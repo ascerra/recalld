@@ -308,6 +308,7 @@ fn native_catalog_publication_fault_reconciles_receipt_on_reopen() {
         "after_metadata_commit",
         "before_handle_publish",
         "after_handle_publish",
+        "commit_unknown",
     ] {
         let root = tempfile::tempdir().unwrap();
         let (path, clock, mut session) = fixture(root.path());
@@ -316,20 +317,72 @@ fn native_catalog_publication_fault_reconciles_receipt_on_reopen() {
         let result = session.create_namespace(&ctx, &input(), &Provider(true));
         crate::storage::catalog::FAILURE.with(|f| f.set(None));
         assert!(result.is_err(), "{point}");
+        let known_commit = matches!(
+            point,
+            "after_metadata_commit" | "before_handle_publish" | "after_handle_publish"
+        );
+        let carried = match &result {
+            Err(StorageError::CommittedMutation { receipt, .. }) => Some((**receipt).clone()),
+            _ => None,
+        };
+        assert_eq!(carried.is_some(), known_commit, "{point}: {result:?}");
+        if point == "commit_unknown" {
+            assert!(matches!(
+                result,
+                Err(StorageError::CommitOutcomeUnknown { .. })
+            ));
+        }
+        if let Some(receipt) = &carried {
+            // No post-error readback can manufacture the response: the owner
+            // is poisoned, so the error must carry the receipt already in hand.
+            assert!(
+                session
+                    .engine
+                    .lookup_operation(
+                        receipt.store_id,
+                        MutationScope::Catalog,
+                        receipt.operation_id,
+                    )
+                    .is_err()
+            );
+            assert!(!receipt.replayed);
+        }
         drop(session);
         let mut reopened =
             NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();
         let receipt = reopened
-            .create_namespace(&ctx, &input(), &Provider(true))
+            .create_namespace(
+                &ctx,
+                &input(),
+                &Provider(!known_commit && point != "commit_unknown"),
+            )
             .unwrap();
         assert_eq!(
             receipt.replayed,
             matches!(
                 point,
-                "after_metadata_commit" | "before_handle_publish" | "after_handle_publish"
+                "after_metadata_commit"
+                    | "before_handle_publish"
+                    | "after_handle_publish"
+                    | "commit_unknown"
             ),
             "{point}"
         );
+        if let Some(carried) = carried {
+            let retained = reopened
+                .engine
+                .lookup_operation(
+                    carried.store_id,
+                    MutationScope::Catalog,
+                    carried.operation_id,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(carried, retained);
+            let mut original = receipt.clone();
+            original.replayed = false;
+            assert_eq!(carried, original);
+        }
         assert!(path.join("created/vectors.dat").is_file());
     }
 }

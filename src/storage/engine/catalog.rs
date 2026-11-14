@@ -95,8 +95,8 @@ pub(super) fn publish_namespace(
         })();
         publish.map_err(|source| {
             meta.mark_unavailable();
-            StorageError::CommittedEffectsPending {
-                operation_id: receipt.operation_id,
+            StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
                 source: Box::new(source),
             }
         })?;
