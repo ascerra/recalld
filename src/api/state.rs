@@ -44,6 +44,18 @@ pub trait SearchPipeline: Send + Sync {
 
     /// Owned production engines return a generation-checked payload page.
     /// Immutable/mock adapters keep their explicit legacy path.
+    async fn record_coherent_exposures_with_work(
+        &self,
+        _accesses: &[(MemoryId, AccessKind)],
+        _scope: crate::storage::control::ExposureScope,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {
+        Err(SearchError::Unavailable(
+            "coherent exposure unavailable".into(),
+        ))
+    }
+
     async fn prepare_coherent_search_with_work(
         &self,
         _query: SearchQuery,

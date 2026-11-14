@@ -201,6 +201,18 @@ pub struct RifSuppression {
 /// Records access events on memories.
 #[async_trait::async_trait]
 pub trait AccessRecorder: Send + Sync {
+    async fn record_access_batch_at_with_work(
+        &self,
+        _accesses: &[(MemoryId, AccessKind)],
+        _scope: Option<&crate::storage::control::ExposureScope>,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        Err(SearchError::Unavailable(
+            "access recorder cannot preserve sampled query clock".into(),
+        ))
+    }
+
     async fn record_access_batch_with_work(
         &self,
         accesses: &[(MemoryId, AccessKind)],
@@ -1959,15 +1971,43 @@ impl QueryEngine {
         scope: crate::storage::control::ExposureScope,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(accesses, scope, None, parent)
+            .await
+    }
+    pub(crate) async fn record_exposures_at_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(accesses, scope, Some(sampled_at), parent)
+            .await
+    }
+    async fn record_exposures_sampled(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         if accesses.is_empty() {
             return Ok(Vec::new());
         }
         let work = self.accept_work(parent)?;
         let result = async {
-            let receipts = self
-                .access_recorder
-                .record_access_batch_with_work(accesses, Some(&scope), work.as_ref())
-                .await?;
+            let receipts = match sampled_at {
+                Some(at) => {
+                    self.access_recorder
+                        .record_access_batch_at_with_work(accesses, Some(&scope), at, work.as_ref())
+                        .await?
+                }
+                None => {
+                    self.access_recorder
+                        .record_access_batch_with_work(accesses, Some(&scope), work.as_ref())
+                        .await?
+                }
+            };
             let observed = Observed {
                 value: (),
                 receipts,

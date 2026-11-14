@@ -323,12 +323,13 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 check_read_admission(&self.storage, stamp).await?;
                 let receipts = if query.record_access {
                     self.query_engine
-                        .record_exposures_with_work(
+                        .record_exposures_at_with_work(
                             &exposures,
                             crate::storage::control::ExposureScope {
                                 namespace: payload.namespace.name,
                                 source: None,
                             },
+                            prepared.evaluated_at,
                             accepted.as_ref(),
                         )
                         .await

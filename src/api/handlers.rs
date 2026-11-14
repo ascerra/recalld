@@ -944,7 +944,7 @@ async fn search_memories_admitted(
         .search
         .prepare_coherent_search_with_work(search_query.clone(), req.include_embeddings, parent)
         .await?;
-    let (hits, exposures) =
+    let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
             let payload = prepared
                 .payload
@@ -998,7 +998,7 @@ async fn search_memories_admitted(
                     score: selected.score.unwrap_or(0.0),
                 });
             }
-            (hits, exposures)
+            (hits, exposures, Some(prepared.evaluated_at))
         } else {
             let results = state
                 .search
@@ -1052,22 +1052,29 @@ async fn search_memories_admitted(
                 });
             }
 
-            (hits, exposures)
+            (hits, exposures, None)
         };
 
     check_read_admission(&state, admitted_stamp).await?;
     let receipts = if req.record_access {
-        state
-            .search
-            .record_exposures_with_work(
-                &exposures,
-                crate::storage::control::ExposureScope {
-                    namespace: ns.name.clone(),
-                    source: None,
-                },
-                parent,
-            )
-            .await?
+        let scope = crate::storage::control::ExposureScope {
+            namespace: ns.name.clone(),
+            source: None,
+        };
+        match evaluated_at {
+            Some(at) => {
+                state
+                    .search
+                    .record_coherent_exposures_with_work(&exposures, scope, at, parent)
+                    .await?
+            }
+            None => {
+                state
+                    .search
+                    .record_exposures_with_work(&exposures, scope, parent)
+                    .await?
+            }
+        }
     } else {
         Vec::new()
     };

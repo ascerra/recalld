@@ -2241,13 +2241,32 @@ mod independent_review_regressions {
         })
         .await
         .expect("purge must release storage before awaiting graph");
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            adapter(&f, DAY).reinforce(live, 3, None),
-        )
+        let feedback_adapter = adapter(&f, DAY);
+        let history_before = f.record(live).unwrap().access_history.len();
+        let feedback = tokio::spawn(async move { feedback_adapter.reinforce(live, 3, None).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let committed_and_unlocked = f.storage.try_read().is_ok_and(|storage| {
+                    storage
+                        .get_record(live)
+                        .unwrap()
+                        .unwrap()
+                        .access_history
+                        .len()
+                        == history_before + 1
+                });
+                if committed_and_unlocked {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
         .await
-        .expect("feedback must not wait for graph holding storage")
-        .unwrap();
+        .expect("feedback must release storage before awaiting graph publication");
+        assert!(
+            !feedback.is_finished(),
+            "ready feedback must await actual derived publication"
+        );
         assert!(
             !purge.is_finished(),
             "purge publication must wait for graph"
@@ -2260,12 +2279,17 @@ mod independent_review_regressions {
         drop(graph_guard);
         tokio::time::timeout(Duration::from_secs(5), async {
             purge.await.unwrap().unwrap();
+            feedback.await.unwrap().unwrap();
             assert!(sweep.await.unwrap().unwrap().is_none());
         })
         .await
         .expect("graph and storage users must finish after publication is released");
         assert!(f.record(id).is_none());
         assert!(!f.graph.read().await.contains(&id));
+        assert_eq!(
+            f.record(live).unwrap().access_history.len(),
+            history_before + 1
+        );
     }
 }
 

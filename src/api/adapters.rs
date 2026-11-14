@@ -139,6 +139,18 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .record_similar_accesses_with_work(ids, scope, parent)
             .await
     }
+    async fn record_coherent_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_exposures_at_with_work(accesses, scope, sampled_at, parent)
+            .await
+    }
+
     async fn record_exposures_with_work(
         &self,
         accesses: &[(MemoryId, AccessKind)],

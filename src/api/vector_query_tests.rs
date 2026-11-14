@@ -43,6 +43,21 @@ struct ObservedAccess {
 }
 #[async_trait::async_trait]
 impl AccessRecorder for ObservedAccess {
+    async fn record_access_batch_at_with_work(
+        &self,
+        values: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        let receipts = self
+            .inner
+            .record_access_batch_at_with_work(values, scope, sampled_at, parent)
+            .await?;
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        self.notify.notify_one();
+        Ok(receipts)
+    }
     async fn record_access_batch_with_work(
         &self,
         values: &[(MemoryId, AccessKind)],
@@ -867,5 +882,58 @@ async fn coherent_payload_postcommit_faults_retain_receipts() {
             };
             assert!(!accesses.is_empty());
         }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_query_and_exposure_share_one_clock_sample_after_provider_wait() {
+    for mcp in [false, true] {
+        let mut h = coherent_harness().await;
+        let sampled = 2_000_000_000_000;
+        let clock = Arc::new(crate::time::ManualClock::new(sampled));
+        h.engine = Arc::new(
+            Arc::try_unwrap(h.engine)
+                .ok()
+                .unwrap()
+                .with_lifecycle_inputs(clock.clone(), Default::default(), 0.0),
+        );
+        h.embedding.hold.store(true, Ordering::SeqCst);
+        let h = Arc::new(h);
+        let child = h.clone();
+        let query = tokio::spawn(async move { coherent_call(&child, mcp, true).await });
+        tokio::time::timeout(Duration::from_secs(10), h.embedding.entered.notified())
+            .await
+            .unwrap();
+        clock.advance_to(sampled + 86_400_000).unwrap();
+        h.embedding.resume.notify_one();
+        let (ok, body) = tokio::time::timeout(Duration::from_secs(10), query)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(ok, "{body}");
+        let mut exposed = 0;
+        for id in &h.ids {
+            let record = h.f.record(*id).unwrap();
+            for event in &record.access_history {
+                assert_eq!(event.timestamp, sampled);
+                exposed += 1;
+            }
+        }
+        assert!(exposed > 0);
+        assert!(
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+        // A later false query observes the published state without needing a write-side repair.
+        h.embedding.hold.store(false, Ordering::SeqCst);
+        let before = h.snapshot();
+        let (ok, body) = coherent_call(&h, mcp, false).await;
+        assert!(ok, "{body}");
+        assert_eq!(h.snapshot(), before);
     }
 }

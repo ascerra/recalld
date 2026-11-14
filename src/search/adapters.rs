@@ -550,6 +550,24 @@ impl AccessRecorder for StorageAccessRecorder {
             .await
     }
 
+    async fn record_access_batch_at_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        crate::decay::observation::record_exposures_scoped_with_work(
+            self.storage.clone(),
+            self.cache.clone(),
+            accesses.to_vec(),
+            sampled_at,
+            scope.cloned(),
+            parent,
+        )
+        .await
+        .map_err(Into::into)
+    }
     async fn record_access_batch_with_work(
         &self,
         accesses: &[(MemoryId, AccessKind)],
