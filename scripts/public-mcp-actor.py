@@ -85,7 +85,7 @@ def run(args):
         rpc("notifications/initialized", {}, "initialized", notification=True)
         names = {t["name"] for t in rpc("tools/list", {}, "tools")["tools"]}
         assert {"store_memory", "recall_memories"} <= names
-        assert not names & {"barrier", "snapshot", "reset", "advance", "inspect", "evaluator/capabilities"}
+        assert not names & {"barrier", "snapshot", "reset", "advance", "inspect", "sweep", "sweepStatus", "evaluator/capabilities"}
         session = rpc("resources/read", dict(uri="recalld://session"), "session")
         context = json.loads(session["contents"][0]["text"])
         assert context["supportedContractVersions"] == [1]

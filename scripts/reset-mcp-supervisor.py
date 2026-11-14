@@ -126,8 +126,8 @@ class Child:
             raise ValueError("serialized owner changed during readiness check")
         return state, ready
 
-    def before_actor(self, checkpoint=None, expected_state=None):
-        if self.h["encoded"](self.control.call("capabilities", {})) != self.h["encoded"](CONTROL_CAPABILITIES):
+    def before_actor(self, checkpoint=None, expected_state=None, capabilities=None):
+        if self.h["encoded"](self.control.call("capabilities", {})) != self.h["encoded"](CONTROL_CAPABILITIES if capabilities is None else capabilities):
             raise ValueError("unsupported reset constructor capabilities")
         self.control.call("reset", {}, error="UNSUPPORTED_CONTROL")
         state, ready = self.ready()
@@ -188,6 +188,8 @@ class Child:
 def run(args, h):
     # Reuse the actual manifest consumer before creating any output/provider/store.
     manifest, actor, labels, cache, schedule, environment = h["validate"](args.manifest, args.binary, args.scorer, args.source_root)
+    sweep = manifest["track"] == h["SWEEP"]["TRACK"]
+    capabilities = h["SWEEP"]["control_capabilities"](CONTROL_CAPABILITIES) if sweep else CONTROL_CAPABILITIES
     args.out.mkdir()
     evaluator = args.out / "evaluator"; evaluator.mkdir()
     runtime = args.out / "runtime"; runtime.mkdir(mode=0o700)
@@ -232,7 +234,7 @@ document_prefix = "a6-document:"
 query_prefix = "a6-query:"
 [decay]
 disable_sweep = true
-decay_rate_multiplier = 0.0
+decay_rate_multiplier = {1.0 if sweep else 0.0}
 [rif]
 enabled = false
 [graph]
@@ -241,7 +243,7 @@ autolink_enabled = false
 warm_file_enabled = false
 ''')
     children, negatives, replays = [], [], []
-    result=dict(status="running", environmentHash=environment, track=TRACK)
+    result=dict(status="running", environmentHash=environment, track=manifest["track"])
     def child(name, checkpoint=None, prior=None, root=None, negative=False):
         value=Child(h,args,root or runtime/name,config,evaluator/name,checkpoint,prior,negative)
         children.append(value)
@@ -268,6 +270,8 @@ warm_file_enabled = false
             candidate.close(rejected=True)
         h["save"](evaluator / "negatives.json", negatives)
     def suffix(owner, prefix_ids, ordinal_base=100):
+        if sweep:
+            return h["SWEEP"]["suffix"](owner, prefix_ids, h, args, manifest, actor, labels, schedule, environment, runtime, evaluator, server, reset_cache, allow)
         reset_cache()
         initial_requests=len(h["rows"](server.log)) if server.log.exists() else 0
         state,_=owner.ready()
@@ -342,10 +346,10 @@ warm_file_enabled = false
         return comparison
     try:
         original=child("original")
-        original.before_actor()
+        original.before_actor(capabilities=capabilities)
         server.delivery=0
         ack,outcomes=original.step(dict(phase="ingest",sources=[s for s in actor["sources"] if s["sourceId"]!="turn-4"],activeEmbedding=manifest["activeEmbedding"],startId=0,deliveryOrdinal=0))
-        prefix_ids=values(outcomes);assert len(prefix_ids)==7
+        prefix_ids=values(outcomes);assert len(prefix_ids)==(1 if sweep else 7)
         h["save"](evaluator / "prefix-mappings.json",prefix_ids)
         start_id=int(ack["stepId"]);warm_start=len(h["rows"](server.log))
         for ordinal in (1,2):
@@ -365,7 +369,7 @@ warm_file_enabled = false
         # Runtime rejection above separately exercises the actual owner's locks.
         for index in range(3):
             restored=child(f"restored-{index}",checkpoint,prior=original if index==0 else restored)
-            restored.before_actor(checkpoint,prefix_state)
+            restored.before_actor(checkpoint,prefix_state,capabilities)
             server.delivery=99
             restored.step(dict(phase="connect",activeEmbedding=manifest["activeEmbedding"],startId=0,deliveryOrdinal=99))
             observed=suffix(restored,prefix_ids)
@@ -374,7 +378,7 @@ warm_file_enabled = false
             unchanged(original.root,original_files);unchanged(checkpoint_root,checkpoint_files)
         # Actual pending provider work in a restored owner must retain ancestry.
         pending=child("pending-owner",checkpoint,prior=restored)
-        pending.before_actor(checkpoint,prefix_state)
+        pending.before_actor(checkpoint,prefix_state,capabilities)
         pending.step(dict(phase="connect",activeEmbedding=manifest["activeEmbedding"],startId=0,deliveryOrdinal=200))
         server.delivery=201
         pending.start_step(dict(phase="action",startId=100,deliveryOrdinal=201,currentAction=dict(tag="pending-store",tool="store_memory",arguments=dict(summary="blocked-worker-canary",namespace="default",checkDuplicates=False))))
@@ -387,7 +391,7 @@ warm_file_enabled = false
         pending.ready();pending.close()
         unchanged(original.root,original_files);unchanged(checkpoint_root,checkpoint_files)
         unsupported=child("unsupported-clock",checkpoint,prior=pending)
-        unsupported.before_actor(checkpoint,prefix_state)
+        unsupported.before_actor(checkpoint,prefix_state,capabilities)
         now=prefix_state["runtimeState"]["nowMillis"]
         assert unsupported.control.call("advance",dict(deltaMs=2**48-now,deadlineMs=30000))==dict(nowMillis=2**48)
         published_before={str(p) for p in runtime.glob("*/manifest.json")}

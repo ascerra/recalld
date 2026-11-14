@@ -17,6 +17,7 @@ def main():
     args=parser.parse_args();args.out.mkdir()
     h=runpy.run_path(str(args.source / "scripts/public-mcp-evaluation.py"))
     m=json.loads((args.inputs / "manifest.json").read_text())
+    sweep = m["track"] == h["SWEEP"]["TRACK"]
     report=dict(status="running",sourceCommit=m["sourceCommit"],executables=m["executables"],rejections=[])
     def inputs(name, mutate):
         root=args.out/name;shutil.copytree(args.inputs,root)
@@ -36,6 +37,9 @@ def main():
         cases += [("full-clock",lambda m,l:m["capabilities"].update(clock="fully-controlled")),
                   ("unknown-source-label",lambda m,l:l["relevant"].update(q0=["not-a-source"])),
                   ("false-native-zero",lambda m,l:m["versions"].update(canonicalSchemaVersion=0))]
+        if sweep:
+            cases += [("unsupported-sweep-version",lambda m,l:m["versions"].update(sweepControlVersion=2)),
+                      ("unsupported-native-sweep",lambda m,l:m["capabilities"].update(nativeSweep=True))]
         for name,mutate in cases:
             root=inputs("reject-"+name,mutate);out=root/"must-not-exist";r=run(root,out)
             report["rejections"].append(dict(case=name,exitCode=r.returncode,outputCreated=out.exists(),stdout=r.stdout,stderr=r.stderr))
@@ -43,7 +47,7 @@ def main():
             assert r.returncode!=0 and not out.exists(),name
         def perturb(m,labels):
             labels["labelCanary"]="CHANGED_RESET_EVALUATOR_LABEL"
-            labels["relevant"]={q["queryId"]:["turn-3"] for q in h["fixtures"](h["RESET"]["TRACK"])[3]["queries"]}
+            labels["relevant"]={q["queryId"]:["turn-0" if sweep else "turn-3"] for q in h["fixtures"](m["track"])[3]["queries"]}
         root=inputs("changed-label-inputs",perturb);variant=args.out/"changed-label-episode";r=run(root,variant)
         h["save"](args.out/"changed-label-run.json",dict(exitCode=r.returncode,stdout=r.stdout,stderr=r.stderr))
         assert r.returncode==0,r.stderr
@@ -66,6 +70,10 @@ def main():
             # startup gate; compare actual hashes without dropping any field.
             for field in ("outputs","mappings","state","readiness","provider","logicalHash"):
                 assert suffixes[0][field] == suffixes[1][field],(name,field)
+            if sweep:
+                assert suffixes[0]["sweepReports"] == suffixes[1]["sweepReports"]
+                assert len(suffixes[0]["sweepReports"]) == 3
+                assert suffixes[0]["malformedControlsRejected"] == suffixes[1]["malformedControlsRejected"] == 7
             report.setdefault("independentLogicalHashes",{})[name]=[v["logicalHash"] for v in suffixes]
             compared+=len(actions(old))
             for p in (a/"actor-inputs").glob("*.json"):
@@ -79,8 +87,10 @@ def main():
                     assert trace["traceSchemaVersion"]==1 and trace["readGeneration"] is None
                     assert trace["action"]["id"]==trace["outcome"]["id"]==int(trace["stepId"])
             scores=[json.loads((p/"scores.json").read_text()) for p in (a,b)]
-            assert scores[0]["scoring"]["scored"]=="3" and scores[0]["scoring"]["unknownAnnotations"]=="1" and scores[0]["scoring"]["zeroLabelUnscored"]=="1"
-            assert scores[1]["scoring"]["scored"]=="5" and scores[1]["scoring"]["means"]["retrievalRecallAt5"]==0
+            assert scores[0]["scoring"]["scored"]==("2" if sweep else "3") and scores[0]["scoring"]["unknownAnnotations"]=="1" and scores[0]["scoring"]["zeroLabelUnscored"]=="1"
+            assert scores[1]["scoring"]["scored"]==("4" if sweep else "5")
+            if not sweep:
+                assert scores[1]["scoring"]["means"]["retrievalRecallAt5"]==0
             assert [v["retrievedSourceIds"] for v in scores[0]["trace"]]==[v["retrievedSourceIds"] for v in scores[1]["trace"]]
         providers=[h["rows"](p/"actor-provider.jsonl") for p in (args.baseline,variant)]
         assert [(r["requestBody"],r["status"],r["responseVectors"]) for r in providers[0]]==[(r["requestBody"],r["status"],r["responseVectors"]) for r in providers[1]]
