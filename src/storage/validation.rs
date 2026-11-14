@@ -204,6 +204,7 @@ fn validate_snapshot(
                         | super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
                         | super::control::MutationOutcome::NativeGraphChanged { .. }
+                        | super::control::MutationOutcome::NativeGraphUnchanged { .. }
                 ))
     }) {
         return Err(StorageError::RecoveryRequired(
