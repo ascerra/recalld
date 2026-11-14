@@ -536,8 +536,10 @@ async fn run_serve(
                 system.entity_index().clone(),
             ),
         );
-        let namespaces: Arc<dyn recalld::api::NamespaceRegistry> =
-            Arc::new(NamespaceRegistryAdapter::new(system.storage().clone()));
+        let namespaces: Arc<dyn recalld::api::NamespaceRegistry> = Arc::new(
+            NamespaceRegistryAdapter::new(system.storage().clone())
+                .with_clock(system.clock().clone()),
+        );
         let metrics: Arc<dyn recalld::api::MetricsCollector> = Arc::new(NoopMetricsCollector);
 
         recalld::api::AppState::new(search, storage, cache, graph, decay, namespaces, metrics)
