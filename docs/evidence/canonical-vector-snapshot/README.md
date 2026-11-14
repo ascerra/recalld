@@ -52,3 +52,16 @@ selected by the final test log. Manifest SHA-256:
 `1c08ec5083b2560401fa3df094c1af870bdb8bcc2498a6fe9ac486a027fd2c39`.
 Final log SHA-256:
 `754c535509e002d56d291b25b15024c98c1c59a8a131b2591dde2804e8e26877`.
+
+## Reviewed namespace alias correction
+
+Runtime `7e276050b532d610d1d7db88b27fff47fba23392` preserves existing exact-first
+ASCII-case-insensitive namespace lookup inside the same canonical transaction.
+Ambiguous fallback fails closed. Added actual catalog creation, restart binding
+continuity and exact-match/ambiguous legacy-shape regression. Final **8 focused
+tests pass**, formatting and all-target clippy exit zero, same warning counts
+as the initial backend. No API type or activation change.
+
+Alias manifest SHA-256: `95aebbfc1b6a8554d3960a9364e430dd70f3a6a6813af766cd4cab99480a8028`.
+Alias log SHA-256: `0f5f7ffd7e09a1aac515f154435556a690472aca4b0d011747b28bfe486b015e`.
+Initial source/binary/log evidence remains unmodified.
