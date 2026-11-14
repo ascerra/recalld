@@ -43,7 +43,7 @@ impl DerivedCompletion {
             let id = crate::storage::insertion::inserted_id(&receipt)?;
             let record = storage
                 .get_record(id)
-                .map_err(|source| StorageError::CommittedInsertion {
+                .map_err(|source| StorageError::CommittedMutation {
                     receipt: Box::new(receipt.clone()),
                     source: Box::new(source),
                 })?
@@ -60,11 +60,67 @@ impl DerivedCompletion {
         let result = result?;
         self.complete()
             .await
-            .map_err(|source| StorageError::CommittedInsertion {
+            .map_err(|source| StorageError::CommittedMutation {
                 receipt: Box::new(result.receipt.clone()),
                 source: Box::new(source),
             })?;
         Ok(result)
+    }
+
+    /// Legacy bool adapter. Resolve namespace and commit under one store guard;
+    /// each batch caller invokes this in order, with independent child commits.
+    pub async fn forget(
+        &self,
+        id: crate::model::MemoryId,
+        namespace: Option<&str>,
+    ) -> Result<bool, StorageError> {
+        let namespace = namespace.map(str::to_owned);
+        let gate = publication_gate(&self.storage).await?;
+        let lease = gate.read_owned().await;
+        let storage = self.storage.clone();
+        let receipt = tokio::task::spawn_blocking(move || {
+            let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
+            if let Some(namespace) = namespace.as_deref() {
+                storage.assert_memory_namespace(id, namespace)?;
+            }
+            let Some(record) = storage.get_record(id)? else {
+                return Ok(None);
+            };
+            // Preserve a clean legacy no-op. A pending prior forget must still
+            // produce a receipt and finish publication, never claim ready here.
+            if record.phase == DecayPhase::Tombstone
+                && !storage.meta_store().needs_effects_rebuild()
+            {
+                return Ok(None);
+            }
+            let ctx = crate::storage::control::MutationContext::unkeyed(NamespaceId::new(
+                record.namespace_id,
+            ));
+            storage.tombstone_memory_with_receipt(&ctx, id).map(Some)
+        })
+        .await
+        .map_err(|e| {
+            failed(format!(
+                "forget worker outcome unknown; reconcile before retry: {e}"
+            ))
+        })?;
+        drop(lease);
+        let Some(receipt) = receipt? else {
+            return Ok(false);
+        };
+        self.complete()
+            .await
+            .map_err(|source| StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(source),
+            })?;
+        Ok(matches!(
+            receipt.outcome,
+            crate::storage::control::MutationOutcome::MemoryTombstoned {
+                status: crate::storage::tombstone::TombstoneStatus::Tombstoned,
+                ..
+            }
+        ))
     }
 
     /// Retrying is safe: no receipt is acknowledged until every view is ready.
@@ -80,17 +136,18 @@ impl DerivedCompletion {
         let storage = self.storage.clone();
         let cache = self.cache.clone();
         tokio::task::spawn_blocking(move || {
-            let storage = storage.write().map_err(|e| failed(e.to_string()))?;
+            let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
+            storage.resume_pending_purges()?;
             storage.ensure_available()?;
             if !storage.meta_store().needs_effects_rebuild() {
                 return Ok(());
             }
             let pending = storage.meta_store().pending_effects()?;
-            let operation_id = pending
+            let receipt = pending
                 .first()
                 .ok_or_else(|| failed("dirty state without durable effects".into()))?
                 .receipt
-                .operation_id;
+                .clone();
             let result = (|| {
                 // ponytail: O(records + edges) rebuild under the publication locks.
                 // Replace with exact effect application when throughput warrants it.
@@ -164,8 +221,8 @@ impl DerivedCompletion {
                 crate::storage::metadata::effects::crash_point("before_online_derived_ack");
                 storage.meta_store().acknowledge_rebuilt_effects()
             })();
-            result.map_err(|source| StorageError::CommittedEffectsPending {
-                operation_id,
+            result.map_err(|source| StorageError::CommittedMutation {
+                receipt: Box::new(receipt),
                 source: Box::new(source),
             })
         })
@@ -299,7 +356,7 @@ mod tests {
             Ok(_) => panic!("wrong-width derived rebuild succeeded"),
             Err(error) => error,
         };
-        let StorageError::CommittedInsertion { receipt, .. } = error else {
+        let StorageError::CommittedMutation { receipt, .. } = error else {
             panic!("{error}")
         };
         let MutationOutcome::MemoryInserted { memory_id, .. } = receipt.outcome else {
@@ -413,7 +470,7 @@ mod tests {
         // and keep all public reads closed. A retry uses the same operation.
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
         assert!(matches!(publisher(&fx).complete().await,
-            Err(StorageError::CommittedEffectsPending {operation_id, ..}) if operation_id == pending[0].receipt.operation_id));
+            Err(StorageError::CommittedMutation {receipt, ..}) if receipt.operation_id == pending[0].receipt.operation_id));
         assert!(adapter.get_memory(live, false, None).await.is_err());
         assert_eq!(
             fx.storage

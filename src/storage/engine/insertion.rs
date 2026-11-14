@@ -75,7 +75,7 @@ impl RedbStorageEngine {
                 &self.edge_store,
                 Some(&mut self.vector_manager),
             )
-            .map_err(|source| StorageError::CommittedInsertion {
+            .map_err(|source| StorageError::CommittedMutation {
                 receipt: Box::new(receipt.clone()),
                 source: Box::new(source),
             })?;

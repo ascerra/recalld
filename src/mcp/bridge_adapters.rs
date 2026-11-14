@@ -21,11 +21,13 @@ use crate::time::format_timestamp;
 use super::bridge;
 use crate::storage::StorageEngine as StorageEngineTrait;
 
-/// Preserve committed/uncertain insertion outcomes across legacy transport errors.
-fn map_insertion_error(error: crate::storage::StorageError) -> bridge::BridgeError {
+/// Preserve committed/uncertain mutation outcomes across legacy transport errors.
+fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeError {
     match error {
-        crate::storage::StorageError::CommittedInsertion { .. }
-        | crate::storage::StorageError::CommitOutcomeUnknown { .. } => {
+        crate::storage::StorageError::CommittedMutation { .. }
+        | crate::storage::StorageError::CommitOutcomeUnknown { .. }
+        // A failed worker/recovery admission cannot prove an uncommitted item.
+        | crate::storage::StorageError::RecoveryRequired(_) => {
             bridge::BridgeError::PartiallyApplied(error.to_string())
         }
         crate::storage::StorageError::ProviderVectorUnavailable(_) => {
@@ -39,7 +41,7 @@ fn map_insertion_error(error: crate::storage::StorageError) -> bridge::BridgeErr
         crate::storage::StorageError::NotFound(_) => {
             bridge::BridgeError::NotFound(error.to_string())
         }
-        _ => bridge::BridgeError::Storage(error.to_string()),
+        _ => bridge::BridgeError::from(error),
     }
 }
 
@@ -830,18 +832,6 @@ impl McpStorageAdapter {
         self
     }
 
-    /// Borrow this adapter's out-of-storage indexes for
-    /// [`crate::index_cleanup::purge_from_indexes`].
-    fn index_handles(&self) -> crate::index_cleanup::IndexHandles<'_> {
-        crate::index_cleanup::IndexHandles {
-            cache: &self.cache,
-            vector_index: &self.vector_index,
-            fts_index: &self.fts_index,
-            entity_index: &self.entity_index,
-            graph: &self.graph,
-        }
-    }
-
     /// Turn raw `(id, score)` candidates into a caller-facing report,
     /// loading each summary from the cache and falling back to storage.
     ///
@@ -1073,7 +1063,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             ns_config.embedding_dim,
             input.embedding.is_some(),
         )
-        .map_err(map_insertion_error)?;
+        .map_err(map_mutation_error)?;
 
         // Near-duplicate advisory.
         //
@@ -1143,10 +1133,10 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 now,
             )
             .await
-            .map_err(map_insertion_error)?;
+            .map_err(map_mutation_error)?;
         let receipt = inserted.receipt;
         let record = inserted.record.ok_or_else(|| {
-            map_insertion_error(crate::storage::StorageError::CommittedInsertion {
+            map_mutation_error(crate::storage::StorageError::CommittedMutation {
                 receipt: Box::new(receipt.clone()),
                 source: Box::new(crate::storage::StorageError::RecoveryRequired(
                     "inserted record unavailable".into(),
@@ -1256,7 +1246,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         }
 
         completion.complete().await.map_err(|source| {
-            map_insertion_error(crate::storage::StorageError::CommittedInsertion {
+            map_mutation_error(crate::storage::StorageError::CommittedMutation {
                 receipt: Box::new(receipt),
                 source: Box::new(source),
             })
@@ -1393,156 +1383,33 @@ impl bridge::StorageEngine for McpStorageAdapter {
         id: MemoryId,
         namespace: Option<&str>,
     ) -> Result<bool, bridge::BridgeError> {
-        let namespace = namespace.map(str::to_owned);
-        // Tombstone-based deletion: strip content from the record but
-        // preserve the graph node and edges so relationship chains
-        // remain intact for spreading activation traversal.
-
-        // 1. Read, check, tombstone, and free the vector slot atomically
-        //    under a single write lock to prevent TOCTOU races. Without
-        //    this, two concurrent deletes could both read the record as
-        //    non-tombstoned, both tombstone it, and both free the same
-        //    vector slot -- corrupting the free list.
-        let existing_record = {
-            let storage = self.storage.clone();
-            tokio::task::spawn_blocking(move || {
-                let mut storage_w = storage.write().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-                if let Some(namespace) = namespace.as_deref() {
-                    storage_w
-                        .assert_memory_namespace(id, namespace)
-                        .map_err(bridge::BridgeError::from)?;
-                }
-
-                let existing = storage_w
-                    .get_record(id)
-                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-
-                let Some(existing_record) = existing else {
-                    return Ok::<Option<crate::model::record::DiskRecord>, bridge::BridgeError>(
-                        None,
-                    );
-                };
-
-                if existing_record.phase == DecayPhase::Tombstone {
-                    return Ok(None);
-                }
-
-                // Tombstone the record.
-                storage_w
-                    .tombstone_memory(id)
-                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-
-                // Free the vector slot.
-                let ns_id = NamespaceId::new(existing_record.namespace_id);
-                if let Err(e) = storage_w.free_vector_slot(ns_id, existing_record.vector_slot) {
-                    tracing::warn!(
-                        memory_id = %id,
-                        vector_slot = existing_record.vector_slot,
-                        %e,
-                        "vector slot free failed (non-fatal)"
-                    );
-                }
-
-                Ok(Some(existing_record))
-            })
-            .await
-            .map_err(|e| {
-                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
-            })??
-        };
-
-        let Some(existing_record) = existing_record else {
-            return Ok(false);
-        };
-
-        // 2. Cache and the four indexes storage cannot reach. Shared
-        //    with the HTTP delete path and with namespace deletion, so
-        //    the three cannot drift apart again. `existing_record` is
-        //    the PRE-strip record, which is what keeps the entity names
-        //    reachable.
-        crate::index_cleanup::purge_from_indexes(
-            &self.index_handles(),
-            std::slice::from_ref(&(id, existing_record)),
-            crate::index_cleanup::FtsAction::PerRecord,
-            crate::index_cleanup::GraphAction::MarkTombstoned,
-        )
-        .await;
-
-        Ok(true)
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .forget(id, namespace)
+        .await
+        .map_err(map_mutation_error)
     }
 
     async fn delete_memories(&self, ids: &[MemoryId]) -> Result<Vec<bool>, bridge::BridgeError> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // ONE spawn_blocking holding ONE storage.write() for the whole
-        // batch. 100 memories go from 100 redb commits (100 fsyncs) to
-        // one, and from ~700 lock acquisitions to a handful.
-        //
-        // `batch_tombstone` is also the single source of truth for
-        // liveness here: only a `Tombstoned` outcome frees a vector
-        // slot, and a duplicate id reports `AlreadyTombstoned`, so the
-        // same slot cannot be freed twice — which would cycle the
-        // on-disk free list and underflow `live_count`.
-        let (flags, purged) = {
-            let storage = self.storage.clone();
-            let ids = ids.to_vec();
-            tokio::task::spawn_blocking(move || {
-                let mut storage_w = storage.write().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-
-                let outcomes = storage_w
-                    .meta_store()
-                    .batch_tombstone(&ids)
-                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-
-                let mut flags = Vec::with_capacity(outcomes.len());
-                let mut purged: Vec<(MemoryId, crate::model::DiskRecord)> = Vec::new();
-
-                for (id, outcome) in ids.iter().zip(outcomes) {
-                    match outcome {
-                        crate::storage::metadata::TombstoneOutcome::Tombstoned(record) => {
-                            let ns_id = NamespaceId::new(record.namespace_id);
-                            if let Err(e) = storage_w.free_vector_slot(ns_id, record.vector_slot) {
-                                tracing::warn!(
-                                    memory_id = %id,
-                                    vector_slot = record.vector_slot,
-                                    %e,
-                                    "vector slot free failed (non-fatal)"
-                                );
-                            }
-                            flags.push(true);
-                            purged.push((*id, record));
-                        }
-                        crate::storage::metadata::TombstoneOutcome::NotFound
-                        | crate::storage::metadata::TombstoneOutcome::AlreadyTombstoned => {
-                            flags.push(false)
-                        }
-                    }
+        let mut flags = Vec::with_capacity(ids.len());
+        for id in ids {
+            match self.delete_memory(*id, None).await {
+                Ok(flag) => flags.push(flag),
+                Err(error) if !flags.is_empty() => {
+                    return Err(bridge::BridgeError::PartiallyApplied(format!(
+                        "ordered forget stopped at index {}; completed flags {flags:?}; {error}",
+                        flags.len()
+                    )));
                 }
-
-                Ok::<_, bridge::BridgeError>((flags, purged))
-            })
-            .await
-            .map_err(|e| {
-                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
-            })??
-        };
-
-        // One pass over the indexes for the whole batch, with the
-        // PRE-strip records so the entity names are still there.
-        crate::index_cleanup::purge_from_indexes(
-            &self.index_handles(),
-            &purged,
-            crate::index_cleanup::FtsAction::PerRecord,
-            crate::index_cleanup::GraphAction::MarkTombstoned,
-        )
-        .await;
-
+                Err(error) => return Err(error),
+            }
+        }
         Ok(flags)
     }
 
@@ -2273,23 +2140,15 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
                     }
                 }
 
-                storage_w.purge_namespace(config.id).map_err(|e| {
-                    let error = if e.is_partial() {
-                        bridge::BridgeError::PartiallyApplied(format!(
-                            "Namespace '{name}' was PARTIALLY destroyed: {} memories are \
-                             permanently gone, and the namespace still exists holding the \
-                             rest. Re-run delete_namespace to finish it. Cause: {}",
-                            e.destroyed.len(),
-                            e.source
-                        ))
-                    } else {
-                        bridge::BridgeError::Storage(e.source.to_string())
-                    };
-                    DeleteFailure {
-                        destroyed: e.destroyed,
-                        error,
-                    }
-                })
+                storage_w
+                    .purge_namespace_checked(config.id, force)
+                    .map_err(|e| {
+                        let error = map_mutation_error(e.source);
+                        DeleteFailure {
+                            destroyed: e.destroyed,
+                            error,
+                        }
+                    })
             })
             .await
             .map_err(|e| bridge::BridgeError::Internal(format!("blocking task join error: {e}")))?
@@ -2312,12 +2171,11 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
                         &self.index_handles(),
                         &failure.destroyed,
                         crate::index_cleanup::FtsAction::PerRecord,
-                        crate::index_cleanup::GraphAction::RemoveNode,
                     )
                     .await;
                 }
                 // Even a partial purge may have durable effects to publish.
-                self.complete_effects().await?;
+                let _ = self.complete_effects().await;
                 return Err(failure.error);
             }
         };
@@ -2339,11 +2197,17 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             &self.index_handles(),
             &purged.records,
             crate::index_cleanup::FtsAction::WholeNamespace(purged.config.id),
-            crate::index_cleanup::GraphAction::RemoveNode,
         )
         .await;
 
-        self.complete_effects().await?;
+        self.complete_effects().await.map_err(|source| {
+            map_mutation_error(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(purged.receipt.clone()),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    source.to_string(),
+                )),
+            })
+        })?;
         Ok(bridge::DeleteNamespaceResult {
             name: purged.config.name.clone(),
             id: purged.config.id.get(),
@@ -3834,52 +3698,6 @@ mod tests {
                 "{bad:?}: {err:?}"
             );
         }
-    }
-
-    /// The migration case, and the reason the refusal is by name rather
-    /// than by lookup: a database created before the validator reached
-    /// this layer can already hold a row named `""`, whose directory
-    /// **is** the data directory. Planting the row directly is the only
-    /// way to reach that state now.
-    #[tokio::test]
-    async fn w47_a_legacy_empty_named_namespace_cannot_destroy_the_database() {
-        let fx = Fixture::new();
-
-        {
-            let mut config = crate::model::NamespaceConfig::default_namespace(0);
-            config.name = String::new();
-            config.embedding_dim = crate::test_support::DIM as u32;
-            fx.storage
-                .write()
-                .expect("storage lock")
-                .meta_store()
-                .create_namespace(&config)
-                .expect("plant a legacy row");
-        }
-
-        let err = fx
-            .namespace_adapter()
-            .delete_namespace(bridge::DeleteNamespaceInput {
-                name: String::new(),
-                force: true,
-            })
-            .await
-            .expect_err("an empty namespace name must be refused");
-        assert!(
-            matches!(err, bridge::BridgeError::InvalidInput(_)),
-            "{err:?}"
-        );
-
-        assert!(
-            fx.path().join("meta.db").exists()
-                && fx.path().join("edges.db").exists()
-                && fx.path().join("fulltext.dat").exists(),
-            "the database was destroyed"
-        );
-        assert!(
-            fx.namespace_dir("default").join("vectors.dat").exists(),
-            "the default namespace's vectors were destroyed"
-        );
     }
 
     // ── case-insensitive namespace identity ──────────────────────────

@@ -211,18 +211,38 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
-    ExposuresRecorded {
-        accesses: Vec<ExposureOutcome>,
-    },
-    LegacyFeedbackRecorded {
+    LifecycleMaterialized {
         #[serde(rename = "memoryId")]
         memory_id: MemoryId,
-        quality: u8,
-        #[serde(rename = "appliedAt")]
-        applied_at: i64,
+        #[serde(rename = "fromPhase")]
+        from_phase: crate::model::DecayPhase,
+        #[serde(rename = "toPhase")]
+        to_phase: crate::model::DecayPhase,
+        #[serde(rename = "strengthBits")]
+        strength_bits: u32,
+        #[serde(rename = "decayStrengthBits")]
+        decay_strength_bits: u32,
+        #[serde(rename = "removedFieldsMask")]
+        removed_fields_mask: u8,
     },
-    LifecyclePolicyMigrated {
-        transition: super::lifecycle_migration::PolicyTransition,
+    NamespacePurgeStarted {
+        namespace_id: NamespaceId,
+        name_hash: [u8; 32],
+    },
+    NamespacePurgeAdvanced {
+        parent_operation_id: Uuid,
+        namespace_id: NamespaceId,
+        sequence: u64,
+        stage: super::purge::PurgeStage,
+        removed: u64,
+        tombstones_removed: u64,
+        edges_removed: u64,
+        last_id: Option<MemoryId>,
+    },
+    MemoryTombstoned {
+        #[serde(rename = "memoryId")]
+        memory_id: MemoryId,
+        status: super::tombstone::TombstoneStatus,
     },
     MemoryInserted {
         #[serde(rename = "memoryId")]
@@ -235,6 +255,29 @@ pub enum MutationOutcome {
         embedding_dim: u32,
         #[serde(rename = "edgesPut")]
         edges_put: usize,
+    },
+    NamespaceCreated {
+        #[serde(rename = "namespaceId")]
+        namespace_id: NamespaceId,
+        #[serde(rename = "createdAt")]
+        created_at: i64,
+    },
+    NamespacePolicyUpdated {
+        #[serde(rename = "namespaceId")]
+        namespace_id: NamespaceId,
+    },
+    ExposuresRecorded {
+        accesses: Vec<ExposureOutcome>,
+    },
+    LegacyFeedbackRecorded {
+        #[serde(rename = "memoryId")]
+        memory_id: MemoryId,
+        quality: u8,
+        #[serde(rename = "appliedAt")]
+        applied_at: i64,
+    },
+    LifecyclePolicyMigrated {
+        transition: super::lifecycle_migration::PolicyTransition,
     },
     GraphChanged {
         edges_put: usize,
@@ -321,6 +364,7 @@ pub(crate) fn validate_existing(
                 "schema without control lineage".into(),
             ));
         }
+        super::metadata::purge::validate_existing(tx, None)?;
         return Ok(None);
     }
     if !present.iter().all(|p| *p) {
@@ -348,13 +392,32 @@ pub(crate) fn validate_existing(
         let (key, value) = entry?;
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
-        if matches!(
-            stored.receipt.outcome,
+        let scope_matches = match &stored.receipt.outcome {
+            MutationOutcome::NamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::NamespacePolicyUpdated { namespace_id }
+            | MutationOutcome::NamespacePurgeStarted { namespace_id, .. }
+            | MutationOutcome::NamespacePurgeAdvanced { namespace_id, .. } => {
+                scope == MutationScope::Namespace(*namespace_id)
+            }
             MutationOutcome::MemoryInserted { .. }
-        ) && !matches!(scope, MutationScope::Namespace(_))
-        {
+            | MutationOutcome::MemoryTombstoned { .. }
+            | MutationOutcome::LifecycleMaterialized { .. } => {
+                matches!(scope, MutationScope::Namespace(_))
+            }
+            _ => true,
+        };
+        if !scope_matches {
             return Err(StorageError::InvalidControl(
-                "insertion receipt has catalog scope".into(),
+                if matches!(
+                    stored.receipt.outcome,
+                    MutationOutcome::MemoryInserted { .. }
+                        | MutationOutcome::MemoryTombstoned { .. }
+                ) {
+                    "record mutation receipt has catalog scope"
+                } else {
+                    "catalog receipt outcome disagrees with key scope"
+                }
+                .into(),
             ));
         }
         // Policy receipts require the canonical schema consumer even when the
@@ -412,6 +475,7 @@ pub(crate) fn validate_existing(
             ));
         }
     }
+    super::metadata::purge::validate_existing(tx, Some(&state))?;
     Ok(Some(state))
 }
 
@@ -540,6 +604,60 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
             ));
         }
     }
+    if matches!(stored.receipt.outcome, MutationOutcome::MemoryTombstoned { memory_id, .. } if memory_id == MemoryId::nil())
+    {
+        return Err(StorageError::InvalidControl(
+            "nil tombstone receipt identity".into(),
+        ));
+    }
+    if let MutationOutcome::LifecycleMaterialized {
+        memory_id,
+        from_phase,
+        to_phase,
+        strength_bits,
+        decay_strength_bits,
+        removed_fields_mask,
+    } = stored.receipt.outcome
+    {
+        use crate::model::DecayPhase::{Full, Ghost, Summary, Tombstone};
+        if memory_id == MemoryId::nil()
+            || from_phase == Tombstone
+            || to_phase == Tombstone
+            || !(from_phase == to_phase
+                || matches!((from_phase, to_phase), (Full, Summary) | (Summary, Ghost)))
+            || [strength_bits, decay_strength_bits].iter().any(|bits| {
+                !f32::from_bits(*bits).is_finite() || !(0.0..=1.0).contains(&f32::from_bits(*bits))
+            })
+            || removed_fields_mask
+                != match (from_phase, to_phase) {
+                    (Full, Summary) => super::metadata::removal_ledger::FULL_TEXT,
+                    (Summary, Ghost) => super::metadata::removal_ledger::SUMMARY,
+                    _ => 0,
+                }
+        {
+            return Err(StorageError::InvalidControl(
+                "invalid lifecycle materialization receipt".into(),
+            ));
+        }
+    }
+    match &stored.receipt.outcome {
+        MutationOutcome::NamespaceCreated {
+            namespace_id,
+            created_at,
+        } if namespace_id.is_unset()
+            || chrono::DateTime::from_timestamp_millis(*created_at).is_none() =>
+        {
+            return Err(StorageError::InvalidControl(
+                "invalid catalog receipt".into(),
+            ));
+        }
+        MutationOutcome::NamespacePolicyUpdated { namespace_id } if namespace_id.is_unset() => {
+            return Err(StorageError::InvalidControl(
+                "invalid catalog receipt".into(),
+            ));
+        }
+        _ => {}
+    }
     match &stored.receipt.outcome {
         MutationOutcome::ExposuresRecorded { accesses } => {
             let mut seen = std::collections::HashSet::new();
@@ -580,6 +698,13 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
+        MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
+        | MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::NamespaceCreated { .. }
+        | MutationOutcome::NamespacePolicyUpdated { .. }
+        | MutationOutcome::NamespacePurgeStarted { .. }
+        | MutationOutcome::NamespacePurgeAdvanced { .. } => {}
     }
     Ok(stored)
 }
@@ -658,10 +783,33 @@ pub(crate) fn record_receipt(
     hash: [u8; 32],
     outcome: MutationOutcome,
 ) -> Result<WriteReceipt, StorageError> {
+    record_reserved_receipt(tx, ctx, hash, outcome, Uuid::new_v4())
+}
+
+/// Internal transaction primitive. Purge callers must first prove a durable
+/// reservation; external requests cannot choose an operation identity.
+pub(super) fn record_reserved_receipt(
+    tx: &WriteTransaction,
+    ctx: &MutationContext,
+    hash: [u8; 32],
+    outcome: MutationOutcome,
+    operation_id: Uuid,
+) -> Result<WriteReceipt, StorageError> {
+    let before = read_control(tx)?;
+    if operation_id.is_nil()
+        || tx
+            .open_table(RECEIPTS)?
+            .get(scoped_key(before.store_id, ctx.scope, operation_id.as_bytes()).as_slice())?
+            .is_some()
+    {
+        return Err(StorageError::InvalidControl(
+            "receipt operation ID already used or nil".into(),
+        ));
+    }
     let state = advance_generation(tx)?;
     let receipt = WriteReceipt {
         store_id: state.store_id,
-        operation_id: Uuid::new_v4(),
+        operation_id,
         committed_generation: state.committed_generation,
         receipt_version: 1,
         outcome,

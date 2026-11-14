@@ -572,8 +572,7 @@ fn spreading_activation_resolved(
 
         // Ghost/Tombstone gate: ghosts and tombstones don't seed activation.
         // Tombstones have no content relevance; ghosts are nearly forgotten.
-        // Both can still relay activation when they're encountered as
-        // neighbors during spreading.
+        // Terminal identities remain structural evidence only.
         if (records.is_none()
             && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
             || (records.is_some() && canonical_strength(node).is_none())
@@ -626,12 +625,9 @@ fn spreading_activation_resolved(
             continue;
         };
 
-        // Ghost gate: don't fire ghost nodes.
-        // NOTE: Tombstone nodes ARE allowed to fire — they serve as
-        // relay nodes that propagate activation through the graph even
-        // though their content has been stripped. This preserves
-        // relationship chain continuity after user-initiated deletion.
-        if (records.is_none() && node.decay_phase == DecayPhase::Ghost)
+        // Terminal identities neither receive nor relay activation.
+        if (records.is_none()
+            && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
             || (records.is_some() && canonical_strength(node).is_none())
         {
             continue;
@@ -683,10 +679,12 @@ fn spreading_activation_resolved(
                 continue;
             }
 
-            // Ghost gate: ghosts don't receive activation.
-            // NOTE: Tombstone nodes DO receive activation so they can
-            // relay it to their neighbors, preserving relationship chains.
-            if (records.is_none() && neighbor.decay_phase == DecayPhase::Ghost)
+            // Terminal identities neither receive nor relay activation.
+            if (records.is_none()
+                && matches!(
+                    neighbor.decay_phase,
+                    DecayPhase::Ghost | DecayPhase::Tombstone
+                ))
                 || (records.is_some() && canonical_strength(neighbor).is_none())
             {
                 continue;
@@ -1013,5 +1011,43 @@ mod spreading_tests {
             results.iter().all(|(id, _)| *id != c),
             "node beyond ghost should not be activated (ghost blocks propagation)"
         );
+    }
+
+    #[test]
+    fn terminal_nodes_neither_seed_nor_relay_retained_structural_edges() {
+        for phase in [DecayPhase::Ghost, DecayPhase::Tombstone] {
+            let mut graph = RelationshipGraph::new();
+            let first = add_node(&mut graph, test_ns());
+            // A stale positive strength must never make a terminal identity live.
+            let terminal = add_node_with(&mut graph, test_ns(), DecayPhase::Full, 1.0);
+            let last = add_node(&mut graph, test_ns());
+            link(&mut graph, first, terminal, EdgeType::Supersedes);
+            link(&mut graph, first, terminal, EdgeType::Associative);
+            link(&mut graph, terminal, last, EdgeType::ParentChild);
+            let config = SpreadingActivationConfig::default();
+            assert!(
+                spreading_activation(&graph, &[(first, 1.)], test_ns(), &config)
+                    .iter()
+                    .any(|(id, _)| *id == last),
+                "the live control path must relay before its middle identity becomes terminal"
+            );
+            graph.update_node_state(terminal, phase, 1.).unwrap();
+            assert!(spreading_activation(&graph, &[(terminal, 1.)], test_ns(), &config).is_empty());
+            assert!(
+                spreading_activation(&graph, &[(first, 1.)], test_ns(), &config).is_empty(),
+                "{phase:?} must not receive/fire activation through retained version edges"
+            );
+            assert_eq!(graph.edge_count(), 3);
+            assert!(
+                graph
+                    .outgoing_edges(&first)
+                    .iter()
+                    .any(|e| e.edge_type == EdgeType::Supersedes)
+            );
+            assert_eq!(
+                graph.outgoing_edges(&terminal)[0].edge_type,
+                EdgeType::ParentChild
+            );
+        }
     }
 } // mod spreading_tests

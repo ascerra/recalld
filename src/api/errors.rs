@@ -26,12 +26,12 @@ use crate::serialization::ApiError;
 /// human-readable message, and an optional field name for validation errors.
 #[derive(Debug)]
 pub enum AppError {
-    Observation(crate::decay::observation::ObservationError),
-    CommittedInsertion {
+    CommittedMutation {
         receipt: crate::storage::control::WriteReceipt,
         message: String,
     },
 
+    Observation(crate::decay::observation::ObservationError),
     /// 404 -- Memory, namespace, or resource not found.
     NotFound {
         /// The kind of resource (e.g. "memory", "namespace").
@@ -102,14 +102,13 @@ impl IntoResponse for AppError {
             )
                 .into_response();
         }
-        if let AppError::CommittedInsertion { receipt, message } = self {
+        if let AppError::CommittedMutation { receipt, message } = self {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
                 "error": "INDEX_NOT_READY", "commitState": "committed", "ready": false, "receipt": receipt, "message": message,
             }))).into_response();
         }
         let (status, error_code, message, field) = match &self {
-            AppError::Observation(_) => unreachable!(),
-            AppError::CommittedInsertion { .. } => unreachable!(),
+            AppError::Observation(_) | AppError::CommittedMutation { .. } => unreachable!(),
             AppError::NotFound { resource, id } => (
                 StatusCode::NOT_FOUND,
                 "NOT_FOUND".to_string(),
@@ -190,20 +189,20 @@ pub use crate::storage::StorageError;
 impl From<StorageError> for AppError {
     fn from(err: StorageError) -> Self {
         match &err {
-            StorageError::NamespaceMismatch { .. } => AppError::NamespaceMismatch {
-                message: err.to_string(),
-            },
-            StorageError::InvalidNamespaceName { .. } => AppError::BadRequest {
-                message: err.to_string(),
-                field: Some("namespace".into()),
-            },
-            StorageError::CommittedInsertion { receipt, source } => AppError::CommittedInsertion {
+            StorageError::CommittedMutation { receipt, source } => AppError::CommittedMutation {
                 receipt: (**receipt).clone(),
                 message: source.to_string(),
             },
             StorageError::CommitOutcomeUnknown { .. }
             | StorageError::ProviderVectorUnavailable(_) => AppError::ServiceUnavailable {
                 message: err.to_string(),
+            },
+            StorageError::NamespaceMismatch { .. } => AppError::NamespaceMismatch {
+                message: err.to_string(),
+            },
+            StorageError::InvalidNamespaceName { .. } => AppError::BadRequest {
+                message: err.to_string(),
+                field: Some("namespace".into()),
             },
             StorageError::NotFound(uuid) => AppError::NotFound {
                 resource: "memory",

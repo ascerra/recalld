@@ -291,7 +291,7 @@ pub async fn create_memory(
         .await?;
     let receipt = inserted.receipt;
     let memory = inserted.record.ok_or_else(|| {
-        AppError::from(crate::storage::StorageError::CommittedInsertion {
+        AppError::from(crate::storage::StorageError::CommittedMutation {
             receipt: Box::new(receipt.clone()),
             source: Box::new(crate::storage::StorageError::RecoveryRequired(
                 "inserted record unavailable".into(),
@@ -1162,21 +1162,7 @@ pub async fn create_namespace(
             req.decay_rate_multiplier,
         )
         .await
-        .map_err(|e| {
-            if matches!(
-                e.downcast_ref::<crate::decay::lifecycle::LifecycleError>(),
-                Some(crate::decay::lifecycle::LifecycleError::InvalidInput(_))
-            ) {
-                AppError::BadRequest {
-                    message: e.to_string(),
-                    field: None,
-                }
-            } else {
-                AppError::Conflict {
-                    message: format!("namespace '{}' already exists", req.name),
-                }
-            }
-        })?;
+        .map_err(namespace_create_error)?;
 
     let response = NamespaceResponse {
         id: ns.id.get(),
@@ -1199,6 +1185,36 @@ pub async fn create_namespace(
             took_us: Some(took),
         }),
     ))
+}
+
+fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {
+    use crate::decay::lifecycle::LifecycleError;
+    use crate::storage::StorageError;
+    if matches!(
+        error.downcast_ref::<LifecycleError>(),
+        Some(LifecycleError::InvalidInput(_))
+    ) {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: None,
+        };
+    }
+    match error.downcast::<StorageError>() {
+        Ok(error) => match *error {
+            StorageError::InvalidMutation(message)
+            | StorageError::InvalidNamespaceName {
+                reason: message, ..
+            } => AppError::BadRequest {
+                message,
+                field: None,
+            },
+            error @ StorageError::CommitOutcomeUnknown { .. } => AppError::ServiceUnavailable {
+                message: error.to_string(),
+            },
+            error => error.into(),
+        },
+        Err(source) => AppError::Internal { source },
+    }
 }
 
 /// GET /namespaces/:id/stats -- namespace statistics.
@@ -1669,7 +1685,7 @@ pub async fn batch_store(
             .await
         {
             Ok(value) => value,
-            Err(error @ crate::storage::StorageError::CommittedInsertion { .. }) => {
+            Err(error @ crate::storage::StorageError::CommittedMutation { .. }) => {
                 return Err(error.into());
             }
             Err(error @ crate::storage::StorageError::CommitOutcomeUnknown { .. }) => {
@@ -1686,7 +1702,7 @@ pub async fn batch_store(
         };
         let receipt = inserted.receipt;
         let memory = inserted.record.ok_or_else(|| {
-            AppError::from(crate::storage::StorageError::CommittedInsertion {
+            AppError::from(crate::storage::StorageError::CommittedMutation {
                 receipt: Box::new(receipt.clone()),
                 source: Box::new(crate::storage::StorageError::RecoveryRequired(
                     "inserted record unavailable".into(),
@@ -1951,13 +1967,19 @@ pub async fn trigger_decay_sweep(
         .decay
         .trigger_sweep(req.as_of)
         .await
-        .map_err(|e| AppError::Internal {
-            source: format!("sweep failed: {e}").into(),
-        })?;
+        .map_err(
+            |error| match error.downcast::<crate::storage::StorageError>() {
+                Ok(storage) => AppError::from(*storage),
+                Err(source) => AppError::Internal { source },
+            },
+        )?;
 
     Ok(Json(ApiResponse {
         data: TriggerSweepResponse {
             memories_scanned: result.memories_scanned,
+            stale_skipped: result.stale_skipped,
+            unchanged_skipped: result.unchanged_skipped,
+            exempt_skipped: result.exempt_skipped,
             full_to_summary: result.full_to_summary,
             summary_to_ghost: result.summary_to_ghost,
             deletions: result.deletions,
