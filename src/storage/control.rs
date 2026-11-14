@@ -231,6 +231,12 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativePhaseMaterialized {
+        transition: super::native_maintenance::NativePhaseWrite,
+    },
+    NativeMemoryHardDeleted {
+        transition: super::native_maintenance::NativeHardDeleteWrite,
+    },
     NativeMemoryInserted {
         transition: super::native_records::NativeRecordWrite,
     },
@@ -449,6 +455,8 @@ pub(crate) fn validate_existing(
             MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
                 | MutationOutcome::LifecycleFeedbackApplied { .. }
+                | MutationOutcome::NativePhaseMaterialized { .. }
+                | MutationOutcome::NativeMemoryHardDeleted { .. }
                 | MutationOutcome::NativeMemoryInserted { .. }
                 | MutationOutcome::NativeMemoryTombstoned { .. }
         ) && state.control_schema_version != 2
@@ -617,6 +625,12 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativePhaseMaterialized { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeMemoryHardDeleted { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeMemoryInserted { transition } => {
             transition.validate(&stored.receipt, true)?
         }
@@ -721,7 +735,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::NativeMemoryInserted { .. }
+        MutationOutcome::NativePhaseMaterialized { .. }
+        | MutationOutcome::NativeMemoryHardDeleted { .. }
+        | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
         | MutationOutcome::LifecycleFeedbackApplied { .. }
