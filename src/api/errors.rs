@@ -330,6 +330,9 @@ impl From<ValidationError> for AppError {
 impl From<GraphError> for AppError {
     fn from(err: GraphError) -> Self {
         match &err {
+            GraphError::Unavailable(message) => AppError::ServiceUnavailable {
+                message: message.clone(),
+            },
             GraphError::MemoryNotFound(id) => AppError::NotFound {
                 resource: "memory",
                 id: format!("{id}"),

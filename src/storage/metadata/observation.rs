@@ -51,6 +51,7 @@ impl MetadataStore {
         accesses: &[(MemoryId, AccessKind)],
         sampled_at: i64,
     ) -> Result<(redb::WriteTransaction, WriteReceipt), StorageError> {
+        publication.check(self)?;
         self.prepare_exposures_scoped(publication, ctx, accesses, sampled_at, None)
     }
 
@@ -197,6 +198,7 @@ impl MetadataStore {
         sampled_at: i64,
         global_multiplier: f64,
     ) -> Result<(redb::WriteTransaction, WriteReceipt), StorageError> {
+        publication.check(self)?;
         self.prepare_feedback_scoped(
             publication,
             ctx,

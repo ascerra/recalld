@@ -910,9 +910,16 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
     }
 
     async fn tombstone_node(&self, id: MemoryId) -> Result<(), crate::graph::GraphError> {
-        let mut graph = self.graph.write().await;
-        graph.update_node_state(id, DecayPhase::Tombstone, 0.0)?;
-        Ok(())
+        let work = crate::storage::work::accept_work(&self.storage, None)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
+        let result = async {
+            let mut graph = self.graph.write().await;
+            graph.update_node_state(id, DecayPhase::Tombstone, 0.0)?;
+            Ok(())
+        }
+        .await;
+        crate::storage::work::finish_work(&self.storage, work);
+        result
     }
 
     async fn add_node(
@@ -923,9 +930,16 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         strength: f32,
         vector_slot: u32,
     ) -> Result<(), crate::graph::GraphError> {
-        let mut graph = self.graph.write().await;
-        let _ = graph.add_node(id, namespace_id, phase, strength, vector_slot);
-        Ok(())
+        let work = crate::storage::work::accept_work(&self.storage, None)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
+        let result = async {
+            let mut graph = self.graph.write().await;
+            let _ = graph.add_node(id, namespace_id, phase, strength, vector_slot);
+            Ok(())
+        }
+        .await;
+        crate::storage::work::finish_work(&self.storage, work);
+        result
     }
 
     async fn perform_post_creation_links(
@@ -941,11 +955,18 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
             return;
         }
 
+        let work = match crate::storage::work::accept_work(&self.storage, None) {
+            Ok(work) => work,
+            Err(error) => {
+                tracing::warn!(%error,"post-creation graph admission rejected");
+                return;
+            }
+        };
         let threshold = self.config.graph.auto_link_threshold as f32;
         let max_links = self.config.graph.max_auto_links;
 
         // Autolink: discover and create edges to similar existing memories.
-        if let Err(e) = crate::graph::perform_autolink(
+        if let Err(e) = crate::graph::perform_autolink_with_work(
             memory_id,
             namespace_id,
             embedding,
@@ -956,6 +977,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
             &self.graph,
             &self.storage,
             &self.cache,
+            Some(&work),
         )
         .await
         {
@@ -969,7 +991,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         // Entity linking: connect memories sharing named entities.
         if !entities.is_empty() {
             let max_entity_links = self.config.graph.max_entity_links;
-            let _ = crate::graph::perform_entity_link(
+            let _ = crate::graph::perform_entity_link_with_work(
                 memory_id,
                 namespace_id,
                 entities,
@@ -978,6 +1000,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                 &self.graph,
                 &self.storage,
                 &self.cache,
+                Some(&work),
             )
             .await;
         }
@@ -1006,7 +1029,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                 .collect();
 
             if !recent_memories.is_empty() {
-                if let Err(e) = crate::graph::perform_temporal_link(
+                if let Err(e) = crate::graph::perform_temporal_link_with_work(
                     memory_id,
                     namespace_id,
                     created_at,
@@ -1016,6 +1039,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                     &self.graph,
                     &self.storage,
                     &self.cache,
+                    Some(&work),
                 )
                 .await
                 {
@@ -1027,6 +1051,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                 }
             }
         }
+        crate::storage::work::finish_work(&self.storage, work);
     }
 }
 
@@ -1153,7 +1178,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         let activation_config = ActivationConfig::default();
         let global_multiplier = self.config.decay.decay_rate_multiplier as f64;
 
-        let result = DecaySweepRunner::execute_sweep_at(
+        let result = DecaySweepRunner::execute_sweep_with_work(
             &sweep_config,
             &decay_config,
             &activation_config,
@@ -1162,6 +1187,8 @@ impl state::FsrsEngine for FsrsEngineAdapter {
             &self.cache,
             global_multiplier,
             Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
+            None,
+            self.completion.as_ref(),
         )
         .await;
 
@@ -1182,16 +1209,8 @@ impl state::FsrsEngine for FsrsEngineAdapter {
                 ),
             )));
         }
-        if let Some(completion) = &self.completion {
-            completion.complete().await?;
-        } else if self
-            .storage
-            .read()
-            .map_err(|e| e.to_string())?
-            .meta_store()
-            .needs_effects_rebuild()
-        {
-            return Err("derived completion handles missing; reopen required".into());
+        if let Some(error) = &result.publication_error {
+            return Err(error.clone().into());
         }
         Ok(result)
     }
@@ -1293,54 +1312,61 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         desired_retention: f32,
         decay_rate_multiplier: Option<f32>,
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
+        let work = crate::storage::work::accept_work(&self.storage, None)?;
+        let worker = work.child()?;
         let now = chrono::Utc::now().timestamp_millis();
         let storage = self.storage.clone();
         let name_owned = name.to_string();
 
-        tokio::task::spawn_blocking(move || {
-            // Resolve embedding_dim: use provided value, or inherit from
-            // the 'default' namespace, or fall back to 1536.
-            let dim = embedding_dim.unwrap_or_else(|| {
-                storage
-                    .read()
-                    .ok()
-                    .and_then(|s| s.get_namespace_by_name("default").ok().flatten())
-                    .map(|ns| ns.embedding_dim)
-                    .unwrap_or(1536)
-            });
+        let result = tokio::task::spawn_blocking(move || {
+            let result = (|| {
+                // Resolve embedding_dim: use provided value, or inherit from
+                // the 'default' namespace, or fall back to 1536.
+                let dim = embedding_dim.unwrap_or_else(|| {
+                    storage
+                        .read()
+                        .ok()
+                        .and_then(|s| s.get_namespace_by_name("default").ok().flatten())
+                        .map(|ns| ns.embedding_dim)
+                        .unwrap_or(1536)
+                });
 
-            let ns_config = NamespaceConfig {
-                schema: None,
-                id: NamespaceId::UNSET,
-                name: name_owned,
-                embedding_dim: dim,
-                initial_stability,
-                default_difficulty: 5.0,
-                phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
-                permastore_threshold: 1500.0,
-                created_at: now,
-                desired_retention,
-                decay_rate_multiplier,
-            };
+                let ns_config = NamespaceConfig {
+                    schema: None,
+                    id: NamespaceId::UNSET,
+                    name: name_owned,
+                    embedding_dim: dim,
+                    initial_stability,
+                    default_difficulty: 5.0,
+                    phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
+                    permastore_threshold: 1500.0,
+                    created_at: now,
+                    desired_retention,
+                    decay_rate_multiplier,
+                };
 
-            crate::decay::lifecycle::resolve_policy(
-                &ns_config,
-                &crate::decay::DecayConfig::default(),
-                1.0,
-            )?;
+                crate::decay::lifecycle::resolve_policy(
+                    &ns_config,
+                    &crate::decay::DecayConfig::default(),
+                    1.0,
+                )?;
 
-            let mut storage_w = storage.write().map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("storage lock poisoned: {e}"),
-                )) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-            let assigned_id = storage_w.create_namespace(&ns_config)?;
-            Ok(NamespaceConfig {
-                schema: None,
-                id: assigned_id,
-                ..ns_config
-            })
+                let mut storage_w = storage.write().map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("storage lock poisoned: {e}"),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })?;
+                let assigned_id =
+                    storage_w.create_namespace_with_work(&ns_config, Some(&worker))?;
+                Ok(NamespaceConfig {
+                    schema: None,
+                    id: assigned_id,
+                    ..ns_config
+                })
+            })();
+            crate::storage::work::finish_work(&storage, worker);
+            result
         })
         .await
         .map_err(|e| {
@@ -1348,7 +1374,9 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
                 std::io::ErrorKind::Other,
                 format!("blocking task join error: {e}"),
             )) as Box<dyn std::error::Error + Send + Sync>
-        })?
+        })?;
+        crate::storage::work::finish_work(&self.storage, work);
+        result
     }
 }
 

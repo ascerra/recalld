@@ -9,6 +9,29 @@ use std::time::Instant;
 
 use uuid::Uuid;
 
+/// Register before a shared engine producer awaits or queues work. Never hold
+/// this outer read lock while draining; workers need the write lock to finish.
+pub(crate) fn accept_work(
+    storage: &Arc<std::sync::RwLock<super::RedbStorageEngine>>,
+    parent: Option<&WorkTicket>,
+) -> Result<WorkTicket, super::StorageError> {
+    let storage = storage
+        .read()
+        .map_err(|e| super::StorageError::RecoveryRequired(e.to_string()))?;
+    Ok(storage.meta_store().work_tracker().admit(parent)?)
+}
+
+/// A known returned worker may finish. Cancellation never reaches this call;
+/// unavailable/unknown owners retain their tickets through MetadataStore.
+pub(crate) fn finish_work(
+    storage: &Arc<std::sync::RwLock<super::RedbStorageEngine>>,
+    work: WorkTicket,
+) {
+    if let Ok(storage) = storage.read() {
+        storage.meta_store().finish_work(work);
+    }
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WorkError {
     #[error("work admission is closed")]

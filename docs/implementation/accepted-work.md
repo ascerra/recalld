@@ -51,6 +51,10 @@ before and after validation: late success is rejected, but validation scans and
 blocking OS I/O are **not bounded** by those checks. No hard 30-second completion
 claim is made.
 
+The [batch/accepted-work follow-up](batch-accepted-work.md) adds actual batch
+root/descendant participation and cooperative checks between durable batch
+manifest rows. The original validation below describes this foundation parent.
+
 ## Validation
 
 Passing regressions cover accepted children/grandchildren during closing; a parent dropped
@@ -85,8 +89,8 @@ read-only allowlisted source, temporary HOME and no home/credential/socket mount
 Final raw output: `/tmp/recalld-accepted-test-wjgq37hv/output`. All 167 source
 hashes and 9 output hashes were reverified, including archived contents.
 
-Evidence is on separate branch `study/accepted-work` (base frozen PR64 tail) at
-`benchmarks/accepted-work/REPORT.md`. It includes all three immutable runs,
+Evidence was frozen on `study/accepted-work` (base PR64 tail) and is included
+in this same implementation PR at `benchmarks/accepted-work/REPORT.md`. It includes all three immutable runs,
 source/command manifests, runtime patch and changed-file list; no runtime ancestry
 or build caches were added. Final archive SHA-256:
 `f1f59723dcb51127d9a6376d1b76d3e611ee7c501f2fc175793e1255c81d0456`.

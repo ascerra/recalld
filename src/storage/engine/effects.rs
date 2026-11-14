@@ -10,7 +10,15 @@ impl RedbStorageEngine {
         &self,
         puts: &[PersistedEdge],
     ) -> Result<Option<EffectResult>, StorageError> {
-        let guard = self.meta_store.mutation_guard()?;
+        self.put_edges_with_effects_with_work(puts, None)
+    }
+
+    pub(crate) fn put_edges_with_effects_with_work(
+        &self,
+        puts: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<EffectResult>, StorageError> {
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let Some(first) = puts.first() else {
             return Ok(None);
         };
@@ -43,7 +51,16 @@ impl RedbStorageEngine {
         id: MemoryId,
         bridges: &[PersistedEdge],
     ) -> Result<Option<EffectResult>, StorageError> {
-        let guard = self.meta_store.mutation_guard()?;
+        self.delete_memory_with_edges_with_work(id, bridges, None)
+    }
+
+    pub(crate) fn delete_memory_with_edges_with_work(
+        &mut self,
+        id: MemoryId,
+        bridges: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<EffectResult>, StorageError> {
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let Some(record) = self.meta_store.get(id)? else {
             return Ok(None);
         };
@@ -85,8 +102,16 @@ impl RedbStorageEngine {
         &self,
         operation_id: uuid::Uuid,
     ) -> Result<(), StorageError> {
+        self.acknowledge_graph_effects_with_work(operation_id, None)
+    }
+
+    pub(crate) fn acknowledge_graph_effects_with_work(
+        &self,
+        operation_id: uuid::Uuid,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), StorageError> {
         self.meta_store
-            .acknowledge_derived_effects(operation_id)
+            .acknowledge_derived_effects_with_work(operation_id, parent)
             .map_err(|source| StorageError::CommittedEffectsPending {
                 operation_id,
                 source: Box::new(source),

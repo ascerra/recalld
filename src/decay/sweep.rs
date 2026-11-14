@@ -20,6 +20,7 @@
 //! under that lock before applying any mutation. Feedback and phase/content loss
 //! use one metadata transaction; hard deletion/edge effects remain a separate boundary.
 
+use crate::storage::work::{WorkTicket, accept_work, finish_work};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -206,6 +207,21 @@ pub struct SweepResult {
 }
 
 impl SweepResult {
+    fn retain_publication_failure(&mut self, error: &crate::storage::StorageError) {
+        use crate::storage::StorageError;
+        self.publication_error = Some(error.to_string());
+        match error {
+            StorageError::CommittedMutation { receipt, source } => {
+                self.failed_commit
+                    .get_or_insert(((**receipt).clone(), source.to_string()));
+            }
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => {
+                self.uncertain_operation.get_or_insert(*operation_id);
+            }
+            _ => {}
+        }
+    }
+
     fn retain_mutation_failure(&mut self, error: &SweepError) {
         use crate::storage::StorageError;
         match error {
@@ -432,6 +448,8 @@ pub struct DecaySweepRunner {
 
     /// Notifies the background task to run an immediate sweep.
     trigger_notify: Arc<Notify>,
+    // Preserve Notify coalescing, but retain the accepted root before enqueue.
+    pending_trigger: Arc<std::sync::Mutex<Option<WorkTicket>>>,
 }
 
 impl DecaySweepRunner {
@@ -463,6 +481,7 @@ impl DecaySweepRunner {
             global_decay_multiplier,
             shutdown_tx,
             trigger_notify: Arc::new(Notify::new()),
+            pending_trigger: Arc::new(std::sync::Mutex::new(None)),
             completion: None,
         })
     }
@@ -501,11 +520,20 @@ impl DecaySweepRunner {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         let trigger_notify = Arc::clone(&self.trigger_notify);
 
+        let pending_trigger = self.pending_trigger.clone();
+        // The startup task is accepted before spawning; an idle scheduler is not
+        // itself pending work. Scheduled ticks register only when they fire.
+        let startup = if config.sweep_on_startup && !*shutdown_rx.borrow() {
+            accept_work(&storage, None).ok()
+        } else {
+            None
+        };
         tokio::spawn(async move {
-            // Optional startup sweep
-            if config.sweep_on_startup {
-                info!("running startup decay sweep");
-                let mut result = Self::execute_sweep_at(
+            if *shutdown_rx.borrow() {
+                return;
+            }
+            if let Some(work) = startup {
+                let result = Self::execute_sweep_with_work(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -514,51 +542,34 @@ impl DecaySweepRunner {
                     &cache,
                     global_decay_multiplier,
                     Some(clock.now_millis()),
+                    Some(&work),
+                    completion.as_ref(),
                 )
                 .await;
-                if let Some(completion) = &completion {
-                    if let Err(error) = completion.complete().await {
-                        result.publication_error = Some(error.to_string());
-                        tracing::error!(%error, "sweep effects remain pending; next sweep retries completion");
-                    }
-                }
+                finish_work(&storage, work);
                 Self::log_result(&result);
             }
-
             let mut interval = time::interval(config.interval);
-            // The first tick fires immediately -- consume it since we
-            // may have already done the startup sweep.
             interval.tick().await;
-
             loop {
-                tokio::select! {
-                    // Regular interval tick
-                    _ = interval.tick() => {
-                        info!("starting scheduled decay sweep");
-                    }
-                    // Manual trigger
-                    _ = trigger_notify.notified() => {
-                        info!("starting manually triggered decay sweep");
-                        // Reset the interval so the next scheduled sweep
-                        // is a full interval from now.
+                let work = tokio::select! {
+                    _=interval.tick()=>accept_work(&storage,None).ok(),
+                    _=trigger_notify.notified()=>{
                         interval.reset();
+                        pending_trigger.lock().unwrap_or_else(|e|e.into_inner()).take()
                     }
-                    // Shutdown signal
-                    _ = shutdown_rx.changed() => {
-                        if *shutdown_rx.borrow() {
-                            info!("decay sweep runner shutting down");
-                            return;
-                        }
+                    _=shutdown_rx.changed()=>{
+                        if *shutdown_rx.borrow() { return; }
                         continue;
                     }
-                }
-
-                // Check shutdown before starting a potentially long sweep
+                };
                 if *shutdown_rx.borrow() {
                     return;
                 }
-
-                let mut result = Self::execute_sweep_at(
+                let Some(work) = work else {
+                    continue;
+                };
+                let result = Self::execute_sweep_with_work(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -567,14 +578,11 @@ impl DecaySweepRunner {
                     &cache,
                     global_decay_multiplier,
                     Some(clock.now_millis()),
+                    Some(&work),
+                    completion.as_ref(),
                 )
                 .await;
-                if let Some(completion) = &completion {
-                    if let Err(error) = completion.complete().await {
-                        result.publication_error = Some(error.to_string());
-                        tracing::error!(%error, "sweep effects remain pending; next sweep retries completion");
-                    }
-                }
+                finish_work(&storage, work);
                 Self::log_result(&result);
             }
         })
@@ -584,7 +592,14 @@ impl DecaySweepRunner {
     ///
     /// The current sweep (if running) will complete before the task exits.
     pub fn shutdown(&self) {
-        let _ = self.shutdown_tx.send(true);
+        self.shutdown_tx.send_replace(true);
+        // Accepted but unexecuted work is abandoned, not successfully drained.
+        drop(
+            self.pending_trigger
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(),
+        );
     }
 
     /// Trigger an immediate sweep outside the regular interval.
@@ -593,6 +608,22 @@ impl DecaySweepRunner {
     /// If a sweep is already in progress, the trigger is consumed and a
     /// new sweep starts immediately after the current one finishes.
     pub fn trigger(&self) {
+        let mut pending = self
+            .pending_trigger
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if *self.shutdown_tx.borrow() {
+            return;
+        }
+        if pending.is_none() {
+            match accept_work(&self.storage, None) {
+                Ok(work) => *pending = Some(work),
+                Err(error) => {
+                    tracing::warn!(%error,"decay trigger admission rejected");
+                    return;
+                }
+            }
+        }
         self.trigger_notify.notify_one();
     }
 
@@ -649,6 +680,88 @@ impl DecaySweepRunner {
         global_decay_multiplier: f64,
         as_of_millis: Option<i64>,
     ) -> SweepResult {
+        Self::execute_sweep_with_work(
+            config,
+            decay_config,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            global_decay_multiplier,
+            as_of_millis,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_sweep_with_work(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        parent: Option<&WorkTicket>,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+    ) -> SweepResult {
+        let work = match accept_work(storage, parent) {
+            Ok(work) => work,
+            Err(error) => {
+                return SweepResult {
+                    publication_error: Some(error.to_string()),
+                    ..Default::default()
+                };
+            }
+        };
+        let mut result = Self::execute_sweep_accepted(
+            config,
+            decay_config,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            global_decay_multiplier,
+            as_of_millis,
+            &work,
+        )
+        .await;
+        // Keep the original canonical failure identity; completion may only add
+        // publication evidence, never replace a failed receipt or unknown ID.
+        if let Some(completion) = completion {
+            if let Err(error) = completion.complete_with_work(Some(&work)).await {
+                result.retain_publication_failure(&error);
+            }
+        } else if storage
+            .read()
+            .map_or(true, |s| s.meta_store().needs_effects_rebuild())
+        {
+            result.publication_error =
+                Some("derived completion handles missing; reopen required".into());
+        }
+        // A known returned failure is not cancellation: durable effects still
+        // block capture and can be retried by completion on this owner. Do not
+        // strand an abandoned ticket for recoverable outbox work. Unknown
+        // commits and unavailable handles retain unresolved work instead.
+        if result.uncertain_operation.is_none() {
+            finish_work(storage, work);
+        }
+        result
+    }
+
+    pub(crate) async fn execute_sweep_accepted(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        work: &WorkTicket,
+    ) -> SweepResult {
         let start = Instant::now();
         let now_millis = as_of_millis
             .unwrap_or_else(|| crate::time::Clock::now_millis(&crate::time::SystemClock));
@@ -667,6 +780,7 @@ impl DecaySweepRunner {
             now_millis,
             global_decay_multiplier,
             &mut result,
+            work,
         )
         .await;
 
@@ -682,6 +796,7 @@ impl DecaySweepRunner {
             now_millis,
             global_decay_multiplier,
             &mut result,
+            work,
         )
         .await;
 
@@ -697,6 +812,7 @@ impl DecaySweepRunner {
             now_millis,
             global_decay_multiplier,
             &mut result,
+            work,
         )
         .await;
 
@@ -709,20 +825,27 @@ impl DecaySweepRunner {
         // and we skip the expensive write-lock + I/O entirely.
         if result.deletions > 0 || result.full_to_summary > 0 {
             let storage_clone = Arc::clone(storage);
+            let worker = work.child().expect("live sweep ticket");
             let compaction_result = tokio::task::spawn_blocking(move || {
-                let mut storage_w = storage_clone.write().unwrap_or_else(|e| {
-                    error!("storage lock poisoned during compaction check: {e}");
-                    e.into_inner()
-                });
-                storage_w.compact_text_log()
+                let outcome = (|| {
+                    let mut storage_w = storage_clone.write().unwrap_or_else(|e| {
+                        error!("storage lock poisoned during compaction check: {e}");
+                        e.into_inner()
+                    });
+                    storage_w.compact_text_log_with_work(Some(&worker))
+                })();
+                finish_work(&storage_clone, worker);
+                outcome
             })
             .await;
             match compaction_result {
                 Ok(Ok(_)) => result.compaction_triggered = true,
                 Ok(Err(e)) => {
+                    result.retain_publication_failure(&e);
                     error!(error = %e, "fulltext.dat compaction failed");
                 }
                 Err(e) => {
+                    result.publication_error = Some(e.to_string());
                     error!(error = %e, "compaction task panicked");
                 }
             }
@@ -731,19 +854,28 @@ impl DecaySweepRunner {
         // -- Persist updated phase bitmaps ------------------------
         {
             let storage_clone = Arc::clone(storage);
+            let worker = work.child().expect("live sweep ticket");
             let persist_result = tokio::task::spawn_blocking(move || {
-                let storage_r = storage_clone.read().unwrap_or_else(|e| {
-                    error!("storage lock poisoned during phase index persist: {e}");
-                    e.into_inner()
-                });
-                storage_r.persist_phase_index()
+                let outcome = (|| {
+                    let storage_r = storage_clone.read().unwrap_or_else(|e| {
+                        error!("storage lock poisoned during phase index persist: {e}");
+                        e.into_inner()
+                    });
+                    storage_r
+                        .meta_store()
+                        .persist_phase_index_with_work(Some(&worker))
+                })();
+                finish_work(&storage_clone, worker);
+                outcome
             })
             .await;
             match persist_result {
                 Ok(Err(e)) => {
+                    result.retain_publication_failure(&e);
                     error!(error = %e, "failed to persist phase bitmap index");
                 }
                 Err(e) => {
+                    result.publication_error = Some(e.to_string());
                     error!(error = %e, "phase index persist task panicked");
                 }
                 _ => {}
@@ -777,6 +909,7 @@ impl DecaySweepRunner {
         now_millis: i64,
         global_decay_multiplier: f64,
         result: &mut SweepResult,
+        work: &WorkTicket,
     ) {
         // Get all memory IDs in this phase from the PhaseIndex.
         let memory_ids = Self::load_phase_ids(phase, storage).await;
@@ -863,7 +996,7 @@ impl DecaySweepRunner {
                     .last()
                     .is_some_and(|t| t.memory_id == *memory_id);
                 if let Some(evaluation) = retrievability.filter(|_| !has_transition) {
-                    Self::update_record_state(
+                    Self::update_record_state_with_work(
                         *memory_id,
                         phase,
                         &evaluation,
@@ -871,14 +1004,22 @@ impl DecaySweepRunner {
                         storage,
                         graph,
                         result,
+                        Some(work),
                     )
                     .await;
                 }
 
                 // Flush write batch if full.
                 if pending_transitions.len() >= config.write_batch_size {
-                    Self::flush_transitions(&pending_transitions, storage, graph, cache, result)
-                        .await;
+                    Self::flush_transitions(
+                        &pending_transitions,
+                        storage,
+                        graph,
+                        cache,
+                        result,
+                        work,
+                    )
+                    .await;
                     pending_transitions.clear();
                 }
 
@@ -888,7 +1029,8 @@ impl DecaySweepRunner {
 
         // Flush remaining transitions.
         if !pending_transitions.is_empty() {
-            Self::flush_transitions(&pending_transitions, storage, graph, cache, result).await;
+            Self::flush_transitions(&pending_transitions, storage, graph, cache, result, work)
+                .await;
         }
     }
 
@@ -1149,49 +1291,80 @@ impl DecaySweepRunner {
         graph: &SharedGraph,
         result: &mut SweepResult,
     ) {
+        Self::update_record_state_with_work(
+            memory_id, phase, evaluation, meta, storage, graph, result, None,
+        )
+        .await
+    }
+
+    async fn update_record_state_with_work(
+        memory_id: MemoryId,
+        phase: DecayPhase,
+        evaluation: &SweepEvaluation,
+        meta: &DecayMetadata,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        result: &mut SweepResult,
+        parent: Option<&WorkTicket>,
+    ) {
+        let work = match accept_work(storage, parent) {
+            Ok(work) => work,
+            Err(error) => {
+                result.publication_error = Some(error.to_string());
+                return;
+            }
+        };
+        let worker = work.child().expect("live sweep ticket");
+        let root_storage = Arc::clone(storage);
+
         let storage = Arc::clone(storage);
         let expected = meta.clone();
         let evaluation = evaluation.clone();
         // Always graph -> storage: never await a graph lock holding a storage lock.
         let mut graph = Arc::clone(graph).write_owned().await;
         let outcome = tokio::task::spawn_blocking(move || {
-            let storage = storage
-                .write()
-                .map_err(|e| SweepError::Storage(e.to_string()))?;
-            let current = storage
-                .get_record(memory_id)
-                .map_err(|e| SweepError::Storage(e.to_string()))?;
-            if !current.as_ref().is_some_and(|r| expected.matches(r)) {
-                return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
-            }
-            let current = current.expect("snapshot match requires a record");
-            let Some(projection) = evaluation
-                .project_locked(memory_id, &expected, &storage, &graph)
-                .map_err(|e| SweepError::Storage(e.to_string()))?
-            else {
-                return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
-            };
-            let raw_r = projection.strength;
-            let effective_r = projection.decay_strength;
-            let outcome = storage
-                .apply_legacy_decay_with_receipt(
-                    &crate::storage::control::MutationContext::unkeyed(expected.namespace.id),
-                    memory_id,
-                    &current,
-                    &expected.namespace,
-                    phase,
-                    raw_r,
-                    effective_r,
-                )
-                .map_err(SweepError::Mutation)?;
-            if matches!(
-                outcome,
-                DecayMutationResult::Skipped(DecaySkip::Stale | DecaySkip::Exempt)
-            ) {
-                return Ok(outcome);
-            }
-            let _ = graph.update_node_state(memory_id, phase, effective_r);
-            Ok::<_, SweepError>(outcome)
+            let outcome = (|| {
+                let storage = storage
+                    .write()
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                let current = storage
+                    .get_record(memory_id)
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                if !current.as_ref().is_some_and(|r| expected.matches(r)) {
+                    return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
+                }
+                let current = current.expect("snapshot match requires a record");
+                let Some(projection) = evaluation
+                    .project_locked(memory_id, &expected, &storage, &graph)
+                    .map_err(|e| SweepError::Storage(e.to_string()))?
+                else {
+                    return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
+                };
+                let raw_r = projection.strength;
+                let effective_r = projection.decay_strength;
+                let outcome = storage
+                    .apply_legacy_decay_with_work(
+                        &crate::storage::control::MutationContext::unkeyed(expected.namespace.id),
+                        memory_id,
+                        &current,
+                        &expected.namespace,
+                        phase,
+                        raw_r,
+                        effective_r,
+                        Some(&worker),
+                    )
+                    .map_err(SweepError::Mutation)?;
+                if matches!(
+                    outcome,
+                    DecayMutationResult::Skipped(DecaySkip::Stale | DecaySkip::Exempt)
+                ) {
+                    return Ok(outcome);
+                }
+                let _ = graph.update_node_state(memory_id, phase, effective_r);
+                Ok::<_, SweepError>(outcome)
+            })();
+            finish_work(&storage, worker);
+            outcome
         })
         .await;
         let error = match outcome {
@@ -1217,6 +1390,7 @@ impl DecaySweepRunner {
                 error,
             });
         }
+        finish_work(&root_storage, work);
     }
 
     /// Calculate the connection bonus for a memory based on spreading
@@ -1246,9 +1420,11 @@ impl DecaySweepRunner {
         graph: &SharedGraph,
         cache: &Arc<CacheManager>,
         result: &mut SweepResult,
+        work: &WorkTicket,
     ) {
         for t in transitions {
-            let outcome = Self::apply_transition(t.clone(), storage, graph).await;
+            let outcome =
+                Self::apply_transition_with_work(t.clone(), storage, graph, Some(work)).await;
             // Even a partial storage failure may have changed the canonical phase.
             cache.invalidate(t.memory_id).await;
             match outcome {
@@ -1288,132 +1464,162 @@ impl DecaySweepRunner {
         storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
         graph: &SharedGraph,
     ) -> Result<Option<PhaseTransition>, SweepError> {
+        Self::apply_transition_with_work(t, storage, graph, None).await
+    }
+
+    async fn apply_transition_with_work(
+        t: PendingTransition,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<PhaseTransition>, SweepError> {
+        let work = accept_work(storage, parent).map_err(SweepError::Mutation)?;
+        let worker = work
+            .child()
+            .map_err(|e| SweepError::Storage(e.to_string()))?;
+        let root_storage = Arc::clone(storage);
+
         let storage = Arc::clone(storage);
         let mut graph = Arc::clone(graph).write_owned().await;
-        tokio::task::spawn_blocking(move || {
-            let mut storage = storage
-                .write()
-                .map_err(|e| SweepError::Storage(e.to_string()))?;
-            let current = storage
-                .get_record(t.memory_id)
-                .map_err(|e| SweepError::Storage(e.to_string()))?;
-            if !current.as_ref().is_some_and(|r| t.expected.matches(r)) {
-                return Ok(None);
-            }
-            let current = current.expect("snapshot match requires a record");
-            let Some(projection) =
-                t.evaluation
-                    .project_locked(t.memory_id, &t.expected, &storage, &graph)?
-            else {
-                return Ok(None);
-            };
-            let Some(threshold) = t.evaluation.threshold(t.from_phase) else {
-                return Ok(None);
-            };
-            if projection.decay_strength > threshold {
-                return Ok(None);
-            }
-            let map_error = SweepError::Mutation;
-            let new_phase = match t.from_phase {
-                DecayPhase::Full => DecayPhase::Summary,
-                DecayPhase::Summary => DecayPhase::Ghost,
-                DecayPhase::Ghost => {
-                    let namespace = storage
-                        .get_namespace(crate::model::NamespaceId::new(current.namespace_id))
-                        .map_err(map_error)?;
-                    if namespace
-                        .as_ref()
-                        .map(serde_json::to_vec)
-                        .transpose()
-                        .map_err(|e| SweepError::Storage(e.to_string()))?
-                        != Some(
-                            serde_json::to_vec(&t.expected.namespace)
-                                .map_err(|e| SweepError::Storage(e.to_string()))?,
-                        )
-                    {
-                        return Ok(None);
-                    }
-                    // Plan privately under the final expected-state and policy guards.
-                    let mut planned = (*graph).clone();
-                    let removal = planned.remove_memory_with_bridging(t.memory_id);
-                    let bridges = removal
-                        .bridge_created
-                        .into_iter()
-                        .map(|bridge| {
-                            let source = planned
-                                .get_node_by_key(bridge.source)
-                                .ok_or_else(|| SweepError::Storage("bridge source missing".into()))?
-                                .memory_id;
-                            let target = planned
-                                .get_node_by_key(bridge.target)
-                                .ok_or_else(|| SweepError::Storage("bridge target missing".into()))?
-                                .memory_id;
-                            Ok(crate::storage::PersistedEdge {
-                                source,
-                                target,
-                                edge_type: bridge.edge_type,
-                                weight: bridge.weight,
-                                auto_created: bridge.auto_created,
-                                created_at: bridge.created_at as u64,
+        let outcome = tokio::task::spawn_blocking(move || {
+            let outcome = (|| {
+                let mut storage = storage
+                    .write()
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                let current = storage
+                    .get_record(t.memory_id)
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                if !current.as_ref().is_some_and(|r| t.expected.matches(r)) {
+                    return Ok(None);
+                }
+                let current = current.expect("snapshot match requires a record");
+                let Some(projection) =
+                    t.evaluation
+                        .project_locked(t.memory_id, &t.expected, &storage, &graph)?
+                else {
+                    return Ok(None);
+                };
+                let Some(threshold) = t.evaluation.threshold(t.from_phase) else {
+                    return Ok(None);
+                };
+                if projection.decay_strength > threshold {
+                    return Ok(None);
+                }
+                let map_error = SweepError::Mutation;
+                let new_phase = match t.from_phase {
+                    DecayPhase::Full => DecayPhase::Summary,
+                    DecayPhase::Summary => DecayPhase::Ghost,
+                    DecayPhase::Ghost => {
+                        let namespace = storage
+                            .get_namespace(crate::model::NamespaceId::new(current.namespace_id))
+                            .map_err(map_error)?;
+                        if namespace
+                            .as_ref()
+                            .map(serde_json::to_vec)
+                            .transpose()
+                            .map_err(|e| SweepError::Storage(e.to_string()))?
+                            != Some(
+                                serde_json::to_vec(&t.expected.namespace)
+                                    .map_err(|e| SweepError::Storage(e.to_string()))?,
+                            )
+                        {
+                            return Ok(None);
+                        }
+                        // Plan privately under the final expected-state and policy guards.
+                        let mut planned = (*graph).clone();
+                        let removal = planned.remove_memory_with_bridging(t.memory_id);
+                        let bridges = removal
+                            .bridge_created
+                            .into_iter()
+                            .map(|bridge| {
+                                let source = planned
+                                    .get_node_by_key(bridge.source)
+                                    .ok_or_else(|| {
+                                        SweepError::Storage("bridge source missing".into())
+                                    })?
+                                    .memory_id;
+                                let target = planned
+                                    .get_node_by_key(bridge.target)
+                                    .ok_or_else(|| {
+                                        SweepError::Storage("bridge target missing".into())
+                                    })?
+                                    .memory_id;
+                                Ok(crate::storage::PersistedEdge {
+                                    source,
+                                    target,
+                                    edge_type: bridge.edge_type,
+                                    weight: bridge.weight,
+                                    auto_created: bridge.auto_created,
+                                    created_at: bridge.created_at as u64,
+                                })
                             })
-                        })
-                        .collect::<Result<Vec<_>, SweepError>>()?;
-                    let Some(_) = storage
-                        .delete_memory_with_edges(t.memory_id, &bridges)
-                        .map_err(map_error)?
-                    else {
-                        return Ok(None);
-                    };
-                    *graph = planned;
-                    // Derived invalidations remain pending until complete publication.
-                    return Ok(Some(PhaseTransition::Deleted {
+                            .collect::<Result<Vec<_>, SweepError>>()?;
+                        let Some(_) = storage
+                            .delete_memory_with_edges_with_work(
+                                t.memory_id,
+                                &bridges,
+                                Some(&worker),
+                            )
+                            .map_err(map_error)?
+                        else {
+                            return Ok(None);
+                        };
+                        *graph = planned;
+                        // Derived invalidations remain pending until complete publication.
+                        return Ok(Some(PhaseTransition::Deleted {
+                            id: t.memory_id,
+                            old_phase: t.from_phase,
+                            retrievability: projection.decay_strength,
+                        }));
+                    }
+                    DecayPhase::Tombstone => return Ok(None),
+                };
+                if t.from_phase == DecayPhase::Full && !t.expected.has_summary {
+                    return Err(SweepError::Storage(
+                        "missing_summary: retaining full text".into(),
+                    ));
+                }
+                let outcome = storage
+                    .apply_legacy_decay_with_work(
+                        &crate::storage::control::MutationContext::unkeyed(t.expected.namespace.id),
+                        t.memory_id,
+                        &current,
+                        &t.expected.namespace,
+                        new_phase,
+                        projection.strength,
+                        projection.decay_strength,
+                        Some(&worker),
+                    )
+                    .map_err(map_error)?;
+                if !matches!(outcome, DecayMutationResult::Committed(_)) {
+                    return Ok(None);
+                }
+                // Publish only after the atomic metadata phase/content commit.
+                let _ = graph.update_node_state(t.memory_id, new_phase, projection.decay_strength);
+                let transition = if new_phase == DecayPhase::Summary {
+                    PhaseTransition::Summarized {
                         id: t.memory_id,
                         old_phase: t.from_phase,
+                        new_phase,
                         retrievability: projection.decay_strength,
-                    }));
-                }
-                DecayPhase::Tombstone => return Ok(None),
-            };
-            if t.from_phase == DecayPhase::Full && !t.expected.has_summary {
-                return Err(SweepError::Storage(
-                    "missing_summary: retaining full text".into(),
-                ));
-            }
-            let outcome = storage
-                .apply_legacy_decay_with_receipt(
-                    &crate::storage::control::MutationContext::unkeyed(t.expected.namespace.id),
-                    t.memory_id,
-                    &current,
-                    &t.expected.namespace,
-                    new_phase,
-                    projection.strength,
-                    projection.decay_strength,
-                )
-                .map_err(map_error)?;
-            if !matches!(outcome, DecayMutationResult::Committed(_)) {
-                return Ok(None);
-            }
-            // Publish only after the atomic metadata phase/content commit.
-            let _ = graph.update_node_state(t.memory_id, new_phase, projection.decay_strength);
-            let transition = if new_phase == DecayPhase::Summary {
-                PhaseTransition::Summarized {
-                    id: t.memory_id,
-                    old_phase: t.from_phase,
-                    new_phase,
-                    retrievability: projection.decay_strength,
-                }
-            } else {
-                PhaseTransition::Ghosted {
-                    id: t.memory_id,
-                    old_phase: t.from_phase,
-                    new_phase,
-                    retrievability: projection.decay_strength,
-                }
-            };
-            Ok(Some(transition))
+                    }
+                } else {
+                    PhaseTransition::Ghosted {
+                        id: t.memory_id,
+                        old_phase: t.from_phase,
+                        new_phase,
+                        retrievability: projection.decay_strength,
+                    }
+                };
+                Ok(Some(transition))
+            })();
+            finish_work(&storage, worker);
+            outcome
         })
         .await
-        .map_err(|e| SweepError::Storage(format!("transition task panicked: {e}")))?
+        .map_err(|e| SweepError::Storage(format!("transition task panicked: {e}")))?;
+        finish_work(&root_storage, work);
+        outcome
     }
 }
 
@@ -1767,14 +1973,17 @@ mod independent_review_regressions {
             &mut result,
         )
         .await;
+        let work = accept_work(&f.storage, None).unwrap();
         DecaySweepRunner::flush_transitions(
             &transitions,
             &f.storage,
             &f.graph,
             &f.cache,
             &mut result,
+            &work,
         )
         .await;
+        finish_work(&f.storage, work);
         let after = f.record(id).unwrap();
         assert_eq!(
             (after.stability, after.is_permastore, after.phase),

@@ -121,7 +121,18 @@ impl MetadataStore {
         descriptor: &TextGeneration,
         refs: &RefMapping,
     ) -> Result<WriteReceipt, StorageError> {
-        let _gate = self.mutation_guard()?;
+        let guard = self.mutation_guard()?;
+        self.select_text_generation_guarded(&guard, expected, descriptor, refs)
+    }
+
+    pub(crate) fn select_text_generation_guarded(
+        &self,
+        guard: &MutationGuard<'_>,
+        expected: Generation,
+        descriptor: &TextGeneration,
+        refs: &RefMapping,
+    ) -> Result<WriteReceipt, StorageError> {
+        guard.check(self)?;
         let tx = self.db.begin_write()?;
         let state = control::read_control(&tx)?;
         descriptor.validate(state.store_id)?;

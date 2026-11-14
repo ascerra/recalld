@@ -21,7 +21,25 @@ impl RedbStorageEngine {
         &mut self,
         mut boundary: impl FnMut(Stage) -> Result<(), StorageError>,
     ) -> Result<CompactionResult, StorageError> {
+        self.compact_text_at_with_work(&mut boundary, None)
+    }
+
+    pub(crate) fn compact_text_log_with_work(
+        &mut self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<CompactionResult, StorageError> {
+        self.compact_text_at_with_work(|_| Ok(()), parent)
+    }
+
+    fn compact_text_at_with_work(
+        &mut self,
+        mut boundary: impl FnMut(Stage) -> Result<(), StorageError>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<CompactionResult, StorageError> {
         self.ensure_available()?;
+        // Admission precedes prepared file creation and stays live through the
+        // selected handle and cleanup publication, including unknown failures.
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let old = self.meta_store.text_selection()?.ok_or_else(|| StorageError::RecoveryRequired(
             "legacy text compaction requires offline fresh-destination migration: recalld-text-migrate SOURCE DESTINATION".into()
         ))?;
@@ -64,7 +82,8 @@ impl RedbStorageEngine {
         for (_, reference) in &new_refs {
             prepared.read(*reference)?;
         }
-        self.meta_store.select_text_generation(
+        self.meta_store.select_text_generation_guarded(
+            &guard,
             state.committed_generation,
             &descriptor,
             &new_refs,
@@ -168,6 +187,88 @@ mod tests {
                 Some(text)
             );
         }
+    }
+
+    #[test]
+    fn accepted_compaction_spans_preparation_selection_and_handle_install() {
+        use std::{
+            sync::mpsc,
+            time::{Duration, Instant},
+        };
+        let root = tempfile::tempdir().unwrap();
+        let (mut engine, kept) = generation_fixture(root.path());
+        let tracker = engine.meta_store().work_tracker();
+        let work = tracker.begin().unwrap();
+        let closing = tracker.clone();
+        let drain = std::thread::spawn(move || {
+            closing.close_and_drain(Instant::now() + Duration::from_secs(10))
+        });
+        tracker.wait_until_closed();
+        let before: std::collections::BTreeSet<_> = std::fs::read_dir(root.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(matches!(
+            engine.compact_text_log(),
+            Err(StorageError::Work(_))
+        ));
+        let after: std::collections::BTreeSet<_> = std::fs::read_dir(root.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            before, after,
+            "rejected root must not create prepared files"
+        );
+        let (at, paused) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            engine
+                .compact_text_at_with_work(
+                    |stage| {
+                        if stage == Stage::Selected {
+                            at.send(()).unwrap();
+                            resume.recv_timeout(Duration::from_secs(10)).unwrap();
+                        }
+                        Ok(())
+                    },
+                    Some(&work),
+                )
+                .unwrap();
+            engine.meta_store().finish_work(work);
+            engine
+        });
+        paused.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(tracker.status().pending >= 2);
+        assert!(!drain.is_finished());
+        release.send(()).unwrap();
+        let engine = worker.join().unwrap();
+        let freeze = drain.join().unwrap().unwrap();
+        assert_texts(&engine, &kept);
+        drop(freeze);
+        drop(engine);
+        let engine = RedbStorageEngine::open(root.path()).unwrap();
+        assert_texts(&engine, &kept);
+    }
+
+    #[test]
+    fn selected_compaction_failure_cannot_finish_accepted_work() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut engine, _) = generation_fixture(root.path());
+        let tracker = engine.meta_store().work_tracker();
+        assert!(
+            engine
+                .compact_text_at(|stage| if stage == Stage::Selected {
+                    Err(std::io::Error::other("before handle install").into())
+                } else {
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert!(tracker.status().unresolved > 0);
+        drop(engine);
+        let engine = RedbStorageEngine::open(root.path()).unwrap();
+        assert_eq!(engine.meta_store().work_tracker().status().pending, 0);
     }
 
     #[test]
