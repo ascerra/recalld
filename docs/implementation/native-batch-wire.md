@@ -140,3 +140,19 @@ retained-origin equality, old None encodings, same-transaction proof, or replay
 ordering. This is bounded source review, not independent runtime validation.
 The initial wire `1347f2f` build failed on three test-only compile errors; no
 behavior test ran. The immutable failed source and log are preserved.
+
+Feynman independently source-reviewed exact runtime
+`6b4823200c2db7efa4776ae96b1a0816fc035463`: no blocker found. He checked that
+all insertion edges touch the new record, at most1,024 edges plus at most3
+advisory peers bound required records, settings are consulted only after replay,
+and the retained budget runs before completion/provider work. Curie's bounded
+review of the same source found no blocker in fixed-size content proofs,
+bounded response fields, compact MCP framing, retained-settings use or the
+single legacy error projection. Neither review reran tests or endorses future
+codec changes; the bound must be revisited when receipt shapes change.
+
+The second focused source `6b48232` passed three tests, including real historical
+oversize transport/immutability tests, and failed one expected replay flag. The
+only differing field was the correct `receipt.replayed:true` versus fixture
+`false`. The corrected expectation preserves strict equality for all other
+fields and compares the untouched original retained receipt separately.

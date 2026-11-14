@@ -202,6 +202,17 @@ mod tests {
                 reservation_receipt: None
             })
         ));
+        let per_item = ITEM_BYTES + BatchBudget::receipt_bound(input, settings);
+        let count = (MAX_BATCH_JSON_BYTES - 2 * ENVELOPE_BYTES) / per_item;
+        assert!(count > 0 && count < 100);
+        BatchBudget::STANDARD
+            .fresh(&vec![plans[0].clone(); count], settings)
+            .unwrap();
+        assert!(
+            BatchBudget::STANDARD
+                .fresh(&vec![plans[0].clone(); count + 1], settings)
+                .is_err()
+        );
         let BatchItemState::Ok { receipt } = &p.items[0].state else {
             panic!()
         };

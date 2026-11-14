@@ -514,3 +514,63 @@ pub(crate) fn input_schema() -> Value {
         "contractVersion":{"const":2,"type":"integer"},"memories":{"type":"array","minItems":1,"maxItems":MAX_BATCH_MEMORIES,"items":item},
         "storeId":{"type":"string","format":"uuid"},"idempotencyKey":{"type":"string","minLength":1,"maxLength":128},"expectedGeneration":{"type":"string","pattern":"^(0|[1-9][0-9]*)$"},"batchOperationId":{"type":"string","format":"uuid"}}})
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn batch_wire_strict_selectors_keys_schema_and_legacy_gate() {
+        let store = Uuid::from_u128(1);
+        let value = json!({"contractVersion":2,"storeId":store,"memories":[{"summary":"valid"}],"idempotencyKey":"same","expectedGeneration":"9007199254740993"});
+        let input = parse(&value, true, Some("same"), "chosen").unwrap();
+        assert_eq!(input.default_namespace, "chosen");
+        assert_eq!(input.expected_generation.unwrap().get(), 9007199254740993);
+        assert_eq!(
+            input.context().expected_generation,
+            input.expected_generation
+        );
+        assert!(parse(&value, true, Some("other"), "chosen").is_err());
+        for key in [json!(null), json!(""), json!("é"), json!("x".repeat(129))] {
+            let mut bad = value.clone();
+            bad["idempotencyKey"] = key;
+            assert!(parse(&bad, true, None, "chosen").is_err());
+        }
+        for generation in [
+            json!(null),
+            json!(1),
+            json!("01"),
+            json!("-1"),
+            json!("9223372036854775808"),
+        ] {
+            let mut bad = value.clone();
+            bad["expectedGeneration"] = generation;
+            assert!(parse(&bad, true, None, "chosen").is_err());
+        }
+        for version in [json!(null), json!("2"), json!(3), json!(1)] {
+            let mut bad = value.clone();
+            bad["contractVersion"] = version;
+            assert!(parse(&bad, true, None, "chosen").is_err());
+        }
+        let mut bad = value.clone();
+        bad["unknown"] = json!(true);
+        assert!(parse(&bad, true, None, "chosen").is_err());
+        for memories in [json!([]), json!(null), json!({})] {
+            let mut bad = value.clone();
+            bad["memories"] = memories;
+            assert!(parse(&bad, true, None, "chosen").is_err());
+        }
+        let schema = input_schema();
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(
+            schema["properties"]["memories"]["items"]["additionalProperties"],
+            false
+        );
+        assert_eq!(schema["properties"]["contractVersion"]["const"], 2);
+        assert!(ContractVersion::V2.require_supported().is_err());
+        assert!(ContractVersion::V1.require_supported().is_ok());
+        assert!(item_error(&json!({"summary":"valid"}), 0).is_none());
+        let invalid = item_error(&json!({"summary":"valid","embeddingProfile":{}}), 99).unwrap();
+        assert_eq!(invalid.code, "INVALID_INPUT");
+        assert_eq!(invalid.field.as_deref(), Some("memories[99]"));
+    }
+}
