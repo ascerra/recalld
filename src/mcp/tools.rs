@@ -8,7 +8,7 @@
 use serde_json::json;
 
 use crate::mcp::args;
-use crate::mcp::bridge::{McpBridge, StoredMemory};
+use crate::mcp::bridge::{DUPLICATE_NEIGHBOR_CAP, DUPLICATE_SAMPLE_CAP, McpBridge, StoredMemory};
 use crate::mcp::protocol::{ToolAnnotations, ToolCallResult, ToolInfo};
 use crate::model::constants::{
     DEFAULT_LIST_LIMIT, DEFAULT_TAG_LIMIT, DUPLICATE_SIMILARITY_THRESHOLD, EMOTION_MAX_BYTES,
@@ -37,7 +37,7 @@ const FULL_TEXT_DESC: &str = "Detailed content. Removed as memory decays to ghos
 
 /// Return all tool definitions for `tools/list`.
 pub fn tool_definitions() -> Vec<ToolInfo> {
-    vec![
+    let mut tools = vec![
         store_memory_def(),
         store_memories_def(),
         recall_memories_def(),
@@ -52,7 +52,14 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         list_memories_def(),
         list_namespaces_def(),
         list_tags_def(),
-    ]
+    ];
+    for tool in &mut tools {
+        tool.input_schema["properties"]["contractVersion"] = json!({
+            "type": "integer", "enum": [1], "default": 1,
+            "description": "Application contract version. This server currently supports version 1 only."
+        });
+    }
+    tools
 }
 
 /// Every tool name [`dispatch_tool`] has an arm for.
@@ -86,6 +93,18 @@ pub async fn dispatch_tool(
 ) -> ToolCallResult {
     if let Err(e) = args::require_object(&arguments) {
         return ToolCallResult::error(e.to_string());
+    }
+    if let Err(error) = crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        .and_then(|version| version.require_supported())
+    {
+        return ToolCallResult::error(error.to_string());
+    }
+    // This branch is deliberately behind the shared unconditional v2 gate.
+    // Activation requires the native owner/serving and complete wire proof.
+    if crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        == Ok(crate::serialization::contract::ContractVersion::V2)
+    {
+        return dispatch_v2(bridge, name, arguments).await;
     }
     match name {
         "store_memory" => handle_store_memory(bridge, arguments).await,
@@ -598,6 +617,9 @@ async fn handle_recall_memories(
                         }
                         if !hit.topics.is_empty() {
                             obj["topics"] = json!(hit.topics);
+                        }
+                        if let Some(labels) = &hit.labels {
+                            obj["labels"] = json!(labels);
                         }
                         obj
                     })
@@ -1202,34 +1224,35 @@ async fn handle_find_similar_scan(
         }
     };
 
-    // Max memories to sample from the namespace (bounded to 200).
-    const MAX_SCAN_MEMORIES: usize = 200;
-
     match bridge
         .search
-        .scan_duplicates(&namespace, threshold, MAX_SCAN_MEMORIES)
+        .scan_duplicates_with_coverage(&namespace, threshold, DUPLICATE_SAMPLE_CAP)
         .await
     {
-        Ok(clusters) => {
-            let response = json!({
-                "namespace": namespace,
-                "threshold": threshold,
-                "clusters": clusters,
-                "clusterCount": clusters.len(),
-                // The legacy bridge returns clusters only. Do not manufacture scan
-                // counts from cluster membership or from a separate racy catalog read.
-                "coverage": {
+        Ok(report) => {
+            let coverage = match report.coverage {
+                Some(coverage) => match serde_json::to_value(coverage) {
+                    Ok(value) => value,
+                    Err(e) => return ToolCallResult::error(format!("Serialization error: {e}")),
+                },
+                None => json!({
                     "algorithm": "sampledNearestNeighbors",
                     "sampledCount": null,
                     "eligibleCount": null,
                     "skippedVectorCount": null,
-                    "sampleCap": MAX_SCAN_MEMORIES,
-                    // Ten neighbors plus one candidate to allow for self-removal.
-                    "neighborCap": 11,
+                    "sampleCap": DUPLICATE_SAMPLE_CAP,
+                    "neighborCap": DUPLICATE_NEIGHBOR_CAP,
                     "complete": false,
                     "truncated": null,
                     "countsAvailable": false
-                },
+                }),
+            };
+            let response = json!({
+                "namespace": namespace,
+                "threshold": threshold,
+                "clusters": report.clusters,
+                "clusterCount": report.clusters.len(),
+                "coverage": coverage,
             });
             match ToolCallResult::json(&response) {
                 Ok(r) => r,
@@ -1703,6 +1726,55 @@ async fn handle_list_tags(bridge: &McpBridge, arguments: serde_json::Value) -> T
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
         Err(e) => ToolCallResult::error(format!("List tags failed: {e}")),
+    }
+}
+
+/// Prepared actual consumer, reachable only after the shared version gate opens.
+pub(crate) async fn dispatch_v2(
+    bridge: &McpBridge,
+    name: &str,
+    arguments: serde_json::Value,
+) -> ToolCallResult {
+    use crate::search::exact_scan::ExactScanData;
+    use crate::serialization::{
+        contract::{CommitState, Envelope, ErrorCategory, ExecutionError},
+        scan::ExactScanRequest,
+    };
+    let failure = |error: ExecutionError| {
+        let envelope = Envelope::<ExactScanData>::failure(None, error);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        result.is_error = Some(true);
+        result
+    };
+    if name != "find_similar_memories"
+        || arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
+    {
+        return failure(ExecutionError {
+            category: ErrorCategory::Unavailable,
+            code: "UNSUPPORTED_CONTRACT_VERSION".into(),
+            message: "this operation has no active v2 backend".into(),
+            field: Some("/contractVersion".into()),
+            retryable: false,
+            commit_state: CommitState::NotCommitted,
+            operation_id: None,
+        });
+    }
+    let mut request = match ExactScanRequest::from_mcp(&arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            return failure(
+                crate::search::exact_scan::ExactScanError::Input(error).execution_error(),
+            );
+        }
+    };
+    request
+        .namespace
+        .get_or_insert_with(|| bridge.default_namespace().into());
+    match bridge.search.scan_duplicate_pairs(request).await {
+        Ok(page) => ToolCallResult::json(&page.into_envelope())
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error")),
+        Err(error) => failure(error.execution_error()),
     }
 }
 

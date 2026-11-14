@@ -1,0 +1,49 @@
+{
+  "runtime_commit": "7dea9d201fe7528b3dc97abd1d8b5944e8feab96",
+  "files": [
+    {
+      "path": "docs/implementation/contract-wire-prep.md",
+      "sha256": "bb35ee740ae28553cd625faf5b277f9f7ee39cb4d61e0c794307f187ec9ccfe9"
+    },
+    {
+      "path": "docs/mcp.md",
+      "sha256": "b7280cb5fe297badd61babcfecb1447e18dc7ff63c3f0b49c27e619bb91044d3"
+    },
+    {
+      "path": "src/api/contract_wire_tests.rs",
+      "sha256": "24f69dc19e04116c73acaab992d2ff868f3dd95d4e5108e8594226efb4060e9d"
+    },
+    {
+      "path": "src/api/legacy_label_tests.rs",
+      "sha256": "d67c54759ebf6e8dfbad693bb810f0ec3c6734e0fae7b5284eaca00a0d8c35ab"
+    },
+    {
+      "path": "src/api/middleware.rs",
+      "sha256": "f91d94c81bcc0df51da04b7b2f1ce80bd599ad53add1e42e0387c52252b24650"
+    },
+    {
+      "path": "src/api/routes.rs",
+      "sha256": "27ef84595e0c703da81075c4ba4589324ef5fe94b77304983c0b728ec4978f80"
+    },
+    {
+      "path": "src/mcp/server.rs",
+      "sha256": "ee366da156c8abe7120eeafaba060ae3753a00753d28c589adea5fb079d589a6"
+    },
+    {
+      "path": "src/mcp/tools.rs",
+      "sha256": "d002c8e4743e4a175d60f9754a7c5db178b037ad94f5ceed7908d09e60f03198"
+    },
+    {
+      "path": "src/serialization/contract.rs",
+      "sha256": "d79c472da13ed455c22db0ba899174fe0a0d87c6fcfd477a9b9930c2fa435d52"
+    },
+    {
+      "path": "src/serialization/contract_tests.rs",
+      "sha256": "4f13d90dd18a60bf577aa8c30b8b17b198f45bab016e5cddc690eda83b923043"
+    },
+    {
+      "path": "src/serialization/mod.rs",
+      "sha256": "ea2ed65dfc6fa0c1b7d285848d30f3277e653cc0997c8cca541c3b7d6f2eb617"
+    }
+  ]
+}

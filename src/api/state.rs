@@ -33,12 +33,19 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
+        Err(EmbeddingError::Unavailable(
+            "active embedding identity unavailable".into(),
+        ))
+    }
     /// Generate an embedding for the given text within a namespace.
     async fn embed_text(
         &self,
         text: &str,
-        namespace_id: NamespaceId,
-    ) -> Result<Vec<f32>, EmbeddingError>;
+        namespace: &NamespaceConfig,
+    ) -> Result<crate::embedding::runtime::GeneratedEmbedding, EmbeddingError>;
 
     /// Execute a search query, returning scored results.
     async fn search(&self, query: SearchQuery) -> Result<Vec<ResolvedSearchResult>, SearchError>;
@@ -140,15 +147,34 @@ pub trait SearchPipeline: Send + Sync {
     async fn fts_remove(&self, memory_id: MemoryId);
 
     /// Add a memory to the entity index for entity-based linking.
-    async fn entity_index_add(&self, memory_id: MemoryId, entities: &[String]);
+    async fn entity_index_add(
+        &self,
+        namespace_id: NamespaceId,
+        memory_id: MemoryId,
+        entities: &[String],
+    );
 
     /// Remove a memory from the entity index.
-    async fn entity_index_remove(&self, memory_id: MemoryId, entities: &[String]);
+    async fn entity_index_remove(&self, namespace_id: NamespaceId, memory_id: MemoryId);
 }
 
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "store identity unavailable".into(),
+        ))
+    }
+    /// Concrete canonical/vector capture; no legacy backend fallback.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Drain in-flight create/index publication before online derived repair.
     async fn publication_lease(
         &self,
@@ -164,7 +190,7 @@ pub trait StorageEngine: Send + Sync {
         &self,
         namespace_id: NamespaceId,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError>;
 
     async fn complete_insertion(

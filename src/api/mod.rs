@@ -15,6 +15,8 @@
 pub mod adapters;
 mod errors;
 mod handlers;
+#[cfg(test)]
+pub(crate) use handlers::scan_duplicates_v2;
 mod middleware;
 pub(crate) mod models;
 mod routes;
@@ -144,7 +146,6 @@ async fn shutdown_signal() {
 }
 
 #[cfg(test)]
-mod vector_query_tests;
-
-#[cfg(test)]
 mod legacy_label_tests;
+#[cfg(test)]
+mod vector_query_tests;

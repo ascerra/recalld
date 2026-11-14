@@ -33,6 +33,9 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         crate::storage::StorageError::ProviderVectorUnavailable(_) => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
+        crate::storage::StorageError::NamespaceMismatch { .. } => {
+            bridge::BridgeError::NamespaceMismatch(error.to_string())
+        }
         crate::storage::StorageError::InvalidMutation(_)
         | crate::storage::StorageError::EdgeConflict(_)
         | crate::storage::StorageError::MutationNamespaceMismatch => {
@@ -142,6 +145,14 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn search(
         &self,
         query: bridge::SearchInput,
@@ -160,10 +171,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         .get_namespace_by_name(&ns_name)
                         .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
                         .ok_or_else(|| {
-                            bridge::BridgeError::NotFound(format!(
-                                "namespace '{}' not found",
-                                ns_name,
-                            ))
+                            bridge::BridgeError::NotFound(format!("namespace '{}' not found", ns_name,))
                         })
                 })
                 .await
@@ -175,30 +183,16 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             // A label that cannot become a tag is an ERROR, not a dropped
             // filter: dropping one widens the query, and "every memory in
             // the namespace" is indistinguishable from a real result set.
-            let require_tags = match filter_tags(
-                &[
-                    ("tags", "", &query.tags),
-                    (
-                        "entities",
-                        crate::model::constants::ENTITY_TAG_PREFIX,
-                        &query.entities,
-                    ),
-                    (
-                        "topics",
-                        crate::model::constants::TOPIC_TAG_PREFIX,
-                        &query.topics,
-                    ),
-                    (
-                        "emotions",
-                        crate::model::constants::EMOTION_TAG_PREFIX,
-                        &query.emotions,
-                    ),
-                ],
-                "recall_memories",
-            ) {
-                Ok(tags) => tags,
-                Err(e) => return Err(bridge::BridgeError::InvalidInput(e)),
+            let require_tags = filter_tags(&[("tags", "", &query.tags)], "recall_memories")
+                .map_err(bridge::BridgeError::InvalidInput)?;
+            let labels = crate::model::tag::StructuredLabelFilter {
+                entities: query.entities.clone(),
+                topics: query.topics.clone(),
+                emotions: query.emotions.clone(),
             };
+            labels
+                .validate(ns_config.schema.is_some())
+                .map_err(bridge::BridgeError::InvalidInput)?;
 
             let pipeline_query = crate::search::SearchQuery {
                 record_access: query.record_access,
@@ -207,6 +201,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 fts_query: None,
                 namespace: query.namespace.clone(),
                 filter: crate::search::PipelineSearchFilter {
+                    labels,
                     require_tags,
                     min_strength: query.min_strength,
                     ..Default::default()
@@ -227,7 +222,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?;
 
-            let hydration = crate::performance::Timer::new("mcp.hydration");
             let mut exposures: Vec<_> = response
                 .results
                 .iter()
@@ -325,10 +319,11 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         })
                         .collect();
 
-                    let metadata = crate::model::parse_structured_tags(&r.tags);
+                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
 
                     let tz = self.timezone;
                     bridge::SearchHit {
+                        labels: r.labels.clone(),
                         id: r.memory_id.to_string(),
                         summary: r.summary.unwrap_or_default(),
                         full_text,
@@ -367,12 +362,11 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     };
                     if let Some(neighbor_node) = graph_r.get_node_by_key(other_key) {
                         if !result_ids.contains(&neighbor_node.memory_id) {
-                            let entry =
-                                neighbor_weights.entry(neighbor_node.memory_id).or_insert((
-                                    0.0,
-                                    format!("{:?}", edge.edge_type).to_lowercase(),
-                                    mid.to_string(),
-                                ));
+                            let entry = neighbor_weights.entry(neighbor_node.memory_id).or_insert((
+                                0.0,
+                                format!("{:?}", edge.edge_type).to_lowercase(),
+                                mid.to_string(),
+                            ));
                             if edge.weight > entry.0 {
                                 *entry = (
                                     edge.weight,
@@ -433,9 +427,13 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         } else {
                             None
                         };
-                        let metadata = crate::model::parse_structured_tags(&disk.tags);
+                        let metadata = crate::model::structured_metadata(
+                            &disk.tags,
+                            disk.schema.as_ref().map(|s| &s.labels),
+                        );
 
                         result.push(bridge::NeighborMemory {
+                            labels: disk.schema.as_ref().map(|s| s.labels.clone()),
                             id: mid.to_string(),
                             summary: disk.summary.clone(),
                             full_text,
@@ -454,7 +452,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 })??
             };
 
-            hydration.complete();
             let receipts = if query.record_access {
                 for neighbor in &neighbors {
                     let id = neighbor
@@ -485,8 +482,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 receipts,
             }
             .finish(check_read_admission(&self.storage, stamp).await)
-        })
-        .await
+        }).await
     }
 
     async fn find_similar(
@@ -531,10 +527,11 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             let hits = results
                 .into_iter()
                 .map(|r| {
-                    let metadata = crate::model::parse_structured_tags(&r.tags);
+                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
 
                     let tz = self.timezone;
                     bridge::SearchHit {
+                        labels: r.labels.clone(),
                         id: r.memory_id.to_string(),
                         summary: r.summary.unwrap_or_default(),
                         full_text: r.full_text,
@@ -576,12 +573,24 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         threshold: f32,
         max_memories: usize,
     ) -> Result<Vec<bridge::DuplicateCluster>, bridge::BridgeError> {
+        Ok(self
+            .scan_duplicates_with_coverage(namespace, threshold, max_memories)
+            .await?
+            .clusters)
+    }
+
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<bridge::DuplicateScanReport, bridge::BridgeError> {
         let stamp = effects_stamp(&self.storage).await?;
         let result = async {
             // 1. Resolve namespace and get memory IDs.
             let storage = self.storage.clone();
             let ns_name = namespace.to_string();
-            let (ns_config, memory_ids) = tokio::task::spawn_blocking(move || {
+            let (ns_config, memory_ids, eligible_count) = tokio::task::spawn_blocking(move || {
                 let storage_r = storage.read().map_err(|e| {
                     bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
                 })?;
@@ -595,17 +604,27 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     .meta_store()
                     .memories_in_namespace(ns.id)
                     .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-                let ids: Vec<MemoryId> = all_ids.into_iter().take(max_memories).collect();
-                Ok::<_, bridge::BridgeError>((ns, ids))
+                let mut ids = Vec::new();
+                let mut eligible_count = 0;
+                for id in all_ids {
+                    let record = storage_r
+                        .get_record(id)
+                        .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
+                    if record.is_some_and(|r| {
+                        r.namespace_id == ns.id.get() && r.phase != DecayPhase::Tombstone
+                    }) {
+                        eligible_count += 1;
+                        if ids.len() < max_memories {
+                            ids.push(id);
+                        }
+                    }
+                }
+                Ok::<_, bridge::BridgeError>((ns, ids, eligible_count))
             })
             .await
             .map_err(|e| {
                 bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
             })??;
-
-            if memory_ids.len() < 2 {
-                return Ok(Vec::new());
-            }
 
             // 3. Load embeddings for all sampled memories via the vector index.
             let mut id_embeddings: Vec<(MemoryId, Vec<f32>)> = Vec::with_capacity(memory_ids.len());
@@ -615,8 +634,22 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 }
             }
 
+            let coverage = bridge::DuplicateScanCoverage {
+                algorithm: "sampledNearestNeighbors".into(),
+                eligible_count,
+                sampled_count: memory_ids.len(),
+                skipped_vector_count: memory_ids.len() - id_embeddings.len(),
+                sample_cap: max_memories,
+                neighbor_cap: bridge::DUPLICATE_NEIGHBOR_CAP,
+                truncated: memory_ids.len() < eligible_count,
+                counts_available: true,
+                complete: false,
+            };
             if id_embeddings.len() < 2 {
-                return Ok(Vec::new());
+                return Ok(bridge::DuplicateScanReport {
+                    clusters: Vec::new(),
+                    coverage: Some(coverage),
+                });
             }
 
             // 4. Union-Find based clustering: for each memory, find similar
@@ -654,14 +687,13 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 std::collections::HashMap::new();
 
             // For each memory, search for its K nearest neighbors and union
-            // those above threshold. Using K=10 is enough to find clusters
-            // without doing full O(n^2) pairwise comparison.
-            const NEIGHBORS_PER_QUERY: usize = 10;
+            // those above threshold. The bounded neighbor set can miss qualifying
+            // pairs even when all records fit in the sample.
 
             for (i, (_mid, embedding)) in id_embeddings.iter().enumerate() {
                 let scored = self
                     .query_engine
-                    .vector_search(ns_config.id, embedding, NEIGHBORS_PER_QUERY + 1)
+                    .vector_search(ns_config.id, embedding, bridge::DUPLICATE_NEIGHBOR_CAP)
                     .map_err(|e| bridge::BridgeError::Search(e.to_string()))?;
 
                 for result in scored {
@@ -746,7 +778,10 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            Ok(clusters)
+            Ok(bridge::DuplicateScanReport {
+                clusters,
+                coverage: Some(coverage),
+            })
         }
         .await;
         if effects_stamp(&self.storage).await? != stamp {
@@ -904,6 +939,27 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, bridge::BridgeError> {
+        use crate::serialization::session::{ActiveEmbedding, BackendContext};
+        let active = ActiveEmbedding::from_provider(self.embedding.as_ref()).map_err(|_| {
+            bridge::BridgeError::Unavailable("active embedding identity unavailable".into())
+        })?;
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            let control = engine.control_state().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            BackendContext::new(control.store_id, active)
+                .map_err(|e| bridge::BridgeError::Unavailable(e.into()))
+        })
+        .await
+        .map_err(|_| bridge::BridgeError::Unavailable("store context unavailable".into()))?
+    }
     async fn store_memory(
         &self,
         input: bridge::StoreInput,
@@ -1005,7 +1061,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
 
         // Generate full embedding (summary + full_text + tags for max surface).
         let raw_embedding = match &input.embedding {
-            Some(emb) => emb.clone(),
+            Some(emb) => emb.clone().into(),
             None => {
                 let mut embed_text = match &input.full_text {
                     Some(ft) => format!(
@@ -1018,19 +1074,24 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 if !merged_tags.is_empty() {
                     embed_text = format!("{} {}", embed_text, merged_tags.join(" "));
                 }
-                self.embedding
-                    .embed(&embed_text)
-                    .await
-                    .map_err(|e| match e {
-                        crate::embedding::EmbeddingError::TextTooLong { .. } => {
-                            bridge::BridgeError::InvalidInput(e.to_string())
-                        }
-                        _ => bridge::BridgeError::Unavailable(e.to_string()),
-                    })?
+                crate::embedding::runtime::generate(
+                    self.embedding.as_ref(),
+                    &ns_config,
+                    &embed_text,
+                )
+                .await
+                .map_err(|e| match e {
+                    crate::embedding::EmbeddingError::TextTooLong { .. } => {
+                        bridge::BridgeError::InvalidInput(e.to_string())
+                    }
+                    _ => bridge::BridgeError::Unavailable(e.to_string()),
+                })?
             }
         };
 
-        let mut embedding = raw_embedding.clone();
+        crate::embedding::runtime::check_namespace(&ns_config, raw_embedding.profile.as_ref())
+            .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?;
+        let mut embedding = raw_embedding.values.clone();
         crate::storage::insertion::normalize_embedding(
             &mut embedding,
             ns_config.embedding_dim,
@@ -1121,6 +1182,13 @@ impl bridge::StorageEngine for McpStorageAdapter {
             crate::model::SupersedesOutcome::new(id, crate::model::SupersedesStatus::Applied)
         });
 
+        // Entity recall is independent of automatic graph linking. Publish the
+        // accepted names directly; legacy tags cannot represent every name.
+        self.entity_index
+            .write()
+            .await
+            .add(ns_config.id, memory_id, &input.entities);
+
         // Auto-link: discover and create edges to similar existing memories.
         if self.config.graph.autolink_enabled {
             let tag_strings: Vec<String> = merged_tags.clone();
@@ -1162,10 +1230,6 @@ impl bridge::StorageEngine for McpStorageAdapter {
                     &self.cache,
                 )
                 .await;
-
-                // Update entity index.
-                let mut idx = self.entity_index.write().await;
-                idx.add(memory_id, &entities);
             }
 
             // Temporal edges: link to recently-stored memories in the same namespace.
@@ -1270,6 +1334,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
                                 .unwrap_or_default();
 
                             return Ok(Some(bridge::MemoryRecord {
+                                labels: record.schema.as_ref().map(|s| s.labels.clone()),
                                 id: id.to_string(),
                                 namespace: ns_name,
                                 summary: String::new(),
@@ -1305,6 +1370,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
                         };
 
                         Ok(Some(bridge::MemoryRecord {
+                            labels: record.schema.as_ref().map(|s| s.labels.clone()),
                             id: id.to_string(),
                             namespace: ns_name,
                             summary: record.summary.clone(),
@@ -1359,7 +1425,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .forget(id, namespace)
+        .forget_scoped(id, namespace.map(str::to_owned))
         .await
         .map_err(map_mutation_error)
     }
@@ -1426,22 +1492,11 @@ impl bridge::StorageEngine for McpStorageAdapter {
     ) -> Result<bridge::ListMemoriesResponse, bridge::BridgeError> {
         let stamp = effects_stamp(&self.storage).await?;
         let result = async {
-            // Build tag filters: merge explicit tags + entity tags for AND
-            // semantics. An unfilterable label is an error — see
-            // `filter_tags`.
-            let require_tags = match filter_tags(
-                &[
-                    ("tags", "", &input.tags),
-                    (
-                        "entities",
-                        crate::model::constants::ENTITY_TAG_PREFIX,
-                        &input.entities,
-                    ),
-                ],
-                "list_memories",
-            ) {
-                Ok(tags) => tags,
-                Err(e) => return Err(bridge::BridgeError::InvalidInput(e)),
+            let require_tags = filter_tags(&[("tags", "", &input.tags)], "list_memories")
+                .map_err(bridge::BridgeError::InvalidInput)?;
+            let labels = crate::model::tag::StructuredLabelFilter {
+                entities: input.entities.clone(),
+                ..Default::default()
             };
 
             // Resolve namespace and query in a single blocking task.
@@ -1461,15 +1516,22 @@ impl bridge::StorageEngine for McpStorageAdapter {
                     .ok_or_else(|| {
                         bridge::BridgeError::NotFound(format!("namespace '{}' not found", ns_name,))
                     })?;
+                labels
+                    .validate(ns.schema.is_some())
+                    .map_err(bridge::BridgeError::InvalidInput)?;
+                let labels = labels.compile();
                 let (page, total) = storage_r
                     .meta_store()
-                    .list_memories_filtered(
+                    .list_memories_filtered_by(
                         ns.id,
                         &require_tags,
                         time_range_start,
                         time_range_end,
                         offset,
                         limit,
+                        |record| {
+                            labels.matches(&record.tags, record.schema.as_ref().map(|s| &s.labels))
+                        },
                     )
                     .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
                 Ok::<_, bridge::BridgeError>((ns, page, total))
@@ -1484,8 +1546,12 @@ impl bridge::StorageEngine for McpStorageAdapter {
             let memories: Vec<bridge::ListMemoryEntry> = page
                 .into_iter()
                 .map(|(mid, record)| {
-                    let metadata = crate::model::parse_structured_tags(&record.tags);
+                    let metadata = crate::model::structured_metadata(
+                        &record.tags,
+                        record.schema.as_ref().map(|s| &s.labels),
+                    );
                     bridge::ListMemoryEntry {
+                        labels: record.schema.as_ref().map(|s| s.labels.clone()),
                         id: mid.to_string(),
                         summary: record.summary,
                         entities: metadata.entities,
@@ -2742,6 +2808,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_profile_mcp_store_rejects_runtime_dimension_before_provider_and_writes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Provider(Arc<AtomicUsize>);
+        #[async_trait::async_trait]
+        impl EmbeddingProvider for Provider {
+            async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![1., 0., 0., 0.])
+            }
+            fn dimensions(&self) -> usize {
+                4
+            }
+            fn model_name(&self) -> &str {
+                "fixture"
+            }
+            fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+                let mut profile = crate::embedding::runtime::tests::profile();
+                profile.dimension = 8;
+                Some(profile)
+            }
+        }
+        let fixture = Fixture::new();
+        let mut adapter = fixture.storage_adapter();
+        let calls = Arc::new(AtomicUsize::new(0));
+        adapter.embedding = Arc::new(Provider(calls.clone()));
+        let mut input = store_input("profile probe", "default", vec![]);
+        input.embedding = None;
+        let before = fixture
+            .storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation;
+        let error = adapter.store_memory(input).await.unwrap_err();
+        assert!(
+            matches!(error, bridge::BridgeError::Unavailable(_)),
+            "{error}"
+        );
+        assert_eq!(
+            crate::daemon::protocol::DaemonRpcError::from(&error).code,
+            -32008
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            fixture
+                .storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation,
+            before
+        );
+        assert!(
+            fixture
+                .storage
+                .read()
+                .unwrap()
+                .scan_all()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn insertion_adapter_rejects_bad_provider_and_caller_vectors_and_normalizes_advisory() {
         use crate::search::VectorIndex as _;
         struct Provider(Vec<f32>);
@@ -3658,5 +3790,80 @@ mod tests {
             1,
             "a case-variant of 'default' left a namespace row behind"
         );
+    }
+    #[tokio::test]
+    async fn canonical_legacy_entity_postings_survive_disabled_autolink_rebuild_and_delete() {
+        let fx = Fixture::new();
+        let foreign = fx.create_namespace("foreign");
+        let mut adapter = fx.storage_adapter();
+        Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+        let names = vec!["John-Smith".into(), "JOSE".into(), "Alice".into()];
+        let mut ids = Vec::new();
+        for namespace in ["default", "foreign"] {
+            let mut input = store_input("accepted names", namespace, unit_x());
+            input.entities = names.clone();
+            let stored = adapter.store_memory(input).await.unwrap();
+            ids.push(MemoryId::from_uuid(
+                uuid::Uuid::parse_str(&stored.id).unwrap(),
+            ));
+        }
+        {
+            let index = fx.entity_index.read().await;
+            assert_eq!(index.len(), 2);
+            assert_eq!(
+                index.find_by_entities(default_ns(), &names, MemoryId::new()),
+                vec![(ids[0], 3)]
+            );
+            assert_eq!(
+                index.find_by_entities(foreign, &names, MemoryId::new()),
+                vec![(ids[1], 3)]
+            );
+        }
+        assert!(adapter.delete_memory(ids[0], None).await.unwrap());
+        let index = fx.entity_index.read().await;
+        assert_eq!(index.len(), 1);
+        assert!(
+            index
+                .find_by_entities(default_ns(), &names, MemoryId::new())
+                .is_empty()
+        );
+        assert_eq!(
+            index.find_by_entities(foreign, &names, MemoryId::new()),
+            vec![(ids[1], 3)]
+        );
+    }
+
+    #[tokio::test]
+    async fn namespace_deletion_clears_orphan_entity_postings_only_in_its_scope() {
+        let fx = Fixture::new();
+        let scratch = fx.create_namespace("scratch");
+        // Only the scratch posting is orphaned. Canonical rebuild must retain
+        // the real foreign owner; noncanonical foreign postings are not retained.
+        let orphan = fx.insert_memory_in(default_ns(), &["entity/shared"]).await;
+        let names = vec!["Shared".into()];
+        {
+            let mut index = fx.entity_index.write().await;
+            index.add(scratch, orphan, &names);
+            index.add(default_ns(), orphan, &names);
+        }
+        fx.namespace_adapter()
+            .delete_namespace(bridge::DeleteNamespaceInput {
+                name: "scratch".into(),
+                force: false,
+            })
+            .await
+            .unwrap();
+        let index = fx.entity_index.read().await;
+        assert_eq!(index.len(), 1);
+        assert!(
+            index
+                .find_by_entities(scratch, &names, MemoryId::new())
+                .is_empty()
+        );
+        assert_eq!(
+            index.find_by_entities(default_ns(), &names, MemoryId::new()),
+            vec![(orphan, 1)]
+        );
+        assert!(fx.record(orphan).is_some());
     }
 }

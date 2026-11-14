@@ -21,6 +21,26 @@ pub(crate) const RECEIPTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("mutation_receipts");
 pub(crate) const KEYS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("mutation_keys");
 
+// Per-test-thread work counts, not timing or a process-wide instrumentation
+// switch. Count receipt decoding as well as full proof entry so a regression
+// cannot hide a history scan behind a different validation helper.
+#[cfg(test)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ValidationWork {
+    pub full_validations: usize,
+    pub receipt_decodes: usize,
+}
+#[cfg(test)]
+thread_local! {
+    static VALIDATION_WORK: std::cell::Cell<ValidationWork> = const {
+        std::cell::Cell::new(ValidationWork { full_validations: 0, receipt_decodes: 0 })
+    };
+}
+#[cfg(test)]
+pub(crate) fn take_validation_work() -> ValidationWork {
+    VALIDATION_WORK.with(|work| work.replace(ValidationWork::default()))
+}
+
 /// Final exposure assertion, checked with canonical records in the write transaction.
 /// Namespace is the name pinned during selection; a by-ID source must still
 /// belong to that same namespace even when it is not itself exposed.
@@ -225,6 +245,18 @@ pub enum MutationOutcome {
         #[serde(rename = "removedFieldsMask")]
         removed_fields_mask: u8,
     },
+    NativeMemoryInserted {
+        transition: super::native_records::NativeRecordWrite,
+    },
+    NativeMemoryTombstoned {
+        transition: super::native_records::NativeRecordWrite,
+    },
+    LifecycleExposureRecorded {
+        transition: super::native_lifecycle::NativeLifecycleWrite,
+    },
+    LifecycleFeedbackApplied {
+        transition: super::native_lifecycle::NativeLifecycleWrite,
+    },
     NamespacePurgeStarted {
         namespace_id: NamespaceId,
         name_hash: [u8; 32],
@@ -342,6 +374,12 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
 pub(crate) fn validate_existing(
     tx: &ReadTransaction,
 ) -> Result<Option<ControlState>, StorageError> {
+    #[cfg(test)]
+    VALIDATION_WORK.with(|work| {
+        let mut count = work.get();
+        count.full_validations += 1;
+        work.set(count);
+    });
     let reserved = [CONTROL.name(), RECEIPTS.name(), KEYS.name()];
     if tx.list_multimap_tables()?.any(|table| {
         reserved.contains(&table.name()) || table.name() == super::canonical_schema::SCHEMA.name()
@@ -412,6 +450,7 @@ pub(crate) fn validate_existing(
                     stored.receipt.outcome,
                     MutationOutcome::MemoryInserted { .. }
                         | MutationOutcome::MemoryTombstoned { .. }
+                        | MutationOutcome::LifecycleMaterialized { .. }
                 ) {
                     "record mutation receipt has catalog scope"
                 } else {
@@ -425,6 +464,10 @@ pub(crate) fn validate_existing(
         if matches!(
             stored.receipt.outcome,
             MutationOutcome::LifecyclePolicyMigrated { .. }
+                | MutationOutcome::LifecycleExposureRecorded { .. }
+                | MutationOutcome::LifecycleFeedbackApplied { .. }
+                | MutationOutcome::NativeMemoryInserted { .. }
+                | MutationOutcome::NativeMemoryTombstoned { .. }
         ) && state.control_schema_version != 2
         {
             return Err(StorageError::InvalidControl(
@@ -572,6 +615,12 @@ pub(crate) fn scoped_key(store_id: Uuid, scope: MutationScope, suffix: &[u8]) ->
 }
 
 pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageError> {
+    #[cfg(test)]
+    VALIDATION_WORK.with(|work| {
+        let mut count = work.get();
+        count.receipt_decodes += 1;
+        work.set(count);
+    });
     let stored: StoredReceipt = decode(bytes)?;
     if stored.request_hash_version != 1
         || stored.receipt.receipt_version != 1
@@ -583,6 +632,34 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         return Err(StorageError::InvalidControl(
             "unsupported receipt/hash version or invalid persisted receipt".into(),
         ));
+    }
+    match &stored.receipt.outcome {
+        MutationOutcome::NativeMemoryInserted { transition } => {
+            transition.validate(&stored.receipt, true)?
+        }
+        MutationOutcome::NativeMemoryTombstoned { transition } => {
+            transition.validate(&stored.receipt, false)?
+        }
+        MutationOutcome::LifecycleExposureRecorded { transition } => {
+            transition.validate(&stored.receipt, false)?
+        }
+        MutationOutcome::LifecycleFeedbackApplied { transition } => {
+            transition.validate(&stored.receipt, true)?
+        }
+        MutationOutcome::ExposuresRecorded { .. }
+        | MutationOutcome::LegacyFeedbackRecorded { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
+        | MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::LifecyclePolicyMigrated { .. }
+        | MutationOutcome::GraphChanged { .. }
+        | MutationOutcome::SchemaMigrated { .. }
+        | MutationOutcome::TextGenerationSelected { .. }
+        | MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::NamespaceCreated { .. }
+        | MutationOutcome::NamespacePolicyUpdated { .. }
+        | MutationOutcome::NamespacePurgeStarted { .. }
+        | MutationOutcome::NamespacePurgeAdvanced { .. } => {}
     }
     if let MutationOutcome::MemoryInserted {
         memory_id,
@@ -692,18 +769,22 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::AccessRecorded { .. }
+        MutationOutcome::NativeMemoryInserted { .. }
+        | MutationOutcome::NativeMemoryTombstoned { .. }
+        | MutationOutcome::LifecycleExposureRecorded { .. }
+        | MutationOutcome::LifecycleFeedbackApplied { .. }
+        | MutationOutcome::NamespaceCreated { .. }
+        | MutationOutcome::NamespacePolicyUpdated { .. }
+        | MutationOutcome::NamespacePurgeStarted { .. }
+        | MutationOutcome::NamespacePurgeAdvanced { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
+        | MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::AccessRecorded { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
-        MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
-        | MutationOutcome::LifecycleMaterialized { .. }
-        | MutationOutcome::NamespaceCreated { .. }
-        | MutationOutcome::NamespacePolicyUpdated { .. }
-        | MutationOutcome::NamespacePurgeStarted { .. }
-        | MutationOutcome::NamespacePurgeAdvanced { .. } => {}
     }
     Ok(stored)
 }

@@ -83,7 +83,7 @@ fn invalid(message: &str) -> StorageError {
     StorageError::InvalidControl(message.into())
 }
 fn token_digest(records: &[DiskRecord], rewind: u64) -> Result<String, StorageError> {
-    let mut tokens = records
+    let tokens = records
         .iter()
         .map(|r| {
             let token = r
@@ -98,22 +98,26 @@ fn token_digest(records: &[DiskRecord], rewind: u64) -> Result<String, StorageEr
             Ok((r.id, token))
         })
         .collect::<Result<Vec<_>, StorageError>>()?;
+    Ok(token_digest_values(tokens))
+}
+fn token_digest_values(values: impl IntoIterator<Item = ([u8; 16], u64)>) -> String {
+    let mut tokens = values.into_iter().collect::<Vec<_>>();
     tokens.sort_unstable();
     let mut digest = Sha256::new();
     for (id, token) in tokens {
         digest.update(id);
         digest.update(token.to_be_bytes());
     }
-    Ok(digest
+    digest
         .finalize()
         .iter()
         .map(|b| format!("{b:02x}"))
-        .collect())
+        .collect()
 }
 
-/// The only admitted post-publication writer is the explicit policy migration.
-/// Baselines are counters in the ACTIVE origin: original publication, or 1 for
-/// a restore fork. Historical counters are only checked against ancestry bounds.
+/// Recognized in-place lifecycle operations and explicit policy migrations are
+/// validated in their actual commit order. Other operation types fail closed.
+/// Historical counters remain ancestry-bounded, never compared across origins.
 pub(crate) fn validate_policy_history(
     read: &redb::ReadTransaction,
     control: &ControlState,
@@ -131,27 +135,28 @@ pub(crate) fn validate_policy_history(
         .open_table(control::KEYS)?
         .iter()?
         .map(|row| {
-            let (_, value) = row?;
-            Ok(value.value().to_vec())
+            let (_, v) = row?;
+            Ok(v.value().to_vec())
         })
         .collect::<Result<std::collections::HashSet<_>, StorageError>>()?;
     let mut suffix = BTreeMap::new();
-    let mut unexplained = std::collections::HashSet::new();
     let mut policies: HashMap<u32, BTreeMap<Generation, (WriteReceipt, PolicyTransition)>> =
         HashMap::new();
+    let mut native_history = Vec::new();
     for row in read.open_table(control::RECEIPTS)?.iter()? {
         let (key, value) = row?;
         let receipt = control::validate_receipt(value.value())?.receipt;
-        let active_suffix =
+        let active =
             receipt.store_id == control.store_id && receipt.committed_generation > baseline;
-        if active_suffix && suffix.insert(receipt.committed_generation, ()).is_some() {
+        if active
+            && suffix
+                .insert(receipt.committed_generation, receipt.clone())
+                .is_some()
+        {
             return Err(invalid("duplicate lifecycle generation"));
         }
-        match &receipt.outcome {
+        let namespace = match &receipt.outcome {
             MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
-                if active_suffix {
-                    unexplained.insert(receipt.operation_id);
-                }
                 if !keys.contains(key.value())
                     || t.namespace_id.is_unset()
                     || t.from == t.to
@@ -162,20 +167,6 @@ pub(crate) fn validate_policy_history(
                         .record_token_digest
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                    || key.value()
-                        != control::scoped_key(
-                            receipt.store_id,
-                            MutationScope::Namespace(t.namespace_id),
-                            receipt.operation_id.as_bytes(),
-                        )
-                    || !control::permits_generation_origin(
-                        read,
-                        control,
-                        GenerationRef {
-                            store_id: receipt.store_id,
-                            generation: receipt.committed_generation,
-                        },
-                    )?
                 {
                     return Err(invalid("invalid lifecycle transition evidence"));
                 }
@@ -187,11 +178,50 @@ pub(crate) fn validate_policy_history(
                 {
                     return Err(invalid("ambiguous lifecycle policy revision"));
                 }
+                Some(t.namespace_id)
             }
-            _ if active_suffix => {
-                return Err(invalid("unrecognized operation after schema publication"));
+            MutationOutcome::LifecycleExposureRecorded { transition: t }
+            | MutationOutcome::LifecycleFeedbackApplied { transition: t } => {
+                // validate_receipt already verifies the exact numeric transition.
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
             }
-            _ => {}
+            MutationOutcome::NativeMemoryInserted { transition: t }
+            | MutationOutcome::NativeMemoryTombstoned { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            _ if active => return Err(invalid("unrecognized operation after schema publication")),
+            _ => None,
+        };
+        if let Some(ns) = namespace {
+            if key.value()
+                != control::scoped_key(
+                    receipt.store_id,
+                    MutationScope::Namespace(ns),
+                    receipt.operation_id.as_bytes(),
+                )
+                || !control::permits_generation_origin(
+                    read,
+                    control,
+                    GenerationRef {
+                        store_id: receipt.store_id,
+                        generation: receipt.committed_generation,
+                    },
+                )?
+            {
+                return Err(invalid("invalid lifecycle receipt origin/scope"));
+            }
         }
     }
     let mut expected = baseline;
@@ -204,25 +234,77 @@ pub(crate) fn validate_policy_history(
     if expected != control.committed_generation {
         return Err(invalid("missing lifecycle receipt suffix"));
     }
-    let mut records: HashMap<u32, Vec<DiskRecord>> = HashMap::new();
-    for row in read.open_table(META_TABLE)?.iter()? {
-        let (_, bytes) = row?;
-        let record = DiskRecord::from_bytes(bytes.value())?;
-        records.entry(record.namespace_id).or_default().push(record);
+    // Retained historical native operations still require an explicit policy
+    // selection. Their record sets need not survive a deletion-aware restore.
+    for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        let version = if policy_revision == Generation::default() {
+            LifecycleVersion::LegacyAccessV1
+        } else {
+            policies
+                .get(&namespace_id.get())
+                .and_then(|h| h.get(&policy_revision))
+                .map(|(_, p)| p.to)
+                .ok_or_else(|| invalid("native receipt lacks policy history"))?
+        };
+        if version != lifecycle_version {
+            return Err(invalid("native receipt policy version mismatch"));
+        }
+        if let Some(history) = policies.get(&namespace_id.get()) {
+            for (revision, (policy_receipt, _)) in history {
+                // Only compare generations from the same origin. Ancestry
+                // bounds establish the retained foreign-origin proof instead.
+                if policy_receipt.store_id == receipt.store_id
+                    && ((*revision <= policy_revision)
+                        != (policy_receipt.committed_generation < receipt.committed_generation))
+                {
+                    return Err(invalid(
+                        "native receipt contradicts policy order in its origin",
+                    ));
+                }
+            }
+        }
     }
+    let configs = read
+        .open_table(NAMESPACE_TABLE)?
+        .iter()?
+        .map(|row| {
+            let (_, value) = row?;
+            let ns = NamespaceConfig::decode(value.value())?;
+            Ok((ns.id.get(), ns))
+        })
+        .collect::<Result<HashMap<_, _>, StorageError>>()?;
+    let creations = super::native_records::creation_proofs(read)?;
+    let ledger = super::metadata::removal_ledger::read_export(read, Some(control))?;
+    let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
+    for row in read.open_table(META_TABLE)?.iter()? {
+        let (_, v) = row?;
+        let r = DiskRecord::from_bytes(v.value())?;
+        let ns = configs
+            .get(&r.namespace_id)
+            .ok_or_else(|| invalid("record namespace missing"))?;
+        let creation = creations.get(&MemoryId::from_bytes(r.id));
+        super::native_records::validate_retained_creation(&r, ns, creation, ledger.as_ref())?;
+        let text_hash = creation
+            .map(|c| c.primary().map(|p| p.after.content.text_sha256))
+            .transpose()?
+            .flatten();
+        records.entry(r.namespace_id).or_default().push(
+            super::native_records::ProofRecord::capture(&r, ns, text_hash)?,
+        );
+    }
+    let mut current_policy = HashMap::new();
     for row in read.open_table(NAMESPACE_TABLE)?.iter()? {
-        let (_, bytes) = row?;
-        let ns = NamespaceConfig::decode(bytes.value())?;
-        let ns_schema = ns
+        let (_, v) = row?;
+        let ns = NamespaceConfig::decode(v.value())?;
+        let fields = ns
             .schema
             .as_ref()
             .ok_or_else(|| invalid("namespace lacks lifecycle schema"))?;
-        let rows = records.remove(&ns.id.get()).unwrap_or_default();
         let mut version = LifecycleVersion::LegacyAccessV1;
         let mut revision = Generation::default();
         let mut last_in_origin = HashMap::new();
         if let Some(history) = policies.get(&ns.id.get()) {
-            for (_, (receipt, t)) in history.range(..=ns_schema.policy_revision) {
+            for (_, (receipt, t)) in history.range(..=fields.policy_revision) {
                 if t.previous_revision != revision || t.from != version {
                     return Err(invalid("gap in namespace policy history"));
                 }
@@ -236,38 +318,103 @@ pub(crate) fn validate_policy_history(
                 }
                 revision = t.next_revision;
                 version = t.to;
-                if receipt.store_id == control.store_id && receipt.committed_generation > baseline {
-                    unexplained.remove(&receipt.operation_id);
-                    let later = ns_schema.policy_revision.get() - revision.get();
-                    if t.record_count != rows.len() as u64
-                        || t.record_token_digest != token_digest(&rows, later)?
-                    {
-                        return Err(invalid("lifecycle affected-record proof mismatch"));
-                    }
-                }
             }
         }
-        if revision != ns_schema.policy_revision || version != ns_schema.lifecycle_version {
+        if revision != fields.policy_revision || version != fields.lifecycle_version {
             return Err(invalid("namespace policy lacks transition evidence"));
         }
-        for record in rows {
-            let fields = &record
-                .schema
-                .as_ref()
-                .ok_or_else(|| invalid("record lacks lifecycle schema"))?
-                .lifecycle;
-            if fields.policy_revision != revision || fields.lifecycle_version != version {
+        for record in records.entry(ns.id.get()).or_default().iter() {
+            let t = &record.state.lifecycle.lifecycle;
+            if t.policy_revision != revision || t.lifecycle_version != version {
                 return Err(invalid("record policy does not match migration"));
             }
         }
+        current_policy.insert(ns.id.get(), (version, revision));
     }
-    if !unexplained.is_empty() {
+    if records.keys().any(|ns| !current_policy.contains_key(ns)) {
+        return Err(invalid("record namespace missing"));
+    }
+    // Reverse exactly the recognized active operations. This replaces the old
+    // assumption that every token increment was a namespace policy migration.
+    for receipt in suffix.values().rev() {
+        match &receipt.outcome {
+            MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
+                let policy = current_policy
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("policy receipt namespace absent"))?;
+                let rows = records.get_mut(&t.namespace_id.get()).unwrap();
+                if *policy != (t.to, t.next_revision)
+                    || t.record_count != rows.len() as u64
+                    || t.record_token_digest
+                        != token_digest_values(rows.iter().map(|r| {
+                            (
+                                *r.id.as_bytes(),
+                                r.state.lifecycle.lifecycle.record_generation.get(),
+                            )
+                        }))
+                {
+                    return Err(invalid("lifecycle affected-record proof mismatch"));
+                }
+                for r in rows {
+                    let fields = &mut r.state.lifecycle.lifecycle;
+                    fields.record_generation = Generation::try_from(
+                        fields
+                            .record_generation
+                            .get()
+                            .checked_sub(1)
+                            .ok_or_else(|| invalid("policy token underflow"))?
+                            .to_string(),
+                    )?;
+                    fields.lifecycle_version = t.from;
+                    fields.policy_revision = t.previous_revision;
+                }
+                *policy = (t.from, t.previous_revision);
+            }
+            MutationOutcome::LifecycleExposureRecorded { transition: t }
+            | MutationOutcome::LifecycleFeedbackApplied { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native receipt namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeMemoryInserted { transition: t }
+            | MutationOutcome::NativeMemoryTombstoned { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native record receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native record namespace absent"))?,
+                )?;
+            }
+            _ => return Err(invalid("unrecognized operation in lifecycle proof")),
+        }
+    }
+    if schema.source.store_id == control.store_id
+        && current_policy
+            .values()
+            .any(|p| *p != (LifecycleVersion::LegacyAccessV1, Generation::default()))
+    {
         return Err(invalid(
             "active policy receipt has no matching namespace transition",
         ));
     }
-    if !records.is_empty() {
-        return Err(invalid("record namespace missing"));
+    if schema.source.store_id == control.store_id
+        && records
+            .values()
+            .flatten()
+            .any(|r| r.state.lifecycle.lifecycle.record_generation != Generation::default())
+    {
+        return Err(invalid("unproven record token before lifecycle suffix"));
     }
     Ok(())
 }

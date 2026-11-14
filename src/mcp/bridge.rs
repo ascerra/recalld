@@ -24,6 +24,15 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    /// Exact canonical/vector page. Public application v2 remains gated.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Execute a semantic search query.
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError>;
 
@@ -41,20 +50,42 @@ pub trait SearchPipeline: Send + Sync {
 
     /// Scan a namespace for clusters of near-duplicate memories.
     ///
-    /// Samples up to `max_memories` from the namespace, runs pairwise
-    /// similarity checks, and groups memories whose similarity exceeds
-    /// `threshold` into clusters.
+    /// Samples up to `max_memories` and groups threshold-connected memories
+    /// found by bounded nearest-neighbor searches; not an exhaustive pair scan.
     async fn scan_duplicates(
         &self,
         namespace: &str,
         threshold: f32,
         max_memories: usize,
     ) -> Result<Vec<DuplicateCluster>, BridgeError>;
+
+    /// Same scan with observed coverage. Legacy implementations cannot report counts.
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<DuplicateScanReport, BridgeError> {
+        Ok(DuplicateScanReport {
+            clusters: self
+                .scan_duplicates(namespace, threshold, max_memories)
+                .await?,
+            coverage: None,
+        })
+    }
 }
 
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Optional resolved backend context; old adapters must not invent identity.
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        Err(BridgeError::Unavailable(
+            "backend context unavailable".into(),
+        ))
+    }
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 
@@ -199,6 +230,9 @@ pub struct RelatedMemory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NeighborMemory {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID of the neighbor.
     pub id: String,
     /// Short summary of the neighbor memory.
@@ -234,6 +268,9 @@ pub struct SearchResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Short summary of the memory.
@@ -267,6 +304,38 @@ pub struct SearchHit {
     /// Related memories connected by graph edges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<RelatedMemory>,
+}
+
+/// Public MCP sample cap and per-source vector candidate cap (including self).
+pub const DUPLICATE_SAMPLE_CAP: usize = 200;
+pub const DUPLICATE_NEIGHBOR_CAP: usize = 11;
+
+/// Legacy clusters plus optional coverage; None means an older bridge/daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanReport {
+    pub clusters: Vec<DuplicateCluster>,
+    pub coverage: Option<DuplicateScanCoverage>,
+}
+
+/// Observed scan counts, not a generation-consistent namespace snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanCoverage {
+    pub algorithm: String,
+    /// Live records before sampling; includes ghosts and records with missing vectors.
+    pub eligible_count: usize,
+    pub sampled_count: usize,
+    /// Sampled records whose vectors were absent at vector loading time.
+    pub skipped_vector_count: usize,
+    pub sample_cap: usize,
+    /// Vector candidates per source, including self when returned.
+    pub neighbor_cap: usize,
+    /// Whether the record sample was truncated; separate from neighbor limiting.
+    pub truncated: bool,
+    pub counts_available: bool,
+    /// Always false for this bounded, unpinned scan.
+    pub complete: bool,
 }
 
 /// A cluster of near-duplicate memories found during namespace scan.
@@ -380,6 +449,9 @@ pub struct StoredMemory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryRecord {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Namespace the memory belongs to.
@@ -508,6 +580,9 @@ pub struct ListTagsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMemoryEntry {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Short summary of the memory.
@@ -701,12 +776,12 @@ pub enum BridgeError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
-    /// A provider or required service cannot satisfy the operation.
-    #[error("Unavailable: {0}")]
-    Unavailable(String),
     /// An explicit by-ID namespace assertion failed.
     #[error("{0}")]
     NamespaceMismatch(String),
+    /// A provider or required service cannot satisfy the operation.
+    #[error("Unavailable: {0}")]
+    Unavailable(String),
 
     /// A storage subsystem error occurred.
     #[error("Storage error: {0}")]

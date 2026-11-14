@@ -93,12 +93,13 @@ impl MetadataStore {
     #[cfg(test)]
     fn prepare_legacy_patch(
         &self,
-        _publication: &std::sync::RwLockWriteGuard<'_, ()>,
+        _publication: &MutationGuard<'_>,
         id: MemoryId,
         expected: &DiskRecord,
         namespace: &NamespaceConfig,
         patch: LegacyPatch<'_>,
     ) -> Result<Option<(redb::WriteTransaction, DiskRecord)>, StorageError> {
+        _publication.check(self)?;
         let tx = self.db.begin_write()?;
         let StagedPatch::Changed {
             before,
@@ -223,6 +224,7 @@ impl MetadataStore {
 
     pub(crate) fn decay_with_effects(
         &self,
+        guard: &MutationGuard<'_>,
         ctx: &MutationContext,
         id: MemoryId,
         expected: &DiskRecord,
@@ -232,7 +234,7 @@ impl MetadataStore {
         decay_strength: f32,
         edges: &[crate::storage::PersistedEdge],
     ) -> Result<DecayMutationResult, StorageError> {
-        let guard = self.mutation_guard()?;
+        guard.check(self)?;
         ctx.validate()?;
         if ctx.contract_version != 1 || ctx.scope != MutationScope::Namespace(namespace.id) {
             return Err(StorageError::InvalidMutationContext(
@@ -273,7 +275,7 @@ impl MetadataStore {
             return Ok(DecayMutationResult::Skipped(reason));
         };
         self.finish_record_effects(
-            &guard,
+            guard,
             tx,
             ctx,
             hash,

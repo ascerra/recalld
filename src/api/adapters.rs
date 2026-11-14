@@ -16,7 +16,7 @@ use crate::embedding::EmbeddingProvider;
 use crate::graph::SharedGraph;
 use crate::model::{
     AccessKind, CachedRecord, DecayPhase, DiskRecord, MemoryId, NamespaceConfig, NamespaceId, Tag,
-    parse_structured_tags,
+    structured_metadata,
 };
 use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex};
 use crate::storage::RedbStorageEngine;
@@ -86,12 +86,19 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+    }
     async fn embed_text(
         &self,
         text: &str,
-        _namespace_id: NamespaceId,
-    ) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
-        self.embedding.embed(text).await
+        namespace: &NamespaceConfig,
+    ) -> Result<crate::embedding::runtime::GeneratedEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::embedding::runtime::generate(self.embedding.as_ref(), namespace, text).await
     }
 
     async fn record_exposures(
@@ -254,18 +261,23 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         }
     }
 
-    async fn entity_index_add(&self, memory_id: MemoryId, entities: &[String]) {
-        if !entities.is_empty() {
-            let mut idx = self.entity_index.write().await;
-            idx.add(memory_id, entities);
-        }
+    async fn entity_index_add(
+        &self,
+        namespace_id: NamespaceId,
+        memory_id: MemoryId,
+        entities: &[String],
+    ) {
+        self.entity_index
+            .write()
+            .await
+            .add(namespace_id, memory_id, entities);
     }
 
-    async fn entity_index_remove(&self, memory_id: MemoryId, entities: &[String]) {
-        if !entities.is_empty() {
-            let mut idx = self.entity_index.write().await;
-            idx.remove(memory_id, entities);
-        }
+    async fn entity_index_remove(&self, namespace_id: NamespaceId, memory_id: MemoryId) {
+        self.entity_index
+            .write()
+            .await
+            .remove(namespace_id, memory_id);
     }
 }
 
@@ -321,6 +333,27 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn store_identity(&self) -> Result<uuid::Uuid, crate::storage::StorageError> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+            })?;
+            Ok(engine.control_state()?.store_id)
+        })
+        .await
+        .map_err(|_| {
+            crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+        })?
+    }
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn publication_lease(
         &self,
     ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, crate::storage::StorageError> {
@@ -349,7 +382,7 @@ impl state::StorageEngine for StorageEngineAdapter {
         &self,
         namespace_id: NamespaceId,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
     ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
@@ -412,7 +445,7 @@ impl state::StorageEngine for StorageEngineAdapter {
                     parent_id: None,
                     supersedes: None,
                 },
-                vec![],
+                vec![].into(),
             )
             .await?;
         result.record.ok_or_else(|| {
@@ -465,7 +498,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .forget(id, namespace)
+        .forget_scoped(id, namespace.map(str::to_owned))
         .await
     }
 
@@ -1395,7 +1428,7 @@ mod tests {
                 .unwrap()
                 .committed_generation;
             let error = match adapter(&fx)
-                .insert_memory(NamespaceId::new(1), input, vec![0.; DIM])
+                .insert_memory(NamespaceId::new(1), input, vec![0.; DIM].into())
                 .await
             {
                 Ok(_) => panic!("zero vector accepted"),
@@ -1442,7 +1475,7 @@ mod tests {
                     parent_id: None,
                     supersedes: None,
                 },
-                vec![],
+                vec![].into(),
             )
             .await
         {
@@ -1535,7 +1568,7 @@ mod tests {
         fx.entity_index
             .write()
             .await
-            .add(id, &["Sarah".to_string()]);
+            .add(ns, id, &["Sarah".to_string()]);
 
         id
     }
@@ -1694,21 +1727,11 @@ impl SearchPipelineAdapter {
             state::QueryInput::TextAndVector { text, embedding } => (Some(text), Some(embedding)),
         };
 
-        // A label that cannot become a tag is an error, not a dropped
-        // filter: dropping one from `includeTags` or `entities` WIDENS
-        // the query, and a caller cannot tell "every memory in the
-        // namespace" from a genuine match.
-        let mut require_tags: Vec<Tag> =
+        // Raw tags remain strict. The pipeline validates structured filters
+        // against the resolved namespace before provider/channel work.
+        let require_tags: Vec<Tag> =
             crate::model::parse_filter_tags("includeTags", "", &query.include_tags)
                 .map_err(|e| crate::search::SearchError::InvalidFilter(e.to_string()))?;
-        require_tags.extend(
-            crate::model::parse_filter_tags(
-                "entities",
-                crate::model::constants::ENTITY_TAG_PREFIX,
-                &query.entities,
-            )
-            .map_err(|e| crate::search::SearchError::InvalidFilter(e.to_string()))?,
-        );
         // `excludeTags` is the safe direction — dropping one can only
         // ever return MORE than asked for in the same sense a missing
         // exclusion does, and it never masquerades as a match — so it
@@ -1737,6 +1760,10 @@ impl SearchPipelineAdapter {
             fts_query: None,
             namespace: query.namespace_name.clone(), // Issue 1: pass actual namespace name
             filter: crate::search::PipelineSearchFilter {
+                labels: crate::model::tag::StructuredLabelFilter {
+                    entities: query.entities.clone(),
+                    ..Default::default()
+                },
                 require_tags,
                 exclude_tags,
                 phases,
@@ -1761,8 +1788,8 @@ impl SearchPipelineAdapter {
             .results
             .into_iter()
             .map(|r| {
-                // Issue 5: Parse entities from tags
-                let metadata = parse_structured_tags(&r.tags);
+                // Preserve canonical metadata; only legacy records parse retained tags.
+                let metadata = structured_metadata(&r.tags, r.labels.as_ref());
                 state::ResolvedSearchResult {
                     access_kind: if r.activation_score.is_some() {
                         AccessKind::AssociativeRetrieval
@@ -1770,6 +1797,7 @@ impl SearchPipelineAdapter {
                         AccessKind::DirectRetrieval
                     },
                     memory: CachedRecord {
+                        labels: r.labels,
                         lifecycle: None,
                         id: r.memory_id,
                         namespace_id: query.namespace_id, // Issue 6: use actual namespace_id
