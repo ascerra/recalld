@@ -117,3 +117,12 @@ pinned views. True get still completes the new exposure before acknowledgement,
 retaining its full receipt on failure. A new actual adapter boundary test covers
 canonical point success without unused derived stamps and unavailable-handle
 rejection. Main and Halley confirmed this distinction against CONTRACTS section68.
+
+## Final handoff
+
+Corrected runtime `8a0d260` passed1007library+2CLI tests, format and Clippy
+(with warnings); four doctests ignored. Seven new focused cases and every one of
+the exact nine prior failures passed before that final full run. The source was
+frozen throughout. The docs-only evidence seal does not require a source rerun.
+[Full report and exact provenance](../evidence/coherent-get-similar/REPORT.md).
+This supersedes the pending-validation checkpoints above.
