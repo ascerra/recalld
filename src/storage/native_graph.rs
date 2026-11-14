@@ -462,6 +462,23 @@ pub(crate) fn validate_edge_history(
         }
     }
     for receipt in suffix.values().rev() {
+        // Deletion witnesses reconstruct validation state only. Restore their
+        // exact edges before checking an older graph/no-change/creation proof.
+        let removed: &[NativeEdgeProof] = match &receipt.outcome {
+            MutationOutcome::NativeMemoryHardDeleted { transition } => &transition.removed_edges,
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition } => transition
+                .chunk
+                .as_ref()
+                .map_or(&[], |chunk| chunk.removed_edges.as_slice()),
+            _ => &[],
+        };
+        for edge in removed {
+            if current.insert(edge_key(edge), edge.clone()).is_some() {
+                return Err(invalid(
+                    "deleted edge still exists during native history rewind",
+                ));
+            }
+        }
         match &receipt.outcome {
             MutationOutcome::NativeGraphUnchanged { transition } => {
                 for e in &transition.edges {

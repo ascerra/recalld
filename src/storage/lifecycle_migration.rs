@@ -350,15 +350,6 @@ pub(crate) fn validate_policy_history(
     if expected != control.committed_generation {
         return Err(invalid("missing lifecycle receipt suffix"));
     }
-    let configs = read
-        .open_table(NAMESPACE_TABLE)?
-        .iter()?
-        .map(|row| {
-            let (_, value) = row?;
-            let ns = NamespaceConfig::decode(value.value())?;
-            Ok((ns.id.get(), ns))
-        })
-        .collect::<Result<HashMap<_, _>, StorageError>>()?;
     // Retained historical native operations still require an explicit policy
     // selection. Their record sets need not survive a deletion-aware restore.
     let purge_progress = super::metadata::purge::validate_existing(read, Some(control))?;
@@ -414,31 +405,8 @@ pub(crate) fn validate_policy_history(
         }
         Ok(())
     };
-    for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
-        if let MutationOutcome::NativeGraphUnchanged { transition } = &receipt.outcome {
-            transition.validate_namespace_profiles(
-                configs
-                    .get(&namespace_id.get())
-                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
-            )?;
-        }
-        if let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome {
-            transition.validate_namespace_profiles(
-                configs
-                    .get(&namespace_id.get())
-                    .ok_or_else(|| invalid("linked creation namespace binding missing"))?,
-            )?;
-        }
-        if let MutationOutcome::NativeGraphChanged { transition } = &receipt.outcome {
-            transition.validate_namespace_profiles(
-                configs
-                    .get(&namespace_id.get())
-                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
-            )?;
-        }
-        before_purge(&receipt, namespace_id)?;
-        check_record_policy(&receipt, namespace_id, lifecycle_version, policy_revision)?;
-    }
+    // Graph/store proofs outlive live catalog removal. Bind every origin to
+    // the same strictly validated retired namespace used by policy history.
     let mut configs = read
         .open_table(NAMESPACE_TABLE)?
         .iter()?
@@ -470,6 +438,31 @@ pub(crate) fn validate_policy_history(
         }
     }
     let historical_configs = configs.clone();
+    for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        if let MutationOutcome::NativeGraphUnchanged { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
+            )?;
+        }
+        if let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("linked creation namespace binding missing"))?,
+            )?;
+        }
+        if let MutationOutcome::NativeGraphChanged { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
+            )?;
+        }
+        before_purge(&receipt, namespace_id)?;
+        check_record_policy(&receipt, namespace_id, lifecycle_version, policy_revision)?;
+    }
     let creations = super::native_records::creation_proofs(read)?;
     // Numeric policy is mutable, including on restored stores. Rewind its
     // complete retained revision chain before checking immutable creation state.
