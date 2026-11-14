@@ -312,9 +312,15 @@ async fn native_single_and_batch_rpc_require_full_frame_before_any_work() {
                 serde_json::from_value(response.result.unwrap()).unwrap();
             assert!(reply.error.is_none());
             assert!(reply.receipt.is_some());
+            assert!(reply.readiness.unwrap().ready);
         } else {
             let reply: NativeBatchReply = serde_json::from_value(response.result.unwrap()).unwrap();
-            assert!(reply.result().is_ok());
+            let reply = reply.result().unwrap();
+            assert_eq!(reply.outcome.succeeded, 1);
+            assert_eq!(reply.outcome.failed, 0);
+            assert_eq!(reply.outcome.unresolved, 0);
+            assert!(reply.outcome.items[0].receipt.is_some());
+            assert!(reply.readiness.unwrap().ready);
         }
     }
     assert_eq!(provider.calls.load(Ordering::SeqCst), 2);

@@ -201,3 +201,14 @@ The remote adapter uses the dedicated non-retrying
 silently omitting the required observer/profile-ID behavior. The server retains
 the prior alias for compatibility; the new client never falls back after a
 mutation. Public API1 response types remain unchanged.
+
+## Fresh generated-document recipe companion
+
+A source audit found that the existing native single/batch producers choose
+`fullText` or `summary`, whereas the declared `recalld-document-v1` recipe uses
+summary, optional full text and merged tags. Curie owns the shared fresh-write
+builder and actual provider-input regressions for original API1 and API2. That
+validated companion is required before activation. Earlier experimental native
+generated vectors are not certified for this recipe or retrieval quality by the
+wire tests. Historical hashes, receipts and data must not be rewritten or
+silently relabeled; matching old replay still performs no provider work.
