@@ -412,7 +412,12 @@ impl DerivedCompletion {
                         .collect();
                     tokio::runtime::Handle::current()
                         .block_on(cache.batch_invalidate(&invalidated));
-                    crate::storage::metadata::effects::crash_point("before_online_derived_ack");
+                    // This probe targets an outstanding effect acknowledgement,
+                    // not a startup rebuild with no pending canonical mutation.
+                    #[cfg(test)]
+                    if !pending.is_empty() {
+                        crate::storage::metadata::effects::crash_point("before_online_derived_ack");
+                    }
                     storage
                         .meta_store()
                         .acknowledge_rebuilt_effects_with_work(Some(&child))
