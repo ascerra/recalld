@@ -1,5 +1,10 @@
 # Owned ID/RNG sidecar boundary
 
+Current ownership: Halley retained this work after Curie confirmed overlapping producer work.
+The actual scoped source and frozen consumer are measured at d09ca498; see
+[owned controls report](../benchmarks/owned-controls/REPORT.md). The proposed
+worker split below is historical, not an outstanding delegation.
+
 Proposed base: bb1a0863b2ab0eba940e767941ca4e85fe9b8e77, actual native82 runtime fb804a0a72ccf7dde0a6ee7eaea2e91a6b7ba2db. Main assigns the additional worker. Halley is not editing these allocation sites.
 
 Own one explicit allocation source on the existing MetadataStore, constructor plumbing through RedbStorageEngine, and canonical allocations: control initialization/receipt IDs; metadata memory-ID allocation shared by legacy/native insert; standalone metadata operation IDs; lifecycle updates; batch child reservations; purge continuation operations; selected text generation identity. Use ordinary production generation by default. No process-global RNG override, new registry, new clock, second session, or change to production restore/fork identity semantics.
