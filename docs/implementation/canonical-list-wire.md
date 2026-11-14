@@ -20,9 +20,10 @@ Memory is bounded by one decoded row plus the retained page, not the store size.
 | Exact duplicate scan | Actual snapshot comparator, inner MCP/REST, generation/pair cursor | Native serving activation; dedicated RPC; representative performance measurements |
 | Native namespace create | PR93 inner MCP/REST, replay/CAS/root/full receipt | Public activation and RPC; no global readiness claim |
 | Canonical metadata list | This slice: owning transaction, filters, UUID continuation, inner MCP/REST | Public activation and RPC; bounded tag/namespace catalog continuation still outstanding |
-| Numeric namespace policy | Feynman validates native core | A4 owns actual wire consumer after list, using frozen core and same engine/root |
+| Numeric namespace policy | Feynman PR94 native core validated | A4 wire next uses actual PR93+94+96 (no list dependency), same engine/root and G-aware coordinator; test changed/no-op/replay before readiness claims |
 | Native store / keyed batches | Curie/Hume native producer and proof owners | Frozen actual API, wire schemas, partial outcomes, replay and RPC conformance |
 | Native feedback / forget / maintenance | Pascal native core | Actual versioned wire adaptation and receipt/error parity |
+| Native namespace purge | Feynman extends typed start/progress and retained namespace witness | A4 owns later transport consumer after frozen core; no legacy fallback or invented retired name |
 | Query / get / similar payloads | Halley coherent core, leases/root/exposure/registry | A4 strict wrappers after frozen APIs; metadata stamps are not payload coherence |
 | Discovery / schemas / activation | Shared gated helpers and truthful v1 context | Complete per-operation input/output schemas, profile selectors and MCP/REST/RPC public conformance before enabling contract2 |
 
