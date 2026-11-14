@@ -8,12 +8,16 @@ branch, not a shipping parent.
 
 ## Owners and parents
 
-- Feynman owns canonical catalog/configuration, maintenance/phase-loss, purge,
-  strict offline/history review of native batches, and the shared
-  history-validation/rewind dispatcher.
-- Pascal owns native readers and observation, and reviews A3 transition/clock
-  semantics. Existing native insertion/tombstone/lifecycle serialization stays
-  unchanged. `NativeRecordWrite::validate(..., false)` remains tombstone-only.
+- Feynman owns numeric catalog policy, native purge and strict shared-history/
+  offline proof review. His dispatcher changes are numeric-policy rewind.
+- Pascal owns native readers/observation, maintenance/phase loss and hard
+  deletion, including typed content-free deletion witnesses and phase/delete
+  dispatcher arms. Existing native insertion/tombstone/lifecycle serialization
+  stays unchanged. `NativeRecordWrite::validate(..., false)` remains
+  tombstone-only. Maintenance implementation was unstarted at this handoff.
+- Hume owns native graph proof, peer-token/outbox core and graph dispatcher
+  arms. Curie retains graph producer integration; tracker coverage alone does
+  not make a legacy graph writer native-compatible.
 - Curie owns producer admission, accepted/transitive work scheduling, native
   batch codec/child binding, and the ordered transport batch runner. Native
   bookkeeping reaches the shared dispatcher only through validated manifest
@@ -22,10 +26,12 @@ branch, not a shipping parent.
   the publication registry, barrier and whole-query ReadView.
 
 The native catalog child uses Pascal's validated PR82 reader join of
-69/eefc987 and 79/6a70174, including frozen phase-clock correction a69865b.
-Actual profile62/ed242ec is already an ancestor; no extra profile merge is needed.
-Add actual 80/ca205aa for the maintenance/purge/batch child, which supplies the
-70+77 runtime/offline composition. Reuse the frozen Curie producer join only
+69/eefc987 and 79/6a70174, including phase-clock correction a69865b and startup recovery fb804a0
+(published evidence head bb1a086). Actual profile62/ed242ec is already an ancestor; no extra profile merge is needed.
+Maintenance/hard deletion prefer corrected82 alone, extending the existing
+native mutation/effects tail. Add actual 80/ca205aa only when a consumed helper
+requires the 70+77 runtime/offline composition; purge/batch offline composition
+must retain its actual dependencies. Reuse the frozen Curie producer join only
 where its typed-guard/accepted-root changes are required. Do not import the
 broad published-leaves checkpoint into a shipping branch. Check ancestry
 before adding any redundant parent.
@@ -40,7 +46,7 @@ create_native_namespace(ctx, input, active_profile, policy_inputs, clock, parent
     -> Result<WriteReceipt, StorageError>
 capture_native_policy(namespace_id, replacement, policy_inputs)
     -> Result<NativePolicyIntent, StorageError>
-apply_native_policy(ctx, intent, clock, parent)
+apply_native_policy(ctx, intent, parent)
     -> Result<WriteReceipt, StorageError>
 capture_native_decay(namespace_id, memory_id, policy_inputs, sampled_at)
     -> Result<NativeDecayIntent, StorageError>
@@ -91,6 +97,23 @@ accepted as arbitrary caller authority. No synchronous guard crosses an await.
    terminal kind and ledger entry. It reconstructs only proof-validation state,
    never deleted text, labels or vector bytes.
 
+   Pascal implements `NativePhaseMaterialized` / `NativeMemoryHardDeleted` with
+   separate typed proofs. The latter retains a bounded `NativeDeletionWitness`
+   (ID, namespace, prior `NativeRecordState`, numeric access history), exact
+   removed edge proofs and peer before/after token/count changes. A deletion
+   never pretends to be a `NativeRecordChange` with a surviving after row.
+   The current maintenance hard-delete planner is Ghost-only; future purge
+   eligibility is a separate validated path. Native purge consumes the actual
+   validated witness accessor after this slice is frozen.
+
+   Exact no-op and stale recheck results remain distinguishable without a
+   receipt. Capture binds actual `GenerationRef`; proof validation checks
+   finite policy evidence against the historical namespace policy, and final
+   execution recomputes graph influence using the original sampled clock.
+   Both planner and final recheck use a same-namespace induced graph so foreign
+   edges cannot affect donor fan counts. Metadata, ledger, peer changes and
+   outbox commit together; edge files and derived publication remain separate.
+
    Pascal's source audit: `SweepEvaluation::project_locked` is a legacy adapter
    using `last_accessed_at`; native projection must instead pass the persisted
    `decay_anchor_at` to the shared lifecycle projection. Recheck graph influence
@@ -117,7 +140,21 @@ accepted as arbitrary caller authority. No synchronous guard crosses an await.
    Pending/unknown commits reconcile before retry; bookkeeping generations do
    not imply atomic batches. Feynman updates strict table/export/restore proof;
    Curie owns the native codec/child binding and routes actual producers through
-   the existing ordered runner and typed seam.
+   the existing ordered runner and typed seam. Until automatic graph proof and
+   exact-duplicate consumers participate, configured auxiliary work fails
+   explicitly before child/provider work. A batch parent reservation may
+   already exist; this is not a zero-canonical-mutation guarantee. Completed
+   replay precedes fresh capability checks.
+
+5. **Native graph and automatic insertion links.** Hume owns the standalone
+   typed graph proof/core on corrected82; no catalog or broad-checkpoint parent
+   is needed. Use exact before/after directed-edge and peer record evidence,
+   canonical endpoint/policy rechecks, same-transaction receipt/outbox, and
+   awaited publication. Structural terminal edges never enable activation.
+   Required automatic links must be frozen in the insertion transaction under
+   a new additive proof variant: a crash after insertion cannot lose graph
+   work, and replay cannot rediscover new links. Curie owns producer planning
+   and integration. Existing insertion proof/hash rules remain immutable.
 
 Every slice preserves replay-before-CAS and checks stale lineage before replay.
 History validation recognizes exact typed transitions and verified ancestry,
