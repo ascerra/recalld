@@ -1,5 +1,8 @@
 # A5 sampling readiness handoff
 
+This is the historical pre-run handoff. The completed five-seed measurement and
+failed sampled-overhead gate are in the [final report](../../benchmarks/pipeline-sampling/REPORT.md).
+
 Candidate runtime/protocol/QA: `8a36b339ffe876d3f88580e9361a333a6602a2f7`,
 direct parent PR71 `7b1a17f`. Probe-only uninstrumented anchor:
 `3e87acff8631bc3d60a1fd23ef7f41f7ff3a1c5e`, on the prior probe anchor with
