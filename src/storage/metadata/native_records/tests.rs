@@ -18,6 +18,8 @@ mod readers;
 
 #[path = "exact_scan_tests.rs"]
 mod exact_scan;
+#[path = "phase_clock_tests.rs"]
+mod phase_clock;
 
 struct FixedClock(AtomicUsize);
 impl Clock for FixedClock {
