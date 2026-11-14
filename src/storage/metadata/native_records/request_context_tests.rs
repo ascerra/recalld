@@ -301,11 +301,28 @@ fn native_record_context_before_fixture() {
 
 #[test]
 fn native_record_context_replays_genuine_before_api2_bytes() {
-    let Ok(source) = std::env::var("RECALLD_READ_RECORD_CONTEXT_BEFORE") else {
-        return;
-    };
-    let source = PathBuf::from(source);
     let root = tempfile::tempdir().unwrap();
+    let source = match std::env::var("RECALLD_READ_RECORD_CONTEXT_BEFORE") {
+        Ok(source) => PathBuf::from(source),
+        Err(_) => {
+            // Genuine PR121/API2 writer output, captured before the correction.
+            // Normal CI exercises it without a local experiment environment.
+            let source = root.path().join("historical");
+            std::fs::create_dir(&source).unwrap();
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(
+                include_bytes!("fixtures/request-context-api2.zip").as_slice(),
+            ))
+            .unwrap();
+            for name in ["store.jsonl", "manifest.json"] {
+                std::io::copy(
+                    &mut archive.by_name(name).unwrap(),
+                    &mut std::fs::File::create(source.join(name)).unwrap(),
+                )
+                .unwrap();
+            }
+            source
+        }
+    };
     let path = root.path().join("copy");
     crate::storage::logical_export::import_store(&source.join("store.jsonl"), &path).unwrap();
     let m: serde_json::Value =
