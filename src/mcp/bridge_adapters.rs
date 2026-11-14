@@ -51,6 +51,15 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
     }
 }
 
+fn map_canonical_read_error(error: crate::storage::StorageError) -> bridge::BridgeError {
+    match error {
+        crate::storage::StorageError::NamespaceMismatch { .. }
+        | crate::storage::StorageError::InvalidNamespaceName { .. }
+        | crate::storage::StorageError::NotFound(_) => error.into(),
+        _ => bridge::BridgeError::Unavailable(error.to_string()),
+    }
+}
+
 /// Map an explicit-link validation failure onto the bridge error the tool
 /// layer already knows how to render.
 ///
@@ -82,6 +91,7 @@ impl From<crate::decay::observation::ObservationError> for bridge::BridgeError {
 fn map_search_error(error: crate::search::SearchError) -> bridge::BridgeError {
     match error {
         crate::search::SearchError::Observation(error) => error.into(),
+        crate::search::SearchError::CanonicalRead(error) => (*error).into(),
         other => bridge::BridgeError::Search(other.to_string()),
     }
 }
@@ -636,38 +646,67 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         let result = async {
             let stamp = effects_stamp(&self.storage).await?;
             let result = async {
-                let namespace = namespace.map(str::to_owned);
-                if let Some(namespace) = namespace {
-                    let storage = self.storage.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let storage = storage
-                            .read()
-                            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
-                        storage
-                            .assert_memory_namespace(id, &namespace)
-                            .map_err(bridge::BridgeError::from)
-                    })
-                    .await
-                    .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
-                }
-                let results = self
+                let prepared = self
                     .query_engine
-                    .prepare_similar_filtered_with_work(
+                    .prepare_coherent_similar(
                         id,
+                        namespace,
                         limit,
                         min_score,
                         record_access,
+                        false,
                         accepted.as_ref(),
                     )
                     .await
                     .map_err(map_search_error)?;
+                let (results, sampled_at, canonical_scope) = if let Some(prepared) = prepared {
+                    let mut results = prepared.results;
+                    for (selected, row) in results.iter_mut().zip(prepared.payload.rows) {
+                        selected.full_text = row.full_text;
+                    }
+                    (
+                        results,
+                        Some(prepared.evaluated_at),
+                        Some(prepared.payload.namespace.name),
+                    )
+                } else {
+                    let namespace = namespace.map(str::to_owned);
+                    if let Some(namespace) = namespace {
+                        let storage = self.storage.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let storage = storage
+                                .read()
+                                .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
+                            storage
+                                .assert_memory_namespace(id, &namespace)
+                                .map_err(bridge::BridgeError::from)
+                        })
+                        .await
+                        .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
+                    }
+                    let results = self
+                        .query_engine
+                        .prepare_similar_filtered_with_work(
+                            id,
+                            limit,
+                            min_score,
+                            record_access,
+                            accepted.as_ref(),
+                        )
+                        .await
+                        .map_err(map_search_error)?;
+
+                    (results, None, None)
+                };
 
                 let ids: Vec<_> = results.iter().map(|r| r.memory_id).collect();
                 let exposure_scope = crate::storage::control::ExposureScope {
-                    namespace: results
-                        .first()
-                        .map(|r| r.namespace.clone())
-                        .unwrap_or_default(),
+                    namespace: canonical_scope.unwrap_or_else(|| {
+                        results
+                            .first()
+                            .map(|r| r.namespace.clone())
+                            .unwrap_or_default()
+                    }),
                     source: Some(id),
                 };
                 let hits = results
@@ -698,10 +737,30 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     .collect();
                 check_read_admission(&self.storage, stamp).await?;
                 let receipts = if record_access {
-                    self.query_engine
-                        .record_similar_accesses_with_work(&ids, exposure_scope, accepted.as_ref())
-                        .await
-                        .map_err(map_search_error)?
+                    if let Some(sampled_at) = sampled_at {
+                        let accesses: Vec<_> = ids
+                            .iter()
+                            .map(|id| (*id, crate::model::AccessKind::AssociativeRetrieval))
+                            .collect();
+                        self.query_engine
+                            .record_exposures_at_with_work(
+                                &accesses,
+                                exposure_scope,
+                                sampled_at,
+                                accepted.as_ref(),
+                            )
+                            .await
+                            .map_err(map_search_error)?
+                    } else {
+                        self.query_engine
+                            .record_similar_accesses_with_work(
+                                &ids,
+                                exposure_scope,
+                                accepted.as_ref(),
+                            )
+                            .await
+                            .map_err(map_search_error)?
+                    }
                 } else {
                     Vec::new()
                 };
@@ -1473,96 +1532,58 @@ impl bridge::StorageEngine for McpStorageAdapter {
             crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
         let result = async {
             let stamp = effects_stamp(&self.storage).await?;
-            let result: Result<Option<bridge::MemoryRecord>, bridge::BridgeError> = async {
-                let namespace = namespace.map(str::to_owned);
-                let storage = self.storage.clone();
-                let tz = self.timezone;
-                tokio::task::spawn_blocking(move || {
-                    let storage_r = storage.read().map_err(|e| {
-                        bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                    })?;
-                    if let Some(namespace) = namespace.as_deref() {
-                        storage_r
-                            .assert_memory_namespace(id, namespace)
-                            .map_err(bridge::BridgeError::from)?;
-                    }
-
-                    let disk_record = storage_r
-                        .get_record(id)
-                        .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-
-                    match disk_record {
-                        Some(record) => {
-                            if record.phase == DecayPhase::Tombstone {
-                                let ns_name = storage_r
-                                    .get_namespace(NamespaceId::new(record.namespace_id))
-                                    .ok()
-                                    .flatten()
-                                    .map(|ns| ns.name.clone())
-                                    .unwrap_or_default();
-
-                                return Ok(Some(bridge::MemoryRecord {
-                                    labels: record.schema.as_ref().map(|s| s.labels.clone()),
-                                    id: id.to_string(),
-                                    namespace: ns_name,
-                                    summary: String::new(),
-                                    full_text: None,
-                                    tags: Vec::new(),
-                                    phase: "Tombstone".to_string(),
-                                    strength: 0.0,
-                                    stability: record.stability,
-                                    created_at: format_timestamp(record.created_at, tz),
-                                    last_accessed_at: format_timestamp(record.last_accessed_at, tz),
-                                    is_permastore: false,
-                                    edge_count: record.edge_count,
-                                }));
-                            }
-
-                            let ns_name = storage_r
-                                .get_namespace(NamespaceId::new(record.namespace_id))
-                                .ok()
-                                .flatten()
-                                .map(|ns| ns.name.clone())
-                                .unwrap_or_default();
-
-                            let full_text = if record.text_length > 0 {
-                                let text_ref = crate::storage::TextRef {
-                                    file_offset: record.text_offset,
-                                    length: record.text_length,
-                                };
-                                storage_r
-                                    .get_text(text_ref)
-                                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+            let namespace = namespace.map(str::to_owned);
+            let storage = self.storage.clone();
+            let clock = self.clock.clone();
+            let tz = self.timezone;
+            let child = accepted.child().map_err(|e| map_mutation_error(e.into()))?;
+            let (value, sampled_at) = tokio::task::spawn_blocking(move || {
+                let storage = storage
+                    .read()
+                    .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
+                let result = (|| {
+                    let view = storage
+                        .meta_store()
+                        .capture_read_view()
+                        .map_err(map_canonical_read_error)?;
+                    let sampled_at = clock.now_millis();
+                    let payload = storage
+                        .hydrate_get_at(view.at, id, namespace.as_deref())
+                        .map_err(map_canonical_read_error)?;
+                    let value = payload.map(|(namespace, payload)| {
+                        let record = payload.record;
+                        let marker = record.phase == DecayPhase::Tombstone;
+                        bridge::MemoryRecord {
+                            labels: record.schema.as_ref().map(|s| s.labels.clone()),
+                            id: id.to_string(),
+                            namespace: namespace.name,
+                            summary: if marker {
+                                String::new()
                             } else {
-                                None
-                            };
-
-                            Ok(Some(bridge::MemoryRecord {
-                                labels: record.schema.as_ref().map(|s| s.labels.clone()),
-                                id: id.to_string(),
-                                namespace: ns_name,
-                                summary: record.summary.clone(),
-                                full_text,
-                                tags: record.tags.iter().map(|t| t.to_string()).collect(),
-                                phase: format!("{:?}", record.phase),
-                                strength: record.strength,
-                                stability: record.stability,
-                                created_at: format_timestamp(record.created_at, tz),
-                                last_accessed_at: format_timestamp(record.last_accessed_at, tz),
-                                is_permastore: record.is_permastore != 0,
-                                edge_count: record.edge_count,
-                            }))
+                                record.summary
+                            },
+                            full_text: payload.full_text,
+                            tags: if marker {
+                                Vec::new()
+                            } else {
+                                record.tags.iter().map(|t| t.to_string()).collect()
+                            },
+                            phase: format!("{:?}", record.phase),
+                            strength: if marker { 0.0 } else { record.strength },
+                            stability: record.stability,
+                            created_at: format_timestamp(record.created_at, tz),
+                            last_accessed_at: format_timestamp(record.last_accessed_at, tz),
+                            is_permastore: !marker && record.is_permastore != 0,
+                            edge_count: record.edge_count,
                         }
-                        None => Ok(None),
-                    }
-                })
-                .await
-                .map_err(|e| {
-                    bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
-                })?
-            }
-            .await;
-            let value = result?;
+                    });
+                    Ok::<_, bridge::BridgeError>((value, sampled_at))
+                })();
+                storage.meta_store().finish_work(child);
+                result
+            })
+            .await
+            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
             check_read_admission(&self.storage, stamp).await?;
             let receipts =
                 if record_access && value.as_ref().is_some_and(|r| r.phase != "Tombstone") {
@@ -1570,7 +1591,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
                         self.storage.clone(),
                         self.cache.clone(),
                         vec![(id, crate::model::AccessKind::DirectRetrieval)],
-                        self.clock.now_millis(),
+                        sampled_at,
                         Some(crate::storage::control::ExposureScope {
                             namespace: value.as_ref().unwrap().namespace.clone(),
                             source: Some(id),

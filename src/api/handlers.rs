@@ -391,6 +391,59 @@ async fn get_memory_admitted(
     let start = Instant::now();
 
     let memory_id = parse_memory_id(&id)?;
+    if let Some(prepared) = state
+        .search
+        .prepare_coherent_get_with_work(
+            memory_id,
+            options.namespace.as_deref(),
+            options.record_access,
+            parent,
+        )
+        .await?
+    {
+        let (namespace, row) = prepared.payload.ok_or_else(|| AppError::NotFound {
+            resource: "memory",
+            id: id.clone(),
+        })?;
+        let mut response = MemoryResponse::from_cached(
+            &crate::model::CachedRecord::from(&row.record),
+            namespace.name,
+        );
+        if row.record.schema.as_ref().is_some_and(|s| {
+            s.lifecycle.lifecycle_version
+                == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+        }) {
+            if let Some(projected) = prepared.response {
+                response.strength = projected.strength;
+                response.decay_strength = projected.decay_strength;
+            }
+        }
+        response.full_text = row.full_text;
+        check_read_admission(&state, admitted_stamp).await?;
+        let receipts = if prepared.requested_access && row.record.phase != DecayPhase::Tombstone {
+            state
+                .search
+                .record_coherent_exposures_with_work(
+                    &[(memory_id, AccessKind::DirectRetrieval)],
+                    crate::storage::control::ExposureScope {
+                        namespace: response.namespace.clone(),
+                        source: Some(memory_id),
+                    },
+                    prepared.evaluated_at,
+                    parent,
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        return Ok(Observed {
+            receipts,
+            value: Json(ApiResponse {
+                data: response,
+                took_us: Some(start.elapsed().as_micros() as u64),
+            }),
+        });
+    }
     if let Some(namespace) = options.namespace.as_deref() {
         state
             .storage
@@ -1132,6 +1185,70 @@ async fn find_similar_admitted(
     let start = Instant::now();
 
     let memory_id = parse_memory_id(&id)?;
+
+    if let Some(prepared) = state
+        .search
+        .prepare_coherent_similar_with_work(
+            memory_id,
+            req.namespace.as_deref(),
+            req.limit.min(100) as usize,
+            req.min_score,
+            req.record_access,
+            req.include_embeddings,
+            parent,
+        )
+        .await?
+    {
+        let mut hits = Vec::with_capacity(prepared.results.len());
+        for (selected, row) in prepared.results.into_iter().zip(prepared.payload.rows) {
+            let mut memory = MemoryResponse::from_cached(
+                &crate::model::CachedRecord::from(&row.record),
+                prepared.payload.namespace.name.clone(),
+            );
+            if row.record.schema.as_ref().is_some_and(|s| {
+                s.lifecycle.lifecycle_version
+                    == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+            }) {
+                memory.strength = selected.retrievability;
+                memory.decay_strength = selected.effective_r;
+            }
+            memory.full_text = row.full_text;
+            memory.embedding = row.embedding;
+            hits.push(SearchHit {
+                memory,
+                score: selected.score.unwrap_or(0.0),
+            });
+        }
+        check_read_admission(&state, admitted_stamp).await?;
+        let accesses: Vec<_> = hits
+            .iter()
+            .map(|h| (h.memory.id, AccessKind::AssociativeRetrieval))
+            .collect();
+        let receipts = if prepared.requested_access {
+            state
+                .search
+                .record_coherent_exposures_with_work(
+                    &accesses,
+                    crate::storage::control::ExposureScope {
+                        namespace: prepared.payload.namespace.name,
+                        source: Some(memory_id),
+                    },
+                    prepared.evaluated_at,
+                    parent,
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        return Ok(Observed {
+            receipts,
+            value: Json(SearchResponse {
+                total: hits.len() as u64,
+                hits,
+                took_us: Some(start.elapsed().as_micros() as u64),
+            }),
+        });
+    }
 
     if let Some(namespace) = req.namespace.as_deref() {
         state

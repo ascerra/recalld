@@ -65,6 +65,28 @@ pub trait SearchPipeline: Send + Sync {
         Ok(None)
     }
 
+    async fn prepare_coherent_get_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _requested_access: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentGetResponse>, SearchError> {
+        Ok(None)
+    }
+    async fn prepare_coherent_similar_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _limit: usize,
+        _min_score: Option<f32>,
+        _requested_access: bool,
+        _include_embeddings: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSimilarResponse>, SearchError> {
+        Ok(None)
+    }
+
     async fn prepare_search_with_work(
         &self,
         query: SearchQuery,

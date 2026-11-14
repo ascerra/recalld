@@ -10,6 +10,67 @@ pub struct HydratedRecord {
 }
 
 impl RedbStorageEngine {
+    /// Direct fetch may return a legacy marker (the caller preserves its projection).
+    /// No marker text is copied. Keep this separate
+    /// from search hydration, whose entire selected page must remain eligible.
+    /// The caller retains engine read ownership through this synchronous copy.
+    pub(crate) fn hydrate_get_at(
+        &self,
+        at: GenerationRef,
+        id: MemoryId,
+        asserted_namespace: Option<&str>,
+    ) -> Result<Option<(NamespaceConfig, HydratedRecord)>, StorageError> {
+        self.ensure_available()?;
+        self.meta_store.with_generation_read_at(at, |view| {
+            if let Some(namespace) = asserted_namespace {
+                validate_namespace_name(namespace).map_err(|e| {
+                    StorageError::InvalidNamespaceName {
+                        name: namespace.to_owned(),
+                        reason: e.to_string(),
+                    }
+                })?;
+            }
+            let Some(record) = view.disk_record(id)? else {
+                return if asserted_namespace.is_some() {
+                    Err(StorageError::NotFound(id.into_inner()))
+                } else {
+                    Ok(None)
+                };
+            };
+            let namespace = view
+                .namespaces()?
+                .into_iter()
+                .find(|namespace| namespace.id.get() == record.namespace_id)
+                .ok_or(StorageError::NamespaceNotFound(record.namespace_id))?;
+            if let Some(asserted) = asserted_namespace {
+                if !namespace.name.eq_ignore_ascii_case(asserted) {
+                    return Err(StorageError::NamespaceMismatch {
+                        id: id.into_inner(),
+                        namespace: asserted.to_owned(),
+                    });
+                }
+            }
+            let full_text = if matches!(record.phase, DecayPhase::Full | DecayPhase::Summary)
+                && record.text_length != 0
+            {
+                Some(self.text_store.read(TextRef {
+                    file_offset: record.text_offset,
+                    length: record.text_length,
+                })?)
+            } else {
+                None
+            };
+            Ok(Some((
+                namespace,
+                HydratedRecord {
+                    record,
+                    full_text,
+                    embedding: None,
+                },
+            )))
+        })
+    }
+
     /// No awaits or escaped references. Generation mismatch rejects the entire
     /// page, including an empty page. Namespace/labels come from canonical bytes.
     pub(crate) fn hydrate_at(

@@ -21,7 +21,7 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 mod diagnostics;
 #[path = "read_view.rs"]
 mod read_view;
-pub use read_view::CoherentSearchResponse;
+pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse};
 #[path = "strength.rs"]
 mod strength;
 use strength::StrengthContext;
@@ -1397,8 +1397,37 @@ impl QueryEngine {
         let work = self.accept_work(parent)?;
         let result = async {
             let stamp = self.meta_store.effects_stamp().await?;
+            if let Some(prepared) = self
+                .prepare_coherent_get(id, None, record_access, work.as_ref())
+                .await?
+            {
+                let receipts = if record_access
+                    && prepared
+                        .response
+                        .as_ref()
+                        .is_some_and(|r| r.phase != DecayPhase::Tombstone)
+                {
+                    self.record_exposures_at_with_work(
+                        &[(id, AccessKind::DirectRetrieval)],
+                        crate::storage::control::ExposureScope {
+                            namespace: prepared.response.as_ref().unwrap().namespace.clone(),
+                            source: Some(id),
+                        },
+                        prepared.evaluated_at,
+                        work.as_ref(),
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+                return Observed {
+                    value: prepared.response,
+                    receipts,
+                }
+                .finish(self.check_effects_stamp(stamp).await);
+            }
             let observed = self
-                .get_memory_with_access_admitted(id, record_access, work.as_ref())
+                .get_memory_with_access_admitted(id, record_access, false, work.as_ref())
                 .await?;
             observed.finish(self.check_effects_stamp(stamp).await)
         }
@@ -1411,6 +1440,7 @@ impl QueryEngine {
         &self,
         id: MemoryId,
         record_access: bool,
+        defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Observed<Option<MemoryResponse>>> {
         let Some(mut record) = self.meta_store.get(&id).await? else {
@@ -1430,7 +1460,8 @@ impl QueryEngine {
             .await?;
         context.apply(&mut record)?;
 
-        let receipts = if record_access && record.phase != DecayPhase::Tombstone {
+        let receipts = if record_access && !defer_recording && record.phase != DecayPhase::Tombstone
+        {
             self.record_exposures_with_work(
                 &[(id, AccessKind::DirectRetrieval)],
                 crate::storage::control::ExposureScope {
@@ -1543,6 +1574,46 @@ impl QueryEngine {
         let work = self.accept_work(parent)?;
         let result = async {
             let stamp = self.meta_store.effects_stamp().await?;
+            if let Some(prepared) = self
+                .prepare_coherent_similar(
+                    id,
+                    None,
+                    k,
+                    min_score,
+                    requested_access,
+                    false,
+                    work.as_ref(),
+                )
+                .await?
+            {
+                let mut results = prepared.results;
+                for (result, row) in results.iter_mut().zip(prepared.payload.rows) {
+                    result.full_text = row.full_text;
+                }
+                let receipts = if requested_access && !defer_recording {
+                    let accesses: Vec<_> = results
+                        .iter()
+                        .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
+                        .collect();
+                    self.record_exposures_at_with_work(
+                        &accesses,
+                        crate::storage::control::ExposureScope {
+                            namespace: prepared.payload.namespace.name,
+                            source: Some(id),
+                        },
+                        prepared.evaluated_at,
+                        work.as_ref(),
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+                return Observed {
+                    value: results,
+                    receipts,
+                }
+                .finish(self.check_effects_stamp(stamp).await);
+            }
             let observed = self
                 .similar_with_access_admitted(
                     id,
