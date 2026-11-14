@@ -941,3 +941,38 @@ async fn native_single_scope_lineage_controls_do_not_replay_other_namespace_or_c
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
 }
+
+// Run against the pre-profile-resolver runtime to retain a genuine historical
+// descriptor-input receipt. The later resolver must replay these exact bytes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_before_fixture() {
+    let Ok(output) = std::env::var("RECALLD_WRITE_PROFILE_BEFORE") else {
+        return;
+    };
+    let output = std::path::PathBuf::from(output);
+    std::fs::create_dir_all(&output).unwrap();
+    let root = tempfile::tempdir_in(&output).unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let a = adapter(&f, provider(&d), clock, Default::default());
+    let out = a
+        .store_native_single(
+            single_context(&f, &d, "profile-before"),
+            single_input(&d, false),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    let manifest = serde_json::json!({"path":d.path,"namespace":d.ns.get(),"parent":d.parent.to_string(),"profile":d.profile,"receipt":out.receipt});
+    std::fs::write(
+        output.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    drop(a);
+    let _retained = f.close().keep();
+}
