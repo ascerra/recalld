@@ -195,7 +195,12 @@ def verify_scoring_outputs(directory, evaluator):
     read_rows = lambda name: [json.loads(line) for line in (directory / name).read_text().splitlines()]
     mappings = {row["memoryId"]: row["sourceIds"] for row in read_rows("source-mappings.jsonl")}
     actor = {row["stepId"]: row for row in read_rows("trace.jsonl")}
-    metrics = read_rows("evaluator/trace.jsonl")
+    evaluator_rows = read_rows("evaluator/trace.jsonl")
+    metrics = [row for row in evaluator_rows if "metrics" in row]
+    expected_steps = {step for step, row in actor.items()
+                      if row["action"]["kind"] == "internal-query" and row["outcome"]["status"] == "ok"
+                      and row["outcome"]["warmup"] is False}
+    assert len(metrics) == len(expected_steps) and {row["stepId"] for row in metrics} == expected_steps
     statuses = {"scored": 0, "zero_label": 0, "unknown": 0}
     scores = []
     for row in metrics:

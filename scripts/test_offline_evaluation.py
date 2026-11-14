@@ -157,6 +157,32 @@ class ManifestInputTests(unittest.TestCase):
         self.assertIn("--track", result.stderr)
         self.assertNotIn("Artifacts:", result.stdout)
 
+    def test_scoring_verifier_separates_index_oracle_and_checks_all_engine_events(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "evaluator").mkdir()
+            def rows(name, values):
+                (root / name).write_text("\n".join(map(json.dumps, values)) + "\n")
+            rows("source-mappings.jsonl", [{"memoryId": "memory", "sourceIds": ["source"]}])
+            rows("trace.jsonl", [
+                {"stepId": "index", "action": {"kind": "exact-index-query"}, "outcome": {"status": "ok"}},
+                {"stepId": "engine", "action": {"kind": "internal-query", "request": {"text": "query"}},
+                 "outcome": {"status": "ok", "warmup": False, "results": [{"memoryId": "memory"}]}}])
+            oracle = {"stepId": "index", "oracleRecallAtK": 1.0}
+            metrics = {"stepId": "engine", "queryId": "query", "retrievedSourceIds": ["source"],
+                       "metrics": {"annotationStatus": "unknown", "scored": False}}
+            rows("evaluator/trace.jsonl", [oracle, metrics])
+            runner["save"](root / "evaluator/scoring-summary.json", {"queryEvents": "1", "scored": "0",
+                "zeroLabelUnscored": "0", "unknownAnnotations": "1", "means": {"retrievalRecallAt5": None}})
+            self.assertEqual(runner["verify_scoring_outputs"](root, {"relevant": {}}),
+                             {"scored": 0, "zero_label": 0, "unknown": 1})
+            rows("evaluator/trace.jsonl", [oracle])
+            with self.assertRaises(AssertionError):
+                runner["verify_scoring_outputs"](root, {"relevant": {}})
+            rows("evaluator/trace.jsonl", [oracle, metrics, metrics])
+            with self.assertRaises(AssertionError):
+                runner["verify_scoring_outputs"](root, {"relevant": {}})
+
     def test_old_explicit_track_is_rejected_before_scratch(self):
         result = subprocess.run([sys.executable, str(Path(__file__).with_name("offline-evaluation.py")),
                                  "--track", "manifest-internal-diagnostic-v1", "--cache", "/does-not-exist"],

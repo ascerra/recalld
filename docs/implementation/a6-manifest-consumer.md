@@ -12,7 +12,7 @@ Run the real supervisor from this checkout:
 python3 scripts/offline-evaluation.py --track manifest-internal-diagnostic-v2 \
   --cache /tmp/recalld-PRIOR-SCRATCH/cargo \
   --build-cache /tmp/recalld-PRIOR-SCRATCH/target \
-  --records 100 --dimensions 16 --k 5 --warmup 1 --samples 3 --runs 3 --seed 7
+  --records 100 --dimensions 16 --k 5 --warmup 1 --samples 4 --runs 3 --seed 7
 ```
 
 The explicit `--track` flag is mandatory; an old supervisor invocation fails before creating scratch. It copies registry/dependency caches to a fresh private target, snapshots only allowlisted source, and uses the pinned existing image with network disabled, 2 CPUs, 4 GiB, an isolated home and no credential/socket mounts. The Rust example consumes the same manifest in all three fresh processes. Old studies retain their historical scripts/source hashes; an old direct example invocation fails rather than silently measuring this new track. Do not rewrite historical reports or compare their timing results as equivalent measurements.
