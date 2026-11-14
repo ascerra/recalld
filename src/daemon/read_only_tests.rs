@@ -432,9 +432,11 @@ async fn read_only_http_get_search_and_vector_similarity_succeed_without_effects
     assert_eq!(hits.len(), 2);
     for hit in hits {
         assert_ne!(hit["memory"]["id"], h.ids[0].to_string());
-        assert!(h.ids[1..]
-            .iter()
-            .any(|id| hit["memory"]["id"] == id.to_string()));
+        assert!(
+            h.ids[1..]
+                .iter()
+                .any(|id| hit["memory"]["id"] == id.to_string())
+        );
     }
     for id in &h.ids {
         assert!(h.f.cache.get(*id).await.is_none());
