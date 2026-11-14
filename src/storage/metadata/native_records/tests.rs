@@ -16,6 +16,8 @@ use std::sync::{
 #[path = "reader_tests.rs"]
 mod readers;
 
+#[path = "exact_scan_tests.rs"]
+mod exact_scan;
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 
@@ -39,6 +41,12 @@ fn fixture(root: &Path) -> Data {
     fixture_with_seed(root, |_| {})
 }
 fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
+    fixture_seeded(root, false, seed)
+}
+fn fixture_with_ghost(root: &Path, ghost: bool) -> Data {
+    fixture_seeded(root, ghost, |_| {})
+}
+fn fixture_seeded(root: &Path, ghost: bool, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
     let mut config = NamespaceConfig::default_namespace(0);
@@ -61,6 +69,28 @@ fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> 
         .unwrap();
     let parent = crate::storage::insertion::inserted_id(&receipt).unwrap();
     seed(&mut engine);
+    if ghost {
+        // Real legacy phase-loss receipts before explicit migration/attestation.
+        // Never author a schema-v2 row or bypass native startup validation.
+        for phase in [DecayPhase::Summary, DecayPhase::Ghost] {
+            let record = engine.get_record(parent).unwrap().unwrap();
+            let namespace = engine.get_namespace(ns).unwrap().unwrap();
+            assert!(matches!(
+                engine
+                    .apply_legacy_decay_with_receipt(
+                        &MutationContext::unkeyed(ns),
+                        parent,
+                        &record,
+                        &namespace,
+                        phase,
+                        0.01,
+                        0.01,
+                    )
+                    .unwrap(),
+                crate::storage::maintenance::DecayMutationResult::Committed(_)
+            ));
+        }
+    }
     engine.sync().unwrap();
     drop(engine);
     let profile = crate::embedding::runtime::tests::profile();

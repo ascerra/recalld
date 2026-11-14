@@ -507,6 +507,7 @@ pub(crate) fn validate_existing(
                     stored.receipt.outcome,
                     MutationOutcome::MemoryInserted { .. }
                         | MutationOutcome::MemoryTombstoned { .. }
+                        | MutationOutcome::LifecycleMaterialized { .. }
                 ) {
                     "record mutation receipt has catalog scope"
                 } else {
