@@ -32,6 +32,9 @@ impl DerivedCompletion {
         let storage = self.storage.clone();
         let child = work.child()?;
         let result = tokio::task::spawn_blocking(move || {
+            // The waiter can be cancelled while this worker remains queued or
+            // blocked. Keep publication ownership through its canonical write.
+            let _publication = lease;
             let _graph = graph;
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = storage.begin_namespace_purge_with_work(&ctx, force, Some(&child));
@@ -44,7 +47,6 @@ impl DerivedCompletion {
                 "purge worker outcome unknown; reconcile original key: {e}"
             ))
         })?;
-        drop(lease);
         let start = result?;
         let completion = self.complete_with_work(Some(work)).await;
         // Uncertain acknowledgements remain uncertain. A known child failure
