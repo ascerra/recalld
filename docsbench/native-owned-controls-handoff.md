@@ -43,6 +43,36 @@ These are documented gates and integration requirements, not newly reproduced
 runtime failures. The current allocator and startup parents are not assumed to
 contain every reader, payload, sweep or public adapter needed by the later track.
 
+## Concrete fixture and manifest boundary
+
+The proposed first track is `isolated-native-prefix-checkpoint-v1`, a private
+synthetic fixture track, not ordinary native serving. Its actual constructor and
+restore consumer must validate the following before actor admission. This is a
+plan for consumed fields, not a new standalone manifest implementation.
+
+| Bound input/state | Required declared value and check |
+| --- | --- |
+| Schema and origin | Actual strict schema2 prefix, original public API1, named native logical-hash contract, independent track/checkpoint/control versions. No schema inference from API or control version. Unsupported combinations reject. |
+| Ownership and profile | Existing canonical files and native owner preflight, no live source owner or second engine; default namespace already exists. Validate actual provider profile against admitted namespace bindings, including dimensions, preprocessing and revision presence. Do not invent a revision, overwrite unknown provenance or create a legacy default. |
+| Automatic mutations | Explicit `disable_sweep=true`, `autolink_enabled=false`, `rif.enabled=false` in the pinned configuration. Native explicit sweep remains unavailable until its actual validated origin-aware owner is consumed. Merely having an OwnedEvaluator cannot enable the inherited legacy sweep capability. |
+| Clock | One owned ManualClock, explicit millisecond state and valid allocation clock range. Declare lifecycle-clock scope; transport time, OS time and arbitrary wall-clock dependencies are not thereby controlled. |
+| IDs and RNG | Existing versioned seeded allocator state/cursor supplied before native recovery, captured and compared exactly. No global RNG claim. Frozen migrated-prefix identity is an input, not independently reproduced genesis. |
+| Caches and indexes | Actual empty-record-cache capture/restore policy, exact cache configuration including TTL/capacity, provider embedding cache disabled, rebuild all four required views from validated canonical state. Inspect the final joined constructor for warm loading and reject unsupported behavior; empty record cache is not a claim that every runtime cache/RNG is controlled. |
+| Provider and source | Synthetic offline replay-only provider, pinned input vectors/profile/artifact hashes, source/config/executable/Cargo.lock hashes, exact prefix file/logical hashes and actual G. Cache miss errors and uncertain controls are not retried into successful evidence. No hash self-reference or output normalization. |
+| Restore eligibility | Strict zero-pending state, actual all-four readiness, old child/workers joined, retained source/ancestor locks, fresh absent destination, exact source/clone inventory and hash, restored cursor/time/G checked before exposure. Pending work, malformed source/build/manifest and cancellation retain115's fail-closed guards. |
+
+Verified legacy source seams: PR130 `system.rs:413` disables provider embedding
+cache; `cache/manager.rs:353–355` clears and drains record-cache tasks;
+`bench/checkpoint.rs:133–154,352–369` consumes that policy under the retained
+freeze. A frozen Rust-source call search found no calls to `warm_cache`,
+`load_warm_file` or `prefetch_worker` outside their defining module; this must be
+rechecked on the actual joined constructor, not treated as future coverage.
+PR130 `bench/controls.rs:108–131` advertises legacy evaluator sweep capabilities
+and `bench/frozen/sweep.rs:77–82` rejects native: the new private track must keep
+unsupported methods unavailable and report its own actual capability set.
+PR134 `model/schema.rs:142–167` provides the existing profile validation/identity;
+matching only vector width is insufficient.
+
 ## Minimal actual consumer sequence
 
 1. Receive the exact validated allocator child on124+134. Inspect its final
