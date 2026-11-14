@@ -311,9 +311,13 @@ impl From<BatchItemOutcome> for BatchWireItem {
                 "INVALID_INPUT" => ErrorCategory::InvalidInput,
                 _ => ErrorCategory::Unavailable,
             },
-            code: if error.code == "CONFLICT" && error.field.as_deref() == Some("embeddingProfileId") {
+            code: if error.code == "CONFLICT"
+                && error.field.as_deref() == Some("embeddingProfileId")
+            {
                 "EMBEDDING_PROFILE_MISMATCH".into()
-            } else { error.code },
+            } else {
+                error.code
+            },
             message: "inspect this indexed outcome; successful items remain committed".into(),
             // The stored diagnostic vocabulary is not a JSON Pointer. The
             // public field identifies this item without changing retained bytes.

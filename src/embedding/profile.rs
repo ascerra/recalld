@@ -8,7 +8,9 @@ use crate::model::{NamespaceConfig, NamespaceId};
 pub(crate) fn valid_profile_id(id: &str) -> bool {
     id.len() == 68
         && id.starts_with("ep1:")
-        && id.as_bytes()[4..].iter().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+        && id.as_bytes()[4..]
+            .iter()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

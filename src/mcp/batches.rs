@@ -62,9 +62,12 @@ pub(crate) fn prepare_native_store(
         // invalid-item fallback hashes. Old completed errors replay unchanged.
         if let Some(value) = input.items[index].get("embeddingProfileId") {
             let parsed = (|| {
-                let id = value.as_str().filter(|s| crate::embedding::profile::valid_profile_id(s))?;
+                let id = value
+                    .as_str()
+                    .filter(|s| crate::embedding::profile::valid_profile_id(s))?;
                 let store = item.store.as_ref()?;
-                if store.embedding.is_none() || input.items[index].get("embeddingProfile").is_some() {
+                if store.embedding.is_none() || input.items[index].get("embeddingProfile").is_some()
+                {
                     return None;
                 }
                 let native = native_fields(store, &input.items[index]).ok()?;
@@ -76,13 +79,21 @@ pub(crate) fn prepare_native_store(
                     namespace: item.store.as_ref().unwrap().namespace.clone(),
                     input: crate::storage::native_store::NativeStoreInput {
                         insert: native,
-                        check_duplicates: item.store.as_ref().unwrap().check_duplicates.unwrap_or(true),
+                        check_duplicates: item
+                            .store
+                            .as_ref()
+                            .unwrap()
+                            .check_duplicates
+                            .unwrap_or(true),
                     },
                     supplied_profile_id: Some(id),
                 },
                 None => BatchItemPlan::Invalid {
                     request_hash: hash,
-                    error: BatchError { code: "INVALID_INPUT".into(), field: Some(format!("memories[{index}].embeddingProfileId")) },
+                    error: BatchError {
+                        code: "INVALID_INPUT".into(),
+                        field: Some(format!("memories[{index}].embeddingProfileId")),
+                    },
                 },
             };
         }
@@ -602,9 +613,13 @@ fn native_input(
     value: &Value,
 ) -> Result<crate::storage::native_records::NativeInsert, bridge::BridgeError> {
     let native = native_fields(store, value)?;
-    native.validate().map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
+    native
+        .validate()
+        .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
     if let Some(profile) = &native.embedding_profile {
-        profile.validate().map_err(bridge::BridgeError::InvalidInput)?;
+        profile
+            .validate()
+            .map_err(bridge::BridgeError::InvalidInput)?;
     }
     Ok(native)
 }

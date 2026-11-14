@@ -143,7 +143,13 @@ mod observation_tests {
         assert_eq!(wire["readiness"]["pendingWorkScope"], "acceptedTickets");
         assert_eq!(wire["readiness"]["observedWork"]["pendingEffects"], 1);
         assert_eq!(wire["readiness"]["ready"], false);
-        assert!(wire["readiness"]["derived"].as_array().unwrap().iter().any(|v| v["name"] == "fts" && v["appliedGeneration"].is_null()));
+        assert!(
+            wire["readiness"]["derived"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["name"] == "fts" && v["appliedGeneration"].is_null())
+        );
         assert_eq!(envelope.receipt.as_ref(), Some(receipt.as_ref()));
         assert_eq!(observation.canonical.store_id, receipt.store_id);
         assert_eq!(
@@ -212,7 +218,11 @@ mod observation_tests {
         );
         assert_eq!(repaired.pending_effects, 0);
         assert_eq!(repaired.accepted_work, 1);
-        assert!(!crate::serialization::contract::Readiness::observed(repaired.clone()).unwrap().ready);
+        assert!(
+            !crate::serialization::contract::Readiness::observed(repaired.clone())
+                .unwrap()
+                .ready
+        );
         publisher.finish_known_work(root);
         assert_eq!(
             publisher
@@ -222,13 +232,23 @@ mod observation_tests {
                 .accepted_work,
             0
         );
-        let barrier = publisher.readiness_barrier(repaired.canonical, deadline()).await.unwrap();
-        let wire = serde_json::to_value(crate::serialization::contract::Readiness::from(barrier)).unwrap();
+        let barrier = publisher
+            .readiness_barrier(repaired.canonical, deadline())
+            .await
+            .unwrap();
+        let wire =
+            serde_json::to_value(crate::serialization::contract::Readiness::from(barrier)).unwrap();
         assert_eq!(wire["ready"], true);
         assert_eq!(wire["pendingWork"], 0);
         assert!(wire.get("pendingWorkScope").is_none());
         assert!(wire.get("observedWork").is_none());
-        assert!(wire["derived"].as_array().unwrap().iter().all(|v| v["appliedGeneration"].is_string()));
+        assert!(
+            wire["derived"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|v| v["appliedGeneration"].is_string())
+        );
     }
 
     #[tokio::test]

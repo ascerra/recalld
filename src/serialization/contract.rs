@@ -300,11 +300,15 @@ impl From<crate::storage::Readiness> for Readiness {
             committed_generation: value.committed_generation,
             ready: value.ready,
             pending_work: value.pending_work,
-            derived: value.derived.into_iter().map(|v| DerivedReadiness {
-                name: v.name.into(),
-                applied_generation: Some(v.applied_generation),
-                ready: v.ready,
-            }).collect(),
+            derived: value
+                .derived
+                .into_iter()
+                .map(|v| DerivedReadiness {
+                    name: v.name.into(),
+                    applied_generation: Some(v.applied_generation),
+                    ready: v.ready,
+                })
+                .collect(),
             pending_work_scope: None,
             observed_work: None,
         }
@@ -313,20 +317,31 @@ impl From<crate::storage::Readiness> for Readiness {
 impl Readiness {
     /// This never certifies readiness or drains the caller. The observer's
     /// current canonical generation is distinct from a retained receipt's G.
-    pub(crate) fn observed(value: crate::storage::ReadinessObservation) -> Result<Self, crate::storage::StorageError> {
-        if value.derived.iter().any(|v| v.applied.is_some_and(|g| g.store_id != value.canonical.store_id)) {
-            return Err(crate::storage::StorageError::RecoveryRequired("foreign derived publication stamp".into()));
+    pub(crate) fn observed(
+        value: crate::storage::ReadinessObservation,
+    ) -> Result<Self, crate::storage::StorageError> {
+        if value.derived.iter().any(|v| {
+            v.applied
+                .is_some_and(|g| g.store_id != value.canonical.store_id)
+        }) {
+            return Err(crate::storage::StorageError::RecoveryRequired(
+                "foreign derived publication stamp".into(),
+            ));
         }
         Ok(Self {
             store_id: value.canonical.store_id,
             committed_generation: value.canonical.generation,
             ready: false,
             pending_work: value.accepted_work,
-            derived: value.derived.into_iter().map(|v| DerivedReadiness {
-                name: v.name.into(),
-                applied_generation: v.applied.map(|g| g.generation),
-                ready: v.matches_canonical,
-            }).collect(),
+            derived: value
+                .derived
+                .into_iter()
+                .map(|v| DerivedReadiness {
+                    name: v.name.into(),
+                    applied_generation: v.applied.map(|g| g.generation),
+                    ready: v.matches_canonical,
+                })
+                .collect(),
             pending_work_scope: Some(PendingWorkScope::AcceptedTickets),
             observed_work: Some(ObservedWork {
                 unresolved_work: value.unresolved_work,

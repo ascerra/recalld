@@ -17,7 +17,12 @@ impl McpStorageAdapter {
         child: &BatchChild,
         work: &WorkTicket,
     ) -> Result<(WriteReceipt, serde_json::Value), StoreWriteError> {
-        let BatchItemPlan::NativeStore { input, supplied_profile_id, .. } = &item.plan else {
+        let BatchItemPlan::NativeStore {
+            input,
+            supplied_profile_id,
+            ..
+        } = &item.plan
+        else {
             return Err(StorageError::InvalidMutation("wrong linked batch plan".into()).into());
         };
         let resolved = child.resolve_store_profile(input, supplied_profile_id.as_deref())?;

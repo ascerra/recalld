@@ -238,7 +238,10 @@ mod tests {
         let mcp = serde_json::json!({"jsonrpc":"2.0","id":u64::MAX,
             "result":{"content":[{"type":"text","text":text}],"structuredContent":value}});
         let mcp_bytes = serde_json::to_vec(&mcp).unwrap().len();
-        println!("SYNTHETIC_NOT_NATIVE record_bytes={record_bytes} receipt_bytes={receipt_bytes} mcp_bytes={mcp_bytes} frame_limit={}", crate::daemon::protocol::MAX_MESSAGE_SIZE);
+        println!(
+            "SYNTHETIC_NOT_NATIVE record_bytes={record_bytes} receipt_bytes={receipt_bytes} mcp_bytes={mcp_bytes} frame_limit={}",
+            crate::daemon::protocol::MAX_MESSAGE_SIZE
+        );
     }
 
     #[test]

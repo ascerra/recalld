@@ -1281,22 +1281,44 @@ async fn batch_profile_id_actual_wire_preserves_identity_and_current_generation_
     Arc::get_mut(&mut p).unwrap().profile = None;
     let a = adapter(&f, p.clone(), clock.clone(), Default::default());
     let mut r = request(&f, "batch-id-selector");
-    r.expected_generation = Some(f.storage.read().unwrap().control_state().unwrap().committed_generation);
-    r.items = vec![json!({"summary":"profile ID supplied", "embedding":[2.,0.,0.,0.], "embeddingProfileId":d.profile.profile_id().unwrap()})];
+    r.expected_generation = Some(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+    );
+    r.items = vec![
+        json!({"summary":"profile ID supplied", "embedding":[2.,0.,0.,0.], "embeddingProfileId":d.profile.profile_id().unwrap()}),
+    ];
     let original = r.items.clone();
     let prepared = crate::mcp::batches::prepare_native_store(&r).unwrap();
     let mut old = r.clone();
     old.mutation_version = 2;
     let historical = crate::mcp::batches::prepare(&old).unwrap();
-    assert!(matches!(historical[0].plan, crate::storage::batch::BatchItemPlan::Invalid {..}));
-    assert_eq!(prepared[0].plan.request_hash(), crate::storage::control::request_hash(&r.context(), "batch_item_intent_v3", &[&historical[0].plan.request_hash()]));
+    assert!(matches!(
+        historical[0].plan,
+        crate::storage::batch::BatchItemPlan::Invalid { .. }
+    ));
+    assert_eq!(
+        prepared[0].plan.request_hash(),
+        crate::storage::control::request_hash(
+            &r.context(),
+            "batch_item_intent_v3",
+            &[&historical[0].plan.request_hash()]
+        )
+    );
     let out = a.mutate_native_batch(r.clone()).await.unwrap();
     assert!(out.all_ready(), "{out:?}");
     let receipt = out.items[0].receipt.as_ref().unwrap().clone();
     assert_eq!(r.items, original);
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
-    let current = completion(&f).observe_readiness(std::time::Instant::now() + std::time::Duration::from_secs(5)).await.unwrap();
+    let current = completion(&f)
+        .observe_readiness(std::time::Instant::now() + std::time::Duration::from_secs(5))
+        .await
+        .unwrap();
     assert!(current.derived.iter().all(|v| v.matches_canonical));
     let rows = receipt_rows(&f);
     let mut config = crate::config::RecalldConfig::default();
@@ -1310,16 +1332,27 @@ async fn batch_profile_id_actual_wire_preserves_identity_and_current_generation_
     assert_eq!(replay_receipt.outcome, receipt.outcome);
     assert_eq!(receipt_rows(&f), rows);
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
-    for replacement in [json!([4.,0.,0.,0.]), json!([2.,-0.0,0.,0.])] {
+    for replacement in [json!([4., 0., 0., 0.]), json!([2., -0.0, 0., 0.])] {
         let mut changed = r.clone();
         changed.items[0]["embedding"] = replacement;
-        let err = replay_adapter.mutate_native_batch(changed).await.unwrap_err();
+        let err = replay_adapter
+            .mutate_native_batch(changed)
+            .await
+            .unwrap_err();
         assert_eq!(err.error.code, "IDEMPOTENCY_CONFLICT");
         assert_eq!(receipt_rows(&f), rows);
     }
     let mut changed = r;
     changed.items[0]["embeddingProfileId"] = json!(format!("ep1:{}", "0".repeat(64)));
-    assert_eq!(replay_adapter.mutate_native_batch(changed).await.unwrap_err().error.code, "IDEMPOTENCY_CONFLICT");
+    assert_eq!(
+        replay_adapter
+            .mutate_native_batch(changed)
+            .await
+            .unwrap_err()
+            .error
+            .code,
+        "IDEMPOTENCY_CONFLICT"
+    );
     assert_eq!(receipt_rows(&f), rows);
 }
 
@@ -1342,11 +1375,17 @@ async fn batch_profile_id_mismatch_and_invalid_pair_are_retained_without_provide
     let out = a.mutate_native_batch(r.clone()).await.unwrap();
     assert_eq!(out.failed, 3);
     assert_eq!(out.items[0].error.as_ref().unwrap().code, "CONFLICT");
-    assert_eq!(out.items[0].error.as_ref().unwrap().field.as_deref(), Some("embeddingProfileId"));
+    assert_eq!(
+        out.items[0].error.as_ref().unwrap().field.as_deref(),
+        Some("embeddingProfileId")
+    );
     let (status, envelope) = crate::serialization::native_batch::response(Ok(out.clone()));
     assert_eq!(status, 422);
     let value = serde_json::to_value(envelope).unwrap();
-    assert_eq!(value["data"]["outcomes"][0]["error"]["code"], "EMBEDDING_PROFILE_MISMATCH");
+    assert_eq!(
+        value["data"]["outcomes"][0]["error"]["code"],
+        "EMBEDDING_PROFILE_MISMATCH"
+    );
     let rows = receipt_rows(&f);
     let replay = a.mutate_native_batch(r).await.unwrap();
     assert_eq!(replay.items[0].error, out.items[0].error);
@@ -1363,13 +1402,43 @@ async fn batch_profile_id_pending_reopen_uses_retained_binding_and_original_cas(
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
     let mut r = request(&f, "batch-id-pending");
-    r.expected_generation = Some(f.storage.read().unwrap().control_state().unwrap().committed_generation);
-    r.items = vec![json!({"summary":"retained profile", "embedding":[2.,0.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap()})];
-    let plans = crate::mcp::batches::prepare_native_store(&r).unwrap().into_iter().map(|p|p.plan).collect::<Vec<_>>();
-    let retained = f.storage.read().unwrap().meta_store().reserve_native_store_batch_with_work(&r.context(), &plans, None, None, ||crate::graph::native_selection::freeze_settings(&Default::default())).unwrap();
+    r.expected_generation = Some(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+    );
+    r.items = vec![
+        json!({"summary":"retained profile", "embedding":[2.,0.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap()}),
+    ];
+    let plans = crate::mcp::batches::prepare_native_store(&r)
+        .unwrap()
+        .into_iter()
+        .map(|p| p.plan)
+        .collect::<Vec<_>>();
+    let retained = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .reserve_native_store_batch_with_work(&r.context(), &plans, None, None, || {
+            crate::graph::native_selection::freeze_settings(&Default::default())
+        })
+        .unwrap();
     let child = retained.child(0).unwrap();
     let resolved = match &plans[0] {
-        crate::storage::batch::BatchItemPlan::NativeStore { input, supplied_profile_id, .. } => crate::storage::batch::native::resolve_store_profile(input, supplied_profile_id.as_deref(), &child.defaults).unwrap(),
+        crate::storage::batch::BatchItemPlan::NativeStore {
+            input,
+            supplied_profile_id,
+            ..
+        } => crate::storage::batch::native::resolve_store_profile(
+            input,
+            supplied_profile_id.as_deref(),
+            &child.defaults,
+        )
+        .unwrap(),
         _ => panic!(),
     };
     assert_eq!(resolved.insert.embedding_profile, Some(d.profile.clone()));
@@ -1384,10 +1453,16 @@ async fn batch_profile_id_pending_reopen_uses_retained_binding_and_original_cas(
     let a = adapter(&f, p.clone(), clock, config);
     let out = a.mutate_native_batch(r).await.unwrap();
     assert!(out.all_ready(), "{out:?}");
-    assert_eq!(out.batch_operation_id, retained.reservation_receipt.operation_id);
+    assert_eq!(
+        out.batch_operation_id,
+        retained.reservation_receipt.operation_id
+    );
     assert_eq!(out.items[0].operation_id, Some(child.operation_id));
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
-    let current = completion(&f).observe_readiness(std::time::Instant::now()+std::time::Duration::from_secs(5)).await.unwrap();
-    assert!(current.derived.iter().all(|v|v.matches_canonical));
+    let current = completion(&f)
+        .observe_readiness(std::time::Instant::now() + std::time::Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(current.derived.iter().all(|v| v.matches_canonical));
 }
