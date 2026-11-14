@@ -500,6 +500,20 @@ pub(crate) fn validate_policy_history(
         super::native_purge::validate_evidence(&receipt, &configs, ledger.as_ref())?;
         super::native_maintenance::validate_ledger(&receipt, ledger.as_ref())?;
         super::native_maintenance::validate_namespace_profiles(&receipt, &configs)?;
+        if let MutationOutcome::NativeMemoryHardDeleted { transition } = &receipt.outcome {
+            // Local proof already requires before/after policy equality. Bind
+            // every peer to its own history, including retained foreign origins.
+            for peer in &transition.peers {
+                before_purge(&receipt, peer.namespace_id)?;
+                let lifecycle = &peer.change.after.lifecycle.lifecycle;
+                check_record_policy(
+                    &receipt,
+                    peer.namespace_id,
+                    lifecycle.lifecycle_version,
+                    lifecycle.policy_revision,
+                )?;
+            }
+        }
     }
     let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
     for row in read.open_table(META_TABLE)?.iter()? {
