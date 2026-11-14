@@ -995,3 +995,83 @@ async fn native_purge_foreign_peer_requires_its_actual_policy_revision() {
     );
     assert_eq!(before, std::fs::read(path.join("meta.db")).unwrap());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_purge_cancelled_waiter_keeps_worker_publication_lease() {
+    use std::time::Duration;
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let s = open(&path);
+    let key = ctx(&s, id, "cancelled-waiter");
+    let fx = crate::test_support::Fixture::from_open_engine(root, s.engine);
+    let publisher = crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    };
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    let accepted = tracker.begin().unwrap();
+    let gate = crate::derived_completion::publication_gate(&fx.storage)
+        .await
+        .unwrap();
+    let graph_block = fx.graph.clone().write_owned().await;
+    let task =
+        tokio::spawn(async move { publisher.purge_native_accepted(key, true, &accepted).await });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if tracker.status().pending == 2 && gate.try_write().is_err() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let storage = fx.storage.clone();
+    let (held_tx, held_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let blocker = tokio::task::spawn_blocking(move || {
+        let _guard = storage.write().unwrap();
+        held_tx.send(()).unwrap();
+        release_rx.recv().unwrap();
+    });
+    held_rx.await.unwrap();
+    drop(graph_block);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().pending != 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let publication_held = gate.try_write().is_err();
+    let graph_held = fx.graph.try_write().is_err();
+    // Always release the worker before assertions/fixture cleanup, including RED.
+    release_tx.send(()).unwrap();
+    blocker.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().pending > 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let lease = tokio::time::timeout(Duration::from_secs(5), gate.write())
+        .await
+        .unwrap();
+    drop(lease);
+    assert!(graph_held, "worker graph guard was not retained");
+    assert!(
+        tracker.status().unresolved >= 1,
+        "cancelled waiter must remain unresolved"
+    );
+    assert!(
+        publication_held,
+        "cancelled waiter released publication lease before blocked worker completed"
+    );
+}

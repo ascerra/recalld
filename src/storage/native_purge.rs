@@ -265,21 +265,23 @@ pub(crate) fn validate_evidence(
         if state.content.profile_id != super::native_records::profile_id(config) {
             return Err(invalid("purge witness profile mismatch"));
         }
+        if ns == t.namespace_id {
+            let schema = config
+                .schema
+                .as_ref()
+                .ok_or_else(|| invalid("purge schema missing"))?;
+            if state.lifecycle.lifecycle.policy_revision != schema.policy_revision
+                || state.lifecycle.lifecycle.lifecycle_version != schema.lifecycle_version
+            {
+                return Err(invalid(
+                    "purge witness differs from retained namespace policy",
+                ));
+            }
+        }
         Ok(())
     };
     for d in &chunk.deletions {
         check(d.namespace_id, &d.before)?;
-        let ns = configs
-            .get(&d.namespace_id.get())
-            .unwrap()
-            .schema
-            .as_ref()
-            .ok_or_else(|| invalid("purge schema missing"))?;
-        if d.before.lifecycle.lifecycle.policy_revision != ns.policy_revision
-            || d.before.lifecycle.lifecycle.lifecycle_version != ns.lifecycle_version
-        {
-            return Err(invalid("purge deletion policy mismatch"));
-        }
         if !ledger.into_iter().flat_map(|l| &l.entries).any(|e| {
             e.origin_lineage == receipt.store_id
                 && e.namespace_id == d.namespace_id.get()
