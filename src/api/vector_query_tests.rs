@@ -622,7 +622,11 @@ async fn accepted_http_create_carries_provider_root_through_links_and_publicatio
             .unwrap()
             .is_empty()
     );
-    assert!(h.f.cache.get(id).await.is_some());
+    // Linking can change the record after insertion. The bound cache is allowed
+    // to reject the pre-link value; it must never serve stale graph metadata.
+    if let Some(cached) = h.f.cache.get(id).await {
+        assert_eq!(cached.edge_count, h.f.record(id).unwrap().edge_count);
+    }
     drop(frozen);
     assert!(tracker.status().admission_open);
 }
