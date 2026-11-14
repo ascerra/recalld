@@ -12,10 +12,10 @@ impl crate::time::Clock for NoClock {
         panic!("purge sampled clock")
     }
 }
-fn open(path: &Path) -> NativeLifecycleSession {
+pub(super) fn open(path: &Path) -> NativeLifecycleSession {
     NativeLifecycleSession::open(path, NativePolicyInputs::default(), Arc::new(NoClock)).unwrap()
 }
-fn fixture(root: &Path) -> (PathBuf, NamespaceId, Vec<MemoryId>) {
+pub(super) fn fixture(root: &Path) -> (PathBuf, NamespaceId, Vec<MemoryId>) {
     let source = root.join("legacy");
     let target = root.join("native");
     let mut e = RedbStorageEngine::open(&source).unwrap();
@@ -1008,7 +1008,8 @@ async fn native_purge_accepted_unknown_child_preserves_reserved_id_and_reopens()
         .await
         .unwrap_err();
     assert!(
-        matches!(error,StorageError::CommitOutcomeUnknown{operation_id,..} if Some(operation_id)==start.next_operation_id)
+        matches!(error,StorageError::CommitOutcomeUnknown{operation_id,..} if Some(operation_id)==start.next_operation_id),
+        "unexpected outcome: {error:?}"
     );
     let committed = fx
         .storage
