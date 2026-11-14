@@ -97,8 +97,8 @@ fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
     out
 }
 
-#[test]
-fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
+#[tokio::test]
+async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
     let root = tempfile::tempdir().unwrap();
     let (path, clock, mut session) = fixture(root.path());
     let ctx = context(&session, "create");
@@ -152,7 +152,7 @@ fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
         .capture_insert(
             crate::storage::native_lifecycle::LifecycleScope {
                 namespace_id: id,
-                namespace_name: ns.name,
+                namespace_name: ns.name.clone(),
                 source: None,
             },
             &memory,
@@ -185,6 +185,72 @@ fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
     let before = bytes(&path);
     assert!(RedbStorageEngine::open(&path).is_err());
     assert_eq!(bytes(&path), before);
+
+    // Real offline consumers must retain the creation proof and provider
+    // binding, including its historical origin after a production fork.
+    use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
+    use crate::storage::logical_export::{export_store, import_store};
+    let stream = root.path().join("created.jsonl");
+    let copy = root.path().join("copy");
+    assert_eq!(
+        export_store(&path, &stream).unwrap(),
+        import_store(&stream, &copy).unwrap()
+    );
+    assert_eq!(bytes(&path), before);
+    let snapshot = inspect_schema(&copy).unwrap();
+    assert_eq!(snapshot.control.store_id, receipt.store_id);
+    let backup = run_backup(
+        &crate::config::RecalldConfig::default(),
+        &root.path().join("created.zip"),
+        Some(&copy),
+        false,
+    )
+    .await
+    .unwrap();
+    restore_from_backup(RestoreOptions {
+        backup_path: backup,
+        data_dir: copy.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: false,
+    })
+    .await
+    .unwrap();
+    let restored = inspect_schema(&copy).unwrap();
+    assert_ne!(restored.control.store_id, receipt.store_id);
+    assert_eq!(restored.schema, snapshot.schema);
+    let mut reopened = NativeLifecycleSession::open(
+        &copy,
+        NativePolicyInputs::default(),
+        Arc::new(Clock(AtomicUsize::new(0))),
+    )
+    .unwrap();
+    assert_eq!(
+        control::encode(&reopened.engine.get_namespace(id).unwrap().unwrap()).unwrap(),
+        control::encode(&ns).unwrap()
+    );
+    let read = reopened.engine.meta_store().db.begin_read().unwrap();
+    let raw = read
+        .open_table(control::RECEIPTS)
+        .unwrap()
+        .get(
+            control::scoped_key(
+                receipt.store_id,
+                MutationScope::Catalog,
+                receipt.operation_id.as_bytes(),
+            )
+            .as_slice(),
+        )
+        .unwrap()
+        .unwrap()
+        .value()
+        .to_vec();
+    assert_eq!(control::validate_receipt(&raw).unwrap().receipt, receipt);
+    drop(read);
+    assert!(matches!(
+        reopened.create_namespace(&ctx, &input(), &Provider(false)),
+        Err(StorageError::StoreLineageMismatch)
+    ));
 }
 
 #[test]
