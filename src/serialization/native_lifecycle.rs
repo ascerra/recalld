@@ -18,6 +18,8 @@ pub(crate) enum Operation {
 }
 #[derive(Debug, Clone)]
 pub(crate) struct Request {
+    /// Original application contract, independent of record/lifecycle schema.
+    pub original_contract_version: u32,
     pub id: MemoryId,
     pub namespace: Option<String>,
     pub namespace_id: Option<NamespaceId>,
@@ -37,6 +39,34 @@ pub(crate) fn parse(
     mcp: bool,
     header_key: Option<&str>,
 ) -> Result<Request, InputError> {
+    if mcp && ContractVersion::from_mcp(value)? != ContractVersion::V2 {
+        return Err(invalid(
+            "/contractVersion",
+            "explicit contractVersion 2 required",
+        ));
+    }
+    parse_request(value, operation, mcp, header_key, 2)
+}
+
+/// Private RPCs carry the original selector explicitly; no schema-derived default.
+pub(crate) fn parse_private(value: &Value, operation: Operation) -> Result<Request, InputError> {
+    if value.get("contractVersion").is_none() {
+        return Err(invalid(
+            "/contractVersion",
+            "explicit contractVersion required",
+        ));
+    }
+    let origin = ContractVersion::from_mcp(value)?.number();
+    parse_request(value, operation, true, None, origin)
+}
+
+fn parse_request(
+    value: &Value,
+    operation: Operation,
+    mcp: bool,
+    header_key: Option<&str>,
+    original_contract_version: u32,
+) -> Result<Request, InputError> {
     let object = value
         .as_object()
         .ok_or_else(|| invalid("", "expected an object"))?;
@@ -53,12 +83,6 @@ pub(crate) fn parse(
     }
     if mcp {
         fields.push("contractVersion");
-        if ContractVersion::from_mcp(value)? != ContractVersion::V2 {
-            return Err(invalid(
-                "/contractVersion",
-                "explicit contractVersion 2 required",
-            ));
-        }
     }
     reject_unknown_fields(object, &fields)?;
     let id = object
@@ -103,6 +127,7 @@ pub(crate) fn parse(
         .transpose()?
         .unwrap_or(3);
     Ok(Request {
+        original_contract_version,
         id: id.into(),
         namespace,
         namespace_id,
@@ -112,7 +137,7 @@ pub(crate) fn parse(
 }
 impl Request {
     pub(crate) fn wire(&self, operation: Operation) -> Value {
-        let mut value = json!({"contractVersion":2,"id":self.id});
+        let mut value = json!({"contractVersion":self.original_contract_version,"id":self.id});
         let object = value.as_object_mut().unwrap();
         if operation == Operation::Feedback {
             object.insert("quality".into(), json!(self.quality));

@@ -22,11 +22,6 @@ fn capture_checked() {
 
 fn native_context(ctx: &MutationContext, namespace: NamespaceId) -> Result<(), StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 {
-        return Err(StorageError::InvalidMutationContext(
-            "native lifecycle operations require contract version 2".into(),
-        ));
-    }
     if ctx.scope != MutationScope::Namespace(namespace) {
         return Err(StorageError::MutationNamespaceMismatch);
     }

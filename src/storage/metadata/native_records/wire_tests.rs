@@ -541,3 +541,6 @@ async fn native_lifecycle_wire_old_rpc_unknown_method_fails_closed_without_legac
     }
     task.await.unwrap();
 }
+
+#[path = "origin_tests.rs"]
+mod origin;

@@ -1,8 +1,13 @@
 # Original application contract through lifecycle observation and maintenance
 
-Status: caller inventory and interface proposal,2026-11-14. No runtime change in
-this branch yet. PR126 remains frozen at179edf0 (runtimed00cebf). The shared
-1|2 guard and compound request-context codec are Feynman's sole ownership;
+Status: approved caller inventory and interface plan,2026-11-14. The independent
+feedback126, exposure119 and manual107 children are now implemented in their
+assigned worktrees. Feedback's initial frozen source passed1140+2; later test-only
+additions and both other children await validation after the performance hold.
+See native-feedback-origin.md, plus native-exposure-origin.md and
+native-manual-origin.md in their respective worktrees. PR126 remains unchanged at
+179edf0 (runtimed00cebf). The shared MutationContext validator and compound
+request-context codec are Feynman's sole ownership;
 standalone implementation reuses existing MutationContext::validate and native guards,
 without adding his compound purge/catalog parent. No parallel type is created.
 Curie owns the narrow native_records context/child-binding consumer on direct121;
@@ -20,8 +25,9 @@ observer/manual propagation described here.
   query policy/sample, final-UUID grouping and accepted native exposure.
 - PR107: `785dfec4` (actual96+98), runtime38e8598. Existing startup/timer/manual
   runner consumes native maintenance on the same owned storage/registry.
-- Feynman's approved plan40720153 is a plan, not a frozen runtime dependency.
-  Curie's narrow native insert/forget child is approved but not frozen yet.
+- Feynman's approved plan40720153 is not a runtime dependency for these standalone
+  paths. Curie's narrow native insert/forget child b3a21e6 is source-frozen; its
+  negative-test adaptation and final validation remain pending after the hold.
 - Hume's legacy delta candidatee78c5e1/docs62a uses96+116+117. It is not imported
   for convenience; preserve its optional sealed-delta changes when actually joined.
 
@@ -134,9 +140,11 @@ schema or retrieval semantics merely to keep a test green.
   origins run through the same runner. No need to import exposure or all public
   writers just to change this actual consumer.
 
-Do not change published126. Proceed on these independent standalone parents. Current planning worktree is
-`/tmp/recalld-implementation/native-origin-propagation`; split code worktrees
-around actual dependencies when each interface is frozen.
+Do not change published126. Implementation worktrees are
+`/tmp/recalld-implementation/native-origin-propagation` (feedback126),
+`/tmp/recalld-implementation/native-exposure-origin` (exposure119), and
+`/tmp/recalld-implementation/native-manual-origin` (manual107).
+No common compound parent was added.
 
 ## Keyed maintenance constraint and non-goals
 

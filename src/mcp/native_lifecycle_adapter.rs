@@ -2,12 +2,12 @@
 use crate::{
     derived_completion::DerivedCompletion,
     serialization::{
-        contract::{ContractVersion, DerivedReadiness, Readiness},
+        contract::{DerivedReadiness, Readiness},
         native_lifecycle::{Operation, Reply, Request},
     },
     storage::{
         StorageEngine, StorageError,
-        control::{GenerationRef, MutationScope},
+        control::{GenerationRef, MutationContext, MutationScope},
         native_lifecycle::NativePolicyInputs,
     },
     time::Clock,
@@ -92,9 +92,13 @@ pub(crate) async fn execute(
             });
         }
     };
-    let context = request
-        .options
-        .context(MutationScope::Namespace(scope), ContractVersion::V2);
+    let context = MutationContext {
+        store_id: request.options.store_id,
+        scope: MutationScope::Namespace(scope),
+        idempotency_key: request.options.idempotency_key.clone(),
+        expected_generation: request.options.expected_generation,
+        contract_version: request.original_contract_version,
+    };
     let result = match operation {
         Operation::Forget => {
             owner
@@ -220,7 +224,33 @@ pub(crate) async fn dispatch(
     operation: Operation,
     arguments: serde_json::Value,
 ) -> Reply {
-    match crate::serialization::native_lifecycle::parse(&arguments, operation, true, None) {
+    dispatch_parsed(
+        storage,
+        operation,
+        crate::serialization::native_lifecycle::parse(&arguments, operation, true, None),
+    )
+    .await
+}
+
+pub(crate) async fn dispatch_private(
+    storage: &dyn super::bridge::StorageEngine,
+    operation: Operation,
+    arguments: serde_json::Value,
+) -> Reply {
+    dispatch_parsed(
+        storage,
+        operation,
+        crate::serialization::native_lifecycle::parse_private(&arguments, operation),
+    )
+    .await
+}
+
+async fn dispatch_parsed(
+    storage: &dyn super::bridge::StorageEngine,
+    operation: Operation,
+    parsed: Result<Request, crate::serialization::contract::InputError>,
+) -> Reply {
+    match parsed {
         Ok(request) => match operation {
             Operation::Forget => storage.forget_native(request).await,
             Operation::Feedback => storage.feedback_native(request).await,

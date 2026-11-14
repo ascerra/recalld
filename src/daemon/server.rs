@@ -512,7 +512,8 @@ async fn dispatch(
                 crate::serialization::native_lifecycle::Operation::Feedback
             };
             let reply =
-                crate::mcp::native_lifecycle_adapter::dispatch(storage, operation, params).await;
+                crate::mcp::native_lifecycle_adapter::dispatch_private(storage, operation, params)
+                    .await;
             serde_json::to_value(reply).map_err(|e| BridgeError::PartiallyApplied(e.to_string()))
         }
         "store_memory" => {
