@@ -46,6 +46,35 @@ The owned fixture constructor remains separate from production fork/restore
 semantics. No generic `nativeControls: true` capability will be added as a proxy
 for passing only one row.
 
+## Acyclic activation order
+
+Main's integration boundary is explicit: format-aware adapters and producer
+routing can be implemented and validated on **explicit owned native fixtures**
+before ordinary native startup exists. A fixture uses the actual owned engine,
+canonical writer and receipt paths; it is not permission to bypass their schema,
+policy or original-request validation. These narrow prepared consumers can ship
+without claiming ordinary serving or advertising public API2.
+
+The dependency order is:
+
+1. Validated format-aware writer/adapters and original API1 compatibility on
+   explicit native fixtures, including retained IDs/contexts and failure receipts.
+2. Feynman's ordinary native admission consumes that validated closure, retaining
+   actual public API1 behavior. **Startup does not depend on public API2 activation.**
+3. Huygens's public API2 activation consumes ordinary startup plus the actual A2
+   selection consumer and its independently tested response/capability contract.
+4. A6's real native constructor may use the admitted API1-native path after step2;
+   add only separately validated, versioned evaluator/public capabilities later.
+   Native checkpoint/control work must not wait for step3 solely for an API2 label.
+
+This also leaves the narrow owned-allocation consumer unblocked by serving:124
+plus Feynman's final common-context writer child can prove catalog/policy IDs on
+explicit fixtures. It does not need ordinary startup or public API2 activation
+as a test dependency. The complete native A6 public-action consumer does need the
+actual constructor/adapters it invokes, but may pin API1-native honestly. No
+unvalidated WIP merge, broad integration ancestor or circular readiness promise
+is justified by this sequencing.
+
 ## Explicit sweep request origin: pending Pascal manual parent
 
 Main's 2026-11-14 handoff reports Pascal's upcoming manual consumer adds
@@ -173,7 +202,9 @@ raw scores/order, not only repeated ready stamps.
 2. **Actual native owned constructor/control join:** use Feynman's validated
    ordinary native startup as primary runtime, plus only missing124 allocation
    consumer,125 clock,128 controller and107 runner inputs. Consume actual final
-   Huygens/Pascal public adapters and A2 reader/exposure closure where needed.
+   Huygens/Pascal format-aware adapters and the reader/exposure closure needed by
+   the declared API1-native track. Do not require public API2 activation as a
+   constructor prerequisite; API2 adds its actual A2 selection gate separately.
    Recompute git ancestry rather than importing integration history. Owner/source
    freeze must precede edits in shared system/engine/metadata files. An internal
    private native session is not the final public-action consumer.
