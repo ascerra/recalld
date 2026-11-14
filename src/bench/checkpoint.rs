@@ -43,7 +43,7 @@ fn check(deadline: Instant) -> anyhow::Result<()> {
     Ok(())
 }
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    digest_array(Sha256::digest(bytes).into())
 }
 fn file_hash(path: &Path, deadline: Instant) -> anyhow::Result<String> {
     crate::storage::validation::require_file(path)?;
@@ -58,7 +58,7 @@ fn file_hash(path: &Path, deadline: Instant) -> anyhow::Result<String> {
         }
         hash.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(digest_array(hash.finalize().into()))
 }
 fn config_value(config: &RecalldConfig) -> anyhow::Result<serde_json::Value> {
     let mut config = config.clone();
@@ -192,7 +192,10 @@ impl OwnedEvaluator {
         let deadline = Instant::now() + Duration::from_secs(30);
         anyhow::ensure!(supported(&config), "unsupported checkpoint configuration");
         crate::storage::validation::require_file(manifest_path)?;
-        let bytes = std::fs::read(manifest_path)?;
+        let mut bytes = Vec::new();
+        std::fs::File::open(manifest_path)?
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
         anyhow::ensure!(
             bytes.len() <= 1024 * 1024 && digest(&bytes) == expected_sha256,
             "checkpoint manifest digest/size mismatch"
