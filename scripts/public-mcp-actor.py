@@ -12,8 +12,18 @@ TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 def run(args):
     projection = json.load(sys.stdin)
     phase = projection["phase"]
-    expected = {"phase", "startId", "deliveryOrdinal", "sources", "activeEmbedding"} if phase == "ingest" else {"phase", "startId", "deliveryOrdinal", "currentQuestion", "expectedMiss"}
-    assert set(projection) == expected and phase in ("ingest", "query"), "unexpected actor projection fields"
+    fields = {"ingest": {"sources", "activeEmbedding"}, "connect": {"activeEmbedding"},
+              "query": {"currentQuestion", "expectedMiss"}, "action": {"currentAction"}}
+    assert phase in fields and set(projection) == {"phase", "startId", "deliveryOrdinal"} | fields[phase], "unexpected actor projection fields"
+    if phase == "action":
+        action = projection["currentAction"]
+        assert set(action) == {"tag", "tool", "arguments"}, "unexpected current action fields"
+        allowed = {"store_memory": {"summary", "fullText", "tags", "namespace", "checkDuplicates", "supersedes"},
+                   "get_memory": {"id", "namespace", "recordAccess"},
+                   "recall_memories": {"query", "namespace", "recordAccess", "depth", "limit"},
+                   "reinforce_memory": {"id", "namespace", "quality"}, "forget_memory": {"id", "namespace"}}
+        assert action["tool"] in allowed and isinstance(action["arguments"], dict)
+        assert set(action["arguments"]) <= allowed[action["tool"]], "unexpected current action arguments"
     source = projection.get("sources", [])
     read = os.fdopen(args.read_fd, "rb", buffering=0)
     write = os.fdopen(args.write_fd, "wb", buffering=0)
@@ -60,7 +70,7 @@ def run(args):
         if "structuredContent" in result:
             assert result["structuredContent"] == text
         return text
-    if phase == "ingest":
+    if phase in ("ingest", "connect"):
         result = rpc("initialize", dict(protocolVersion="2025-06-18", capabilities={}, clientInfo=dict(name=TRACK, version="1")), "initialize")
         assert result["protocolVersion"] == "2025-06-18"
         rpc("notifications/initialized", {}, "initialized", notification=True)
@@ -74,9 +84,13 @@ def run(args):
         assert context["backendContext"]["activeEmbedding"] == projection["activeEmbedding"]
         assert uuid.UUID(context["backendContext"]["storeId"]).int != 0
         rpc("evaluator/capabilities", {}, "private-control-denied", expected_error=True)
-        call("create_namespace", dict(name="foreign", embeddingDim=4), "namespace")
+        if phase == "ingest":
+            call("create_namespace", dict(name="foreign", embeddingDim=4), "namespace")
         for entry in source:
-            call("store_memory", dict(summary=entry["summary"], namespace=entry["namespace"], checkDuplicates=False), "store:" + entry["sourceId"])
+            call("store_memory", dict(summary=entry["summary"], namespace=entry["namespace"], checkDuplicates=False, **{k: entry[k] for k in ("fullText", "tags") if k in entry}), "store:" + entry["sourceId"])
+    elif phase == "action":
+        # Expected outcomes belong to the evaluator. Retain errors as normal wire outcomes.
+        rpc("tools/call", dict(name=action["tool"], arguments=action["arguments"]), action["tag"])
     else:
         query = projection["currentQuestion"]
         assert set(query) == {"queryId", "text"}

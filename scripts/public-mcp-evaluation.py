@@ -18,6 +18,7 @@ import uuid
 
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 MODEL = "a6-public-synthetic-v1"
+CONFORMANCE = runpy.run_path(str(Path(__file__).with_name("public-mcp-conformance.py")))
 ROOT = Path(__file__).resolve().parents[1]
 CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadView=False,
                     barrier=False, reset=False, snapshot=False, clock="system-uncontrolled",
@@ -25,7 +26,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
                     canonicalSchemaAttested=False)
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
-EXTRA = ("scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+EXTRA = ("scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl")
 
 
@@ -50,7 +51,11 @@ def exact_keys(value, keys):
         raise ValueError("unsupported or missing fields")
 
 
-def fixtures():
+def fixtures(track=TRACK):
+    if track == CONFORMANCE["TRACK"]:
+        return CONFORMANCE["fixtures"](fixtures)
+    if track != TRACK:
+        raise ValueError("unsupported diagnostic track")
     sources = []
     for i, (text, namespace) in enumerate((("amber", "default"), ("birch", "default"), ("olive", "default"), ("foreign", "foreign"))):
         sources.append(dict(sourceId=f"turn-{i}", groupId="synthetic-regression", conversationId="synthetic-conversation",
@@ -78,7 +83,7 @@ def validate(manifest_path, binary, scorer, source_root):
                    "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
-    if m["track"] != TRACK or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
+    if m["track"] not in (TRACK, CONFORMANCE["TRACK"]) or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -104,7 +109,7 @@ def validate(manifest_path, binary, scorer, source_root):
             raise ValueError("artifact hash/reference mismatch")
         artifacts.append(json.loads(p.read_text()))
     actor, labels, cache, schedule = artifacts
-    expected_actor, _, expected_cache, expected_schedule = fixtures()
+    expected_actor, _, expected_cache, expected_schedule = fixtures(m["track"])
     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
     exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
@@ -130,8 +135,8 @@ def validate(manifest_path, binary, scorer, source_root):
 def prepare(args):
     args.out.mkdir()
     build = json.loads(args.build.read_text())
-    actor, labels, cache, schedule = fixtures()
-    m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
+    actor, labels, cache, schedule = fixtures(args.track)
+    m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=args.track, versions=VERSIONS,
              capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
              executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
@@ -172,21 +177,24 @@ class Replay(http.server.BaseHTTPRequestHandler):
 
 def run_episode(args):
     m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
+    conformance = m["track"] == CONFORMANCE["TRACK"]
     args.out.mkdir()
     evaluator = args.out / "evaluator"
     evaluator.mkdir()
-    ingest_projection = dict(phase="ingest", sources=actor["sources"], activeEmbedding=m["activeEmbedding"], startId=0, deliveryOrdinal=0)
+    ingest_projection = dict(phase="ingest", sources=actor["sources"][:3] if conformance else actor["sources"], activeEmbedding=m["activeEmbedding"], startId=0, deliveryOrdinal=0)
     save(args.out / "actor-projection.json", ingest_projection)
     (args.out / "actor-inputs").mkdir()
     # Cache server receives only the actor cache projection, never evaluator labels.
     stub = http.server.HTTPServer(("127.0.0.1", 0), Replay)
     stub.log, stub.environment, stub.delivery = args.out / "actor-provider.jsonl", environment, 0
     stub.key = lambda text: digest(encoded(dict(environmentHash=environment, model=MODEL, dimension=4, prefixedInput=text)))
-    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:")}
+    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:") and (not conformance or text.removeprefix("a6-document:") in {s["summary"] for s in actor["sources"][:3]} or text == "a6-document:health check")}
     threading.Thread(target=stub.serve_forever, daemon=True).start()
     result = dict(status="running", environmentHash=environment, capabilities=CAPABILITIES)
     process = None
     runtime_failure = None
+    process_events = []
+    public_ids = {}
     guard_read, guard_write = os.pipe()
     try:
         with tempfile.TemporaryDirectory(prefix="a6-public-runtime-") as temporary:
@@ -219,8 +227,20 @@ warm_file_enabled = false
             env = dict(PATH="/usr/local/bin:/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC", RUST_LOG="info",
                        A6_SYNTHETIC_KEY="synthetic-fixture-only", RECALLD_DAEMON_SOCKET=str(root / "disabled-daemon/socket"))
             with (args.out / "runtime.log").open("wb") as runtime_log, (args.out / "actor-wire.jsonl").open("wb") as wire, (args.out / "actor.log").open("wb") as actor_log:
-                process = subprocess.Popen([str(args.binary), "--config", str(root / "config.toml"), "--data-dir", str(root / "data"), "mcp"],
-                                           cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=runtime_log, bufsize=0)
+                def launch():
+                    child = subprocess.Popen([str(args.binary), "--config", str(root / "config.toml"), "--data-dir", str(root / "data"), "mcp"],
+                                             cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=runtime_log, bufsize=0)
+                    process_events.append(dict(pid=child.pid, dataRoot=str(root / "data"), exitCode=None))
+                    save(evaluator / "process-events.json", process_events)
+                    return child
+                def stop():
+                    process.stdin.close()
+                    process.wait(timeout=20)
+                    process_events[-1]["exitCode"] = process.returncode
+                    save(evaluator / "process-events.json", process_events)
+                    if process.returncode != 0:
+                        raise RuntimeError("production MCP child failed during EOF shutdown")
+                process = launch()
                 actor_path = root / "actor.py"
                 shutil.copyfile(Path(__file__).with_name("public-mcp-actor.py"), actor_path)
                 shutil.copyfile(actor_path, args.out / "actor-code.py")
@@ -228,10 +248,25 @@ warm_file_enabled = false
                 assert digest(actor_path.read_bytes()) == m["sourceFilesSha256"]["scripts/public-mcp-actor.py"]
                 start_id = 0
                 # The supervisor owns this schedule. Each actor process sees only its current question.
-                for ordinal in range(len(schedule["queries"]) + 2):
+                for ordinal in range(len(schedule["steps"]) + 1 if conformance else len(schedule["queries"]) + 2):
                     stub.delivery = ordinal
                     if ordinal == 0:
                         projection = ingest_projection
+                    elif conformance:
+                        step = schedule["steps"][ordinal - 1]
+                        if step.get("restart"):
+                            stop()
+                            process = launch()
+                            projection = dict(phase="connect", startId=start_id, deliveryOrdinal=ordinal, activeEmbedding=m["activeEmbedding"])
+                        else:
+                            if "waitSeconds" in step:
+                                time.sleep(step["waitSeconds"])  # Real elapsed time; no frozen clock/control.
+                            projection = CONFORMANCE["projection"](step, public_ids, start_id, ordinal)
+                            arguments = projection["currentAction"]["arguments"]
+                            text = ("a6-query:" + arguments["query"] if "query" in arguments else
+                                    "a6-document:" + arguments["summary"] if "summary" in arguments else None)
+                            if text in cache["entries"]:
+                                stub.entries[stub.key(text)] = cache["entries"][text]
                     else:
                         miss = ordinal == len(schedule["queries"]) + 1
                         question = dict(queryId="replay-miss", text="unrecorded-query") if miss else schedule["queries"][ordinal - 1]
@@ -254,10 +289,12 @@ warm_file_enabled = false
                         break
                     assert acknowledgments and int(acknowledgments[-1]["stepId"]) > start_id
                     start_id = int(acknowledgments[-1]["stepId"])
+                    for ack in acknowledgments:
+                        if ack["tag"].startswith("store:") and not ack["response"]["result"].get("isError"):
+                            public_ids[ack["tag"][6:]] = json.loads(ack["response"]["result"]["content"][0]["text"])["id"]
                     with (evaluator / "schedule-ledger.jsonl").open("a") as log:
                         log.write(json.dumps(dict(deliveryOrdinal=ordinal, acknowledgedThroughStepId=str(start_id))) + "\n")
-                process.stdin.close()
-                process.wait(timeout=20)
+                stop()
                 if runtime_failure is None and process.returncode != 0:
                     runtime_failure = f"actor/runtime exited {child.returncode}/{process.returncode}"
             if "falling back to direct mode" not in (args.out / "runtime.log").read_text():
@@ -307,12 +344,18 @@ warm_file_enabled = false
         canary = schedule["futureQueryCanary"]
         assert canary not in (args.out / "actor-code.py").read_text()
         assert labels["labelCanary"] not in (args.out / "actor-code.py").read_text()
-        for ordinal in range(4):
+        canary_ordinal = next(i for i in range(len(schedule["steps"]) + 1) if canary in (args.out / "actor-inputs" / f"step-{i}.json").read_text()) if conformance else 4
+        for ordinal in range(canary_ordinal):
             assert canary not in (args.out / "actor-inputs" / f"step-{ordinal}.json").read_text()
-        assert canary in (args.out / "actor-inputs/step-4.json").read_text()
-        assert all(canary not in json.dumps(row) for row in wire if row["deliveryOrdinal"] < 4)
-        assert all(canary not in json.dumps(row) for row in providers if row["deliveryOrdinal"] < 4)
-        assert len(rows(evaluator / "schedule-ledger.jsonl")) == 6
+        assert canary in (args.out / "actor-inputs" / f"step-{canary_ordinal}.json").read_text()
+        assert all(canary not in json.dumps(row) for row in wire if row["deliveryOrdinal"] < canary_ordinal)
+        assert all(canary not in json.dumps(row) for row in providers if row["deliveryOrdinal"] < canary_ordinal)
+        assert len(rows(evaluator / "schedule-ledger.jsonl")) == (len(schedule["steps"]) + 1 if conformance else 6)
+        for projection_path in (args.out / "actor-inputs").glob("*.json"):
+            assert labels["labelCanary"] not in projection_path.read_text()
+        if conformance:
+            report = CONFORMANCE["verify"](wire, schedule, mappings, actor["sources"], process_events)
+            save(evaluator / "conformance.json", report)
         result.update(futureQueryCanaryWithheldUntilDelivery=True, status="passed", actorActions=len(outcomes), expectedProviderMisses=1, storeMappings=len(mappings))
     except BaseException as error:
         result.update(status="failed", error=str(error))
@@ -375,6 +418,9 @@ cargo build --offline --locked --bin recalld --example score_mcp_episode > /work
 python3 scripts/public-mcp-evaluation.py prepare --binary /work/target/debug/recalld --scorer /work/target/debug/examples/score_mcp_episode --build /work/output/build.json --out /work/output/inputs
 python3 scripts/public-mcp-evaluation.py run --binary /work/target/debug/recalld --scorer /work/target/debug/examples/score_mcp_episode --source-root /work/source --manifest /work/output/inputs/manifest.json --out /work/output/episode-0
 '''
+    if args.track == CONFORMANCE["TRACK"]:
+        script = script.replace("cargo test --offline --locked --examples", "cargo test --offline --locked --example score_mcp_episode")
+        script = script.replace(" prepare --binary", " prepare --track " + args.track + " --binary")
     if args.library_evidence:
         script = "\n".join(line for line in script.split("\n") if "cargo test --offline --locked --lib " not in line)
     (root / "build.sh").write_text(script)
@@ -395,10 +441,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
+    p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p = sub.add_parser("host")
+    p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"]), default=TRACK)
     p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True); p.add_argument("--library-evidence", type=Path)
     args = parser.parse_args()
     {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)

@@ -109,6 +109,43 @@ class Preflight(unittest.TestCase):
             self.assertEqual(run.stdout, "")
             self.assertIn("unexpected actor projection fields", run.stderr)
 
+    def test_conformance_track_is_distinct_and_schedule_is_evaluator_only(self):
+        actor, labels, cache, schedule = m["fixtures"](m["CONFORMANCE"]["TRACK"])
+        self.manifest["track"] = m["CONFORMANCE"]["TRACK"]
+        for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels),
+                                  ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
+            m["save"](self.root / name, value)
+            self.manifest[key]["sha256"] = m["digest"]((self.root / name).read_bytes())
+        self.manifest["dataset"]["actorArtifactSha256"] = self.manifest["actorInputs"]["sha256"]
+        self.validate()
+        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](actor).decode())
+        self.assertEqual(sum(s.get("restart", False) for s in schedule["steps"]), 1)
+        self.assertEqual(sum(s.get("expectedError", False) for s in schedule["steps"]), 11)
+        self.manifest["track"] = m["TRACK"]
+        with self.assertRaises(ValueError): self.validate()
+
+    def test_current_action_projection_resolves_only_acknowledged_ids(self):
+        _, labels, _, schedule = m["fixtures"](m["CONFORMANCE"]["TRACK"])
+        step = next(s for s in schedule["steps"] if s.get("tag") == "store:turn-3")
+        with self.assertRaises(KeyError): m["CONFORMANCE"]["projection"](step, {}, 10, 2)
+        delivered = m["CONFORMANCE"]["projection"](step, {"turn-0": "acknowledged-public-uuid"}, 10, 2)
+        self.assertEqual(delivered["currentAction"]["arguments"]["supersedes"], "acknowledged-public-uuid")
+        self.assertEqual(set(delivered["currentAction"]), {"tag", "tool", "arguments"})
+        self.assertNotIn(labels["labelCanary"], m["encoded"](delivered).decode())
+        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](delivered).decode())
+
+    def test_current_action_rejects_nested_evaluator_data_before_mcp_io(self):
+        import subprocess, sys
+        for field in ("futureQueries", "evaluatorLabels", "expectedError"):
+            projection = dict(phase="action", startId=0, deliveryOrdinal=1,
+                              currentAction=dict(tag="current", tool="get_memory", arguments=dict(id="public-id", recordAccess=False)))
+            projection["currentAction"][field] = "MUST_NOT_REACH_ACTOR"
+            run = subprocess.run([sys.executable, str(Path(__file__).with_name("public-mcp-actor.py")),
+                "--read-fd", "0", "--write-fd", "1", "--deny-fd", "9"], input=json.dumps(projection), capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertEqual(run.stdout, "")
+            self.assertIn("unexpected current action fields", run.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
