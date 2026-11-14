@@ -139,15 +139,25 @@ async fn native_context_purge_coordinator_rejects_legacy_owner_for_both_contract
     let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
     for contract_version in [1, 2] {
         let work = tracker.begin().unwrap();
-        let error = publisher.purge_native_accepted(MutationContext {
-            store_id: Some(before.store_id),
-            scope: MutationScope::Namespace(NamespaceId::new(1)),
-            idempotency_key: Some("wrong-owner".into()),
-            expected_generation: Some(before.committed_generation),
-            contract_version,
-        }, true, &work).await.unwrap_err();
+        let error = publisher
+            .purge_native_accepted(
+                MutationContext {
+                    store_id: Some(before.store_id),
+                    scope: MutationScope::Namespace(NamespaceId::new(1)),
+                    idempotency_key: Some("wrong-owner".into()),
+                    expected_generation: Some(before.committed_generation),
+                    contract_version,
+                },
+                true,
+                &work,
+            )
+            .await
+            .unwrap_err();
         work.finish();
-        assert!(matches!(error, StorageError::InvalidMutationContext(ref message) if message == "native purge requires native owner"), "{error:?}");
+        assert!(
+            matches!(error, StorageError::InvalidMutationContext(ref message) if message == "native purge requires native owner"),
+            "{error:?}"
+        );
         assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
     }
 }
