@@ -43,7 +43,7 @@ impl DerivedCompletion {
         &self,
         ctx: crate::storage::control::MutationContext,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
         sampled_at: i64,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
         self.insert_reserved_with_work(ctx, input, generated_embedding, sampled_at, None, None)
@@ -54,7 +54,7 @@ impl DerivedCompletion {
         &self,
         ctx: crate::storage::control::MutationContext,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
         sampled_at: i64,
         reservation: Option<crate::storage::batch::BatchChild>,
         parent: Option<&WorkTicket>,
@@ -78,7 +78,7 @@ impl DerivedCompletion {
         &self,
         ctx: crate::storage::control::MutationContext,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
         sampled_at: i64,
         reservation: Option<crate::storage::batch::BatchChild>,
         work: &WorkTicket,
@@ -90,10 +90,11 @@ impl DerivedCompletion {
         let result = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = (|| {
-                let receipt = storage.insert_memory_reserved_with_work(
+                let receipt = storage.insert_memory_reserved_profile_with_work(
                     &ctx,
                     &input,
-                    &generated_embedding,
+                    &generated_embedding.values,
+                    generated_embedding.profile.as_ref(),
                     sampled_at,
                     reservation.as_ref(),
                     Some(&child),
@@ -582,7 +583,7 @@ mod tests {
                         parent_id: None,
                         supersedes: None,
                     },
-                    vec![],
+                    vec![].into(),
                     123,
                 )
                 .await
@@ -732,7 +733,7 @@ mod tests {
             .committed_generation;
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
         let error = match publisher(&fx)
-            .insert(ctx.clone(), input.clone(), vec![], 123)
+            .insert(ctx.clone(), input.clone(), vec![].into(), 123)
             .await
         {
             Ok(_) => panic!("wrong-width derived rebuild succeeded"),
@@ -763,7 +764,7 @@ mod tests {
         );
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
         let replay = publisher(&fx)
-            .insert(ctx, input, vec![f32::NAN], i64::MAX)
+            .insert(ctx, input, vec![f32::NAN].into(), i64::MAX)
             .await
             .unwrap();
         assert!(replay.receipt.replayed);

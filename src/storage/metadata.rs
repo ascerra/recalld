@@ -13,6 +13,8 @@ pub(crate) mod effects;
 mod insertion;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
+mod native_lifecycle;
+mod native_records;
 mod observation;
 mod publication;
 pub(crate) mod purge;
@@ -85,6 +87,7 @@ const NAMESPACE_INDEX: MultimapTableDefinition<u32, &[u8]> =
 /// concurrent read transactions and exclusive write transactions.
 pub struct MetadataStore {
     db: Database,
+    native_lifecycle_only: bool,
     work_tracker: WorkTracker,
     view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
     unavailable: std::sync::atomic::AtomicBool,
@@ -119,14 +122,53 @@ impl MetadataStore {
     /// - Creates all tables on first open.
     /// - Loads or rebuilds the phase index from persisted bitmaps.
     pub(crate) fn open(path: &Path) -> Result<Self, StorageError> {
+        Self::open_mode(path, false)
+    }
+
+    // Caller must already own the store and validate its complete inventory.
+    pub(crate) fn open_native_lifecycle(path: &Path) -> Result<Self, StorageError> {
+        Self::open_mode(path, true)
+    }
+
+    fn open_mode(path: &Path, native_lifecycle_only: bool) -> Result<Self, StorageError> {
+        if native_lifecycle_only && (!path.is_file() || path.metadata()?.len() == 0) {
+            return Err(StorageError::InvalidPath);
+        }
+        if let Some(parent) = path.parent() {
+            if std::fs::symlink_metadata(parent.join(".recalld-importing")).is_ok() {
+                return Err(StorageError::RecoveryRequired(
+                    "incomplete logical import; resume using its original export".into(),
+                ));
+            }
+        }
         // redb's writable open can change bookkeeping. Reject historical mode
         // on a disposable copy even for callers bypassing the engine.
         if path.try_exists()? && path.metadata()?.len() > 0 {
             let (_copy, db) = super::validation::inspect_database_copy(path, true)?;
             let read = db.begin_read()?;
-            if let Some(control) = control::validate_existing(&read)? {
+            let control = control::validate_existing(&read)?;
+            super::canonical_schema::validate_metadata_format(&read, control.as_ref())?;
+            if native_lifecycle_only {
+                restoration::validate_inventory(&read)?;
+            }
+            if native_lifecycle_only && text_generation::read_selection(&read)?.is_none() {
+                return Err(StorageError::InvalidControl(
+                    "native lifecycle entry requires the selected-text old-reader fence".into(),
+                ));
+            }
+            if native_lifecycle_only && control.is_none() {
+                return Err(StorageError::InvalidMutation(
+                    "native lifecycle entry requires canonical schema 2".into(),
+                ));
+            }
+            if let Some(control) = control {
                 super::lineage::ensure_serving(&read, &control)?;
-                if control.control_schema_version == 2 {
+                if native_lifecycle_only && control.control_schema_version != 2 {
+                    return Err(StorageError::InvalidMutation(
+                        "native lifecycle entry requires canonical schema 2".into(),
+                    ));
+                }
+                if control.control_schema_version == 2 && !native_lifecycle_only {
                     return Err(StorageError::RecoveryRequired("canonical schema v2 is offline until participating writers are enabled; use schema inspect/export".into()));
                 }
             }
@@ -146,7 +188,7 @@ impl MetadataStore {
             let control = control::validate_existing(&read)?;
             removal_ledger::read_export(&read, control.as_ref())?;
             if let Some(state) = control {
-                if state.control_schema_version == 2 {
+                if state.control_schema_version == 2 && !native_lifecycle_only {
                     return Err(StorageError::RecoveryRequired("canonical schema v2 is offline until participating writers are enabled; use schema inspect/export".into()));
                 }
                 // An adopted store must retain its canonical tables. Do not
@@ -158,8 +200,18 @@ impl MetadataStore {
             effects::validate_existing(&read)?;
         }
 
-        // Force-create all tables by opening them in a write transaction.
-        let store_id = {
+        // Native entry never initializes tables or rewrites checkpoints.
+        let store_id = if native_lifecycle_only {
+            let read = db.begin_read()?;
+            let table = read.open_table(control::CONTROL)?;
+            ControlState::decode(
+                table
+                    .get("state")?
+                    .ok_or_else(|| StorageError::InvalidControl("missing native control".into()))?
+                    .value(),
+            )?
+            .store_id
+        } else {
             let write_txn = db.begin_write()?;
             control::initialize(&write_txn)?;
             effects::initialize(&write_txn)?;
@@ -178,6 +230,7 @@ impl MetadataStore {
         // from canonical records, even for direct MetadataStore callers.
         let store = Self {
             db,
+            native_lifecycle_only,
             work_tracker: WorkTracker::new(store_id),
             view_publication: std::sync::Arc::new(
                 super::publication::PublicationRegistry::default(),
@@ -252,11 +305,21 @@ impl MetadataStore {
     }
 
     fn commit(&self, tx: redb::WriteTransaction) -> Result<(), StorageError> {
+        self.ensure_legacy_operation()?;
         tx.commit().map_err(|e| {
             self.mark_unavailable();
             StorageError::RedbCommit(e)
         })?;
         self.view_publication.canonical_committed();
+        Ok(())
+    }
+
+    fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
+        if self.native_lifecycle_only {
+            return Err(StorageError::RecoveryRequired(
+                "operation does not participate in native lifecycle proof".into(),
+            ));
+        }
         Ok(())
     }
 }

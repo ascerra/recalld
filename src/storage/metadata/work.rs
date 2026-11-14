@@ -71,8 +71,8 @@ impl MetadataStore {
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<MutationGuard<'_>, StorageError> {
+        self.ensure_legacy_operation()?;
         let guard = self.publication_guard(parent)?;
-        // Recheck after waiting: the preceding writer may have failed.
         self.ensure_available()?;
         let read = self.db.begin_read()?;
         let table = read.open_table(control::CONTROL)?;
