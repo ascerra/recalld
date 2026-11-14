@@ -81,7 +81,7 @@ pub trait StorageEngine: Send + Sync {
     async fn mutate_native_batch(
         &self,
         _input: crate::storage::batch::BatchInput,
-    ) -> Result<crate::storage::batch::BatchOutcome, crate::serialization::native_batch::BatchFailure>
+    ) -> Result<crate::serialization::native_batch::NativeBatchOutcome, crate::serialization::native_batch::BatchFailure>
     {
         Err(crate::serialization::native_batch::BatchFailure::unavailable())
     }

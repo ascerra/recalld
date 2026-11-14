@@ -386,12 +386,12 @@ mod tests {
             failed: 0,
             unresolved: 0,
         };
-        let reply = crate::serialization::native_batch::NativeBatchReply::Outcome(outcome.clone());
+        let reply = crate::serialization::native_batch::NativeBatchReply::Outcome(outcome.clone().into());
         let daemon = crate::daemon::protocol::DaemonResponse::success(
             u64::MAX,
             serde_json::to_value(reply).unwrap(),
         );
-        let (status, envelope) = crate::serialization::native_batch::response(Ok(outcome));
+        let (status, envelope) = crate::serialization::native_batch::response(Ok(outcome.into()));
         assert_eq!(status, 200);
         let mcp = crate::serialization::native_batch::mcp_result(status, &envelope);
         for value in [

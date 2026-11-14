@@ -107,6 +107,12 @@ pub(crate) fn item_error(value: &Value, index: usize) -> Option<BatchError> {
             });
         }
     };
+    if object.get("embedding").is_some_and(|v| !v.is_array()) {
+        return Some(BatchError {
+            code: "INVALID_INPUT".into(),
+            field: Some(format!("memories[{index}].embedding")),
+        });
+    }
     if reject_unknown_fields(
         object,
         &[
@@ -144,6 +150,10 @@ pub struct BatchFailure {
     pub receipt: Option<WriteReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reservation_receipt: Option<WriteReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<Readiness>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 impl BatchFailure {
     fn new(category: ErrorCategory, code: &str, field: Option<String>, message: String) -> Self {
@@ -160,6 +170,8 @@ impl BatchFailure {
             },
             receipt: None,
             reservation_receipt: None,
+            readiness: None,
+            warnings: vec![],
         }
     }
     pub(crate) fn unavailable() -> Self {
@@ -262,14 +274,30 @@ impl From<InputError> for BatchFailure {
 }
 
 /// Dedicated internal RPC reply preserves typed failure and complete receipts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeBatchOutcome {
+    #[serde(flatten)]
+    pub outcome: BatchOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<Readiness>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+impl From<BatchOutcome> for NativeBatchOutcome {
+    fn from(outcome: BatchOutcome) -> Self {
+        Self { outcome, readiness: None, warnings: vec![] }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NativeBatchReply {
-    Outcome(BatchOutcome),
+    Outcome(NativeBatchOutcome),
     Failure(BatchFailure),
 }
 impl NativeBatchReply {
-    pub(crate) fn result(self) -> Result<BatchOutcome, BatchFailure> {
+    pub(crate) fn result(self) -> Result<NativeBatchOutcome, BatchFailure> {
         match self {
             Self::Outcome(v) => Ok(v),
             Self::Failure(e) => Err(e),
@@ -392,12 +420,12 @@ pub(crate) fn mcp_result(
     }
     out
 }
-pub(crate) fn response(result: Result<BatchOutcome, BatchFailure>) -> (u16, BatchEnvelope) {
+pub(crate) fn response(result: Result<NativeBatchOutcome, BatchFailure>) -> (u16, BatchEnvelope) {
     let scope = Scope::Catalog {
         kind: CatalogKind::Catalog,
     };
     match result {
-        Ok(out) => {
+        Ok(NativeBatchOutcome { outcome: out, readiness, warnings }) => {
             let states = out
                 .items
                 .iter()
@@ -439,6 +467,8 @@ pub(crate) fn response(result: Result<BatchOutcome, BatchFailure>) -> (u16, Batc
                 unresolved: counter(counts.unresolved),
             };
             let mut envelope = Envelope::success(scope, data);
+            envelope.readiness = readiness;
+            envelope.warnings = warnings;
             envelope.status = status;
             if http != 200 {
                 envelope.error = Some(ExecutionError {
@@ -490,6 +520,8 @@ pub(crate) fn response(result: Result<BatchOutcome, BatchFailure>) -> (u16, Batc
             let parent = failure.reservation_receipt.as_ref().map(|r| r.operation_id);
             let mut envelope = Envelope::failure(Some(scope), failure.error);
             envelope.receipt = failure.receipt;
+            envelope.readiness = failure.readiness;
+            envelope.warnings = failure.warnings;
             (
                 status,
                 BatchEnvelope {
@@ -509,7 +541,10 @@ pub(crate) fn input_schema() -> Value {
         "fullText":{"type":["string","null"],"maxLength":FULL_TEXT_MAX_BYTES},
         "namespace":{"type":["string","null"],"minLength":1,"maxLength":NAMESPACE_NAME_MAX_BYTES},
         "parentId":{"type":["string","null"],"format":"uuid"},"supersedes":{"type":["string","null"],"format":"uuid"},
+        "embedding":{"type":"array","minItems":1,"maxItems":8192,"items":{"type":"number"},"description":"Finite nonzero vector matching the canonical Bound profile. Original caller bits remain retry identity."},
+        "embeddingProfileId":{"type":"string","pattern":"^ep1:[0-9a-f]{64}$","minLength":68,"maxLength":68},
         "checkDuplicates":{"type":["boolean","null"],"default":true,"description":"Omitted/null enables advisory duplicate checks."}}});
+    item["dependentRequired"] = json!({"embedding":["embeddingProfileId"],"embeddingProfileId":["embedding"]});
     for (name, count, bytes) in [
         ("tags", MAX_TAGS, TAG_MAX_BYTES),
         ("entities", MAX_ENTITIES, ENTITY_MAX_BYTES),

@@ -323,12 +323,22 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
     assert_eq!(pending["data"]["succeeded"], "0");
     assert_eq!(pending["data"]["unresolved"], "1");
     assert!(pending["data"]["outcomes"][0].get("receipt").is_none());
+    assert_eq!(pending["readiness"]["ready"], false);
+    assert_eq!(pending["readiness"]["pendingWorkScope"], "acceptedTickets");
+    assert_eq!(pending["readiness"]["pendingWork"], 0);
+    assert_eq!(pending["readiness"]["observedWork"]["pendingBatchItems"], 1);
     let parent = pending["data"]["batchOperationId"].clone();
     provider.unavailable.store(false, Ordering::SeqCst);
     let (status, done) = http(&a, &body(&r)).await;
     assert_eq!(status, 200, "{done}");
     assert_eq!(done["data"]["batchOperationId"], parent);
     assert_eq!(done["data"]["outcomes"][0]["status"], "ok");
+    assert_eq!(done["readiness"]["ready"], true);
+    assert_eq!(done["readiness"]["pendingWork"], 0);
+    assert!(done["readiness"].get("pendingWorkScope").is_none());
+    let current = f.storage.read().unwrap().control_state().unwrap().committed_generation;
+    assert_eq!(done["readiness"]["committedGeneration"], json!(current));
+    assert!(done["readiness"]["derived"].as_array().unwrap().iter().all(|v|v["appliedGeneration"] == json!(current) && v["ready"] == true));
     let calls = provider.calls.load(Ordering::SeqCst);
     let ticks = clock.0.load(Ordering::SeqCst);
     let mut bad = r.clone();
@@ -356,6 +366,11 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
     assert_eq!(item["error"]["commitState"], "committed");
     let receipt: WriteReceipt = serde_json::from_value(item["receipt"].clone()).unwrap();
     assert_eq!(item["receipt"], canonical(&receipt));
+    assert_eq!(unready["readiness"]["ready"], false);
+    assert_eq!(unready["readiness"]["pendingWorkScope"], "acceptedTickets");
+    assert_eq!(unready["readiness"]["pendingWork"], 0);
+    assert!(unready["readiness"]["observedWork"]["pendingEffects"].as_u64().unwrap() > 0);
+    assert!(unready["readiness"]["derived"].as_array().unwrap().iter().any(|v|v["appliedGeneration"].is_null()));
     assert_ne!(
         item["receipt"]["operationId"],
         unready["data"]["batchOperationId"]
@@ -365,6 +380,10 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
     *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
     let (status, recovered) = http(&a, &body(&r)).await;
     assert_eq!(status, 200, "{recovered}");
+    assert_eq!(recovered["readiness"]["ready"], true);
+    let current = f.storage.read().unwrap().control_state().unwrap().committed_generation;
+    assert_eq!(recovered["readiness"]["committedGeneration"], json!(current));
+    assert!(recovered["readiness"]["derived"].as_array().unwrap().iter().all(|v|v["appliedGeneration"] == json!(current) && v["ready"] == true));
     let mut expected_replay = receipt.clone();
     expected_replay.replayed = true;
     assert_eq!(
@@ -385,4 +404,67 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
         .unwrap()
         .unwrap();
     assert_eq!(retained.items[0].state, BatchItemState::Ok { receipt });
+}
+
+#[tokio::test]
+async fn batch_wire_final_barrier_failure_after_children_preserves_receipts_and_repairs_same_key() {
+    for fault in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let d = fixture(root.path());
+        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+        let session = open(&d, clock.clone());
+        let mut r = request(&d, session.metadata().control_state().unwrap().store_id);
+        r.items = vec![json!({"summary":"final publication boundary","checkDuplicates":false})];
+        let f = Fixture::from_open_engine(root, session.engine);
+        let provider = Arc::new(Provider { profile: d.profile.clone(), calls: AtomicUsize::new(0), fail_if_called: false });
+        let a = Arc::new(adapter(&f, provider.clone(), clock.clone(), Default::default()));
+        a.fail_native_batch_after_children.store(fault, Ordering::SeqCst);
+        let failed = if fault == 1 {
+            let (status, failed) = http(&a, &body(&r)).await;
+            assert_eq!(status, 207, "{failed}");
+            failed
+        } else {
+            let (is_error, failed) = mcp(&bridge(a.clone()), body(&r)).await;
+            assert!(is_error, "{failed}");
+            failed
+        };
+        assert_eq!(failed["status"], "partial");
+        assert_eq!(a.fail_native_batch_after_children.load(Ordering::SeqCst), 0);
+        assert_eq!(f.storage.read().unwrap().meta_store().work_tracker().status().pending, 0);
+        assert_eq!(failed["data"]["succeeded"], "1");
+        let item = &failed["data"]["outcomes"][0];
+        assert_eq!(item["status"], "ok");
+        assert_eq!(item["ready"], false);
+        assert_eq!(item["error"]["commitState"], "committed");
+        let receipt: WriteReceipt = serde_json::from_value(item["receipt"].clone()).unwrap();
+        assert_eq!(item["receipt"], canonical(&receipt));
+        if fault == 1 {
+            assert_eq!(failed["readiness"]["ready"], false);
+            assert_eq!(failed["readiness"]["pendingWork"], 0);
+            assert_eq!(failed["readiness"]["pendingWorkScope"], "acceptedTickets");
+            assert!(failed["readiness"]["derived"].as_array().unwrap().iter().any(|v|v["name"] == "fts" && v["appliedGeneration"].is_null()));
+        } else {
+            assert!(failed.get("readiness").is_none());
+            assert_eq!(failed["warnings"], json!(["READINESS_UNKNOWN"]));
+        }
+        let calls = provider.calls.load(Ordering::SeqCst);
+        let ticks = clock.0.load(Ordering::SeqCst);
+        assert_eq!(calls, 1);
+        drop(a);
+        let root = f.close();
+        let session = open(&d, clock.clone());
+        let f = Fixture::from_open_engine(root, session.engine);
+        let before = readers::bytes(&d.path);
+        let a = Arc::new(adapter(&f, provider.clone(), clock.clone(), Default::default()));
+        let (is_error, repaired) = mcp(&bridge(a), body(&r)).await;
+        assert!(!is_error, "{repaired}");
+        assert_eq!(repaired["readiness"]["ready"], true);
+        assert_eq!(repaired["data"]["outcomes"][0]["ready"], true);
+        let mut expected = receipt;
+        expected.replayed = true;
+        assert_eq!(repaired["data"]["outcomes"][0]["receipt"], canonical(&expected));
+        assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
+        assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+        assert_eq!(readers::bytes(&d.path), before);
+    }
 }

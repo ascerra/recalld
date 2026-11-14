@@ -64,3 +64,20 @@ Profile mismatch uses the existing persisted `CONFLICT` diagnostic with field
 `EMBEDDING_PROFILE_MISMATCH` code. No persisted diagnostic vocabulary is widened.
 Original API1 context propagation is a separately owned dependent core change;
 this consumer continues using explicit API2 without coercing API1 contexts.
+
+## Actual batch publication consumer
+
+The native wire batch reply wraps the existing canonical outcome; manifests and
+core batch output types do not acquire transport readiness fields. A completed
+per-item effects result is only a candidate success. After the runner finishes
+its known accepted root, the actual owner's barrier checks current canonical
+lineage/generation and required publications. Barrier failure preserves every
+committed item/receipt and changes readiness to false, producing HTTP207 and MCP
+isError instead of a stale HTTP200. Unknown or failed work is observed without
+attempting to drain that caller's unresolved root.
+
+The remote adapter uses the dedicated non-retrying
+`mutate_native_batch_observed_v1` alias. Older servers reject it rather than
+silently omitting the required observer/profile-ID behavior. The server retains
+the prior alias for compatibility; the new client never falls back after a
+mutation. Public API1 response types remain unchanged.

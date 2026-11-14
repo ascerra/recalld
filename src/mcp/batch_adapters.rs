@@ -8,6 +8,61 @@ use crate::storage::control::{MutationOutcome, WriteReceipt};
 use serde_json::json;
 
 impl McpStorageAdapter {
+    /// The runner has finished its known root before this point. Unknown roots
+    /// remain tracked; failure observation never tries to drain them.
+    pub(super) async fn native_batch_readiness(
+        &self,
+        result: Result<BatchOutcome, crate::serialization::native_batch::BatchFailure>,
+    ) -> Result<crate::serialization::native_batch::NativeBatchOutcome, crate::serialization::native_batch::BatchFailure> {
+        use crate::serialization::{contract::Readiness, native_batch::NativeBatchOutcome};
+        let completion = self.batch_completion();
+        let deadline = || std::time::Instant::now() + std::time::Duration::from_secs(30);
+        match result {
+            Err(mut failure) => {
+                // Historical oversize reservation evidence is not a committed
+                // item receipt or a readiness claim. Do no completion for it.
+                if failure.receipt.is_some() {
+                    match completion.observe_readiness(deadline()).await.and_then(Readiness::observed) {
+                        Ok(observed) => failure.readiness = Some(observed),
+                        Err(_) => failure.warnings.push("READINESS_UNKNOWN".into()),
+                    }
+                }
+                Err(failure)
+            }
+            Ok(mut outcome) => {
+                if outcome.all_ready() {
+                    #[cfg(test)]
+                    match self.fail_native_batch_after_children.swap(0, std::sync::atomic::Ordering::SeqCst) {
+                        1 => self.storage.read().unwrap().meta_store().invalidate_derived_view(crate::storage::publication::DerivedView::Fts),
+                        2 => self.storage.read().unwrap().meta_store().mark_unavailable(),
+                        _ => {},
+                    }
+                    // Use actual current lineage/G, including a restored fork;
+                    // retained historical receipt G is not current readiness.
+                    let target = self.storage.read()
+                        .map_err(|e| StorageError::RecoveryRequired(e.to_string()))
+                        .and_then(|s| s.control_state().map(|c| c.generation_ref()));
+                    if let Ok(target) = target {
+                        if let Ok(ready) = completion.readiness_barrier(target, deadline()).await {
+                            return Ok(NativeBatchOutcome {
+                                outcome,
+                                readiness: Some(ready.into()),
+                                warnings: vec![],
+                            });
+                        }
+                    }
+                    mark_unready(&mut outcome);
+                }
+                let mut reply = NativeBatchOutcome::from(outcome);
+                match completion.observe_readiness(deadline()).await.and_then(Readiness::observed) {
+                    Ok(observed) => reply.readiness = Some(observed),
+                    Err(_) => reply.warnings.push("READINESS_UNKNOWN".into()),
+                }
+                Ok(reply)
+            }
+        }
+    }
+
     pub(super) fn batch_completion(&self) -> crate::derived_completion::DerivedCompletion {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
@@ -369,7 +424,7 @@ impl McpStorageAdapter {
     }
 }
 
-fn mark_unready(outcome: &mut BatchOutcome) {
+pub(super) fn mark_unready(outcome: &mut BatchOutcome) {
     for item in &mut outcome.items {
         item.ready = false;
         if item.status == BatchStatus::Ok {

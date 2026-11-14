@@ -1310,8 +1310,8 @@ async fn batch_profile_id_actual_wire_preserves_identity_and_current_generation_
         )
     );
     let out = a.mutate_native_batch(r.clone()).await.unwrap();
-    assert!(out.all_ready(), "{out:?}");
-    let receipt = out.items[0].receipt.as_ref().unwrap().clone();
+    assert!(out.outcome.all_ready(), "{out:?}");
+    let receipt = out.outcome.items[0].receipt.as_ref().unwrap().clone();
     assert_eq!(r.items, original);
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
@@ -1326,8 +1326,8 @@ async fn batch_profile_id_actual_wire_preserves_identity_and_current_generation_
     config.graph.max_auto_links = usize::MAX;
     let replay_adapter = adapter(&f, p.clone(), clock.clone(), config);
     let replay = replay_adapter.mutate_native_batch(r.clone()).await.unwrap();
-    assert!(replay.all_ready(), "{replay:?}");
-    let replay_receipt = replay.items[0].receipt.as_ref().unwrap();
+    assert!(replay.outcome.all_ready(), "{replay:?}");
+    let replay_receipt = replay.outcome.items[0].receipt.as_ref().unwrap();
     assert_eq!(replay_receipt.operation_id, receipt.operation_id);
     assert_eq!(replay_receipt.outcome, receipt.outcome);
     assert_eq!(receipt_rows(&f), rows);
@@ -1373,10 +1373,10 @@ async fn batch_profile_id_mismatch_and_invalid_pair_are_retained_without_provide
         json!({"summary":"unpaired", "embeddingProfileId":d.profile.profile_id().unwrap()}),
     ];
     let out = a.mutate_native_batch(r.clone()).await.unwrap();
-    assert_eq!(out.failed, 3);
-    assert_eq!(out.items[0].error.as_ref().unwrap().code, "CONFLICT");
+    assert_eq!(out.outcome.failed, 3);
+    assert_eq!(out.outcome.items[0].error.as_ref().unwrap().code, "CONFLICT");
     assert_eq!(
-        out.items[0].error.as_ref().unwrap().field.as_deref(),
+        out.outcome.items[0].error.as_ref().unwrap().field.as_deref(),
         Some("embeddingProfileId")
     );
     let (status, envelope) = crate::serialization::native_batch::response(Ok(out.clone()));
@@ -1388,7 +1388,7 @@ async fn batch_profile_id_mismatch_and_invalid_pair_are_retained_without_provide
     );
     let rows = receipt_rows(&f);
     let replay = a.mutate_native_batch(r).await.unwrap();
-    assert_eq!(replay.items[0].error, out.items[0].error);
+    assert_eq!(replay.outcome.items[0].error, out.outcome.items[0].error);
     assert_eq!(receipt_rows(&f), rows);
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
@@ -1452,12 +1452,12 @@ async fn batch_profile_id_pending_reopen_uses_retained_binding_and_original_cas(
     config.graph.max_auto_links = usize::MAX;
     let a = adapter(&f, p.clone(), clock, config);
     let out = a.mutate_native_batch(r).await.unwrap();
-    assert!(out.all_ready(), "{out:?}");
+    assert!(out.outcome.all_ready(), "{out:?}");
     assert_eq!(
-        out.batch_operation_id,
+        out.outcome.batch_operation_id,
         retained.reservation_receipt.operation_id
     );
-    assert_eq!(out.items[0].operation_id, Some(child.operation_id));
+    assert_eq!(out.outcome.items[0].operation_id, Some(child.operation_id));
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
     let current = completion(&f)

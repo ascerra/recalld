@@ -964,6 +964,10 @@ impl bridge::SearchPipeline for McpSearchAdapter {
 
 /// Adapts `RedbStorageEngine` + subsystems to the MCP `StorageEngine` trait.
 pub struct McpStorageAdapter {
+    /// Test-only, per-instance fault after completed children and known root
+    /// finish: 1 invalidates FTS publication; 2 withdraws the canonical handle.
+    #[cfg(test)]
+    pub(crate) fail_native_batch_after_children: std::sync::atomic::AtomicU8,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
@@ -1003,6 +1007,8 @@ impl McpStorageAdapter {
         cache.bind_storage(&storage);
         Self {
             clock: Arc::new(crate::time::SystemClock),
+            #[cfg(test)]
+            fail_native_batch_after_children: std::sync::atomic::AtomicU8::new(0),
             storage,
             cache,
             embedding,
@@ -1497,7 +1503,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
     async fn mutate_native_batch(
         &self,
         input: crate::storage::batch::BatchInput,
-    ) -> Result<crate::storage::batch::BatchOutcome, crate::serialization::native_batch::BatchFailure>
+    ) -> Result<crate::serialization::native_batch::NativeBatchOutcome, crate::serialization::native_batch::BatchFailure>
     {
         use crate::serialization::native_batch::BatchFailure;
         if input.mutation_version != 3
@@ -1508,12 +1514,13 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 bridge::BridgeError::InvalidInput("native insertion batch version mismatch".into()),
             ));
         }
-        self.run_batch_budgeted(input, Some(crate::mcp::batch_budget::BatchBudget::STANDARD))
+        let result = self.run_batch_budgeted(input, Some(crate::mcp::batch_budget::BatchBudget::STANDARD))
             .await
             .map_err(|e| match e {
                 StoreWriteError::Canonical(e) => BatchFailure::from_storage(e),
                 StoreWriteError::Bridge(e) => BatchFailure::from_bridge(e),
-            })
+            });
+        self.native_batch_readiness(result).await
     }
     async fn backend_context(
         &self,

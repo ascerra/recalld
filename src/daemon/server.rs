@@ -496,7 +496,7 @@ async fn dispatch(
             }
         }
 
-        "mutate_native_batch_v1" => {
+        "mutate_native_batch_v1" | "mutate_native_batch_observed_v1" => {
             use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};
             let reply = match serde_json::from_value::<crate::storage::batch::BatchInput>(params) {
                 Ok(input) => match storage.mutate_native_batch(input).await {
