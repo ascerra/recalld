@@ -23,77 +23,123 @@ pub async fn reinforce(
     now_millis: i64,
     expected_namespace: Option<String>,
 ) -> Result<super::lifecycle::FeedbackPlan, super::lifecycle::LifecycleError> {
+    reinforce_with_work(
+        storage,
+        cache,
+        id,
+        quality,
+        global_multiplier,
+        now_millis,
+        expected_namespace,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn reinforce_with_work(
+    storage: std::sync::Arc<std::sync::RwLock<crate::storage::RedbStorageEngine>>,
+    cache: std::sync::Arc<crate::cache::CacheManager>,
+    id: MemoryId,
+    quality: u8,
+    global_multiplier: f64,
+    now_millis: i64,
+    expected_namespace: Option<String>,
+    parent: Option<&crate::storage::work::WorkTicket>,
+) -> Result<super::lifecycle::FeedbackPlan, super::lifecycle::LifecycleError> {
     use super::lifecycle::{LifecycleError, plan_feedback, resolve_policy};
-    tokio::task::spawn_blocking(move || {
-        let storage = storage
+    let tracker = storage
+        .read()
+        .map_err(|e| LifecycleError::Storage(e.to_string()))?
+        .meta_store()
+        .work_tracker();
+    let work = tracker
+        .admit(parent)
+        .map_err(|e| LifecycleError::Storage(e.to_string()))?;
+    let child = work
+        .child()
+        .map_err(|e| LifecycleError::Storage(e.to_string()))?;
+    let worker_storage = storage.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let storage = worker_storage
             .write()
             .map_err(|e| LifecycleError::Storage(e.to_string()))?;
-        if let Some(namespace) = expected_namespace.as_deref() {
-            storage
-                .assert_memory_namespace(id, namespace)
-                .map_err(|error| match error {
-                    crate::storage::StorageError::NamespaceMismatch { .. } => {
-                        LifecycleError::NamespaceMismatch(error.to_string())
-                    }
-                    crate::storage::StorageError::NotFound(_) => LifecycleError::NotFound,
-                    crate::storage::StorageError::InvalidNamespaceName { .. } => {
-                        LifecycleError::InvalidInput("invalid namespace assertion")
-                    }
-                    _ => LifecycleError::Storage(error.to_string()),
-                })?;
-        }
-        let record = storage
-            .get_record(id)
-            .map_err(|e| LifecycleError::Storage(e.to_string()))?
-            .ok_or(LifecycleError::NotFound)?;
-        let namespace = storage
-            .get_namespace(NamespaceId::new(record.namespace_id))
-            .map_err(|e| LifecycleError::Storage(e.to_string()))?
-            .ok_or(LifecycleError::NotFound)?;
-        let policy = resolve_policy(
-            &namespace,
-            &super::DecayConfig::default(),
-            global_multiplier,
-        )?;
-        plan_feedback(&record, &policy, now_millis, quality)?;
-        let receipt = storage
-            .meta_store()
-            .record_legacy_feedback_scoped(
-                &crate::storage::control::MutationContext::unkeyed(namespace.id),
-                id,
-                quality,
-                now_millis,
+        let result = (|| {
+            if let Some(namespace) = expected_namespace.as_deref() {
+                storage
+                    .assert_memory_namespace(id, namespace)
+                    .map_err(|error| match error {
+                        crate::storage::StorageError::NamespaceMismatch { .. } => {
+                            LifecycleError::NamespaceMismatch(error.to_string())
+                        }
+                        crate::storage::StorageError::NotFound(_) => LifecycleError::NotFound,
+                        crate::storage::StorageError::InvalidNamespaceName { .. } => {
+                            LifecycleError::InvalidInput("invalid namespace assertion")
+                        }
+                        _ => LifecycleError::Storage(error.to_string()),
+                    })?;
+            }
+            let record = storage
+                .get_record(id)
+                .map_err(|e| LifecycleError::Storage(e.to_string()))?
+                .ok_or(LifecycleError::NotFound)?;
+            let namespace = storage
+                .get_namespace(NamespaceId::new(record.namespace_id))
+                .map_err(|e| LifecycleError::Storage(e.to_string()))?
+                .ok_or(LifecycleError::NotFound)?;
+            let policy = resolve_policy(
+                &namespace,
+                &super::DecayConfig::default(),
                 global_multiplier,
-                Some(&namespace.name),
-            )
-            .map_err(|e| super::observation::ObservationError::storage(e, vec![]))?;
-        super::observation::publish(&storage, std::slice::from_ref(&receipt), || {
-            tokio::runtime::Handle::current().block_on(cache.invalidate(id));
-        })?;
-        // Return canonical values, not the preflight plan: the metadata
-        // transaction is the authority even if an internal writer bypassed
-        // the outer storage lock. No historical response payload is retained.
-        let current = storage
-            .get_record(id)
-            .map_err(|e| super::observation::ObservationError::storage(e, vec![receipt.clone()]))?
-            .ok_or_else(|| {
-                super::observation::ObservationError::storage(
-                    crate::storage::StorageError::NotFound(id.into_inner()),
-                    vec![receipt.clone()],
+            )?;
+            plan_feedback(&record, &policy, now_millis, quality)?;
+            let receipt = storage
+                .meta_store()
+                .record_legacy_feedback_scoped_with_work(
+                    &crate::storage::control::MutationContext::unkeyed(namespace.id),
+                    id,
+                    quality,
+                    now_millis,
+                    global_multiplier,
+                    Some(&namespace.name),
+                    Some(&child),
                 )
+                .map_err(|e| super::observation::ObservationError::storage(e, vec![]))?;
+            super::observation::publish(&storage, std::slice::from_ref(&receipt), || {
+                tokio::runtime::Handle::current().block_on(cache.invalidate(id));
             })?;
-        Ok(super::lifecycle::FeedbackPlan {
-            timestamp: current.last_accessed_at,
-            stability: current.stability,
-            strength: current.strength,
-            phase: current.phase,
-            is_permastore: current.is_permastore != 0,
-        })
+            // Return canonical values, not the preflight plan: the metadata
+            // transaction is the authority even if an internal writer bypassed
+            // the outer storage lock. No historical response payload is retained.
+            let current = storage
+                .get_record(id)
+                .map_err(|e| {
+                    super::observation::ObservationError::storage(e, vec![receipt.clone()])
+                })?
+                .ok_or_else(|| {
+                    super::observation::ObservationError::storage(
+                        crate::storage::StorageError::NotFound(id.into_inner()),
+                        vec![receipt.clone()],
+                    )
+                })?;
+            Ok(super::lifecycle::FeedbackPlan {
+                timestamp: current.last_accessed_at,
+                stability: current.stability,
+                strength: current.strength,
+                phase: current.phase,
+                is_permastore: current.is_permastore != 0,
+            })
+        })();
+        storage.meta_store().finish_work(child);
+        result
     })
     .await
     .map_err(|e| {
         LifecycleError::Observation(super::observation::ObservationError::worker_failed(e))
-    })?
+    })?;
+    if let Ok(storage) = storage.read() {
+        storage.meta_store().finish_work(work);
+    }
+    result
 }
 
 /// Extract decay-relevant metadata from a `DiskRecord`, including the

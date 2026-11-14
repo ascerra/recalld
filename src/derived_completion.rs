@@ -291,6 +291,21 @@ impl DerivedCompletion {
                 }
                 let receipt = pending.first().map(|effect| effect.receipt.clone());
                 let result = (|| {
+                    // Instance-local fault is reached only after a real child
+                    // tombstone commit, not during batch reservation/preflight.
+                    #[cfg(test)]
+                    if pending.iter().any(|effect| {
+                        matches!(
+                            effect.receipt.outcome,
+                            crate::storage::control::MutationOutcome::MemoryTombstoned { .. }
+                        )
+                    }) && storage
+                        .meta_store()
+                        .tombstone_publication_fault
+                        .swap(false, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        return Err(failed("injected post-tombstone publication failure".into()));
+                    }
                     // ponytail: O(records + edges) rebuild under the publication locks.
                     // Replace with exact effect application when throughput warrants it.
                     let records = storage.scan_all()?;

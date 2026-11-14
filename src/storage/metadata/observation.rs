@@ -24,6 +24,17 @@ impl MetadataStore {
         sampled_at: i64,
         scope: Option<&crate::storage::control::ExposureScope>,
     ) -> Result<Option<WriteReceipt>, StorageError> {
+        self.record_exposure_batch_scoped_with_work(ctx, accesses, sampled_at, scope, None)
+    }
+
+    pub(crate) fn record_exposure_batch_scoped_with_work(
+        &self,
+        ctx: &MutationContext,
+        accesses: &[(MemoryId, AccessKind)],
+        sampled_at: i64,
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
         self.ensure_available()?;
         let namespace = legacy_scope(ctx)?;
         if accesses.is_empty() {
@@ -36,7 +47,7 @@ impl MetadataStore {
             }
             return Ok(None);
         }
-        let publication = self.mutation_guard()?;
+        let publication = self.mutation_guard_with_work(parent)?;
         let (tx, receipt) =
             self.prepare_exposures_scoped(&publication, ctx, accesses, sampled_at, scope)?;
         self.commit_observation(tx, &receipt)?;
@@ -173,7 +184,28 @@ impl MetadataStore {
         global_multiplier: f64,
         expected_namespace: Option<&str>,
     ) -> Result<WriteReceipt, StorageError> {
-        let publication = self.mutation_guard()?;
+        self.record_legacy_feedback_scoped_with_work(
+            ctx,
+            id,
+            quality,
+            sampled_at,
+            global_multiplier,
+            expected_namespace,
+            None,
+        )
+    }
+
+    pub(crate) fn record_legacy_feedback_scoped_with_work(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        quality: u8,
+        sampled_at: i64,
+        global_multiplier: f64,
+        expected_namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        let publication = self.mutation_guard_with_work(parent)?;
         let (tx, receipt) = self.prepare_feedback_scoped(
             &publication,
             ctx,

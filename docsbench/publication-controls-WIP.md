@@ -123,3 +123,32 @@ legacy ledger operation UUID sites and offline schema-migration/store IDs must
 also be covered or explicitly rejected by reset controls. Reserved batch/purge
 operation identities must pass through unchanged, never be redrawn by a new
 owned source. No competing native allocator is being introduced.
+
+The current coherent-query implementation intentionally holds publication and all
+four derived leases across provider embedding. Provider latency can therefore
+block publishers. This is a disclosed correctness-first cost, not a measured
+performance result. A later provider-before-capture path requires final profile
+and policy revalidation; this revision does not weaken the leases speculatively.
+
+## Post-END focused validation log
+
+- `c14f331` compiled. Two of four coherent-consumer regressions passed; two byte
+  checks failed because the test helper invoked offline database validation on
+  an already-open owned fixture. Raw failure and executable hash are retained at
+  `/tmp/recalld-coherent-controls-test-cj0r7f9l/output`.
+- `3ba2d5a` corrected that test helper to enumerate actual owned namespace/text
+  selection paths. Four coherent, ten current-freeze, 27 publication, eleven
+  completion, thirteen metadata-observation, and forty entity checks passed.
+  Batch checks passed 52 and failed one; native checks were not reached. Evidence:
+  `/tmp/recalld-coherent-controls-test-jznmb08x/output`.
+- The batch failure exposed stronger pre-batch admission: an invalid starting
+  index now fails before any child mutation, rather than at the intended
+  post-commit test fault. Current source retains a separate early-rejection
+  regression and injects the committed-failure test only after a real tombstone
+  receipt via an instance-local test probe. Original assertions about retained
+  committed receipts and unattempted later children remain intact.
+- Exposure/feedback source now registers roots before workers are queued, and
+  carries children through actual metadata publication and cache invalidation.
+  Close-race and cancellation tests are added; this newer source is not yet
+  validated. These roots do not replace the still-required outer true/prepared
+  transport root covering provider/selection/hydration work.
