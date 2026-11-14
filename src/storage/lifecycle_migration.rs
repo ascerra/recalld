@@ -204,6 +204,15 @@ pub(crate) fn validate_policy_history(
                 ));
                 Some(t.namespace_id)
             }
+            MutationOutcome::NativeGraphChanged { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
             MutationOutcome::NativeMemoryInserted { transition: t }
             | MutationOutcome::NativeMemoryTombstoned { transition: t } => {
                 native_history.push((
@@ -399,6 +408,18 @@ pub(crate) fn validate_policy_history(
                     records
                         .get_mut(&t.namespace_id.get())
                         .ok_or_else(|| invalid("native receipt namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeGraphChanged { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native graph receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native graph namespace absent"))?,
                 )?;
             }
             MutationOutcome::NativeMemoryInserted { transition: t }
