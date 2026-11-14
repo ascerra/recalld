@@ -33,6 +33,9 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         crate::storage::StorageError::ProviderVectorUnavailable(_) => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
+        crate::storage::StorageError::NamespaceMismatch { .. } => {
+            bridge::BridgeError::NamespaceMismatch(error.to_string())
+        }
         crate::storage::StorageError::InvalidMutation(_)
         | crate::storage::StorageError::EdgeConflict(_)
         | crate::storage::StorageError::MutationNamespaceMismatch => {
@@ -3765,8 +3768,10 @@ mod tests {
     async fn namespace_deletion_clears_orphan_entity_postings_only_in_its_scope() {
         let fx = Fixture::new();
         let scratch = fx.create_namespace("scratch");
-        let orphan = MemoryId::new();
-        let names = vec!["José".into()];
+        // Only the scratch posting is orphaned. The actual purge completion
+        // rebuilds from canonical rows, so a foreign posting needs a real owner.
+        let orphan = fx.insert_memory_in(default_ns(), &["entity/shared"]).await;
+        let names = vec!["Shared".into()];
         {
             let mut index = fx.entity_index.write().await;
             index.add(scratch, orphan, &names);
@@ -3790,5 +3795,6 @@ mod tests {
             index.find_by_entities(default_ns(), &names, MemoryId::new()),
             vec![(orphan, 1)]
         );
+        assert!(fx.record(orphan).is_some());
     }
 }

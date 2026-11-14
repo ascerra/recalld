@@ -191,6 +191,21 @@ impl DerivedCompletion {
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<(), StorageError> {
+        self.complete_impl(parent, false).await
+    }
+
+    /// Explicitly rebuild newly constructed private views after owner reopen,
+    /// even when earlier completion consumed every pending manifest. This does
+    /// not establish a whole-query ReadView or register generation watermarks.
+    pub(crate) async fn rebuild_all(&self) -> Result<(), StorageError> {
+        self.complete_impl(None, true).await
+    }
+
+    async fn complete_impl(
+        &self,
+        parent: Option<&WorkTicket>,
+        rebuild_all: bool,
+    ) -> Result<(), StorageError> {
         let work = self.accept_work(parent)?;
         self.cache.bind_storage(&self.storage);
         let gate = publication_gate(&self.storage).await?;
@@ -207,15 +222,14 @@ impl DerivedCompletion {
             let result = (|| {
                 storage.resume_pending_purges_with_work(Some(&child))?;
                 storage.ensure_available()?;
-                if !storage.meta_store().needs_effects_rebuild() {
+                if !rebuild_all && !storage.meta_store().needs_effects_rebuild() {
                     return Ok(());
                 }
                 let pending = storage.meta_store().pending_effects()?;
-                let operation_id = pending
-                    .first()
-                    .ok_or_else(|| failed("dirty state without durable effects".into()))?
-                    .receipt
-                    .operation_id;
+                let operation_id = pending.first().map(|p| p.receipt.operation_id);
+                if operation_id.is_none() && storage.meta_store().needs_effects_rebuild() {
+                    return Err(failed("dirty state without durable effects".into()));
+                }
                 let result = (|| {
                     // ponytail: O(records + edges) rebuild under the publication locks.
                     // Replace with exact effect application when throughput warrants it.
@@ -295,9 +309,12 @@ impl DerivedCompletion {
                         .meta_store()
                         .acknowledge_rebuilt_effects_with_work(Some(&child))
                 })();
-                result.map_err(|source| StorageError::CommittedEffectsPending {
-                    operation_id,
-                    source: Box::new(source),
+                result.map_err(|source| match operation_id {
+                    Some(operation_id) => StorageError::CommittedEffectsPending {
+                        operation_id,
+                        source: Box::new(source),
+                    },
+                    None => source,
                 })
             })();
             storage.meta_store().finish_work(child);

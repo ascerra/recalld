@@ -765,7 +765,17 @@ impl MetadataStore {
         operation_id: uuid::Uuid,
         parent: Option<&WorkTicket>,
     ) -> Result<(), StorageError> {
-        let _publication = self.mutation_guard_with_work(parent)?;
+        // This narrow checkpoint consumes an already validated outbox only
+        // after the caller rebuilt the real views. It does not author canonical
+        // records, receipts or generations, and cannot admit legacy writers to
+        // a native owner. Both paths retain the same owner-instance work ticket.
+        let publication = if self.native_lifecycle_only {
+            self.native_guard_with_work(parent)?
+        } else {
+            self.mutation_guard_with_work(parent)?
+        };
+        publication.check(self)?;
+        self.pending_effects()?;
         let tx = self.db.begin_write()?;
         {
             let mut effects = tx.open_table(EFFECTS)?;
@@ -779,7 +789,10 @@ impl MetadataStore {
             }
             effects.remove(operation_id.as_bytes().as_slice())?;
         }
-        self.commit(tx)?;
+        tx.commit().map_err(|error| {
+            self.mark_unavailable();
+            StorageError::RedbCommit(error)
+        })?;
         self.derived_dirty
             .store(!self.pending_effects()?.is_empty(), Ordering::SeqCst);
         Ok(())
