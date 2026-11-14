@@ -2013,9 +2013,6 @@ mod tests {
             async fn get_batch(&self, _: &[MemoryId]) -> Result<Vec<CachedRecord>> {
                 unreachable!()
             }
-            async fn list_namespace_memories(&self, _: NamespaceId) -> Result<Vec<MemoryId>> {
-                unreachable!("this fixture exercises only get_memory")
-            }
         }
         let mut engine = engine(StubGraph::default(), StubMetaStore::default());
         engine.meta_store = Arc::new(MutatingLookup {
