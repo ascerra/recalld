@@ -1,154 +1,79 @@
-# Owned publication controls: unvalidated consumer work
+# Owned publication controls: bounded validated consumer
 
-This is working implementation documentation, not a publication or completion report.
-The registry will ship with its first actual coherent-query/barrier consumer and
-required writer joins, after isolated validation. No registry-only PR is proposed.
 
-## Current source and evidence
+Measured runtime: `ddd4cc20874015a0b77f10b5c1879cd0090ca097`, tree
+`369c7037666e3465eeb2c6af2cc1891844ce3243`, branch `impl/publication-controls`.
+Actual dependency composition: corrected native82 `a69865b` and producer83
+`209ce38`, with their required core/tracker ancestry. No broad integration ancestry.
+The file inventory relative to corrected82 includes producer83 dependency changes.
 
-Last compiled source: `671bede` on `impl/publication-controls`, based on actual
-73 + 70 + 61 + 78 + 79 dependencies. Focused isolated validation at
-`/tmp/recalld-publication-controls-test-jgc8kgiu/output` passed 27 publication,
-11 completion, and 13 observation tests. Its entity filter passed 38 and failed
-2 fixture tests, then stopped before batch/native filters. The failures were an
-undeclared 2-dimensional fixture provider and text embedding against unknown
-legacy provenance. Source now uses the same explicit synthetic query vectors
-and fixture dimension declaration as the actual native reader parent `d1d916e`;
-those corrections have not been rerun.
+## Exact validation
 
-Earlier failed runs remain intact:
+The frozen source passed **991 library tests, 2 CLI tests, 7 Python runner tests,
+formatting, clippy (exit 0 with warnings), and 9 public-v1 episodes**: three fresh
+stdio MCP, three HTTP MCP, three REST. Fixture version 3 passed all 54 returned-only
+exposure cases, nine expected fail-closed replay misses, false-read durable-file
+and public-state invariance, strict quality/scope, similarity thresholds, restart
+and deletion checks. The full library suite includes actual HTTP/MCP/daemon
+postcommit receipt and hydration error regressions. These are synthetic contract
+checks, not semantic quality or a release/performance gate.
 
-- `recalld-publication-controls-test-qg_aik89`: initial compile integration errors.
-- `recalld-publication-controls-test-93kw_s3y`: two canonical entity fixture errors;
-  its old observation filter matched zero tests and is not observation proof.
-- `recalld-publication-controls-test-n5y70_d3`: native/batch merge compile errors.
+Exact command and source/input/output hashes are in `manifest.json`; executable
+hashes are in `source-binaries.json`. `passed-source-output.tar.gz` contains the
+allowlisted source and complete raw output, including synthetic forensic stores.
+Those stores are evidence, not validated A6 snapshots. No cargo cache, target or
+executable is archived. Prior successful/failed attempts remain in their original
+scratch paths and `prior-run-outputs.tar.gz`, indexed by `prior-run-index.json`.
 
-Source after `671bede` is unvalidated. A5 sampling hold began
-2026-11-14 15:27:38 UTC, hard end 15:47:38 UTC, with explicit END required before
-new builds/tests/formatting/copies. All local heavy jobs were drained beforehand.
+Validation used Rust 1.94.1, image
+`sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef`,
+Docker network none, 2 CPUs/4 GiB, private source/cargo/target, no personal home,
+credentials or socket mounts. Each source had a new private target and package
+clean; no BEFORE/AFTER executable reuse. Full target compilation used `-j 1`.
+Final cgroup memory peak reached 4294967296 bytes; oom and oom_kill counters were
+zero. Clippy warnings are retained in full; this is not warning-free validation.
 
-## Actual consumer being implemented
+An earlier two-target compile at `14d9af5` was killed by signal 9. That attempt
+has no captured cgroup OOM evidence: report a resource kill, not a proven OOM.
+Its serial retry compiled but found three real fixture/owner integration failures
+(988 pass/3 fail). Final source admits MCP searches through the actual QueryEngine
+owner, preserving immutable offline readers, and makes the RIF fixture explicitly
+false-mode. Final focused regressions and the complete suite passed. A prior
+creation-cache assertion was narrowed to require that any served cached entry
+matches canonical links; correctly rejecting a stale cache entry is permitted.
+Earlier zero-match daemon filters are not daemon evidence; the final full suite
+executes the actual daemon tests.
 
-`Recalld::search_coherent_read_only` is an internal Rust entry point through the
-actual QueryEngine. It rejects requested true mode; it never rewrites the caller's
-request. It registers an owned root before waiting, registers each blocking
-child before spawning, and pins the same live graph/vector/FTS/entity handles
-used by production adapters. The adapters read these leases directly, avoiding
-recursive locks behind queued publishers.
+## Implemented boundary
 
-The canonical view retains one actual redb read transaction. Namespace policy,
-member discovery, and canonical record hydration all read that transaction.
-Capture requires every derived component stamp to equal its actual GenerationRef;
-a missed notification cannot bless stale views. Behavioral record caches are
-bypassed and the query's clock is sampled once. The response includes that actual
-read generation. A newer canonical commit can coexist with the pinned older
-query; this is not an as-of reconstruction or copied-file snapshot.
+One owned registry compares all required derived stamps against actual canonical
+GenerationRef read from redb. The coherent read-only Rust query pins one canonical
+transaction plus graph/vector/FTS/entity leases, bypasses behavioral record cache,
+and samples one query clock. True mode is rejected at this entry point. Existing
+public query/creation/deletion/feedback paths now carry owned roots and descendants
+through provider waits, mutation, hydration, publication and committed receipts.
+The readiness barrier drains accepted transitive work, checks actual pending
+canonical effects/purge/batch state and all component stamps. It fails closed on
+missed generation notification, foreign lineage, future target and stale views.
 
-Readiness barrier source drains the existing owned WorkTracker before acquiring
-publication/derived/storage locks. It rejects foreign/future targets and verifies
-actual pending effects, purge progress, batch items, and derived stamps. It does
-not repair a failed durable mutation or invent missing batch input. Completion
-remains the explicit actual rebuild/ack path.
+The coherent Rust response currently contains metadata/scores, with full_text=None.
+The passing legacy public-v1 episodes do NOT establish generation-coherent full
+payload responses. The next child must capture payloads under the actual engine
+read lock at the selected GenerationRef, reject whole-page mismatch before
+exposure, and consume the owned result without second hydration. Concurrent
+forget/text-compaction regressions are required before that promotion.
 
-The current-state metadata check uses a healthy already-validated owned handle.
-It checks actual pending tables, including stale-dirty-flag cases, with cooperative
-checks through enumeration. Full startup/offline proof and the original strict
-metadata freeze remain unchanged. This does not promise a hard timeout over
-blocking OS I/O. Barrier readiness is an observation; admission reopens afterward.
-It grants no snapshot/reset permission.
+Readiness is an observation; admission reopens afterward. It is not a retained
+whole-core freeze or snapshot/reset permission. Deadlines are cooperative, not a
+hard bound over OS I/O. Provider awaits currently retain derived leases and can
+block publishers. Completion rebuilds whole record views (O(N)); no incremental
+publication or performance improvement is claimed. Current barrier coverage is
+for this exact joined source, not later unjoined native catalog/batch producers.
 
-## Shipping prerequisites and remaining scope
+Actual public-v2 activation, physical frozen reset, controlled canonical clock,
+owned ID/RNG stream, exact cache/config restoration and evaluator control-channel
+activation remain outstanding. UUIDs and public wall clock remain nondeterministic.
+The private endpoint draft is not part of this measured source. Full A6 is not done.
+No datasets, live/paid models, training or human-judge quality results were used.
 
-- Curie owns queued catalog/policy, compaction install, maintenance/background,
-  and standalone graph roots/tails. Consume his frozen tested child, not file
-  overrides. Keep known completion errors repairable while durable pending work
-  blocks capture; unknown/cancelled/unavailable work remains unresolved.
-- Pascal owns native reader/profile and same-owner native acknowledgement join.
-  Preserve strict schema/proof/lineage guards and full committed receipts.
-- True/prepared query roots through returned-only exposure, HTTP provider-before-
-  insertion root, and standalone feedback still need actual root plumbing.
-  Current source is not proof of global producer coverage.
-- Native/public v2 activation, physical full-store snapshot/reset, owned canonical
-  clock/ID/RNG capture, frozen config and cache state remain unimplemented here.
-  Memory UUIDv7 and operation/store UUID generation are still real nondeterminism.
-- The independent manifest consumer keeps coherentReadView/barrier/reset/native
-  capabilities false until its actual runtime prerequisites and validation exist.
-  No datasets, models, training, or human-quality judgments are introduced.
-
-## Prepared validation after explicit END
-
-Use the pinned `recalld-ci:1.94` image, Rust 1.94.1, offline network-none Docker,
-2 CPUs/4 GiB, no home/credentials/socket mounts, separate private source targets.
-Clean only this crate in the privately copied dependency target and preserve
-per-source executable hashes. Do not reuse a test executable after source switching.
-
-1. Offline formatting, freeze the intended source commit, then focused coherent
-   query/barrier and metadata-current-state regressions.
-2. Existing publication/completion/observation/entity/batch/native checks.
-3. Full library and both actual CLI targets; clippy and formatting on exact source.
-4. Required producer/native joins and actual transport/fault regressions before
-   any global readiness or shipping handoff. Keep all failures/raw evidence and
-   seal final artifacts to authorized work-notes only after validation.
-
-Prepared new regressions cover physical false-mode canonical bytes, requested-mode
-rejection, pinned records across a real observation commit, a queued graph writer
-without recursive-lock deadlock, barrier waiting on an actual query root,
-foreign/future targets, close-timeout-reclose, stale views after catalog commit,
-current checks without lifetime receipt scans, cooperative deadline rejection,
-and durable pending work despite a stale clean flag. These are planned assertions,
-not passing results.
-
-## Reset inventory handoff (Feynman, source review only)
-
-Canonical capture must include namespace allocation high-water state, text
-generation descriptors/selection, batch reservation and child identities plus
-expanded defaults/policy hashes/outcomes, purge identities/cursor/sequence/stage,
-schema publication/profile/migration proofs, and lineage ancestry with retained
-per-origin receipts/ledger. Preserve canonical effects rows, including applied
-but not yet acknowledged effects; they are not disposable derived checkpoints.
-Pending effects must be discharged by the actual coordinator or capture fails.
-Active batch/purge/import/restore journals cannot be dropped to fabricate readiness.
-
-Freeze actual namespace bytes and policy/profile revisions, resolved lifecycle
-configuration, owned clock, default namespace/provider mode, and zero pending work.
-Capture RNG stream state/counter after draws, not only a seed, and restore before
-workers can be admitted. Preserve supplied IDs exactly. Isolated fixture reset may
-retain lineage only in its inaccessible retry domain; production restore forks it.
-Use the existing logical-export canonical table inventory as a coverage reference.
-No credentials or unknown profile provenance are inferred.
-
-Pascal confirmed native insertion uses the shared metadata memory allocator after
-replay/validation and native receipts use `control::record_receipt`. Additional
-legacy ledger operation UUID sites and offline schema-migration/store IDs must
-also be covered or explicitly rejected by reset controls. Reserved batch/purge
-operation identities must pass through unchanged, never be redrawn by a new
-owned source. No competing native allocator is being introduced.
-
-The current coherent-query implementation intentionally holds publication and all
-four derived leases across provider embedding. Provider latency can therefore
-block publishers. This is a disclosed correctness-first cost, not a measured
-performance result. A later provider-before-capture path requires final profile
-and policy revalidation; this revision does not weaken the leases speculatively.
-
-## Post-END focused validation log
-
-- `c14f331` compiled. Two of four coherent-consumer regressions passed; two byte
-  checks failed because the test helper invoked offline database validation on
-  an already-open owned fixture. Raw failure and executable hash are retained at
-  `/tmp/recalld-coherent-controls-test-cj0r7f9l/output`.
-- `3ba2d5a` corrected that test helper to enumerate actual owned namespace/text
-  selection paths. Four coherent, ten current-freeze, 27 publication, eleven
-  completion, thirteen metadata-observation, and forty entity checks passed.
-  Batch checks passed 52 and failed one; native checks were not reached. Evidence:
-  `/tmp/recalld-coherent-controls-test-jznmb08x/output`.
-- The batch failure exposed stronger pre-batch admission: an invalid starting
-  index now fails before any child mutation, rather than at the intended
-  post-commit test fault. Current source retains a separate early-rejection
-  regression and injects the committed-failure test only after a real tombstone
-  receipt via an instance-local test probe. Original assertions about retained
-  committed receipts and unattempted later children remain intact.
-- Exposure/feedback source now registers roots before workers are queued, and
-  carries children through actual metadata publication and cache invalidation.
-  Close-race and cancellation tests are added; this newer source is not yet
-  validated. These roots do not replace the still-required outer true/prepared
-  transport root covering provider/selection/hydration work.
+Evidence: [frozen report](../benchmarks/coherent-publication/REPORT.md).
