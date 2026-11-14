@@ -71,3 +71,29 @@ suite or clippy run on this composition is claimed.
 Final single
 wire/budget work, historical-selector fixtures, all required transport regressions,
 full shipping-tree validation, evidence seal and publication remain outstanding.
+
+## Published121 parent join
+
+`e11eb12` joins published PR121 `3fa91d4` directly for retained namespace binding.
+Curie's `866482da` source unions were used as a conflict-resolution reference,
+not as a shipping parent or inherited validation. Existing canonical-vector and
+exact-scan additions, batch CAS/profile preparation, observation, and the actual
+native-purge pending-reader checks remain. This first immutable run stopped at
+two rustfmt module-order differences; no tests ran and the failed log is retained.
+
+The ordering-only correction is frozen in `f7b6d625c3c44e68683d67a9d643e014c3469b20`.
+Formatting and nine focused tests passed: actual publication failure (1), final
+barrier failure and same-key repair (1), profile-ID batch cases (3), actual
+failure-readiness observation (1), and retained namespace-binding cases (3).
+The binding cases cover retired/recreated names, foreign guards/missing identity,
+and retained unknown profile provenance. This is existing API integration proof,
+not proof of an implemented single-write wire consumer.
+
+Both source snapshots' 307 file hashes match pre/post; the executed binary hash,
+commands, results and durable-copy manifest are in `join-f7b6d62.json`. The private
+package target was cleaned before the changed source build. Tests used offline
+Docker with two CPUs, 4 GiB and Rust1.94.1; both completed test containers were
+removed. All 34 evidence files, including the stopped formatter run, were copied
+and SHA-verified in the referenced work-notes artifact directory. No full suite
+or clippy run on this join is claimed, and this active branch is not READY for
+integration or publication.

@@ -52,6 +52,13 @@ activation prerequisites, not a decision to make API2 native-only. The proposed
 follow-up is a minimal actual legacy2 writer/adapter consumer after its original
 context interfaces are frozen, not an unused helper or blanket guard removal.
 
+Coordinated follow-up ownership: Curie owns insertion/batch original proofs,
+Feynman catalog/compound-history review, Pascal observation and maintenance
+origin, and Huygens actual MCP/REST/RPC selection and activation. This follows
+the current native consumer work; no extra legacy guard edits are included in
+that consumer. Read-only API2 on either store format remains gated by its actual
+coherence, semantics and observation prerequisites.
+
 ## Integration ownership
 
 Before an integration agent changes or merges an owned branch, provide READY
