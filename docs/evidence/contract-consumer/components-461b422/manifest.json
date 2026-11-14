@@ -1,0 +1,30 @@
+{
+  "runtime_commit": "461b422",
+  "files": [
+    {
+      "path": "REPORT.md",
+      "bytes": 1905,
+      "sha256": "2a5e8294a81b328eb873dc8c464e14fb0665d5cdb8fe9d53243ebd57c5bb144b"
+    },
+    {
+      "path": "clean.log",
+      "bytes": 38,
+      "sha256": "c60d68cda88e89185ca33528c746dd80e1f1402afb682636a14dc468a8366787"
+    },
+    {
+      "path": "discovery.log",
+      "bytes": 7629,
+      "sha256": "9353fa4343ab5eff76af9d8334b17104acdbf01168b3d83ea2adb559d39b835a"
+    },
+    {
+      "path": "exact.log",
+      "bytes": 8541,
+      "sha256": "94898162bee0b8ae77c0fc795225fc552052b76fcc34b05b350f3d8e2f2bf596"
+    },
+    {
+      "path": "pure-component-binary-hashes.json",
+      "bytes": 2404,
+      "sha256": "9ce3a2405407bf02b6936050d4db386485d5467f34490216cc78da34b181be0d"
+    }
+  ]
+}

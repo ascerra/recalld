@@ -22,6 +22,12 @@ pub(crate) struct CanonicalVectorSnapshot {
     pub binding: SnapshotBinding,
     pub namespace: crate::model::NamespaceConfig,
     pub rows: Vec<CanonicalVectorRow>,
+    pub accounting: SnapshotAccounting,
+}
+pub(crate) struct SnapshotAccounting {
+    pub record_encoded_bytes: usize,
+    pub vector_examined_bytes: usize,
+    pub vector_copied_bytes: usize,
 }
 pub(crate) struct CanonicalVectorRow {
     pub id: crate::model::MemoryId,
@@ -70,3 +76,15 @@ Actual writers during postcapture comparison: insertion/tombstone, catalog/polic
 ## Whole-query follow-up, owned by Halley coordinator
 
 A coherent query must pin one canonical transaction and matching graph/vector/FTS/entity publications, with exact GenerationRefs. Invalidation occurs inside canonical commit publication guard for catalog/policy/observed/batch bookkeeping and content/graph writers; effects_epoch is not a generation. Channel stamps advance only after actual publication or an audited no-change proof for that channel. No generic complete() blessing. Readiness/barrier must account accepted/transitive work and unresolved canonical effects, and fail closed rather than return stale-index empty success. This snapshot adds no duplicate registry.
+
+## Approved private accounting amendment
+
+Before backend freeze, Feynman added SnapshotAccounting. record_encoded_bytes
+counts selected encoded rows, vector_examined_bytes counts all retained vector
+bytes examined including invalid vectors, and vector_copied_bytes counts
+Available copies. max_bytes charges record_encoded_bytes+vector_examined_bytes,
+with all additions checked before copying. These are not physical disk I/O,
+cache traffic or allocator-exact memory. Timing remains caller wall capture.
+No public stats/cursor cache/performance claim is introduced. Actual200/2000/
+20000 measurements remain required. The backend and native consumer are still
+pending, not proven by this handshake document.
