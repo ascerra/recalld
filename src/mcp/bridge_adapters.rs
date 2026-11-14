@@ -171,7 +171,10 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         .get_namespace_by_name(&ns_name)
                         .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
                         .ok_or_else(|| {
-                            bridge::BridgeError::NotFound(format!("namespace '{}' not found", ns_name,))
+                            bridge::BridgeError::NotFound(format!(
+                                "namespace '{}' not found",
+                                ns_name,
+                            ))
                         })
                 })
                 .await
@@ -362,11 +365,12 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     };
                     if let Some(neighbor_node) = graph_r.get_node_by_key(other_key) {
                         if !result_ids.contains(&neighbor_node.memory_id) {
-                            let entry = neighbor_weights.entry(neighbor_node.memory_id).or_insert((
-                                0.0,
-                                format!("{:?}", edge.edge_type).to_lowercase(),
-                                mid.to_string(),
-                            ));
+                            let entry =
+                                neighbor_weights.entry(neighbor_node.memory_id).or_insert((
+                                    0.0,
+                                    format!("{:?}", edge.edge_type).to_lowercase(),
+                                    mid.to_string(),
+                                ));
                             if edge.weight > entry.0 {
                                 *entry = (
                                     edge.weight,
@@ -482,7 +486,8 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 receipts,
             }
             .finish(check_read_admission(&self.storage, stamp).await)
-        }).await
+        })
+        .await
     }
 
     async fn find_similar(

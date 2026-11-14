@@ -17,6 +17,7 @@ FIXED_INPUTS = (
     "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "examples/offline_eval.rs",
     "scripts/offline-evaluation.py", "scripts/offline-evaluation.Dockerfile",
     "scripts/test_offline_evaluation.py", "scripts/check-evaluation-contract.py",
+    "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl",
 )
 
 
@@ -32,18 +33,20 @@ def save(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
-def snapshot_source(root, destination):
+def snapshot_source(root, destination, extra=()):
     # Tracked target inputs only; never copy scratch, ambient Cargo config or secrets.
     tracked = {os.fsdecode(p) for p in subprocess.check_output(
         ["git", "ls-files", "-z", "--cached"], cwd=root).split(b"\0") if p}
     roots = ("src/", "tests/", "examples/", "benches/")
     legacy_data = {f"src/bench/data/{name}.json" for name in
                    ("locomo1", "locomo10", "locomo_conv30", "locomo_conv41", "locomo_first")}
-    names = set(FIXED_INPUTS)
+    names = set(FIXED_INPUTS) | set(extra)
     for name in tracked:
         if name.startswith(roots):
             if name.endswith(".rs"):
                 names.add(name)
+            elif name in names:
+                pass
             elif name not in legacy_data:
                 raise RuntimeError(f"undeclared target asset requires explicit allowlist: {name}")
     cargo = tomllib.loads((root / "Cargo.toml").read_text())
