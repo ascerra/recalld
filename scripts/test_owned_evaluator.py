@@ -121,6 +121,10 @@ decay_rate_multiplier = 0.0
         assert capabilities['guarantees']['snapshot'] is False
         assert capabilities['guarantees']['controlledIds'] is False
         assert capabilities['guarantees']['lifecycleClockControlled'] is True
+        assert capabilities['guarantees']['explicitLegacySweep'] is True
+        assert capabilities['guarantees']['nativeSweep'] is False
+        assert capabilities['sweepControlVersion'] == 1
+        assert control.call('sweepStatus', {})['result'] == {'episodeInvalidated': False, 'lastSweep': None}
         assert control.call('advance', {'deltaMs': 0, 'deadlineMs': 30000})['result']['nowMillis'] == 1767225600000
         for params in [{'deltaMs': -1, 'deadlineMs': 100}, {'deltaMs': 1.5, 'deadlineMs': 100},
                        {'deltaMs': 1, 'deadlineMs': 0}, {'deltaMs': 1, 'deadlineMs': 30001},
@@ -196,7 +200,7 @@ decay_rate_multiplier = 0.0
         before = files(root / 'data')
         tool('recall_memories', {'query': 'fixture-miss', 'recordAccess': False}, ok=False)
         assert inspect() == reinforced and files(root / 'data') == before
-        for method in ['snapshot', 'reset', 'sweep']:
+        for method in ['snapshot', 'reset']:
             assert control.call(method, {})['error']['code'] == 'UNSUPPORTED_CONTROL'
         for target in [dict(reinforced, storeId='00000000-0000-0000-0000-000000000000'),
                        dict(reinforced, generation=str(int(reinforced['generation']) + 1))]:

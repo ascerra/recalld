@@ -2,6 +2,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+mod sweep;
+
 use crate::derived_completion::DerivedCompletion;
 use crate::storage::{Readiness, RedbStorageEngine, StorageError, metadata::MetadataFreeze};
 use crate::time::{Clock, ManualClock};
@@ -76,6 +78,7 @@ pub(super) struct FrozenControls {
     // A controller permit, not a work ticket or a readiness registry. The join
     // task owns this until the blocking worker exits, even if its caller leaves.
     busy: Arc<tokio::sync::Mutex<()>>,
+    sweep_state: Arc<std::sync::Mutex<sweep::SweepState>>,
 }
 
 fn unavailable(message: impl ToString) -> StorageError {
@@ -88,6 +91,7 @@ impl FrozenControls {
             owner,
             clock,
             busy: Arc::new(tokio::sync::Mutex::new(())),
+            sweep_state: Arc::new(std::sync::Mutex::new(sweep::SweepState::default())),
         }
     }
 
@@ -107,6 +111,16 @@ impl FrozenControls {
             .clone()
             .try_lock_owned()
             .map_err(|_| unavailable("prior frozen control worker has not joined"))?;
+        if self
+            .sweep_state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .invalidated
+        {
+            return Err(unavailable(
+                "sweep episode invalid; inspect sweepStatus or use a fresh owner",
+            ));
+        }
         let owner = self.owner.clone();
         let join = tokio::spawn(async move {
             let _permit = permit;
