@@ -1,6 +1,5 @@
 //! Known replay evidence must survive validation failure without a second lookup.
 use super::*;
-use crate::storage::StorageEngine;
 use crate::storage::native_purge_tests::{fixture, open};
 
 #[tokio::test]
@@ -122,5 +121,33 @@ async fn native_context_purge_replay_validation_preserves_exact_known_receipt() 
             );
             assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), frozen);
         }
+    }
+}
+
+#[tokio::test]
+async fn native_context_purge_coordinator_rejects_legacy_owner_for_both_contracts() {
+    let fx = crate::test_support::Fixture::new();
+    let publisher = crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    };
+    let before = fx.storage.read().unwrap().control_state().unwrap();
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    for contract_version in [1, 2] {
+        let work = tracker.begin().unwrap();
+        let error = publisher.purge_native_accepted(MutationContext {
+            store_id: Some(before.store_id),
+            scope: MutationScope::Namespace(NamespaceId::new(1)),
+            idempotency_key: Some("wrong-owner".into()),
+            expected_generation: Some(before.committed_generation),
+            contract_version,
+        }, true, &work).await.unwrap_err();
+        work.finish();
+        assert!(matches!(error, StorageError::InvalidMutationContext(ref message) if message == "native purge requires native owner"), "{error:?}");
+        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
     }
 }

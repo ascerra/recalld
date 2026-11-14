@@ -595,8 +595,15 @@ impl MetadataStore {
             ) {
                 return Err(StorageError::IdempotencyConflict);
             }
-            let mut p = load(&tx, receipt.operation_id)?;
-            start_contract_write(&tx, &p)?;
+            let mut p = load(&tx, receipt.operation_id)
+                .and_then(|p| {
+                    start_contract_write(&tx, &p)?;
+                    Ok(p)
+                })
+                .map_err(|source| StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(source),
+                })?;
             p.start_receipt = receipt;
             return Ok(p);
         }
