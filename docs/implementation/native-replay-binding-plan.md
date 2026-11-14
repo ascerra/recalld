@@ -53,3 +53,12 @@ Required consumers/tests:
 5. The shared borrowed helper is consumed by strict lifecycle history, and the
    actual replay adapters consume MetadataStore capture. Do not publish an
    unused standalone helper as completion of the replay gap.
+
+## Implemented backend handoff
+
+The agreed capture interface is implemented at55bcf43db4518a3c4d6d5bc4329141394813b984,
+child of PR111/23f99c5.23focused checks and all-target Clippy passed; exact results
+and source/binary provenance are in ../evidence/native-replay-binding/README.md.
+This supersedes the planning-only status for the backend, not for the actual
+consumer replay closure. Pascal/Huygens consume this shared seam in their real
+adapters; no helper-only PR or ordinary startup activation is claimed.
