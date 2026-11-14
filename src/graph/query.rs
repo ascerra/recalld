@@ -229,38 +229,61 @@ pub struct RifEdge {
     pub weight: f32,
 }
 
+/// Maximum adjacency entries examined by one opt-in RIF query. Separate from
+/// the admitted unique pair/target caps and from graph expansion's own budget.
+pub const MAX_RIF_EXAMINED_EDGES: usize = 12_800;
+
+/// An entire neighborhood or an explicit refusal before examining/allocating it.
+/// O(1) stored degree is authoritative for the work preflight, not eligibility.
+#[derive(Debug)]
+pub struct RifAdjacency {
+    pub edges: Vec<RifEdge>,
+    pub unexamined_edges: usize,
+}
+
 pub fn rif_edges(
     graph: &RelationshipGraph,
     anchor: MemoryId,
     namespace: NamespaceId,
-) -> Result<Vec<RifEdge>, &'static str> {
+    allowance: usize,
+) -> Result<RifAdjacency, &'static str> {
     let node = graph.get_node(&anchor).ok_or("missing RIF anchor")?;
     if node.namespace_id != namespace {
         return Err("RIF anchor scope mismatch");
     }
-    node.outgoing
-        .iter()
-        .chain(&node.incoming)
-        .map(|key| {
-            let edge = graph.edges.get(*key).ok_or("missing RIF edge")?;
-            let source = graph.nodes.get(edge.source).ok_or("missing RIF source")?;
-            let target = graph.nodes.get(edge.target).ok_or("missing RIF target")?;
-            let other = if source.memory_id == anchor {
-                target
-            } else if target.memory_id == anchor {
-                source
-            } else {
-                return Err("invalid RIF adjacency");
-            };
-            if !edge.weight.is_finite() || !(0.0..=1.0).contains(&edge.weight) {
-                return Err("invalid RIF edge weight");
-            }
-            Ok(RifEdge {
-                target: other.memory_id,
-                namespace: other.namespace_id,
-                edge_type: edge.edge_type,
-                weight: edge.weight,
-            })
-        })
-        .collect()
+    // Both lengths are stored Vec metadata. Do not collect, sort, or iterate a
+    // prefix that would make a budget-limited result depend on insertion order.
+    let degree = node.degree();
+    if degree > allowance.min(MAX_RIF_EXAMINED_EDGES) {
+        return Ok(RifAdjacency {
+            edges: Vec::new(),
+            unexamined_edges: degree,
+        });
+    }
+    let mut edges = Vec::with_capacity(degree);
+    for key in node.outgoing.iter().chain(&node.incoming) {
+        let edge = graph.edges.get(*key).ok_or("missing RIF edge")?;
+        let source = graph.nodes.get(edge.source).ok_or("missing RIF source")?;
+        let target = graph.nodes.get(edge.target).ok_or("missing RIF target")?;
+        let other = if source.memory_id == anchor {
+            target
+        } else if target.memory_id == anchor {
+            source
+        } else {
+            return Err("invalid RIF adjacency");
+        };
+        if !edge.weight.is_finite() || !(0.0..=1.0).contains(&edge.weight) {
+            return Err("invalid RIF edge weight");
+        }
+        edges.push(RifEdge {
+            target: other.memory_id,
+            namespace: other.namespace_id,
+            edge_type: edge.edge_type,
+            weight: edge.weight,
+        });
+    }
+    Ok(RifAdjacency {
+        edges,
+        unexamined_edges: 0,
+    })
 }

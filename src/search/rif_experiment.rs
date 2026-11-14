@@ -4,6 +4,8 @@ use crate::model::EdgeType;
 use crate::rif::{QueryRifContext, RifConfig, calculate_activation, plasticity_multiplier};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use crate::graph::query::MAX_RIF_EXAMINED_EDGES;
+
 pub const MAX_RIF_TARGETS_PER_ANCHOR: usize = 100;
 pub const MAX_RIF_PAIRS: usize = 1_000;
 
@@ -20,7 +22,19 @@ pub enum RifMode {
 pub struct RifDiagnostics {
     pub mode: RifMode,
     pub anchors: usize,
+    /// Every inspected adjacency entry, including rejected/self/parallel edges.
     pub examined_edges: usize,
+    pub examined_edge_limit: usize,
+    /// False means pair/duplicate/similarity counts cover completed anchors only.
+    pub adjacency_complete: bool,
+    pub completed_anchors: usize,
+    pub unprocessed_anchors: usize,
+    /// Stored degree of the first neighborhood that could not fit; not scanned.
+    pub blocked_adjacency_edges: usize,
+    /// Peak retained entries, not process RSS or allocator byte measurements.
+    pub peak_edge_buffer_entries: usize,
+    pub peak_similarity_entries: usize,
+    pub peak_pair_entries: usize,
     pub eligible_pairs: usize,
     pub duplicate_pairs: usize,
     pub admitted_pairs: usize,
@@ -94,6 +108,8 @@ impl QueryEngine {
     ) -> Result<RifDiagnostics> {
         let mut diagnostic = RifDiagnostics {
             mode: self.rif_mode,
+            examined_edge_limit: MAX_RIF_EXAMINED_EDGES,
+            adjacency_complete: true,
             ..Default::default()
         };
         let config = RifConfig {
@@ -108,17 +124,40 @@ impl QueryEngine {
             })
         };
         // Already off-ranked and resolved; freeze top-L before suppression.
+        diagnostic.anchors = candidates
+            .iter()
+            .take(query.limit)
+            .filter(|anchor| live(&anchor.record.id).is_some())
+            .count();
         let mut pairs = BTreeMap::<(MemoryId, MemoryId), Pair>::new();
         for anchor in candidates.iter().take(query.limit) {
             if live(&anchor.record.id).is_none() {
                 continue;
             }
-            diagnostic.anchors += 1;
             let anchor_id = anchor.record.id;
-            let edges = self.graph.rif_edges(anchor_id, namespace)?;
+            let remaining = MAX_RIF_EXAMINED_EDGES - diagnostic.examined_edges;
+            let adjacency = self.graph.rif_edges(anchor_id, namespace, remaining)?;
+            if adjacency.edges.len() > remaining
+                || (adjacency.unexamined_edges > 0
+                    && (!adjacency.edges.is_empty() || adjacency.unexamined_edges <= remaining))
+            {
+                return Err(SearchError::Unavailable(
+                    "invalid RIF adjacency coverage".into(),
+                ));
+            }
+            if adjacency.unexamined_edges > 0 {
+                diagnostic.adjacency_complete = false;
+                diagnostic.blocked_adjacency_edges = adjacency.unexamined_edges;
+                diagnostic.unprocessed_anchors = diagnostic.anchors - diagnostic.completed_anchors;
+                break;
+            }
+            let edges = adjacency.edges;
+            diagnostic.completed_anchors += 1;
             diagnostic.examined_edges += edges.len();
+            diagnostic.peak_edge_buffer_entries =
+                diagnostic.peak_edge_buffer_entries.max(edges.len());
             let anchor_vector = self.vector_indexes.get_vector(anchor_id);
-            let mut similarities = HashMap::new();
+            let mut similarities = BTreeMap::new();
             for edge in edges {
                 if edge.target == anchor_id
                     || edge.edge_type == EdgeType::Supersedes
@@ -187,7 +226,10 @@ impl QueryEngine {
                     }
                 }
             }
+            diagnostic.peak_similarity_entries =
+                diagnostic.peak_similarity_entries.max(similarities.len());
         }
+        diagnostic.peak_pair_entries = pairs.len();
         diagnostic.eligible_pairs = pairs.len();
         let mut pairs: Vec<_> = pairs.into_values().collect();
         pairs.sort_by(|a, b| {

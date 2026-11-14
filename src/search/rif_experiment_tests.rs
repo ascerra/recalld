@@ -549,3 +549,188 @@ async fn rif_signed_zero_activation_ties_use_uuid_before_target_caps() {
         assert_eq!(d.suppressed_targets, 0);
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rif_stored_degree_preflight_has_no_prefix_buffer_or_hidden_edge_read() {
+    let (_, graph) = fixture(
+        vec![rec(mid(1)), rec(mid(2))],
+        &[],
+        &[
+            (1, 1, EdgeType::Associative, 1.0),
+            (1, 2, EdgeType::Associative, 1.0),
+            (1, 2, EdgeType::Causal, 1.0),
+            (2, 1, EdgeType::Contradicts, 1.0),
+        ],
+    );
+    let mut graph = graph.write().await;
+    assert_eq!(graph.get_node(&mid(1)).unwrap().degree(), 5); // Self appears twice.
+    let complete = crate::graph::query::rif_edges(&graph, mid(1), ns(), 5).unwrap();
+    assert_eq!(complete.edges.len(), 5);
+    assert_eq!(complete.edges.capacity(), 5);
+    assert_eq!(complete.unexamined_edges, 0);
+    let key = graph.get_node(&mid(1)).unwrap().outgoing[0];
+    graph.edges.remove(key); // Would error if even the first edge were read.
+    let limited = crate::graph::query::rif_edges(&graph, mid(1), ns(), 4).unwrap();
+    assert_eq!(limited.unexamined_edges, 5);
+    assert!(limited.edges.is_empty());
+    assert_eq!(limited.edges.capacity(), 0);
+    assert!(crate::graph::query::rif_edges(&graph, mid(1), ns(), 5).is_err());
+    assert!(crate::graph::query::rif_edges(&graph, mid(1), other_ns(), 0).is_err());
+}
+
+fn dense_budget_records() -> (Vec<CachedRecord>, Vec<(u128, u128, EdgeType, f32)>, u128) {
+    // First anchor has 12,798 entries; its highest-ranked target has two.
+    // Together they exactly consume 12,800, including parallel edge types.
+    let champion = (MAX_RIF_EXAMINED_EDGES / 2) as u128;
+    let records = (1..=champion)
+        .map(|id| {
+            let mut r = rec(mid(id));
+            let strength = if id == 1 {
+                1.0
+            } else if id == champion {
+                0.9
+            } else {
+                0.2
+            };
+            r.strength = strength;
+            r.decay_strength = strength;
+            r
+        })
+        .collect();
+    let edges = (2..=champion)
+        .flat_map(|target| {
+            let weight = if target == champion { 1.0 } else { 0.1 };
+            [EdgeType::Associative, EdgeType::Causal].map(|kind| (1, target, kind, weight))
+        })
+        .collect();
+    (records, edges, champion)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rif_complete_dense_budget_matches_exhaustive_top_activation_oracle() {
+    let (mut records, mut edges, champion) = dense_budget_records();
+    // Exhaustive activation order: the strong last UUID, then the lowest 99
+    // equal-activation target UUIDs; both edge types must compete before cap.
+    let oracle_edges: Vec<_> = edges
+        .iter()
+        .copied()
+        .filter(|edge| edge.1 == champion || edge.1 <= 100)
+        .collect();
+    let (oracle, _) = fixture(records.clone(), &[], &oracle_edges);
+    let expected = oracle
+        .with_rif_mode(RifMode::Experimental)
+        .search_with_semantics(metadata(2), history())
+        .await
+        .unwrap();
+    assert!(hit(&expected, champion).effective_r < 0.9);
+    assert!(hit(&expected, 1).effective_r < 1.0);
+    for _ in 0..2 {
+        records.reverse();
+        edges.reverse();
+        let (mut engine, graph) = fixture(records.clone(), &[], &edges);
+        let off = engine
+            .search_with_semantics(metadata(2), history())
+            .await
+            .unwrap();
+        engine.rif_mode = RifMode::Shadow;
+        let shadow = engine
+            .search_with_semantics(metadata(2), history())
+            .await
+            .unwrap();
+        assert_eq!(values(&off), values(&shadow));
+        engine.rif_mode = RifMode::Experimental;
+        let actual = engine
+            .search_with_semantics(metadata(2), history())
+            .await
+            .unwrap();
+        assert_eq!(values(&expected), values(&actual));
+        let d = actual.diagnostics.rif.unwrap();
+        assert!(d.adjacency_complete);
+        assert_eq!(d.examined_edges, MAX_RIF_EXAMINED_EDGES);
+        assert_eq!(d.completed_anchors, 2);
+        assert_eq!(d.unprocessed_anchors, 0);
+        assert_eq!(d.blocked_adjacency_edges, 0);
+        assert_eq!(d.peak_edge_buffer_entries, MAX_RIF_EXAMINED_EDGES - 2);
+        assert_eq!(d.peak_pair_entries, champion as usize);
+        assert_eq!(d.peak_similarity_entries, champion as usize - 1);
+        assert_eq!(d.eligible_pairs, champion as usize);
+        assert_eq!(d.duplicate_pairs, champion as usize);
+        assert_eq!(d.admitted_pairs, 101);
+        assert_eq!(d.per_anchor_cap_hits, 1);
+        assert_eq!(d.suppressed_targets, 2);
+        assert_eq!(graph.read().await.edge_count(), edges.len());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rif_dense_refusal_and_remaining_budget_are_explicit_and_order_independent() {
+    for extra in [1, 3] {
+        let (mut records, mut edges, champion) = dense_budget_records();
+        for target in 2..2 + extra {
+            edges.push((1, target, EdgeType::Entity, 0.1));
+        }
+        let mut previous = None;
+        for _ in 0..2 {
+            records.reverse();
+            edges.reverse();
+            let (mut engine, graph) = fixture(records.clone(), &[], &edges);
+            let off = engine
+                .search_with_semantics(metadata(2), history())
+                .await
+                .unwrap();
+            engine.rif_mode = RifMode::Shadow;
+            let shadow = engine
+                .search_with_semantics(metadata(2), history())
+                .await
+                .unwrap();
+            assert_eq!(values(&off), values(&shadow));
+            engine.rif_mode = RifMode::Experimental;
+            let actual = engine
+                .search_with_semantics(metadata(2), history())
+                .await
+                .unwrap();
+            let d = actual.diagnostics.rif.as_ref().unwrap();
+            assert!(!d.adjacency_complete);
+            assert_eq!(d.examined_edge_limit, MAX_RIF_EXAMINED_EDGES);
+            assert_eq!(d.anchors, 2);
+            assert!(d.peak_pair_entries <= MAX_RIF_EXAMINED_EDGES);
+            assert!(d.peak_similarity_entries <= MAX_RIF_EXAMINED_EDGES);
+            if extra == 1 {
+                assert_eq!(d.examined_edges, MAX_RIF_EXAMINED_EDGES - 1);
+                assert_eq!(d.completed_anchors, 1);
+                assert_eq!(d.unprocessed_anchors, 1);
+                assert_eq!(d.blocked_adjacency_edges, 2);
+                assert_eq!(d.admitted_pairs, 100);
+                assert_eq!(d.returned_multipliers[&mid(1)], 1.0);
+                assert!(hit(&actual, champion).effective_r < hit(&off, champion).effective_r);
+            } else {
+                assert_eq!(d.examined_edges, 0);
+                assert_eq!(d.completed_anchors, 0);
+                assert_eq!(d.unprocessed_anchors, 2);
+                assert_eq!(d.blocked_adjacency_edges, MAX_RIF_EXAMINED_EDGES + 1);
+                assert_eq!(d.peak_edge_buffer_entries, 0);
+                assert_eq!(d.peak_pair_entries, 0);
+                assert_eq!(d.peak_similarity_entries, 0);
+                assert_eq!(values(&off), values(&actual));
+                // Even an oversized caller allowance cannot bypass the adapter's bound.
+                let graph = graph.read().await;
+                let read =
+                    crate::graph::query::rif_edges(&graph, mid(1), ns(), usize::MAX).unwrap();
+                assert_eq!(read.unexamined_edges, MAX_RIF_EXAMINED_EDGES + 1);
+                assert_eq!(read.edges.capacity(), 0);
+            }
+            let current = (
+                values(&actual),
+                d.examined_edges,
+                d.admitted_pairs,
+                d.completed_anchors,
+                d.blocked_adjacency_edges,
+                d.duplicate_pairs,
+            );
+            if let Some(previous) = previous {
+                assert_eq!(current, previous);
+            }
+            previous = Some(current);
+        }
+    }
+}

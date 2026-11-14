@@ -48,8 +48,8 @@ pub use error::SearchError;
 pub use pipeline::{
     AccessRecorder, ChannelDiagnostics, ChannelParticipation, EmbeddingProviderRegistry,
     EntityIndexReader, EntityRecallResult, FtsAvailability, FtsDiagnostics, FtsIndexRegistry,
-    FtsResult, GraphReader, MAX_RIF_PAIRS, MAX_RIF_TARGETS_PER_ANCHOR, MetadataStore,
-    NamespaceResolver, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
+    FtsResult, GraphReader, MAX_RIF_EXAMINED_EDGES, MAX_RIF_PAIRS, MAX_RIF_TARGETS_PER_ANCHOR,
+    MetadataStore, NamespaceResolver, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
     RetrievalSemantics, RifDiagnostics, RifMode, RifProcessor, RifSuppression, ScoredResult,
     SemanticsDiagnostics, SemanticsResponse, StrengthDiagnostics, UnresolvedReason,
     VectorIndexRegistry, VersionMode, VersionStatus,

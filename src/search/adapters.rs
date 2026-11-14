@@ -608,11 +608,12 @@ impl GraphReader for SharedGraphReader {
         &self,
         anchor: MemoryId,
         namespace: NamespaceId,
-    ) -> Result<Vec<crate::graph::query::RifEdge>> {
+        allowance: usize,
+    ) -> Result<crate::graph::query::RifAdjacency> {
         let graph = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.graph.read())
         });
-        crate::graph::query::rif_edges(&graph, anchor, namespace)
+        crate::graph::query::rif_edges(&graph, anchor, namespace, allowance)
             .map_err(|error| SearchError::Unavailable(error.into()))
     }
 

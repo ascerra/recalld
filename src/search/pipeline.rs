@@ -19,7 +19,9 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 
 #[path = "rif_experiment.rs"]
 mod rif_experiment;
-pub use rif_experiment::{MAX_RIF_PAIRS, MAX_RIF_TARGETS_PER_ANCHOR, RifDiagnostics, RifMode};
+pub use rif_experiment::{
+    MAX_RIF_EXAMINED_EDGES, MAX_RIF_PAIRS, MAX_RIF_TARGETS_PER_ANCHOR, RifDiagnostics, RifMode,
+};
 
 #[path = "diagnostics.rs"]
 mod diagnostics;
@@ -245,13 +247,15 @@ pub trait GraphReader: Send + Sync {
             "semantics2 graph expansion unavailable".into(),
         ))
     }
-    /// Complete one-hop typed adjacency for the opt-in RIF experiment.
+    /// Whole one-hop typed adjacency within the remaining examination allowance.
+    /// A refused neighborhood returns explicit unexamined work and no prefix.
     /// Unsupported/corrupt reads fail; absence is not silently successful.
     fn rif_edges(
         &self,
         _anchor: MemoryId,
         _namespace: NamespaceId,
-    ) -> Result<Vec<crate::graph::query::RifEdge>> {
+        _allowance: usize,
+    ) -> Result<crate::graph::query::RifAdjacency> {
         Err(SearchError::Unavailable(
             "RIF graph reads unavailable".into(),
         ))
