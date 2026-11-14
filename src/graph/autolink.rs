@@ -12,7 +12,7 @@ use crate::graph::structure::RelationshipGraph;
 use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
 use crate::search::{EntityIndex, FlatVectorIndex, SearchFilter, VectorIndex};
 use crate::storage::PersistedEdge;
-use crate::storage::engine::RedbStorageEngine;
+use crate::storage::engine::{RedbStorageEngine, StorageEngine};
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
