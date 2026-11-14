@@ -1,0 +1,10 @@
+{
+  "source": "21f11364569c5c29cfbdbd0f61a9b1aed2803192",
+  "tree": "e24a2dc3dab9e6c80a640776cda882314e21f089",
+  "exit_code": 101,
+  "log_sha256": "9ceba0ebc984ddf3a7c660f4831d26c4dc1c34b4ae1fa1b8c14cf108f2b8efd2",
+  "executable_sha256": "2247d107c0903d3b1d3a04e1b34b8d0608d18382bc8804039038332093ff1181",
+  "result_lines": [
+    "test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1090 filtered out; finished in 1.79s"
+  ]
+}
