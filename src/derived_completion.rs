@@ -30,14 +30,11 @@ impl DerivedCompletion {
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<WorkTicket, StorageError> {
-        let storage = self.storage.read().map_err(|e| failed(e.to_string()))?;
-        Ok(storage.meta_store().work_tracker().admit(parent)?)
+        crate::storage::work::accept_work(&self.storage, parent)
     }
 
     pub(crate) fn finish_known_work(&self, work: WorkTicket) {
-        if let Ok(storage) = self.storage.read() {
-            storage.meta_store().finish_work(work);
-        }
+        crate::storage::work::finish_work(&self.storage, work);
     }
 
     /// Actual insertion consumer: canonical commit under the store lease, then

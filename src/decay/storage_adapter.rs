@@ -47,13 +47,7 @@ pub(crate) async fn reinforce_with_work(
     parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<super::lifecycle::FeedbackPlan, super::lifecycle::LifecycleError> {
     use super::lifecycle::{LifecycleError, plan_feedback, resolve_policy};
-    let tracker = storage
-        .read()
-        .map_err(|e| LifecycleError::Storage(e.to_string()))?
-        .meta_store()
-        .work_tracker();
-    let work = tracker
-        .admit(parent)
+    let work = crate::storage::work::accept_work(&storage, parent)
         .map_err(|e| LifecycleError::Storage(e.to_string()))?;
     let child = work
         .child()
@@ -136,9 +130,7 @@ pub(crate) async fn reinforce_with_work(
     .map_err(|e| {
         LifecycleError::Observation(super::observation::ObservationError::worker_failed(e))
     })?;
-    if let Ok(storage) = storage.read() {
-        storage.meta_store().finish_work(work);
-    }
+    crate::storage::work::finish_work(&storage, work);
     result
 }
 

@@ -1434,18 +1434,7 @@ impl StorageEngine for RedbStorageEngine {
     /// Publish durable namespace vectors before committing its row and receipt.
     /// The v1 wrapper retains its assigned-ID return shape.
     fn create_namespace(&mut self, config: &NamespaceConfig) -> Result<NamespaceId, StorageError> {
-        let ctx = MutationContext {
-            scope: MutationScope::Catalog,
-            ..MutationContext::unkeyed(NamespaceId::new(1))
-        };
-        match self.create_namespace_with_receipt(&ctx, config)?.outcome {
-            crate::storage::control::MutationOutcome::NamespaceCreated { namespace_id, .. } => {
-                Ok(namespace_id)
-            }
-            _ => Err(StorageError::InvalidControl(
-                "create receipt outcome mismatch".into(),
-            )),
-        }
+        self.create_namespace_with_work(config, None)
     }
 
     fn list_namespaces(&self) -> Result<Vec<NamespaceConfig>, StorageError> {

@@ -58,3 +58,6 @@ pub use system::Recalld;
 
 // Re-export core types at the crate root for ergonomics.
 pub use model::{DecayPhase, EdgeType, Memory, MemoryId, NamespaceConfig, NamespaceId};
+
+#[cfg(test)]
+mod producer_work_tests;

@@ -143,14 +143,8 @@ pub(crate) async fn record_exposures_scoped_with_work(
     if accesses.is_empty() {
         return Ok(Vec::new());
     }
-    let tracker = storage
-        .read()
-        .map_err(|e| ObservationError::failed(e, vec![]))?
-        .meta_store()
-        .work_tracker();
-    let work = tracker
-        .admit(parent)
-        .map_err(|e| ObservationError::failed(e, vec![]))?;
+    let work = crate::storage::work::accept_work(&storage, parent)
+        .map_err(|e| ObservationError::storage(e, vec![]))?;
     let child = work
         .child()
         .map_err(|e| ObservationError::failed(e, vec![]))?;
@@ -195,9 +189,7 @@ pub(crate) async fn record_exposures_scoped_with_work(
     })
     .await
     .map_err(ObservationError::worker_failed)?;
-    if let Ok(storage) = storage.read() {
-        storage.meta_store().finish_work(work);
-    }
+    crate::storage::work::finish_work(&storage, work);
     result
 }
 

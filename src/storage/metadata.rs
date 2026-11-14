@@ -1320,8 +1320,15 @@ impl MetadataStore {
     /// Persist the current in-memory phase bitmaps to INDEX_TABLE.
     /// Called periodically (end of decay sweep, graceful shutdown).
     pub fn persist_phase_index(&self) -> Result<(), StorageError> {
+        self.persist_phase_index_with_work(None)
+    }
+
+    pub(crate) fn persist_phase_index_with_work(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<(), StorageError> {
         self.ensure_available()?;
-        let _publication = self.mutation_guard()?;
+        let _publication = self.mutation_guard_with_work(parent)?;
         let bytes = {
             let pi = self.phase_index.read().unwrap_or_else(|e| e.into_inner());
             pi.to_bytes()

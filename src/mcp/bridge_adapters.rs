@@ -4,10 +4,10 @@
 //! corresponding MCP bridge trait from `bridge.rs`. These adapters
 //! bridge between the MCP protocol layer and Recalld subsystem types.
 
-use crate::decay::observation::Observed;
 #[path = "batch_adapters.rs"]
 mod batch_adapters;
 
+use crate::decay::observation::Observed;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -932,340 +932,346 @@ impl McpStorageAdapter {
         work: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(bridge::StoredMemory, crate::storage::control::WriteReceipt), StoreWriteError>
     {
-        // This is shared by direct single writes and reserved batch children.
-        // Validate before replay normalization, provider work or payload staging.
-        let (merged_tags, canonical_input) = crate::mcp::batches::canonical_input(&input)
-            .map_err(|error| bridge::BridgeError::InvalidInput(error.to_string()))?;
-        if let Some(child) = child.clone() {
-            let canonical = canonical_input.clone();
-            let storage = self.storage.clone();
-            let worker = work
-                .map(|p| p.child())
-                .transpose()
-                .map_err(crate::storage::StorageError::from)?;
-            let replay = tokio::task::spawn_blocking(move || {
-                let storage = storage
-                    .read()
-                    .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?;
-                let result = storage.meta_store().lookup_insert_child_with_work(
-                    &child,
-                    &canonical,
-                    worker.as_ref(),
-                );
-                if let Some(worker) = worker {
-                    storage.meta_store().finish_work(worker);
+        let accepted = crate::storage::work::accept_work(&self.storage, work)?;
+        let work = Some(&accepted);
+        let result = async {
+            // This is shared by direct single writes and reserved batch children.
+            // Validate before replay normalization, provider work or payload staging.
+            let (merged_tags, canonical_input) = crate::mcp::batches::canonical_input(&input)
+                .map_err(|error| bridge::BridgeError::InvalidInput(error.to_string()))?;
+            if let Some(child) = child.clone() {
+                let canonical = canonical_input.clone();
+                let storage = self.storage.clone();
+                let worker = work
+                    .map(|p| p.child())
+                    .transpose()
+                    .map_err(crate::storage::StorageError::from)?;
+                let replay = tokio::task::spawn_blocking(move || {
+                    let storage = storage.read().map_err(|e| {
+                        crate::storage::StorageError::RecoveryRequired(e.to_string())
+                    })?;
+                    let result = storage.meta_store().lookup_insert_child_with_work(
+                        &child,
+                        &canonical,
+                        worker.as_ref(),
+                    );
+                    if let Some(worker) = worker {
+                        storage.meta_store().finish_work(worker);
+                    }
+                    result
+                })
+                .await
+                .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
+                if let Some(receipt) = replay {
+                    return Ok((
+                        crate::mcp::batches::stored_from_receipt(&input, &receipt, self.timezone)?,
+                        receipt,
+                    ));
                 }
-                result
-            })
-            .await
-            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
-            if let Some(receipt) = replay {
+            }
+
+            effects_stamp(&self.storage).await?;
+
+            use crate::model::constants::{
+                DUPLICATE_SIMILARITY_THRESHOLD, MAX_NEAR_DUPLICATE_MATCHES,
+            };
+
+            // Resolve namespace.
+            let ns_config = {
+                let storage = self.storage.clone();
+                let ns_name = input.namespace.clone();
+                let reserved_namespace = child.as_ref().map(|c| c.namespace());
+                tokio::task::spawn_blocking(move || {
+                    let storage_r = storage.read().map_err(|e| {
+                        bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
+                    })?;
+                    (if let Some(id) = reserved_namespace {
+                        storage_r.get_namespace(id)
+                    } else {
+                        storage_r.get_namespace_by_name(&ns_name)
+                    })
+                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+                    .ok_or_else(|| {
+                        bridge::BridgeError::NotFound(format!("namespace '{}' not found", ns_name,))
+                    })
+                })
+                .await
+                .map_err(|e| {
+                    bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
+                })??
+            };
+
+            // Validate caller-specified links BEFORE anything is written.
+            //
+            // The record is committed to meta.db, fulltext.dat, vectors.dat, FTS
+            // and the cache further down; a link failure discovered after that
+            // would have to unwind all of it. Checking here makes "reject the
+            // whole store" free, and it also avoids paying for an embedding
+            // round-trip on a store that cannot succeed.
+            if let Some(parent_id) = input.parent_id {
+                crate::graph::check_link_target(
+                    "parentId",
+                    None,
+                    parent_id,
+                    ns_config.id,
+                    &self.graph,
+                    &self.storage,
+                    &self.cache,
+                )
+                .await
+                .map_err(map_link_error)?;
+            }
+            if let Some(old_id) = input.supersedes {
+                crate::graph::check_link_target(
+                    "supersedes",
+                    None,
+                    old_id,
+                    ns_config.id,
+                    &self.graph,
+                    &self.storage,
+                    &self.cache,
+                )
+                .await
+                .map_err(map_link_error)?;
+            }
+
+            // Generate full embedding (summary + full_text + tags for max surface).
+            let raw_embedding = match &input.embedding {
+                Some(emb) => emb.clone().into(),
+                None => {
+                    let mut embed_text = match &input.full_text {
+                        Some(ft) => format!(
+                            "{}
+\n{}",
+                            input.summary, ft
+                        ),
+                        None => input.summary.clone(),
+                    };
+                    if !merged_tags.is_empty() {
+                        embed_text = format!("{} {}", embed_text, merged_tags.join(" "));
+                    }
+                    crate::embedding::runtime::generate(
+                        self.embedding.as_ref(),
+                        &ns_config,
+                        &embed_text,
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        crate::embedding::EmbeddingError::TextTooLong { .. } => {
+                            bridge::BridgeError::InvalidInput(e.to_string())
+                        }
+                        _ => bridge::BridgeError::Unavailable(e.to_string()),
+                    })?
+                }
+            };
+
+            crate::embedding::runtime::check_namespace(&ns_config, raw_embedding.profile.as_ref())
+                .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?;
+            let mut embedding = raw_embedding.values.clone();
+            crate::storage::insertion::normalize_embedding(
+                &mut embedding,
+                ns_config.embedding_dim,
+                input.embedding.is_some(),
+            )?;
+
+            // Near-duplicate advisory.
+            //
+            // Runs BEFORE the write, for two reasons. The embedding is already
+            // in hand, so there is no second embed round-trip. And the new
+            // memory is not in the vector index yet — `index.add` is ~70 lines
+            // below — so it cannot match itself and no self-filter is needed.
+            // Moving this below the write silently turns every store into its
+            // own duplicate at score 1.0.
+            //
+            // An unavailable advisory must not be reported as "no duplicates".
+            let advisory_stamp = effects_stamp(&self.storage).await?;
+            let near_duplicates = if input.check_duplicates.unwrap_or(true) {
+                let candidates = {
+                    let index = self.vector_index.read().await;
+                    crate::search::find_near_duplicates(
+                        &index,
+                        &embedding,
+                        ns_config.id,
+                        DUPLICATE_SIMILARITY_THRESHOLD as f32,
+                        MAX_NEAR_DUPLICATE_MATCHES,
+                    )
+                }; // index read lock released before the awaits below
+                self.hydrate_near_duplicates(candidates, DUPLICATE_SIMILARITY_THRESHOLD)
+                    .await
+            } else {
+                None
+            };
+
+            if effects_stamp(&self.storage).await? != advisory_stamp {
+                return Err(bridge::BridgeError::Storage(
+                    "unavailable: effects changed during advisory".into(),
+                )
+                .into());
+            }
+            let now = self.clock.now_millis();
+            let completion = crate::derived_completion::DerivedCompletion {
+                storage: self.storage.clone(),
+                cache: self.cache.clone(),
+                graph: self.graph.clone(),
+                vectors: self.vector_index.clone(),
+                fts: self.fts_index.clone(),
+                entities: self.entity_index.clone(),
+            };
+            let inserted = completion
+                .insert_reserved_with_work(
+                    child.as_ref().map(|c| c.context()).unwrap_or_else(|| {
+                        crate::storage::control::MutationContext::unkeyed(ns_config.id)
+                    }),
+                    canonical_input,
+                    raw_embedding,
+                    now,
+                    child.clone(),
+                    work,
+                )
+                .await?;
+            let receipt = inserted.receipt;
+            if receipt.replayed {
                 return Ok((
                     crate::mcp::batches::stored_from_receipt(&input, &receipt, self.timezone)?,
                     receipt,
                 ));
             }
-        }
+            let record =
+                inserted
+                    .record
+                    .ok_or_else(|| crate::storage::StorageError::CommittedMutation {
+                        receipt: Box::new(receipt.clone()),
+                        source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                            "inserted record unavailable".into(),
+                        )),
+                    })?;
+            let memory_id = record.id;
+            let supersedes_outcome = input.supersedes.map(|id| {
+                crate::model::SupersedesOutcome::new(id, crate::model::SupersedesStatus::Applied)
+            });
 
-        effects_stamp(&self.storage).await?;
+            // Auto-link: discover and create edges to similar existing memories.
+            if self.config.graph.autolink_enabled {
+                let tag_strings: Vec<String> = merged_tags.clone();
+                let threshold = self.config.graph.auto_link_threshold as f32;
+                let max_links = self.config.graph.max_auto_links;
 
-        use crate::model::constants::{DUPLICATE_SIMILARITY_THRESHOLD, MAX_NEAR_DUPLICATE_MATCHES};
-
-        // Resolve namespace.
-        let ns_config = {
-            let storage = self.storage.clone();
-            let ns_name = input.namespace.clone();
-            let reserved_namespace = child.as_ref().map(|c| c.namespace());
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage.read().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-                (if let Some(id) = reserved_namespace {
-                    storage_r.get_namespace(id)
-                } else {
-                    storage_r.get_namespace_by_name(&ns_name)
-                })
-                .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                .ok_or_else(|| {
-                    bridge::BridgeError::NotFound(format!("namespace '{}' not found", ns_name,))
-                })
-            })
-            .await
-            .map_err(|e| {
-                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
-            })??
-        };
-
-        // Validate caller-specified links BEFORE anything is written.
-        //
-        // The record is committed to meta.db, fulltext.dat, vectors.dat, FTS
-        // and the cache further down; a link failure discovered after that
-        // would have to unwind all of it. Checking here makes "reject the
-        // whole store" free, and it also avoids paying for an embedding
-        // round-trip on a store that cannot succeed.
-        if let Some(parent_id) = input.parent_id {
-            crate::graph::check_link_target(
-                "parentId",
-                None,
-                parent_id,
-                ns_config.id,
-                &self.graph,
-                &self.storage,
-                &self.cache,
-            )
-            .await
-            .map_err(map_link_error)?;
-        }
-        if let Some(old_id) = input.supersedes {
-            crate::graph::check_link_target(
-                "supersedes",
-                None,
-                old_id,
-                ns_config.id,
-                &self.graph,
-                &self.storage,
-                &self.cache,
-            )
-            .await
-            .map_err(map_link_error)?;
-        }
-
-        // Generate full embedding (summary + full_text + tags for max surface).
-        let raw_embedding = match &input.embedding {
-            Some(emb) => emb.clone().into(),
-            None => {
-                let mut embed_text = match &input.full_text {
-                    Some(ft) => format!(
-                        "{}
-\n{}",
-                        input.summary, ft
-                    ),
-                    None => input.summary.clone(),
-                };
-                if !merged_tags.is_empty() {
-                    embed_text = format!("{} {}", embed_text, merged_tags.join(" "));
-                }
-                crate::embedding::runtime::generate(
-                    self.embedding.as_ref(),
-                    &ns_config,
-                    &embed_text,
-                )
-                .await
-                .map_err(|e| match e {
-                    crate::embedding::EmbeddingError::TextTooLong { .. } => {
-                        bridge::BridgeError::InvalidInput(e.to_string())
-                    }
-                    _ => bridge::BridgeError::Unavailable(e.to_string()),
-                })?
-            }
-        };
-
-        crate::embedding::runtime::check_namespace(&ns_config, raw_embedding.profile.as_ref())
-            .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?;
-        let mut embedding = raw_embedding.values.clone();
-        crate::storage::insertion::normalize_embedding(
-            &mut embedding,
-            ns_config.embedding_dim,
-            input.embedding.is_some(),
-        )?;
-
-        // Near-duplicate advisory.
-        //
-        // Runs BEFORE the write, for two reasons. The embedding is already
-        // in hand, so there is no second embed round-trip. And the new
-        // memory is not in the vector index yet — `index.add` is ~70 lines
-        // below — so it cannot match itself and no self-filter is needed.
-        // Moving this below the write silently turns every store into its
-        // own duplicate at score 1.0.
-        //
-        // An unavailable advisory must not be reported as "no duplicates".
-        let advisory_stamp = effects_stamp(&self.storage).await?;
-        let near_duplicates = if input.check_duplicates.unwrap_or(true) {
-            let candidates = {
-                let index = self.vector_index.read().await;
-                crate::search::find_near_duplicates(
-                    &index,
-                    &embedding,
-                    ns_config.id,
-                    DUPLICATE_SIMILARITY_THRESHOLD as f32,
-                    MAX_NEAR_DUPLICATE_MATCHES,
-                )
-            }; // index read lock released before the awaits below
-            self.hydrate_near_duplicates(candidates, DUPLICATE_SIMILARITY_THRESHOLD)
-                .await
-        } else {
-            None
-        };
-
-        if effects_stamp(&self.storage).await? != advisory_stamp {
-            return Err(bridge::BridgeError::Storage(
-                "unavailable: effects changed during advisory".into(),
-            )
-            .into());
-        }
-        let now = self.clock.now_millis();
-        let completion = crate::derived_completion::DerivedCompletion {
-            storage: self.storage.clone(),
-            cache: self.cache.clone(),
-            graph: self.graph.clone(),
-            vectors: self.vector_index.clone(),
-            fts: self.fts_index.clone(),
-            entities: self.entity_index.clone(),
-        };
-        let inserted = completion
-            .insert_reserved_with_work(
-                child.as_ref().map(|c| c.context()).unwrap_or_else(|| {
-                    crate::storage::control::MutationContext::unkeyed(ns_config.id)
-                }),
-                canonical_input,
-                raw_embedding,
-                now,
-                child.clone(),
-                work,
-            )
-            .await?;
-        let receipt = inserted.receipt;
-        if receipt.replayed {
-            return Ok((
-                crate::mcp::batches::stored_from_receipt(&input, &receipt, self.timezone)?,
-                receipt,
-            ));
-        }
-        let record =
-            inserted
-                .record
-                .ok_or_else(|| crate::storage::StorageError::CommittedMutation {
-                    receipt: Box::new(receipt.clone()),
-                    source: Box::new(crate::storage::StorageError::RecoveryRequired(
-                        "inserted record unavailable".into(),
-                    )),
-                })?;
-        let memory_id = record.id;
-        let supersedes_outcome = input.supersedes.map(|id| {
-            crate::model::SupersedesOutcome::new(id, crate::model::SupersedesStatus::Applied)
-        });
-
-        // Entity recall is independent of automatic graph linking. Publish the
-        // accepted names directly; legacy tags cannot represent every name.
-        self.entity_index
-            .write()
-            .await
-            .add(ns_config.id, memory_id, &input.entities);
-
-        // Auto-link: discover and create edges to similar existing memories.
-        if self.config.graph.autolink_enabled {
-            let tag_strings: Vec<String> = merged_tags.clone();
-            let threshold = self.config.graph.auto_link_threshold as f32;
-            let max_links = self.config.graph.max_auto_links;
-
-            if let Err(e) = crate::graph::perform_autolink_with_work(
-                memory_id,
-                ns_config.id,
-                &embedding,
-                &tag_strings,
-                threshold,
-                max_links,
-                &self.vector_index,
-                &self.graph,
-                &self.storage,
-                &self.cache,
-                work,
-            )
-            .await
-            {
-                tracing::warn!(
-                    memory_id = %memory_id,
-                    %e,
-                    "autolink failed (non-fatal)"
-                );
-            }
-
-            let entities = input.entities.clone();
-            if !entities.is_empty() {
-                let max_entity_links = self.config.graph.max_entity_links;
-                let _ = crate::graph::perform_entity_link_with_work(
+                if let Err(e) = crate::graph::perform_autolink_with_work(
                     memory_id,
                     ns_config.id,
-                    &entities,
-                    max_entity_links,
-                    &self.entity_index,
+                    &embedding,
+                    &tag_strings,
+                    threshold,
+                    max_links,
+                    &self.vector_index,
                     &self.graph,
                     &self.storage,
                     &self.cache,
                     work,
                 )
-                .await;
-            }
+                .await
+                {
+                    tracing::warn!(
+                        memory_id = %memory_id,
+                        %e,
+                        "autolink failed (non-fatal)"
+                    );
+                }
 
-            // Temporal edges: link to recently-stored memories in the same namespace.
-            let temporal_window_ms = self.config.graph.temporal_window_ms;
-            let max_temporal_links = self.config.graph.max_temporal_links;
-            if temporal_window_ms > 0 {
-                let recent_memories: Vec<(MemoryId, i64)> = self
-                    .cache
-                    .iter()
-                    .filter_map(|(mid, record)| {
-                        if mid == memory_id {
-                            return None; // skip self
-                        }
-                        if record.namespace_id != ns_config.id {
-                            return None; // wrong namespace
-                        }
-                        let delta = (now - record.created_at).unsigned_abs();
-                        if delta <= temporal_window_ms {
-                            Some((mid, record.created_at))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                if !recent_memories.is_empty() {
-                    if let Err(e) = crate::graph::perform_temporal_link_with_work(
+                let entities = input.entities.clone();
+                if !entities.is_empty() {
+                    let max_entity_links = self.config.graph.max_entity_links;
+                    let _ = crate::graph::perform_entity_link_with_work(
                         memory_id,
                         ns_config.id,
-                        now,
-                        temporal_window_ms,
-                        max_temporal_links,
-                        &recent_memories,
+                        &entities,
+                        max_entity_links,
+                        &self.entity_index,
                         &self.graph,
                         &self.storage,
                         &self.cache,
                         work,
                     )
-                    .await
-                    {
-                        tracing::warn!(
-                            memory_id = %memory_id,
-                            %e,
-                            "temporal link failed (non-fatal)"
-                        );
+                    .await;
+
+                    // Update entity index.
+                    let mut idx = self.entity_index.write().await;
+                    idx.add(ns_config.id, memory_id, &entities);
+                }
+
+                // Temporal edges: link to recently-stored memories in the same namespace.
+                let temporal_window_ms = self.config.graph.temporal_window_ms;
+                let max_temporal_links = self.config.graph.max_temporal_links;
+                if temporal_window_ms > 0 {
+                    let recent_memories: Vec<(MemoryId, i64)> = self
+                        .cache
+                        .iter()
+                        .filter_map(|(mid, record)| {
+                            if mid == memory_id {
+                                return None; // skip self
+                            }
+                            if record.namespace_id != ns_config.id {
+                                return None; // wrong namespace
+                            }
+                            let delta = (now - record.created_at).unsigned_abs();
+                            if delta <= temporal_window_ms {
+                                Some((mid, record.created_at))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    if !recent_memories.is_empty() {
+                        if let Err(e) = crate::graph::perform_temporal_link_with_work(
+                            memory_id,
+                            ns_config.id,
+                            now,
+                            temporal_window_ms,
+                            max_temporal_links,
+                            &recent_memories,
+                            &self.graph,
+                            &self.storage,
+                            &self.cache,
+                            work,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                memory_id = %memory_id,
+                                %e,
+                                "temporal link failed (non-fatal)"
+                            );
+                        }
                     }
                 }
             }
-        }
 
-        completion
-            .complete_with_work(work)
-            .await
-            .map_err(|source| crate::storage::StorageError::CommittedMutation {
-                receipt: Box::new(receipt.clone()),
-                source: Box::new(source),
-            })?;
-        self.cache.insert(memory_id, record.clone()).await;
-        Ok((
-            bridge::StoredMemory {
-                id: memory_id.to_string(),
-                namespace: input.namespace,
-                phase: "Full".to_string(),
-                strength: record.strength,
-                stability: record.stability,
-                created_at: format_timestamp(record.created_at, self.timezone),
-                supersedes: supersedes_outcome,
-                near_duplicates,
-            },
-            receipt,
-        ))
+            completion
+                .complete_with_work(work)
+                .await
+                .map_err(|source| crate::storage::StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(source),
+                })?;
+            self.cache.insert(memory_id, record.clone()).await;
+            Ok((
+                bridge::StoredMemory {
+                    id: memory_id.to_string(),
+                    namespace: input.namespace,
+                    phase: "Full".to_string(),
+                    strength: record.strength,
+                    stability: record.stability,
+                    created_at: format_timestamp(record.created_at, self.timezone),
+                    supersedes: supersedes_outcome,
+                    near_duplicates,
+                },
+                receipt,
+            ))
+        }
+        .await;
+        crate::storage::work::finish_work(&self.storage, accepted);
+        result
     }
 }
 
@@ -1917,6 +1923,9 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         crate::model::validation::validate_namespace_name(&input.name)
             .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
 
+        let work =
+            crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
+        let worker = work.child().map_err(|e| map_mutation_error(e.into()))?;
         let now = chrono::Utc::now().timestamp_millis();
         let storage = self.storage.clone();
         let tz = self.timezone;
@@ -1926,60 +1935,66 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         let desired_retention = input.desired_retention;
         let decay_rate_multiplier = input.decay_rate_multiplier;
 
-        tokio::task::spawn_blocking(move || {
-            let dim = embedding_dim.map(|d| d as u32).unwrap_or_else(|| {
-                storage
-                    .read()
-                    .ok()
-                    .and_then(|s| {
-                        s.get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)
-                            .ok()
-                            .flatten()
-                    })
-                    .map(|ns| ns.embedding_dim)
-                    .unwrap_or(1536)
-            });
+        let result = tokio::task::spawn_blocking(move || {
+            let result = (|| {
+                let dim = embedding_dim.map(|d| d as u32).unwrap_or_else(|| {
+                    storage
+                        .read()
+                        .ok()
+                        .and_then(|s| {
+                            s.get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)
+                                .ok()
+                                .flatten()
+                        })
+                        .map(|ns| ns.embedding_dim)
+                        .unwrap_or(1536)
+                });
 
-            let ns_config = NamespaceConfig {
-                schema: None,
-                id: NamespaceId::UNSET,
-                name: input_name.clone(),
-                embedding_dim: dim,
-                initial_stability: initial_stability.unwrap_or(3.7145),
-                default_difficulty: 5.0,
-                phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
-                permastore_threshold: 1500.0,
-                created_at: now,
-                desired_retention: desired_retention.unwrap_or(0.9),
-                decay_rate_multiplier,
-            };
+                let ns_config = NamespaceConfig {
+                    schema: None,
+                    id: NamespaceId::UNSET,
+                    name: input_name.clone(),
+                    embedding_dim: dim,
+                    initial_stability: initial_stability.unwrap_or(3.7145),
+                    default_difficulty: 5.0,
+                    phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
+                    permastore_threshold: 1500.0,
+                    created_at: now,
+                    desired_retention: desired_retention.unwrap_or(0.9),
+                    decay_rate_multiplier,
+                };
 
-            crate::decay::lifecycle::resolve_policy(
-                &ns_config,
-                &crate::decay::DecayConfig::default(),
-                1.0,
-            )
-            .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
+                crate::decay::lifecycle::resolve_policy(
+                    &ns_config,
+                    &crate::decay::DecayConfig::default(),
+                    1.0,
+                )
+                .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
 
-            let mut storage_w = storage.write().map_err(|e| {
-                bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-            })?;
-            let assigned_id = storage_w
-                .create_namespace(&ns_config)
-                .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
+                let mut storage_w = storage.write().map_err(|e| {
+                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
+                })?;
+                let assigned_id = storage_w
+                    .create_namespace_with_work(&ns_config, Some(&worker))
+                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
 
-            Ok(bridge::NamespaceInfo {
-                id: assigned_id.get(),
-                name: input_name,
-                embedding_dim: dim as u16,
-                // Not a placeholder: a namespace created one line ago is
-                // empty.
-                memory_count: 0,
-                created_at: format_timestamp(now, tz),
-            })
+                Ok(bridge::NamespaceInfo {
+                    id: assigned_id.get(),
+                    name: input_name,
+                    embedding_dim: dim as u16,
+                    // Not a placeholder: a namespace created one line ago is
+                    // empty.
+                    memory_count: 0,
+                    created_at: format_timestamp(now, tz),
+                })
+            })();
+            crate::storage::work::finish_work(&storage, worker);
+            result
         })
         .await
-        .map_err(|e| bridge::BridgeError::Internal(format!("blocking task join error: {e}")))?
+        .map_err(|e| bridge::BridgeError::Internal(format!("blocking task join error: {e}")))?;
+        crate::storage::work::finish_work(&self.storage, work);
+        result
     }
 
     async fn namespace_stats(
