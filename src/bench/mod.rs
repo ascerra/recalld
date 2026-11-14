@@ -11,3 +11,5 @@ pub mod controls;
 
 /// Shared-clock evaluator constructor; snapshot/reset remain unavailable.
 pub mod frozen;
+
+mod checkpoint;

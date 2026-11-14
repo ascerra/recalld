@@ -10,8 +10,8 @@ use crate::time::{Clock, ManualClock};
 /// Pins lifecycle time and canonical allocation seed 7 for this legacy-v1 track.
 /// This is not control over every RNG, behavioral cache, or query tie.
 pub struct OwnedEvaluator {
-    core: Arc<crate::Recalld>,
-    controls: FrozenControls,
+    pub(super) core: Arc<crate::Recalld>,
+    pub(super) controls: FrozenControls,
 }
 
 impl OwnedEvaluator {
@@ -65,9 +65,9 @@ impl OwnedEvaluator {
     }
 }
 
-struct FrozenControls {
+pub(super) struct FrozenControls {
     owner: DerivedCompletion,
-    clock: Arc<ManualClock>,
+    pub(super) clock: Arc<ManualClock>,
     // A controller permit, not a work ticket or a readiness registry. The join
     // task owns this until the blocking worker exits, even if its caller leaves.
     busy: Arc<tokio::sync::Mutex<()>>,
@@ -78,7 +78,7 @@ fn unavailable(message: impl ToString) -> StorageError {
 }
 
 impl FrozenControls {
-    fn new(owner: DerivedCompletion, clock: Arc<ManualClock>) -> Self {
+    pub(super) fn new(owner: DerivedCompletion, clock: Arc<ManualClock>) -> Self {
         Self {
             owner,
             clock,
@@ -86,7 +86,7 @@ impl FrozenControls {
         }
     }
 
-    async fn capture<T: Send + 'static>(
+    pub(super) async fn capture<T: Send + 'static>(
         &self,
         deadline: Instant,
         capture: impl FnOnce(

@@ -43,6 +43,16 @@ pub(crate) struct IdState {
     last_memory_millis: Option<u64>,
 }
 
+impl IdState {
+    pub(crate) fn validate_clock(&self, millis: i64) -> Result<(), StorageError> {
+        let millis = u64::try_from(millis).map_err(|_| invalid("negative restored clock"))?;
+        if millis >= (1_u64 << 48) || self.last_memory_millis.is_some_and(|last| last > millis) {
+            return Err(invalid("restored clock precedes allocated UUID time"));
+        }
+        Ok(())
+    }
+}
+
 pub(crate) struct SeededIds(Mutex<IdState>);
 fn invalid(message: &str) -> StorageError {
     StorageError::InvalidControl(format!("owned allocation source: {message}"))

@@ -71,7 +71,7 @@ impl RedbStorageEngine {
         }
         let directory = tempfile::Builder::new()
             .prefix("recalld-frozen-canonical-")
-            .tempdir()?;
+            .tempdir_in(self.db_path.parent().ok_or(StorageError::InvalidPath)?)?;
         // Keep OfflineSnapshot's sibling owner lock inside this private stage,
         // so timeout/error cleanup removes the entire disposable capture.
         let stage = directory.path().join("canonical");
