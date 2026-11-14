@@ -4,6 +4,7 @@ use crate::storage::RedbStorageEngine;
 use crate::storage::control::MutationOutcome;
 use crate::storage::native_lifecycle::{NativeLifecycleSession, NativePolicyInputs};
 use crate::storage::schema_migration::{MigrationOptions, inspect_schema, migrate_schema};
+use redb::ReadableTable;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -302,4 +303,78 @@ fn forged_native_catalog_configuration_is_rejected_immutably() {
     let before = bytes(&path);
     assert!(inspect_schema(&path).is_err());
     assert_eq!(bytes(&path), before);
+}
+
+#[test]
+fn native_catalog_review_expanded_fixed_defaults_replay_but_dynamic_selectors_conflict() {
+    let root = tempfile::tempdir().unwrap();
+    let (_, clock, mut session) = fixture(root.path());
+    let ctx = context(&session, "defaults");
+    let mut omitted = input();
+    omitted.initial_stability = None;
+    omitted.desired_retention = None;
+    let receipt = session
+        .create_namespace(&ctx, &omitted, &Provider(true))
+        .unwrap();
+    let defaults = NamespaceConfig::default_namespace(0);
+    let mut explicit = omitted.clone();
+    explicit.initial_stability = Some(defaults.initial_stability);
+    explicit.desired_retention = Some(defaults.desired_retention);
+    let replay = session
+        .create_namespace(&ctx, &explicit, &Provider(false))
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.outcome, receipt.outcome);
+    assert_eq!(replay.operation_id, receipt.operation_id);
+    assert_eq!(replay.committed_generation, receipt.committed_generation);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+    for which in 0..3 {
+        let mut dynamic = omitted.clone();
+        match which {
+            0 => dynamic.embedding_dim = Some(profile().dimension),
+            1 => dynamic.embedding_profile_id = Some(profile().profile_id().unwrap()),
+            _ => dynamic.decay_rate_multiplier = Some(1.),
+        }
+        assert!(matches!(
+            session.create_namespace(&ctx, &dynamic, &Provider(false)),
+            Err(StorageError::IdempotencyConflict)
+        ));
+    }
+}
+
+#[test]
+fn native_catalog_review_invalid_inherited_policy_rejects_before_allocation() {
+    for bad_global in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (path, _, mut session) = fixture(root.path());
+        let ctx = context(&session, "invalid-policy");
+        let control = session.engine.control_state().unwrap();
+        let before = bytes(&path);
+        if bad_global {
+            session.policy.global.max_connection_bonus = f32::NAN;
+        } else {
+            session.policy.multiplier = f64::NAN;
+        }
+        assert!(
+            session
+                .create_namespace(&ctx, &input(), &Provider(true))
+                .is_err()
+        );
+        assert_eq!(session.engine.control_state().unwrap(), control);
+        assert_eq!(bytes(&path), before);
+        assert!(!path.join("created").exists());
+        if !bad_global {
+            let mut overriding = input();
+            overriding.decay_rate_multiplier = Some(2.);
+            let receipt = session
+                .create_namespace(&ctx, &overriding, &Provider(true))
+                .unwrap();
+            session.policy.global.max_connection_bonus = f32::NAN;
+            let replay = session
+                .create_namespace(&ctx, &overriding, &Provider(false))
+                .unwrap();
+            assert!(replay.replayed);
+            assert_eq!(replay.outcome, receipt.outcome);
+        }
+    }
 }
