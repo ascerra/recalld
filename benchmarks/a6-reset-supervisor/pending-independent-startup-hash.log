@@ -1,0 +1,36 @@
+{
+  "gate": "independent-startup-logical-hash-equality",
+  "status": "failed",
+  "checks": [
+    {
+      "case": "prefix",
+      "left": "b5ca96e75d8ca248d491b771b28486ec6ed44edd4a8374059b1eef27235d5a2c",
+      "right": "25e31163917fa7e30491bb532249ffd1cb3de73dcbaf5af7a5db3755d2504ab7",
+      "equal": false
+    },
+    {
+      "case": "original",
+      "left": "8e2989357d8068d714b436e27ba72e9ce7813ca622a3a1dab897386c5579e493",
+      "right": "8957e9ffc4bf4d96230de1b73bc66b3e2a8375b45d808ae2ee10254e1f75af11",
+      "equal": false
+    },
+    {
+      "case": "restored-0",
+      "left": "8e2989357d8068d714b436e27ba72e9ce7813ca622a3a1dab897386c5579e493",
+      "right": "8957e9ffc4bf4d96230de1b73bc66b3e2a8375b45d808ae2ee10254e1f75af11",
+      "equal": false
+    },
+    {
+      "case": "restored-1",
+      "left": "8e2989357d8068d714b436e27ba72e9ce7813ca622a3a1dab897386c5579e493",
+      "right": "8957e9ffc4bf4d96230de1b73bc66b3e2a8375b45d808ae2ee10254e1f75af11",
+      "equal": false
+    },
+    {
+      "case": "restored-2",
+      "left": "8e2989357d8068d714b436e27ba72e9ce7813ca622a3a1dab897386c5579e493",
+      "right": "8957e9ffc4bf4d96230de1b73bc66b3e2a8375b45d808ae2ee10254e1f75af11",
+      "equal": false
+    }
+  ]
+}

@@ -197,7 +197,10 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
         k: usize,
         eligible_ids: Option<&HashSet<MemoryId>>,
     ) -> Result<Vec<ScoredResult>> {
+        let wait = crate::performance::Timer::new("vector.lock_wait");
         let index = self.index.read();
+        wait.complete();
+        let index = crate::performance::Hold::new("vector.lock_hold", index);
         let filter = SearchFilter {
             namespace_id: Some(namespace_id),
             ..Default::default()
@@ -215,7 +218,10 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
     }
 
     fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>> {
+        let wait = crate::performance::Timer::new("vector.lock_wait");
         let index = self.index.read();
+        wait.complete();
+        let index = crate::performance::Hold::new("vector.lock_hold", index);
         index.get_vector(id)
     }
 }
@@ -245,7 +251,10 @@ impl SharedFtsIndexRegistry {
 
 impl FtsIndexRegistry for SharedFtsIndexRegistry {
     fn search(&self, namespace_id: NamespaceId, query: &str, k: usize) -> Result<Vec<FtsResult>> {
+        let wait = crate::performance::Timer::new("fts.lock_wait");
         let index = self.index.lock();
+        wait.complete();
+        let index = crate::performance::Hold::new("fts.lock_hold", index);
         index
             .search(namespace_id, query, k)
             .map(|results| {
@@ -267,7 +276,10 @@ impl FtsIndexRegistry for SharedFtsIndexRegistry {
         k: usize,
         eligible_ids: &HashSet<MemoryId>,
     ) -> Result<super::EligibleFtsResults> {
+        let wait = crate::performance::Timer::new("fts.lock_wait");
         let index = self.index.lock();
+        wait.complete();
+        let index = crate::performance::Hold::new("fts.lock_hold", index);
         index
             .search_eligible(namespace_id, query, k, eligible_ids)
             .map_err(|e| SearchError::Internal(format!("eligible FTS search failed: {e}")))
@@ -339,13 +351,16 @@ impl MetadataStore for StorageMetadataAdapter {
 
     async fn effects_stamp(&self) -> Result<u64> {
         let storage = self.storage.clone();
+        let worker = crate::performance::Worker::new("storage.read.queue");
         tokio::task::spawn_blocking(move || {
-            storage
-                .read()
-                .map_err(|e| SearchError::Unavailable(e.to_string()))?
-                .meta_store()
-                .effects_stamp()
-                .map_err(|e| SearchError::Unavailable(e.to_string()))
+            worker.run(|| {
+                storage
+                    .read()
+                    .map_err(|e| SearchError::Unavailable(e.to_string()))?
+                    .meta_store()
+                    .effects_stamp()
+                    .map_err(|e| SearchError::Unavailable(e.to_string()))
+            })
         })
         .await
         .map_err(|e| SearchError::Internal(e.to_string()))?
@@ -354,14 +369,20 @@ impl MetadataStore for StorageMetadataAdapter {
     async fn get(&self, id: &MemoryId) -> Result<Option<CachedRecord>> {
         let storage = self.storage.clone();
         let id = *id;
+        let worker = crate::performance::Worker::new("storage.read.queue");
         tokio::task::spawn_blocking(move || {
-            let storage_r = storage
-                .read()
-                .map_err(|e| SearchError::MetadataError(format!("storage lock poisoned: {e}")))?;
-            storage_r
-                .get_record(id)
-                .map(|opt| opt.map(|disk| CachedRecord::from(&disk)))
-                .map_err(|e| SearchError::MetadataError(e.to_string()))
+            worker.run(|| {
+                let wait = crate::performance::Timer::new("storage.read.wait");
+                let storage_r = storage.read().map_err(|e| {
+                    SearchError::MetadataError(format!("storage lock poisoned: {e}"))
+                })?;
+                wait.complete();
+                let storage_r = crate::performance::Hold::new("storage.read.hold", storage_r);
+                storage_r
+                    .get_record(id)
+                    .map(|opt| opt.map(|disk| CachedRecord::from(&disk)))
+                    .map_err(|e| SearchError::MetadataError(e.to_string()))
+            })
         })
         .await
         .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
@@ -370,19 +391,25 @@ impl MetadataStore for StorageMetadataAdapter {
     async fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<CachedRecord>> {
         let storage = self.storage.clone();
         let ids = ids.to_vec();
+        let worker = crate::performance::Worker::new("storage.read.queue");
         tokio::task::spawn_blocking(move || {
-            let storage_r = storage
-                .read()
-                .map_err(|e| SearchError::MetadataError(format!("storage lock poisoned: {e}")))?;
-            let mut results = Vec::with_capacity(ids.len());
-            for id in &ids {
-                match storage_r.get_record(*id) {
-                    Ok(Some(disk)) => results.push(CachedRecord::from(&disk)),
-                    Ok(None) => {}
-                    Err(e) => return Err(SearchError::MetadataError(e.to_string())),
+            worker.run(|| {
+                let wait = crate::performance::Timer::new("storage.read.wait");
+                let storage_r = storage.read().map_err(|e| {
+                    SearchError::MetadataError(format!("storage lock poisoned: {e}"))
+                })?;
+                wait.complete();
+                let storage_r = crate::performance::Hold::new("storage.read.hold", storage_r);
+                let mut results = Vec::with_capacity(ids.len());
+                for id in &ids {
+                    match storage_r.get_record(*id) {
+                        Ok(Some(disk)) => results.push(CachedRecord::from(&disk)),
+                        Ok(None) => {}
+                        Err(e) => return Err(SearchError::MetadataError(e.to_string())),
+                    }
                 }
-            }
-            Ok(results)
+                Ok(results)
+            })
         })
         .await
         .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
@@ -390,15 +417,21 @@ impl MetadataStore for StorageMetadataAdapter {
 
     async fn namespace_records(&self, namespace_id: NamespaceId) -> Result<Vec<CachedRecord>> {
         let storage = self.storage.clone();
+        let worker = crate::performance::Worker::new("storage.read.queue");
         tokio::task::spawn_blocking(move || {
-            let storage = storage
-                .read()
-                .map_err(|e| SearchError::MetadataError(format!("storage lock poisoned: {e}")))?;
-            storage
-                .meta_store()
-                .records_in_namespace(namespace_id)
-                .map(|records| records.iter().map(CachedRecord::from).collect())
-                .map_err(|e| SearchError::MetadataError(e.to_string()))
+            worker.run(|| {
+                let wait = crate::performance::Timer::new("storage.read.wait");
+                let storage = storage.read().map_err(|e| {
+                    SearchError::MetadataError(format!("storage lock poisoned: {e}"))
+                })?;
+                wait.complete();
+                let storage = crate::performance::Hold::new("storage.read.hold", storage);
+                storage
+                    .meta_store()
+                    .records_in_namespace(namespace_id)
+                    .map(|records| records.iter().map(CachedRecord::from).collect())
+                    .map_err(|e| SearchError::MetadataError(e.to_string()))
+            })
         })
         .await
         .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
@@ -406,14 +439,20 @@ impl MetadataStore for StorageMetadataAdapter {
 
     async fn list_namespace_memories(&self, namespace_id: NamespaceId) -> Result<Vec<MemoryId>> {
         let storage = self.storage.clone();
+        let worker = crate::performance::Worker::new("storage.read.queue");
         tokio::task::spawn_blocking(move || {
-            let storage_r = storage
-                .read()
-                .map_err(|e| SearchError::MetadataError(format!("storage lock poisoned: {e}")))?;
-            storage_r
-                .meta_store()
-                .memories_in_namespace(namespace_id)
-                .map_err(|e| SearchError::MetadataError(e.to_string()))
+            worker.run(|| {
+                let wait = crate::performance::Timer::new("storage.read.wait");
+                let storage_r = storage.read().map_err(|e| {
+                    SearchError::MetadataError(format!("storage lock poisoned: {e}"))
+                })?;
+                wait.complete();
+                let storage_r = crate::performance::Hold::new("storage.read.hold", storage_r);
+                storage_r
+                    .meta_store()
+                    .memories_in_namespace(namespace_id)
+                    .map_err(|e| SearchError::MetadataError(e.to_string()))
+            })
         })
         .await
         .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
@@ -614,7 +653,10 @@ impl GraphReader for SharedGraphReader {
         &self,
         strengths: &HashMap<MemoryId, f32>,
     ) -> Result<HashMap<MemoryId, f32>> {
+        let wait = crate::performance::Timer::new("graph.lock_wait");
         let graph = self.graph.read();
+        wait.complete();
+        let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         let config = crate::graph::activation::ActivationConfig::default();
         Ok(strengths
             .keys()
@@ -636,7 +678,10 @@ impl GraphReader for SharedGraphReader {
         depth: u8,
         records: &HashMap<MemoryId, CachedRecord>,
     ) -> Result<Vec<(MemoryId, f32)>> {
+        let wait = crate::performance::Timer::new("graph.lock_wait");
         let graph = self.graph.read();
+        wait.complete();
+        let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         Ok(crate::graph::activation::spreading_activation_with_records(
             &graph,
             seeds,
@@ -664,7 +709,10 @@ impl GraphReader for SharedGraphReader {
         depth: u8,
         eligible: &std::collections::HashMap<MemoryId, CachedRecord>,
     ) -> Result<crate::graph::query::GraphExpansion> {
+        let wait = crate::performance::Timer::new("graph.lock_wait");
         let graph = self.graph.read();
+        wait.complete();
+        let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         crate::graph::query::expand(&graph, seeds, namespace, depth, eligible)
             .map_err(|e| SearchError::Internal(e.into()))
     }
@@ -690,7 +738,10 @@ impl GraphReader for SharedGraphReader {
         namespace_id: NamespaceId,
         graph_depth: u8,
     ) -> Vec<(MemoryId, f32)> {
+        let wait = crate::performance::Timer::new("graph.lock_wait");
         let graph = self.graph.read();
+        wait.complete();
+        let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         let config = spreading_config(graph_depth);
         crate::graph::activation::spreading_activation(&graph, seeds, namespace_id, &config)
     }

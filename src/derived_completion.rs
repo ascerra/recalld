@@ -476,6 +476,53 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn repeated_same_generation_rebuild_preserves_exact_fts_scores() {
+        let fx = Fixture::new();
+        fx.insert_memory_with(MemorySpec {
+            summary: "alpha alpha beta",
+            ..MemorySpec::new(NamespaceId::new(1))
+        })
+        .await;
+        fx.insert_memory_with(MemorySpec {
+            summary: "alpha gamma",
+            ..MemorySpec::new(NamespaceId::new(1))
+        })
+        .await;
+        let owner = publisher(&fx);
+        let generation = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .canonical;
+        let mut rounds = Vec::new();
+        for round in 0..4 {
+            owner.rebuild_all().await.unwrap();
+            let state = fx
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap();
+            assert_eq!(state.canonical, generation);
+            assert!(state.matches_canonical());
+            let fts = fx.fts_index.lock().await;
+            let results = fts.search(NamespaceId::new(1), "alpha beta", 10).unwrap();
+            eprintln!(
+                "SAME_G_REBUILD round={round} G={generation:?} stats={} results={results:?}",
+                fts.rebuild_statistics()
+            );
+            rounds.push(results);
+        }
+        for result in &rounds[1..] {
+            assert_eq!(&rounds[0], result);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_rebuild_publishes_exact_views_after_effect_free_catalog_commit() {
         let fx = Fixture::new();
         let id = fx

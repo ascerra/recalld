@@ -1,5 +1,5 @@
 //! Evaluator-only JSONL on caller-owned pipes, sharing the actor's actual core.
-//! This is a bounded v1 diagnostic control plane, not a snapshot/reset facility.
+//! Bounded v1 controls; checkpoint support requires the explicit owned track.
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -35,6 +35,23 @@ async fn dispatch(
     evaluator: Option<&super::frozen::OwnedEvaluator>,
     request: &Request,
 ) -> Result<Value, Value> {
+    if request.method == "snapshot" && evaluator.is_some_and(|v| v.checkpoint_supported()) {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Snapshot {
+            deadline_ms: u64,
+        }
+        let params: Snapshot = serde_json::from_value(request.params.clone())
+            .map_err(|e| error("INVALID_PARAMS", e))?;
+        if !(1..=30_000).contains(&params.deadline_ms) {
+            return Err(error("INVALID_PARAMS", "deadlineMs must be 1..30000"));
+        }
+        return evaluator
+            .unwrap()
+            .checkpoint(Instant::now() + Duration::from_millis(params.deadline_ms))
+            .await
+            .map_err(|e| error("CONTROL_UNAVAILABLE", e));
+    }
     if request.method == "sweepStatus" {
         if request.params != json!({}) {
             return Err(error("INVALID_PARAMS", "sweepStatus requires empty params"));
@@ -97,12 +114,13 @@ async fn dispatch(
             }
             Ok(json!({
                 "controlVersion":1,
-                "methods": if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance","sweep","sweepStatus"] } else { vec!["capabilities","inspect","barrier"] },
+                "methods": if evaluator.is_some_and(|v| v.checkpoint_supported()) { vec!["capabilities","inspect","barrier","advance","snapshot","sweep","sweepStatus"] } else if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance","sweep","sweepStatus"] } else { vec!["capabilities","inspect","barrier"] },
                 "publicContract":"legacy-v1",
                 "sweepControlVersion": if evaluator.is_some() { Some(1) } else { None },
                 "guarantees":{
                     "barrier":"owned-work-and-required-derived-generations",
-                    "logicalHash":false,"snapshot":false,"reset":false,
+                    "logicalHash":false,"snapshot":evaluator.is_some_and(|v| v.checkpoint_supported()),"reset":false,
+                    "freshOwnerCheckpointRestore":evaluator.is_some_and(|v| v.checkpoint_supported()),
                     "controlledClock":false,"lifecycleClockControlled":evaluator.is_some(),
                     "explicitLegacySweep":evaluator.is_some(),"nativeSweep":false,
                     "controlledIds":false,"canonicalAllocationControlled":evaluator.is_some(),"controlledRng":false

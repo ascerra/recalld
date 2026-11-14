@@ -8,6 +8,9 @@
 //! See Spec 04 Section 7 for the design rationale.
 
 mod catalog;
+pub(crate) use catalog::rename_new_directory;
+mod checkpoint;
+pub(crate) use checkpoint::StagedCanonical;
 mod effects;
 mod insertion;
 mod maintenance;
@@ -345,6 +348,9 @@ pub struct RedbStorageEngine {
     /// Exclusive file lock preventing multi-process access.
     _lock_file: crate::storage::ownership::OwnedFileLock,
     _ownership: crate::storage::ownership::StoreOwnership,
+    // Isolated fixture clones retain their ancestor owners until every worker
+    // releases this actual engine. Empty in all production constructors.
+    pub(crate) fixture_owners: Vec<crate::storage::ownership::OwnedFileLock>,
 }
 
 impl RedbStorageEngine {
@@ -518,6 +524,7 @@ impl RedbStorageEngine {
             edge_store,
             _lock_file: lock_file,
             _ownership: ownership,
+            fixture_owners: Vec::new(),
         };
 
         // Step 7: Startup validation.

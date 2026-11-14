@@ -1,0 +1,16 @@
+{
+  "filesSha256": {
+    "clippy.log": "b1911f5e140035960621e2370dbfed27bf664b00ef6e854ae0d924a3aea99a05",
+    "example-test-binaries-after.json": "4333db8801f9ec90d02f0ca6f940b39936879261a63fa3014f56abcdcde1a611",
+    "example-test-binaries-before.json": "4333db8801f9ec90d02f0ca6f940b39936879261a63fa3014f56abcdcde1a611",
+    "full-suite.log": "68a1940f730b3474dcee0903782d1b50720a5f5780fb39ea99126dcd64c00fc8",
+    "public-binary-after.sha256": "4d5e81a5d9407a298413205043c141d8b30bcdd996de38b8b533bce47ad6cc3f",
+    "public-binary-before.sha256": "4d5e81a5d9407a298413205043c141d8b30bcdd996de38b8b533bce47ad6cc3f",
+    "summary.json": "2dcf1561c341500ca146e2da4a72cc62f7fd7a5fb85586045a1f6801d5b9ea7a",
+    "test-binaries-after.json": "7d5adf2cd3f7a237d3e96a4df277b4f6568fd43463be0746762e47126aa9d58f",
+    "test-binaries-before.json": "7d5adf2cd3f7a237d3e96a4df277b4f6568fd43463be0746762e47126aa9d58f"
+  },
+  "priorOutput": "/tmp/recalld-owned-supervisor-c8f126bd-pstlgs50/output",
+  "runtimeFilesIdentical": true,
+  "sourceCommit": "c8f126bd0d737106d0c4aedd65c521a460cc2125"
+}
