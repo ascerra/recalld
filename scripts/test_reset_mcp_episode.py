@@ -43,7 +43,7 @@ def main():
             assert r.returncode!=0 and not out.exists(),name
         def perturb(m,labels):
             labels["labelCanary"]="CHANGED_RESET_EVALUATOR_LABEL"
-            labels["relevant"]={f"q{i}":["turn-3"] for i in range(4)}
+            labels["relevant"]={q["queryId"]:["turn-3"] for q in h["fixtures"](h["RESET"]["TRACK"])[3]["queries"]}
         root=inputs("changed-label-inputs",perturb);variant=args.out/"changed-label-episode";r=run(root,variant)
         h["save"](args.out/"changed-label-run.json",dict(exitCode=r.returncode,stdout=r.stdout,stderr=r.stderr))
         assert r.returncode==0,r.stderr
@@ -57,6 +57,7 @@ def main():
             old=h["rows"](a/"actor-wire.jsonl");new=h["rows"](b/"actor-wire.jsonl")
             actions=lambda rows:[r["request"] for r in rows if r["event"]=="attempt"]
             assert actions(old)==actions(new),name  # Actual owned IDs, no normalization.
+            assert json.loads((a/"suffix.json").read_text()) == json.loads((b/"suffix.json").read_text()),name
             compared+=len(actions(old))
             for p in (a/"actor-inputs").glob("*.json"):
                 assert p.read_bytes()==(b/"actor-inputs"/p.name).read_bytes()
@@ -69,8 +70,8 @@ def main():
                     assert trace["traceSchemaVersion"]==1 and trace["readGeneration"] is None
                     assert trace["action"]["id"]==trace["outcome"]["id"]==int(trace["stepId"])
             scores=[json.loads((p/"scores.json").read_text()) for p in (a,b)]
-            assert scores[0]["scoring"]["scored"]=="2" and scores[0]["scoring"]["unknownAnnotations"]=="1" and scores[0]["scoring"]["zeroLabelUnscored"]=="1"
-            assert scores[1]["scoring"]["scored"]=="4" and scores[1]["scoring"]["means"]["retrievalRecallAt5"]==0
+            assert scores[0]["scoring"]["scored"]=="3" and scores[0]["scoring"]["unknownAnnotations"]=="1" and scores[0]["scoring"]["zeroLabelUnscored"]=="1"
+            assert scores[1]["scoring"]["scored"]=="5" and scores[1]["scoring"]["means"]["retrievalRecallAt5"]==0
             assert [v["retrievedSourceIds"] for v in scores[0]["trace"]]==[v["retrievedSourceIds"] for v in scores[1]["trace"]]
         providers=[h["rows"](p/"actor-provider.jsonl") for p in (args.baseline,variant)]
         assert [(r["requestBody"],r["status"],r["responseVectors"]) for r in providers[0]]==[(r["requestBody"],r["status"],r["responseVectors"]) for r in providers[1]]

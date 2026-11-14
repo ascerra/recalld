@@ -26,6 +26,21 @@ def fixtures(base):
     cache["entries"]["a6-document:blocked-worker-canary"] = [0., 0., 0., 1.]
     cache["entries"]["a6-query:replacement"] = [.8, .6, 0., 0.]
     cache["entries"]["a6-query:replacement FUTURE_RESET_QUERY"] = [.8, .6, 0., 0.]
+    # Public-legal asymmetric corpus derived from the baseline FTS regression:
+    # nonempty summaries, distinct vectors and explicit namespace/limit; no tie oracle.
+    import math
+    corpus = [("document A", "alpha " + " ".join(["filler"]*20), [0.,0.,1.,0.]),
+              ("beta beta beta", None, [1.,0.,0.,0.]), ("beta", None, [0.,1.,0.,0.])]
+    for ordinal,(summary,body,vector) in enumerate(corpus,5):
+        source=dict(actor["sources"][3],sourceId=f"turn-{ordinal}",turnId=f"turn-{ordinal}",ordinal=ordinal,summary=summary,
+                    contentSha256=hashlib.sha256(summary.encode()).hexdigest())
+        if body is not None:
+            source.update(fullText=body,fullTextSha256=hashlib.sha256(body.encode()).hexdigest())
+        actor["sources"].append(source)
+        cache["entries"]["a6-document:"+summary+("\n\n"+body if body is not None else "")]=vector
+    cache["entries"]["a6-document:foreign"]=[0.,0.,0.,1.]
+    norm=math.sqrt(.9**2+.8**2+.7**2)
+    cache["entries"]["a6-query:alpha beta"]=[.9/norm,.8/norm,.7/norm,0.]
     schedule = dict(scheduleVersion=1, futureQueryCanary="FUTURE_RESET_QUERY", queries=[
         dict(queryId=f"q{i}", text="replacement" if i < 3 else "replacement FUTURE_RESET_QUERY") for i in range(4)],
         warmQuestion=dict(queryId="warm", text="replacement"), advanceMillis=86400000)
@@ -34,13 +49,15 @@ def fixtures(base):
         dict(tag="feedback", tool="reinforce_memory", arguments=dict(id="$turn-4", namespace="default", quality=3))]
     for question in schedule["queries"]:
         steps.append(dict(tag="query:" + question["queryId"], tool="recall_memories", arguments=dict(query=question["text"], namespace="default", recordAccess=False, depth=0, limit=1, compact=False)))
+    schedule["queries"].append(dict(queryId="fts",text="alpha beta"))
+    steps.append(dict(tag="query:fts",tool="recall_memories",arguments=dict(query="alpha beta",namespace="foreign",recordAccess=False,depth=0,limit=3,compact=False)))
     steps.extend([
         dict(tag="forget", tool="forget_memory", arguments=dict(id="$turn-0", namespace="default")),
         dict(tag="tombstone", tool="get_memory", arguments=dict(id="$turn-0", namespace="default", recordAccess=False)),
         dict(tag="invalid-quality", tool="reinforce_memory", arguments=dict(id="$turn-4", namespace="default", quality=0)),
         dict(tag="replay-miss", tool="recall_memories", arguments=dict(query="unrecorded-query", namespace="default", recordAccess=False, depth=0, limit=1))])
     schedule["steps"] = steps
-    labels["relevant"] = {"q0": ["turn-4"], "q1": [], "q3": ["turn-4", "turn-3"]}
+    labels["relevant"] = {"q0": ["turn-4"], "q1": [], "q3": ["turn-4", "turn-3"], "fts":["turn-5","turn-6","turn-7"]}
     return actor, labels, cache, schedule
 
 
@@ -278,7 +295,12 @@ warm_file_enabled = false
         for row in outputs:
             if row["tag"].startswith("query:"):
                 memories=json.loads(row["result"]["content"][0]["text"])["memories"]
-                assert [v["id"] for v in memories] == [mappings["turn-4"]]
+                if row["tag"]=="query:fts":
+                    assert len(memories)==3 and {v["id"] for v in memories}=={mappings[f"turn-{i}"] for i in (5,6,7)}
+                    assert all(v["namespace"]=="foreign" for v in memories)
+                    assert all(isinstance(v["score"],(int,float)) for v in memories)
+                else:
+                    assert [v["id"] for v in memories] == [mappings["turn-4"]]
                 returned=memories+json.loads(row["result"]["content"][0]["text"]).get("graphContext",{}).get("neighbors",[])
                 queries.append(dict(queryId=row["tag"][6:],memoryIds=[v["id"] for v in returned]))
         state,ready=owner.ready()
@@ -322,8 +344,8 @@ warm_file_enabled = false
         original=child("original")
         original.before_actor()
         server.delivery=0
-        ack,outcomes=original.step(dict(phase="ingest",sources=actor["sources"][:4],activeEmbedding=manifest["activeEmbedding"],startId=0,deliveryOrdinal=0))
-        prefix_ids=values(outcomes);assert len(prefix_ids)==4
+        ack,outcomes=original.step(dict(phase="ingest",sources=[s for s in actor["sources"] if s["sourceId"]!="turn-4"],activeEmbedding=manifest["activeEmbedding"],startId=0,deliveryOrdinal=0))
+        prefix_ids=values(outcomes);assert len(prefix_ids)==7
         h["save"](evaluator / "prefix-mappings.json",prefix_ids)
         start_id=int(ack["stepId"]);warm_start=len(h["rows"](server.log))
         for ordinal in (1,2):
