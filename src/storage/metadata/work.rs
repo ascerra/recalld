@@ -179,7 +179,11 @@ impl MetadataStore {
             let value = table
                 .get("state")?
                 .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
-            let state = ControlState::decode(value.value())?;
+            let state = if self.native_lifecycle_only {
+                self.native_control_at(&read)?
+            } else {
+                ControlState::decode(value.value())?
+            };
             super::publication::check_current_pending(&read, &state, || {
                 admission.check(&self.work_tracker)?;
                 Ok(())

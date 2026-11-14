@@ -66,7 +66,7 @@ impl MetadataStore {
     /// the handle proves the complete receipt/schema suffix. Participating writes
     /// preserve it atomically; an uncertain commit poisons the handle until a
     /// strict reopen. Do not run that lifetime-history proof on each observation.
-    fn native_control_at(
+    pub(super) fn native_control_at(
         &self,
         read: &redb::ReadTransaction,
     ) -> Result<ControlState, StorageError> {

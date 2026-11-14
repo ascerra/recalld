@@ -133,10 +133,13 @@ impl MetadataStore {
             .read()
             .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
         self.ensure_available()?;
-        // Native reader activation belongs to the owned native consumer join.
-        self.ensure_legacy_operation()?;
         let read = self.db.begin_read()?;
-        let state = {
+        let state = if self.native_lifecycle_only {
+            // Same transaction and already-owned native gate as the native
+            // writer/reader join; no ordinary schema-2 startup bypass.
+            self.native_control_at(&read)?
+        } else {
+            self.ensure_legacy_operation()?;
             let table = read.open_table(control::CONTROL)?;
             let value = table
                 .get("state")?
