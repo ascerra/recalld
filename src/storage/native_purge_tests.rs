@@ -568,16 +568,92 @@ async fn native_purge_accepted_completion_failure_retains_latest_receipt_then_re
             .effects_stamp()
             .is_err()
     );
+    let target = fx
+        .storage
+        .read()
+        .unwrap()
+        .control_state()
+        .unwrap()
+        .generation_ref();
+    assert_eq!(
+        canonical.last_receipt.committed_generation,
+        target.generation
+    );
+    {
+        let storage = fx.storage.read().unwrap();
+        assert_eq!(
+            storage
+                .meta_store()
+                .lookup_operation(
+                    canonical.store_id,
+                    MutationScope::Namespace(id),
+                    canonical.last_receipt.operation_id
+                )
+                .unwrap()
+                .unwrap(),
+            canonical.last_receipt
+        );
+        let state = storage.meta_store().publication_state().unwrap();
+        assert_eq!(state.canonical, target);
+        assert!(state.applied.iter().all(|at| *at != Some(target)));
+    }
+    // Finish the known caller before draining; never make a barrier wait on its
+    // own held parent. The broken view must reject the actual four-view barrier.
+    root.finish();
+    assert!(
+        publisher
+            .readiness_barrier(
+                target,
+                std::time::Instant::now() + std::time::Duration::from_secs(5)
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        fx.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref(),
+        target
+    );
+    let root = tracker.begin().unwrap();
     *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
     let completed = publisher
         .purge_native_accepted(key, true, &root)
         .await
         .unwrap();
-    assert_eq!(completed.last_receipt, canonical.last_receipt);
+    assert_eq!(completed, canonical);
+    assert_eq!(
+        fx.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref(),
+        target
+    );
     assert_eq!(completed.stage, PurgeStage::Complete);
     root.finish();
     assert_eq!(tracker.status().pending, 0);
     assert_eq!(tracker.status().unresolved, 0);
+    let ready = publisher
+        .readiness_barrier(
+            target,
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    assert!(ready.ready);
+    assert_eq!(ready.derived.len(), 4);
+    assert!(
+        ready
+            .derived
+            .iter()
+            .all(|view| view.ready && view.applied_generation == target.generation)
+    );
+
     assert!(
         fx.storage
             .read()
