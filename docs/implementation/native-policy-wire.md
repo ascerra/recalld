@@ -71,3 +71,5 @@ activation. Full query payload coherence, native store/batch/feedback/forget/
 purge wire, remote native RPC, complete input/output schemas, and whole-application
 conformance remain prerequisites for activation. This change makes no
 whole-native-ready claim.
+
+Final source validation: [1864dab evidence](../evidence/native-policy-wire/final-1864dab/REPORT.md). All-feature1063lib+2CLI, focused8+exactcatalog1, fmt and Clippy passed; preserved fixture failures are reported separately.
