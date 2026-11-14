@@ -37,4 +37,24 @@ impl MetadataStore {
         let binding = bindings.get(&namespace.get()).map(|proof| (*proof).clone());
         Ok((control.generation_ref(), binding))
     }
+    /// Replay callers already hold this unchanged transaction and mutation guard.
+    /// Bind a separate read snapshot to it before reconstructing historical hashes.
+    pub(super) fn replay_namespace_binding_at(
+        &self,
+        guard: &MutationGuard<'_>,
+        tx: &redb::WriteTransaction,
+        namespace: NamespaceId,
+    ) -> Result<NativeNamespaceProof, StorageError> {
+        let (generation, binding) = self.capture_namespace_binding(guard, namespace)?;
+        if generation != control::read_control(tx)?.generation_ref() {
+            return Err(StorageError::RecoveryRequired(
+                "namespace replay binding generation changed".into(),
+            ));
+        }
+        binding.ok_or_else(|| {
+            StorageError::RecoveryRequired(
+                "native replay requires retained namespace binding proof".into(),
+            )
+        })
+    }
 }

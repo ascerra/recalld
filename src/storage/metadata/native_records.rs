@@ -483,10 +483,32 @@ impl MetadataStore {
         &self,
         ctx: &MutationContext,
         id: MemoryId,
+        asserted_namespace: Option<&str>,
         parent: Option<&super::super::work::WorkTicket>,
     ) -> Result<Option<WriteReceipt>, StorageError> {
-        let _guard = self.native_guard_with_work(parent)?;
-        replay_tombstone(&self.db.begin_write()?, ctx, id)
+        let guard = self.native_guard_with_work(parent)?;
+        let tx = self.db.begin_write()?;
+        let receipt = replay_tombstone(&tx, ctx, id)?;
+        if let (Some(receipt), Some(name)) = (&receipt, asserted_namespace) {
+            let assertion = (|| {
+                let MutationScope::Namespace(namespace) = ctx.scope else {
+                    return Err(StorageError::MutationNamespaceMismatch);
+                };
+                let binding = self.replay_namespace_binding_at(&guard, &tx, namespace)?;
+                if binding.name != name {
+                    return Err(StorageError::NamespaceMismatch {
+                        id: id.into_inner(),
+                        namespace: name.to_owned(),
+                    });
+                }
+                Ok(())
+            })();
+            assertion.map_err(|source| StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(source),
+            })?;
+        }
+        Ok(receipt)
     }
     pub(crate) fn lookup_native_tombstone(
         &self,

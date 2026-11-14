@@ -405,6 +405,7 @@ impl MetadataStore {
         ctx: &MutationContext,
         id: MemoryId,
         quality: u8,
+        asserted_namespace: Option<&str>,
         parent: Option<&WorkTicket>,
     ) -> Result<Option<WriteReceipt>, StorageError> {
         feedback_quality(quality)?;
@@ -412,7 +413,7 @@ impl MetadataStore {
             return Err(StorageError::MutationNamespaceMismatch);
         };
         native_context(ctx, namespace)?;
-        let _guard = self.native_guard_with_work(parent)?;
+        let guard = self.native_guard_with_work(parent)?;
         let tx = self.db.begin_write()?;
         let Some(stored) = control::keyed_receipt(&tx, ctx)? else {
             return Ok(None);
@@ -428,26 +429,17 @@ impl MetadataStore {
         {
             return Err(StorageError::IdempotencyConflict);
         }
-        // The existing hash includes the original scope name. Live ID/name
-        // binding is immutable; numeric policy is neither resolved nor sampled.
-        let config = tx
-            .open_table(NAMESPACE_TABLE)?
-            .get(namespace.get())?
-            .map(|value| NamespaceConfig::decode(value.value()))
-            .transpose()?;
-        let Some(config) = config else {
-            // A future validated purge-witness accessor can supply this binding.
-            // Until then this is a known receipt, not a verified matching replay.
-            return Err(StorageError::CommittedMutation {
-                receipt: Box::new(stored.receipt),
-                source: Box::new(StorageError::RecoveryRequired(
-                    "native feedback replay requires retained namespace binding proof".into(),
-                )),
-            });
-        };
+        // Recover only original identity under this same guard/transaction.
+        // Numeric policy, clock and current name resolution do not participate.
+        let binding = self
+            .replay_namespace_binding_at(&guard, &tx, namespace)
+            .map_err(|source| StorageError::CommittedMutation {
+                receipt: Box::new(stored.receipt.clone()),
+                source: Box::new(source),
+            })?;
         let scope = LifecycleScope {
             namespace_id: namespace,
-            namespace_name: config.name,
+            namespace_name: binding.name,
             source: None,
         };
         let hash = native_request_hash(
@@ -456,7 +448,19 @@ impl MetadataStore {
             &[(id, AccessKind::ManualReinforcement)],
             Some(quality),
         )?;
-        control::replay_or_check(&tx, ctx, hash)
+        let receipt = control::replay_or_check(&tx, ctx, hash)?;
+        if let (Some(receipt), Some(name)) = (&receipt, asserted_namespace) {
+            if scope.namespace_name != name {
+                return Err(StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(StorageError::NamespaceMismatch {
+                        id: id.into_inner(),
+                        namespace: name.to_owned(),
+                    }),
+                });
+            }
+        }
+        Ok(receipt)
     }
     fn commit_native(
         &self,

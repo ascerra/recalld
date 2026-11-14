@@ -44,36 +44,13 @@ impl DerivedCompletion {
             let _graph = graph;
             let storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = (|| {
-                if let Some(receipt) =
-                    storage
-                        .meta_store()
-                        .lookup_native_feedback(&ctx, id, quality, Some(&child))?
-                {
-                    // A name is an assertion, never a replacement for stable scope.
-                    // Retired names need a validated purge-history consumer. Until
-                    // then, fail closed with the known receipt instead of rebinding.
-                    if let Some(name) = asserted_namespace.as_deref() {
-                        let assertion = (|| {
-                            let MutationScope::Namespace(namespace) = ctx.scope else {
-                                return Err(StorageError::MutationNamespaceMismatch);
-                            };
-                            if storage
-                                .get_namespace(namespace)?
-                                .is_some_and(|ns| ns.name == name)
-                            {
-                                Ok(())
-                            } else {
-                                Err(StorageError::NamespaceMismatch {
-                                    id: id.into_inner(),
-                                    namespace: name.to_owned(),
-                                })
-                            }
-                        })();
-                        assertion.map_err(|source| StorageError::CommittedMutation {
-                            receipt: Box::new(receipt.clone()),
-                            source: Box::new(source),
-                        })?;
-                    }
+                if let Some(receipt) = storage.meta_store().lookup_native_feedback(
+                    &ctx,
+                    id,
+                    quality,
+                    asserted_namespace.as_deref(),
+                    Some(&child),
+                )? {
                     return Ok(receipt);
                 }
                 if let Some(name) = asserted_namespace.as_deref() {

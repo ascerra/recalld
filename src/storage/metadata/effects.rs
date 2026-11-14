@@ -418,7 +418,10 @@ impl MetadataStore {
             return Err(StorageError::NamespaceNotFound(namespace.get()));
         }
 
-        if !matches!(mutation, RecordMutation::PurgeChunk(_) | RecordMutation::NativePurgeChunk(_, _)) {
+        if !matches!(
+            mutation,
+            RecordMutation::PurgeChunk(_) | RecordMutation::NativePurgeChunk(_, _)
+        ) {
             super::namespace_state::require_namespace_active(&tx, namespace)?;
         }
 
