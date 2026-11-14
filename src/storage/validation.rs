@@ -148,15 +148,6 @@ fn validate_snapshot(
     let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
     let read = meta.begin_read()?;
     let control = super::control::validate_existing(&read)?;
-    if super::metadata::batch::validate_existing(&read, control.as_ref())?
-        .iter()
-        .any(|p| p.unresolved() != 0)
-    {
-        return Err(StorageError::RecoveryRequired(
-            "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
-                .into(),
-        ));
-    }
     if native_recovery {
         let state = control
             .as_ref()
@@ -171,6 +162,15 @@ fn validate_snapshot(
         super::lineage::ensure_serving(&read, state)?;
         super::metadata::restoration::validate_inventory(&read)?;
         super::canonical_schema::validate_metadata_format(&read, Some(state))?;
+    }
+    if super::metadata::batch::validate_existing(&read, control.as_ref())?
+        .iter()
+        .any(|p| p.unresolved() != 0 && (!native_recovery || !matches!(p.version, 2 | 3)))
+    {
+        return Err(StorageError::RecoveryRequired(
+            "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
+                .into(),
+        ));
     }
 
     if super::metadata::purge::validate_existing(&read, control.as_ref())?
@@ -204,8 +204,10 @@ fn validate_snapshot(
             && (!native_recovery
                 || !matches!(
                     e.receipt.outcome,
-                    super::control::MutationOutcome::NativeMemoryInserted { .. }
+                    super::control::MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+                        | super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
+                        | super::control::MutationOutcome::NativeGraphChanged { .. }
                 ))
     }) {
         return Err(StorageError::RecoveryRequired(
@@ -345,6 +347,7 @@ fn validate_snapshot(
             "edge index counts disagree".into(),
         ));
     }
+    let mut decoded_edges = Vec::new();
     for item in forward.iter()? {
         let (key, value) = item?;
         let edge = PersistedEdge::from_forward(key.value(), value.value())?;
@@ -360,6 +363,23 @@ fn validate_snapshot(
                 "dangling or inconsistent edge".into(),
             ));
         }
+        if schema_state.is_some() {
+            decoded_edges.push(edge);
+        }
+    }
+    if let (Some(state), Some(schema)) = (control.as_ref(), schema_state.as_ref()) {
+        let baseline = if schema.source.store_id == state.store_id {
+            schema.publication_generation
+        } else {
+            super::control::Generation::default().next()?
+        };
+        super::native_graph::validate_edge_history(
+            &meta.begin_read()?,
+            state,
+            baseline,
+            &decoded_edges,
+            &effects,
+        )?;
     }
     Ok(inventory)
 }

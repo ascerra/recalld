@@ -32,8 +32,10 @@ pub mod maintenance;
 #[cfg(test)]
 mod maintenance_tests;
 pub mod metadata;
+pub mod native_graph;
 pub mod native_lifecycle;
 pub mod native_records;
+pub mod native_store;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
 pub(crate) mod publication;

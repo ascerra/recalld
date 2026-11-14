@@ -16,6 +16,8 @@ use std::sync::{
 #[path = "reader_tests.rs"]
 mod readers;
 
+#[path = "batch_tests.rs"]
+mod batches;
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 
@@ -36,6 +38,9 @@ struct Data {
     profile: crate::model::schema::EmbeddingProfile,
 }
 fn fixture(root: &Path) -> Data {
+    fixture_with_seed(root, |_| {})
+}
+fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
     let mut config = NamespaceConfig::default_namespace(0);
@@ -57,6 +62,7 @@ fn fixture(root: &Path) -> Data {
         .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &input, &[], 1000)
         .unwrap();
     let parent = crate::storage::insertion::inserted_id(&receipt).unwrap();
+    seed(&mut engine);
     engine.sync().unwrap();
     drop(engine);
     let profile = crate::embedding::runtime::tests::profile();
@@ -777,3 +783,20 @@ fn owned_ids_actual_native_insert_uses_single_clock_sample_and_replay_allocates_
     assert_eq!(session.metadata().id_source().checkpoint().unwrap(), cursor);
     assert_eq!(clock.0.load(Ordering::SeqCst), 1);
 }
+#[path = "graph_tests.rs"]
+mod graph;
+
+#[path = "graph_producer_tests.rs"]
+mod graph_producers;
+
+#[path = "selection_tests.rs"]
+mod selection;
+
+#[path = "store_tests.rs"]
+mod store;
+
+#[path = "store_batch_tests.rs"]
+mod store_batches;
+
+#[path = "store_producer_tests.rs"]
+mod store_producers;

@@ -11,6 +11,7 @@ mod catalog;
 mod effects;
 mod insertion;
 mod maintenance;
+mod native_graph;
 mod native_records;
 mod purge;
 mod read_payload;

@@ -139,6 +139,19 @@ pub(crate) fn validate_policy_history(
             Ok(v.value().to_vec())
         })
         .collect::<Result<std::collections::HashSet<_>, StorageError>>()?;
+    // This API first validates complete manifest/receipt/origin bindings. It
+    // returns only native-v2 bookkeeping, never a table or variant allowlist.
+    let native_bookkeeping = super::metadata::batch::validated_native_bookkeeping(read)?;
+    let is_native_bookkeeping = |receipt: &WriteReceipt| {
+        native_bookkeeping.iter().any(|entry| {
+            entry.generation
+                == GenerationRef {
+                    store_id: receipt.store_id,
+                    generation: receipt.committed_generation,
+                }
+                && entry.operation_id == receipt.operation_id
+        })
+    };
     let mut suffix = BTreeMap::new();
     let mut policies: HashMap<u32, BTreeMap<Generation, (WriteReceipt, PolicyTransition)>> =
         HashMap::new();
@@ -191,6 +204,24 @@ pub(crate) fn validate_policy_history(
                 ));
                 Some(t.namespace_id)
             }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeGraphChanged { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
             MutationOutcome::NativeMemoryInserted { transition: t }
             | MutationOutcome::NativeMemoryTombstoned { transition: t } => {
                 native_history.push((
@@ -200,6 +231,11 @@ pub(crate) fn validate_policy_history(
                     t.policy_revision,
                 ));
                 Some(t.namespace_id)
+            }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(&receipt) =>
+            {
+                None
             }
             _ if active => return Err(invalid("unrecognized operation after schema publication")),
             _ => None,
@@ -234,9 +270,32 @@ pub(crate) fn validate_policy_history(
     if expected != control.committed_generation {
         return Err(invalid("missing lifecycle receipt suffix"));
     }
+    let configs = read
+        .open_table(NAMESPACE_TABLE)?
+        .iter()?
+        .map(|row| {
+            let (_, value) = row?;
+            let ns = NamespaceConfig::decode(value.value())?;
+            Ok((ns.id.get(), ns))
+        })
+        .collect::<Result<HashMap<_, _>, StorageError>>()?;
     // Retained historical native operations still require an explicit policy
     // selection. Their record sets need not survive a deletion-aware restore.
     for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        if let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("linked creation namespace binding missing"))?,
+            )?;
+        }
+        if let MutationOutcome::NativeGraphChanged { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
+            )?;
+        }
         let version = if policy_revision == Generation::default() {
             LifecycleVersion::LegacyAccessV1
         } else {
@@ -264,15 +323,6 @@ pub(crate) fn validate_policy_history(
             }
         }
     }
-    let configs = read
-        .open_table(NAMESPACE_TABLE)?
-        .iter()?
-        .map(|row| {
-            let (_, value) = row?;
-            let ns = NamespaceConfig::decode(value.value())?;
-            Ok((ns.id.get(), ns))
-        })
-        .collect::<Result<HashMap<_, _>, StorageError>>()?;
     let creations = super::native_records::creation_proofs(read)?;
     let ledger = super::metadata::removal_ledger::read_export(read, Some(control))?;
     let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
@@ -383,6 +433,30 @@ pub(crate) fn validate_policy_history(
                         .ok_or_else(|| invalid("native receipt namespace absent"))?,
                 )?;
             }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("linked creation out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("linked creation namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeGraphChanged { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native graph receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native graph namespace absent"))?,
+                )?;
+            }
             MutationOutcome::NativeMemoryInserted { transition: t }
             | MutationOutcome::NativeMemoryTombstoned { transition: t } => {
                 if current_policy.get(&t.namespace_id.get())
@@ -396,6 +470,8 @@ pub(crate) fn validate_policy_history(
                         .ok_or_else(|| invalid("native record namespace absent"))?,
                 )?;
             }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(receipt) => {}
             _ => return Err(invalid("unrecognized operation in lifecycle proof")),
         }
     }
