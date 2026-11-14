@@ -348,20 +348,20 @@ async fn mixed_history_policy_graph_maintenance_purge_export_import_fork_preserv
             crate::storage::metadata::removal_ledger::PriorHistory::Unknown
         );
     }
-    // A fork has fresh conservative coverage; the original coverage remains
-    // explicit ancestry evidence rather than being relabeled as the new store.
+    // A fork has fresh conservative coverage. Restore capture also downgrades
+    // unproven pre-lineage coverage to Unknown, while retaining its origin boundary.
     let (_copy, db) = validation::inspect_database(&imported.join("meta.db")).unwrap();
     let read = db.begin_read().unwrap();
     let control = control::validate_existing(&read).unwrap().unwrap();
     let lineage = crate::storage::lineage::read_lineage(&read, &control)
         .unwrap()
         .unwrap();
-    assert!(
-        lineage
-            .ledger_sources
-            .iter()
-            .any(|s| s.coverage == ledger.state)
-    );
+    assert!(lineage.ledger_sources.iter().any(|source| {
+        source.coverage.ledger_version == ledger.state.ledger_version
+            && source.coverage.tracking_started_at == ledger.state.tracking_started_at
+            && source.coverage.prior_history
+                == crate::storage::metadata::removal_ledger::PriorHistory::Unknown
+    }));
     let payload = payloads(&root.path().join("fork.jsonl"));
     let memories: Vec<_> = payload.iter().filter(|p| p["kind"] == "memory").collect();
     assert_eq!(memories.len(), 1);
