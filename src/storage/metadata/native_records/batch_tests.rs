@@ -29,6 +29,7 @@ fn disabled_aux_adapter(
 
 fn request(d: &Data, store_id: uuid::Uuid, key: &str) -> BatchInput {
     BatchInput {
+        expected_generation: None,
         mutation_version: 2,
         result_version: 1,
         kind: BatchKind::Insert,
@@ -990,6 +991,7 @@ async fn native_batch_review_unknown_profile_forget_matches_single_and_preserves
     let f = Fixture::from_open_engine(root, s.engine);
     completion(&f).complete().await.unwrap();
     let request = BatchInput {
+        expected_generation: None,
         mutation_version: 2,
         result_version: 1,
         kind: BatchKind::Forget,

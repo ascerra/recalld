@@ -50,6 +50,7 @@ fn provider(d: &Data) -> Arc<Provider> {
 }
 fn request(f: &Fixture, key: &str) -> BatchInput {
     BatchInput {
+        expected_generation: None,
         mutation_version: 3,
         result_version: 1,
         kind: BatchKind::Insert,

@@ -1352,7 +1352,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: crate::storage::batch::BatchInput,
     ) -> Result<crate::storage::batch::BatchOutcome, bridge::BridgeError> {
-        if input.mutation_version == 3 {
+        if input.mutation_version == 3 || input.expected_generation.is_some() {
             return Err(bridge::BridgeError::Unavailable(
                 "linked native batch consumer remains gated pending transport validation".into(),
             ));
@@ -1508,6 +1508,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         }
         let outcome = self
             .run_batch(crate::storage::batch::BatchInput {
+                expected_generation: None,
                 mutation_version: 1,
                 result_version: 1,
                 kind: crate::storage::batch::BatchKind::Forget,

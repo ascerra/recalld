@@ -472,6 +472,7 @@ mod tests {
 
     fn request(f: &Fixture, key: &str, items: Vec<serde_json::Value>) -> BatchInput {
         BatchInput {
+            expected_generation: None,
             mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,

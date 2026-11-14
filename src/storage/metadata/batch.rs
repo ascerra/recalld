@@ -29,7 +29,9 @@ fn load(tx: &redb::WriteTransaction, id: Uuid) -> Result<BatchProgress, StorageE
     let bytes = table
         .get(id.as_bytes().as_slice())?
         .ok_or_else(|| invalid("unknown reservation"))?;
-    control::decode(bytes.value())
+    let progress: BatchProgress = control::decode(bytes.value())?;
+    progress.reservation_expected_generation()?;
+    Ok(progress)
 }
 fn save(tx: &redb::WriteTransaction, p: &BatchProgress) -> Result<(), StorageError> {
     tx.open_table(BATCHES)?.insert(
@@ -102,6 +104,7 @@ pub(crate) fn validate_existing(
     for row in tx.open_table(BATCHES)?.iter()? {
         let (key, bytes) = row?;
         let p: BatchProgress = control::decode(bytes.value())?;
+        let expected_generation = p.reservation_expected_generation()?;
         let parent = &p.reservation_receipt;
         let latest = p
             .bookkeeping_receipts
@@ -163,6 +166,7 @@ pub(crate) fn validate_existing(
         if matches!(p.version, 2 | 3) {
             let ctx = MutationContext {
                 contract_version: 2,
+                expected_generation,
                 ..catalog_context()
             };
             let stored = receipts.get(&parent_key).unwrap();
@@ -459,7 +463,7 @@ impl MetadataStore {
         if ctx.scope != MutationScope::Catalog
             || ctx.contract_version != batch::contract_version(version)?
             || version == 3 && kind != BatchKind::Insert
-            || ctx.contract_version == 2 && ctx.expected_generation.is_some()
+            || ctx.contract_version == 2 && version != 3 && ctx.expected_generation.is_some()
             || plans.is_empty()
             || plans.len() > crate::model::constants::MAX_BATCH_MEMORIES
         {
@@ -562,6 +566,16 @@ impl MetadataStore {
         )?;
         tx.open_table(SCHEMA)?.insert("version", 1)?;
         let p = BatchProgress {
+            reservation_precondition: if version == 3 {
+                ctx.expected_generation.map(|expected_generation| {
+                    batch::BatchReservationPrecondition {
+                        proof_version: 1,
+                        expected_generation,
+                    }
+                })
+            } else {
+                None
+            },
             version,
             kind,
             caller_hash,
