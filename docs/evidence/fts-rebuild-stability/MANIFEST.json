@@ -1,0 +1,103 @@
+{
+  "runtime_sha": "7311775604539a386bdeaa9e1e881cf8eeeff9de",
+  "base_sha": "387c7118864040c68d7d28c44fb2600ade520a45",
+  "base_pr": 96,
+  "home_evidence": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-fts-rebuild-stability-7311775",
+  "environment": {
+    "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "rust": "1.94.1",
+    "runtime_network": "none",
+    "cpus": 2,
+    "memory_bytes": 4294967296,
+    "cargo_build_jobs": 2,
+    "source": "immutable allowlist /work:ro",
+    "target": "private reflink copy, own cargo clean -p recalld before every source switch",
+    "no_home_credentials_socket_mounts": true
+  },
+  "runs": [
+    {
+      "name": "red-1",
+      "post_validation": {
+        "source_verified_after": true,
+        "source_manifest_sha256": "8075219ffcc356f8eac3a76b8b57f7e9e549e16ad72f24f2901a7fde8b55f7d0",
+        "binary_sha256": "a53b7b3e1ca6c510239619d53dfc5531f7765ee9c79ff7d534d5869ba33c11b1",
+        "log_sha256": "ecc1c9d2d71a611bb417e3e1fa95cb755f5141168bffcab8ec4534fdfebfc43b",
+        "exit_code": 101,
+        "file_count": 224,
+        "oom_killed": false,
+        "test_results": [
+          "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 997 filtered out; finished in 8.63s"
+        ]
+      },
+      "artifacts": {
+        "validation.log": "ecc1c9d2d71a611bb417e3e1fa95cb755f5141168bffcab8ec4534fdfebfc43b",
+        "source.json": "8075219ffcc356f8eac3a76b8b57f7e9e549e16ad72f24f2901a7fde8b55f7d0",
+        "post-validation.json": "eb928c675b487df2115f214d9ee846bab4f1d287e9e8b6dae7634eba368e38bc",
+        "command.txt": "eda0eb14a2ea3dee7dcfdfc201a5633b4e94040fbbeef1fd5e345bd25e19db41"
+      }
+    },
+    {
+      "name": "red-2",
+      "post_validation": {
+        "source_verified_after": true,
+        "source_manifest_sha256": "504f92d457af05dfe9ac19c6fc1080e6a432fec2f36f739d41d16bc477bd3e39",
+        "binary_sha256": "ca35508fa7dd7ee3d14afa13422775fc59e4986208633545d80b6f3571aa371e",
+        "log_sha256": "981abc2b8f59c75358c0fd5d7e56cb6d13c94156d6a4b7b6eeb55189807486cf",
+        "exit_code": 101,
+        "file_count": 224,
+        "oom_killed": false,
+        "test_results": [
+          "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1002 filtered out; finished in 0.03s"
+        ]
+      },
+      "artifacts": {
+        "validation.log": "981abc2b8f59c75358c0fd5d7e56cb6d13c94156d6a4b7b6eeb55189807486cf",
+        "source.json": "504f92d457af05dfe9ac19c6fc1080e6a432fec2f36f739d41d16bc477bd3e39",
+        "post-validation.json": "8d4ceec510b3249d8344b99112c2e2bbbacbda3df80b227f357f2d36a76099c3",
+        "command.txt": "f564c1cda0ca1c06296fc1deb16d1aa63a4b43b6faac7f437aea5e2eab3a64cf"
+      }
+    },
+    {
+      "name": "green-1",
+      "post_validation": {
+        "source_manifest_sha256": "9d485b27d34784e97008839f9439182d944318741f125913a6dce479ae5ea214",
+        "source_verified_after": true,
+        "file_count": 224,
+        "exit_code": 0,
+        "oom_killed": false,
+        "log_sha256": "daaa3aa9371621fef3d033841dcf059bf13dc205cbeab1df0d3c2723df687200",
+        "test_results": [
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 997 filtered out; finished in 9.12s",
+          "test result: ok. 1003 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 437.68s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.54s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.11s"
+        ],
+        "working_source_verified": true,
+        "fmt": "PASS",
+        "clippy": "exit 0 with warnings",
+        "clippy_summaries": [
+          "warning: `recalld` (lib test) generated 8 warnings",
+          "warning: `recalld` (lib test) generated 8 warnings",
+          "warning: `recalld` (lib) generated 25 warnings",
+          "warning: `recalld` (lib) generated 690 warnings (run `cargo clippy --fix --lib -p recalld` to apply 83 suggestions)",
+          "warning: `recalld` (bin \"recalld\") generated 1 warning",
+          "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+          "warning: `recalld` (lib test) generated 759 warnings (671 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 6 suggestions)"
+        ],
+        "binary_sha256": {
+          "/target/debug/deps/lifecycle_cli-4843a41927cafc6b": "e55dc7f2fa66c14cc18e449427c6520012e81aec03a64cb46b86cbdeffd121cf",
+          "/target/debug/deps/recalld-e423ca3d07310388": "787adb00ce76dc0934d106341bdc8acd61bc8dda9d4f1a225fe86630b5b67291",
+          "/target/debug/deps/text_migration_cli-92bf02c892a58814": "5e85be90154adf2053c329c40d143bf3da5da419887c0497dffc8e8b2ab4e6b9",
+          "/target/debug/recalld": "e119c7a0b9364e440f8630feda8368a09ec69e876f937e93cfef9b7bb47d1ec0"
+        }
+      },
+      "artifacts": {
+        "validation.log": "daaa3aa9371621fef3d033841dcf059bf13dc205cbeab1df0d3c2723df687200",
+        "validate.sh": "26da7b479bea7c66c5d9ebd41ee6290160cf4ecb50c8f1ece46c0836137108be",
+        "source.json": "9d485b27d34784e97008839f9439182d944318741f125913a6dce479ae5ea214",
+        "post-validation.json": "fe723e0e944473794daa618ff13b080fe35390e6d87d3369f96d76e7d8980baf"
+      }
+    }
+  ],
+  "sealed_at": "2026-11-14T19:52:35.455567+00:00"
+}
