@@ -5,3 +5,6 @@
 
 pub mod claude;
 pub mod locomo;
+
+/// Private evaluator-channel consumer, never an actor MCP tool.
+pub mod controls;
