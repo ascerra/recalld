@@ -1,4 +1,4 @@
-# Private owned evaluator constructor (unvalidated draft)
+# Private owned evaluator constructor (validated bounded consumer)
 
 The `owned_evaluator` example, gated by the existing `bench` feature, constructs
 one ordinary Recalld instance from an explicit config and a fresh data root. It
@@ -26,7 +26,11 @@ The only key name is `RECALLD_EVAL_OFFLINE_KEY`, with literal synthetic value
 already exist, and is created with mode0700. No configuration discovery occurs.
 An offline replay miss is a request failure, never live-provider fallback.
 
-Control frames are JSONL, at most16KiB:
+This is an isolated trusted-process diagnostic; pipe separation is not a security sandbox.
+
+Control frames are newline-terminated JSONL, at most16KiB. Oversized frames and
+valid JSON without its terminating newline at EOF reject without dispatch:
+
 
 ```
 {"id":1,"method":"inspect","params":{}}
@@ -50,7 +54,16 @@ an action whose ACK was not received. Pending interrupted actions remain invalid
 `scripts/test_owned_evaluator.py` is a narrow actual pipe/constructor probe with
 three fresh processes, real public store/search/feedback, returned generation
 barriers, physical false-window byte checks, private-method isolation, malformed
-control inputs, explicit offline misses and EOF shutdown. It is not the dataset
+control inputs, duplicate/stdin/reversed/non-FIFO descriptor rejection, unchanged
+existing-root rejection, oversized/unterminated-frame rejection, explicit offline
+misses and EOF shutdown. It is not the dataset
 supervisor/scorer, owned by the separate A6 manifest/public-actor work. Its fresh
-runs are not deterministic reset/replays. All results are pending until isolated
-validation and source/binary provenance are sealed.
+runs are not deterministic reset/replays. Exact source, source/binary provenance and results are in
+[the frozen report](../benchmarks/owned-evaluator/REPORT.md).
+
+Initial source73933a1 compiled and passed all seven launcher/framing negatives,
+then its positive store failed because the synthetic OpenAI reply omitted required
+usage fields. Raw failed output remains `/tmp/recalld-owned-evaluator-test-jxa9w_2e/output`.
+Corrected source6ba411e passed1000lib+2CLI+7runner+6focused payload+9public episodes,
+3actual private-pipe processes and7launcher/framing negatives; fmt/clippy exit0
+with warnings. The failed attempt remains immutable.
