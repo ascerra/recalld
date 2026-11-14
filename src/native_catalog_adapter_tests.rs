@@ -174,6 +174,13 @@ async fn native_catalog_wire_real_cross_transport_replay_and_reopen() {
         serde_json::from_str::<Value>(result["content"][0]["text"].as_str().unwrap()).unwrap(),
         *replay
     );
+    let mut replay_receipt = replay["receipt"].clone();
+    replay_receipt["replayed"] = json!(false);
+    assert_eq!(
+        replay_receipt, first["receipt"],
+        "strict MCP/REST receipt parity"
+    );
+    assert_eq!(replay["data"], first["data"]);
     assert_eq!(bytes(&path), before);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -417,7 +424,13 @@ async fn native_catalog_wire_actual_fault_receipt_and_unknown_reconcile() {
             .unwrap()
             .unwrap();
         if point != "commit_unknown" {
-            assert_eq!(serde_json::to_value(&stored).unwrap(), envelope["receipt"]);
+            let encoded = crate::storage::control::encode(&stored).unwrap();
+            let expected: Value = serde_json::from_slice(&encoded).unwrap();
+            assert_eq!(expected, envelope["receipt"]);
+            let decoded: WriteReceipt =
+                serde_json::from_value(envelope["receipt"].clone()).unwrap();
+            assert_eq!(decoded, stored);
+            assert_eq!(crate::storage::control::encode(&decoded).unwrap(), encoded);
         }
         provider.available.store(false, Ordering::SeqCst);
         let request = CreateNamespaceRequest::from_mcp(&request).unwrap();
