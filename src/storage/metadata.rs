@@ -175,7 +175,9 @@ impl MetadataStore {
         let store = Self {
             db,
             work_tracker: WorkTracker::new(store_id),
-            view_publication: std::sync::Arc::new(super::publication::PublicationRegistry::default()),
+            view_publication: std::sync::Arc::new(
+                super::publication::PublicationRegistry::default(),
+            ),
             unavailable: std::sync::atomic::AtomicBool::new(false),
             purge_pending: std::sync::atomic::AtomicBool::new(false),
             canonical_pending: std::sync::atomic::AtomicBool::new(false),

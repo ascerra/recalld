@@ -4,13 +4,15 @@ use crate::storage::publication::{DerivedView, PublicationState};
 
 impl MetadataStore {
     pub(crate) fn publication_state(&self) -> Result<PublicationState, StorageError> {
-        let _publication = self.publication.read().map_err(|_| {
-            StorageError::RecoveryRequired("metadata publication poisoned".into())
-        })?;
+        let _publication = self
+            .publication
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
         self.ensure_available()?;
         let read = self.db.begin_read()?;
         let table = read.open_table(control::CONTROL)?;
-        let value = table.get("state")?
+        let value = table
+            .get("state")?
             .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
         let state = ControlState::decode(value.value())?;
         Ok(self.view_publication.state(state.generation_ref()))
@@ -27,13 +29,15 @@ impl MetadataStore {
         view: DerivedView,
         at: control::GenerationRef,
     ) -> Result<(), StorageError> {
-        let _publication = self.publication.read().map_err(|_| {
-            StorageError::RecoveryRequired("metadata publication poisoned".into())
-        })?;
+        let _publication = self
+            .publication
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
         self.ensure_available()?;
         let read = self.db.begin_read()?;
         let table = read.open_table(control::CONTROL)?;
-        let value = table.get("state")?
+        let value = table
+            .get("state")?
             .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
         let state = ControlState::decode(value.value())?;
         if state.generation_ref() != at {
@@ -70,14 +74,30 @@ mod tests {
             tx.commit().unwrap();
         }
         let after = store.publication_state().unwrap();
-        assert_eq!(after.applied, initial.applied.map(|_| Some(initial.canonical)));
+        assert_eq!(
+            after.applied,
+            initial.applied.map(|_| Some(initial.canonical))
+        );
         assert_ne!(after.canonical, initial.canonical);
         assert!(!after.matches_canonical());
-        assert!(store.publish_derived_view(DerivedView::Graph, initial.canonical).is_err());
-        store.publish_derived_view(DerivedView::Graph, after.canonical).unwrap();
+        assert!(
+            store
+                .publish_derived_view(DerivedView::Graph, initial.canonical)
+                .is_err()
+        );
+        store
+            .publish_derived_view(DerivedView::Graph, after.canonical)
+            .unwrap();
         assert!(!store.publication_state().unwrap().matches_canonical());
-        let foreign = control::GenerationRef { store_id: uuid::Uuid::new_v4(), ..after.canonical };
-        assert!(store.publish_derived_view(DerivedView::Vectors, foreign).is_err());
+        let foreign = control::GenerationRef {
+            store_id: uuid::Uuid::new_v4(),
+            ..after.canonical
+        };
+        assert!(
+            store
+                .publish_derived_view(DerivedView::Vectors, foreign)
+                .is_err()
+        );
     }
 
     #[test]
@@ -88,7 +108,9 @@ mod tests {
         for view in REQUIRED_VIEWS {
             store.publish_derived_view(view, at).unwrap();
         }
-        store.create_namespace(&NamespaceConfig::default_namespace(0)).unwrap();
+        store
+            .create_namespace(&NamespaceConfig::default_namespace(0))
+            .unwrap();
         let after = store.publication_state().unwrap();
         assert_ne!(after.canonical, at);
         assert_eq!(after.applied, [Some(at); 4]);

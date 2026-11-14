@@ -6,8 +6,8 @@ use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, NamespaceId};
 use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, VectorIndex, VectorMetadata};
-use crate::storage::work::WorkTicket;
 use crate::storage::publication::{DerivedView, REQUIRED_VIEWS};
+use crate::storage::work::WorkTicket;
 use crate::storage::{RedbStorageEngine, StorageEngine, StorageError, TextRef};
 
 #[derive(Clone)]
@@ -105,9 +105,15 @@ impl DerivedCompletion {
 
     /// Legacy bool adapter. Resolve namespace and commit under one store guard;
     /// each batch caller invokes this in order, with independent child commits.
-    pub async fn forget(&self, id: crate::model::MemoryId, namespace: Option<&str>) -> Result<bool, StorageError> {
+    pub async fn forget(
+        &self,
+        id: crate::model::MemoryId,
+        namespace: Option<&str>,
+    ) -> Result<bool, StorageError> {
         let work = self.accept_work(None)?;
-        let result = self.forget_accepted(id, namespace.map(str::to_owned), &work).await;
+        let result = self
+            .forget_accepted(id, namespace.map(str::to_owned), &work)
+            .await;
         self.finish_known_work(work);
         result
     }
@@ -200,7 +206,8 @@ impl DerivedCompletion {
                 storage.resume_pending_purges_with_work(Some(&child))?;
                 storage.ensure_available()?;
                 let publication = storage.meta_store().publication_state()?;
-                if !storage.meta_store().needs_effects_rebuild() && publication.matches_canonical() {
+                if !storage.meta_store().needs_effects_rebuild() && publication.matches_canonical()
+                {
                     return Ok(());
                 }
                 let pending = storage.meta_store().pending_effects()?;
@@ -215,7 +222,9 @@ impl DerivedCompletion {
                     let mut next_graph = RelationshipGraph::with_capacity(records.len());
                     let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
                     let next_entities = EntityIndex::from_records(&records);
-                    storage.meta_store().invalidate_derived_view(DerivedView::Fts);
+                    storage
+                        .meta_store()
+                        .invalidate_derived_view(DerivedView::Fts);
                     fts.clear().map_err(|e| failed(e.to_string()))?;
                     for (id, record) in &records {
                         let ns = NamespaceId::new(record.namespace_id);
@@ -275,7 +284,9 @@ impl DerivedCompletion {
                     // Every channel above was actually rebuilt from this captured
                     // canonical state. This is not no-change advancement.
                     for view in REQUIRED_VIEWS {
-                        storage.meta_store().publish_derived_view(view, publication.canonical)?;
+                        storage
+                            .meta_store()
+                            .publish_derived_view(view, publication.canonical)?;
                     }
                     // Preserve unrelated cached candidates used by legacy temporal
                     // linking. Cache invalidation itself never acquires storage or
@@ -341,24 +352,65 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_rebuild_publishes_exact_views_after_effect_free_catalog_commit() {
         let fx = Fixture::new();
-        let id = fx.insert_memory_in(NamespaceId::new(1), &["entity/alice"]).await;
+        let id = fx
+            .insert_memory_in(NamespaceId::new(1), &["entity/alice"])
+            .await;
         let completion = publisher(&fx);
         completion.complete().await.unwrap();
-        let before = fx.storage.read().unwrap().meta_store().publication_state().unwrap();
+        let before = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap();
         assert!(before.matches_canonical());
         fx.create_namespace("publication-catalog");
-        let after = fx.storage.read().unwrap().meta_store().publication_state().unwrap();
-        assert!(!fx.storage.read().unwrap().meta_store().needs_effects_rebuild());
+        let after = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap();
+        assert!(
+            !fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .needs_effects_rebuild()
+        );
         assert_ne!(before.canonical, after.canonical);
         assert!(!after.matches_canonical());
         completion.complete().await.unwrap();
-        let rebuilt = fx.storage.read().unwrap().meta_store().publication_state().unwrap();
+        let rebuilt = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap();
         assert_eq!(rebuilt.canonical, after.canonical);
         assert!(rebuilt.matches_canonical());
         assert!(fx.vector_index.read().await.get_vector(id).is_some());
-        assert_eq!(fx.entity_index.read().await.find_by_entities(
-            NamespaceId::new(1), &["Alice".into()], MemoryId::new()), vec![(id, 1)]);
-        assert_eq!(fx.storage.read().unwrap().meta_store().work_tracker().status().pending, 0);
+        assert_eq!(
+            fx.entity_index.read().await.find_by_entities(
+                NamespaceId::new(1),
+                &["Alice".into()],
+                MemoryId::new()
+            ),
+            vec![(id, 1)]
+        );
+        assert_eq!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .status()
+                .pending,
+            0
+        );
     }
 
     #[tokio::test]

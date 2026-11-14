@@ -76,7 +76,8 @@ impl MetadataStore {
         self.ensure_available()?;
         let read = self.db.begin_read()?;
         let table = read.open_table(control::CONTROL)?;
-        let value = table.get("state")?
+        let value = table
+            .get("state")?
             .ok_or_else(|| StorageError::InvalidControl("missing control".into()))?;
         let state = ControlState::decode(value.value())?;
         crate::storage::lineage::ensure_serving(&read, &state)?;
