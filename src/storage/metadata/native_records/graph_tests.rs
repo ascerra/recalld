@@ -195,6 +195,68 @@ fn native_graph_review_preserves_signed_zero_weight_bits() {
 }
 
 #[test]
+fn native_graph_keyed_noop_never_reports_unbound_success_then_reexecutes() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let mut session = open(&d, clock.clone());
+    let id = add(&mut session, &d, "source");
+    let a = plan(id, d.parent);
+    let committed_key = ctx(&session, &d, "committed-a");
+    let original = session
+        .put_graph(&committed_key, scope(&d), &a)
+        .unwrap()
+        .unwrap();
+    let noop_key = ctx(&session, &d, "fresh-key-noop");
+    let before = session.metadata().control_state().unwrap();
+    let calls = clock.0.load(Ordering::SeqCst);
+    let noop = session.put_graph(&noop_key, scope(&d), &a);
+    let after_noop = session.metadata().control_state().unwrap();
+    let after_calls = clock.0.load(Ordering::SeqCst);
+    let mut b = a.clone();
+    b.edges[0].weight = 0.25;
+    session
+        .put_graph(&ctx(&session, &d, "writer-b"), scope(&d), &b)
+        .unwrap()
+        .unwrap();
+    let after_b = session.metadata().control_state().unwrap();
+    let edges_b = session.engine.load_all_edges().unwrap();
+    if noop.is_ok() {
+        // Any successful keyed no-op must be durably replayable. This exposes
+        // the original bug after an intervening real writer, not just its None.
+        let retry = session.put_graph(&noop_key, scope(&d), &a).unwrap();
+        assert_eq!(
+            session.metadata().control_state().unwrap(),
+            after_b,
+            "successful keyed no-op was not bound; retry performed another mutation"
+        );
+        assert!(retry.is_some_and(|r| r.replayed));
+        assert!(matches!(
+            session.put_graph(&noop_key, scope(&d), &b),
+            Err(StorageError::IdempotencyConflict)
+        ));
+    } else {
+        // This bounded API explicitly rejects a fresh keyed no-op. It promises
+        // no successful outcome/key reservation, and does not sample the clock.
+        assert!(matches!(noop, Err(StorageError::InvalidMutation(_))));
+        assert_eq!(after_noop, before);
+        assert_eq!(after_calls, calls);
+    }
+    let replay = session
+        .put_graph(&committed_key, scope(&d), &a)
+        .unwrap()
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.operation_id, original.operation_id);
+    assert_eq!(session.metadata().control_state().unwrap(), after_b);
+    assert_eq!(session.engine.load_all_edges().unwrap(), edges_b);
+    assert!(matches!(
+        session.put_graph(&committed_key, scope(&d), &b),
+        Err(StorageError::IdempotencyConflict)
+    ));
+}
+
+#[test]
 fn native_graph_ghost_cannot_activate_but_retained_parent_can_gain_structural_edge() {
     let root = tempfile::tempdir().unwrap();
     let d = fixture_with_seed(root.path(), |engine| {
@@ -664,9 +726,11 @@ fn native_graph_multi_edge_updates_noops_replay_and_history() {
     );
     assert_eq!(session.engine.load_all_edges().unwrap().len(), 3);
     let control = session.metadata().control_state().unwrap();
+    let mut unkeyed = ctx(&session, &d, "noop");
+    unkeyed.idempotency_key = None;
     assert!(
         session
-            .put_graph(&ctx(&session, &d, "noop"), scope(&d), &input)
+            .put_graph(&unkeyed, scope(&d), &input)
             .unwrap()
             .is_none()
     );

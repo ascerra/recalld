@@ -107,6 +107,14 @@ impl MetadataStore {
         // Identical semantic attributes preserve the old creation timestamp and
         // cause neither a clock sample nor a fresh receipt/key reservation.
         if changes.is_empty() {
+            // A successful keyed outcome must bind its key durably. This
+            // bounded primitive has no typed no-change receipt; never report
+            // unbound success that could execute on a later retry.
+            if ctx.idempotency_key.is_some() {
+                return Err(StorageError::InvalidMutation(
+                    "keyed native graph no-op is unsupported".into(),
+                ));
+            }
             return Ok(None);
         }
         let sampled = clock.now_millis();

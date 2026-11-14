@@ -252,6 +252,8 @@ impl super::native_lifecycle::NativeLifecycleSession {
             .capture_native_graph(scope, input, &self.policy, None)
     }
     /// Explicit offline primitive; success does not certify derived publication.
+    /// Unkeyed no-ops return None. A fresh keyed no-op is explicitly unsupported;
+    /// successful keyed mutations always have a durable replayable receipt.
     pub fn put_graph_prepared(
         &mut self,
         ctx: &MutationContext,

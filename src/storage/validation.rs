@@ -353,7 +353,9 @@ fn validate_snapshot(
                 "dangling or inconsistent edge".into(),
             ));
         }
-        decoded_edges.push(edge);
+        if schema_state.is_some() {
+            decoded_edges.push(edge);
+        }
     }
     if let (Some(state), Some(schema)) = (control.as_ref(), schema_state.as_ref()) {
         let baseline = if schema.source.store_id == state.store_id {
