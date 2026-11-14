@@ -268,6 +268,14 @@ impl Recalld {
         config: RecalldConfig,
         clock: Arc<dyn crate::time::Clock>,
     ) -> Result<Self> {
+        Self::with_runtime_sources(config, clock, Box::new(crate::storage::ids::SystemIds)).await
+    }
+
+    pub(crate) async fn with_runtime_sources(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        ids: Box<dyn crate::storage::ids::IdSource>,
+    ) -> Result<Self> {
         let config = Arc::new(config);
         let (shutdown_tx, _) = watch::channel(false);
         let drain_notify = Arc::new(Notify::new());
@@ -279,10 +287,12 @@ impl Recalld {
         let storage = {
             let data_dir = &config.storage.data_dir;
             tracing::info!(data_dir = %data_dir, "opening storage engine");
-            let engine = RedbStorageEngine::open(data_dir).map_err(|e| RecalldError::Init {
-                step: "open_storage",
-                message: format!("failed to open storage at {}: {}", data_dir, e),
-                source: Some(Box::new(e)),
+            let engine = RedbStorageEngine::open_with_ids(data_dir, false, ids).map_err(|e| {
+                RecalldError::Init {
+                    step: "open_storage",
+                    message: format!("failed to open storage at {}: {}", data_dir, e),
+                    source: Some(Box::new(e)),
+                }
             })?;
             tracing::info!("storage engine opened");
             Arc::new(std::sync::RwLock::new(engine))
@@ -901,6 +911,17 @@ impl Recalld {
         self.query_engine
             .search_coherent_read_only(&owner, self.rif_engine.clone(), query, semantics, deadline)
             .await
+    }
+
+    pub(crate) fn derived_owner(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
     }
 
     /// Internal owned-core barrier. Returns a readiness observation, not a

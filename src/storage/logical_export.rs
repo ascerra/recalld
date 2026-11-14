@@ -189,8 +189,16 @@ fn write_line(writer: &mut impl Write, line: &Line) -> Result<(), StorageError> 
     Ok(())
 }
 
-fn logical_memory(mut item: OfflineRecord) -> Result<LogicalMemory, StorageError> {
-    if item.record.version != 2 || item.record.schema.is_none() {
+fn logical_memory(item: OfflineRecord) -> Result<LogicalMemory, StorageError> {
+    logical_memory_for(item, false)
+}
+
+fn logical_memory_for(
+    mut item: OfflineRecord,
+    isolated_legacy: bool,
+) -> Result<LogicalMemory, StorageError> {
+    let legacy = isolated_legacy && item.record.version == 1 && item.record.schema.is_none();
+    if !legacy && (item.record.version != 2 || item.record.schema.is_none()) {
         return Err(invalid("migrate canonical schema before logical export"));
     }
     if item.record.phase == DecayPhase::Tombstone
@@ -203,7 +211,12 @@ fn logical_memory(mut item: OfflineRecord) -> Result<LogicalMemory, StorageError
     item.record.text_offset = 0;
     item.record.text_length = 0;
     item.record.vector_slot = 0;
-    if let Some(reference) = item.record.schema.as_mut().unwrap().vector.as_mut() {
+    if let Some(reference) = item
+        .record
+        .schema
+        .as_mut()
+        .and_then(|schema| schema.vector.as_mut())
+    {
         reference.slot = 0;
     }
     Ok(LogicalMemory {
@@ -217,9 +230,19 @@ fn logical_memory(mut item: OfflineRecord) -> Result<LogicalMemory, StorageError
 
 fn visit_items(
     snapshot: &OfflineSnapshot,
+    visit: impl FnMut(Item) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    visit_items_for(snapshot, false, visit)
+}
+
+fn visit_items_for(
+    snapshot: &OfflineSnapshot,
+    isolated_legacy: bool,
     mut visit: impl FnMut(Item) -> Result<(), StorageError>,
 ) -> Result<(), StorageError> {
-    if snapshot.control().control_schema_version != 2 {
+    if snapshot.control().control_schema_version != 2
+        && !(isolated_legacy && snapshot.control().control_schema_version == 1)
+    {
         return Err(invalid("migrate canonical schema before logical export"));
     }
     let read = snapshot.metadata.begin_read()?;
@@ -249,7 +272,19 @@ fn visit_items(
         }
         tables.insert(
             name.to_owned(),
-            table_kind(name).ok_or_else(|| invalid("unknown canonical table"))?,
+            table_kind(name)
+                .or_else(|| {
+                    if isolated_legacy {
+                        match name {
+                            "batch_schema" => Some(TableKind::StrU32),
+                            "mutation_batches" => Some(TableKind::BytesBytes),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| invalid("unknown canonical table"))?,
         );
     }
     for ns in snapshot.namespaces() {
@@ -299,7 +334,13 @@ fn visit_items(
             }
         }
     }
-    snapshot.for_each_record(|record| visit(Item::Memory(logical_memory(record)?)))?;
+    snapshot.for_each_record(|record| {
+        visit(Item::Memory(if isolated_legacy {
+            logical_memory_for(record, true)?
+        } else {
+            logical_memory(record)?
+        }))
+    })?;
     let read = snapshot.edges.begin_read()?;
     for table in read.list_tables()? {
         if !matches!(table.name(), "edges_forward" | "edges_reverse") {
@@ -353,6 +394,27 @@ impl LogicalHash {
         }
         Ok(())
     }
+}
+
+/// Private legacy fixture checkpoint hash. This does not change export format,
+/// enable native serving, or certify runtime/cache/ID state. The caller already
+/// owns a strictly validated disposable stage, never a second live-core owner.
+pub(crate) fn isolated_legacy_hash(
+    snapshot: &OfflineSnapshot,
+    deadline: std::time::Instant,
+) -> Result<[u8; 32], StorageError> {
+    if snapshot.control().control_schema_version != 1 {
+        return Err(invalid("isolated legacy hash requires schema 1"));
+    }
+    let mut hash = LogicalHash::new(snapshot.control().generation_ref())?;
+    hash.hash.update(b"recalld-isolated-legacy-logical-v1");
+    visit_items_for(snapshot, true, |item| {
+        if std::time::Instant::now() >= deadline {
+            return Err(invalid("checkpoint hash deadline"));
+        }
+        hash.item(&item)
+    })?;
+    Ok(hash.hash.finalize().into())
 }
 
 /// Publishes a new export file only after the entire retained-state stream is

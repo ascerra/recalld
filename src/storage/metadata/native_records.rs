@@ -191,7 +191,10 @@ impl MetadataStore {
             ns.embedding_dim,
             input.memory.embedding.is_some(),
         )?;
-        let id = self.allocate_memory_id(input.memory.id);
+        // A generated UUID needs the operation sample. Supplied identities
+        // must still fail nil/duplicate/terminal/target checks before sampling.
+        let allocation_sample = input.memory.id.is_none().then(|| clock.now_millis());
+        let id = self.allocate_memory_id(input.memory.id, allocation_sample.unwrap_or(0))?;
         if id == MemoryId::nil() {
             return Err(StorageError::InvalidMutation("nil memory ID".into()));
         }
@@ -215,7 +218,7 @@ impl MetadataStore {
             }
         }
         super::insertion::validate_insert_targets(&tx, &input.memory, ns.id, id, existing_edges)?;
-        let sampled = clock.now_millis();
+        let sampled = allocation_sample.unwrap_or_else(|| clock.now_millis());
         let created = input.memory.created_at.unwrap_or(sampled);
         if chrono::DateTime::from_timestamp_millis(sampled).is_none() {
             return Err(StorageError::InvalidMutation("invalid clock sample".into()));

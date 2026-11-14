@@ -493,7 +493,7 @@ impl MetadataStore {
         } else {
             MutationOutcome::LifecycleExposureRecorded { transition }
         };
-        let receipt = control::record_receipt(&tx, ctx, hash, outcome)?;
+        let receipt = self.record_receipt(&tx, ctx, hash, outcome)?;
         Ok((tx, Some(receipt)))
     }
 }

@@ -1,5 +1,5 @@
 //! Evaluator-only JSONL on caller-owned pipes, sharing the actor's actual core.
-//! This is a bounded v1 diagnostic control plane, not a snapshot/reset facility.
+//! Bounded v1 controls; checkpoint support requires the explicit owned track.
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,52 @@ fn error(code: &'static str, message: impl ToString) -> Value {
     json!({"code":code,"message":message.to_string()})
 }
 
-async fn dispatch(core: &Arc<Recalld>, request: &Request) -> Result<Value, Value> {
+async fn dispatch(
+    core: &Arc<Recalld>,
+    evaluator: Option<&super::frozen::OwnedEvaluator>,
+    request: &Request,
+) -> Result<Value, Value> {
+    if request.method == "snapshot" && evaluator.is_some_and(|v| v.checkpoint_supported()) {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Snapshot {
+            deadline_ms: u64,
+        }
+        let params: Snapshot = serde_json::from_value(request.params.clone())
+            .map_err(|e| error("INVALID_PARAMS", e))?;
+        if !(1..=30_000).contains(&params.deadline_ms) {
+            return Err(error("INVALID_PARAMS", "deadlineMs must be 1..30000"));
+        }
+        return evaluator
+            .unwrap()
+            .checkpoint(Instant::now() + Duration::from_millis(params.deadline_ms))
+            .await
+            .map_err(|e| error("CONTROL_UNAVAILABLE", e));
+    }
+    if request.method == "advance" {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Advance {
+            delta_ms: i64,
+            deadline_ms: u64,
+        }
+        let evaluator =
+            evaluator.ok_or_else(|| error("UNSUPPORTED_CONTROL", "owned clock required"))?;
+        let params: Advance = serde_json::from_value(request.params.clone())
+            .map_err(|e| error("INVALID_PARAMS", e))?;
+        if params.delta_ms < 0 || !(1..=30_000).contains(&params.deadline_ms) {
+            return Err(error(
+                "INVALID_PARAMS",
+                "nonnegative deltaMs and deadlineMs 1..30000 required",
+            ));
+        }
+        let deadline = Instant::now() + Duration::from_millis(params.deadline_ms);
+        let now = evaluator
+            .advance(params.delta_ms, deadline)
+            .await
+            .map_err(|e| error("CONTROL_UNAVAILABLE", e))?;
+        return Ok(json!({"nowMillis":now}));
+    }
     match request.method.as_str() {
         "capabilities" => {
             if request.params != json!({}) {
@@ -41,18 +86,26 @@ async fn dispatch(core: &Arc<Recalld>, request: &Request) -> Result<Value, Value
             }
             Ok(json!({
                 "controlVersion":1,
-                "methods":["capabilities","inspect","barrier"],
+                "methods": if evaluator.is_some_and(|v| v.checkpoint_supported()) { vec!["capabilities","inspect","barrier","advance","snapshot"] } else if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance"] } else { vec!["capabilities","inspect","barrier"] },
                 "publicContract":"legacy-v1",
                 "guarantees":{
                     "barrier":"owned-work-and-required-derived-generations",
-                    "logicalHash":false,"snapshot":false,"reset":false,
-                    "controlledClock":false,"controlledIds":false,"controlledRng":false
+                    "logicalHash":false,"snapshot":evaluator.is_some_and(|v| v.checkpoint_supported()),"reset":false,
+                    "freshOwnerCheckpointRestore":evaluator.is_some_and(|v| v.checkpoint_supported()),
+                    "controlledClock":false,"lifecycleClockControlled":evaluator.is_some(),
+                    "controlledIds":false,"canonicalAllocationControlled":evaluator.is_some(),"controlledRng":false
                 }
             }))
         }
         "inspect" => {
             if request.params != json!({}) {
                 return Err(error("INVALID_PARAMS", "inspect requires empty params"));
+            }
+            if let Some(evaluator) = evaluator {
+                return evaluator
+                    .inspect(Instant::now() + Duration::from_secs(30))
+                    .await
+                    .map_err(|e| error("CONTROL_UNAVAILABLE", e));
             }
             let storage = core.storage().clone();
             // Register this readonly worker before enqueue. It does not touch
@@ -98,7 +151,32 @@ async fn dispatch(core: &Arc<Recalld>, request: &Request) -> Result<Value, Value
 /// from actor MCP stdin/stdout; this function never changes actor tool discovery.
 /// EOF ends the evaluator channel. Oversized frames fail closed and end it too.
 /// Deadlines are cooperative; blocking OS I/O has no hard real-time bound.
-pub async fn serve<R, W>(core: Arc<Recalld>, input: R, mut output: W) -> std::io::Result<()>
+pub async fn serve<R, W>(core: Arc<Recalld>, input: R, output: W) -> std::io::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    serve_inner(core, None, input, output).await
+}
+
+pub async fn serve_owned<R, W>(
+    evaluator: Arc<super::frozen::OwnedEvaluator>,
+    input: R,
+    output: W,
+) -> std::io::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    serve_inner(evaluator.core().clone(), Some(evaluator), input, output).await
+}
+
+async fn serve_inner<R, W>(
+    core: Arc<Recalld>,
+    evaluator: Option<Arc<super::frozen::OwnedEvaluator>>,
+    input: R,
+    mut output: W,
+) -> std::io::Result<()>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -122,7 +200,7 @@ where
         } else {
             match serde_json::from_slice::<Request>(&line) {
                 Err(e) => json!({"id":null,"error":error("INVALID_REQUEST",e)}),
-                Ok(request) => match dispatch(&core, &request).await {
+                Ok(request) => match dispatch(&core, evaluator.as_deref(), &request).await {
                     Ok(result) => json!({"id":request.id,"result":result}),
                     Err(error) => json!({"id":request.id,"error":error}),
                 },

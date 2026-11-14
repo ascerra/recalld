@@ -131,7 +131,7 @@ impl RedbStorageEngine {
 
 /// Publish a prepared directory without replacing even an empty existing one.
 /// The supported local platforms already provide an atomic no-replace rename.
-fn rename_new_directory(source: &Path, target: &Path) -> Result<(), StorageError> {
+pub(crate) fn rename_new_directory(source: &Path, target: &Path) -> Result<(), StorageError> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::os::unix::ffi::OsStrExt;

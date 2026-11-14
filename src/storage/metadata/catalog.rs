@@ -60,7 +60,7 @@ impl MetadataStore {
             stored.id = id;
             table.insert(id.get(), control::encode(&stored)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -112,7 +112,7 @@ impl MetadataStore {
             policy.apply(&mut config);
             table.insert(id.get(), control::encode(&config)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
