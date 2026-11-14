@@ -108,3 +108,14 @@ warnings. PR87's published94a352c evidence/ancestry alignment leaves all tested
 runtime inputs unchanged. The [final report](../evidence/native-catalog-wire/final-d4c8a2f/REPORT.md)
 records exact counts, commands, source/binary hashes, failures and remaining
 activation limits. This is not an ordinary public contract2 readiness claim.
+
+
+## Owned publication follow-up
+
+The [numeric-policy wire child](native-policy-wire.md) joins actual PR94 and
+PR96 and also corrects catalog create/replay completion. The same accepted root
+now reaches the real coordinator for actual current-generation publication of
+all four views. It preserves the original full receipt on a known completion
+failure. The earlier validation and limitation statements above describe PR93;
+they are not retroactively evidence for this follow-up. Public contract2 still
+remains closed, and a receipt alone still does not certify whole-store readiness.

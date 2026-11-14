@@ -704,6 +704,21 @@ async fn native_policy_wire_catalog_noop_change_and_replay_publish_current_gener
         created["receipt"]["operationId"]
     );
     assert_eq!(ready(&f).await, changed_at);
+    drop(bridge);
+    drop(create);
+    drop(adapter);
+    let dir = f.close();
+    let reopened =
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(FixedClock))
+            .unwrap();
+    let f = Fixture::from_open_engine(dir, reopened.engine);
+    let adapter = rest_adapter(&f, provider, Arc::new(NoPolicyClock));
+    let before_reopen_replay = bytes(&path);
+    let (status, reopened_replay) = policy_rest(&adapter, "1", &original).await;
+    assert_eq!(status, 200, "{reopened_replay}");
+    assert_eq!(reopened_replay, text);
+    assert_eq!(ready(&f).await, changed_at);
+    assert_eq!(bytes(&path), before_reopen_replay);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -884,6 +899,9 @@ impl Clock for BlockingClock {
 async fn native_policy_wire_cancelled_spawn_retains_unknown_root_and_executing_child() {
     let (f, _, provider) = fixture();
     let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let gate = crate::derived_completion::publication_gate(&f.storage)
+        .await
+        .unwrap();
     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let adapter = NativeCatalogAdapter::new(
@@ -906,6 +924,10 @@ async fn native_policy_wire_cancelled_spawn_retains_unknown_root_and_executing_c
     let status = tracker.status();
     assert!(status.pending >= 2);
     assert_eq!(status.unresolved, 1);
+    assert!(
+        gate.try_write().is_err(),
+        "detached worker still owns publication lease"
+    );
     release_tx.send(()).unwrap();
     // Engine lock acquisition waits for the real detached worker to leave its
     // canonical commit. Its known child can finish; the cancelled root cannot.
@@ -945,4 +967,62 @@ async fn native_policy_wire_unknown_worker_keeps_root_unresolved() {
     let status = tracker.status();
     assert!(status.pending >= 2);
     assert_eq!(status.pending, status.unresolved);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_policy_wire_rejects_invalid_scope_preconditions_and_policy_without_writes() {
+    let (f, path, provider) = fixture_with_record(true);
+    provider.available.store(false, Ordering::SeqCst);
+    let adapter = rest_adapter(&f, provider.clone(), Arc::new(NoPolicyClock));
+    let original = policy_body(&f, Some("unchanged"));
+    let before = bytes(&path);
+    for (field, value) in [
+        ("initialStability", Value::Null),
+        ("desiredRetention", json!(2)),
+        ("lifecycleVersion", json!(2)),
+        ("embeddingProfileId", json!("unknown")),
+    ] {
+        let mut body = original.clone();
+        body["policy"][field] = value;
+        let (status, error) = policy_rest(&adapter, "1", &body).await;
+        assert_eq!(status, 400, "{error}");
+        assert_eq!(error["error"]["commitState"], "notCommitted");
+        assert_eq!(bytes(&path), before);
+    }
+    for id in ["default", "0", "01", "4294967296"] {
+        let (status, error) = policy_rest(&adapter, id, &original).await;
+        assert_eq!(status, 400, "{error}");
+        assert_eq!(bytes(&path), before);
+    }
+    let (status, error) = policy_rest(&adapter, "2", &original).await;
+    assert_eq!(status, 404);
+    assert_eq!(error["error"]["code"], "NAMESPACE_NOT_FOUND");
+    assert_eq!(bytes(&path), before);
+    let mut stale = original.clone();
+    stale["expectedGeneration"] = json!("0");
+    let (status, error) = policy_rest(&adapter, "1", &stale).await;
+    assert_eq!(status, 409);
+    assert_eq!(error["error"]["code"], "GENERATION_CONFLICT");
+    assert_eq!(bytes(&path), before);
+    let mut foreign = original.clone();
+    foreign["storeId"] = json!(uuid::Uuid::new_v4());
+    let (status, error) = policy_rest(&adapter, "1", &foreign).await;
+    assert_eq!(status, 409);
+    assert_eq!(error["error"]["code"], "STORE_LINEAGE_MISMATCH");
+    assert_eq!(bytes(&path), before);
+    let response =
+        crate::api::update_namespace_policy_v2(&adapter, "1", &original, Some("different")).await;
+    assert_eq!(response.status().as_u16(), 400);
+    assert_eq!(bytes(&path), before);
+    let (status, first) = policy_rest(&adapter, "1", &original).await;
+    assert_eq!(status, 200, "{first}");
+    let after = bytes(&path);
+    let mut conflict = original;
+    conflict["policy"]["initialStability"] = json!(8);
+    let (status, error) = policy_rest(&adapter, "1", &conflict).await;
+    assert_eq!(status, 409);
+    assert_eq!(error["error"]["code"], "IDEMPOTENCY_CONFLICT");
+    assert_eq!(bytes(&path), after);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    ready(&f).await;
 }

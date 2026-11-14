@@ -329,7 +329,7 @@ mod tests {
         let mut value = original.clone();
         value["idempotencyKey"] = json!("retry");
         assert!(PolicyRequest::from_mcp(&value).is_err());
-        value["storeId"] = json!(uuid::Uuid::nil());
+        value["storeId"] = json!("00000000-0000-0000-0000-000000000001");
         for bad in [
             json!(1),
             json!("01"),

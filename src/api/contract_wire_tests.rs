@@ -80,6 +80,44 @@ async fn contract_http_rejects_before_parsing_provider_and_all_mutations() {
     assert_eq!(files(f.path()), before);
 }
 
+#[tokio::test]
+async fn native_policy_wire_public_gate_remains_closed_for_v1_and_v2() {
+    let f = Fixture::new();
+    let provider = Arc::new(CountingProvider::default());
+    let router = crate::api::router(
+        state(&f, provider.clone()),
+        &crate::api::ApiConfig::default(),
+    );
+    let before = files(f.path());
+    for selectors in [vec![], vec!["1"], vec!["2"]] {
+        let (status, value) = response(
+            router.clone(),
+            "PUT",
+            "/namespaces/1/policy",
+            &selectors,
+            "{",
+        )
+        .await;
+        assert_eq!(status, 400);
+        assert_eq!(value["field"], "contractVersion");
+    }
+    assert_eq!(files(f.path()), before);
+    assert_eq!(provider.0.load(Ordering::SeqCst), 0);
+    let bridge = StubBridge::default().into_bridge();
+    let result = crate::mcp::tools::dispatch_tool(
+        &bridge,
+        "update_namespace_policy",
+        json!({"contractVersion":2}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        !crate::mcp::tools::tool_definitions()
+            .iter()
+            .any(|t| t.name == "update_namespace_policy")
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn contract_http_v1_success_shape_and_unknown_fields_stay_legacy() {
     let f = Fixture::new();
