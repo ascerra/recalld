@@ -698,8 +698,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
-        MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
+        MutationOutcome::MemoryTombstoned { .. }
         | MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::NamespaceCreated { .. }
         | MutationOutcome::NamespacePolicyUpdated { .. }

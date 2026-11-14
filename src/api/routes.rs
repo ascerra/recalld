@@ -63,7 +63,7 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
         .route("/", get(handlers::list_namespaces))
         .route("/", post(handlers::create_namespace))
         .route("/{id}/stats", get(handlers::namespace_stats))
-        .route("/{name}/duplicates", post(handlers::scan_duplicates));
+        .route("/{name}/duplicates", post(handlers::dispatch_duplicates));
 
     let ops_routes = Router::new()
         .route("/health", get(handlers::health_check))

@@ -154,6 +154,15 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Concrete canonical/vector capture; no legacy backend fallback.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Drain in-flight create/index publication before online derived repair.
     async fn publication_lease(
         &self,

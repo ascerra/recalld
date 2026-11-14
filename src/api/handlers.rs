@@ -2070,3 +2070,83 @@ async fn check_read_admission(state: &AppState, stamp: u64) -> Result<(), AppErr
     }
     Ok(())
 }
+
+/// Route selection for duplicates. The shared middleware and this direct-call
+/// boundary both keep v2 closed until the native serving/wire contract is ready.
+pub async fn dispatch_duplicates(
+    State(state): State<super::state::AppState>,
+    Path(name): Path<String>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::{ContractVersion, Envelope};
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = super::middleware::request_contract_version(request.headers());
+    let version = match version {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version == ContractVersion::V1 {
+        // Preserve Axum's legacy JSON extractor rejection and successful shape.
+        return match Json::<super::models::ScanDuplicatesRequest>::from_request(request, &state)
+            .await
+        {
+            Ok(Json(body)) => scan_duplicates(State(state), Path(name), Json(body))
+                .await
+                .into_response(),
+            Err(rejection) => rejection.into_response(),
+        };
+    }
+    let body = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            let error = crate::search::exact_scan::ExactScanError::Input(
+                crate::serialization::contract::InputError {
+                    code: "INVALID_TYPE",
+                    field: String::new(),
+                    message: "body must be a JSON object",
+                },
+            )
+            .execution_error();
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(Envelope::<crate::search::exact_scan::ExactScanData>::failure(None, error)),
+            )
+                .into_response();
+        }
+    };
+    let result = match crate::serialization::scan::ExactScanRequest::from_http(&body, &name) {
+        Ok(request) => state.storage.scan_duplicate_pairs(request).await,
+        Err(error) => Err(crate::search::exact_scan::ExactScanError::Input(error)),
+    };
+    match result {
+        Ok(page) => Json(page.into_envelope()).into_response(),
+        Err(error) => {
+            use crate::serialization::contract::ErrorCategory;
+            let error = error.execution_error();
+            let status = match error.category {
+                ErrorCategory::InvalidInput => axum::http::StatusCode::BAD_REQUEST,
+                ErrorCategory::NotFound => axum::http::StatusCode::NOT_FOUND,
+                ErrorCategory::Conflict => axum::http::StatusCode::CONFLICT,
+                _ => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (
+                status,
+                Json(Envelope::<crate::search::exact_scan::ExactScanData>::failure(None, error)),
+            )
+                .into_response()
+        }
+    }
+}

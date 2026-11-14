@@ -294,6 +294,19 @@ pub struct Envelope<T> {
     pub warnings: Vec<String>,
 }
 impl<T> Envelope<T> {
+    pub fn failure(scope: Option<Scope>, error: ExecutionError) -> Self {
+        Self {
+            contract_version: 2,
+            status: Status::Error,
+            scope,
+            data: None,
+            receipt: None,
+            read_generation: None,
+            error: Some(error),
+            readiness: None,
+            warnings: vec![],
+        }
+    }
     pub fn success(scope: Scope, data: T) -> Self {
         Self {
             contract_version: 2,

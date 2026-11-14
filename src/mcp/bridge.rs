@@ -24,6 +24,15 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    /// Exact canonical/vector page. Public application v2 remains gated.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Execute a semantic search query.
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError>;
 

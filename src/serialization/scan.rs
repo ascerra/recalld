@@ -12,9 +12,18 @@ pub(crate) const MAX_CURSOR_BYTES: usize = 4096;
 // Whole-snapshot limits, not sample caps: exceeding either must fail the page.
 pub(crate) const MAX_SNAPSHOT_RECORDS: usize = 100_000;
 pub(crate) const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
+// Bound the shared page for the existing daemon frame and both MCP payload
+// copies (escaped pretty text plus structured JSON). No result truncation:
+// exceeding this conservative wire bound fails the whole page before push.
+pub(crate) const MAX_SCAN_RESPONSE_BYTES: usize = crate::daemon::protocol::MAX_MESSAGE_SIZE;
+pub(crate) const SCAN_RESPONSE_FIXED_BYTES: usize = 64 * 1024;
+// Two UUIDs, finite f64, keys, nested indentation, JSON escaping and both copies.
+pub(crate) const PAIR_RESPONSE_MAX_BYTES: usize = 512;
+pub(crate) const MAX_RESPONSE_PAIRS: usize =
+    (MAX_SCAN_RESPONSE_BYTES - SCAN_RESPONSE_FIXED_BYTES) / PAIR_RESPONSE_MAX_BYTES;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ExactScanRequest {
+pub struct ExactScanRequest {
     pub namespace: Option<String>,
     pub threshold: f64,
     pub pair_budget: u32,

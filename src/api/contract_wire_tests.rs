@@ -308,3 +308,41 @@ async fn contract_mcp_omitted_arguments_v1_and_legacy_eras_keep_success_payloads
         assert!(rejected.get("structuredContent").is_none());
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn contract_duplicates_v1_preserves_original_extractor_errors() {
+    let fixture = Fixture::new();
+    let state = state(&fixture, Arc::new(CountingProvider::default()));
+    let legacy = axum::Router::new()
+        .route(
+            "/namespaces/{name}/duplicates",
+            axum::routing::post(crate::api::handlers::scan_duplicates),
+        )
+        .with_state(state.clone());
+    let dispatch = crate::api::router(state, &crate::api::ApiConfig::default());
+    for (body, content_type) in [
+        ("{", "application/json"),
+        (r#"{"threshold":null}"#, "application/json"),
+        (r#"{"maxMemories":"bad"}"#, "application/json"),
+        ("{}", "text/plain"),
+    ] {
+        let request = || {
+            Request::builder()
+                .method("POST")
+                .uri("/namespaces/default/duplicates")
+                .header("content-type", content_type)
+                .body(Body::from(body))
+                .unwrap()
+        };
+        let before = legacy.clone().oneshot(request()).await.unwrap();
+        let after = dispatch.clone().oneshot(request()).await.unwrap();
+        assert_eq!(before.status(), after.status());
+        let before = axum::body::to_bytes(before.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let after = axum::body::to_bytes(after.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(before, after);
+    }
+}

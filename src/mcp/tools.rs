@@ -99,6 +99,13 @@ pub async fn dispatch_tool(
     {
         return ToolCallResult::error(error.to_string());
     }
+    // This branch is deliberately behind the shared unconditional v2 gate.
+    // Activation requires the native owner/serving and complete wire proof.
+    if crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        == Ok(crate::serialization::contract::ContractVersion::V2)
+    {
+        return dispatch_v2(bridge, name, arguments).await;
+    }
     match name {
         "store_memory" => handle_store_memory(bridge, arguments).await,
         "store_memories" => handle_store_memories(bridge, arguments).await,
@@ -1719,6 +1726,55 @@ async fn handle_list_tags(bridge: &McpBridge, arguments: serde_json::Value) -> T
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
         Err(e) => ToolCallResult::error(format!("List tags failed: {e}")),
+    }
+}
+
+/// Prepared actual consumer, reachable only after the shared version gate opens.
+async fn dispatch_v2(
+    bridge: &McpBridge,
+    name: &str,
+    arguments: serde_json::Value,
+) -> ToolCallResult {
+    use crate::search::exact_scan::ExactScanData;
+    use crate::serialization::{
+        contract::{CommitState, Envelope, ErrorCategory, ExecutionError},
+        scan::ExactScanRequest,
+    };
+    let failure = |error: ExecutionError| {
+        let envelope = Envelope::<ExactScanData>::failure(None, error);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        result.is_error = Some(true);
+        result
+    };
+    if name != "find_similar_memories"
+        || arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
+    {
+        return failure(ExecutionError {
+            category: ErrorCategory::Unavailable,
+            code: "UNSUPPORTED_CONTRACT_VERSION".into(),
+            message: "this operation has no active v2 backend".into(),
+            field: Some("/contractVersion".into()),
+            retryable: false,
+            commit_state: CommitState::NotCommitted,
+            operation_id: None,
+        });
+    }
+    let mut request = match ExactScanRequest::from_mcp(&arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            return failure(
+                crate::search::exact_scan::ExactScanError::Input(error).execution_error(),
+            );
+        }
+    };
+    request
+        .namespace
+        .get_or_insert_with(|| bridge.default_namespace().into());
+    match bridge.search.scan_duplicate_pairs(request).await {
+        Ok(page) => ToolCallResult::json(&page.into_envelope())
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error")),
+        Err(error) => failure(error.execution_error()),
     }
 }
 

@@ -142,6 +142,14 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn search(
         &self,
         query: bridge::SearchInput,
@@ -3803,8 +3811,10 @@ mod tests {
     async fn namespace_deletion_clears_orphan_entity_postings_only_in_its_scope() {
         let fx = Fixture::new();
         let scratch = fx.create_namespace("scratch");
-        let orphan = MemoryId::new();
-        let names = vec!["José".into()];
+        // Only the scratch posting is orphaned. Canonical rebuild must retain
+        // the real foreign owner; noncanonical foreign postings are not retained.
+        let orphan = fx.insert_memory_in(default_ns(), &["entity/shared"]).await;
+        let names = vec!["Shared".into()];
         {
             let mut index = fx.entity_index.write().await;
             index.add(scratch, orphan, &names);
@@ -3828,5 +3838,6 @@ mod tests {
             index.find_by_entities(default_ns(), &names, MemoryId::new()),
             vec![(orphan, 1)]
         );
+        assert!(fx.record(orphan).is_some());
     }
 }

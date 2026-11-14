@@ -1,9 +1,8 @@
 //! Exact page arithmetic and vector comparison. No storage generation is
 //! produced here: the real canonical/vector capture and final guard wrap this.
-use super::{dot_product_simd, is_normalized};
 use crate::{
     model::MemoryId,
-    serialization::scan::{ExactScanRequest, MAX_PAIR_BUDGET},
+    serialization::scan::{ExactScanRequest, MAX_PAIR_BUDGET, MAX_RESPONSE_PAIRS},
 };
 use serde::Serialize;
 
@@ -13,15 +12,17 @@ pub(crate) enum PairError {
     Bounds,
     #[error("cursor pair position is outside the captured eligible pairs")]
     InvalidPosition,
-    #[error("exact comparator requires ordered unique IDs and compatible normalized vectors")]
+    #[error("exact scan response exceeds the transport byte budget; reduce pairBudget")]
+    ResponseTooLarge,
+    #[error("exact comparator requires ordered unique IDs and finite nonzero compatible vectors")]
     InvalidVectors,
 }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct PairEdge {
+pub struct PairEdge {
     pub left_id: MemoryId,
     pub right_id: MemoryId,
-    pub similarity: f32,
+    pub similarity: f64,
 }
 #[derive(Debug)]
 pub(crate) struct ComparedPage {
@@ -60,18 +61,33 @@ pub(crate) fn compare_page(
         return Err(PairError::InvalidPosition);
     }
     let dimension = vectors.first().map(|(_, v)| v.len()).unwrap_or(0);
-    if vectors
-        .windows(2)
-        .any(|rows| rows[0].0.as_bytes() >= rows[1].0.as_bytes())
+    if dimension > 8192
+        || vectors
+            .windows(2)
+            .any(|rows| rows[0].0.as_bytes() >= rows[1].0.as_bytes())
         || vectors.iter().any(|(_, v)| {
             v.is_empty()
                 || v.len() != dimension
                 || v.iter().any(|x| !x.is_finite())
-                || !is_normalized(v, 1e-3)
+                || v.iter().all(|x| *x == 0.0)
         })
     {
         return Err(PairError::InvalidVectors);
     }
+    // Snapshot Available preserves original f32 bits; it is not a promise of
+    // exact unit length. Even admitted Bound f32 vectors have rounding error.
+    // Compute cosine in f64 without normalizing/mutating stored or copied bytes.
+    // f32 products and sums for supported dimensions cannot overflow f64.
+    let norms: Vec<f64> = vectors
+        .iter()
+        .map(|(_, vector)| {
+            vector
+                .iter()
+                .map(|x| f64::from(*x).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        })
+        .collect();
     let start = next.unwrap_or(0);
     let budget = u64::from(request.pair_budget).min(total - start);
     let mut remainder = start;
@@ -89,11 +105,19 @@ pub(crate) fn compare_page(
     for _ in 0..budget {
         let (left_id, a) = &vectors[left];
         let (right_id, b) = &vectors[right];
-        let score = dot_product_simd(a, b);
+        let dot: f64 = a
+            .iter()
+            .zip(b)
+            .map(|(x, y)| f64::from(*x) * f64::from(*y))
+            .sum();
+        let score = (dot / (norms[left] * norms[right])).clamp(-1.0, 1.0);
         if !score.is_finite() {
             return Err(PairError::InvalidVectors);
         }
-        if f64::from(score) >= request.threshold {
+        if score >= request.threshold {
+            if pairs.len() == MAX_RESPONSE_PAIRS {
+                return Err(PairError::ResponseTooLarge);
+            }
             pairs.push(PairEdge {
                 left_id: *left_id,
                 right_id: *right_id,
@@ -127,6 +151,97 @@ mod tests {
             "default",
         )
         .unwrap()
+    }
+    #[test]
+    fn exact_pair_cosine_preserves_bits_and_handles_rounding_scaling_and_extremes() {
+        let id = |n| MemoryId::from_uuid(Uuid::from_u128(n));
+        let vectors = vec![(id(1), vec![1., 0.]), (id(2), vec![0.6_f32, 0.8_f32])];
+        // These inputs satisfy the actual Bound norm tolerance, yet raw dot is
+        // above true cosine. A threshold between them must not match.
+        crate::storage::canonical_schema::validate_bound_vector(&vectors[1].1).unwrap();
+        let raw_dot = f64::from(0.6_f32);
+        let cosine = raw_dot / raw_dot.hypot(f64::from(0.8_f32));
+        assert!(cosine < raw_dot);
+        let midpoint = (raw_dot + cosine) / 2.;
+        assert!(
+            compare_page(&vectors, &request(1, midpoint), None)
+                .unwrap()
+                .pairs
+                .is_empty()
+        );
+        let matched = compare_page(&vectors, &request(1, cosine - 1e-12), None).unwrap();
+        assert!((matched.pairs[0].similarity - cosine).abs() < 1e-15);
+        let scaled = vec![(id(1), vec![3., 4.]), (id(2), vec![0., 2.])];
+        let before: Vec<_> = scaled
+            .iter()
+            .flat_map(|(_, v)| v.iter().map(|x| f32::to_bits(*x)))
+            .collect();
+        let page = compare_page(&scaled, &request(1, 0.79), None).unwrap();
+        assert!((page.pairs[0].similarity - 0.8).abs() < 1e-15);
+        assert!(
+            compare_page(&scaled, &request(1, 0.81), None)
+                .unwrap()
+                .pairs
+                .is_empty()
+        );
+        assert_eq!(
+            before,
+            scaled
+                .iter()
+                .flat_map(|(_, v)| v.iter().map(|x| x.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        // Pure comparator fixtures only: arbitrary scaling is not an attestation
+        // of canonical Bound storage. Its stricter proof remains unchanged.
+        let extremes = vec![
+            (id(1), vec![f32::MAX, f32::MAX]),
+            (id(2), vec![f32::from_bits(1), f32::from_bits(1)]),
+            (id(3), vec![3., 3.]),
+        ];
+        let page = compare_page(&extremes, &request(3, 0.999), None).unwrap();
+        assert_eq!(page.pairs.len(), 3);
+        assert!(
+            page.pairs
+                .iter()
+                .all(|p| p.similarity <= 1. && p.similarity.is_finite())
+        );
+    }
+    #[test]
+    fn exact_pair_dense_response_overflow_errors_without_losing_pairs_on_smaller_retry() {
+        let vectors: Vec<_> = (1..=182)
+            .map(|n| (MemoryId::from_uuid(Uuid::from_u128(n)), vec![1.]))
+            .collect();
+        assert!(total_pairs(vectors.len() as u64).unwrap() > MAX_RESPONSE_PAIRS as u64);
+        assert_eq!(
+            compare_page(&vectors, &request(MAX_PAIR_BUDGET, 1.), None).unwrap_err(),
+            PairError::ResponseTooLarge
+        );
+        // Retry the same cursor with a smaller budget. No edge is dropped and
+        // coverage counts compared pairs, not the failed request's partial work.
+        let first = compare_page(&vectors, &request(MAX_RESPONSE_PAIRS as u32, 1.), None).unwrap();
+        assert_eq!(first.pairs.len(), MAX_RESPONSE_PAIRS);
+        assert_eq!(first.compared_so_far, MAX_RESPONSE_PAIRS as u64);
+        let second = compare_page(
+            &vectors,
+            &request(MAX_RESPONSE_PAIRS as u32, 1.),
+            first.next_pair,
+        )
+        .unwrap();
+        assert_eq!(second.next_pair, None);
+        assert_eq!(second.compared_so_far, first.total_pairs);
+        let actual: Vec<_> = first
+            .pairs
+            .into_iter()
+            .chain(second.pairs)
+            .map(|p| (p.left_id, p.right_id))
+            .collect();
+        let mut oracle = Vec::new();
+        for (i, (left, _)) in vectors.iter().enumerate() {
+            for (right, _) in vectors.iter().skip(i + 1) {
+                oracle.push((*left, *right));
+            }
+        }
+        assert_eq!(actual, oracle);
     }
     #[test]
     fn exact_pair_pages_match_independent_dense_tied_disconnected_cross_200_oracle() {
