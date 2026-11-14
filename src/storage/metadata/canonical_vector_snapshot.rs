@@ -60,6 +60,8 @@ impl MetadataStore {
         let state = current(&tx)?;
         let namespaces = tx.open_table(NAMESPACE_TABLE).map_err(StorageError::from)?;
         let mut selected = None;
+        let mut folded = None;
+        let mut ambiguous = false;
         for row in namespaces.iter().map_err(StorageError::from)? {
             let (key, value) = row.map_err(StorageError::from)?;
             if value.value().len() > limits.max_bytes {
@@ -74,9 +76,17 @@ impl MetadataStore {
                     return Err(unavailable("duplicate namespace name"));
                 }
                 selected = Some((binding(&state, config.id, value.value()), config));
+            } else if config.name.eq_ignore_ascii_case(name) {
+                ambiguous |= folded.is_some();
+                folded = Some((binding(&state, config.id, value.value()), config));
             }
         }
-        let Some((binding, namespace)) = selected else {
+        // Preserve canonical exact-first lookup without a separate resolution
+        // transaction. Corrupt/legacy ambiguous aliases never choose arbitrarily.
+        if selected.is_none() && ambiguous {
+            return Err(unavailable("ambiguous namespace alias"));
+        }
+        let Some((binding, namespace)) = selected.or(folded) else {
             return Err(if expected.is_some() {
                 SnapshotError::Stale
             } else {
@@ -510,5 +520,48 @@ mod tests {
             .unwrap();
         engine.validate_vector_snapshot(&snapshot.binding).unwrap();
         worker.join().unwrap();
+    }
+    #[tokio::test]
+    async fn canonical_vector_snapshot_case_alias_restart_and_ambiguous_fallback() {
+        let f = Fixture::new();
+        let project = f.create_namespace("Project");
+        let other = f.create_namespace("other");
+        let snapshot = f
+            .storage
+            .read()
+            .unwrap()
+            .canonical_vector_snapshot("project", None, limits())
+            .unwrap();
+        assert_eq!(snapshot.namespace.id, project);
+        assert_eq!(snapshot.namespace.name, "Project");
+        let root = f.close();
+        let engine = crate::storage::RedbStorageEngine::open(root.path()).unwrap();
+        let restarted = engine
+            .canonical_vector_snapshot("PROJECT", Some(&snapshot.binding), limits())
+            .unwrap();
+        assert_eq!(restarted.binding, snapshot.binding);
+        engine.validate_vector_snapshot(&snapshot.binding).unwrap();
+        // Real creation rejects case collisions. Inject only the historical/
+        // corrupt ambiguous metadata shape to prove fallback cannot pick one.
+        let mut config = engine.get_namespace(other).unwrap().unwrap();
+        config.name = "PROJECT".into();
+        let tx = engine.meta_store().db.begin_write().unwrap();
+        tx.open_table(NAMESPACE_TABLE)
+            .unwrap()
+            .insert(other.get(), control::encode(&config).unwrap().as_slice())
+            .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            engine
+                .canonical_vector_snapshot("Project", None, limits())
+                .unwrap()
+                .namespace
+                .id,
+            project
+        );
+        assert!(matches!(
+            engine.canonical_vector_snapshot("project", None, limits()),
+            Err(SnapshotError::Unavailable(_))
+        ));
     }
 }
