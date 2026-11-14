@@ -115,3 +115,22 @@ doctests remain ignored. Formatting passed. Clippy exited 0 with 623 library and
 661 library-test warnings (621 duplicates), plus one binary warning. The preserved
 recovery and signed-zero failures, source/binary identities and final raw logs
 are in `work-notes/native-maintenance/`.
+
+## Corrected historical proof and cancellation boundary
+
+Runtime `66207fdacfd185f847b89f6ba88cc64496058cb4` adds historical peer-policy
+binding (`ab8c8e7`) and worker-owned publication leases on waiter cancellation.
+Both have actual BEFORE regressions and separate commits. The graph guard and
+unresolved tracker remained protective in the cancellation reproduction; no
+false-readiness defect is claimed. Receipt formats and provenance are unchanged.
+
+942 library + 2 CLI, 14 maintenance focused and 4 reader/publication tests pass;
+fmt passes; clippy exits0 WITH624 library/662 test warnings (622 duplicates),
+plus one binary warning. Evidence commit `3263b5b` and
+[correction report](../../work-notes/native-maintenance-corrections/REPORT.md)
+preserve exact source, binary identity and logs.
+
+Verified actual HOME copy: `/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-maintenance-corrections-3263b5b`; 28 files.
+COPY-VERIFICATION SHA-256: `e2c070a4254fbf69a26bf803c5522c1ee9bfc1c5bbbe4aa579b8d743fd1b950c`.
+The shared experiment notebook contains the same handoff. Ordinary schema-2
+serving and the earlier supplied-key skipped-outcome limitation remain unchanged.
