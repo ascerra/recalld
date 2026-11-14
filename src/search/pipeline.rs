@@ -201,6 +201,31 @@ pub struct RifSuppression {
 /// Records access events on memories.
 #[async_trait::async_trait]
 pub trait AccessRecorder: Send + Sync {
+    /// Receives the query owner's configured policy and already sampled clock.
+    /// Legacy recorders keep their existing behavior through this default.
+    async fn record_access_batch_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        _policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        let receipts = match sampled_at {
+            Some(at) => {
+                self.record_access_batch_at_with_work(accesses, scope, at, parent)
+                    .await?
+            }
+            None => {
+                self.record_access_batch_with_work(accesses, scope, parent)
+                    .await?
+            }
+        };
+        Ok(crate::decay::observation::AccessObservation::from_receipts(
+            receipts,
+        ))
+    }
+
     async fn record_access_batch_at_with_work(
         &self,
         _accesses: &[(MemoryId, AccessKind)],
@@ -1996,21 +2021,23 @@ impl QueryEngine {
         }
         let work = self.accept_work(parent)?;
         let result = async {
-            let receipts = match sampled_at {
-                Some(at) => {
-                    self.access_recorder
-                        .record_access_batch_at_with_work(accesses, Some(&scope), at, work.as_ref())
-                        .await?
-                }
-                None => {
-                    self.access_recorder
-                        .record_access_batch_with_work(accesses, Some(&scope), work.as_ref())
-                        .await?
-                }
+            let policy = crate::storage::native_lifecycle::NativePolicyInputs {
+                global: self.decay_policy.clone(),
+                multiplier: self.decay_multiplier,
             };
+            let observation = self
+                .access_recorder
+                .record_access_batch_for_publication(
+                    accesses,
+                    Some(&scope),
+                    sampled_at,
+                    work.as_ref(),
+                    Some(&policy),
+                )
+                .await?;
             let observed = Observed {
                 value: (),
-                receipts,
+                receipts: observation.receipts,
             }
             .publish_derived(
                 self.coherent_owner.as_ref().map(|(owner, _)| owner),
@@ -2249,6 +2276,170 @@ mod tests {
             Arc::new(Unused),
             Arc::new(Unused),
         )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn access_policy_forwarding_keeps_query_inputs_and_legacy_receipts() {
+        use crate::decay::observation::AccessObservation;
+        use crate::search::adapters::{StorageAccessRecorder, StorageMetadataAdapter};
+        use crate::storage::control::ExposureScope;
+        use crate::storage::native_lifecycle::NativePolicyInputs;
+        use crate::storage::work::WorkTicket;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Clock(AtomicUsize);
+        impl crate::time::Clock for Clock {
+            fn now_millis(&self) -> i64 {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                1_800_000_000_007
+            }
+        }
+        struct Recording {
+            inner: StorageAccessRecorder,
+            seen: std::sync::Mutex<Vec<(Option<i64>, f32, f64, bool)>>,
+        }
+        #[async_trait::async_trait]
+        impl AccessRecorder for Recording {
+            async fn record_access_batch_for_publication(
+                &self,
+                accesses: &[(MemoryId, AccessKind)],
+                scope: Option<&ExposureScope>,
+                sampled_at: Option<i64>,
+                parent: Option<&WorkTicket>,
+                policy: Option<&NativePolicyInputs>,
+            ) -> Result<AccessObservation> {
+                let policy = policy.expect("actual configured policy");
+                assert_eq!(scope.unwrap().namespace, "default");
+                assert_eq!(scope.unwrap().source, Some(accesses[0].0));
+                self.seen.lock().unwrap().push((
+                    sampled_at,
+                    policy.global.initial_stability,
+                    policy.multiplier,
+                    parent.is_some(),
+                ));
+                // The production legacy adapter uses the new trait default,
+                // which must preserve its old clock/receipt/publication path.
+                self.inner
+                    .record_access_batch_for_publication(
+                        accesses,
+                        scope,
+                        sampled_at,
+                        parent,
+                        Some(policy),
+                    )
+                    .await
+            }
+            async fn record_access(
+                &self,
+                _: MemoryId,
+                _: AccessKind,
+            ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+                unreachable!()
+            }
+            async fn record_access_batch(
+                &self,
+                _: &[(MemoryId, AccessKind)],
+                _: Option<&ExposureScope>,
+            ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+                unreachable!()
+            }
+        }
+        let fx = crate::test_support::Fixture::new();
+        let id = fx.insert_memory().await;
+        let clock = Arc::new(Clock(AtomicUsize::new(0)));
+        let recorder = Arc::new(Recording {
+            inner: StorageAccessRecorder::new(fx.storage.clone(), fx.cache.clone())
+                .with_clock(clock.clone()),
+            seen: Default::default(),
+        });
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: fx.storage.clone(),
+            cache: fx.cache.clone(),
+            graph: fx.graph.clone(),
+            vectors: fx.vector_index.clone(),
+            fts: fx.fts_index.clone(),
+            entities: fx.entity_index.clone(),
+        };
+        owner.complete().await.unwrap();
+        let mut query_engine = engine(StubGraph::default(), StubMetaStore::default())
+            .with_lifecycle_inputs(
+                clock.clone(),
+                crate::decay::DecayConfig {
+                    initial_stability: 17.25,
+                    ..Default::default()
+                },
+                2.75,
+            )
+            .with_coherent_owner(
+                owner,
+                Arc::new(crate::rif::RifEngine::new(Default::default())),
+            );
+        query_engine.meta_store = Arc::new(StorageMetadataAdapter::new(fx.storage.clone()));
+        query_engine.access_recorder = recorder.clone();
+        let scope = || ExposureScope {
+            namespace: "default".into(),
+            source: Some(id),
+        };
+        let accesses = [(id, AccessKind::DirectRetrieval)];
+        let first = query_engine
+            .record_exposures_at_with_work(&accesses, scope(), 1_800_000_000_003, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            clock.0.load(Ordering::SeqCst),
+            0,
+            "pinned clock must not be sampled again"
+        );
+        assert_eq!(fx.record(id).unwrap().last_accessed_at, 1_800_000_000_003);
+        let second = query_engine
+            .record_exposures(&accesses, scope())
+            .await
+            .unwrap();
+        assert_eq!(
+            clock.0.load(Ordering::SeqCst),
+            1,
+            "legacy non-pinned path samples its recorder once"
+        );
+        assert_eq!(fx.record(id).unwrap().last_accessed_at, 1_800_000_000_007);
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_ne!(first[0].operation_id, second[0].operation_id);
+        assert_eq!(
+            *recorder.seen.lock().unwrap(),
+            vec![
+                (Some(1_800_000_000_003), 17.25, 2.75, true),
+                (None, 17.25, 2.75, true)
+            ]
+        );
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+        let before = fx.record(id).unwrap().to_bytes();
+        assert!(
+            query_engine
+                .record_exposures(&[], scope())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(before, fx.record(id).unwrap().to_bytes());
+        assert_eq!(recorder.seen.lock().unwrap().len(), 2);
+        assert_eq!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .status()
+                .pending,
+            0
+        );
     }
 
     #[tokio::test]

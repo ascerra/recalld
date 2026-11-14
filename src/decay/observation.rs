@@ -14,6 +14,18 @@ pub(crate) struct Observed<T> {
     pub receipts: Vec<WriteReceipt>,
 }
 
+/// Rust-only recorder result. Receipts retain the existing full-publication path;
+/// this type does not certify readiness or activate native exposure writes.
+#[derive(Default)]
+pub struct AccessObservation {
+    pub receipts: Vec<WriteReceipt>,
+}
+impl AccessObservation {
+    pub fn from_receipts(receipts: Vec<WriteReceipt>) -> Self {
+        Self { receipts }
+    }
+}
+
 impl<T> Observed<T> {
     pub fn unobserved(value: T) -> Self {
         Self {
