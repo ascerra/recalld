@@ -33,7 +33,13 @@ impl DerivedCompletion {
             let _publication = lease;
             let _graph = graph;
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            let result = storage.begin_namespace_purge_with_work(&ctx, force, Some(&child));
+            let result = if storage.control_state()?.control_schema_version != 2 {
+                Err(StorageError::InvalidMutationContext(
+                    "native purge requires native owner".into(),
+                ))
+            } else {
+                storage.begin_namespace_purge_with_work(&ctx, force, Some(&child))
+            };
             storage.meta_store().finish_work(child);
             result
         })

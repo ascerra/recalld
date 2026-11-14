@@ -865,11 +865,17 @@ impl MetadataStore {
         if store_id != state.store_id {
             return Err(StorageError::StoreLineageMismatch);
         }
+        if !tx
+            .list_tables()?
+            .any(|table| table.name() == PROGRESS.name())
+        {
+            return Ok(None);
+        }
         let Some(value) = tx.open_table(PROGRESS)?.get(parent.as_bytes().as_slice())? else {
             return Ok(None);
         };
         let p: PurgeProgress = control::decode(value.value())?;
-        if p.namespace_id != namespace {
+        if p.namespace_id != namespace || p.store_id != store_id {
             return Ok(None);
         }
         let receipts = tx.open_table(control::RECEIPTS)?;

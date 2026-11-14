@@ -547,7 +547,10 @@ fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
     s.update_policy(&fresh, scope(&s, id), &changed)
         .unwrap()
         .unwrap();
-    let before = rows(&s);
+    let before = rows(&s)
+        .iter()
+        .map(|r| r.to_bytes().unwrap())
+        .collect::<Vec<_>>();
     let state = s.engine.control_state().unwrap();
     let mut expected = first;
     expected.replayed = true;
@@ -567,7 +570,13 @@ fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
         s.update_policy(&key, scope(&s, id), &changed),
         Err(StorageError::IdempotencyConflict)
     ));
-    assert_eq!(rows(&s), before);
+    assert_eq!(
+        rows(&s)
+            .iter()
+            .map(|r| r.to_bytes().unwrap())
+            .collect::<Vec<_>>(),
+        before
+    );
     assert_eq!(s.engine.control_state().unwrap(), state);
     drop(s);
     let mut s = open(&path);
