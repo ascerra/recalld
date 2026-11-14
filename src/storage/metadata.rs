@@ -325,7 +325,7 @@ impl MetadataStore {
         Ok(())
     }
 
-    fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
+    pub(crate) fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
         if self.native_lifecycle_only {
             return Err(StorageError::RecoveryRequired(
                 "operation does not participate in native lifecycle proof".into(),
