@@ -19,6 +19,9 @@ mod readers;
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 
+#[path = "recovery_tests.rs"]
+mod recovery;
+
 struct FixedClock(AtomicUsize);
 impl Clock for FixedClock {
     fn now_millis(&self) -> i64 {
