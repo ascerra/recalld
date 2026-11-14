@@ -4,6 +4,10 @@ Actual parents are PR96 `387c7118864040c68d7d28c44fb2600ade520a45`
 and PR98 `441e7b939de4c45e940c9ffdb99d042eeb831bf3` (maintenance runtime
 `86ad274`). Join `a86d7ea` preserves the accepted producer roots, current-generation
 view registry, native proofs and the optional final-transaction BatchChild argument.
+The validated baseline `64261a0` is retained separately. Join `38e8598` adds
+PR98 peer-history correction `ab8c8e7` and worker lease correction `66207fd`.
+Historical hard-delete peers now validate their own policy history after fork;
+cancelled async waiters leave publication leases with the actual blocking worker.
 The earlier 98+83 merge attempt is preserved separately as an unexecuted conflict
 record; it is not validation or implementation evidence.
 
