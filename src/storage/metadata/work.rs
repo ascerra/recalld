@@ -57,6 +57,16 @@ impl MetadataFreeze<'_> {
 }
 
 impl MetadataStore {
+    /// Allocation state is meaningful only while the same owner's admission
+    /// and metadata publication remain frozen. No live restore/rewind API.
+    pub(crate) fn frozen_id_state(
+        &self,
+        frozen: &MetadataFreeze<'_>,
+    ) -> Result<Option<crate::storage::ids::IdState>, StorageError> {
+        frozen._admission.check(&self.work_tracker)?;
+        self.ids.checkpoint()
+    }
+
     /// Clone under a brief outer storage read lock, then release that lock
     /// BEFORE close_and_drain. Workers need the outer lock to finish.
     pub fn work_tracker(&self) -> WorkTracker {

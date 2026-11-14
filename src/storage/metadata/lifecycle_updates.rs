@@ -172,7 +172,7 @@ impl MetadataStore {
             state.generation_ref(),
             &before,
             &record,
-            uuid::Uuid::new_v4(),
+            self.ids.uuid(crate::storage::ids::IdKind::Operation)?,
         )?;
         Ok(Some((tx, record)))
     }

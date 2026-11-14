@@ -355,7 +355,7 @@ impl MetadataStore {
         }
         tx.open_table(SCHEMA)?.insert("version", 1)?;
         tx.open_table(PROGRESS)?;
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -373,7 +373,7 @@ impl MetadataStore {
             last_receipt: receipt.clone(),
             sequence: 0,
             stage: PurgeStage::Deleting,
-            next_operation_id: Some(Uuid::new_v4()),
+            next_operation_id: Some(self.ids.uuid(crate::storage::ids::IdKind::Operation)?),
             cursor: None,
             removed: 0,
             tombstones_removed: 0,
@@ -420,6 +420,7 @@ impl MetadataStore {
 pub(super) fn record_next(
     tx: &redb::WriteTransaction,
     expected: &PurgeProgress,
+    ids: &dyn crate::storage::ids::IdSource,
     stage: PurgeStage,
     removed: &[(MemoryId, DiskRecord)],
     edges_removed: usize,
@@ -498,7 +499,7 @@ pub(super) fn record_next(
     p.next_operation_id = if stage == PurgeStage::Complete {
         None
     } else {
-        Some(Uuid::new_v4())
+        Some(ids.uuid(crate::storage::ids::IdKind::Operation)?)
     };
     save(tx, &p)?;
     Ok(receipt)
@@ -599,7 +600,7 @@ impl MetadataStore {
         }
         drop(config);
         drop(namespaces);
-        let receipt = record_next(&tx, p, PurgeStage::Cleanup, &[], 0)?;
+        let receipt = record_next(&tx, p, self.ids.as_ref(), PurgeStage::Cleanup, &[], 0)?;
         self.commit_purge(tx, &receipt)?;
         Ok(None)
     }
@@ -624,7 +625,7 @@ impl MetadataStore {
         }
         // The name lease stays durable if cleanup or its acknowledgement fails.
         cleanup()?;
-        let receipt = record_next(&tx, p, PurgeStage::Complete, &[], 0)?;
+        let receipt = record_next(&tx, p, self.ids.as_ref(), PurgeStage::Complete, &[], 0)?;
         let pending = super::effects::PendingEffects {
             version: 1,
             receipt: receipt.clone(),

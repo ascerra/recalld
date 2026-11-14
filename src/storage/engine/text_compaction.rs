@@ -47,7 +47,11 @@ impl RedbStorageEngine {
         let state = self.control_state()?;
         let old_size = self.text_store.file_size();
         let old_count = self.text_store.complete_entry_count()?;
-        let (mut prepared, id) = TextStore::create_generation(&self.db_path, state.store_id)?;
+        let (mut prepared, id) = TextStore::create_generation_with_ids(
+            &self.db_path,
+            state.store_id,
+            self.meta_store.id_source(),
+        )?;
         let mut new_refs = Vec::with_capacity(refs.len());
         for (memory, reference) in &refs {
             let text = self.text_store.read(*reference)?;

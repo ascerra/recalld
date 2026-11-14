@@ -594,12 +594,13 @@ impl MetadataStore {
             super::purge::record_next(
                 &tx,
                 progress,
+                self.ids.as_ref(),
                 crate::storage::purge::PurgeStage::Deleting,
                 &removed,
                 deletes.len(),
             )?
         } else {
-            control::record_receipt(&tx, ctx, hash, outcome)?
+            self.record_receipt(&tx, ctx, hash, outcome)?
         };
         if let RecordMutation::Tombstoned { record, old_phase }
         | RecordMutation::NativeTombstoned {

@@ -119,9 +119,15 @@ mod profile_boundary_tests {
 
 impl MetadataStore {
     /// Shared owned-core allocation point for legacy/native receipt writers.
-    /// Still nondeterministic until the real scoped ID/RNG prerequisite lands.
-    pub(super) fn allocate_memory_id(&self, supplied: Option<MemoryId>) -> MemoryId {
-        supplied.unwrap_or_else(MemoryId::new)
+    pub(super) fn allocate_memory_id(
+        &self,
+        supplied: Option<MemoryId>,
+        sampled_at: i64,
+    ) -> Result<MemoryId, StorageError> {
+        match supplied {
+            Some(id) => Ok(id),
+            None => self.ids.memory(sampled_at),
+        }
     }
 
     pub(crate) fn lookup_insert_replay(
@@ -226,7 +232,7 @@ impl MetadataStore {
             config.embedding_dim,
             input.embedding.is_some(),
         )?;
-        let id = self.allocate_memory_id(input.id);
+        let id = self.allocate_memory_id(input.id, sampled_at)?;
         if id == MemoryId::nil() {
             return Err(StorageError::InvalidMutation("nil memory ID".into()));
         }

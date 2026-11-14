@@ -523,7 +523,10 @@ fn decode_scope(key: &[u8]) -> Result<(Uuid, MutationScope, &[u8]), StorageError
 
 /// One-time adoption at generation zero; a present but incomplete control schema
 /// is corruption, not permission to mint a new retry lineage.
-pub(crate) fn initialize(tx: &WriteTransaction) -> Result<(), StorageError> {
+pub(crate) fn initialize_with_ids(
+    tx: &WriteTransaction,
+    ids: &dyn super::ids::IdSource,
+) -> Result<(), StorageError> {
     let names: Vec<_> = tx.list_tables()?.map(|t| t.name().to_owned()).collect();
     let present =
         [CONTROL.name(), RECEIPTS.name(), KEYS.name()].map(|n| names.iter().any(|s| s == n));
@@ -537,7 +540,7 @@ pub(crate) fn initialize(tx: &WriteTransaction) -> Result<(), StorageError> {
     } else {
         let state = ControlState {
             control_schema_version: 1,
-            store_id: Uuid::new_v4(),
+            store_id: ids.uuid(super::ids::IdKind::Store)?,
             committed_generation: Generation::default(),
             removal_ledger_version: None,
             restore_lineage_version: None,
@@ -814,7 +817,23 @@ pub(crate) fn record_receipt(
     hash: [u8; 32],
     outcome: MutationOutcome,
 ) -> Result<WriteReceipt, StorageError> {
-    record_reserved_receipt(tx, ctx, hash, outcome, Uuid::new_v4())
+    record_receipt_with_ids(tx, ctx, hash, outcome, &super::ids::SystemIds)
+}
+
+pub(crate) fn record_receipt_with_ids(
+    tx: &WriteTransaction,
+    ctx: &MutationContext,
+    hash: [u8; 32],
+    outcome: MutationOutcome,
+    ids: &dyn super::ids::IdSource,
+) -> Result<WriteReceipt, StorageError> {
+    record_reserved_receipt(
+        tx,
+        ctx,
+        hash,
+        outcome,
+        ids.uuid(super::ids::IdKind::Operation)?,
+    )
 }
 
 /// Internal transaction primitive. Purge callers must first prove a durable
