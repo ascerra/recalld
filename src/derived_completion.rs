@@ -29,25 +29,34 @@ impl DerivedCompletion {
         sampled_at: i64,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
         let gate = publication_gate(&self.storage).await?;
+        let wait = crate::performance::Timer::new("insert.publication_lease.wait");
         let lease = gate.read_owned().await;
+        wait.complete();
         let storage = self.storage.clone();
+        let worker = crate::performance::Worker::new("insert.worker_queue");
         let result = tokio::task::spawn_blocking(move || {
-            let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            let receipt = storage.insert_memory_with_receipt(
-                &ctx,
-                &input,
-                &generated_embedding,
-                sampled_at,
-            )?;
-            let id = crate::storage::insertion::inserted_id(&receipt)?;
-            let record = storage
-                .get_record(id)
-                .map_err(|source| StorageError::CommittedMutation {
-                    receipt: Box::new(receipt.clone()),
-                    source: Box::new(source),
-                })?
-                .map(|r| crate::model::CachedRecord::from(&r));
-            Ok::<_, StorageError>(crate::storage::insertion::InsertResult { receipt, record })
+            worker.run(|| {
+                let wait = crate::performance::Timer::new("insert.storage.write.wait");
+                let storage = storage.write().map_err(|e| failed(e.to_string()))?;
+                wait.complete();
+                let mut storage =
+                    crate::performance::Hold::new("insert.storage.write.hold", storage);
+                let receipt = storage.insert_memory_with_receipt(
+                    &ctx,
+                    &input,
+                    &generated_embedding,
+                    sampled_at,
+                )?;
+                let id = crate::storage::insertion::inserted_id(&receipt)?;
+                let record = storage
+                    .get_record(id)
+                    .map_err(|source| StorageError::CommittedMutation {
+                        receipt: Box::new(receipt.clone()),
+                        source: Box::new(source),
+                    })?
+                    .map(|r| crate::model::CachedRecord::from(&r));
+                Ok::<_, StorageError>(crate::storage::insertion::InsertResult { receipt, record })
+            })
         })
         .await
         .map_err(|e| {
@@ -125,20 +134,36 @@ impl DerivedCompletion {
     /// Retrying is safe: no receipt is acknowledged until every view is ready.
     /// Canonical/uncertain-commit failures still require reopening the engine.
     pub async fn complete(&self) -> Result<(), StorageError> {
+        crate::performance::measure("derived.complete", true, async {
         self.cache.bind_storage(&self.storage);
         let gate = publication_gate(&self.storage).await?;
+        let wait = crate::performance::Timer::new("derived.publication.wait");
         let _publication = gate.write_owned().await;
+        wait.complete();
+        let wait = crate::performance::Timer::new("derived.graph.wait");
         let mut graph = self.graph.clone().write_owned().await;
+        wait.complete();
+        let wait = crate::performance::Timer::new("derived.vectors.wait");
         let mut vectors = self.vectors.clone().write_owned().await;
+        wait.complete();
+        let wait = crate::performance::Timer::new("derived.fts.wait");
         let fts = self.fts.clone().lock_owned().await;
+        wait.complete();
+        let wait = crate::performance::Timer::new("derived.entities.wait");
         let mut entities = self.entities.clone().write_owned().await;
+        wait.complete();
         let storage = self.storage.clone();
         let cache = self.cache.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
+        let worker = crate::performance::Worker::new("derived.worker_queue");
+        tokio::task::spawn_blocking(move || worker.run(|| {
+            let wait = crate::performance::Timer::new("derived.storage.write.wait");
+            let storage = storage.write().map_err(|e| failed(e.to_string()))?;
+            wait.complete();
+            let mut storage = crate::performance::Hold::new("derived.storage.write.hold", storage);
             storage.resume_pending_purges()?;
             storage.ensure_available()?;
             if !storage.meta_store().needs_effects_rebuild() {
+                tracing::trace!(target: "recalld::performance", kind = "derived_noop");
                 return Ok(());
             }
             let pending = storage.meta_store().pending_effects()?;
@@ -150,7 +175,12 @@ impl DerivedCompletion {
             let result = (|| {
                 // ponytail: O(records + edges) rebuild under the publication locks.
                 // Replace with exact effect application when throughput warrants it.
+                let scan = crate::performance::Timer::new("derived.canonical_records");
                 let records = storage.scan_all()?;
+                scan.complete();
+                let records_count = records.len();
+                let mut live_count = 0usize;
+                let rebuild = crate::performance::Timer::new("derived.record_views");
                 let mut next_graph = RelationshipGraph::with_capacity(records.len());
                 let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
                 let mut next_entities = EntityIndex::with_capacity(records.len());
@@ -169,6 +199,7 @@ impl DerivedCompletion {
                     if record.phase == DecayPhase::Tombstone {
                         continue;
                     }
+                    live_count += 1;
                     let vector = storage
                         .get_vector(ns, record.vector_slot)?
                         .ok_or_else(|| failed(format!("missing vector for {id}")))?;
@@ -203,7 +234,11 @@ impl DerivedCompletion {
                         &crate::model::parse_structured_tags(&record.tags).entities,
                     );
                 }
+                rebuild.complete();
+                let scan = crate::performance::Timer::new("derived.canonical_edges");
                 let edges = storage.load_all_edges()?;
+                scan.complete();
+                let rebuild = crate::performance::Timer::new("derived.graph_edges_publish");
                 let count = edges.len();
                 if crate::graph::rebuild_from_storage(&mut next_graph, edges.into_iter()) != count {
                     return Err(failed("graph rejected canonical edges".into()));
@@ -211,6 +246,9 @@ impl DerivedCompletion {
                 *graph = next_graph;
                 *vectors = next_vectors;
                 *entities = next_entities;
+                rebuild.complete();
+                tracing::trace!(target: "recalld::performance", kind = "derived_rebuild",
+                    records = records_count, live_records = live_count, edges = count, pending_effects = pending.len());
                 // Preserve unrelated cached candidates used by legacy temporal
                 // linking. Cache invalidation itself never acquires storage or
                 // graph locks; it is safe to finish its future on this blocking
@@ -220,17 +258,23 @@ impl DerivedCompletion {
                     .iter()
                     .flat_map(|effect| effect.invalidated_ids.iter().copied())
                     .collect();
+                let invalidate = crate::performance::Timer::new("derived.cache_invalidate");
                 tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&invalidated));
+                invalidate.complete();
                 crate::storage::metadata::effects::crash_point("before_online_derived_ack");
-                storage.meta_store().acknowledge_rebuilt_effects()
+                let ack = crate::performance::Timer::new("derived.effects_ack");
+                let result = storage.meta_store().acknowledge_rebuilt_effects();
+                ack.outcome(result.is_ok());
+                result
             })();
             result.map_err(|source| StorageError::CommittedMutation {
                 receipt: Box::new(receipt),
                 source: Box::new(source),
             })
-        })
+        }))
         .await
         .map_err(|e| failed(e.to_string()))?
+        }).await
     }
 }
 
@@ -638,13 +682,14 @@ pub(crate) async fn publication_gate(
     storage: &Arc<RwLock<RedbStorageEngine>>,
 ) -> Result<Arc<tokio::sync::RwLock<()>>, StorageError> {
     let storage = storage.clone();
+    let worker = crate::performance::Worker::new("publication_gate.worker_queue");
     tokio::task::spawn_blocking(move || {
-        Ok(storage
-            .read()
-            .map_err(|e| failed(e.to_string()))?
-            .meta_store()
-            .derived_publication
-            .clone())
+        worker.run(|| {
+            let wait = crate::performance::Timer::new("publication_gate.storage.read.wait");
+            let storage = storage.read().map_err(|e| failed(e.to_string()))?;
+            wait.complete();
+            Ok(storage.meta_store().derived_publication.clone())
+        })
     })
     .await
     .map_err(|e| failed(e.to_string()))?

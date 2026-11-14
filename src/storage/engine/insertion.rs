@@ -23,11 +23,15 @@ impl RedbStorageEngine {
         sampled_at: i64,
     ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
+        let edge_read = crate::performance::Timer::new("insert.canonical_edges");
         let edges = self.edge_store.load_all_edges()?;
+        edge_read.complete();
+        tracing::trace!(target: "recalld::performance", kind = "insert_edges", loaded = edges.len());
         let vectors = &mut self.vector_manager;
         let text = &mut self.text_store;
         let mut staging_started = false;
         let embedding = input.embedding.as_deref().unwrap_or(generated_embedding);
+        let commit = crate::performance::Timer::new("insert.canonical_commit");
         let result = self.meta_store.insert_with_effects(
             ctx,
             input,
@@ -45,12 +49,17 @@ impl RedbStorageEngine {
                     record.text_offset = reference.file_offset;
                     record.text_length = reference.length;
                 }
+                let sync = crate::performance::Timer::new("insert.vector_sync");
                 store.sync()?;
+                sync.complete();
+                let sync = crate::performance::Timer::new("insert.text_sync");
                 text.sync_data()?;
+                sync.complete();
                 crate::storage::metadata::effects::crash_point("after_insert_payload_sync");
                 Ok(())
             },
         );
+        commit.outcome(result.is_ok());
         if result.is_err() && staging_started {
             // Never free a possibly committed slot on an I/O return. Recovery
             // validates every canonical owner before reclaiming unowned bytes.
@@ -58,6 +67,7 @@ impl RedbStorageEngine {
         }
         let receipt = result?;
         if !receipt.replayed {
+            let effects = crate::performance::Timer::new("insert.apply_effects");
             effects::apply_pending(
                 &self.meta_store,
                 &self.edge_store,
@@ -67,6 +77,7 @@ impl RedbStorageEngine {
                 receipt: Box::new(receipt.clone()),
                 source: Box::new(source),
             })?;
+            effects.complete();
         }
         Ok(receipt)
     }

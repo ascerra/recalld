@@ -908,6 +908,8 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: bridge::StoreInput,
     ) -> Result<bridge::StoredMemory, bridge::BridgeError> {
+        crate::performance::measure("mcp.store", true, async {
+        let mut profile = crate::performance::Timeline::new();
         crate::model::validation::validate_legacy_memory_input(
             crate::model::validation::MemoryInputRef {
                 summary: &input.summary,
@@ -945,6 +947,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             })??
         };
 
+        profile.mark("store.validation_namespace");
         // Validate caller-specified links BEFORE anything is written.
         //
         // The record is committed to meta.db, fulltext.dat, vectors.dat, FTS
@@ -1003,6 +1006,9 @@ impl bridge::StorageEngine for McpStorageAdapter {
             }
         }
 
+        profile.mark("store.links_labels");
+        tracing::trace!(target: "recalld::performance", kind = "store_embedding_input",
+            provided = input.embedding.is_some(), provider_calls = usize::from(input.embedding.is_none()));
         // Generate full embedding (summary + full_text + tags for max surface).
         let raw_embedding = match &input.embedding {
             Some(emb) => emb.clone(),
@@ -1018,10 +1024,10 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 if !merged_tags.is_empty() {
                     embed_text = format!("{} {}", embed_text, merged_tags.join(" "));
                 }
-                self.embedding
-                    .embed(&embed_text)
-                    .await
-                    .map_err(|e| match e {
+                let timer = crate::performance::Timer::new("store.provider");
+                let response = self.embedding.embed(&embed_text).await;
+                timer.outcome(response.is_ok());
+                response.map_err(|e| match e {
                         crate::embedding::EmbeddingError::TextTooLong { .. } => {
                             bridge::BridgeError::InvalidInput(e.to_string())
                         }
@@ -1030,6 +1036,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             }
         };
 
+        profile.mark("store.embedding");
         let mut embedding = raw_embedding.clone();
         crate::storage::insertion::normalize_embedding(
             &mut embedding,
@@ -1080,6 +1087,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         let parsed_tags: Vec<Tag> =
             crate::model::parse_tags_lossy("store_memory.tags", &merged_tags);
 
+        profile.mark("store.normalize_advisory");
         let completion = crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -1107,7 +1115,9 @@ impl bridge::StorageEngine for McpStorageAdapter {
             )
             .await
             .map_err(map_mutation_error)?;
+        profile.mark("store.canonical_and_publication");
         let receipt = inserted.receipt;
+        crate::performance::receipts(std::slice::from_ref(&receipt));
         let record = inserted.record.ok_or_else(|| {
             map_mutation_error(crate::storage::StorageError::CommittedMutation {
                 receipt: Box::new(receipt.clone()),
@@ -1215,6 +1225,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             }
         }
 
+        profile.mark("store.autolink");
         completion.complete().await.map_err(|source| {
             map_mutation_error(crate::storage::StorageError::CommittedMutation {
                 receipt: Box::new(receipt),
@@ -1222,6 +1233,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             })
         })?;
         self.cache.insert(memory_id, record.clone()).await;
+        profile.mark("store.final_publication_cache");
         Ok(bridge::StoredMemory {
             id: memory_id.to_string(),
             namespace: input.namespace,
@@ -1232,6 +1244,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             supersedes: supersedes_outcome,
             near_duplicates,
         })
+        }).await
     }
 
     async fn get_memory(
