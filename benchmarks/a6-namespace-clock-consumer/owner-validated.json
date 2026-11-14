@@ -1,0 +1,17 @@
+{
+  "sourceCommit": "2920dec86c3d9f7a0788ef01433a3ab4f9093bab",
+  "validated": true,
+  "validationScope": "Owner full1009+2/7runner/9public, focused/private and actual3suffix13negative passed; FTS parent separately full validated. Joint consumer validation required.",
+  "fullValidationStatus": "passed",
+  "publicationHeld": false,
+  "ownerOutput": "/tmp/recalld-owned-reset-full-3jw774b1/output/reset/summary.json",
+  "ownerSeal": "0750f13b69c3e7c6e1f6650dd26e6bb94896e15f",
+  "ownerPr": 115,
+  "additionalFtsParent": "bf7c2484018297b7f9af30e98d3214581f33f351",
+  "additionalFtsRuntime": "7311775604539a386bdeaa9e1e881cf8eeeff9de",
+  "additionalFtsValidation": "6 focused+1003 library+2 CLI/fmt passed; clippy exit0 with warnings; required by actual fresh-owner FTS rebuild",
+  "namespaceClockValidated": true,
+  "namespaceClockParent": "0b50168b64ad353e4f7a53c6459c270fe8500070",
+  "namespaceClockRuntime": "535605d3c1ecc38f915dbe8daccbae9d5a0f0d0b",
+  "namespaceClockValidation": "1009library+2CLI+7runner+9public, focused canonical/receipt/single-sample +3private clock replays/7negatives; fmt pass,clippy exit0 WITHwarnings"
+}

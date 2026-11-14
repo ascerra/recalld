@@ -1,0 +1,15 @@
+{
+  "sourceCommit": "95540eedd7764555c42e03dd006da8dfb35290c7",
+  "consumerParent": "3b6ab694699cac2886d93c0db04fd1860af115c3",
+  "namespaceClockParent": "0b50168b64ad353e4f7a53c6459c270fe8500070",
+  "namespaceClockRuntime": "535605d3c1ecc38f915dbe8daccbae9d5a0f0d0b",
+  "conflicts": [],
+  "autoMerged": [
+    "src/api/adapters.rs",
+    "src/daemon/server.rs",
+    "src/mcp/bridge_adapters.rs"
+  ],
+  "nativeIdJoinIncluded": false,
+  "ownerReportSha256": "302c97235bf53c3f872c373fa13a64ea9921a2bb011b35ef77ec4828bba1f4b1",
+  "namespaceClockPr": "https://github.com/calebevans/recalld/pull/125"
+}
