@@ -48,3 +48,12 @@ compatibility proofs remain unchanged. Full source-specific offline Docker passe
 existing sweep/maintenance focused checks passed. Formatting passed; Clippy exit0
 with737 library/804 test warnings (717duplicates). All231 source inputs were
 sealed and verified unchanged. No failed validation stage occurred in this slice.
+
+## Evidence seal
+
+Runtime `f86b244e75ecd3e9d6c64a61d94d5eadcda6a689`; evidence `2c0770a3de2f41d0d8fcfde56b5fd8de784b66dd`.
+See `work-notes/native-manual-origin/REPORT.md`. Actual HOME copy:
+`/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-manual-origin-2c0770a`.
+COPY.json SHA256 `55c04aee5146faaa810cde65feb789fba60c377e8220c80da0c9ef08678219e4`.
+All23 files/1,942,505 bytes verified individually; existing research notebook
+appended. No executable or cache copied.
