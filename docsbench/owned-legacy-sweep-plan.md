@@ -33,6 +33,9 @@ its descendants/completion; unknown work remains unresolved under existing rules
 
 After successful sweep completion and root finish, use the actual readiness
 barrier at the actual canonical GenerationRef, under the same monotonic deadline.
+Use its join-retaining `with_frozen_core(Some(target), ..., ready)` implementation
+inside the retained coordinator; do not add an inner handler timeout that could
+return while a blocking readiness capture still owns leases.
 Report actual sampled time, sweep counts/errors, available full known committed
 receipt and uncertain operation identity, and barrier readiness. Any sweep error,
 publication failure or unavailable barrier is a failed control, never a ready
