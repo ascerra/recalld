@@ -24,7 +24,76 @@ fn is_purge(outcome: &MutationOutcome) -> bool {
         outcome,
         MutationOutcome::NamespacePurgeStarted { .. }
             | MutationOutcome::NamespacePurgeAdvanced { .. }
+            | MutationOutcome::NativeNamespacePurgeStarted { .. }
+            | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
     )
+}
+
+fn step_fields(
+    r: &WriteReceipt,
+) -> Option<(
+    Uuid,
+    NamespaceId,
+    u64,
+    PurgeStage,
+    u64,
+    u64,
+    u64,
+    Option<MemoryId>,
+)> {
+    match &r.outcome {
+        MutationOutcome::NamespacePurgeAdvanced {
+            parent_operation_id,
+            namespace_id,
+            sequence,
+            stage,
+            removed,
+            tombstones_removed,
+            edges_removed,
+            last_id,
+        } => Some((
+            *parent_operation_id,
+            *namespace_id,
+            *sequence,
+            *stage,
+            *removed,
+            *tombstones_removed,
+            *edges_removed,
+            *last_id,
+        )),
+        MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => {
+            let (n, x, e, last) = t.counts();
+            Some((
+                t.parent_operation_id,
+                t.namespace_id,
+                t.sequence,
+                t.stage,
+                n,
+                x,
+                e,
+                last,
+            ))
+        }
+        _ => None,
+    }
+}
+fn start_matches(p: &PurgeProgress) -> bool {
+    match &p.start_receipt.outcome {
+        MutationOutcome::NamespacePurgeStarted {
+            namespace_id,
+            name_hash,
+        } => {
+            p.version == 1
+                && *namespace_id == p.namespace_id
+                && *name_hash == <[u8; 32]>::from(Sha256::digest(p.name.as_bytes()))
+        }
+        MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+            p.version == 2
+                && t.before_namespace.namespace_id == p.namespace_id
+                && t.before_namespace.name == p.name
+        }
+        _ => false,
+    }
 }
 
 /// Pure validation, also called before any writable source open. Unknown tables
@@ -92,7 +161,7 @@ pub(crate) fn validate_existing(
             },
         )? && (p.store_id == state.store_id
             || p.stage == PurgeStage::Complete);
-        if p.version != 1
+        if !matches!(p.version, 1 | 2)
             || !permitted_origin
             || p.start_receipt.store_id != p.store_id
             || p.namespace_id.is_unset()
@@ -102,13 +171,16 @@ pub(crate) fn validate_existing(
                 .eq_ignore_ascii_case(crate::model::constants::DEFAULT_NAMESPACE_NAME)
             || key.value() != p.start_receipt.operation_id.as_bytes()
             || !namespace_ids.insert(p.namespace_id)
-            || !matches!(p.start_receipt.outcome, MutationOutcome::NamespacePurgeStarted { namespace_id,name_hash } if namespace_id == p.namespace_id && name_hash==<[u8;32]>::from(Sha256::digest(p.name.as_bytes())))
+            || !start_matches(&p)
             || !histories.contains(&p.start_receipt)
         {
             return Err(invalid("progress identity/start receipt mismatch"));
         }
         claimed.insert(p.start_receipt.operation_id);
-        let mut steps: Vec<_> = histories.iter().filter(|r| matches!(r.outcome, MutationOutcome::NamespacePurgeAdvanced {parent_operation_id,..} if parent_operation_id == p.start_receipt.operation_id)).collect();
+        let mut steps: Vec<_> = histories
+            .iter()
+            .filter(|r| step_fields(r).is_some_and(|v| v.0 == p.start_receipt.operation_id))
+            .collect();
         steps.sort_by_key(|r| r.committed_generation);
         let mut sequence = 0;
         let mut removed = 0u64;
@@ -118,19 +190,15 @@ pub(crate) fn validate_existing(
         let mut stage = PurgeStage::Deleting;
         let mut last = &p.start_receipt;
         for receipt in steps {
-            let MutationOutcome::NamespacePurgeAdvanced {
-                namespace_id,
-                sequence: seq,
-                stage: next,
-                removed: n,
-                tombstones_removed: t,
-                edges_removed: e,
-                last_id,
-                ..
-            } = receipt.outcome
-            else {
-                unreachable!()
-            };
+            let (_, namespace_id, seq, next, n, t, e, last_id) = step_fields(receipt).unwrap();
+            if (p.version == 2)
+                != matches!(
+                    receipt.outcome,
+                    MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                )
+            {
+                return Err(invalid("mixed purge receipt versions"));
+            }
             sequence += 1;
             if seq != sequence
                 || namespace_id != p.namespace_id
@@ -188,6 +256,17 @@ pub(crate) fn validate_existing(
             .get(p.namespace_id.get())?
             .map(|v| NamespaceConfig::decode(v.value()))
             .transpose()?;
+        if let MutationOutcome::NativeNamespacePurgeStarted { transition: t } =
+            &p.start_receipt.outcome
+        {
+            if let Some(config) = &config {
+                if crate::storage::native_purge::NativeNamespaceProof::capture(config)?
+                    != t.before_namespace
+                {
+                    return Err(invalid("native purging namespace changed"));
+                }
+            }
+        }
         match p.stage {
             PurgeStage::Deleting
                 if config
@@ -304,24 +383,41 @@ impl MetadataStore {
         ctx: &MutationContext,
         force: bool,
     ) -> Result<PurgeProgress, StorageError> {
+        self.begin_purge_with_work(ctx, force, None)
+    }
+    pub(crate) fn begin_purge_with_work(
+        &self,
+        ctx: &MutationContext,
+        force: bool,
+        parent: Option<&WorkTicket>,
+    ) -> Result<PurgeProgress, StorageError> {
         ctx.validate()?;
         let MutationScope::Namespace(namespace) = ctx.scope else {
             return Err(StorageError::InvalidMutationContext(
                 "purge requires namespace scope".into(),
             ));
         };
-        if ctx.contract_version != 1 {
+        if !matches!(ctx.contract_version, 1 | 2) {
             return Err(StorageError::InvalidMutationContext(
-                "native v2 purge is not enabled".into(),
+                "unsupported purge contract".into(),
             ));
         }
-        let hash = control::request_hash(ctx, "namespace_purge_v1", &[&[u8::from(force)]]);
-        let _guard = self.purge_guard(None)?;
+        let hash = control::request_hash(
+            ctx,
+            if ctx.contract_version == 2 {
+                "namespace_purge_v2"
+            } else {
+                "namespace_purge_v1"
+            },
+            &[&[u8::from(force)]],
+        );
+        let _guard = self.purge_guard(parent)?;
         let tx = self.db.begin_write()?;
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             if !matches!(
                 receipt.outcome,
                 MutationOutcome::NamespacePurgeStarted { .. }
+                    | MutationOutcome::NativeNamespacePurgeStarted { .. }
             ) {
                 return Err(StorageError::IdempotencyConflict);
             }
@@ -331,22 +427,32 @@ impl MetadataStore {
         }
         let config = super::namespace_state::require_namespace_active(&tx, namespace)?;
         if config.id != namespace
-            || config.schema.is_some()
+            || (ctx.contract_version == 2) != config.schema.is_some()
             || config
                 .name
                 .eq_ignore_ascii_case(crate::model::constants::DEFAULT_NAMESPACE_NAME)
         {
             return Err(StorageError::InvalidMutation(
-                "default or schema-v2 namespace cannot be purged by the legacy writer".into(),
+                "default namespace or incompatible purge contract".into(),
             ));
         }
         crate::model::validation::validate_namespace_name(&config.name)
             .map_err(|_| StorageError::InvalidPath)?;
-        if !force {
+        if !force || ctx.contract_version == 2 {
             for row in tx.open_table(META_TABLE)?.iter()? {
                 let (_, value) = row?;
                 let r = DiskRecord::from_bytes(value.value())?;
-                if r.namespace_id == namespace.get() && r.phase != DecayPhase::Tombstone {
+                if r.namespace_id != namespace.get() {
+                    continue;
+                }
+                if ctx.contract_version == 2
+                    && r.schema.as_ref().is_none_or(|s| !s.extensions.is_empty())
+                {
+                    return Err(StorageError::RecoveryRequired(
+                        "native purge requires a consumer for unknown record extensions".into(),
+                    ));
+                }
+                if !force && r.phase != DecayPhase::Tombstone {
                     return Err(StorageError::InvalidMutation(
                         "namespace contains live memories; force is required".into(),
                     ));
@@ -355,17 +461,33 @@ impl MetadataStore {
         }
         tx.open_table(SCHEMA)?.insert("version", 1)?;
         tx.open_table(PROGRESS)?;
-        let receipt = control::record_receipt(
-            &tx,
-            ctx,
-            hash,
+        let outcome = if ctx.contract_version == 2 {
+            let state = ControlState::decode(
+                tx.open_table(control::CONTROL)?
+                    .get("state")?
+                    .ok_or_else(|| invalid("control missing"))?
+                    .value(),
+            )?;
+            if state.control_schema_version != 2 {
+                return Err(invalid("native purge requires schema2"));
+            }
+            MutationOutcome::NativeNamespacePurgeStarted {
+                transition: crate::storage::native_purge::NativePurgeStarted {
+                    previous_generation: state.committed_generation,
+                    before_namespace: crate::storage::native_purge::NativeNamespaceProof::capture(
+                        &config,
+                    )?,
+                },
+            }
+        } else {
             MutationOutcome::NamespacePurgeStarted {
                 namespace_id: namespace,
                 name_hash: Sha256::digest(config.name.as_bytes()).into(),
-            },
-        )?;
+            }
+        };
+        let receipt = control::record_receipt(&tx, ctx, hash, outcome)?;
         let p = PurgeProgress {
-            version: 1,
+            version: ctx.contract_version,
             store_id: receipt.store_id,
             namespace_id: namespace,
             name: config.name,
@@ -425,6 +547,16 @@ pub(super) fn record_next(
     removed: &[(MemoryId, DiskRecord)],
     edges_removed: usize,
 ) -> Result<WriteReceipt, StorageError> {
+    record_next_native(tx, expected, stage, removed, edges_removed, None)
+}
+pub(super) fn record_next_native(
+    tx: &redb::WriteTransaction,
+    expected: &PurgeProgress,
+    stage: PurgeStage,
+    removed: &[(MemoryId, DiskRecord)],
+    edges_removed: usize,
+    chunk: Option<crate::storage::native_purge::NativePurgeChunk>,
+) -> Result<WriteReceipt, StorageError> {
     let mut p = load(tx, expected.start_receipt.operation_id)?;
     if &p != expected || p.stage == PurgeStage::Complete {
         return Err(invalid("stale progress reservation"));
@@ -458,26 +590,63 @@ pub(super) fn record_next(
         .sequence
         .checked_add(1)
         .ok_or(StorageError::GenerationExhausted)?;
-    let outcome = MutationOutcome::NamespacePurgeAdvanced {
-        parent_operation_id: p.start_receipt.operation_id,
-        namespace_id: p.namespace_id,
-        sequence,
-        stage,
-        removed: removed.len() as u64,
-        tombstones_removed: tombstones,
-        edges_removed: edges_removed as u64,
-        last_id,
+    let outcome = if p.version == 2 {
+        let state = ControlState::decode(
+            tx.open_table(control::CONTROL)?
+                .get("state")?
+                .ok_or_else(|| invalid("control missing"))?
+                .value(),
+        )?;
+        MutationOutcome::NativeNamespacePurgeAdvanced {
+            transition: crate::storage::native_purge::NativePurgeAdvanced {
+                parent_operation_id: p.start_receipt.operation_id,
+                namespace_id: p.namespace_id,
+                previous_generation: state.committed_generation,
+                sequence,
+                stage,
+                chunk,
+            },
+        }
+    } else {
+        MutationOutcome::NamespacePurgeAdvanced {
+            parent_operation_id: p.start_receipt.operation_id,
+            namespace_id: p.namespace_id,
+            sequence,
+            stage,
+            removed: removed.len() as u64,
+            tombstones_removed: tombstones,
+            edges_removed: edges_removed as u64,
+            last_id,
+        }
     };
-    let ctx = MutationContext::unkeyed(p.namespace_id);
+    let mut ctx = MutationContext::unkeyed(p.namespace_id);
+    ctx.contract_version = p.version;
     let hash = control::request_hash(
         &ctx,
-        "namespace_purge_child_v1",
+        if p.version == 2 {
+            "namespace_purge_child_v2"
+        } else {
+            "namespace_purge_child_v1"
+        },
         &[
             p.start_receipt.operation_id.as_bytes(),
             &sequence.to_be_bytes(),
         ],
     );
     let receipt = control::record_reserved_receipt(tx, &ctx, hash, outcome, operation)?;
+    if let MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } = &receipt.outcome {
+        t.validate(&receipt)?;
+        if t.counts()
+            != (
+                removed.len() as u64,
+                tombstones,
+                edges_removed as u64,
+                last_id,
+            )
+        {
+            return Err(invalid("native chunk count differs from records"));
+        }
+    }
     p.sequence = sequence;
     p.stage = stage;
     p.last_receipt = receipt.clone();
@@ -536,6 +705,7 @@ impl MetadataStore {
         p: &PurgeProgress,
         limit: usize,
         edges: &[crate::storage::PersistedEdge],
+        mut text_hash: impl FnMut(&DiskRecord) -> Result<Option<[u8; 32]>, StorageError>,
     ) -> Result<Option<super::effects::EffectResult>, StorageError> {
         if !(1..=CHUNK_LIMIT).contains(&limit) {
             return Err(StorageError::InvalidMutation(
@@ -574,7 +744,16 @@ impl MetadataStore {
             {
                 super::effects::FAIL_AFTER_RECORD_COMMIT.with(|f| f.set(true));
             }
-            let ctx = MutationContext::unkeyed(p.namespace_id);
+            let mut ctx = MutationContext::unkeyed(p.namespace_id);
+            ctx.contract_version = p.version;
+            let mutation = if p.version == 2 {
+                super::effects::RecordMutation::NativePurgeChunk(
+                    p,
+                    capture_chunk(&tx, &ids, edges, &mut text_hash)?,
+                )
+            } else {
+                super::effects::RecordMutation::PurgeChunk(p)
+            };
             let result = self.finish_record_effects(
                 guard,
                 tx,
@@ -585,8 +764,8 @@ impl MetadataStore {
                 &ids,
                 true,
                 false,
-                super::effects::RecordMutation::PurgeChunk(p),
-                None,
+                mutation,
+            None,
             )?;
             return Ok(Some(result));
         }
@@ -657,4 +836,72 @@ impl MetadataStore {
             .store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
+}
+
+fn capture_chunk(
+    tx: &redb::WriteTransaction,
+    ids: &[MemoryId],
+    edges: &[crate::storage::PersistedEdge],
+    text_hash: &mut impl FnMut(&DiskRecord) -> Result<Option<[u8; 32]>, StorageError>,
+) -> Result<crate::storage::native_purge::NativePurgeChunk, StorageError> {
+    use crate::storage::native_maintenance::{NativeDeletionWitness, NativePeerChange};
+    use crate::storage::native_records::{NativeEdgeProof, NativeRecordChange, NativeRecordState};
+    let records = tx.open_table(META_TABLE)?;
+    let namespaces = tx.open_table(NAMESPACE_TABLE)?;
+    let mut capture = |id: MemoryId| -> Result<(DiskRecord, NativeRecordState), StorageError> {
+        let r = DiskRecord::from_bytes(
+            records
+                .get(id.as_bytes().as_slice())?
+                .ok_or(StorageError::NotFound(id.into_inner()))?
+                .value(),
+        )?;
+        let ns = NamespaceConfig::decode(
+            namespaces
+                .get(r.namespace_id)?
+                .ok_or(StorageError::NamespaceNotFound(r.namespace_id))?
+                .value(),
+        )?;
+        let state = NativeRecordState::capture(&r, &ns, text_hash(&r)?)?;
+        Ok((r, state))
+    };
+    let mut deletions = Vec::new();
+    for id in ids {
+        let (r, before) = capture(*id)?;
+        deletions.push(NativeDeletionWitness {
+            memory_id: *id,
+            namespace_id: NamespaceId::new(r.namespace_id),
+            before,
+            history: r.access_history,
+        });
+    }
+    let mut removed_edges = edges
+        .iter()
+        .filter(|e| ids.contains(&e.source) || ids.contains(&e.target))
+        .map(NativeEdgeProof::from)
+        .collect::<Vec<_>>();
+    removed_edges.sort_by_key(|e| (e.source, e.target, e.edge_type.as_u8()));
+    let mut peer_ids = removed_edges
+        .iter()
+        .filter(|e| !ids.contains(&e.source))
+        .map(|e| e.source)
+        .collect::<Vec<_>>();
+    peer_ids.sort();
+    peer_ids.dedup();
+    let mut peers = Vec::new();
+    for id in peer_ids {
+        let (r, before) = capture(id)?;
+        peers.push(NativePeerChange {
+            namespace_id: NamespaceId::new(r.namespace_id),
+            change: NativeRecordChange {
+                memory_id: id,
+                before: Some(before.clone()),
+                after: before,
+            },
+        });
+    }
+    Ok(crate::storage::native_purge::NativePurgeChunk {
+        deletions,
+        peers,
+        removed_edges,
+    })
 }
