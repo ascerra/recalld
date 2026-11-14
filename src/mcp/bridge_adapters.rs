@@ -937,6 +937,27 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, bridge::BridgeError> {
+        use crate::serialization::session::{ActiveEmbedding, BackendContext};
+        let active = ActiveEmbedding::from_provider(self.embedding.as_ref()).map_err(|_| {
+            bridge::BridgeError::Unavailable("active embedding identity unavailable".into())
+        })?;
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            let control = engine.control_state().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            BackendContext::new(control.store_id, active)
+                .map_err(|e| bridge::BridgeError::Unavailable(e.into()))
+        })
+        .await
+        .map_err(|_| bridge::BridgeError::Unavailable("store context unavailable".into()))?
+    }
     async fn store_memory(
         &self,
         input: bridge::StoreInput,

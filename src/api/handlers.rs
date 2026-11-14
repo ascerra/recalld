@@ -2162,3 +2162,37 @@ pub(crate) async fn scan_duplicates_v2(
         }
     }
 }
+
+/// Resolved v1 discovery only. Store/provider identity certifies no ReadView,
+/// native writer readiness or historical vector provenance.
+pub async fn capabilities(State(state): State<super::state::AppState>) -> axum::response::Response {
+    use crate::serialization::session::{BackendContext, document};
+    use axum::response::IntoResponse;
+    let unavailable = || AppError::ServiceUnavailable {
+        message: "backend context unavailable".into(),
+    };
+    let result = async {
+        let store_id = state
+            .storage
+            .store_identity()
+            .await
+            .map_err(|_| unavailable())?;
+        let active = state.search.active_embedding().map_err(|_| unavailable())?;
+        let backend = BackendContext::new(store_id, active).map_err(|_| unavailable())?;
+        let requested = crate::model::constants::DEFAULT_NAMESPACE_NAME;
+        let namespace = state.namespaces.resolve(requested);
+        Ok::<_, AppError>(Json(document(
+            requested,
+            "legacyHttpDefault",
+            namespace.map(|ns| (ns.name, ns.id.get(), ns.embedding_dim)),
+            Some(backend),
+        )))
+    }
+    .await;
+    let mut response = result.into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response
+}

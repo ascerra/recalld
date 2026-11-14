@@ -66,6 +66,7 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
         .route("/{name}/duplicates", post(handlers::dispatch_duplicates));
 
     let ops_routes = Router::new()
+        .route("/capabilities", get(handlers::capabilities))
         .route("/health", get(handlers::health_check))
         .route("/health/report", get(handlers::health_report))
         .route("/metrics", get(handlers::metrics))

@@ -33,6 +33,13 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
+        Err(EmbeddingError::Unavailable(
+            "active embedding identity unavailable".into(),
+        ))
+    }
     /// Generate an embedding for the given text within a namespace.
     async fn embed_text(
         &self,
@@ -154,6 +161,11 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "store identity unavailable".into(),
+        ))
+    }
     /// Concrete canonical/vector capture; no legacy backend fallback.
     async fn scan_duplicate_pairs(
         &self,

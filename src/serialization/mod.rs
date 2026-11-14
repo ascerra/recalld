@@ -7,6 +7,7 @@ pub mod contract;
 mod json;
 pub(crate) mod pair_cursor;
 pub mod scan;
+pub mod session;
 
 pub use json::{
     ApiError, ApiResponse, CreateMemoryRequest, MemoryResponse, NamespaceRequest,

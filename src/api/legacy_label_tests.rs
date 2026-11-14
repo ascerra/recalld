@@ -27,7 +27,7 @@ impl EmbeddingProvider for CountingProvider {
         "synthetic-label-validation"
     }
 }
-fn state(f: &Fixture, provider: Arc<CountingProvider>) -> AppState {
+fn state(f: &Fixture, provider: Arc<dyn EmbeddingProvider>) -> AppState {
     let config = Arc::new(crate::config::RecalldConfig::default());
     let query = Arc::new(crate::search::QueryEngine::new(
         Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
@@ -214,3 +214,6 @@ async fn legacy_labels_normalized_positive_survive_receipted_rebuild_and_restart
 
 #[path = "contract_wire_tests.rs"]
 mod contract_wire_tests;
+
+#[path = "session_context_tests.rs"]
+mod session_context_tests;

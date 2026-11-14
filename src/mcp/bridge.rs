@@ -78,6 +78,14 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Optional resolved backend context; old adapters must not invent identity.
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        Err(BridgeError::Unavailable(
+            "backend context unavailable".into(),
+        ))
+    }
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 

@@ -215,49 +215,120 @@ where
         .map(|value| PairCursor::decode(value, &request))
         .transpose()?;
     tokio::task::spawn_blocking(move || {
-        let expected=cursor.as_ref().map(|cursor|SnapshotBinding{at:cursor.at,namespace_id:cursor.namespace_id,namespace_sha256:cursor.namespace_sha256});
-        let started=Instant::now();
-        let snapshot={
-            let engine=storage.read().map_err(|_|ExactScanError::Unavailable)?;
-            engine.canonical_vector_snapshot(&namespace,expected.as_ref(),SnapshotLimits{max_records:MAX_SNAPSHOT_RECORDS,max_bytes:MAX_SNAPSHOT_BYTES})?
-        }; // The storage and publication guards end before vector comparison.
-        let capture_time=started.elapsed();
+        let expected = cursor.as_ref().map(|cursor| SnapshotBinding {
+            at: cursor.at,
+            namespace_id: cursor.namespace_id,
+            namespace_sha256: cursor.namespace_sha256,
+        });
+        let started = Instant::now();
+        let snapshot = {
+            let engine = storage.read().map_err(|_| ExactScanError::Unavailable)?;
+            engine.canonical_vector_snapshot(
+                &namespace,
+                expected.as_ref(),
+                SnapshotLimits { max_records: MAX_SNAPSHOT_RECORDS, max_bytes: MAX_SNAPSHOT_BYTES },
+            )?
+        }; // Capture guards end before vector comparison.
+        let capture_time = started.elapsed();
         after_capture();
-        let profile=match snapshot.namespace.schema.as_ref().map(|s|&s.embedding_binding) {
-            Some(EmbeddingBinding::Bound{profile_id,descriptor,..}) if descriptor.dimension==snapshot.namespace.embedding_dim && descriptor.profile_id().as_ref()==Ok(profile_id)=>profile_id.clone(),
-            _=>return Err(ExactScanError::ProfileUnavailable),
+        let profile = match snapshot.namespace.schema.as_ref().map(|s| &s.embedding_binding) {
+            Some(EmbeddingBinding::Bound { profile_id, descriptor, .. })
+                if descriptor.dimension == snapshot.namespace.embedding_dim
+                    && descriptor.profile_id().as_ref() == Ok(profile_id) => profile_id.clone(),
+            _ => return Err(ExactScanError::ProfileUnavailable),
         };
-        if let Some(cursor)=&cursor {cursor.matches_profile(&profile)?;}
-        let mut diagnostics=ScanDiagnostics{rows:snapshot.rows.len(),record_encoded_bytes:snapshot.accounting.record_encoded_bytes,vector_examined_bytes:snapshot.accounting.vector_examined_bytes,vector_copied_bytes:snapshot.accounting.vector_copied_bytes,capture_time,comparison_time:Duration::ZERO};
-        let compare_started=Instant::now();
-        let mut phase_counts=BTreeMap::from([("full",0),("summary",0),("ghost",0),("tombstone",0)]);
-        let mut exclusions=BTreeMap::new();
-        let mut vectors=Vec::new();
+        if let Some(cursor) = &cursor { cursor.matches_profile(&profile)?; }
+        let mut diagnostics = ScanDiagnostics {
+            rows: snapshot.rows.len(),
+            record_encoded_bytes: snapshot.accounting.record_encoded_bytes,
+            vector_examined_bytes: snapshot.accounting.vector_examined_bytes,
+            vector_copied_bytes: snapshot.accounting.vector_copied_bytes,
+            capture_time,
+            comparison_time: Duration::ZERO,
+        };
+        let compare_started = Instant::now();
+        let mut phase_counts = BTreeMap::from([
+            ("full", 0), ("summary", 0), ("ghost", 0), ("tombstone", 0),
+        ]);
+        let mut exclusions = BTreeMap::new();
+        let mut vectors = Vec::new();
         for row in snapshot.rows {
-            let phase=match row.record.phase {DecayPhase::Full=>"full",DecayPhase::Summary=>"summary",DecayPhase::Ghost=>"ghost",DecayPhase::Tombstone=>"tombstone"};
-            *phase_counts.get_mut(phase).expect("known phase")+=1;
-            if row.record.phase==DecayPhase::Tombstone {continue;}
-            use crate::storage::canonical_vector_snapshot::InvalidVectorReason;
-            let reason=match row.vector {
-                SnapshotVector::Available(values)=>{vectors.push((row.id,values));continue;},
-                SnapshotVector::Missing=>"missingVector",
-                SnapshotVector::Invalid(InvalidVectorReason::DimensionMismatch)=>"dimensionMismatch",
-                SnapshotVector::Invalid(InvalidVectorReason::NonFinite)=>"nonFinite",
-                SnapshotVector::Invalid(InvalidVectorReason::ZeroNorm)=>"zeroNorm",
+            let phase = match row.record.phase {
+                DecayPhase::Full => "full",
+                DecayPhase::Summary => "summary",
+                DecayPhase::Ghost => "ghost",
+                DecayPhase::Tombstone => "tombstone",
             };
-            *exclusions.entry(reason).or_insert(0u64)+=1;
+            *phase_counts.get_mut(phase).expect("known phase") += 1;
+            if row.record.phase == DecayPhase::Tombstone { continue; }
+            use crate::storage::canonical_vector_snapshot::InvalidVectorReason;
+            let reason = match row.vector {
+                SnapshotVector::Available(values) => {
+                    vectors.push((row.id, values));
+                    continue;
+                }
+                SnapshotVector::Missing => "missingVector",
+                SnapshotVector::Invalid(InvalidVectorReason::DimensionMismatch) => "dimensionMismatch",
+                SnapshotVector::Invalid(InvalidVectorReason::NonFinite) => "nonFinite",
+                SnapshotVector::Invalid(InvalidVectorReason::ZeroNorm) => "zeroNorm",
+            };
+            *exclusions.entry(reason).or_insert(0u64) += 1;
         }
-        let compared=compare_page(&vectors,&request,cursor.as_ref().map(|c|c.next_pair)).map_err(|error|match error {PairError::InvalidPosition=>ExactScanError::Input(InputError{code:"INVALID_CURSOR",field:"/cursor".into(),message:"cursor pair position is outside eligible pairs"}),PairError::Bounds=>ExactScanError::TooLarge,PairError::ResponseTooLarge=>ExactScanError::ResponseTooLarge,PairError::InvalidVectors=>ExactScanError::Unavailable})?;
-        diagnostics.comparison_time=compare_started.elapsed();
-        let next_cursor=compared.next_pair.map(|next_pair|PairCursor{cursor_version:1,contract_version:2,at:snapshot.binding.at,namespace_id:snapshot.binding.namespace_id,namespace_sha256:snapshot.binding.namespace_sha256,profile_id:profile.clone(),threshold_bits:request.threshold.to_bits(),eligibility_version:PAIR_ELIGIBILITY_VERSION,next_pair}.encode()).transpose()?;
-        let excluded_count=exclusions.values().sum();
-        let warnings=if excluded_count>0 {vec!["Some live namespace records lack comparable vectors; terminal coverage cannot be complete.".into()]} else {vec![]};
-        let page=ExactScanPage{namespace:snapshot.namespace.name,namespace_id:snapshot.binding.namespace_id,data:ExactScanData{pairs:compared.pairs,coverage:ExactCoverage{algorithm:ExactPairAlgorithm::ExactPairs,read_generation:snapshot.binding.at,embedding_profile_id:profile,eligible_count:vectors.len() as u64,excluded_count,total_pairs:compared.total_pairs,compared_this_page:compared.compared_this_page,compared_so_far:compared.compared_so_far,complete:next_cursor.is_none()&&excluded_count==0,phase_counts,exclusions},next_cursor},warnings,diagnostics};
-        // Actual storage guard rechecks generation AND full namespace binding.
-        // Never expose any of the computed page when this check fails.
-        storage.read().map_err(|_|ExactScanError::Unavailable)?.validate_vector_snapshot(&snapshot.binding)?;
+        let compared = compare_page(&vectors, &request, cursor.as_ref().map(|c| c.next_pair))
+            .map_err(|error| match error {
+                PairError::InvalidPosition => ExactScanError::Input(InputError {
+                    code: "INVALID_CURSOR",
+                    field: "/cursor".into(),
+                    message: "cursor pair position is outside eligible pairs",
+                }),
+                PairError::Bounds => ExactScanError::TooLarge,
+                PairError::ResponseTooLarge => ExactScanError::ResponseTooLarge,
+                PairError::InvalidVectors => ExactScanError::Unavailable,
+            })?;
+        diagnostics.comparison_time = compare_started.elapsed();
+        let next_cursor = compared.next_pair.map(|next_pair| PairCursor {
+            cursor_version: 1,
+            contract_version: 2,
+            at: snapshot.binding.at,
+            namespace_id: snapshot.binding.namespace_id,
+            namespace_sha256: snapshot.binding.namespace_sha256,
+            profile_id: profile.clone(),
+            threshold_bits: request.threshold.to_bits(),
+            eligibility_version: PAIR_ELIGIBILITY_VERSION,
+            next_pair,
+        }.encode()).transpose()?;
+        let excluded_count = exclusions.values().sum();
+        let warnings = if excluded_count > 0 {
+            vec!["Some live namespace records lack comparable vectors; terminal coverage cannot be complete.".into()]
+        } else { vec![] };
+        let page = ExactScanPage {
+            namespace: snapshot.namespace.name,
+            namespace_id: snapshot.binding.namespace_id,
+            data: ExactScanData {
+                pairs: compared.pairs,
+                coverage: ExactCoverage {
+                    algorithm: ExactPairAlgorithm::ExactPairs,
+                    read_generation: snapshot.binding.at,
+                    embedding_profile_id: profile,
+                    eligible_count: vectors.len() as u64,
+                    excluded_count,
+                    total_pairs: compared.total_pairs,
+                    compared_this_page: compared.compared_this_page,
+                    compared_so_far: compared.compared_so_far,
+                    complete: next_cursor.is_none() && excluded_count == 0,
+                    phase_counts,
+                    exclusions,
+                },
+                next_cursor,
+            },
+            warnings,
+            diagnostics,
+        };
+        // Discard the entire computed page if actual generation or binding changed.
+        storage.read().map_err(|_| ExactScanError::Unavailable)?
+            .validate_vector_snapshot(&snapshot.binding)?;
         Ok(page)
-    }).await.map_err(|_|ExactScanError::Unavailable)?
+    }).await.map_err(|_| ExactScanError::Unavailable)?
 }
 
 #[cfg(test)]

@@ -134,6 +134,21 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        // Dedicated RPC: an old daemon cannot silently ignore new context fields.
+        let value = self
+            .client
+            .call("session_context_v1", serde_json::json!({}))
+            .await?;
+        let context: crate::serialization::session::BackendContext = serde_json::from_value(value)
+            .map_err(|_| BridgeError::Unavailable("invalid backend context response".into()))?;
+        context
+            .validate()
+            .map_err(|e| BridgeError::Unavailable(e.into()))?;
+        Ok(context)
+    }
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError> {
         let params =
             serde_json::to_value(&input).map_err(|e| BridgeError::Internal(e.to_string()))?;

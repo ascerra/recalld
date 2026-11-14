@@ -110,6 +110,40 @@ Pascal subsequently found a regressed-clock native-forget marker bug in the
 Final native consumer promotion is held until his validated corrected PR82 head
 is consumed and the final joined suite passes. No moving WIP is imported.
 
+## Actual v1 discovery context
+
+PR19's existing `recalld://session` is reused. Its original requested/resolved
+default, source=`bridge`, limits and sampled-neighbor coverage stay unchanged.
+When the actual storage/provider adapter supplies it, optional `backendContext`
+contains contextVersion1, the actual storeId, and activeEmbedding. Its identity
+is either `unknown` with the actual dimension, or `configuration` with dimension
+and canonical ep1 profileId. Provider profile validation and actual provider
+width must agree; display model labels, equal widths, and stored legacy vectors
+are never used to invent provenance. No credentials, endpoint/config paths,
+remote-weight verification, namespace attestation, generation or readiness are
+reported. The legacy-unverified lane remains explicit and unchanged.
+
+Remote adapters use dedicated `session_context_v1` with strictly empty object
+parameters. Unknown methods and malformed/future response schemas do not fall
+back to weaker RPCs or fabricated identity. The original session fields remain
+available with backendContextUnavailable=true. Configuration identity is read
+only and can safely retry the same RPC after reconnect. HTTP GET /capabilities
+uses the same document and actual storage/search adapters, with the existing
+REST default `default` explicitly sourced as `legacyHttpDefault`. Failure to
+obtain backend context yields503. HTTP cache control is private,no-store;
+MCP retains its existing private zero-TTL boundary.
+
+Both surfaces advertise supportedContractVersions=[1]. No exact-scan capability,
+public v2 output schema, retry/CAS contract, or readiness is advertised while
+their activation prerequisites remain incomplete. Five actual discovery tests
+passed (including framed RPC old/malformed peers and source-byte immutability),
+followed by21 exact-related tests. The initial discovery compile missed two
+test imports; the next harness incorrectly assumed connect sends ping and was
+stopped after four passes. Both failures are retained. Explicit ping plus a
+bounded server join fixed the harness; production context semantics were not
+weakened. Hume independently reviewed f64 cosine source and found no issue;
+that review is not an independent execution or A5 performance result.
+
 Required tests: pure exhaustive oracle at201+records including cross-page pairs,
 dense>10,ties/disconnected, budget1, no-match progress, empty/singleton,
 Ghost/exclusion and arithmetic limits; malformed/change-bound cursor rejection;
@@ -119,8 +153,8 @@ proof. Pascal owns the native writer/serving acceptance join needed for true
 writer→publication→scan→reopen tests and malformed-proof rejection.
 
 Additional A4 work remains: versioned public profile/keyed write adapters over
-actual native/batch APIs, full per-operation schemas and envelopes, truthful
-resolved session discovery, generation-bound filtered list/catalog continuations
+actual native/batch APIs, full per-operation schemas and envelopes, namespace
+compatibility diagnostics, generation-bound filtered list/catalog continuations
 and whole-query ReadView. No blanket A4-complete claim is made by this branch.
 
 ## Capture cost and measurement limits

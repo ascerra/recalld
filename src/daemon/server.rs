@@ -439,6 +439,20 @@ async fn dispatch(
 
         "shutdown" => Ok(serde_json::json!({})),
 
+        "session_context_v1" => {
+            if !params.as_object().is_some_and(|object| object.is_empty()) {
+                return Err(BridgeError::InvalidInput(
+                    "session context requires an empty object".into(),
+                ));
+            }
+            let context = storage.backend_context().await?;
+            context
+                .validate()
+                .map_err(|e| BridgeError::Unavailable(e.into()))?;
+            serde_json::to_value(context)
+                .map_err(|_| BridgeError::Internal("context serialization failed".into()))
+        }
+
         "search" | "search_read_only" => {
             let mut input: SearchInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
