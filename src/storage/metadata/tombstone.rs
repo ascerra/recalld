@@ -9,6 +9,17 @@ impl MetadataStore {
         id: MemoryId,
         existing_edges: &[PersistedEdge],
     ) -> Result<WriteReceipt, StorageError> {
+        self.tombstone_reserved_with_effects(guard, ctx, id, existing_edges, None)
+    }
+
+    pub(crate) fn tombstone_reserved_with_effects(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        id: MemoryId,
+        existing_edges: &[PersistedEdge],
+        child: Option<&crate::storage::batch::BatchChild>,
+    ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
         self.ensure_available()?;
         ctx.validate()?;
@@ -25,16 +36,16 @@ impl MetadataStore {
         let tx = self.db.begin_write()?;
         let hash = crate::storage::tombstone::request_hash(ctx, id);
         // Historical identity is checked before CAS or current existence.
-        if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
+        if let Some(child) = child {
+            if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
+                return Ok(receipt);
+            }
+            super::batch::check_policy(&tx, child)?;
+        } else if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }
         control::read_control(&tx)?.committed_generation.next()?;
-        let config = NamespaceConfig::decode(
-            tx.open_table(NAMESPACE_TABLE)?
-                .get(namespace.get())?
-                .ok_or(StorageError::NamespaceNotFound(namespace.get()))?
-                .value(),
-        )?;
+        let config = namespace_state::require_namespace_active(&tx, namespace)?;
         if config.schema.is_some() || control::read_control(&tx)?.control_schema_version != 1 {
             return Err(StorageError::RecoveryRequired(
                 "schema-v2 tombstone requires participating writers; serving remains disabled"
@@ -90,6 +101,7 @@ impl MetadataStore {
                 record: &record,
                 old_phase,
             },
+            child,
         )
         .map(|result| result.receipt)
     }

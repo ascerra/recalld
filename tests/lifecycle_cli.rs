@@ -1,6 +1,6 @@
 //! Executes the public offline CLI against synthetic stores only.
 use recalld::model::schema::LifecycleVersion;
-use recalld::model::{DecayPhase, DiskRecord, MemoryId, NamespaceConfig};
+use recalld::model::{MemoryId, NamespaceConfig};
 use recalld::storage::lifecycle_migration::LifecycleMigrationOptions;
 use recalld::storage::schema_migration::{MigrationOptions, inspect_schema, migrate_schema};
 use recalld::storage::{RedbStorageEngine, StorageEngine};
@@ -15,34 +15,22 @@ fn cli_preview_migrate_retry_and_rollback_use_real_offline_writer() {
     ns.embedding_dim = 4;
     let ns = engine.create_namespace(&ns).unwrap();
     let id = MemoryId::new();
-    let mut record = DiskRecord {
-        schema: None,
-        version: 1,
-        id: *id.as_bytes(),
-        namespace_id: ns.get(),
-        created_at: 0,
-        last_accessed_at: 0,
-        phase: DecayPhase::Full,
-        strength: 1.,
-        decay_strength: 1.,
-        stability: 1.,
-        difficulty: 5.,
-        is_permastore: 0,
-        vector_slot: 0,
-        edge_count: 0,
-        summary: "kept".into(),
-        tags: vec![],
-        access_history: vec![],
-        text_offset: 0,
-        text_length: 0,
-    };
     engine
-        .insert_memory(
-            id,
-            ns,
-            &mut record,
+        .insert_memory_with_receipt(
+            &recalld::storage::control::MutationContext::unkeyed(ns),
+            &recalld::storage::insertion::InsertMemory {
+                id: Some(id),
+                summary: "kept".into(),
+                full_text: Some("retained payload".into()),
+                tags: vec![],
+                embedding: None,
+                initial_stability: Some(1.),
+                created_at: Some(0),
+                parent_id: None,
+                supersedes: None,
+            },
             &[1., 0., 0., 0.],
-            Some("retained payload"),
+            0,
         )
         .unwrap();
     engine.sync().unwrap();

@@ -243,15 +243,30 @@ pub enum MutationOutcome {
     LifecycleFeedbackApplied {
         transition: super::native_lifecycle::NativeLifecycleWrite,
     },
-    ExposuresRecorded {
-        accesses: Vec<ExposureOutcome>,
+    BatchReserved {
+        batch_kind: super::batch::BatchKind,
+        item_count: u32,
+        caller_hash: [u8; 32],
+        resolution_hash: [u8; 32],
     },
-    LegacyFeedbackRecorded {
+    BatchItemRejected {
+        batch_operation_id: Uuid,
+        index: u32,
+        error: super::batch::BatchError,
+    },
+    LifecycleMaterialized {
         #[serde(rename = "memoryId")]
         memory_id: MemoryId,
-        quality: u8,
-        #[serde(rename = "appliedAt")]
-        applied_at: i64,
+        #[serde(rename = "fromPhase")]
+        from_phase: crate::model::DecayPhase,
+        #[serde(rename = "toPhase")]
+        to_phase: crate::model::DecayPhase,
+        #[serde(rename = "strengthBits")]
+        strength_bits: u32,
+        #[serde(rename = "decayStrengthBits")]
+        decay_strength_bits: u32,
+        #[serde(rename = "removedFieldsMask")]
+        removed_fields_mask: u8,
     },
     LifecyclePolicyMigrated {
         transition: super::lifecycle_migration::PolicyTransition,
@@ -296,6 +311,19 @@ pub enum MutationOutcome {
     NamespacePolicyUpdated {
         #[serde(rename = "namespaceId")]
         namespace_id: NamespaceId,
+    },
+    ExposuresRecorded {
+        accesses: Vec<ExposureOutcome>,
+    },
+    LegacyFeedbackRecorded {
+        #[serde(rename = "memoryId")]
+        memory_id: MemoryId,
+        quality: u8,
+        #[serde(rename = "appliedAt")]
+        applied_at: i64,
+    },
+    LifecyclePolicyMigrated {
+        transition: super::lifecycle_migration::PolicyTransition,
     },
     GraphChanged {
         edges_put: usize,
@@ -389,6 +417,7 @@ pub(crate) fn validate_existing(
             ));
         }
         super::metadata::purge::validate_existing(tx, None)?;
+        super::metadata::batch::validate_existing(tx, None)?;
         return Ok(None);
     }
     if !present.iter().all(|p| *p) {
@@ -417,13 +446,17 @@ pub(crate) fn validate_existing(
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
-            MutationOutcome::NamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::NamespaceCreated { .. }
+            | MutationOutcome::BatchReserved { .. }
+            | MutationOutcome::BatchItemRejected { .. } => scope == MutationScope::Catalog,
             MutationOutcome::NamespacePolicyUpdated { namespace_id }
             | MutationOutcome::NamespacePurgeStarted { namespace_id, .. }
             | MutationOutcome::NamespacePurgeAdvanced { namespace_id, .. } => {
                 scope == MutationScope::Namespace(*namespace_id)
             }
-            MutationOutcome::MemoryInserted { .. } | MutationOutcome::MemoryTombstoned { .. } => {
+            MutationOutcome::MemoryInserted { .. }
+            | MutationOutcome::MemoryTombstoned { .. }
+            | MutationOutcome::LifecycleMaterialized { .. } => {
                 matches!(scope, MutationScope::Namespace(_))
             }
             _ => true,
@@ -502,6 +535,7 @@ pub(crate) fn validate_existing(
         }
     }
     super::metadata::purge::validate_existing(tx, Some(&state))?;
+    super::metadata::batch::validate_existing(tx, Some(&state))?;
     Ok(Some(state))
 }
 
@@ -629,7 +663,10 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::LifecycleFeedbackApplied { transition } => {
             transition.validate(&stored.receipt, true)?
         }
-        MutationOutcome::ExposuresRecorded { .. }
+        MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::BatchReserved { .. }
+        | MutationOutcome::BatchItemRejected { .. }
+        | MutationOutcome::ExposuresRecorded { .. }
         | MutationOutcome::LegacyFeedbackRecorded { .. }
         | MutationOutcome::MemoryInserted { .. }
         | MutationOutcome::MemoryTombstoned { .. }
@@ -668,6 +705,36 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         return Err(StorageError::InvalidControl(
             "nil tombstone receipt identity".into(),
         ));
+    }
+    if let MutationOutcome::LifecycleMaterialized {
+        memory_id,
+        from_phase,
+        to_phase,
+        strength_bits,
+        decay_strength_bits,
+        removed_fields_mask,
+    } = stored.receipt.outcome
+    {
+        use crate::model::DecayPhase::{Full, Ghost, Summary, Tombstone};
+        if memory_id == MemoryId::nil()
+            || from_phase == Tombstone
+            || to_phase == Tombstone
+            || !(from_phase == to_phase
+                || matches!((from_phase, to_phase), (Full, Summary) | (Summary, Ghost)))
+            || [strength_bits, decay_strength_bits].iter().any(|bits| {
+                !f32::from_bits(*bits).is_finite() || !(0.0..=1.0).contains(&f32::from_bits(*bits))
+            })
+            || removed_fields_mask
+                != match (from_phase, to_phase) {
+                    (Full, Summary) => super::metadata::removal_ledger::FULL_TEXT,
+                    (Summary, Ghost) => super::metadata::removal_ledger::SUMMARY,
+                    _ => 0,
+                }
+        {
+            return Err(StorageError::InvalidControl(
+                "invalid lifecycle materialization receipt".into(),
+            ));
+        }
     }
     match &stored.receipt.outcome {
         MutationOutcome::NamespaceCreated {
@@ -736,6 +803,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
+        MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::BatchReserved { .. }
+        | MutationOutcome::BatchItemRejected { .. } => {}
     }
     Ok(stored)
 }

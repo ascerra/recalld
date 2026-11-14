@@ -330,6 +330,7 @@ impl MetadataStore {
             false,
             false,
             effects::RecordMutation::NativeInserted(&record, transition),
+            None,
         )
         .map(|r| r.receipt)
     }
@@ -429,6 +430,7 @@ impl MetadataStore {
                 old_phase,
                 transition,
             },
+            None,
         )
         .map(|r| r.receipt)
     }
