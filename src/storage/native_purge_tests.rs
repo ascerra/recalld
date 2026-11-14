@@ -682,3 +682,147 @@ fn native_purge_native_catalog_binding_empty_cleanup_and_recreated_name() {
     drop(s);
     validation::canonical_files(&path).unwrap();
 }
+
+fn extension_admission_probe(namespace_extension: bool) {
+    use redb::ReadableTable;
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, ids) = fixture(root.path());
+    {
+        let db = redb::Database::open(path.join("meta.db")).unwrap();
+        let tx = db.begin_write().unwrap();
+        if namespace_extension {
+            let mut table = tx.open_table(metadata::NAMESPACE_TABLE).unwrap();
+            let mut ns =
+                NamespaceConfig::decode(table.get(id.get()).unwrap().unwrap().value()).unwrap();
+            ns.schema.as_mut().unwrap().extensions.insert(
+                "future_payload".into(),
+                serde_json::json!({"secret":"not allowed in purge receipt"}),
+            );
+            table
+                .insert(id.get(), control::encode(&ns).unwrap().as_slice())
+                .unwrap();
+        } else {
+            let mut table = tx.open_table(metadata::META_TABLE).unwrap();
+            let mut r = crate::model::DiskRecord::from_bytes(
+                table
+                    .get(ids[0].as_bytes().as_slice())
+                    .unwrap()
+                    .unwrap()
+                    .value(),
+            )
+            .unwrap();
+            r.schema.as_mut().unwrap().extensions.insert(
+                "future_payload".into(),
+                serde_json::json!({"secret":"not allowed in purge receipt"}),
+            );
+            table
+                .insert(r.id.as_slice(), r.encode().unwrap().as_slice())
+                .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    let mut s = open(&path);
+    let before = s.engine.control_state().unwrap();
+    let bytes = std::fs::read(path.join("meta.db")).unwrap();
+    let result = s
+        .engine
+        .begin_namespace_purge(&ctx(&s, id, "unknown-extension"), true);
+    assert!(
+        result.is_err(),
+        "unsupported extension accepted durable Purging: {result:?}"
+    );
+    assert_eq!(before, s.engine.control_state().unwrap());
+    assert!(s.metadata().purge_progress().unwrap().is_empty());
+    assert_eq!(bytes, std::fs::read(path.join("meta.db")).unwrap());
+}
+#[test]
+fn native_purge_namespace_extension_rejected_before_receipt_retention() {
+    extension_admission_probe(true);
+}
+#[test]
+fn native_purge_record_extension_rejected_before_undrainable_progress() {
+    extension_admission_probe(false);
+}
+
+#[tokio::test]
+async fn native_purge_foreign_terminal_boundary_rejects_later_noop() {
+    use redb::ReadableTable;
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    policy(&mut s, id);
+    let config = s.engine.get_namespace(id).unwrap().unwrap();
+    let current = catalog::NamespacePolicy::from(&config);
+    let receipt = s
+        .update_policy(
+            &ctx(&s, id, "terminal-noop"),
+            LifecycleScope {
+                namespace_id: id,
+                namespace_name: config.name,
+                source: None,
+            },
+            &current,
+        )
+        .unwrap()
+        .unwrap();
+    let p = s
+        .engine
+        .begin_namespace_purge(&ctx(&s, id, "terminal-purge"), true)
+        .unwrap();
+    let p = done(&mut s, p);
+    drop(s);
+    let archive = crate::backup::run_backup(
+        &crate::config::RecalldConfig::default(),
+        &root.path().join("terminal.zip"),
+        Some(&path),
+        false,
+    )
+    .await
+    .unwrap();
+    crate::backup::restore_from_backup(crate::backup::RestoreOptions {
+        backup_path: archive,
+        data_dir: path.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: false,
+    })
+    .await
+    .unwrap();
+    {
+        let db = redb::Database::open(path.join("meta.db")).unwrap();
+        let tx = db.begin_write().unwrap();
+        let mut table = tx.open_table(control::RECEIPTS).unwrap();
+        let key = control::scoped_key(
+            receipt.store_id,
+            MutationScope::Namespace(id),
+            receipt.operation_id.as_bytes(),
+        );
+        let mut stored: control::StoredReceipt =
+            control::decode(table.get(key.as_slice()).unwrap().unwrap().value()).unwrap();
+        stored.receipt.committed_generation = p.last_receipt.committed_generation;
+        let control::MutationOutcome::NativeNamespacePolicyUnchanged { transition: t } =
+            &mut stored.receipt.outcome
+        else {
+            panic!("wrong proof")
+        };
+        t.previous_generation = control::Generation::try_from(
+            (p.last_receipt.committed_generation.get() - 1).to_string(),
+        )
+        .unwrap();
+        table
+            .insert(key.as_slice(), control::encode(&stored).unwrap().as_slice())
+            .unwrap();
+        drop(table);
+        tx.commit().unwrap();
+    }
+    let before = std::fs::read(path.join("meta.db")).unwrap();
+    assert!(
+        validation::canonical_files(&path).is_err(),
+        "foreign same-revision no-op after terminal purge accepted"
+    );
+    assert!(
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(NoClock))
+            .is_err()
+    );
+    assert_eq!(before, std::fs::read(path.join("meta.db")).unwrap());
+}
