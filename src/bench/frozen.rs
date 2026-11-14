@@ -135,12 +135,12 @@ impl FrozenControls {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::StorageEngine;
     use crate::test_support::Fixture;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     async fn controls() -> (Fixture, FrozenControls) {
-        use crate::storage::StorageEngine;
         let root = tempfile::tempdir().unwrap();
         let mut engine = RedbStorageEngine::open_with_ids(
             root.path(),
@@ -330,5 +330,111 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(captured, state);
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_frozen_canonical_stage_is_validated_and_late_capture_is_discarded() {
+        let (fx, controls) = controls().await;
+        let controls = Arc::new(controls);
+        let id = fx
+            .insert_memory_in(crate::model::NamespaceId::new(1), &["entity/frozen"])
+            .await;
+        controls.owner.complete().await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let source_files = {
+            let engine = fx.storage.read().unwrap();
+            let mut names = vec![
+                "meta.db".to_owned(),
+                "edges.db".into(),
+                "fulltext.dat".into(),
+                "default/vectors.dat".into(),
+            ];
+            if let Some(selected) = engine.meta_store().text_selection().unwrap() {
+                names.push(selected.filename);
+            }
+            names
+                .into_iter()
+                .map(|name| {
+                    let path = engine.db_path().join(name);
+                    let bytes = std::fs::read(&path).unwrap();
+                    (path, bytes)
+                })
+                .collect::<Vec<_>>()
+        };
+        let first = controls
+            .capture(deadline, move |engine, frozen, _| {
+                engine.stage_frozen_canonical(frozen, deadline)
+            })
+            .await
+            .unwrap();
+        let original_generation = first.generation;
+        let original_hash = first.logical_sha256;
+        let snapshot =
+            crate::storage::offline_snapshot::OfflineSnapshot::open(&first.path()).unwrap();
+        assert_eq!(snapshot.control().generation_ref(), original_generation);
+        assert!(snapshot.record(id).unwrap().is_some());
+        drop(snapshot);
+        let second = controls
+            .capture(deadline, move |engine, frozen, _| {
+                engine.stage_frozen_canonical(frozen, deadline)
+            })
+            .await
+            .unwrap();
+        assert_eq!(second.generation, original_generation);
+        assert_eq!(second.logical_sha256, original_hash);
+        {
+            let database = redb::Database::open(second.path().join("meta.db")).unwrap();
+            let tx = database.begin_write().unwrap();
+            tx.open_table(redb::TableDefinition::<&str, &str>::new(
+                "unknown_required_state",
+            ))
+            .unwrap()
+            .insert("key", "value")
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let snapshot =
+            crate::storage::offline_snapshot::OfflineSnapshot::open(&second.path()).unwrap();
+        assert!(crate::storage::logical_export::isolated_legacy_hash(&snapshot, deadline).is_err());
+        drop(snapshot);
+        // A source-specific corruption of the disposable stage never changes
+        // the live owner or makes a second capture inherit unvalidated bytes.
+        std::fs::write(second.path().join("meta.db"), b"not a database").unwrap();
+        assert!(crate::storage::offline_snapshot::OfflineSnapshot::open(&second.path()).is_err());
+        assert!(fx.storage.read().unwrap().get_record(id).unwrap().is_some());
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let capturing = controls.clone();
+        let task = tokio::spawn(async move {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            capturing
+                .capture(deadline, move |engine, frozen, _| {
+                    let stage = engine.stage_frozen_canonical(frozen, deadline)?;
+                    started.send(stage.directory.path().to_owned()).unwrap();
+                    released.recv_timeout(Duration::from_secs(10)).unwrap();
+                    Ok(stage)
+                })
+                .await
+        });
+        let path = entered.await.unwrap();
+        assert!(path.exists());
+        assert!(task.await.unwrap().is_err());
+        assert!(
+            controls
+                .advance(1, Instant::now() + Duration::from_secs(5))
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        let _joined = tokio::time::timeout(Duration::from_secs(5), controls.busy.lock())
+            .await
+            .unwrap();
+        assert!(!path.exists(), "timed-out canonical stage must not escape");
+        for (path, expected) in source_files {
+            assert_eq!(std::fs::read(path).unwrap(), expected);
+        }
+        eprintln!(
+            "validated canonical stage at {:?}, logical hash {:?}; late stage discarded",
+            original_generation, original_hash
+        );
     }
 }

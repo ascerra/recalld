@@ -8,6 +8,8 @@
 //! See Spec 04 Section 7 for the design rationale.
 
 mod catalog;
+mod checkpoint;
+pub(crate) use checkpoint::StagedCanonical;
 mod effects;
 mod insertion;
 mod maintenance;
