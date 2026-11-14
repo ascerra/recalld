@@ -214,7 +214,7 @@ impl DerivedCompletion {
                     let records = storage.scan_all()?;
                     let mut next_graph = RelationshipGraph::with_capacity(records.len());
                     let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
-                    let mut next_entities = EntityIndex::with_capacity(records.len());
+                    let next_entities = EntityIndex::from_records(&records);
                     storage.meta_store().invalidate_derived_view(DerivedView::Fts);
                     fts.clear().map_err(|e| failed(e.to_string()))?;
                     for (id, record) in &records {
@@ -261,10 +261,6 @@ impl DerivedCompletion {
                         };
                         fts.add(ns, *id, &record.summary, text.as_deref(), &tags)
                             .map_err(|e| failed(e.to_string()))?;
-                        next_entities.add(
-                            *id,
-                            &crate::model::parse_structured_tags(&record.tags).entities,
-                        );
                     }
                     let edges = storage.load_all_edges()?;
                     let count = edges.len();
@@ -340,6 +336,88 @@ mod tests {
             fts: fx.fts_index.clone(),
             entities: fx.entity_index.clone(),
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_rebuild_publishes_exact_views_after_effect_free_catalog_commit() {
+        let fx = Fixture::new();
+        let id = fx.insert_memory_in(NamespaceId::new(1), &["entity/alice"]).await;
+        let completion = publisher(&fx);
+        completion.complete().await.unwrap();
+        let before = fx.storage.read().unwrap().meta_store().publication_state().unwrap();
+        assert!(before.matches_canonical());
+        fx.create_namespace("publication-catalog");
+        let after = fx.storage.read().unwrap().meta_store().publication_state().unwrap();
+        assert!(!fx.storage.read().unwrap().meta_store().needs_effects_rebuild());
+        assert_ne!(before.canonical, after.canonical);
+        assert!(!after.matches_canonical());
+        completion.complete().await.unwrap();
+        let rebuilt = fx.storage.read().unwrap().meta_store().publication_state().unwrap();
+        assert_eq!(rebuilt.canonical, after.canonical);
+        assert!(rebuilt.matches_canonical());
+        assert!(fx.vector_index.read().await.get_vector(id).is_some());
+        assert_eq!(fx.entity_index.read().await.find_by_entities(
+            NamespaceId::new(1), &["Alice".into()], MemoryId::new()), vec![(id, 1)]);
+        assert_eq!(fx.storage.read().unwrap().meta_store().work_tracker().status().pending, 0);
+    }
+
+    #[tokio::test]
+    async fn entity_rebuild_online_completion_replaces_stale_namespace_postings() {
+        let fx = Fixture::new();
+        let local = NamespaceId::new(1);
+        let foreign = fx.create_namespace("foreign");
+        let live = fx.insert_memory_in(local, &["entity/alice"]).await;
+        let peer = fx
+            .insert_memory_in(foreign, &["entity/alice", "entity/bob"])
+            .await;
+        let dead = fx.insert_memory_in(local, &["entity/dead"]).await;
+        {
+            let mut index = fx.entity_index.write().await;
+            index.add(local, live, &["stale".into()]);
+            index.add(local, dead, &["dead".into()]);
+        }
+        // Real canonical deletion dirties every view and requires completion.
+        fx.storage.write().unwrap().delete_memory(dead).unwrap();
+        let query = vec!["Alice".into(), "Bob".into()];
+        for _ in 0..2 {
+            publisher(&fx).complete().await.unwrap();
+            let index = fx.entity_index.read().await;
+            assert_eq!(index.len(), 2);
+            assert_eq!(
+                index.find_by_entities(local, &query, MemoryId::new()),
+                vec![(live, 1)]
+            );
+            assert_eq!(
+                index.find_by_entities(foreign, &query, MemoryId::new()),
+                vec![(peer, 2)]
+            );
+            assert!(
+                index
+                    .find_by_entities(local, &["stale".into(), "dead".into()], MemoryId::new())
+                    .is_empty()
+            );
+            assert!(
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .effects_stamp()
+                    .is_ok()
+            );
+        }
+        fx.storage.write().unwrap().delete_memory(live).unwrap();
+        publisher(&fx).complete().await.unwrap();
+        let index = fx.entity_index.read().await;
+        assert_eq!(index.len(), 1);
+        assert!(
+            index
+                .find_by_entities(local, &query, MemoryId::new())
+                .is_empty()
+        );
+        assert_eq!(
+            index.find_by_entities(foreign, &query, MemoryId::new()),
+            vec![(peer, 2)]
+        );
     }
 
     async fn wait_for_work(
