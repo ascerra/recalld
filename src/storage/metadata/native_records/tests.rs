@@ -755,3 +755,6 @@ mod graph_producers;
 
 #[path = "selection_tests.rs"]
 mod selection;
+
+#[path = "store_tests.rs"]
+mod store;
