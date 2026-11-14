@@ -183,3 +183,33 @@ pub(crate) fn store_hash(
         settings,
     )
 }
+
+/// Fresh callers pass defaults captured in the reservation transaction; resumed
+/// children pass the immutable manifest defaults. Never consult a provider or
+/// the current namespace while resolving a retained child.
+pub(crate) fn resolve_store_profile(
+    input: &crate::storage::native_store::NativeStoreInput,
+    supplied_profile_id: Option<&str>,
+    defaults: &BatchDefaults,
+) -> Result<crate::storage::native_store::NativeStoreInput, StorageError> {
+    let mut resolved = input.clone();
+    if let Some(requested) = supplied_profile_id {
+        if input.insert.embedding_profile.is_some()
+            || input.insert.memory.embedding.is_none()
+            || !crate::embedding::profile::valid_profile_id(requested)
+        {
+            return Err(StorageError::InvalidMutation("supplied vector requires only a valid profile ID".into()));
+        }
+        let native = defaults.native.as_ref().ok_or_else(|| StorageError::InvalidControl("native batch defaults missing".into()))?;
+        native.validate(defaults.embedding_dim, BatchKind::Insert)?;
+        let EmbeddingBinding::Bound { profile_id, descriptor, .. } = &native.embedding_binding else {
+            return Err(StorageError::InvalidMutation("unknown native profile provenance".into()));
+        };
+        if requested != profile_id {
+            return Err(StorageError::EmbeddingProfileMismatch);
+        }
+        resolved.insert.embedding_profile = Some(descriptor.clone());
+    }
+    resolved.insert.validate()?;
+    Ok(resolved)
+}

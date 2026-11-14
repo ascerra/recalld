@@ -254,21 +254,89 @@ pub enum Status {
 
 /// Wire representation only. Populating this requires A1's actual readiness
 /// interface; no conversion from an epoch, metadata lease, or latest counter.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Readiness {
     pub store_id: Uuid,
     pub committed_generation: Generation,
     pub ready: bool,
     pub pending_work: usize,
     pub derived: Vec<DerivedReadiness>,
+    /// An observation counts accepted tickets, not a deduplicated sum of
+    /// tickets and durable work. Both observation fields are emitted together.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_work_scope: Option<PendingWorkScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_work: Option<ObservedWork>,
 }
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DerivedReadiness {
     pub name: String,
-    pub applied_generation: Generation,
+    /// None means unpublished/unknown, never generation zero.
+    pub applied_generation: Option<Generation>,
     pub ready: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PendingWorkScope {
+    AcceptedTickets,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ObservedWork {
+    /// Already included in pendingWork; do not add this count again.
+    pub unresolved_work: usize,
+    pub admission_open: bool,
+    pub pending_effects: u64,
+    pub pending_purges: usize,
+    pub pending_batch_items: usize,
+}
+impl From<crate::storage::Readiness> for Readiness {
+    fn from(value: crate::storage::Readiness) -> Self {
+        Self {
+            store_id: value.store_id,
+            committed_generation: value.committed_generation,
+            ready: value.ready,
+            pending_work: value.pending_work,
+            derived: value.derived.into_iter().map(|v| DerivedReadiness {
+                name: v.name.into(),
+                applied_generation: Some(v.applied_generation),
+                ready: v.ready,
+            }).collect(),
+            pending_work_scope: None,
+            observed_work: None,
+        }
+    }
+}
+impl Readiness {
+    /// This never certifies readiness or drains the caller. The observer's
+    /// current canonical generation is distinct from a retained receipt's G.
+    pub(crate) fn observed(value: crate::storage::ReadinessObservation) -> Result<Self, crate::storage::StorageError> {
+        if value.derived.iter().any(|v| v.applied.is_some_and(|g| g.store_id != value.canonical.store_id)) {
+            return Err(crate::storage::StorageError::RecoveryRequired("foreign derived publication stamp".into()));
+        }
+        Ok(Self {
+            store_id: value.canonical.store_id,
+            committed_generation: value.canonical.generation,
+            ready: false,
+            pending_work: value.accepted_work,
+            derived: value.derived.into_iter().map(|v| DerivedReadiness {
+                name: v.name.into(),
+                applied_generation: v.applied.map(|g| g.generation),
+                ready: v.matches_canonical,
+            }).collect(),
+            pending_work_scope: Some(PendingWorkScope::AcceptedTickets),
+            observed_work: Some(ObservedWork {
+                unresolved_work: value.unresolved_work,
+                admission_open: value.admission_open,
+                pending_effects: value.pending_effects,
+                pending_purges: value.pending_purges,
+                pending_batch_items: value.pending_batch_items,
+            }),
+        })
+    }
 }
 
 /// Not returned by live handlers yet. A read generation must eventually come
@@ -294,6 +362,22 @@ pub struct Envelope<T> {
     pub warnings: Vec<String>,
 }
 impl<T> Envelope<T> {
+    /// Attach independently observed current state to a failed write without
+    /// replacing its original receipt, error, or query generation. Observation
+    /// failure is enrichment failure, never evidence that the write rolled back.
+    pub(crate) fn observe_failure(
+        &mut self,
+        observation: Result<crate::storage::ReadinessObservation, crate::storage::StorageError>,
+    ) {
+        match observation.and_then(Readiness::observed) {
+            Ok(readiness) => self.readiness = Some(readiness),
+            Err(_) => {
+                self.readiness = None;
+                self.warnings.push("READINESS_UNKNOWN".into());
+            }
+        }
+    }
+
     pub fn failure(scope: Option<Scope>, error: ExecutionError) -> Self {
         Self {
             contract_version: 2,

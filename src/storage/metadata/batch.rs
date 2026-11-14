@@ -699,11 +699,16 @@ impl MetadataStore {
                     }
                     batch::native::insert_hash(&ctx, input, &defaults)?
                 }
-                (3, BatchItemPlan::NativeStore { input, .. }) => {
-                    if input.insert.validate().is_err() {
-                        return Ok(Err(BatchError::new("INVALID_INPUT")));
-                    }
-                    batch::native::store_hash(&ctx, input, &defaults)?
+                (3, BatchItemPlan::NativeStore { input, supplied_profile_id, .. }) => {
+                    let resolved = match batch::native::resolve_store_profile(input, supplied_profile_id.as_deref(), &defaults) {
+                        Ok(resolved) => resolved,
+                        Err(StorageError::EmbeddingProfileMismatch) => return Ok(Err(BatchError {
+                            code: "CONFLICT".into(), field: Some("embeddingProfileId".into()),
+                        })),
+                        Err(StorageError::InvalidMutation(_)) => return Ok(Err(BatchError::new("INVALID_INPUT"))),
+                        Err(error) => return Err(error),
+                    };
+                    batch::native::store_hash(&ctx, &resolved, &defaults)?
                 }
                 (1, BatchItemPlan::Forget { id, .. }) => {
                     crate::storage::tombstone::request_hash(&ctx, *id)

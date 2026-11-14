@@ -134,6 +134,9 @@ pub(crate) enum BatchItemPlan {
         request_hash: [u8; 32],
         namespace: String,
         input: super::native_store::NativeStoreInput,
+        /// Wire-only selector, resolved from canonical/retained defaults. Never
+        /// persisted or substituted into the original caller hash.
+        supplied_profile_id: Option<String>,
     },
     Forget {
         request_hash: [u8; 32],
@@ -170,6 +173,14 @@ pub(crate) struct BatchChild {
     pub(super) canonical_hash: [u8; 32],
 }
 impl BatchChild {
+    pub(crate) fn resolve_store_profile(
+        &self,
+        input: &super::native_store::NativeStoreInput,
+        supplied_profile_id: Option<&str>,
+    ) -> Result<super::native_store::NativeStoreInput, super::StorageError> {
+        native::resolve_store_profile(input, supplied_profile_id, &self.defaults)
+    }
+
     pub(crate) fn context(&self) -> MutationContext {
         MutationContext {
             store_id: Some(self.store_id),

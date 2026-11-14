@@ -124,6 +124,27 @@ mod observation_tests {
             panic!("lost committed receipt: {error}")
         };
         let observation = publisher.observe_readiness(deadline()).await.unwrap();
+        let mut envelope = crate::serialization::contract::Envelope::<serde_json::Value>::failure(
+            None,
+            crate::serialization::contract::ExecutionError {
+                category: crate::serialization::contract::ErrorCategory::Unavailable,
+                code: "INDEX_NOT_READY".into(),
+                field: None,
+                message: "publication failed after commit".into(),
+                retryable: false,
+                commit_state: crate::serialization::contract::CommitState::Committed,
+                operation_id: Some(receipt.operation_id),
+            },
+        );
+        envelope.receipt = Some((*receipt).clone());
+        envelope.observe_failure(Ok(observation.clone()));
+        let wire = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(wire["readiness"]["pendingWork"], 1);
+        assert_eq!(wire["readiness"]["pendingWorkScope"], "acceptedTickets");
+        assert_eq!(wire["readiness"]["observedWork"]["pendingEffects"], 1);
+        assert_eq!(wire["readiness"]["ready"], false);
+        assert!(wire["readiness"]["derived"].as_array().unwrap().iter().any(|v| v["name"] == "fts" && v["appliedGeneration"].is_null()));
+        assert_eq!(envelope.receipt.as_ref(), Some(receipt.as_ref()));
         assert_eq!(observation.canonical.store_id, receipt.store_id);
         assert_eq!(
             observation.canonical.generation,
@@ -162,6 +183,23 @@ mod observation_tests {
             *receipt
         );
         assert!(fx.record(live).is_some());
+        // Durable effects remain after an explicitly finished known root.
+        // pendingWork=0 here is a ticket count, never a claim of no durable work.
+        publisher.finish_known_work(root);
+        let no_root = publisher.observe_readiness(deadline()).await.unwrap();
+        assert_eq!(no_root.accepted_work, 0);
+        assert_eq!(no_root.pending_effects, 1);
+        envelope.observe_failure(Ok(no_root));
+        let wire = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(wire["readiness"]["pendingWork"], 0);
+        assert_eq!(wire["readiness"]["pendingWorkScope"], "acceptedTickets");
+        assert_eq!(wire["readiness"]["observedWork"]["pendingEffects"], 1);
+        assert_eq!(wire["readiness"]["ready"], false);
+        envelope.observe_failure(publisher.observe_readiness(Instant::now()).await);
+        assert!(envelope.readiness.is_none());
+        assert_eq!(envelope.warnings, ["READINESS_UNKNOWN"]);
+        assert_eq!(envelope.receipt.as_ref(), Some(receipt.as_ref()));
+        let root = publisher.accept_work(None).unwrap();
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
         publisher.complete_with_work(Some(&root)).await.unwrap();
         let repaired = publisher.observe_readiness(deadline()).await.unwrap();
@@ -174,6 +212,7 @@ mod observation_tests {
         );
         assert_eq!(repaired.pending_effects, 0);
         assert_eq!(repaired.accepted_work, 1);
+        assert!(!crate::serialization::contract::Readiness::observed(repaired.clone()).unwrap().ready);
         publisher.finish_known_work(root);
         assert_eq!(
             publisher
@@ -183,6 +222,13 @@ mod observation_tests {
                 .accepted_work,
             0
         );
+        let barrier = publisher.readiness_barrier(repaired.canonical, deadline()).await.unwrap();
+        let wire = serde_json::to_value(crate::serialization::contract::Readiness::from(barrier)).unwrap();
+        assert_eq!(wire["ready"], true);
+        assert_eq!(wire["pendingWork"], 0);
+        assert!(wire.get("pendingWorkScope").is_none());
+        assert!(wire.get("observedWork").is_none());
+        assert!(wire["derived"].as_array().unwrap().iter().all(|v| v["appliedGeneration"].is_string()));
     }
 
     #[tokio::test]
