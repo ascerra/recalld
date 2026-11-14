@@ -7,7 +7,8 @@ use crate::storage::{Readiness, RedbStorageEngine, StorageError, metadata::Metad
 use crate::time::{Clock, ManualClock};
 
 /// The actor receives `core()` only. Runtime sources stay private to controls.
-/// This constructor currently controls lifecycle time, not UUIDs or all RNG.
+/// Pins lifecycle time and canonical allocation seed 7 for this legacy-v1 track.
+/// This is not control over every RNG, behavioral cache, or query tie.
 pub struct OwnedEvaluator {
     core: Arc<crate::Recalld>,
     controls: FrozenControls,
@@ -20,13 +21,39 @@ impl OwnedEvaluator {
             "isolated controls require explicit sweeps"
         );
         let clock = Arc::new(ManualClock::new(1_767_225_600_000));
-        let core = Arc::new(crate::Recalld::with_clock(config, clock.clone()).await?);
+        let mut seed = [0; 32];
+        seed[..8].copy_from_slice(&7_u64.to_be_bytes());
+        let core = Arc::new(
+            crate::Recalld::with_runtime_sources(
+                config,
+                clock.clone(),
+                Box::new(crate::storage::ids::SeededIds::new(seed)),
+            )
+            .await?,
+        );
         let controls = FrozenControls::new(core.derived_owner(), clock);
         Ok(Self { core, controls })
     }
 
     pub fn core(&self) -> &Arc<crate::Recalld> {
         &self.core
+    }
+
+    pub(crate) async fn inspect(
+        &self,
+        deadline: Instant,
+    ) -> Result<serde_json::Value, StorageError> {
+        let clock = self.controls.clock.clone();
+        self.controls
+            .capture(deadline, move |engine, frozen, _| {
+                let ids = engine.meta_store().frozen_id_state(frozen)?;
+                Ok(
+                    serde_json::json!({"committed":frozen.generation(), "logicalHash":null,
+                "runtimeState":{"nowMillis":clock.now_millis(),"allocation":ids},
+                "snapshot":false}),
+                )
+            })
+            .await
     }
 
     pub(crate) async fn advance(
@@ -113,7 +140,18 @@ mod tests {
     use std::time::Duration;
 
     async fn controls() -> (Fixture, FrozenControls) {
-        let fx = Fixture::new();
+        use crate::storage::StorageEngine;
+        let root = tempfile::tempdir().unwrap();
+        let mut engine = RedbStorageEngine::open_with_ids(
+            root.path(),
+            false,
+            Box::new(crate::storage::ids::SeededIds::new([7; 32])),
+        )
+        .unwrap();
+        let mut ns = crate::model::NamespaceConfig::default_namespace(0);
+        ns.embedding_dim = 4;
+        engine.create_namespace(&ns).unwrap();
+        let fx = Fixture::from_open_engine(root, engine);
         let owner = DerivedCompletion {
             storage: fx.storage.clone(),
             cache: fx.cache.clone(),
@@ -238,5 +276,59 @@ mod tests {
                 .is_err()
         );
         assert_eq!(controls.clock.now_millis(), 1010);
+    }
+    #[tokio::test]
+    async fn owned_ids_batch_reservation_replay_uses_owner_cursor_and_frozen_inspection() {
+        use crate::storage::batch::{BatchError, BatchItemPlan, BatchKind};
+        use crate::storage::control::{MutationContext, MutationScope};
+        use crate::storage::ids::{IdKind, IdSource, SeededIds};
+        let (fx, controls) = controls().await;
+        let state = {
+            let engine = fx.storage.read().unwrap();
+            let meta = engine.meta_store();
+            let expected =
+                SeededIds::from_state(meta.id_source().checkpoint().unwrap().unwrap()).unwrap();
+            let first = expected.uuid(IdKind::Operation).unwrap();
+            let second = expected.uuid(IdKind::Operation).unwrap();
+            let parent = expected.uuid(IdKind::Operation).unwrap();
+            let plans = [
+                BatchItemPlan::Invalid {
+                    request_hash: [1; 32],
+                    error: BatchError::new("INVALID_INPUT"),
+                },
+                BatchItemPlan::Invalid {
+                    request_hash: [2; 32],
+                    error: BatchError::new("INVALID_INPUT"),
+                },
+            ];
+            let ctx = MutationContext {
+                store_id: Some(engine.control_state().unwrap().store_id),
+                scope: MutationScope::Catalog,
+                idempotency_key: Some("scoped-batch".into()),
+                expected_generation: None,
+                contract_version: 1,
+            };
+            let result = meta.reserve_batch(&ctx, BatchKind::Insert, &plans).unwrap();
+            assert_eq!(result.items[0].operation_id, first);
+            assert_eq!(result.items[1].operation_id, second);
+            assert_eq!(result.reservation_receipt.operation_id, parent);
+            let replay = meta.reserve_batch(&ctx, BatchKind::Insert, &plans).unwrap();
+            assert!(replay.reservation_receipt.replayed);
+            assert_eq!(replay.items, result.items);
+            assert_eq!(
+                meta.id_source().checkpoint().unwrap(),
+                expected.checkpoint().unwrap()
+            );
+            expected.checkpoint().unwrap()
+        };
+        controls.owner.complete().await.unwrap();
+        let captured = controls
+            .capture(
+                Instant::now() + Duration::from_secs(5),
+                |engine, frozen, _| engine.meta_store().frozen_id_state(frozen),
+            )
+            .await
+            .unwrap();
+        assert_eq!(captured, state);
     }
 }

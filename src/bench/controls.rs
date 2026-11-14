@@ -75,13 +75,19 @@ async fn dispatch(
                     "barrier":"owned-work-and-required-derived-generations",
                     "logicalHash":false,"snapshot":false,"reset":false,
                     "controlledClock":false,"lifecycleClockControlled":evaluator.is_some(),
-                    "controlledIds":false,"controlledRng":false
+                    "controlledIds":false,"canonicalAllocationControlled":evaluator.is_some(),"controlledRng":false
                 }
             }))
         }
         "inspect" => {
             if request.params != json!({}) {
                 return Err(error("INVALID_PARAMS", "inspect requires empty params"));
+            }
+            if let Some(evaluator) = evaluator {
+                return evaluator
+                    .inspect(Instant::now() + Duration::from_secs(30))
+                    .await
+                    .map_err(|e| error("CONTROL_UNAVAILABLE", e));
             }
             let storage = core.storage().clone();
             // Register this readonly worker before enqueue. It does not touch

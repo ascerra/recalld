@@ -191,7 +191,11 @@ impl MetadataStore {
             ns.embedding_dim,
             input.memory.embedding.is_some(),
         )?;
-        let id = self.allocate_memory_id(input.memory.id);
+        let sampled = clock.now_millis();
+        if chrono::DateTime::from_timestamp_millis(sampled).is_none() {
+            return Err(StorageError::InvalidMutation("invalid clock sample".into()));
+        }
+        let id = self.allocate_memory_id(input.memory.id, sampled)?;
         if id == MemoryId::nil() {
             return Err(StorageError::InvalidMutation("nil memory ID".into()));
         }
@@ -215,11 +219,7 @@ impl MetadataStore {
             }
         }
         super::insertion::validate_insert_targets(&tx, &input.memory, ns.id, id, existing_edges)?;
-        let sampled = clock.now_millis();
         let created = input.memory.created_at.unwrap_or(sampled);
-        if chrono::DateTime::from_timestamp_millis(sampled).is_none() {
-            return Err(StorageError::InvalidMutation("invalid clock sample".into()));
-        }
         let vector_hash = hash_bytes(
             &normalized
                 .iter()

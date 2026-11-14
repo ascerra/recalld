@@ -128,6 +128,9 @@ decay_rate_multiplier = 0.0
             assert control.call('advance', params)['error']['code'] == 'INVALID_PARAMS'
         assert 'error' in control.call('advance', {'deltaMs': 9223372036854775807, 'deadlineMs': 30000})
         assert control.call('advance', {'deltaMs': 60000, 'deadlineMs': 30000})['result']['nowMillis'] == 1767225660000
+        runtime_initial = control.call('inspect', {})['result']
+        assert runtime_initial['runtimeState']['nowMillis'] == 1767225660000
+        assert runtime_initial['runtimeState']['allocation']['version'] == 1
         initial = inspect()
         barrier(initial)
         # Real actor work is admitted before the fixture provider blocks. A
@@ -162,6 +165,7 @@ decay_rate_multiplier = 0.0
         assert actor_done.is_set() and barrier_done.is_set()
         assert len(stored_values) == len(barrier_values) == 1
         stored = stored_values[0]
+        runtime_after_store = control.call('inspect', {})['result']['runtimeState']
         assert stored['createdAt'] == '2026-01-01 00:01:00 UTC', stored
         accepted_barrier = barrier_values[0]
         assert 'error' not in accepted_barrier, accepted_barrier
@@ -208,6 +212,7 @@ decay_rate_multiplier = 0.0
         assert child.returncode == 0, child.returncode
         return {'replay': index, 'passed': True, 'initial': initial, 'afterStore': after_store,
                 'afterExposure': exposed, 'afterFeedback': reinforced,
+                'storedId': stored['id'], 'runtimeInitial': runtime_initial['runtimeState'], 'runtimeAfterStore': runtime_after_store,
                 'acceptedBarrierWaitedForStore': True, 'controlEofExitSeconds': time.monotonic() - started, 'command': command}
     finally:
         save(root / 'transcript.json', log)
@@ -342,7 +347,9 @@ def main():
     try:
         negatives = negative_launches(args.binary.resolve(), args.output, f'http://127.0.0.1:{server.server_port}/v1')
         runs = [episode(args.binary.resolve(), args.output, f'http://127.0.0.1:{server.server_port}/v1', n, hold, entered, resume) for n in range(1, 4)]
-        save(args.output / 'summary.json', {'claim': 'same-core private barrier diagnostic; no reset/v2/A6 completion',
+        projections = [{k: run[k] for k in ('initial', 'afterStore', 'afterExposure', 'afterFeedback', 'storedId', 'runtimeInitial', 'runtimeAfterStore')} for run in runs]
+        assert projections[0] == projections[1] == projections[2], 'owned allocation/time projection drift'
+        save(args.output / 'summary.json', {'claim': 'same-core frozen clock/allocation diagnostic; matching projections are not whole-state reset/replay; no v2/A6 completion',
               'binarySha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(), 'episodes': runs, 'constructorNegatives': negatives})
     finally:
         save(args.output / 'embedding-requests.json', requests)

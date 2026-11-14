@@ -626,6 +626,7 @@ impl MetadataStore {
             super::purge::record_next(
                 &tx,
                 progress,
+                self.ids.as_ref(),
                 crate::storage::purge::PurgeStage::Deleting,
                 &removed,
                 deletes.len(),
@@ -633,7 +634,7 @@ impl MetadataStore {
         } else if let Some(child) = child {
             super::batch::record_child(&tx, child, ctx, hash, outcome)?
         } else {
-            control::record_receipt(&tx, ctx, hash, outcome)?
+            self.record_receipt(&tx, ctx, hash, outcome)?
         };
         if let RecordMutation::LifecyclePatched { before, after } = &mutation {
             super::removal_ledger::record_change(

@@ -218,7 +218,7 @@ impl MetadataStore {
             catalog.insert(key.as_str(), bytes.as_slice())?;
             catalog.insert("active", control::encode(&descriptor.id)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             &ctx,
             hash,

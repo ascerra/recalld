@@ -22,6 +22,7 @@ pub mod edges;
 pub mod engine;
 pub mod error;
 pub mod fsync;
+pub(crate) mod ids;
 pub mod indexes;
 pub mod insertion;
 pub mod lifecycle_migration;
