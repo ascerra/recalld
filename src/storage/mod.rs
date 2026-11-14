@@ -30,6 +30,7 @@ pub mod metadata;
 pub mod native_catalog;
 pub mod native_lifecycle;
 pub mod native_policy;
+pub mod native_maintenance;
 pub mod native_records;
 pub mod offline_snapshot;
 pub(crate) mod ownership;

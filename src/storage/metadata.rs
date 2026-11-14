@@ -15,6 +15,7 @@ pub(crate) mod namespace_state;
 mod native_catalog;
 mod native_lifecycle;
 mod native_policy;
+mod native_maintenance;
 mod native_records;
 mod observation;
 pub(crate) mod purge;

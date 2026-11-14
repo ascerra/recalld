@@ -240,6 +240,12 @@ pub enum MutationOutcome {
     NativeNamespaceCreated {
         transition: super::native_catalog::NativeNamespaceCreated,
     },
+    NativePhaseMaterialized {
+        transition: super::native_maintenance::NativePhaseWrite,
+    },
+    NativeMemoryHardDeleted {
+        transition: super::native_maintenance::NativeHardDeleteWrite,
+    },
     NativeMemoryInserted {
         transition: super::native_records::NativeRecordWrite,
     },
@@ -468,6 +474,8 @@ pub(crate) fn validate_existing(
                 | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
                 | MutationOutcome::LifecycleFeedbackApplied { .. }
+                | MutationOutcome::NativePhaseMaterialized { .. }
+                | MutationOutcome::NativeMemoryHardDeleted { .. }
                 | MutationOutcome::NativeMemoryInserted { .. }
                 | MutationOutcome::NativeMemoryTombstoned { .. }
         ) && state.control_schema_version != 2
@@ -645,6 +653,12 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::NativeNamespaceCreated { transition } => {
             transition.validate(&stored.receipt)?
         }
+        MutationOutcome::NativePhaseMaterialized { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeMemoryHardDeleted { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeMemoryInserted { transition } => {
             transition.validate(&stored.receipt, true)?
         }
@@ -752,6 +766,8 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::NativeNamespacePolicyUnchanged { .. }
         | MutationOutcome::NativeNamespacePolicyUpdated { .. }
         | MutationOutcome::NativeNamespaceCreated { .. }
+        | MutationOutcome::NativePhaseMaterialized { .. }
+        | MutationOutcome::NativeMemoryHardDeleted { .. }
         | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
