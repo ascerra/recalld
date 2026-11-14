@@ -317,12 +317,49 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
         ] {
             let result = query
                 .search_with_semantics(
-                    serde_json::from_value(body).unwrap(),
+                    serde_json::from_value(body.clone()).unwrap(),
                     crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
                 )
                 .await
                 .unwrap();
             assert!(result.response.results.iter().any(|r| r.memory_id == id));
+            let target = f
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .canonical;
+            let coherent = query
+                .search_coherent_read_only(
+                    &publisher,
+                    Arc::new(crate::rif::RifEngine::new(Default::default())),
+                    serde_json::from_value(body).unwrap(),
+                    crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
+                    std::time::Instant::now() + std::time::Duration::from_secs(10),
+                )
+                .await
+                .unwrap();
+            assert_eq!(coherent.read_generation, target);
+            assert!(
+                coherent
+                    .response
+                    .response
+                    .results
+                    .iter()
+                    .any(|r| r.memory_id == id)
+            );
+            assert!(
+                publisher
+                    .readiness_barrier(
+                        target,
+                        std::time::Instant::now() + std::time::Duration::from_secs(10)
+                    )
+                    .await
+                    .unwrap()
+                    .ready
+            );
         }
         assert_eq!(bytes(&d.path), before, "false-mode canonical bytes changed");
         assert_eq!(
@@ -335,6 +372,21 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
                 .pending,
             0
         );
+        if reopen {
+            f.storage.read().unwrap().mark_unavailable();
+            let result = query.search_coherent_read_only(
+                &publisher, Arc::new(crate::rif::RifEngine::new(Default::default())),
+                serde_json::from_value(json!({"namespace":"native", "queryEmbedding":[1.,0.,0.,0.], "recordAccess":false})).unwrap(),
+                crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
+                std::time::Instant::now() + std::time::Duration::from_secs(10),
+            ).await;
+            assert!(result.is_err());
+            assert_eq!(
+                bytes(&d.path),
+                before,
+                "poison rejection changed canonical bytes"
+            );
+        }
         drop((api, bridge, query, publisher));
         root = f.close();
         inspect_schema(&d.path).unwrap();
@@ -428,7 +480,10 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
     assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
     *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
     let failure = publisher.complete().await.unwrap_err();
-    assert!(matches!(failure,StorageError::CommittedMutation{receipt,..} if *receipt==forgotten));
+    let StorageError::CommittedMutation { receipt, .. } = failure else {
+        panic!("publication failure lost full committed receipt: {failure:?}");
+    };
+    assert_eq!(*receipt, forgotten);
     assert!(
         !f.storage
             .read()

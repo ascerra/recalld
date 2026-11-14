@@ -747,6 +747,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         super::effects::crash_point("after_batch_commit");
         Ok(())
     }

@@ -42,6 +42,10 @@ pub enum StorageError {
     #[error("IDEMPOTENCY_CONFLICT")]
     IdempotencyConflict,
 
+    /// A well-formed caller selector conflicts with the canonical binding.
+    #[error("EMBEDDING_PROFILE_MISMATCH")]
+    EmbeddingProfileMismatch,
+
     #[error("NAMESPACE_MISMATCH")]
     MutationNamespaceMismatch,
 

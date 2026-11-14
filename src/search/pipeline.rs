@@ -19,6 +19,9 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 
 #[path = "diagnostics.rs"]
 mod diagnostics;
+#[path = "read_view.rs"]
+mod read_view;
+pub use read_view::CoherentSearchResponse;
 #[path = "strength.rs"]
 mod strength;
 use strength::StrengthContext;
@@ -138,6 +141,25 @@ pub trait RecordCache: Send + Sync {
 /// On-disk metadata storage fallback.
 #[async_trait::async_trait]
 pub trait MetadataStore: Send + Sync {
+    /// Immutable/offline adapters have no owned mutable core. A parent cannot
+    /// cross silently into such an adapter or another owner.
+    fn accept_work(
+        &self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::work::WorkTicket>> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "metadata adapter cannot inherit owned work".into(),
+            ));
+        }
+        Ok(None)
+    }
+    fn finish_work(&self, work: crate::storage::work::WorkTicket) {
+        // An adapter returning Some must implement known completion. Default
+        // drop retains unresolved work rather than manufacturing readiness.
+        drop(work);
+    }
+
     /// Internal effects admission stamp, not a canonical generation/read view.
     async fn effects_stamp(&self) -> Result<u64> {
         Ok(0)
@@ -179,6 +201,32 @@ pub struct RifSuppression {
 /// Records access events on memories.
 #[async_trait::async_trait]
 pub trait AccessRecorder: Send + Sync {
+    async fn record_access_batch_at_with_work(
+        &self,
+        _accesses: &[(MemoryId, AccessKind)],
+        _scope: Option<&crate::storage::control::ExposureScope>,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        Err(SearchError::Unavailable(
+            "access recorder cannot preserve sampled query clock".into(),
+        ))
+    }
+
+    async fn record_access_batch_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "access recorder cannot inherit owned work".into(),
+            ));
+        }
+        self.record_access_batch(accesses, scope).await
+    }
+
     /// Record that a memory was accessed.
     async fn record_access(
         &self,
@@ -389,6 +437,10 @@ const FTS_ONLY_RATE: f32 = 0.3;
 /// Holds `Arc` references to all subsystems. Cheap to clone, safe to
 /// share across request handlers.
 pub struct QueryEngine {
+    coherent_owner: Option<(
+        crate::derived_completion::DerivedCompletion,
+        Arc<crate::rif::RifEngine>,
+    )>,
     clock: Arc<dyn crate::time::Clock>,
     decay_policy: crate::decay::DecayConfig,
     decay_multiplier: f64,
@@ -415,6 +467,49 @@ pub struct QueryEngine {
 }
 
 impl QueryEngine {
+    pub(crate) fn accept_work(
+        &self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::work::WorkTicket>> {
+        self.meta_store.accept_work(parent)
+    }
+    pub(crate) fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
+        if let Some(work) = work {
+            self.meta_store.finish_work(work);
+        }
+    }
+
+    pub(crate) async fn prepare_search_with_work(
+        &self,
+        query: SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<SearchResponse> {
+        Ok(self
+            .search_checked_with_work(query, RetrievalSemantics::V1, true, parent)
+            .await?
+            .response)
+    }
+    pub(crate) async fn search_with_work(
+        &self,
+        query: SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<SearchResponse> {
+        Ok(self
+            .search_checked_with_work(query, RetrievalSemantics::V1, false, parent)
+            .await?
+            .response)
+    }
+    pub(crate) async fn prepare_similar_filtered_with_work(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<SearchResult>> {
+        self.similar_with_access_checked_with_work(id, k, min_score, requested_access, true, parent)
+            .await
+    }
     /// Create a new QueryEngine with all subsystem dependencies.
     pub fn new(
         namespace_resolver: Arc<dyn NamespaceResolver>,
@@ -429,6 +524,7 @@ impl QueryEngine {
         access_recorder: Arc<dyn AccessRecorder>,
     ) -> Self {
         Self {
+            coherent_owner: None,
             clock: Arc::new(crate::time::SystemClock),
             decay_policy: crate::decay::DecayConfig::default(),
             decay_multiplier: 1.0,
@@ -509,11 +605,28 @@ impl QueryEngine {
         semantics: RetrievalSemantics,
         defer_recording: bool,
     ) -> Result<SemanticsResponse> {
-        let stamp = self.meta_store.effects_stamp().await?;
-        let observed = self
-            .search_admitted(query, semantics, defer_recording)
-            .await?;
-        observed.finish(self.check_effects_stamp(stamp).await)
+        self.search_checked_with_work(query, semantics, defer_recording, None)
+            .await
+    }
+
+    pub(crate) async fn search_checked_with_work(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<SemanticsResponse> {
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let stamp = self.meta_store.effects_stamp().await?;
+            let observed = self
+                .search_admitted(query, semantics, defer_recording, work.as_ref())
+                .await?;
+            observed.finish(self.check_effects_stamp(stamp).await)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 
     async fn check_effects_stamp(&self, stamp: u64) -> Result<()> {
@@ -534,6 +647,7 @@ impl QueryEngine {
         mut query: SearchQuery,
         semantics: RetrievalSemantics,
         defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Observed<SemanticsResponse>> {
         let mut diagnostics = SemanticsDiagnostics::new(semantics);
         let pipeline_start = Instant::now();
@@ -875,6 +989,7 @@ impl QueryEngine {
                     namespace: ns_config.name.clone(),
                     source: None,
                 },
+                parent,
             )
             .await?
         } else {
@@ -1270,17 +1385,33 @@ impl QueryEngine {
         id: MemoryId,
         record_access: bool,
     ) -> Result<Option<MemoryResponse>> {
-        let stamp = self.meta_store.effects_stamp().await?;
-        let observed = self
-            .get_memory_with_access_admitted(id, record_access)
-            .await?;
-        observed.finish(self.check_effects_stamp(stamp).await)
+        self.get_memory_with_work(id, record_access, None).await
+    }
+
+    pub(crate) async fn get_memory_with_work(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<MemoryResponse>> {
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let stamp = self.meta_store.effects_stamp().await?;
+            let observed = self
+                .get_memory_with_access_admitted(id, record_access, work.as_ref())
+                .await?;
+            observed.finish(self.check_effects_stamp(stamp).await)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 
     async fn get_memory_with_access_admitted(
         &self,
         id: MemoryId,
         record_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Observed<Option<MemoryResponse>>> {
         let Some(mut record) = self.meta_store.get(&id).await? else {
             return Ok(Observed::unobserved(None));
@@ -1300,12 +1431,13 @@ impl QueryEngine {
         context.apply(&mut record)?;
 
         let receipts = if record_access && record.phase != DecayPhase::Tombstone {
-            self.record_exposures(
+            self.record_exposures_with_work(
                 &[(id, AccessKind::DirectRetrieval)],
                 crate::storage::control::ExposureScope {
                     namespace: namespace.name.clone(),
                     source: Some(id),
                 },
+                parent,
             )
             .await?
         } else {
@@ -1388,11 +1520,44 @@ impl QueryEngine {
         requested_access: bool,
         defer_recording: bool,
     ) -> Result<Vec<SearchResult>> {
-        let stamp = self.meta_store.effects_stamp().await?;
-        let observed = self
-            .similar_with_access_admitted(id, k, min_score, requested_access, defer_recording)
-            .await?;
-        observed.finish(self.check_effects_stamp(stamp).await)
+        self.similar_with_access_checked_with_work(
+            id,
+            k,
+            min_score,
+            requested_access,
+            defer_recording,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn similar_with_access_checked_with_work(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<SearchResult>> {
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let stamp = self.meta_store.effects_stamp().await?;
+            let observed = self
+                .similar_with_access_admitted(
+                    id,
+                    k,
+                    min_score,
+                    requested_access,
+                    defer_recording,
+                    work.as_ref(),
+                )
+                .await?;
+            observed.finish(self.check_effects_stamp(stamp).await)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 
     async fn similar_with_access_admitted(
@@ -1402,6 +1567,7 @@ impl QueryEngine {
         min_score: Option<f32>,
         record_access: bool,
         defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Observed<Vec<SearchResult>>> {
         let k = k.min(SearchQuery::MAX_USER_LIMIT);
         let mut record = self
@@ -1496,12 +1662,13 @@ impl QueryEngine {
             .collect();
 
         let receipts = if context.requested_record_access && !defer_recording {
-            self.record_similar_accesses(
+            self.record_similar_accesses_with_work(
                 &results.iter().map(|r| r.memory_id).collect::<Vec<_>>(),
                 crate::storage::control::ExposureScope {
                     namespace: namespace.name.clone(),
                     source: Some(id),
                 },
+                parent,
             )
             .await?
         } else {
@@ -1520,27 +1687,44 @@ impl QueryEngine {
         ids: &[MemoryId],
         scope: crate::storage::control::ExposureScope,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
-        let mut seen = std::collections::HashSet::new();
-        // Consumer preflight only: a schema-aware observation writer must also
-        // enforce this under its publication guard on the later A3 join.
-        let records = self.meta_store.get_batch(ids).await?;
-        if records.iter().any(|r| {
-            r.lifecycle.as_ref().is_some_and(|fields| {
-                fields.lifecycle_version
-                    == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
-            })
-        }) {
-            return Err(SearchError::Unavailable(
-                "explicit-feedback exposure writer unavailable".into(),
-            ));
+        self.record_similar_accesses_with_work(ids, scope, None)
+            .await
+    }
+
+    pub(crate) async fn record_similar_accesses_with_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let mut seen = std::collections::HashSet::new();
+            // Consumer preflight only: a schema-aware observation writer must also
+            // enforce this under its publication guard on the later A3 join.
+            let records = self.meta_store.get_batch(ids).await?;
+            if records.iter().any(|r| {
+                r.lifecycle.as_ref().is_some_and(|fields| {
+                    fields.lifecycle_version
+                        == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+                })
+            }) {
+                return Err(SearchError::Unavailable(
+                    "explicit-feedback exposure writer unavailable".into(),
+                ));
+            }
+            let accesses: Vec<_> = ids
+                .iter()
+                .copied()
+                .filter(|id| seen.insert(*id))
+                .map(|id| (id, AccessKind::AssociativeRetrieval))
+                .collect();
+            self.record_exposures_with_work(&accesses, scope, work.as_ref())
+                .await
         }
-        let accesses: Vec<_> = ids
-            .iter()
-            .copied()
-            .filter(|id| seen.insert(*id))
-            .map(|id| (id, AccessKind::AssociativeRetrieval))
-            .collect();
-        self.record_exposures(&accesses, scope).await
+        .await;
+        self.finish_work(work);
+        result
     }
 
     // =====================================================================
@@ -1753,6 +1937,7 @@ impl QueryEngine {
         &self,
         candidates: &[Candidate],
         scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         let accesses: Vec<(MemoryId, AccessKind)> = candidates
             .iter()
@@ -1766,7 +1951,8 @@ impl QueryEngine {
             })
             .collect();
 
-        self.record_exposures(&accesses, scope).await
+        self.record_exposures_with_work(&accesses, scope, parent)
+            .await
     }
 
     /// Record the final caller-visible set after any outer hydration/filtering.
@@ -1776,12 +1962,66 @@ impl QueryEngine {
         accesses: &[(MemoryId, AccessKind)],
         scope: crate::storage::control::ExposureScope,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_with_work(accesses, scope, None).await
+    }
+
+    pub(crate) async fn record_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(accesses, scope, None, parent)
+            .await
+    }
+    pub(crate) async fn record_exposures_at_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(accesses, scope, Some(sampled_at), parent)
+            .await
+    }
+    async fn record_exposures_sampled(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         if accesses.is_empty() {
             return Ok(Vec::new());
         }
-        self.access_recorder
-            .record_access_batch(accesses, Some(&scope))
-            .await
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let receipts = match sampled_at {
+                Some(at) => {
+                    self.access_recorder
+                        .record_access_batch_at_with_work(accesses, Some(&scope), at, work.as_ref())
+                        .await?
+                }
+                None => {
+                    self.access_recorder
+                        .record_access_batch_with_work(accesses, Some(&scope), work.as_ref())
+                        .await?
+                }
+            };
+            let observed = Observed {
+                value: (),
+                receipts,
+            }
+            .publish_derived(
+                self.coherent_owner.as_ref().map(|(owner, _)| owner),
+                work.as_ref(),
+            )
+            .await?;
+            Ok(observed.receipts)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 }
 
@@ -2520,7 +2760,7 @@ mod tests {
     impl NamespaceResolver for SearchFixture {
         async fn resolve(&self, _name: &str) -> Result<NamespaceConfig> {
             let mut config = NamespaceConfig::default_namespace(1_700_000_000_000);
-            config.embedding_dim = 2; // Matches this fixture's actual embedding provider.
+            config.embedding_dim = 2; // Actual fixture provider width.
             Ok(config)
         }
     }

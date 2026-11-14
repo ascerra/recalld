@@ -18,7 +18,11 @@ pub(crate) mod native_graph;
 mod native_lifecycle;
 pub(crate) mod native_records;
 mod native_store;
+mod native_store_profile;
+pub(crate) use native_store_profile::NativeStoreProfileResolution;
 mod observation;
+mod publication;
+pub(crate) use publication::CanonicalReadView;
 pub(crate) mod purge;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
@@ -91,6 +95,7 @@ pub struct MetadataStore {
     db: Database,
     native_lifecycle_only: bool,
     work_tracker: WorkTracker,
+    view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
     unavailable: std::sync::atomic::AtomicBool,
     purge_pending: std::sync::atomic::AtomicBool,
     pub(crate) canonical_pending: std::sync::atomic::AtomicBool,
@@ -98,6 +103,8 @@ pub struct MetadataStore {
     effects_epoch: std::sync::atomic::AtomicU64,
     #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
+    pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
@@ -233,6 +240,9 @@ impl MetadataStore {
             db,
             native_lifecycle_only,
             work_tracker: WorkTracker::new(store_id),
+            view_publication: std::sync::Arc::new(
+                super::publication::PublicationRegistry::default(),
+            ),
             unavailable: std::sync::atomic::AtomicBool::new(false),
             purge_pending: std::sync::atomic::AtomicBool::new(false),
             canonical_pending: std::sync::atomic::AtomicBool::new(false),
@@ -240,6 +250,8 @@ impl MetadataStore {
             effects_epoch: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             observation_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            tombstone_publication_fault: std::sync::atomic::AtomicBool::new(false),
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
@@ -307,7 +319,9 @@ impl MetadataStore {
         tx.commit().map_err(|e| {
             self.mark_unavailable();
             StorageError::RedbCommit(e)
-        })
+        })?;
+        self.view_publication.canonical_committed();
+        Ok(())
     }
 
     fn ensure_legacy_operation(&self) -> Result<(), StorageError> {

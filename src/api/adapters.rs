@@ -92,6 +92,82 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     {
         crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
     }
+    fn accept_work(
+        &self,
+    ) -> Result<Option<crate::storage::work::WorkTicket>, crate::search::SearchError> {
+        self.query_engine.accept_work(None)
+    }
+    fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
+        self.query_engine.finish_work(work);
+    }
+    async fn prepare_coherent_search_with_work(
+        &self,
+        query: state::SearchQuery,
+        include_embeddings: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSearchResponse>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_coherent_payload(
+                Self::pipeline_query(query)?,
+                include_embeddings,
+                false,
+                parent,
+            )
+            .await
+    }
+
+    async fn prepare_search_with_work(
+        &self,
+        query: state::SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        self.search_inner(query, true, parent).await
+    }
+    async fn prepare_similar_with_work(
+        &self,
+        id: MemoryId,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::search::PipelineSearchResult>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_similar_filtered_with_work(id, limit, min_score, requested_access, parent)
+            .await
+    }
+    async fn record_similar_with_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_similar_accesses_with_work(ids, scope, parent)
+            .await
+    }
+    async fn record_coherent_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_exposures_at_with_work(accesses, scope, sampled_at, parent)
+            .await
+    }
+
+    async fn record_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_exposures_with_work(accesses, scope, parent)
+            .await
+    }
+
     async fn embed_text(
         &self,
         text: &str,
@@ -113,13 +189,13 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         &self,
         query: state::SearchQuery,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        self.search_inner(query, false).await
+        self.search_inner(query, false, None).await
     }
     async fn prepare_search(
         &self,
         query: state::SearchQuery,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        self.search_inner(query, true).await
+        self.search_inner(query, true, None).await
     }
 
     async fn find_similar(
@@ -384,6 +460,17 @@ impl state::StorageEngine for StorageEngineAdapter {
         input: crate::storage::insertion::InsertMemory,
         generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
     ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
+        self.insert_memory_with_work(namespace_id, input, generated_embedding, None)
+            .await
+    }
+
+    async fn insert_memory_with_work(
+        &self,
+        namespace_id: NamespaceId,
+        input: crate::storage::insertion::InsertMemory,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -392,11 +479,13 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .insert(
+        .insert_reserved_with_work(
             crate::storage::control::MutationContext::unkeyed(namespace_id),
             input,
             generated_embedding,
             self.clock.now_millis(),
+            None,
+            parent,
         )
         .await
     }
@@ -404,6 +493,14 @@ impl state::StorageEngine for StorageEngineAdapter {
     async fn complete_insertion(
         &self,
         receipt: &crate::storage::control::WriteReceipt,
+    ) -> Result<(), crate::storage::StorageError> {
+        self.complete_insertion_with_work(receipt, None).await
+    }
+
+    async fn complete_insertion_with_work(
+        &self,
+        receipt: &crate::storage::control::WriteReceipt,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
@@ -413,7 +510,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .complete()
+        .complete_with_work(parent)
         .await
         .map_err(|source| crate::storage::StorageError::CommittedMutation {
             receipt: Box::new(receipt.clone()),
@@ -490,6 +587,15 @@ impl state::StorageEngine for StorageEngineAdapter {
         id: MemoryId,
         namespace: Option<&str>,
     ) -> Result<bool, crate::storage::StorageError> {
+        self.delete_memory_with_work(id, namespace, None).await
+    }
+
+    async fn delete_memory_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<bool, crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -498,7 +604,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .forget(id, namespace)
+        .forget_with_work(id, namespace, parent)
         .await
     }
 
@@ -937,7 +1043,15 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
     }
 
     async fn tombstone_node(&self, id: MemoryId) -> Result<(), crate::graph::GraphError> {
-        let work = crate::storage::work::accept_work(&self.storage, None)
+        self.tombstone_node_with_work(id, None).await
+    }
+
+    async fn tombstone_node_with_work(
+        &self,
+        id: MemoryId,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), crate::graph::GraphError> {
+        let work = crate::storage::work::accept_work(&self.storage, parent)
             .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let result = async {
             let mut graph = self.graph.write().await;
@@ -978,17 +1092,38 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         entities: &[String],
         created_at: i64,
     ) {
+        if let Err(error) = self
+            .post_creation_links_with_work(
+                memory_id,
+                namespace_id,
+                embedding,
+                tags,
+                entities,
+                created_at,
+                None,
+            )
+            .await
+        {
+            tracing::warn!(%error, "post-creation graph admission rejected");
+        }
+    }
+
+    async fn post_creation_links_with_work(
+        &self,
+        memory_id: MemoryId,
+        namespace_id: NamespaceId,
+        embedding: &[f32],
+        tags: &[String],
+        entities: &[String],
+        created_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), crate::graph::GraphError> {
         if !self.config.graph.autolink_enabled {
-            return;
+            return Ok(());
         }
 
-        let work = match crate::storage::work::accept_work(&self.storage, None) {
-            Ok(work) => work,
-            Err(error) => {
-                tracing::warn!(%error,"post-creation graph admission rejected");
-                return;
-            }
-        };
+        let work = crate::storage::work::accept_work(&self.storage, parent)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let threshold = self.config.graph.auto_link_threshold as f32;
         let max_links = self.config.graph.max_auto_links;
 
@@ -1079,6 +1214,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
             }
         }
         crate::storage::work::finish_work(&self.storage, work);
+        Ok(())
     }
 }
 
@@ -1166,7 +1302,17 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         quality: u8,
         namespace: Option<&str>,
     ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
-        let outcome = crate::decay::storage_adapter::reinforce(
+        self.reinforce_with_work(id, quality, namespace, None).await
+    }
+
+    async fn reinforce_with_work(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
+        let outcome = crate::decay::storage_adapter::reinforce_with_completion(
             self.storage.clone(),
             self.cache.clone(),
             id,
@@ -1174,6 +1320,8 @@ impl state::FsrsEngine for FsrsEngineAdapter {
             self.config.decay.decay_rate_multiplier,
             self.clock.now_millis(),
             namespace.map(str::to_owned),
+            parent,
+            self.completion.as_ref(),
         )
         .await;
         let plan = outcome?;
@@ -1743,11 +1891,9 @@ mod tests {
 }
 
 impl SearchPipelineAdapter {
-    async fn search_inner(
-        &self,
+    fn pipeline_query(
         query: state::SearchQuery,
-        defer_recording: bool,
-    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+    ) -> Result<crate::search::SearchQuery, crate::search::SearchError> {
         // Convert API-layer SearchQuery to the pipeline's SearchQuery.
         let (text, query_embedding) = match query.query {
             state::QueryInput::Text(t) => (Some(t), None),
@@ -1781,7 +1927,7 @@ impl SearchPipelineAdapter {
             })
             .unwrap_or_default();
 
-        let pipeline_query = crate::search::SearchQuery {
+        Ok(crate::search::SearchQuery {
             record_access: query.record_access,
             query_embedding,
             text,
@@ -1806,11 +1952,24 @@ impl SearchPipelineAdapter {
             time_range_start: query.time_range_start, // Issue 3: pass time range
             time_range_end: query.time_range_end,     // Issue 3: pass time range
             entities: query.entities.clone(),         // Issue 4: pass entities
-        };
+        })
+    }
+
+    async fn search_inner(
+        &self,
+        query: state::SearchQuery,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        let pipeline_query = Self::pipeline_query(query.clone())?;
         let response = if defer_recording {
-            self.query_engine.prepare_search(pipeline_query).await?
+            self.query_engine
+                .prepare_search_with_work(pipeline_query, parent)
+                .await?
         } else {
-            self.query_engine.search(pipeline_query).await?
+            self.query_engine
+                .search_with_work(pipeline_query, parent)
+                .await?
         };
         Ok(response
             .results

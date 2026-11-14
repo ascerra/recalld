@@ -1300,10 +1300,6 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "batch_label_tests.rs"]
-mod batch_label_tests;
-
-#[cfg(test)]
 #[path = "read_only_tests.rs"]
 mod read_only_tests;
 
@@ -1362,3 +1358,6 @@ pub(crate) async fn native_batch_method_test_rpc(
 #[cfg(test)]
 #[path = "coverage_tests.rs"]
 mod coverage_tests;
+#[cfg(test)]
+#[path = "batch_label_tests.rs"]
+mod batch_label_tests;

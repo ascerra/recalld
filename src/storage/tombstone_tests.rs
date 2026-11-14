@@ -525,7 +525,13 @@ async fn actual_batch_tool_marks_committed_failure_as_error_and_stops_later_item
     let fixture = Fixture::new();
     let first = fixture.insert_memory().await;
     let later = fixture.insert_memory().await;
-    *fixture.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM + 1);
+    fixture
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .tombstone_publication_fault
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.storage = std::sync::Arc::new(fixture.storage_adapter());
     let result = crate::mcp::tools::dispatch_tool(
@@ -554,5 +560,32 @@ async fn actual_batch_tool_marks_committed_failure_as_error_and_stops_later_item
         crate::storage::batch::BatchStatus::NotAttempted
     );
     assert_eq!(fixture.record(first).unwrap().phase, DecayPhase::Tombstone);
+    assert_eq!(fixture.record(later).unwrap().phase, DecayPhase::Full);
+}
+
+#[tokio::test]
+async fn actual_batch_invalid_starting_view_rejects_before_any_child_commit() {
+    let fixture = Fixture::new();
+    let first = fixture.insert_memory().await;
+    let later = fixture.insert_memory().await;
+    *fixture.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM + 1);
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = std::sync::Arc::new(fixture.storage_adapter());
+    let result = crate::mcp::tools::dispatch_tool(
+        &bridge,
+        "forget_memories",
+        serde_json::json!({"ids": [first.to_string(), later.to_string()]}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
+    let response: serde_json::Value = serde_json::from_str(text).unwrap();
+    let batch: crate::storage::batch::BatchOutcome =
+        serde_json::from_value(response["batch"].clone()).unwrap();
+    assert!(batch.items.iter().all(|item| item.status
+        == crate::storage::batch::BatchStatus::NotAttempted
+        && item.receipt.is_none()
+        && !item.ready));
+    assert_eq!(fixture.record(first).unwrap().phase, DecayPhase::Full);
     assert_eq!(fixture.record(later).unwrap().phase, DecayPhase::Full);
 }

@@ -420,3 +420,851 @@ async fn linked_producer_unavailable_provider_leaves_only_reservation_and_resume
     assert!(!transition.edges.is_empty());
     assert_eq!(p.calls.load(Ordering::SeqCst), 1);
 }
+
+fn single_input(d: &Data, generated: bool) -> crate::storage::native_store::NativeStoreInput {
+    let mut insert = input(d);
+    if generated {
+        insert.memory.embedding = None;
+        insert.embedding_profile = None;
+    }
+    crate::storage::native_store::NativeStoreInput {
+        insert,
+        check_duplicates: true,
+    }
+}
+fn single_context(f: &Fixture, d: &Data, key: &str) -> MutationContext {
+    MutationContext {
+        contract_version: 2,
+        store_id: Some(f.storage.read().unwrap().control_state().unwrap().store_id),
+        idempotency_key: Some(key.into()),
+        ..MutationContext::unkeyed(d.ns)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_replay_preserves_receipt_without_provider_settings_clock_or_batch() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let key = single_context(&f, &d, "single");
+    let input = single_input(&d, true);
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let out = a
+        .store_native_single(
+            key.clone(),
+            input.clone(),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        out.receipt.committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .lookup_operation(
+                out.receipt.store_id,
+                MutationScope::Namespace(d.ns),
+                out.receipt.operation_id
+            )
+            .unwrap(),
+        Some(out.receipt.clone())
+    );
+    assert!(out.advisory_requested);
+    assert!(out.advisory.read_generation.is_some());
+    assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    let mut unavailable = provider(&d);
+    Arc::get_mut(&mut unavailable).unwrap().profile = None;
+    let replay_adapter = adapter(&f, unavailable.clone(), clock.clone(), config);
+    let calls = clock.0.load(Ordering::SeqCst);
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    let replay = replay_adapter
+        .store_native_single(
+            key.clone(),
+            input.clone(),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&out.receipt));
+    assert_eq!(unavailable.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(unavailable.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), state);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_batch_items()
+            .unwrap(),
+        0
+    );
+    let mut changed = input;
+    changed.check_duplicates = false;
+    assert!(matches!(
+        replay_adapter
+            .store_native_single(key, changed, NativePolicyInputs::default(), None)
+            .await,
+        Err(StorageError::IdempotencyConflict)
+    ));
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), state);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_publication_failure_carries_exact_receipt_and_reopens_without_provider() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().corrupt = Some(f.vector_index.clone());
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let key = single_context(&f, &d, "single-fault");
+    let input = single_input(&d, true);
+    let error = a
+        .store_native_single(
+            key.clone(),
+            input.clone(),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .err()
+        .unwrap();
+    let StorageError::CommittedMutation { receipt, .. } = error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .lookup_operation(
+                receipt.store_id,
+                MutationScope::Namespace(d.ns),
+                receipt.operation_id
+            )
+            .unwrap()
+            .unwrap(),
+        *receipt
+    );
+    assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+    drop(a);
+    let root = f.close();
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let replay = a
+        .store_native_single(key, input, NativePolicyInputs::default(), None)
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&receipt));
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 2);
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_close_waits_provider_then_graph_without_storage_inversion() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().entered = Some(entered.clone());
+    Arc::get_mut(&mut p).unwrap().release = Some(release.clone());
+    let a = adapter(&f, p, clock, Default::default());
+    let key = single_context(&f, &d, "single-close");
+    let input = single_input(&d, true);
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let task = tokio::spawn(async move {
+        a.store_native_single(key, input, NativePolicyInputs::default(), None)
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+        .await
+        .unwrap();
+    let graph = f.graph.clone().write_owned().await;
+    let gate = crate::derived_completion::publication_gate(&f.storage)
+        .await
+        .unwrap();
+    let closing = tracker.clone();
+    let drain = tokio::task::spawn_blocking(move || {
+        closing.close_and_drain(std::time::Instant::now() + std::time::Duration::from_secs(15))
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while tracker.status().admission_open {
+            tokio::task::yield_now().await
+        }
+    })
+    .await
+    .unwrap();
+    release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while gate.try_write().is_ok() {
+            tokio::task::yield_now().await
+        }
+    })
+    .await
+    .unwrap();
+    assert!(f.storage.try_write().is_ok());
+    drop(graph);
+    task.await.unwrap().unwrap();
+    let freeze = drain.await.unwrap().unwrap();
+    assert_eq!(tracker.status().pending, 0);
+    assert_eq!(tracker.status().unresolved, 0);
+    drop(freeze);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_provider_race_rejects_stale_plan_before_clock_or_allocation() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().entered = Some(entered.clone());
+    Arc::get_mut(&mut p).unwrap().release = Some(release.clone());
+    let a = adapter(&f, p, clock.clone(), Default::default());
+    let key = single_context(&f, &d, "stale-single");
+    let input = single_input(&d, true);
+    let task = tokio::spawn(async move {
+        a.store_native_single(key, input, NativePolicyInputs::default(), None)
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+        .await
+        .unwrap();
+    let other = adapter(&f, provider(&d), clock.clone(), Default::default());
+    other
+        .store_native_single(
+            single_context(&f, &d, "other-single"),
+            single_input(&d, false),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    let calls = clock.0.load(Ordering::SeqCst);
+    release.notify_one();
+    assert!(matches!(
+        task.await.unwrap(),
+        Err(StorageError::LifecycleConflict(_))
+    ));
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), state);
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+    assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_original_vector_bits_and_checked_empty_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let mut original = single_input(&d, false);
+    original.insert.memory.embedding = Some(vec![0., 2., 0., 0.]);
+    let key = single_context(&f, &d, "bits");
+    let out = a
+        .store_native_single(
+            key.clone(),
+            original.clone(),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(out.advisory_requested);
+    assert!(out.advisory.report.is_none());
+    assert!(out.advisory.read_generation.is_some());
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    for values in [vec![0., 1., 0., 0.], vec![-0., 2., 0., 0.]] {
+        let mut changed = original.clone();
+        changed.insert.memory.embedding = Some(values);
+        assert!(matches!(
+            a.store_native_single(key.clone(), changed, NativePolicyInputs::default(), None)
+                .await,
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(f.storage.read().unwrap().control_state().unwrap(), state);
+    }
+    let mut disabled = original;
+    disabled.check_duplicates = false;
+    let out = a
+        .store_native_single(
+            single_context(&f, &d, "disabled"),
+            disabled,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(!out.advisory_requested);
+    assert!(out.advisory.read_generation.is_none());
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_process_child() {
+    let Ok(path) = std::env::var("RECALLD_SINGLE_PATH") else {
+        return;
+    };
+    let d = Data {
+        path: path.into(),
+        ns: NamespaceId::new(std::env::var("RECALLD_SINGLE_NS").unwrap().parse().unwrap()),
+        parent: MemoryId::from_uuid(
+            std::env::var("RECALLD_SINGLE_PARENT")
+                .unwrap()
+                .parse()
+                .unwrap(),
+        ),
+        profile: crate::embedding::runtime::tests::profile(),
+    };
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(tempfile::tempdir().unwrap(), s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let a = adapter(&f, provider(&d), clock, Default::default());
+    a.store_native_single(
+        single_context(&f, &d, "process"),
+        single_input(&d, true),
+        NativePolicyInputs::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    panic!("process failed to exit at requested commit boundary");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_process_exit_reopens_one_receipt_and_frozen_links() {
+    for point in [
+        "before_metadata_commit",
+        "after_metadata_commit",
+        "after_edge_commit",
+        "after_canonical_ack",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let d = fixture(root.path());
+        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+        let s = open(&d, clock.clone());
+        let before = s.metadata().control_state().unwrap();
+        drop(s);
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "storage::metadata::native_records::tests::store_producers::native_single_process_child", "--nocapture"])
+            .env("RECALLD_SINGLE_PATH", &d.path)
+            .env("RECALLD_SINGLE_NS", d.ns.get().to_string())
+            .env("RECALLD_SINGLE_PARENT", d.parent.to_string())
+            .env("RECALLD_TEST_EFFECT_CRASH", point)
+            .output().unwrap();
+        assert_eq!(
+            child.status.code(),
+            Some(91),
+            "{point}: {}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        let s = open(&d, clock.clone());
+        let f = Fixture::from_open_engine(root, s.engine);
+        let mut p = provider(&d);
+        if point != "before_metadata_commit" {
+            Arc::get_mut(&mut p).unwrap().profile = None;
+        }
+        let a = adapter(&f, p.clone(), clock, Default::default());
+        let key = single_context(&f, &d, "process");
+        let first = a
+            .store_native_single(
+                key.clone(),
+                single_input(&d, true),
+                NativePolicyInputs::default(),
+                None,
+            )
+            .await
+            .unwrap();
+        let replay = a
+            .store_native_single(
+                key,
+                single_input(&d, true),
+                NativePolicyInputs::default(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.receipt, expected_replay(&first.receipt));
+        assert_eq!(
+            first.receipt.committed_generation,
+            before.committed_generation.next().unwrap()
+        );
+        assert_eq!(
+            p.calls.load(Ordering::SeqCst),
+            usize::from(point == "before_metadata_commit")
+        );
+        let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &first.receipt.outcome
+        else {
+            panic!()
+        };
+        assert!(!transition.edges.is_empty());
+        assert_eq!(
+            f.storage.read().unwrap().load_all_edges().unwrap().len(),
+            transition.edges.len()
+        );
+        assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 2);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_unknown_commit_retains_identity_and_unresolved_work_until_reopen() {
+    struct UnknownClock;
+    impl Clock for UnknownClock {
+        fn now_millis(&self) -> i64 {
+            crate::storage::metadata::effects::FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.set(true));
+            86_400_000
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default())
+        .with_clock(Arc::new(UnknownClock));
+    let key = single_context(&f, &d, "unknown-single");
+    let original = single_input(&d, true);
+    let error = a
+        .store_native_single(
+            key.clone(),
+            original.clone(),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .err()
+        .unwrap();
+    let StorageError::CommitOutcomeUnknown { operation_id, .. } = error else {
+        panic!("{error:?}")
+    };
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    assert!(tracker.status().unresolved > 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+    drop(a);
+    let root = f.close();
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let result = a
+        .store_native_single(key, original, NativePolicyInputs::default(), None)
+        .await
+        .unwrap();
+    assert_eq!(result.receipt.operation_id, operation_id);
+    assert!(result.receipt.replayed);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_scope_lineage_controls_do_not_replay_other_namespace_or_call_provider() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let key = single_context(&f, &d, "same-key");
+    let original = single_input(&d, false);
+    a.store_native_single(
+        key.clone(),
+        original.clone(),
+        NativePolicyInputs::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    for case in 0..3 {
+        let mut bad = key.clone();
+        match case {
+            0 => bad.scope = MutationScope::Namespace(NamespaceId::new(u32::MAX)),
+            1 => bad.scope = MutationScope::Catalog,
+            _ => bad.store_id = Some(uuid::Uuid::new_v4()),
+        }
+        assert!(
+            a.store_native_single(bad, original.clone(), NativePolicyInputs::default(), None)
+                .await
+                .is_err()
+        );
+        assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+    }
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+}
+
+// Run against the pre-profile-resolver runtime to retain a genuine historical
+// descriptor-input receipt. The later resolver must replay these exact bytes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_before_fixture() {
+    let Ok(output) = std::env::var("RECALLD_WRITE_PROFILE_BEFORE") else {
+        return;
+    };
+    let output = std::path::PathBuf::from(output);
+    std::fs::create_dir_all(&output).unwrap();
+    let root = tempfile::tempdir_in(&output).unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let a = adapter(&f, provider(&d), clock, Default::default());
+    let out = a
+        .store_native_single(
+            single_context(&f, &d, "profile-before"),
+            single_input(&d, false),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    let manifest = serde_json::json!({"path":d.path,"namespace":d.ns.get(),"parent":d.parent.to_string(),"profile":d.profile,"receipt":out.receipt});
+    std::fs::write(
+        output.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    drop(a);
+    let _retained = f.close().keep();
+}
+
+fn profile_wire_input(d: &Data, generated: bool) -> crate::storage::native_store::NativeStoreInput {
+    let mut input = single_input(d, generated);
+    input.insert.embedding_profile = None;
+    input
+}
+fn receipt_rows(f: &Fixture) -> Vec<(Vec<u8>, Vec<u8>)> {
+    use redb::ReadableTable;
+    let engine = f.storage.read().unwrap();
+    let tx = engine.meta_store().db.begin_read().unwrap();
+    tx.open_table(crate::storage::control::RECEIPTS)
+        .unwrap()
+        .iter()
+        .unwrap()
+        .map(|row| {
+            let (k, v) = row.unwrap();
+            (k.value().to_vec(), v.value().to_vec())
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_fresh_binding_replay_and_original_bits() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let mut key = single_context(&f, &d, "wire-profile");
+    key.expected_generation = Some(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+    );
+    let input = profile_wire_input(&d, false);
+    let profile_id = d.profile.profile_id().unwrap();
+    let out = a
+        .store_native_single_by_profile_id(
+            key.clone(),
+            input.clone(),
+            Some(profile_id.clone()),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &out.receipt.outcome else {
+        panic!()
+    };
+    let engine = f.storage.read().unwrap();
+    let row = engine.get_record(transition.memory_id).unwrap().unwrap();
+    assert_eq!(
+        engine.get_vector(d.ns, row.vector_slot).unwrap().unwrap(),
+        vec![1., 0., 0., 0.]
+    );
+    drop(engine);
+    let rows = receipt_rows(&f);
+    let calls = clock.0.load(Ordering::SeqCst);
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    let replay_adapter = adapter(&f, p.clone(), clock.clone(), config);
+    let replay = replay_adapter
+        .store_native_single_by_profile_id(
+            key.clone(),
+            input.clone(),
+            Some(profile_id.clone()),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&out.receipt));
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+    assert_eq!(receipt_rows(&f), rows);
+    for case in 0..4 {
+        let mut changed = input.clone();
+        let mut changed_id = profile_id.clone();
+        match case {
+            0 => changed.insert.memory.embedding = Some(vec![1., 0., 0., 0.]),
+            1 => changed.insert.memory.embedding = Some(vec![2., -0., 0., 0.]),
+            2 => changed_id = format!("ep1:{}", "0".repeat(64)),
+            _ => changed.check_duplicates = false,
+        }
+        assert!(matches!(
+            replay_adapter
+                .store_native_single_by_profile_id(
+                    key.clone(),
+                    changed,
+                    Some(changed_id),
+                    NativePolicyInputs::default(),
+                    None
+                )
+                .await,
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(receipt_rows(&f), rows);
+    }
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    let rows = receipt_rows(&f);
+    let id = d.profile.profile_id().unwrap();
+    for case in 0..7 {
+        let mut input = profile_wire_input(&d, false);
+        let mut selector = Some(id.clone());
+        match case {
+            0 => selector = None,
+            1 => input.insert.memory.embedding = None,
+            2 => input.insert.embedding_profile = Some(d.profile.clone()),
+            3 => selector = Some(format!("ep1:{}", "0".repeat(64))),
+            4 => selector = Some("not-a-profile".into()),
+            5 => input.insert.memory.embedding = Some(vec![0.; 4]),
+            _ => input.insert.memory.embedding = Some(vec![1.; 3]),
+        }
+        let error = a
+            .store_native_single_by_profile_id(
+                single_context(&f, &d, "bad-profile"),
+                input,
+                selector,
+                NativePolicyInputs::default(),
+                None,
+            )
+            .await
+            .err()
+            .unwrap();
+        if case == 3 {
+            assert!(matches!(error, StorageError::EmbeddingProfileMismatch));
+            assert_eq!(error.to_string(), "EMBEDDING_PROFILE_MISMATCH");
+        } else {
+            assert!(
+                matches!(error, StorageError::InvalidMutation(_)),
+                "{error:?}"
+            );
+        }
+        assert_eq!(state, f.storage.read().unwrap().control_state().unwrap());
+        assert_eq!(receipt_rows(&f), rows);
+        assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 1);
+    }
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    let generated = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "generated-profile"),
+            profile_wire_input(&d, true),
+            None,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(!generated.receipt.replayed);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_replays_genuine_before_fixture_bytes() {
+    let Ok(manifest) = std::env::var("RECALLD_READ_PROFILE_BEFORE") else {
+        return;
+    };
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(manifest).unwrap()).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("copied-native");
+    fn copy_dir(source: &std::path::Path, target: &std::path::Path) {
+        std::fs::create_dir(target).unwrap();
+        for entry in std::fs::read_dir(source).unwrap() {
+            let entry = entry.unwrap();
+            let to = target.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &to);
+            } else {
+                std::fs::copy(entry.path(), to).unwrap();
+            }
+        }
+    }
+    copy_dir(
+        std::path::Path::new(saved["path"].as_str().unwrap()),
+        &target,
+    );
+    let d = Data {
+        path: target,
+        ns: NamespaceId::new(saved["namespace"].as_u64().unwrap() as u32),
+        parent: MemoryId::from_uuid(saved["parent"].as_str().unwrap().parse().unwrap()),
+        profile: serde_json::from_value(saved["profile"].clone()).unwrap(),
+    };
+    let old: WriteReceipt = serde_json::from_value(saved["receipt"].clone()).unwrap();
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    let a = adapter(&f, p.clone(), clock.clone(), config);
+    let rows = receipt_rows(&f);
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    let replay = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "profile-before"),
+            profile_wire_input(&d, false),
+            Some(d.profile.profile_id().unwrap()),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&old));
+    assert_eq!(
+        receipt_rows(&f),
+        rows,
+        "old receipt bytes must not be rewritten"
+    );
+    assert_eq!(state, f.storage.read().unwrap().control_state().unwrap());
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_publication_error_preserves_exact_committed_receipt() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let key = single_context(&f, &d, "profile-publication");
+    let input = profile_wire_input(&d, false);
+    let id = Some(d.profile.profile_id().unwrap());
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let error = a
+        .store_native_single_by_profile_id(
+            key.clone(),
+            input.clone(),
+            id.clone(),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .err()
+        .unwrap();
+    let StorageError::CommittedMutation { receipt, .. } = error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .lookup_operation(
+                receipt.store_id,
+                MutationScope::Namespace(d.ns),
+                receipt.operation_id
+            )
+            .unwrap(),
+        Some(*receipt.clone())
+    );
+    let rows = receipt_rows(&f);
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    let replay = a
+        .store_native_single_by_profile_id(key, input, id, NativePolicyInputs::default(), None)
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&receipt));
+    assert_eq!(receipt_rows(&f), rows);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+}

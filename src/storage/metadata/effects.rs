@@ -818,6 +818,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         crash_point("after_metadata_commit");
         let mut phases = self.phase_index.write().unwrap_or_else(|e| e.into_inner());
         if let RecordMutation::LifecyclePatched { before, after } = &mutation {
@@ -1107,6 +1108,19 @@ pub(crate) fn validate_plan(
     Ok(())
 }
 
+#[cfg(test)]
+impl MetadataStore {
+    /// Instance-local probe, reached only after actual exposure commit/publication.
+    pub(crate) fn after_observation_probe(&self) {
+        match self.observation_fault.swap(0, Ordering::SeqCst) {
+            1 => self.mark_unavailable(),
+            2 => {
+                self.effects_epoch.fetch_add(1, Ordering::SeqCst);
+            }
+            _ => {}
+        }
+    }
+}
 fn native_proof(
     effect: &PendingEffects,
 ) -> Option<&crate::storage::native_records::NativeRecordWrite> {
@@ -1211,20 +1225,6 @@ fn validate_native_effect(effect: &PendingEffects, insertion: bool) -> Result<()
     }
     Ok(())
 }
-#[cfg(test)]
-impl MetadataStore {
-    /// Instance-local probe, reached only after actual exposure commit/publication.
-    pub(crate) fn after_observation_probe(&self) {
-        match self.observation_fault.swap(0, Ordering::SeqCst) {
-            1 => self.mark_unavailable(),
-            2 => {
-                self.effects_epoch.fetch_add(1, Ordering::SeqCst);
-            }
-            _ => {}
-        }
-    }
-}
-
 fn validate_native_store_effect(
     effect: &PendingEffects,
     proof: &crate::storage::native_store::NativeStoreWrite,
