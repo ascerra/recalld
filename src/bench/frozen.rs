@@ -12,6 +12,7 @@ use crate::time::{Clock, ManualClock};
 pub struct OwnedEvaluator {
     pub(super) core: Arc<crate::Recalld>,
     pub(super) controls: FrozenControls,
+    pub(super) fixture_ancestors: Vec<std::path::PathBuf>,
 }
 
 impl OwnedEvaluator {
@@ -32,7 +33,11 @@ impl OwnedEvaluator {
             .await?,
         );
         let controls = FrozenControls::new(core.derived_owner(), clock);
-        Ok(Self { core, controls })
+        Ok(Self {
+            core,
+            controls,
+            fixture_ancestors: Vec::new(),
+        })
     }
 
     pub fn core(&self) -> &Arc<crate::Recalld> {

@@ -32,6 +32,7 @@ struct Manifest {
     allocation: IdState,
     config: serde_json::Value,
     source_root: PathBuf,
+    ancestor_roots: Vec<PathBuf>,
     executable_sha256: String,
     cargo_lock_sha256: String,
     cache_policy: String,
@@ -161,6 +162,7 @@ impl OwnedEvaluator {
             allocation,
             config,
             source_root,
+            ancestor_roots: self.fixture_ancestors.clone(),
             executable_sha256: file_hash(&std::env::current_exe()?, deadline)?,
             cargo_lock_sha256: digest(include_bytes!("../../Cargo.lock")),
             cache_policy: CACHE_POLICY.into(),
@@ -248,23 +250,40 @@ impl OwnedEvaluator {
                 == parent,
             "restore outside fixture parent"
         );
-        let name = source.file_name().unwrap().to_string_lossy();
-        // Open existing lock files only. Do not create/repair anything in old root.
-        let lock_paths = [
-            parent.join(format!("{name}.recalld-owner.lock")),
-            source.join("recalld.lock"),
-        ];
+        let mut ancestor_roots = manifest.ancestor_roots.clone();
+        anyhow::ensure!(ancestor_roots.len() < 64, "fixture ancestor limit exceeded");
+        ancestor_roots.push(source.clone());
+        ancestor_roots.sort();
+        anyhow::ensure!(
+            ancestor_roots.windows(2).all(|pair| pair[0] != pair[1]),
+            "duplicate fixture ancestor"
+        );
         let mut old_owner = Vec::new();
-        for path in lock_paths {
+        for ancestor in &ancestor_roots {
             anyhow::ensure!(
-                std::fs::symlink_metadata(&path)?.file_type().is_file(),
-                "invalid owner lock"
+                ancestor.parent() == Some(parent) && ancestor.canonicalize()? == *ancestor,
+                "ancestor outside fixture parent"
             );
-            old_owner.push(OwnedFileLock::acquire(
-                std::fs::OpenOptions::new().write(true).open(path)?,
-            )?);
+            let name = ancestor.file_name().unwrap().to_string_lossy();
+            // Existing A1 locks only; no new registry or source initialization.
+            for path in [
+                parent.join(format!("{name}.recalld-owner.lock")),
+                ancestor.join("recalld.lock"),
+            ] {
+                anyhow::ensure!(
+                    std::fs::symlink_metadata(&path)?.file_type().is_file(),
+                    "invalid owner lock"
+                );
+                old_owner.push(OwnedFileLock::acquire(
+                    std::fs::OpenOptions::new().write(true).open(path)?,
+                )?);
+            }
         }
         let canonical = checkpoint_dir.join("canonical");
+        anyhow::ensure!(
+            std::fs::symlink_metadata(&canonical)?.file_type().is_dir(),
+            "nonregular canonical root"
+        );
         anyhow::ensure!(
             inventory(&canonical, deadline)? == manifest.files_sha256,
             "canonical file digest mismatch"
@@ -313,13 +332,21 @@ impl OwnedEvaluator {
         );
         drop(snapshot);
         check(deadline)?;
-        std::fs::rename(&target, &destination)?;
+        crate::storage::engine::rename_new_directory(&target, &destination)?;
         let clock = Arc::new(ManualClock::new(manifest.now_millis));
         let core = Arc::new(
             crate::Recalld::with_runtime_sources(config, clock.clone(), Box::new(ids)).await?,
         );
         let controls = FrozenControls::new(core.derived_owner(), clock);
-        let evaluator = Self { core, controls };
+        core.storage()
+            .write()
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .fixture_owners = old_owner;
+        let evaluator = Self {
+            core,
+            controls,
+            fixture_ancestors: ancestor_roots,
+        };
         let cache = evaluator.core.cache().clone();
         let runtime = tokio::runtime::Handle::current();
         evaluator
@@ -338,7 +365,6 @@ impl OwnedEvaluator {
                 Ok(())
             })
             .await?;
-        drop(old_owner);
         Ok(evaluator)
     }
 }

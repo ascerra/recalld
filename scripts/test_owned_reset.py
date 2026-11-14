@@ -157,14 +157,45 @@ autolink_enabled = false
             negative.append(label)
         finally:
             child.close()
+    existing = output / 'existing-destination'
+    existing.mkdir()
+    (existing / 'sentinel').write_bytes(b'preserve existing destination')
+    existing_before = files(existing)
+    child = Child(binary, config, existing, checkpoint)
+    try:
+        assert child.process.wait(timeout=15) != 0
+        assert files(existing) == existing_before
+        negative.append('existing-destination-unchanged')
+    finally:
+        child.close()
+    oversized = manifest_path.parent / 'oversized.json'
+    oversized.write_bytes(b' ' * (1024 * 1024 + 1))
+    child = Child(binary, config, output / 'oversized-manifest', {'manifest': str(oversized), 'sha256': hashlib.sha256(oversized.read_bytes()).hexdigest()})
+    try:
+        assert child.process.wait(timeout=15) != 0
+        assert not child.root.exists()
+        negative.append('bounded-manifest-rejected')
+    finally:
+        child.close()
     actual = []
+    nested_checkpoint = None
     for n in range(3):
-        child = Child(binary, config, output / f'restored-{n}', checkpoint)
+        restore_input = nested_checkpoint if n == 2 else checkpoint
+        child = Child(binary, config, output / f'restored-{n}', restore_input)
         try:
             child.initialize()
+            sibling = Child(binary, config, output / f'concurrent-clone-{n}', checkpoint)
+            try:
+                assert sibling.process.wait(timeout=15) != 0
+                assert not sibling.root.exists()
+                negative.append(f'live-clone-exclusion-{n}')
+            finally:
+                sibling.close()
             before = child.private('snapshot', {'deadlineMs': 30000})
             assert before['logicalHash'] == checkpoint['logicalHash']
             assert before['committed'] == checkpoint['committed']
+            if n == 0:
+                nested_checkpoint = before
             result = suffix(child, prefix, requests)
             save(output / f'suffix-restored-{n}.json', result)
             assert result == expected, f'actual suffix mismatch replay {n}'
