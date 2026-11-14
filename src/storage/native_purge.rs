@@ -90,6 +90,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativePurgeChunk {
+    #[serde(deserialize_with = "deserialize_deletions")]
     pub deletions: Vec<NativeDeletionWitness>,
     pub peers: Vec<NativePeerChange>,
     pub removed_edges: Vec<NativeEdgeProof>,
@@ -365,4 +366,33 @@ pub(crate) fn validate_pending_records(
         }
     }
     Ok(())
+}
+
+fn deserialize_deletions<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<NativeDeletionWitness>, D::Error> {
+    struct Bounded;
+    impl<'de> serde::de::Visitor<'de> for Bounded {
+        type Value = Vec<NativeDeletionWitness>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("bounded native purge deletion witnesses")
+        }
+        fn visit_seq<S: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: S,
+        ) -> Result<Self::Value, S::Error> {
+            let mut rows = Vec::new();
+            while rows.len() < super::metadata::purge::CHUNK_LIMIT {
+                let Some(row) = seq.next_element()? else {
+                    return Ok(rows);
+                };
+                rows.push(row);
+            }
+            if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                return Err(serde::de::Error::custom("native purge chunk exceeds bound"));
+            }
+            Ok(rows)
+        }
+    }
+    d.deserialize_seq(Bounded)
 }

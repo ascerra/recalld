@@ -221,6 +221,25 @@ async fn native_purge_complete_export_import_backup_fork_preserves_witness() {
     let (path, id, _) = fixture(root.path());
     let mut s = open(&path);
     policy(&mut s, id);
+    let memory = s
+        .metadata()
+        .scan_all()
+        .unwrap()
+        .into_iter()
+        .find(|(_, r)| r.namespace_id == id.get() && r.phase == DecayPhase::Full)
+        .unwrap()
+        .0;
+    let policy = NativePolicyInputs::default();
+    let intent = s
+        .metadata()
+        .capture_native_decay(memory, id, &policy, 10_000 * 86_400_000_i64)
+        .unwrap();
+    assert!(matches!(
+        s.engine
+            .apply_native_decay(&ctx(&s, id, "phase-before-purge"), &intent, &policy, None)
+            .unwrap(),
+        native_maintenance::NativeDecayResult::Committed(_)
+    ));
     let p = s
         .engine
         .begin_namespace_purge(&ctx(&s, id, "purge"), true)
@@ -353,12 +372,25 @@ fn native_purge_corrupt_pending_and_history_reject_without_source_changes() {
             let tx = db.begin_write().unwrap();
             if mode.starts_with("pending") {
                 let mut table = tx.open_table(metadata::effects::EFFECTS).unwrap();
-                let (row_key, bytes) = table.iter().unwrap().next().unwrap().unwrap();
-                let key = row_key.value().to_vec();
-                drop(row_key);
-                let mut e: metadata::effects::PendingEffects =
-                    control::decode(bytes.value()).unwrap();
-                drop(bytes);
+                let (key, mut e) = table
+                    .iter()
+                    .unwrap()
+                    .map(|row| {
+                        let (k, v) = row.unwrap();
+                        (
+                            k.value().to_vec(),
+                            control::decode::<metadata::effects::PendingEffects>(v.value())
+                                .unwrap(),
+                        )
+                    })
+                    .find(|(_, e)| {
+                        !e.canonical_applied
+                            && matches!(
+                                e.receipt.outcome,
+                                control::MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                            )
+                    })
+                    .expect("exact pending native chunk");
                 if mode == "pending-extra-edge" {
                     e.deletes.push(edges::PersistedEdge {
                         source: MemoryId::from(uuid::Uuid::new_v4()),
@@ -526,4 +558,127 @@ async fn native_purge_accepted_completion_failure_retains_latest_receipt_then_re
             .get(),
         1
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_purge_accepted_descendants_complete_after_close() {
+    use std::time::{Duration, Instant};
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let s = open(&path);
+    let key = ctx(&s, id, "closing-purge");
+    let fx = crate::test_support::Fixture::from_open_engine(root, s.engine);
+    let publisher = crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    };
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    let accepted = tracker.begin().unwrap();
+    let closing = tracker.clone();
+    let drain = tokio::task::spawn_blocking(move || {
+        closing.close_and_drain(Instant::now() + Duration::from_secs(15))
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().admission_open {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(tracker.begin().is_err());
+    let done = tokio::time::timeout(
+        Duration::from_secs(10),
+        publisher.purge_native_accepted(key, true, &accepted),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(done.stage, PurgeStage::Complete);
+    accepted.finish();
+    let freeze = drain.await.unwrap().unwrap();
+    let storage = fx.storage.read().unwrap();
+    assert!(storage.meta_store().pending_effects().unwrap().is_empty());
+    let capture = storage.meta_store().freeze_metadata(freeze).unwrap();
+    assert_eq!(
+        capture.generation(),
+        storage.control_state().unwrap().generation_ref()
+    );
+    assert_eq!(tracker.status().pending, 0);
+}
+
+#[test]
+fn native_purge_native_catalog_binding_empty_cleanup_and_recreated_name() {
+    struct FixedClock;
+    impl crate::time::Clock for FixedClock {
+        fn now_millis(&self) -> i64 {
+            2000
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let input = native_catalog::NativeNamespaceInput {
+        name: "native-born".into(),
+        embedding_dim: Some(4),
+        embedding_profile_id: None,
+        initial_stability: None,
+        desired_retention: None,
+        decay_rate_multiplier: None,
+    };
+    let mut catalog = ctx(&s, id, "born");
+    catalog.scope = MutationScope::Catalog;
+    let receipt = s
+        .engine
+        .create_native_namespace(
+            &catalog,
+            &input,
+            &crate::embedding::runtime::tests::profile(),
+            &NativePolicyInputs::default(),
+            &FixedClock,
+            None,
+        )
+        .unwrap();
+    let control::MutationOutcome::NativeNamespaceCreated { transition: t } = receipt.outcome else {
+        panic!("wrong receipt")
+    };
+    let born = t.namespace_id;
+    policy(&mut s, born);
+    let key = ctx(&s, born, "empty-purge");
+    let start = s.engine.begin_namespace_purge(&key, false).unwrap();
+    let cleanup = step(&mut s, &start);
+    assert_eq!(cleanup.stage, PurgeStage::Cleanup);
+    drop(s);
+    let bytes = std::fs::read(path.join("meta.db")).unwrap();
+    assert!(validation::canonical_files(&path).is_err());
+    assert_eq!(bytes, std::fs::read(path.join("meta.db")).unwrap());
+    let mut s = open(&path);
+    let mut next = ctx(&s, id, "reborn");
+    next.scope = MutationScope::Catalog;
+    let new = s
+        .engine
+        .create_native_namespace(
+            &next,
+            &input,
+            &crate::embedding::runtime::tests::profile(),
+            &NativePolicyInputs::default(),
+            &FixedClock,
+            None,
+        )
+        .unwrap();
+    let control::MutationOutcome::NativeNamespaceCreated { transition: t } = new.outcome else {
+        panic!("wrong receipt")
+    };
+    assert_ne!(t.namespace_id, born);
+    let before = s.engine.control_state().unwrap();
+    let replay = s.engine.begin_namespace_purge(&key, false).unwrap();
+    assert!(replay.start_receipt.replayed);
+    assert_eq!(replay.stage, PurgeStage::Complete);
+    assert_eq!(before, s.engine.control_state().unwrap());
+    assert!(s.engine.get_namespace(t.namespace_id).unwrap().is_some());
+    drop(s);
+    validation::canonical_files(&path).unwrap();
 }
