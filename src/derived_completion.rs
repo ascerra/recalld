@@ -5,6 +5,8 @@ use std::sync::{Arc, RwLock};
 #[path = "derived_readiness.rs"]
 mod readiness;
 
+mod native_feedback;
+
 use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, NamespaceId};
