@@ -78,6 +78,14 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Canonical metadata page; unsupported/remote adapters fail closed.
+    async fn list_canonical_page(
+        &self,
+        _request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        Err(crate::canonical_list::ListError::Unavailable)
+    }
+
     /// Optional resolved backend context; old adapters must not invent identity.
     async fn backend_context(
         &self,

@@ -333,6 +333,13 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn list_canonical_page(
+        &self,
+        request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        crate::canonical_list::list_page(self.storage.clone(), request).await
+    }
+
     async fn store_identity(&self) -> Result<uuid::Uuid, crate::storage::StorageError> {
         let storage = self.storage.clone();
         tokio::task::spawn_blocking(move || {

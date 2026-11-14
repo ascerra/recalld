@@ -5,6 +5,7 @@
 
 pub mod contract;
 mod json;
+pub mod list;
 pub(crate) mod pair_cursor;
 pub mod scan;
 pub mod session;

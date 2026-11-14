@@ -161,6 +161,14 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Canonical metadata page; unsupported/remote adapters fail closed.
+    async fn list_canonical_page(
+        &self,
+        _request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        Err(crate::canonical_list::ListError::Unavailable)
+    }
+
     async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
         Err(StorageError::RecoveryRequired(
             "store identity unavailable".into(),
@@ -579,6 +587,8 @@ pub struct NamespaceListInfo {
 /// themselves -- they receive them through `AppState`.
 #[derive(Clone)]
 pub struct AppState {
+    /// Frozen configured default for contract2; v1 omission behavior is unchanged.
+    pub default_namespace: String,
     /// The search pipeline: embedding, vector search, graph expansion.
     pub search: Arc<dyn SearchPipeline>,
 
@@ -605,6 +615,11 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn with_default_namespace(mut self, namespace: String) -> Self {
+        self.default_namespace = namespace;
+        self
+    }
+
     /// Construct a new `AppState` from pre-initialized subsystems.
     ///
     /// All subsystems must be fully initialized before the API server
@@ -619,6 +634,7 @@ impl AppState {
         metrics: Arc<dyn MetricsCollector>,
     ) -> Self {
         Self {
+            default_namespace: crate::model::constants::DEFAULT_NAMESPACE_NAME.into(),
             search,
             storage,
             cache,

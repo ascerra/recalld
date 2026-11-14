@@ -767,3 +767,6 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
     assert_eq!(tracker.status().pending, 0);
     assert_eq!(tracker.status().unresolved, 0);
 }
+
+#[path = "list_tests.rs"]
+mod canonical_list;

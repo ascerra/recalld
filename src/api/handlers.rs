@@ -564,6 +564,67 @@ fn feedback_error(error: Box<dyn std::error::Error + Send + Sync>, id: &str) -> 
 /// 7. Return ListMemoriesResponse with pagination metadata.
 pub async fn list_memories(
     State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::ContractVersion;
+    use axum::{extract::FromRequestParts, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    let (mut parts, _) = request.into_parts();
+    if version == ContractVersion::V1 {
+        let params = match Query::<ListMemoriesQuery>::from_request_parts(&mut parts, &state).await
+        {
+            Ok(params) => params,
+            Err(error) => return error.into_response(),
+        };
+        return list_memories_v1(State(state), params).await.into_response();
+    }
+    let Query(params) =
+        match Query::<Vec<(String, String)>>::from_request_parts(&mut parts, &state).await {
+            Ok(params) => params,
+            Err(error) => return error.into_response(),
+        };
+    list_memories_v2(state.storage.as_ref(), &state.default_namespace, &params).await
+}
+pub(crate) async fn list_memories_v2(
+    storage: &dyn super::state::StorageEngine,
+    default_namespace: &str,
+    params: &[(String, String)],
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let result = match crate::serialization::list::ListPageRequest::from_http(params) {
+        Ok(mut request) => {
+            request
+                .namespace
+                .get_or_insert_with(|| default_namespace.into());
+            storage.list_canonical_page(request).await
+        }
+        Err(error) => Err(error.into()),
+    };
+    let (status, envelope) = crate::canonical_list::response(result);
+    (
+        axum::http::StatusCode::from_u16(status).expect("fixed status"),
+        Json(envelope),
+    )
+        .into_response()
+}
+async fn list_memories_v1(
+    State(state): State<AppState>,
     Query(params): Query<ListMemoriesQuery>,
 ) -> Result<Json<ApiResponse<ListMemoriesResponse>>, AppError> {
     let stamp = state.storage.effects_stamp().await?;

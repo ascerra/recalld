@@ -541,6 +541,7 @@ async fn run_serve(
         let metrics: Arc<dyn recalld::api::MetricsCollector> = Arc::new(NoopMetricsCollector);
 
         recalld::api::AppState::new(search, storage, cache, graph, decay, namespaces, metrics)
+            .with_default_namespace(default_namespace.clone())
     };
 
     // Build MCP bridge and router for the /mcp endpoint.

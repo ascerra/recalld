@@ -1735,6 +1735,24 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if name == "list_memories" {
+        let result = match crate::serialization::list::ListPageRequest::from_mcp(&arguments) {
+            Ok(mut request) => {
+                request
+                    .namespace
+                    .get_or_insert_with(|| bridge.default_namespace().into());
+                bridge.storage.list_canonical_page(request).await
+            }
+            Err(error) => Err(error.into()),
+        };
+        let (status, envelope) = crate::canonical_list::response(result);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        if status >= 400 {
+            result.is_error = Some(true);
+        }
+        return result;
+    }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{
         contract::{CommitState, Envelope, ErrorCategory, ExecutionError},

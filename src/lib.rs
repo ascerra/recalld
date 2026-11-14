@@ -26,6 +26,7 @@ pub mod backup;
 #[cfg(feature = "bench")]
 pub mod bench;
 pub mod cache;
+pub mod canonical_list;
 pub mod cli;
 pub mod config;
 pub mod daemon;

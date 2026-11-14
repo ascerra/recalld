@@ -7,6 +7,8 @@
 //!
 //! See CS-07 for the full specification.
 
+mod canonical_list;
+mod canonical_scope;
 mod canonical_vector_snapshot;
 mod catalog;
 pub(crate) mod effects;
