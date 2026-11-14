@@ -33,6 +33,20 @@ struct ObservedAccess {
 }
 #[async_trait::async_trait]
 impl AccessRecorder for ObservedAccess {
+    async fn record_access_batch_with_work(
+        &self,
+        values: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        let receipts = self
+            .inner
+            .record_access_batch_with_work(values, scope, parent)
+            .await?;
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        self.notify.notify_one();
+        Ok(receipts)
+    }
     async fn record_access(
         &self,
         id: MemoryId,

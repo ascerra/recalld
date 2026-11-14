@@ -86,6 +86,54 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
+    fn accept_work(
+        &self,
+    ) -> Result<Option<crate::storage::work::WorkTicket>, crate::search::SearchError> {
+        self.query_engine.accept_work(None)
+    }
+    fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
+        self.query_engine.finish_work(work);
+    }
+    async fn prepare_search_with_work(
+        &self,
+        query: state::SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        self.search_inner(query, true, parent).await
+    }
+    async fn prepare_similar_with_work(
+        &self,
+        id: MemoryId,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::search::PipelineSearchResult>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_similar_filtered_with_work(id, limit, min_score, requested_access, parent)
+            .await
+    }
+    async fn record_similar_with_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_similar_accesses_with_work(ids, scope, parent)
+            .await
+    }
+    async fn record_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_exposures_with_work(accesses, scope, parent)
+            .await
+    }
+
     async fn embed_text(
         &self,
         text: &str,
@@ -107,13 +155,13 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         &self,
         query: state::SearchQuery,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        self.search_inner(query, false).await
+        self.search_inner(query, false, None).await
     }
     async fn prepare_search(
         &self,
         query: state::SearchQuery,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        self.search_inner(query, true).await
+        self.search_inner(query, true, None).await
     }
 
     async fn find_similar(
@@ -1720,6 +1768,7 @@ impl SearchPipelineAdapter {
         &self,
         query: state::SearchQuery,
         defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
         // Convert API-layer SearchQuery to the pipeline's SearchQuery.
         let (text, query_embedding) = match query.query {
@@ -1781,9 +1830,13 @@ impl SearchPipelineAdapter {
             entities: query.entities.clone(),         // Issue 4: pass entities
         };
         let response = if defer_recording {
-            self.query_engine.prepare_search(pipeline_query).await?
+            self.query_engine
+                .prepare_search_with_work(pipeline_query, parent)
+                .await?
         } else {
-            self.query_engine.search(pipeline_query).await?
+            self.query_engine
+                .search_with_work(pipeline_query, parent)
+                .await?
         };
         Ok(response
             .results

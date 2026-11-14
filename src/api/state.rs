@@ -33,6 +33,70 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
+    /// Same owned core as the production pipeline, before provider/selection work.
+    /// Immutable test adapters do not register work; they may not inherit a ticket.
+    fn accept_work(&self) -> Result<Option<crate::storage::work::WorkTicket>, SearchError> {
+        Ok(None)
+    }
+    fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
+        drop(work);
+    }
+
+    async fn prepare_search_with_work(
+        &self,
+        query: SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<ResolvedSearchResult>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.prepare_search(query).await
+    }
+    async fn prepare_similar_with_work(
+        &self,
+        id: MemoryId,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::search::PipelineSearchResult>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.prepare_similar_filtered(id, limit, min_score, requested_access)
+            .await
+    }
+    async fn record_similar_with_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.record_similar_accesses(ids, scope).await
+    }
+    async fn record_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.record_exposures(accesses, scope).await
+    }
+
     /// Generate an embedding for the given text within a namespace.
     async fn embed_text(
         &self,

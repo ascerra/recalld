@@ -7,18 +7,25 @@ use crate::test_support::{DIM, Fixture, MemorySpec};
 use serde_json::{Value, json};
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::Duration;
 
 #[derive(Default)]
 struct FixedEmbedding {
     calls: AtomicUsize,
+    hold: AtomicBool,
+    entered: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
 }
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for FixedEmbedding {
     async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.hold.load(Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.resume.notified().await;
+        }
         Ok(vec![0.0, 1.0, 0.0, 0.0])
     }
     fn dimensions(&self) -> usize {
@@ -35,6 +42,20 @@ struct ObservedAccess {
 }
 #[async_trait::async_trait]
 impl AccessRecorder for ObservedAccess {
+    async fn record_access_batch_with_work(
+        &self,
+        values: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        let receipts = self
+            .inner
+            .record_access_batch_with_work(values, scope, parent)
+            .await?;
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        self.notify.notify_one();
+        Ok(receipts)
+    }
     async fn record_access(
         &self,
         id: MemoryId,
@@ -384,4 +405,148 @@ async fn vector_query_invalid_vectors_reject_before_access_work() {
     assert_eq!(body["field"], "embedding");
     h.assert_quiet(&before).await;
     assert_eq!(h.embedding.calls.load(Ordering::SeqCst), 0);
+}
+
+// These are actual serialized HTTP/router and MCP tool consumers. The provider
+// latch controls scheduling only; real storage, pipeline, hydration and exposure
+// transactions run unchanged. No timing sleep is used to establish admission.
+async fn accepted_query(h: &Harness, mcp: bool) {
+    if mcp {
+        let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+        bridge.search = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            h.engine.clone(),
+            h.embedding.clone(),
+            h.f.storage.clone(),
+            h.f.graph.clone(),
+            chrono_tz::UTC,
+        ));
+        let result = crate::mcp::tools::dispatch_tool(
+            &bridge,
+            "recall_memories",
+            json!({
+                "query":"rarekeyword", "namespace":"default", "limit":1,
+                "depth":0, "recordAccess":true, "includeNeighbors":false,
+            }),
+        )
+        .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+    } else {
+        let (status, body) = request(
+            h,
+            "/search",
+            json!({
+                "query":"rarekeyword", "namespace":"default", "limit":1,
+                "depth":0, "recordAccess":true,
+            })
+            .to_string(),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(body["hits"].as_array().unwrap().len(), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_query_roots_allow_http_and_mcp_exposure_after_close() {
+    for mcp in [false, true] {
+        let h = Arc::new(Harness::new().await);
+        h.embedding.hold.store(true, Ordering::SeqCst);
+        let tracker =
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .clone();
+        let before =
+            h.f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation;
+        let running = {
+            let h = h.clone();
+            tokio::spawn(async move { accepted_query(&h, mcp).await })
+        };
+        tokio::time::timeout(Duration::from_secs(5), h.embedding.entered.notified())
+            .await
+            .unwrap();
+        assert!(
+            tracker.status().pending >= 2,
+            "outer transport and pipeline roots must both be accepted"
+        );
+        let close = {
+            let tracker = tracker.clone();
+            tokio::task::spawn_blocking(move || {
+                tracker.close_and_drain(std::time::Instant::now() + Duration::from_secs(5))
+            })
+        };
+        let waiting = tracker.clone();
+        tokio::task::spawn_blocking(move || waiting.wait_until_closed())
+            .await
+            .unwrap();
+        assert!(!close.is_finished());
+        assert!(tracker.begin().is_err());
+        h.embedding.resume.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), running)
+            .await
+            .unwrap()
+            .unwrap();
+        let frozen = close.await.unwrap().unwrap();
+        assert_eq!(tracker.status().pending, 0);
+        assert_eq!(tracker.status().unresolved, 0);
+        assert!(!tracker.status().admission_open);
+        assert_eq!(h.access.completed.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            h.ids
+                .iter()
+                .map(|id| h.f.record(*id).unwrap().access_history.len())
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(
+            h.f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get(),
+            before.get() + 1
+        );
+        drop(frozen);
+        assert!(tracker.status().admission_open);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_query_cancel_keeps_http_and_mcp_roots_unresolved() {
+    for mcp in [false, true] {
+        let h = Arc::new(Harness::new().await);
+        h.embedding.hold.store(true, Ordering::SeqCst);
+        let tracker =
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .clone();
+        let before = h.snapshot();
+        let running = {
+            let h = h.clone();
+            tokio::spawn(async move { accepted_query(&h, mcp).await })
+        };
+        tokio::time::timeout(Duration::from_secs(5), h.embedding.entered.notified())
+            .await
+            .unwrap();
+        running.abort();
+        assert!(running.await.unwrap_err().is_cancelled());
+        assert_eq!(h.snapshot(), before);
+        assert_eq!(h.access.completed.load(Ordering::SeqCst), 0);
+        assert!(tracker.status().unresolved >= 2);
+        assert!(matches!(tracker.close_and_drain(std::time::Instant::now()),
+            Err(crate::storage::work::WorkError::Deadline{unresolved,..}) if unresolved>=2));
+        assert!(tracker.status().admission_open);
+    }
 }

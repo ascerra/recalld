@@ -325,6 +325,18 @@ impl StorageMetadataAdapter {
 
 #[async_trait]
 impl MetadataStore for StorageMetadataAdapter {
+    fn accept_work(
+        &self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::work::WorkTicket>> {
+        crate::storage::work::accept_work(&self.storage, parent)
+            .map(Some)
+            .map_err(|e| SearchError::Unavailable(e.to_string()))
+    }
+    fn finish_work(&self, work: crate::storage::work::WorkTicket) {
+        crate::storage::work::finish_work(&self.storage, work);
+    }
+
     async fn effects_stamp(&self) -> Result<u64> {
         let storage = self.storage.clone();
         tokio::task::spawn_blocking(move || {
@@ -534,12 +546,23 @@ impl AccessRecorder for StorageAccessRecorder {
         accesses: &[(MemoryId, AccessKind)],
         scope: Option<&crate::storage::control::ExposureScope>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
-        crate::decay::observation::record_exposures_scoped(
+        self.record_access_batch_with_work(accesses, scope, None)
+            .await
+    }
+
+    async fn record_access_batch_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        crate::decay::observation::record_exposures_scoped_with_work(
             self.storage.clone(),
             self.cache.clone(),
             accesses.to_vec(),
             self.clock.now_millis(),
             scope.cloned(),
+            parent,
         )
         .await
         .map_err(Into::into)

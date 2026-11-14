@@ -346,9 +346,22 @@ pub async fn get_memory(
     Path(id): Path<String>,
     Query(options): Query<GetMemoryQuery>,
 ) -> Result<Json<ApiResponse<MemoryResponse>>, AppError> {
-    let stamp = state.storage.effects_stamp().await?;
-    let observed = get_memory_admitted(State(state.clone()), Path(id), Query(options), stamp).await;
-    observed?.finish(check_read_admission(&state, stamp).await)
+    let work = state.search.accept_work()?;
+    let result = async {
+        let stamp = state.storage.effects_stamp().await?;
+        let observed = get_memory_admitted(
+            State(state.clone()),
+            Path(id),
+            Query(options),
+            stamp,
+            work.as_ref(),
+        )
+        .await;
+        observed?.finish(check_read_admission(&state, stamp).await)
+    }
+    .await;
+    state.search.finish_work(work);
+    result
 }
 
 async fn get_memory_admitted(
@@ -356,6 +369,7 @@ async fn get_memory_admitted(
     Path(id): Path<String>,
     Query(options): Query<GetMemoryQuery>,
     admitted_stamp: u64,
+    parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<Observed<Json<ApiResponse<MemoryResponse>>>, AppError> {
     let start = Instant::now();
 
@@ -395,12 +409,13 @@ async fn get_memory_admitted(
     let receipts = if options.record_access && record.phase != DecayPhase::Tombstone {
         state
             .search
-            .record_exposures(
+            .record_exposures_with_work(
                 &[(memory_id, AccessKind::DirectRetrieval)],
                 crate::storage::control::ExposureScope {
                     namespace: response.namespace.clone(),
                     source: Some(memory_id),
                 },
+                parent,
             )
             .await?
     } else {
@@ -797,15 +812,23 @@ pub async fn search_memories(
     State(state): State<AppState>,
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
-    let stamp = state.storage.effects_stamp().await?;
-    let observed = search_memories_admitted(State(state.clone()), Json(req), stamp).await;
-    observed?.finish(check_read_admission(&state, stamp).await)
+    let work = state.search.accept_work()?;
+    let result = async {
+        let stamp = state.storage.effects_stamp().await?;
+        let observed =
+            search_memories_admitted(State(state.clone()), Json(req), stamp, work.as_ref()).await;
+        observed?.finish(check_read_admission(&state, stamp).await)
+    }
+    .await;
+    state.search.finish_work(work);
+    result
 }
 
 async fn search_memories_admitted(
     State(state): State<AppState>,
     Json(req): Json<SearchRequest>,
     admitted_stamp: u64,
+    parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<Observed<Json<SearchResponse>>, AppError> {
     let start = Instant::now();
 
@@ -883,7 +906,10 @@ async fn search_memories_admitted(
         entities: req.entities.clone(),
     };
 
-    let results = state.search.prepare_search(search_query).await?;
+    let results = state
+        .search
+        .prepare_search_with_work(search_query, parent)
+        .await?;
 
     // Batch-load embeddings with a single lock acquisition if requested.
     let embeddings = if req.include_embeddings {
@@ -939,12 +965,13 @@ async fn search_memories_admitted(
     let receipts = if req.record_access {
         state
             .search
-            .record_exposures(
+            .record_exposures_with_work(
                 &exposures,
                 crate::storage::control::ExposureScope {
                     namespace: ns.name.clone(),
                     source: None,
                 },
+                parent,
             )
             .await?
     } else {
@@ -976,9 +1003,22 @@ pub async fn find_similar(
     Path(id): Path<String>,
     Json(req): Json<FindSimilarRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
-    let stamp = state.storage.effects_stamp().await?;
-    let observed = find_similar_admitted(State(state.clone()), Path(id), Json(req), stamp).await;
-    observed?.finish(check_read_admission(&state, stamp).await)
+    let work = state.search.accept_work()?;
+    let result = async {
+        let stamp = state.storage.effects_stamp().await?;
+        let observed = find_similar_admitted(
+            State(state.clone()),
+            Path(id),
+            Json(req),
+            stamp,
+            work.as_ref(),
+        )
+        .await;
+        observed?.finish(check_read_admission(&state, stamp).await)
+    }
+    .await;
+    state.search.finish_work(work);
+    result
 }
 
 async fn find_similar_admitted(
@@ -986,6 +1026,7 @@ async fn find_similar_admitted(
     Path(id): Path<String>,
     Json(req): Json<FindSimilarRequest>,
     admitted_stamp: u64,
+    parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<Observed<Json<SearchResponse>>, AppError> {
     let start = Instant::now();
 
@@ -1002,11 +1043,12 @@ async fn find_similar_admitted(
     // similarity minScore before exposure. /search minStrength is independent.
     let results = state
         .search
-        .prepare_similar_filtered(
+        .prepare_similar_with_work(
             memory_id,
             req.limit.min(100) as usize,
             req.min_score,
             req.record_access,
+            parent,
         )
         .await?;
     let embeddings = if req.include_embeddings {
@@ -1063,7 +1105,7 @@ async fn find_similar_admitted(
         let ids: Vec<_> = hits.iter().map(|hit| hit.memory.id).collect();
         state
             .search
-            .record_similar_accesses(
+            .record_similar_with_work(
                 &ids,
                 crate::storage::control::ExposureScope {
                     namespace: hits
@@ -1072,6 +1114,7 @@ async fn find_similar_admitted(
                         .unwrap_or_default(),
                     source: Some(memory_id),
                 },
+                parent,
             )
             .await?
     } else {
