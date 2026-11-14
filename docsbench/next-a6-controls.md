@@ -1,6 +1,13 @@
 # Next actual A6 controls after the owned-pipe endpoint
 
-Current ownership: Halley retains same-core constructor, coherent search/payload,
+Progress at d09ca498: retained all-view capture leases, timeout/join control exclusion,
+shared lifecycle clock and canonical allocation injection have actual core/private
+consumer proof. Snapshot/reset/caches and suffix replay remain unimplemented in
+that measured source. The canonical staging child is separate and unsealed. See
+[owned controls report](../benchmarks/owned-controls/REPORT.md). Halley owns IDs;
+Curie has separately accepted get/similar coherent payload consumers on PR96.
+
+Original ownership plan (superseded where noted above): Halley retains same-core constructor, coherent search/payload,
 registry/readiness, frozen checkpoint/reset and shared clock/ID/RNG until an
 explicit owner handoff. The ID/RNG sidecar is disjoint and available, not blocked
 on the endpoint. Base bb1a0863b2ab0eba940e767941ca4e85fe9b8e77; exact allocation
