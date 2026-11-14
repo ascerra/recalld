@@ -171,6 +171,21 @@ pub struct ContentProof {
     pub profile_id: Option<String>,
 }
 impl ContentProof {
+    /// Shared shape check also applies to historical receipts whose records
+    /// were removed after a restore. None preserves unknown legacy provenance.
+    pub(crate) fn validate_profile_commitment(&self) -> Result<(), StorageError> {
+        if let Some(profile) = &self.profile_id {
+            if profile.len() != 68
+                || !profile.starts_with("ep1:")
+                || !profile.as_bytes()[4..]
+                    .iter()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+            {
+                return Err(invalid("invalid native profile commitment"));
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn capture(
         record: &DiskRecord,
         namespace: &NamespaceConfig,
@@ -420,16 +435,7 @@ impl NativeRecordWrite {
             let after = &change.after;
             let fields = &after.lifecycle.lifecycle;
             after.lifecycle.validate()?;
-            if let Some(profile) = &after.content.profile_id {
-                if profile.len() != 68
-                    || !profile.starts_with("ep1:")
-                    || !profile.as_bytes()[4..]
-                        .iter()
-                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
-                {
-                    return Err(invalid("invalid native profile commitment"));
-                }
-            }
+            after.content.validate_profile_commitment()?;
             if let Some(before) = &change.before {
                 before.lifecycle.validate()?;
             }

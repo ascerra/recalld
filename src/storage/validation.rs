@@ -204,7 +204,9 @@ fn validate_snapshot(
             && (!native_recovery
                 || !matches!(
                     e.receipt.outcome,
-                    super::control::MutationOutcome::NativeMemoryInserted { .. }
+                    super::control::MutationOutcome::NativePhaseMaterialized { .. }
+                        | super::control::MutationOutcome::NativeMemoryHardDeleted { .. }
+                        | super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
                 ))
     }) {
@@ -352,8 +354,26 @@ fn validate_snapshot(
         reverse_key[..16].copy_from_slice(edge.target.as_bytes());
         reverse_key[16] = edge.edge_type.as_u8();
         reverse_key[17..].copy_from_slice(edge.source.as_bytes());
-        if !ids.contains(&edge.source)
-            || !ids.contains(&edge.target)
+        // A committed native hard deletion can precede its separate edge-DB
+        // replay. Admit only the exact, already validated pending deletion;
+        // unrelated dangling edges and missing reverse entries still fail.
+        let pending_delete = native_recovery
+            && effects.iter().any(|effect| {
+                let super::control::MutationOutcome::NativeMemoryHardDeleted { transition } =
+                    &effect.receipt.outcome
+                else {
+                    return false;
+                };
+                !effect.canonical_applied
+                    && effect.deletes.iter().any(|deleted| {
+                        super::native_records::NativeEdgeProof::from(deleted)
+                            == super::native_records::NativeEdgeProof::from(&edge)
+                    })
+                    && [edge.source, edge.target]
+                        .iter()
+                        .all(|id| *id == transition.memory_id || ids.contains(id))
+            });
+        if ((!ids.contains(&edge.source) || !ids.contains(&edge.target)) && !pending_delete)
             || reverse.get(reverse_key.as_slice())?.is_none()
         {
             return Err(StorageError::CorruptIndex(

@@ -201,6 +201,24 @@ pub(crate) fn validate_policy_history(
                 ));
                 Some(t.namespace_id)
             }
+            MutationOutcome::NativePhaseMaterialized { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
             _ if active => return Err(invalid("unrecognized operation after schema publication")),
             _ => None,
         };
@@ -275,6 +293,12 @@ pub(crate) fn validate_policy_history(
         .collect::<Result<HashMap<_, _>, StorageError>>()?;
     let creations = super::native_records::creation_proofs(read)?;
     let ledger = super::metadata::removal_ledger::read_export(read, Some(control))?;
+    for row in read.open_table(control::RECEIPTS)?.iter()? {
+        let (_, bytes) = row?;
+        let receipt = control::validate_receipt(bytes.value())?.receipt;
+        super::native_maintenance::validate_ledger(&receipt, ledger.as_ref())?;
+        super::native_maintenance::validate_namespace_profiles(&receipt, &configs)?;
+    }
     let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
     for row in read.open_table(META_TABLE)?.iter()? {
         let (_, v) = row?;
@@ -395,6 +419,32 @@ pub(crate) fn validate_policy_history(
                         .get_mut(&t.namespace_id.get())
                         .ok_or_else(|| invalid("native record namespace absent"))?,
                 )?;
+            }
+            MutationOutcome::NativePhaseMaterialized { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                    || !t.policy.matches_namespace(
+                        configs
+                            .get(&t.namespace_id.get())
+                            .ok_or_else(|| invalid("phase namespace absent"))?,
+                    )
+                {
+                    return Err(invalid("phase policy proof mismatch"));
+                }
+                t.rewind(records.entry(t.namespace_id.get()).or_default())?;
+            }
+            MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                    || !t.policy.matches_namespace(
+                        configs
+                            .get(&t.namespace_id.get())
+                            .ok_or_else(|| invalid("delete namespace absent"))?,
+                    )
+                {
+                    return Err(invalid("deletion policy proof mismatch"));
+                }
+                t.rewind(&mut records)?;
             }
             _ => return Err(invalid("unrecognized operation in lifecycle proof")),
         }
