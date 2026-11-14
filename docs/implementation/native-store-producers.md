@@ -81,3 +81,36 @@ original receipt without resampling a clock or changing generation. These are
 process-exit tests, not power-loss evidence. No publication is authorized for
 this preparation alone: the next store child still requires its actual new proof
 and consumer, with the unsupported guard retained until validation.
+
+
+## Version3 consumer audit before implementation
+
+The current version coupling is concentrated in `storage/batch.rs` contexts and
+caller/resolution hashes, `metadata/batch.rs` reservation/replay/final-error and
+strict-row validation, `batch/native.rs` child hashes/outcome binding,
+`mcp/batches.rs` parsing and `mcp/batch_adapters.rs` execution selection. Version3
+must be a separate parameter from the existing native MutationContext version2;
+MutationContext must continue rejecting contract3.
+
+Exact version/domain matches must cover reservation receipts, resolved hashes,
+error bookkeeping, private child capability context, frozen native/default shape,
+and the exact native bookkeeping references used by lifecycle history dispatch.
+No `version != 1 means newest` fallback. Existing v1/v2 fixtures must reopen and
+replay with identical original bytes/hashes/IDs. New child outcomes and defaults
+need strict version-specific checks rather than merely expanding an allowlist.
+
+Native startup currently permits pending version2 manifests; the version3 join
+must add only strictly validated native version3 recovery plans. Ordinary export
+and snapshot still reject unresolved manifests. Logical export and retained-state
+restore already preserve the raw manifest tables, so their dispatch stays generic
+while actual version3 completed roundtrip, foreign-origin reconciliation and
+forged-version/default/outcome controls prove no row or proof is silently dropped.
+The existing pending_batch_items scan remains the accepted-work source of truth;
+new unknown/payload-needed slots cannot be acknowledged as completed.
+
+Minimal mutable link settings are frozen separately at reservation: enablement,
+semantic threshold/caps, entity cap and temporal window/cap. Unrelated activation
+settings are not consumed. Completed replay uses the stored expansion before
+current settings, provider or candidate discovery. Generated plan/UUID/time/vector
+output remains outside caller identity; the original advisory boolean after fixed
+true expansion is part of the new store request identity.

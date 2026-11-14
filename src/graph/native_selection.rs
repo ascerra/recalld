@@ -58,13 +58,22 @@ pub(crate) fn capture(
         return Err(conflict("native candidates changed after insert capture"));
     }
     let input = &intent.original;
-    let profile = input
-        .embedding_profile
-        .as_ref()
-        .or(generated.profile.as_ref())
-        .ok_or_else(|| StorageError::InvalidMutation("native candidate profile missing".into()))?;
+    let supplied = input.memory.embedding.is_some();
+    let profile_error = |message: String| {
+        if supplied {
+            StorageError::InvalidMutation(message)
+        } else {
+            StorageError::ProviderVectorUnavailable(message)
+        }
+    };
+    let profile = if supplied {
+        input.embedding_profile.as_ref()
+    } else {
+        generated.profile.as_ref()
+    }
+    .ok_or_else(|| profile_error("native candidate profile missing".into()))?;
     let profile_id = crate::embedding::profile::require_compatible(&intent.namespace, profile)
-        .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
+        .map_err(|e| profile_error(e.to_string()))?;
     let mut query = input
         .memory
         .embedding

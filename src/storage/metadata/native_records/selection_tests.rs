@@ -174,6 +174,24 @@ fn native_selection_invalid_vectors_and_temporal_extremes_do_not_mutate_or_sampl
         capture(&s.engine, &intent, &bad),
         Err(StorageError::ProviderVectorUnavailable(_))
     ));
+    let missing_profile = GeneratedEmbedding {
+        values: vec![1., 0., 0., 0.],
+        profile: None,
+    };
+    assert!(matches!(
+        capture(&s.engine, &intent, &missing_profile),
+        Err(StorageError::ProviderVectorUnavailable(_))
+    ));
+    let mut wrong_profile = d.profile.clone();
+    wrong_profile.dimension = 2;
+    let wrong_profile = GeneratedEmbedding {
+        values: vec![1., 0., 0., 0.],
+        profile: Some(wrong_profile),
+    };
+    assert!(matches!(
+        capture(&s.engine, &intent, &wrong_profile),
+        Err(StorageError::ProviderVectorUnavailable(_))
+    ));
     let mut captured = capture(&s.engine, &probe(&s, &d), &generated()).unwrap();
     captured.candidates[0].created_at = i64::MIN;
     let settings = crate::config::GraphConfig {
