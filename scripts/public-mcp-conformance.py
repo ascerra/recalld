@@ -6,6 +6,16 @@ import json
 TRACK = "serialized-mcp-synthetic-conformance-v1"
 
 
+def document_text(arguments):
+    # Frozen production McpStorageAdapter::store_memory input composition.
+    text = arguments["summary"]
+    if "fullText" in arguments:
+        text += "\n\n" + arguments["fullText"]
+    if arguments.get("tags"):
+        text += " " + " ".join(arguments["tags"])
+    return text
+
+
 def fixtures(base):
     actor, labels, cache, _ = base()
     texts = [("amber OBSOLETE_CONTENT", "default"), ("birch FORGET_CONTENT", "default"),
@@ -72,7 +82,7 @@ def fixtures(base):
     labels["relevant"] = {q["queryId"]: ["turn-2" if "foreign" in q["queryId"] else "turn-0" if q["queryId"] == "before" else "turn-3"] for q in queries}
     labels["relevant"]["restart-birch"] = []
     del labels["relevant"]["deleted-turn-1"]
-    cache["entries"] = {"a6-document:" + text: [0., 1., 0., 0.] if i == 1 else [1., 0., 0., 0.] for i, (text, _) in enumerate(texts)}
+    cache["entries"] = {"a6-document:" + document_text(source): [0., 1., 0., 0.] if i == 1 else [1., 0., 0., 0.] for i, source in enumerate(sources)}
     cache["entries"]["a6-document:health check"] = [0., 0., 0., 1.]
     for query in queries:
         cache["entries"]["a6-query:" + query["text"]] = [0., 1., 0., 0.] if query["text"] == "birch" else [1., 0., 0., 0.]
@@ -110,6 +120,11 @@ def verify(wire, schedule, mappings, sources, process_events):
         row = by_tag[step["tag"]]
         assert row["response"]["result"].get("isError", False) == step["expectedError"], step["tag"]
         if step["expectedError"]:
+            message = json.dumps(row["response"]["result"]).lower()
+            if step["tag"].startswith("invalid-quality"):
+                assert "quality" in message
+            if step["tag"].startswith("wrong-namespace") or step["tag"] == "store:turn-4":
+                assert "namespace" in message
             invalid.append(dict(tag=step["tag"], request=row["request"], response=row["response"]))
     ids = {source: memory for memory, source_ids in mappings.items() for source in source_ids}
     assert set(ids) == {"turn-0", "turn-1", "turn-2", "turn-3"}

@@ -188,7 +188,7 @@ def run_episode(args):
     stub = http.server.HTTPServer(("127.0.0.1", 0), Replay)
     stub.log, stub.environment, stub.delivery = args.out / "actor-provider.jsonl", environment, 0
     stub.key = lambda text: digest(encoded(dict(environmentHash=environment, model=MODEL, dimension=4, prefixedInput=text)))
-    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:") and (not conformance or text.removeprefix("a6-document:") in {s["summary"] for s in actor["sources"][:3]} or text == "a6-document:health check")}
+    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:") and (not conformance or text.removeprefix("a6-document:") in {CONFORMANCE["document_text"](s) for s in actor["sources"][:3]} or text == "a6-document:health check")}
     threading.Thread(target=stub.serve_forever, daemon=True).start()
     result = dict(status="running", environmentHash=environment, capabilities=CAPABILITIES)
     process = None
@@ -264,7 +264,7 @@ warm_file_enabled = false
                             projection = CONFORMANCE["projection"](step, public_ids, start_id, ordinal)
                             arguments = projection["currentAction"]["arguments"]
                             text = ("a6-query:" + arguments["query"] if "query" in arguments else
-                                    "a6-document:" + arguments["summary"] if "summary" in arguments else None)
+                                    "a6-document:" + CONFORMANCE["document_text"](arguments) if "summary" in arguments else None)
                             if text in cache["entries"]:
                                 stub.entries[stub.key(text)] = cache["entries"][text]
                     else:
