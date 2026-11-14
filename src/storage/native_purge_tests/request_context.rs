@@ -79,17 +79,25 @@ fn crashed_start(path: &Path) {
         String::from_utf8_lossy(&out.stderr)
     );
 }
-fn strip_all_requests(path: &Path) -> usize {
-    fn strip(value: &mut serde_json::Value) -> usize {
+fn rewrite_requests(path: &Path, replacement: Option<&serde_json::Value>) -> usize {
+    fn strip(value: &mut serde_json::Value, replacement: Option<&serde_json::Value>) -> usize {
         match value {
             serde_json::Value::Object(m) => {
                 let mut count = usize::from(m.remove("request").is_some());
-                for v in m.values_mut() {
-                    count += strip(v);
+                if count != 0 {
+                    if let Some(replacement) = replacement {
+                        m.insert("request".into(), replacement.clone());
+                    }
+                    // Do not descend into the newly replaced request.
+                }
+                for (key, v) in m.iter_mut() {
+                    if key != "request" {
+                        count += strip(v, replacement);
+                    }
                 }
                 count
             }
-            serde_json::Value::Array(a) => a.iter_mut().map(strip).sum(),
+            serde_json::Value::Array(a) => a.iter_mut().map(|v| strip(v, replacement)).sum(),
             _ => 0,
         }
     }
@@ -108,7 +116,7 @@ fn strip_all_requests(path: &Path) -> usize {
             .collect();
         for (key, raw) in rows {
             let mut value: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-            let n = strip(&mut value);
+            let n = strip(&mut value, replacement);
             count += n;
             if n > 0 {
                 table
@@ -146,7 +154,7 @@ fn native_context_api1_start_all_copies_strip_before_first_child_rejected_immuta
     drop(read);
     drop(db);
     assert_eq!(
-        strip_all_requests(&path),
+        rewrite_requests(&path, None),
         3,
         "canonical + progress start + progress last; no children exist"
     );
@@ -250,7 +258,7 @@ async fn native_context_api1_purge_replay_export_fork_and_current_reader() {
     );
     drop(publisher);
     let _root = f.close();
-    assert_eq!(strip_all_requests(&imported), 2); // completed last is an advanced receipt
+    assert_eq!(rewrite_requests(&imported, None), 2); // completed last is an advanced receipt
     let frozen = bytes(&imported);
     assert!(validation::canonical_files(&imported).is_err());
     assert!(validation::preflight_native(&imported).is_err());
@@ -266,6 +274,11 @@ fn native_context_genuine_before_four_cases_reopen_fork_unchanged_receipts() {
         for cas in [false, true] {
             let case = Path::new(&source).join(format!("force-{force}-cas-{cas}"));
             let raw = std::fs::read(case.join("original-start-receipt.json")).unwrap();
+            assert_eq!(
+                control::encode(&control::validate_receipt(&raw).unwrap()).unwrap(),
+                raw,
+                "old absent proof encoding must stay byte-identical"
+            );
             let data: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(case.join("case.json")).unwrap()).unwrap();
             let p: PurgeProgress = serde_json::from_value(data["progress"].clone()).unwrap();
@@ -282,5 +295,59 @@ fn native_context_genuine_before_four_cases_reopen_fork_unchanged_receipts() {
                 validation::canonical_files(&copy).unwrap();
             }
         }
+    }
+}
+
+#[test]
+fn native_context_api1_purge_malformed_request_proofs_fail_closed_immutable() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let mut key = ctx(&s, id, "api1-malformed");
+    key.contract_version = 1;
+    let p = s.engine.begin_namespace_purge(&key, true).unwrap();
+    drop(s);
+    let value: serde_json::Value = serde_json::from_slice(&raw_start(&path, &p)).unwrap();
+    let request = value["receipt"]["outcome"]["transition"]["request"].clone();
+    assert!(request.is_object());
+    let mut bad = vec![serde_json::Value::Null];
+    for version in [0, 2, 3] {
+        let mut r = request.clone();
+        r["context"]["contractVersion"] = version.into();
+        bad.push(r);
+    }
+    let mut r = request.clone();
+    r["context"]["proofVersion"] = 2.into();
+    bad.push(r);
+    let mut r = request.clone();
+    r["context"] = serde_json::Value::Null;
+    bad.push(r);
+    let mut r = request.clone();
+    r["context"]["unknown"] = true.into();
+    bad.push(r);
+    let mut r = request.clone();
+    r["force"] = false.into();
+    bad.push(r);
+    let mut r = request.clone();
+    r["expectedGeneration"] = serde_json::Value::Null;
+    bad.push(r);
+    let mut r = request.clone();
+    r["expectedGeneration"] = "0".into();
+    bad.push(r);
+    for (index, r) in bad.iter().enumerate() {
+        let copy = root.path().join(format!("bad-{index}"));
+        copy_tree(&path, &copy);
+        assert_eq!(rewrite_requests(&copy, Some(r)), 3);
+        let frozen = bytes(&copy);
+        assert!(
+            validation::preflight_native(&copy).is_err(),
+            "accepted case{index}"
+        );
+        assert_eq!(bytes(&copy), frozen);
+        assert!(
+            RedbStorageEngine::open_native(&copy).is_err(),
+            "opened case{index}"
+        );
+        assert_eq!(bytes(&copy), frozen);
     }
 }
