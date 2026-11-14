@@ -55,3 +55,142 @@ impl DerivedCompletion {
             .map_err(|_| failed("barrier deadline expired".into()))?
     }
 }
+
+impl DerivedCompletion {
+    pub(crate) async fn observe_readiness(
+        &self,
+        deadline: Instant,
+    ) -> Result<crate::storage::ReadinessObservation, StorageError> {
+        let storage = self.storage.clone();
+        let operation = async {
+            let gate = publication_gate(&storage).await?;
+            let publication = gate.read_owned().await;
+            tokio::task::spawn_blocking(move || {
+                // The actual lease stays with the worker after caller timeout.
+                let _publication = publication;
+                let engine = storage.read().map_err(|e| failed(e.to_string()))?;
+                engine.meta_store().observe_readiness(deadline)
+            })
+            .await
+            .map_err(|e| failed(e.to_string()))?
+        };
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), operation)
+            .await
+            .map_err(|_| failed("readiness observation deadline expired".into()))?
+    }
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    use crate::test_support::{DIM, Fixture};
+    use std::time::Duration;
+
+    fn owner(fx: &Fixture) -> DerivedCompletion {
+        DerivedCompletion {
+            storage: fx.storage.clone(),
+            cache: fx.cache.clone(),
+            graph: fx.graph.clone(),
+            vectors: fx.vector_index.clone(),
+            fts: fx.fts_index.clone(),
+            entities: fx.entity_index.clone(),
+        }
+    }
+    fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(5)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_committed_failure_observes_unknown_views_receipt_and_callers_live_root() {
+        let fx = Fixture::new();
+        let publisher = owner(&fx);
+        let empty = publisher.observe_readiness(deadline()).await.unwrap();
+        assert!(
+            empty
+                .derived
+                .iter()
+                .all(|v| v.applied.is_none() && !v.matches_canonical)
+        );
+        let live = fx.insert_memory().await;
+        let dead = fx.insert_memory().await;
+        publisher.complete().await.unwrap();
+        let ready = publisher.observe_readiness(deadline()).await.unwrap();
+        assert!(ready.derived.iter().all(|v| v.matches_canonical));
+        let root = publisher.accept_work(None).unwrap();
+        fx.storage.write().unwrap().delete_memory(dead).unwrap();
+        *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
+        let error = publisher.complete_with_work(Some(&root)).await.unwrap_err();
+        let StorageError::CommittedMutation { receipt, .. } = error else {
+            panic!("lost committed receipt: {error}")
+        };
+        let observation = publisher.observe_readiness(deadline()).await.unwrap();
+        assert_eq!(observation.canonical.store_id, receipt.store_id);
+        assert_eq!(
+            observation.canonical.generation,
+            receipt.committed_generation
+        );
+        assert_eq!(
+            observation.accepted_work, 1,
+            "observation must not drain/finish caller"
+        );
+        assert_eq!(observation.unresolved_work, 0);
+        assert_eq!(observation.pending_effects, 1);
+        assert_eq!(observation.pending_purges, 0);
+        assert_eq!(observation.pending_batch_items, 0);
+        assert!(
+            observation
+                .derived
+                .iter()
+                .any(|v| v.name == "fts" && v.applied.is_none())
+        );
+        assert!(observation.derived.iter().all(|v| !v.matches_canonical));
+        assert!(
+            observation
+                .derived
+                .iter()
+                .filter_map(|v| v.applied)
+                .all(|g| g == ready.canonical)
+        );
+        assert_eq!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .pending_effects()
+                .unwrap()[0]
+                .receipt,
+            *receipt
+        );
+        assert!(fx.record(live).is_some());
+        *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
+        publisher.complete_with_work(Some(&root)).await.unwrap();
+        let repaired = publisher.observe_readiness(deadline()).await.unwrap();
+        assert_eq!(repaired.canonical, observation.canonical);
+        assert!(
+            repaired
+                .derived
+                .iter()
+                .all(|v| v.applied == Some(repaired.canonical) && v.matches_canonical)
+        );
+        assert_eq!(repaired.pending_effects, 0);
+        assert_eq!(repaired.accepted_work, 1);
+        publisher.finish_known_work(root);
+        assert_eq!(
+            publisher
+                .observe_readiness(deadline())
+                .await
+                .unwrap()
+                .accepted_work,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_handle_and_expired_deadline_never_invent_a_readiness_object() {
+        let fx = Fixture::new();
+        let publisher = owner(&fx);
+        assert!(publisher.observe_readiness(Instant::now()).await.is_err());
+        fx.storage.read().unwrap().meta_store().mark_unavailable();
+        assert!(publisher.observe_readiness(deadline()).await.is_err());
+    }
+}
