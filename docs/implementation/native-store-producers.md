@@ -196,3 +196,13 @@ adding the unknown/pending-provider cases. This was a fixture error, not a
 reproduced production mutation failure. Final full-suite/fmt/Clippy validation
 awaits Hume's validated foreign-history dimension correction; focused results
 do not replace that final shipping-tree proof.
+
+## Final frozen validation and handoff
+
+Published corrected PR101 `51da3ca` is joined at runtime `4c151f8`. The final
+offline run passed 1045 library tests, 2 CLI integration tests, format and Clippy
+(with warnings); 4 doctests were ignored. This supersedes the earlier pending
+validation checkpoints above. Source/executable provenance, retained failures,
+actual HOME copy verification and bounded scope are in
+[the final report](../evidence/native-store-producers/REPORT.md). No source changes
+followed that run; the final seal is documentation only.
