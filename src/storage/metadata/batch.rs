@@ -380,6 +380,14 @@ impl MetadataStore {
     ) -> Result<usize, StorageError> {
         check()?;
         let tx = self.db.begin_read()?;
+        Self::pending_batch_items_at(&tx, check)
+    }
+
+    pub(super) fn pending_batch_items_at(
+        tx: &redb::ReadTransaction,
+        mut check: impl FnMut() -> Result<(), StorageError>,
+    ) -> Result<usize, StorageError> {
+        check()?;
         if !tx.list_tables()?.any(|t| t.name() == BATCHES.name()) {
             return Ok(0);
         }
