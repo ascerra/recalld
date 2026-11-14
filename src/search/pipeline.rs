@@ -21,6 +21,10 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 mod diagnostics;
 #[path = "payload_selection.rs"]
 mod payload_selection;
+#[path = "similar_selection.rs"]
+mod similar_selection;
+pub(crate) use similar_selection::{SimilarityScope, SimilaritySelection};
+
 #[path = "read_view.rs"]
 mod read_view;
 pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse};
@@ -216,6 +220,20 @@ pub trait AccessRecorder: Send + Sync {
     /// Only a configured, owned native writer may admit observing v2 reads.
     fn supports_native_exposure(&self) -> bool {
         false
+    }
+
+    async fn record_similarity_for_publication(
+        &self,
+        _accesses: &[(MemoryId, AccessKind)],
+        _selection: &crate::decay::similarity_scope::SimilarityExposure,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+        _policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        _original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        Err(SearchError::Unavailable(
+            "similarity exposure selection unsupported".into(),
+        ))
     }
 
     /// Receives the query owner's configured policy and already sampled clock.
@@ -1805,9 +1823,9 @@ impl QueryEngine {
                 "resolved namespace differs from canonical source".into(),
             ));
         }
-        let context = self
-            .by_id_strength_context(&namespace, record_access)
-            .await?;
+        let mut context = strength::StrengthContext::pin(self, &namespace, record_access)?;
+        let mut records = self.meta_store.namespace_records(namespace.id).await?;
+        context.project_namespace(&mut records, self.graph.as_ref())?;
         context.apply(&mut record)?;
 
         // Load the source memory's embedding from the vector index.
@@ -1820,10 +1838,22 @@ impl QueryEngine {
             namespace.embedding_dim as usize,
         )?;
 
-        // Over-fetch by 1 to account for self-match removal.
-        let scored =
-            self.vector_indexes
-                .search(record.namespace_id, &source_embedding, k + 1, None)?;
+        // Canonical phase and source exclusion precede the exact top-k allowance.
+        let eligible_ids: HashSet<MemoryId> = records
+            .into_iter()
+            .filter(|r| {
+                r.id != id
+                    && r.namespace_id == namespace.id
+                    && !matches!(r.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+            })
+            .map(|r| r.id)
+            .collect();
+        let scored = self.vector_indexes.search(
+            record.namespace_id,
+            &source_embedding,
+            k,
+            Some(&eligible_ids),
+        )?;
 
         // Remove the source memory from results.
         let filtered: Vec<ScoredResult> = scored
@@ -1832,14 +1862,22 @@ impl QueryEngine {
             .take(k)
             .collect();
 
-        let result_ids: Vec<MemoryId> = filtered.iter().map(|s| s.memory_id).collect();
-        let records = self.strength_records(&result_ids, Some(&context)).await?;
-
-        // Build a lookup map so we can iterate `filtered` (which preserves
-        // descending similarity order from the vector search) instead of
-        // `records` (whose order is scrambled by cache-hit / disk-load batching).
-        let record_map: std::collections::HashMap<MemoryId, &CachedRecord> =
-            records.iter().map(|r| (r.id, r)).collect();
+        // Preserve the canonical final-read invariant as well as pre-cap
+        // eligibility. A changed/missing selected row invalidates the page;
+        // silently dropping it would hide an incomplete or inconsistent read.
+        let selected_ids: Vec<_> = filtered.iter().map(|s| s.memory_id).collect();
+        let records = self.strength_records(&selected_ids, Some(&context)).await?;
+        let record_map: HashMap<_, _> = records.into_iter().map(|r| (r.id, r)).collect();
+        if selected_ids.iter().any(|id| {
+            record_map.get(id).is_none_or(|r| {
+                r.namespace_id != namespace.id
+                    || matches!(r.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+            })
+        }) {
+            return Err(SearchError::Unavailable(
+                "selected similarity record changed or disappeared".into(),
+            ));
+        }
 
         let results: Vec<SearchResult> = filtered
             .iter()

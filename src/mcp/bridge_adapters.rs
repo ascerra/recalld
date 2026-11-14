@@ -624,10 +624,62 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         id: MemoryId,
         limit: usize,
         min_score: Option<f32>,
-        _same_namespace: bool,
+        same_namespace: bool,
         record_access: bool,
         namespace: Option<&str>,
     ) -> Result<Vec<bridge::SearchHit>, bridge::BridgeError> {
+        if !same_namespace {
+            let observed = self
+                .query_engine
+                .similar_selected_with_work(
+                    id,
+                    namespace,
+                    crate::search::SimilaritySelection {
+                        semantics: crate::search::RetrievalSemantics::V1,
+                        scope: crate::search::SimilarityScope::AllCompatible,
+                        filter: Default::default(),
+                        limit: limit.min(crate::search::SearchQuery::MAX_USER_LIMIT),
+                        min_score,
+                        record_access,
+                        include_embeddings: false,
+                        original_contract_version: 1,
+                    },
+                    None,
+                )
+                .await
+                .map_err(map_search_error)?;
+            let hits = observed
+                .value
+                .rows
+                .into_iter()
+                .map(|selected| {
+                    let r = selected.result;
+                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
+                    bridge::SearchHit {
+                        labels: r.labels.clone(),
+                        id: r.memory_id.to_string(),
+                        summary: r.summary.unwrap_or_default(),
+                        full_text: selected.payload.full_text,
+                        score: r.score.unwrap_or(0.0),
+                        namespace: selected.namespace.name,
+                        tags: r.tags.iter().map(|t| t.to_string()).collect(),
+                        entities: metadata.entities,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        phase: format!("{:?}", r.phase),
+                        strength: r.retrievability,
+                        created_at: format_timestamp(r.created_at, self.timezone),
+                        last_accessed_at: format_timestamp(r.last_accessed_at, self.timezone),
+                        related: Vec::new(),
+                    }
+                })
+                .collect();
+            return Observed {
+                value: hits,
+                receipts: observed.receipts,
+            }
+            .finish(Ok(()));
+        }
         // Admission follows the actual query metadata owner. Immutable offline
         // adapters have no mutable core; they cannot inherit a placeholder's ticket.
         let accepted = self

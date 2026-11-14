@@ -55,6 +55,7 @@ pub use pipeline::{
     SemanticsResponse, StrengthDiagnostics, UnresolvedReason, VectorIndexRegistry, VersionMode,
     VersionStatus,
 };
+pub(crate) use pipeline::{SimilarityScope, SimilaritySelection};
 pub use query::SearchFilter as PipelineSearchFilter;
 pub use query::{QueryMode, SearchQuery};
 pub use response::{

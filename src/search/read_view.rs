@@ -437,7 +437,7 @@ impl QueryEngine {
             .map(Some)
     }
 
-    async fn pin_read_engine(
+    pub(super) async fn pin_read_engine(
         &self,
         owner: &DerivedCompletion,
         rif: Arc<crate::rif::RifEngine>,
@@ -701,6 +701,7 @@ mod tests {
     use tokio::sync::Notify;
 
     include!("payload_tests.rs");
+    include!("similar_selection_tests.rs");
 
     struct Embeddings {
         entered: Notify,
