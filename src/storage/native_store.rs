@@ -180,8 +180,8 @@ impl NativeStoreWrite {
         &self,
         namespace: &NamespaceConfig,
     ) -> Result<(), StorageError> {
-        if namespace.id != self.namespace_id {
-            return Err(invalid("linked creation namespace mismatch"));
+        if namespace.id != self.namespace_id || namespace.embedding_dim != self.embedding_dim {
+            return Err(invalid("linked creation namespace or dimension mismatch"));
         }
         for r in &self.records {
             if let Some(before) = &r.before {
