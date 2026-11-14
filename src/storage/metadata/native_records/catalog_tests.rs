@@ -1,7 +1,7 @@
 //! Actual native writes/migration and reopen, not authored schema-row probes.
 use super::*;
 use crate::{
-    catalog_page::{self, CatalogData, ProfileCompatibility},
+    catalog_page,
     serialization::catalog_page::{CatalogKind, CatalogPageRequest},
     test_support::Fixture,
 };

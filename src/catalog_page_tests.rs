@@ -1,7 +1,6 @@
 use super::*;
 use crate::{
     serialization::catalog_page::*,
-    storage::StorageEngine,
     test_support::{Fixture, MemorySpec},
 };
 use serde_json::{Value, json};
@@ -316,7 +315,6 @@ async fn catalog_page_response_budget_whole_error_and_serialized_transport_retry
     );
     assert!(serde_json::to_vec(&rpc).unwrap().len() < crate::daemon::protocol::MAX_MESSAGE_SIZE);
     let daemon = crate::daemon::protocol::DaemonResponse::success(
-        u64::MAX,
         u64::MAX,
         serde_json::to_value(&envelope).unwrap(),
     );
