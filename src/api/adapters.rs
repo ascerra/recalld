@@ -991,7 +991,11 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         self.tombstone_node_with_work(id, None).await
     }
 
-    async fn tombstone_node_with_work(&self, id: MemoryId) -> Result<(), crate::graph::GraphError> {
+    async fn tombstone_node_with_work(
+        &self,
+        id: MemoryId,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), crate::graph::GraphError> {
         let work = crate::storage::work::accept_work(&self.storage, parent)
             .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let result = async {
