@@ -1350,3 +1350,17 @@ When working in this repo, also store:
 **Decay tuning:**
 
 If you find memories disappearing too quickly or persisting too long, adjust `decayRateMultiplier` in your namespace or config. Values above 1.0 slow decay; below 1.0 speed it up; 0.0 disables decay entirely.
+
+## Application contract selection
+
+Tools currently support application contract version 1. Omit `contractVersion`
+or supply the integer `1`; explicit `2` and malformed selectors fail before
+handler work. This is separate from MCP transport protocol negotiation. Legacy
+success payloads remain unchanged, including unknown-field compatibility and
+missing arguments on no-argument tools. Modern object results also carry the
+same JSON in `structuredContent`; legacy-era results and array/scalar payloads
+retain text-only encoding. No v2 readiness or public retry/CAS support is advertised.
+
+REST uses `Recalld-Contract-Version: 1` or omission; other values and duplicate
+version headers fail before handler work. See
+[wire preparation and remaining prerequisites](implementation/contract-wire-prep.md).

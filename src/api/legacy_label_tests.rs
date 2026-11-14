@@ -211,3 +211,6 @@ async fn legacy_labels_normalized_positive_survive_receipted_rebuild_and_restart
         assert!(r.schema.is_none());
     }
 }
+
+#[path = "contract_wire_tests.rs"]
+mod contract_wire_tests;

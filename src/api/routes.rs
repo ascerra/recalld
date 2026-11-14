@@ -16,7 +16,7 @@ use tracing::warn;
 
 use super::ApiConfig;
 use super::handlers;
-use super::middleware::request_id_middleware;
+use super::middleware::{contract_version_middleware, request_id_middleware};
 use super::state::AppState;
 
 /// Constructs the complete axum Router with all routes and middleware.
@@ -84,6 +84,7 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
         .merge(ops_routes)
         .layer(
             ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(contract_version_middleware))
                 .layer(axum::middleware::from_fn(request_id_middleware))
                 .layer(TraceLayer::new_for_http())
                 .layer(TimeoutLayer::with_status_code(

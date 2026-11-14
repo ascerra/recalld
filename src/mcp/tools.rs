@@ -37,7 +37,7 @@ const FULL_TEXT_DESC: &str = "Detailed content. Removed as memory decays to ghos
 
 /// Return all tool definitions for `tools/list`.
 pub fn tool_definitions() -> Vec<ToolInfo> {
-    vec![
+    let mut tools = vec![
         store_memory_def(),
         store_memories_def(),
         recall_memories_def(),
@@ -52,7 +52,14 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         list_memories_def(),
         list_namespaces_def(),
         list_tags_def(),
-    ]
+    ];
+    for tool in &mut tools {
+        tool.input_schema["properties"]["contractVersion"] = json!({
+            "type": "integer", "enum": [1], "default": 1,
+            "description": "Application contract version. This server currently supports version 1 only."
+        });
+    }
+    tools
 }
 
 /// Every tool name [`dispatch_tool`] has an arm for.
@@ -86,6 +93,11 @@ pub async fn dispatch_tool(
 ) -> ToolCallResult {
     if let Err(e) = args::require_object(&arguments) {
         return ToolCallResult::error(e.to_string());
+    }
+    if let Err(error) = crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        .and_then(|version| version.require_supported())
+    {
+        return ToolCallResult::error(error.to_string());
     }
     match name {
         "store_memory" => handle_store_memory(bridge, arguments).await,
