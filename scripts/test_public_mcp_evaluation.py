@@ -147,5 +147,62 @@ class Preflight(unittest.TestCase):
             self.assertIn("unexpected current action fields", run.stderr)
 
 
+    def install_owned(self):
+        self.manifest["track"] = m["OWNED"]["TRACK"]
+        self.manifest["versions"], self.manifest["capabilities"] = m["track_profile"](self.manifest["track"])
+        self.manifest["executables"]["ownedEvaluator"] = self.manifest["executables"].pop("recalld")
+        actor, labels, cache, schedule = m["fixtures"](self.manifest["track"])
+        for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels),
+                                  ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
+            m["save"](self.root / name, value)
+            self.manifest[key]["sha256"] = m["digest"]((self.root / name).read_bytes())
+        self.manifest["dataset"]["actorArtifactSha256"] = self.manifest["actorInputs"]["sha256"]
+        return actor, schedule
+
+    def test_owned_version_is_distinct_and_unsupported_guarantees_reject(self):
+        actor, schedule = self.install_owned()
+        self.validate()
+        self.assertNotIn("steps", actor)
+        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](actor).decode())
+        for change in (lambda v: v["versions"].update(privateControlVersion=2),
+                       lambda v: v["versions"].update(canonicalSchemaVersion=0),
+                       lambda v: v["versions"].update(canonicalSchemaVersion=2),
+                       lambda v: v["versions"].update(privateControlVersion=True),
+                       lambda v: v["capabilities"].update(reset=True),
+                       lambda v: v["capabilities"].update(clock="frozen"),
+                       lambda v: v["capabilities"].update(coherentReadView=True),
+                       lambda v: v["capabilities"].update(deterministicIds=True),
+                       lambda v: v["capabilities"].update(deterministicRng=True),
+                       lambda v: v["capabilities"].update(fullA6=True)):
+            value = copy.deepcopy(self.manifest); change(value)
+            with self.assertRaises(ValueError): self.validate(value)
+
+    def test_owned_barrier_rejects_missing_stale_duplicate_and_foreign_views(self):
+        owned = m["OWNED"]
+        at = dict(storeId="11111111-1111-4111-8111-111111111111", generation="9")
+        report = dict(storeId=at["storeId"], committedGeneration="9", ready=True, pendingWork=0,
+            derived=[dict(name=name, appliedGeneration="9", ready=True) for name in ("graph", "vectors", "fts", "entities")])
+        self.assertEqual(owned["checked_barrier"](report, at), report)
+        for change in (lambda v: v.update(ready=1), lambda v: v.update(pendingWork=False), lambda v: v.update(pendingWork=1),
+                       lambda v: v.update(storeId="other"), lambda v: v.update(committedGeneration="8"),
+                       lambda v: v["derived"].pop(), lambda v: v["derived"][0].update(name="vectors"),
+                       lambda v: v["derived"][0].update(appliedGeneration="8"), lambda v: v["derived"][0].update(ready=False)):
+            value = copy.deepcopy(report); change(value)
+            with self.assertRaises(ValueError): owned["checked_barrier"](value, at)
+        for bad in (0, True, "01", "-1", str(2**64)):
+            with self.assertRaises(ValueError): owned["generation"](bad)
+
+    def test_owned_control_rejects_wrong_ack_and_eof(self):
+        import os
+        for response in (dict(id=2, result={}), dict(id=True, result={}), dict(id=1, result={}, error={}), None):
+            request_read, request_write = os.pipe(); response_read, response_write = os.pipe()
+            try:
+                if response is not None: os.write(response_write, json.dumps(response).encode() + b"\n")
+                os.close(response_write)
+                client = m["OWNED"]["Control"](response_read, request_write, self.root / "control.jsonl")
+                with self.assertRaises((ValueError, RuntimeError)): client.call("inspect", {})
+            finally:
+                for fd in (request_read, request_write, response_read): os.close(fd)
+
 if __name__ == "__main__":
     unittest.main()

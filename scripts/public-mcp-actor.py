@@ -18,7 +18,7 @@ def run(args):
     if phase == "action":
         action = projection["currentAction"]
         assert set(action) == {"tag", "tool", "arguments"}, "unexpected current action fields"
-        allowed = {"store_memory": {"summary", "fullText", "tags", "namespace", "checkDuplicates", "supersedes"},
+        allowed = {"store_memory": {"summary", "fullText", "tags", "namespace", "checkDuplicates", "supersedes", "parentId"},
                    "get_memory": {"id", "namespace", "recordAccess"},
                    "recall_memories": {"query", "namespace", "recordAccess", "depth", "limit"},
                    "reinforce_memory": {"id", "namespace", "quality"}, "forget_memory": {"id", "namespace"}}
@@ -33,6 +33,15 @@ def run(args):
         print(json.dumps(dict(event="isolation", tag="private-fd-closed", stepId=str(projection["startId"]), deliveryOrdinal=projection["deliveryOrdinal"], fdClosed=True)), flush=True)
     else:
         raise RuntimeError("evaluator-only descriptor leaked to actor")
+    for fd in args.deny_control_fd:
+        try:
+            os.fstat(fd)
+        except OSError:
+            pass
+        else:
+            raise RuntimeError("actual evaluator control descriptor leaked to actor")
+    if args.deny_control_fd:
+        print(json.dumps(dict(event="isolation", tag="control-fds-closed", stepId=str(projection["startId"]), deliveryOrdinal=projection["deliveryOrdinal"], fdClosed=True, count=len(args.deny_control_fd))), flush=True)
     serial = projection["startId"]
     def rpc(method, params, tag, notification=False, expected_error=False):
         nonlocal serial
@@ -101,4 +110,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("read-fd", "write-fd", "deny-fd"):
         parser.add_argument("--" + flag, type=int, required=True)
+    parser.add_argument("--deny-control-fd", type=int, action="append", default=[])
     run(parser.parse_args())
