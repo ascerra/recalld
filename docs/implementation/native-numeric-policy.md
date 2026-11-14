@@ -1,6 +1,6 @@
 # Native numeric policy replacement
 
-Implementation in progress. Minimal parent PR87 at 94a352c, including corrected
+Implemented internal owning-engine path. Minimal parent PR87 at 94a352c, including corrected
 PR82 startup recovery. No graph, batch, maintenance or broad-checkpoint ancestry.
 
 Reuse the complete `NamespacePolicy` replacement input. Identity, dimensions,
@@ -33,7 +33,7 @@ history is rewound before matching native namespace creation; foreign-origin
 history remains ancestry-bounded. Active reverse validation also rewinds numeric
 configuration before older phase/write proofs. Existing proof bytes are unchanged.
 
-Required checks: exact no-op; changed-input conflict; replay before stale policy,
+Validated checks: exact no-op; changed-input conflict; replay before stale policy,
 CAS and inherited-input failure; complete terminal-row token participation with
 byte-preserved payload/lifecycle state; stale captured policy; actual metadata
 commit interruption; creation and lifecycle migration interleaving; strict reopen,
@@ -42,5 +42,23 @@ without source changes. Offline bounded Docker, source-specific private target.
 
 Feynman owns this slice and its numeric-policy dispatcher arms. Pascal owns phase
 and hard-delete arms, Hume graph, Curie batch references. Purge remains a later
-consumer of Pascal's validated deletion witness. This document records the plan,
-not completed implementation or validation.
+consumer of Pascal's validated deletion witness. The actual core is validated at ea72a14d8fa9d759e532e00afa1e7b6f381c5e3b:
+7focused (6new/1existing),938library+2CLI pass;4doctests ignored;fmt and all-target
+Clippy exit0 with618library/655lib-test warnings(615duplicates). Source, executable
+and logs, including the historical-no-op RED, are sealed in
+[the evidence directory](../evidence/native-numeric-policy/README.md).
+
+The actual public transport consumer is assigned to Huygens after metadata-list;
+Halley owns the sole publication/readiness integration. The accepted parent must
+cover replay, capture, canonical transaction and awaited completion after guards
+are released. Known committed publication failure carries the original full
+receipt. No-change generations must invalidate mismatched publication stamps even
+when effects_epoch is unchanged. This internal core does not activate ordinary
+native serving or claim a complete public policy API or whole-query readiness.
+
+Historical no-change proofs are bound to their revision's numeric policy for
+both active and ancestry-bounded origins. The actual fork regression reproduced
+acceptance of a forged later policy before this check; correction preserves all
+original receipts and request hashes. Numeric revision chains rewind before the
+immutable namespace creation match. Existing explicit lifecycle migrations retain
+their own proof bytes and interleave with same-version numeric revisions.
