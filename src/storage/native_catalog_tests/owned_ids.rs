@@ -320,7 +320,7 @@ fn owned_native_catalog_abandoned_precommit_consumes_reserved_id_without_rewind(
 #[test]
 fn owned_native_purge_children_consume_reservations_and_closed_reopen_preserves_cursor() {
     use crate::storage::purge::PurgeStage;
-    for api in [1, 2] {
+    for (api, recover) in [(1, false), (1, true), (2, false), (2, true)] {
         let root = tempfile::tempdir().unwrap();
         let (path, namespace, records) = crate::storage::native_purge_tests::fixture(root.path());
         let clock = Arc::new(Clock(AtomicUsize::new(0)));
@@ -354,15 +354,50 @@ fn owned_native_purge_children_consume_reservations_and_closed_reopen_preserves_
             };
             assert_eq!(p.next_operation_id, expected_next);
             assert_receipt_cursor(&s, &oracle);
-            if p.sequence == 1 {
+            if recover && p.sequence == 1 {
                 let saved = cursor(&s);
+                let deleting = p.next_operation_id.unwrap();
+                // Startup finishes the remaining three rows in one bounded
+                // chunk, then Cleanup and Complete. Only the first two reserve
+                // successors; Complete consumes its existing reservation.
+                let cleanup = oracle.uuid(IdKind::Operation).unwrap();
+                let complete = oracle.uuid(IdKind::Operation).unwrap();
                 drop(s);
-                s = with_ids(
-                    &path,
-                    clock.clone(),
-                    SeededIds::from_state(saved.clone()).unwrap(),
-                );
-                assert_eq!(cursor(&s), saved);
+                s = with_ids(&path, clock.clone(), SeededIds::from_state(saved).unwrap());
+                p = s
+                    .engine
+                    .lookup_namespace_purge(p.store_id, namespace, start)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(p.stage, PurgeStage::Complete);
+                assert_eq!(p.sequence, 4);
+                assert_eq!(p.last_receipt.operation_id, complete);
+                assert!(p.next_operation_id.is_none());
+                for (operation, sequence, stage) in [
+                    (deleting, 2, PurgeStage::Deleting),
+                    (cleanup, 3, PurgeStage::Cleanup),
+                    (complete, 4, PurgeStage::Complete),
+                ] {
+                    let receipt = s
+                        .engine
+                        .lookup_operation(
+                            p.store_id,
+                            MutationScope::Namespace(namespace),
+                            operation,
+                        )
+                        .unwrap()
+                        .unwrap();
+                    let MutationOutcome::NativeNamespacePurgeAdvanced { transition } =
+                        receipt.outcome
+                    else {
+                        panic!("missing typed recovery child");
+                    };
+                    assert_eq!(transition.parent_operation_id, start);
+                    assert_eq!(transition.sequence, sequence);
+                    assert_eq!(transition.stage, stage);
+                    assert_eq!(transition.counts().0, if sequence == 2 { 3 } else { 0 });
+                }
+                assert_receipt_cursor(&s, &oracle);
             }
         }
         assert_eq!(p.removed, records.len() as u64);
@@ -374,5 +409,17 @@ fn owned_native_purge_children_consume_reservations_and_closed_reopen_preserves_
         assert_eq!(s.engine.control_state().unwrap(), state);
         assert_receipt_cursor(&s, &oracle);
         assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+        let saved = cursor(&s);
+        drop(s);
+        let mut s = with_ids(&path, clock, SeededIds::from_state(saved.clone()).unwrap());
+        assert_eq!(cursor(&s), saved, "completed purge open reserves nothing");
+        assert_eq!(
+            s.engine
+                .begin_namespace_purge(&ctx, true)
+                .unwrap()
+                .last_receipt,
+            p.last_receipt
+        );
+        assert_eq!(cursor(&s), saved);
     }
 }
