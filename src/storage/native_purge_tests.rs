@@ -1,0 +1,529 @@
+use super::control::{MutationContext, MutationScope};
+use super::native_lifecycle::{LifecycleScope, NativeLifecycleSession, NativePolicyInputs};
+use super::purge::{PurgeProgress, PurgeStage};
+use super::*;
+use crate::model::{DecayPhase, MemoryId, NamespaceConfig, NamespaceId};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+struct NoClock;
+impl crate::time::Clock for NoClock {
+    fn now_millis(&self) -> i64 {
+        panic!("purge sampled clock")
+    }
+}
+fn open(path: &Path) -> NativeLifecycleSession {
+    NativeLifecycleSession::open(path, NativePolicyInputs::default(), Arc::new(NoClock)).unwrap()
+}
+fn fixture(root: &Path) -> (PathBuf, NamespaceId, Vec<MemoryId>) {
+    let source = root.join("legacy");
+    let target = root.join("native");
+    let mut e = RedbStorageEngine::open(&source).unwrap();
+    let mut ns = NamespaceConfig::default_namespace(100);
+    ns.name = "doomed".into();
+    ns.embedding_dim = 4;
+    let id = e.create_namespace(&ns).unwrap();
+    ns.id = id;
+    let mut ids = Vec::new();
+    for n in 0..4 {
+        let r = e
+            .insert_memory_with_receipt(
+                &MutationContext::unkeyed(id),
+                &insertion::InsertMemory {
+                    id: None,
+                    summary: format!("private summary {n}"),
+                    full_text: Some(format!("private full text {n}")),
+                    tags: vec![],
+                    initial_stability: None,
+                    created_at: Some(1000),
+                    embedding: Some(vec![1., 0., 0., 0.]),
+                    parent_id: None,
+                    supersedes: None,
+                },
+                &[],
+                1000,
+            )
+            .unwrap();
+        ids.push(insertion::inserted_id(&r).unwrap());
+    }
+    e.add_edge(
+        ids[0],
+        ids[1],
+        crate::model::EdgeType::ParentChild,
+        0.5,
+        false,
+        0,
+    )
+    .unwrap();
+    for i in [1, 2] {
+        let before = e.get_record(ids[i]).unwrap().unwrap();
+        assert!(
+            e.apply_legacy_decay(ids[i], &before, &ns, DecayPhase::Summary, 0.2, 0.2)
+                .unwrap()
+        );
+    }
+    let before = e.get_record(ids[2]).unwrap().unwrap();
+    assert!(
+        e.apply_legacy_decay(ids[2], &before, &ns, DecayPhase::Ghost, 0.05, 0.05)
+            .unwrap()
+    );
+    e.tombstone_memory_with_receipt(&MutationContext::unkeyed(id), ids[3])
+        .unwrap();
+    let mut keep = NamespaceConfig::default_namespace(100);
+    keep.name = "kept".into();
+    keep.embedding_dim = 4;
+    let keep_id = e.create_namespace(&keep).unwrap();
+    let kept = e
+        .insert_memory_with_receipt(
+            &MutationContext::unkeyed(keep_id),
+            &insertion::InsertMemory {
+                id: None,
+                summary: "surviving summary".into(),
+                full_text: Some("surviving full text".into()),
+                tags: vec![],
+                initial_stability: None,
+                created_at: Some(1000),
+                embedding: Some(vec![1., 0., 0., 0.]),
+                parent_id: None,
+                supersedes: None,
+            },
+            &[],
+            1000,
+        )
+        .unwrap();
+    let kept = insertion::inserted_id(&kept).unwrap();
+    // Historical cross-namespace edge fixture, before schema publication. New
+    // native graph admission does not create such edges; purge must remove them.
+    e.edge_store()
+        .add_edge(
+            kept,
+            ids[0],
+            crate::model::EdgeType::Associative,
+            0.25,
+            false,
+            0,
+        )
+        .unwrap();
+    e.meta_store().update_edge_count(kept, 1).unwrap();
+    e.sync().unwrap();
+    drop(e);
+    schema_migration::migrate_schema(
+        &source,
+        &target,
+        &schema_migration::MigrationOptions {
+            migration_now: 2000,
+            expected_source: schema_migration::inspect_schema(&source)
+                .unwrap()
+                .control
+                .generation_ref(),
+            attestations: vec![],
+        },
+    )
+    .unwrap();
+    (target, id, ids)
+}
+fn ctx(s: &NativeLifecycleSession, ns: NamespaceId, key: &str) -> MutationContext {
+    let c = s.engine.control_state().unwrap();
+    MutationContext {
+        store_id: Some(c.store_id),
+        scope: MutationScope::Namespace(ns),
+        idempotency_key: Some(key.into()),
+        expected_generation: Some(c.committed_generation),
+        contract_version: 2,
+    }
+}
+fn step(s: &mut NativeLifecycleSession, p: &PurgeProgress) -> PurgeProgress {
+    s.engine
+        .resume_namespace_purge(p.store_id, p.namespace_id, p.start_receipt.operation_id, 1)
+        .unwrap()
+}
+fn done(s: &mut NativeLifecycleSession, mut p: PurgeProgress) -> PurgeProgress {
+    while p.stage != PurgeStage::Complete {
+        p = step(s, &p);
+    }
+    p
+}
+fn policy(s: &mut NativeLifecycleSession, id: NamespaceId) {
+    let config = s.engine.get_namespace(id).unwrap().unwrap();
+    let scope = LifecycleScope {
+        namespace_id: id,
+        namespace_name: config.name,
+        source: None,
+    };
+    let mut replacement =
+        catalog::NamespacePolicy::from(&s.engine.get_namespace(id).unwrap().unwrap());
+    s.update_policy(&ctx(s, id, "noop"), scope.clone(), &replacement)
+        .unwrap()
+        .unwrap();
+    replacement.initial_stability = 9.;
+    s.update_policy(&ctx(s, id, "numeric"), scope, &replacement)
+        .unwrap()
+        .unwrap();
+}
+#[test]
+fn native_purge_mixed_chunks_restart_replay_policy_and_ledger() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, ids) = fixture(root.path());
+    let mut s = open(&path);
+    policy(&mut s, id);
+    let key = ctx(&s, id, "purge");
+    let p = s.engine.begin_namespace_purge(&key, true).unwrap();
+    assert_eq!(p.version, 2);
+    let r = s.engine.begin_namespace_purge(&key, true).unwrap();
+    assert!(r.start_receipt.replayed);
+    assert_eq!(r.next_operation_id, p.next_operation_id);
+    assert!(matches!(
+        s.engine.begin_namespace_purge(&key, false),
+        Err(StorageError::IdempotencyConflict)
+    ));
+    assert!(s.capture_tombstone(ids[0], Some(id)).is_err());
+    let partial = step(&mut s, &p);
+    assert_eq!(partial.removed, 1);
+    assert_eq!(
+        partial.last_receipt.operation_id,
+        p.next_operation_id.unwrap()
+    );
+    assert!(s.engine.get_record(ids[0]).is_err());
+    drop(s);
+    let before = std::fs::read(path.join("meta.db")).unwrap();
+    assert!(validation::canonical_files(&path).is_err());
+    assert_eq!(before, std::fs::read(path.join("meta.db")).unwrap());
+    let mut s = open(&path);
+    let p = s
+        .engine
+        .lookup_namespace_purge(p.store_id, id, p.start_receipt.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(p.stage, PurgeStage::Complete);
+    assert_eq!(p.removed, 4);
+    assert_eq!(p.tombstones_removed, 1);
+    assert_eq!(p.edges_removed, 2);
+    assert!(!path.join("doomed").exists());
+    assert!(s.engine.get_namespace(id).unwrap().is_none());
+    for id in ids {
+        assert!(s.engine.get_record(id).unwrap().is_none());
+    }
+    let before = s.engine.control_state().unwrap();
+    assert!(
+        s.engine
+            .begin_namespace_purge(&key, true)
+            .unwrap()
+            .start_receipt
+            .replayed
+    );
+    assert_eq!(before, s.engine.control_state().unwrap());
+    drop(s);
+    validation::canonical_files(&path).unwrap();
+}
+#[tokio::test]
+async fn native_purge_complete_export_import_backup_fork_preserves_witness() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    policy(&mut s, id);
+    let p = s
+        .engine
+        .begin_namespace_purge(&ctx(&s, id, "purge"), true)
+        .unwrap();
+    let p = done(&mut s, p);
+    let receipt = p.start_receipt.clone();
+    drop(s);
+    let stream = root.path().join("logical.jsonl");
+    let imported = root.path().join("imported");
+    assert_eq!(
+        logical_export::export_store(&path, &stream).unwrap(),
+        logical_export::import_store(&stream, &imported).unwrap()
+    );
+    let text = std::fs::read_to_string(&stream).unwrap();
+    assert!(!text.contains("private summary"));
+    assert!(!text.contains("private full text"));
+    let archive = crate::backup::run_backup(
+        &crate::config::RecalldConfig::default(),
+        &root.path().join("purge.zip"),
+        Some(&imported),
+        false,
+    )
+    .await
+    .unwrap();
+    crate::backup::restore_from_backup(crate::backup::RestoreOptions {
+        backup_path: archive,
+        data_dir: imported.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: false,
+    })
+    .await
+    .unwrap();
+    let s = open(&imported);
+    assert_ne!(s.engine.control_state().unwrap().store_id, receipt.store_id);
+    drop(s);
+    let (_copy, db) = validation::inspect_database(&imported.join("meta.db")).unwrap();
+    let read = db.begin_read().unwrap();
+    let state = control::validate_existing(&read).unwrap();
+    let progress = metadata::purge::validate_existing(&read, state.as_ref()).unwrap();
+    assert_eq!(progress, vec![p]);
+    drop(read);
+    validation::canonical_files(&imported).unwrap();
+}
+
+#[test]
+fn native_purge_process_child() {
+    let Some(path) = std::env::var_os("RECALLD_NATIVE_PURGE_TEST_STORE") else {
+        return;
+    };
+    let mut s = open(Path::new(&path));
+    let id = NamespaceId::new(
+        std::env::var("RECALLD_NATIVE_PURGE_TEST_NS")
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+    let p = s
+        .engine
+        .begin_namespace_purge(&ctx(&s, id, "process-purge"), true)
+        .unwrap();
+    done(&mut s, p);
+    panic!("fault boundary not reached");
+}
+fn crash(path: &Path, id: NamespaceId, point: &str) {
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "storage::native_purge_tests::native_purge_process_child",
+            "--nocapture",
+        ])
+        .env("RECALLD_NATIVE_PURGE_TEST_STORE", path)
+        .env("RECALLD_NATIVE_PURGE_TEST_NS", id.get().to_string())
+        .env("RECALLD_TEST_EFFECT_CRASH", point)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(91),
+        "{point}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+#[test]
+fn native_purge_interrupted_publication_recovers_exactly_once() {
+    for point in [
+        "before_purge_commit",
+        "after_purge_commit",
+        "after_metadata_commit",
+        "after_edge_commit",
+        "after_canonical_ack",
+        "after_purge_directory_cleanup",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let (path, id, ids) = fixture(root.path());
+        crash(&path, id, point);
+        for _ in 0..2 {
+            let s = open(&path);
+            let progress = s.metadata().purge_progress().unwrap();
+            if point == "before_purge_commit" {
+                assert!(progress.is_empty());
+                assert!(s.engine.get_record(ids[0]).unwrap().is_some());
+            } else {
+                assert_eq!(progress.len(), 1);
+                assert_eq!(progress[0].stage, PurgeStage::Complete);
+                assert_eq!(progress[0].removed, 4);
+                assert_eq!(progress[0].edges_removed, 2);
+            }
+        }
+    }
+}
+#[test]
+fn native_purge_corrupt_pending_and_history_reject_without_source_changes() {
+    use redb::ReadableTable;
+    for mode in [
+        "pending-extra-edge",
+        "pending-missing-peer",
+        "before-policy",
+        "before-profile",
+        "chunk-token",
+        "progress-version",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let (path, id, _) = fixture(root.path());
+        crash(&path, id, "after_metadata_commit");
+        // Mutate only an isolated synthetic database. Both pending canonical and
+        // immutable history must fail before any writable engine open.
+        {
+            let db = redb::Database::open(path.join("meta.db")).unwrap();
+            let tx = db.begin_write().unwrap();
+            if mode.starts_with("pending") {
+                let mut table = tx.open_table(metadata::effects::EFFECTS).unwrap();
+                let (row_key, bytes) = table.iter().unwrap().next().unwrap().unwrap();
+                let key = row_key.value().to_vec();
+                drop(row_key);
+                let mut e: metadata::effects::PendingEffects =
+                    control::decode(bytes.value()).unwrap();
+                drop(bytes);
+                if mode == "pending-extra-edge" {
+                    e.deletes.push(edges::PersistedEdge {
+                        source: MemoryId::from(uuid::Uuid::new_v4()),
+                        target: MemoryId::from(uuid::Uuid::new_v4()),
+                        edge_type: crate::model::EdgeType::Associative,
+                        weight: 0.5,
+                        auto_created: false,
+                        created_at: 0,
+                    });
+                } else {
+                    e.invalidated_ids.push(MemoryId::from(uuid::Uuid::new_v4()));
+                }
+                table
+                    .insert(key.as_slice(), control::encode(&e).unwrap().as_slice())
+                    .unwrap();
+            } else {
+                let mut table = tx.open_table(metadata::purge::PROGRESS).unwrap();
+                let (row_key, bytes) = table.iter().unwrap().next().unwrap().unwrap();
+                let key = row_key.value().to_vec();
+                drop(row_key);
+                let mut p: PurgeProgress = control::decode(bytes.value()).unwrap();
+                drop(bytes);
+                if mode == "progress-version" {
+                    p.version = 1;
+                } else {
+                    let mut receipts = tx.open_table(control::RECEIPTS).unwrap();
+                    let receipt = if mode == "chunk-token" {
+                        &mut p.last_receipt
+                    } else {
+                        &mut p.start_receipt
+                    };
+                    let key = control::scoped_key(
+                        receipt.store_id,
+                        MutationScope::Namespace(id),
+                        receipt.operation_id.as_bytes(),
+                    );
+                    let mut stored: control::StoredReceipt =
+                        control::decode(receipts.get(key.as_slice()).unwrap().unwrap().value())
+                            .unwrap();
+                    match &mut stored.receipt.outcome {
+                        control::MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                            if mode == "before-policy" {
+                                t.before_namespace.schema.policy_revision =
+                                    t.before_namespace.schema.policy_revision.next().unwrap();
+                            } else {
+                                t.before_namespace.embedding_dim = 5;
+                            }
+                        }
+                        control::MutationOutcome::NativeNamespacePurgeAdvanced {
+                            transition: t,
+                        } => {
+                            let d = &mut t.chunk.as_mut().unwrap().deletions[0];
+                            d.before.lifecycle.lifecycle.record_generation = d
+                                .before
+                                .lifecycle
+                                .lifecycle
+                                .record_generation
+                                .next()
+                                .unwrap();
+                        }
+                        _ => panic!("unexpected proof"),
+                    }
+                    *receipt = stored.receipt.clone();
+                    receipts
+                        .insert(key.as_slice(), control::encode(&stored).unwrap().as_slice())
+                        .unwrap();
+                }
+                table
+                    .insert(key.as_slice(), control::encode(&p).unwrap().as_slice())
+                    .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let before = std::fs::read(path.join("meta.db")).unwrap();
+        let edges = std::fs::read(path.join("edges.db")).unwrap();
+        assert!(
+            NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(NoClock))
+                .is_err(),
+            "{mode}"
+        );
+        assert_eq!(
+            before,
+            std::fs::read(path.join("meta.db")).unwrap(),
+            "{mode}"
+        );
+        assert_eq!(
+            edges,
+            std::fs::read(path.join("edges.db")).unwrap(),
+            "{mode}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_purge_accepted_completion_failure_retains_latest_receipt_then_retries() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, ids) = fixture(root.path());
+    let s = open(&path);
+    let key = ctx(&s, id, "accepted-purge");
+    let fx = crate::test_support::Fixture::from_open_engine(root, s.engine);
+    let publisher = crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    };
+    publisher.rebuild_all().await.unwrap();
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    let root = tracker.begin().unwrap();
+    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let result = publisher
+        .purge_native_accepted(key.clone(), true, &root)
+        .await;
+    let Err(StorageError::CommittedMutation { receipt, .. }) = result else {
+        panic!("expected exact committed receipt: {result:?}");
+    };
+    let control::MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } = &receipt.outcome
+    else {
+        panic!("wrong receipt: {receipt:?}");
+    };
+    assert_eq!(t.stage, PurgeStage::Complete);
+    assert!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .effects_stamp()
+            .is_err()
+    );
+    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    let completed = publisher
+        .purge_native_accepted(key, true, &root)
+        .await
+        .unwrap();
+    assert_eq!(&completed.last_receipt, receipt.as_ref());
+    assert_eq!(completed.stage, PurgeStage::Complete);
+    root.finish();
+    assert_eq!(tracker.status().pending, 0);
+    assert_eq!(tracker.status().unresolved, 0);
+    assert!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+    for id in ids {
+        assert!(!fx.graph.read().await.contains(&id));
+    }
+    let rows = fx.storage.read().unwrap().scan_all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1.edge_count, 0);
+    assert_eq!(
+        rows[0]
+            .1
+            .schema
+            .as_ref()
+            .unwrap()
+            .lifecycle
+            .record_generation
+            .get(),
+        1
+    );
+}

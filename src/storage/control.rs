@@ -231,6 +231,12 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativeNamespacePurgeStarted {
+        transition: super::native_purge::NativePurgeStarted,
+    },
+    NativeNamespacePurgeAdvanced {
+        transition: super::native_purge::NativePurgeAdvanced,
+    },
     NativeNamespacePolicyUnchanged {
         transition: super::native_policy::NativeNamespacePolicyUnchanged,
     },
@@ -644,6 +650,12 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativeNamespacePurgeStarted { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePurgeAdvanced { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -763,7 +775,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+        MutationOutcome::NativeNamespacePurgeStarted { .. }
+        | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+        | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
         | MutationOutcome::NativeNamespacePolicyUpdated { .. }
         | MutationOutcome::NativeNamespaceCreated { .. }
         | MutationOutcome::NativePhaseMaterialized { .. }

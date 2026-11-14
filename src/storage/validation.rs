@@ -166,7 +166,9 @@ fn validate_snapshot(
 
     if super::metadata::purge::validate_existing(&read, control.as_ref())?
         .iter()
-        .any(|p| p.stage != super::purge::PurgeStage::Complete)
+        .any(|p| {
+            p.stage != super::purge::PurgeStage::Complete && (!native_recovery || p.version != 2)
+        })
     {
         return Err(StorageError::RecoveryRequired(
             "unfinished namespace purge; reopen and finish before offline inventory".into(),
@@ -195,7 +197,8 @@ fn validate_snapshot(
             && (!native_recovery
                 || !matches!(
                     e.receipt.outcome,
-                    super::control::MutationOutcome::NativePhaseMaterialized { .. }
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                        | super::control::MutationOutcome::NativePhaseMaterialized { .. }
                         | super::control::MutationOutcome::NativeMemoryHardDeleted { .. }
                         | super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
@@ -350,10 +353,17 @@ fn validate_snapshot(
         // unrelated dangling edges and missing reverse entries still fail.
         let pending_delete = native_recovery
             && effects.iter().any(|effect| {
-                let super::control::MutationOutcome::NativeMemoryHardDeleted { transition } =
-                    &effect.receipt.outcome
-                else {
-                    return false;
+                let permitted_deleted = |id: &MemoryId| match &effect.receipt.outcome {
+                    super::control::MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                        *id == t.memory_id
+                    }
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced {
+                        transition: t,
+                    } => t
+                        .chunk
+                        .as_ref()
+                        .is_some_and(|c| c.deletions.iter().any(|d| d.memory_id == *id)),
+                    _ => false,
                 };
                 !effect.canonical_applied
                     && effect.deletes.iter().any(|deleted| {
@@ -362,7 +372,7 @@ fn validate_snapshot(
                     })
                     && [edge.source, edge.target]
                         .iter()
-                        .all(|id| *id == transition.memory_id || ids.contains(id))
+                        .all(|id| permitted_deleted(id) || ids.contains(id))
             });
         if ((!ids.contains(&edge.source) || !ids.contains(&edge.target)) && !pending_delete)
             || reverse.get(reverse_key.as_slice())?.is_none()

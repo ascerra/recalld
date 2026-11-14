@@ -20,6 +20,10 @@ pub(super) enum RecordMutation<'a> {
         transition: crate::storage::native_maintenance::NativePhaseWrite,
     },
     NativeHardDelete(crate::storage::native_maintenance::NativeHardDeleteWrite),
+    NativePurgeChunk(
+        &'a crate::storage::purge::PurgeProgress,
+        crate::storage::native_purge::NativePurgeChunk,
+    ),
     GraphOnly,
     PurgeChunk(&'a crate::storage::purge::PurgeProgress),
     Inserted(&'a DiskRecord, u32),
@@ -109,6 +113,8 @@ pub(crate) fn validate_existing(
                         | MutationOutcome::NativeMemoryHardDeleted { .. }
                         | MutationOutcome::NativeMemoryInserted { .. }
                         | MutationOutcome::NativeMemoryTombstoned { .. }
+                        | MutationOutcome::NativeNamespacePurgeStarted { .. }
+                        | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                         | MutationOutcome::NamespacePurgeStarted { .. }
                         | MutationOutcome::NamespacePurgeAdvanced { .. }
                 ) {
@@ -167,6 +173,9 @@ pub(crate) fn validate_existing(
             ));
         }
         match &effect.receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeAdvanced { .. } => {
+                crate::storage::native_purge::validate_effect(&effect)?
+            }
             MutationOutcome::NativePhaseMaterialized { .. }
             | MutationOutcome::NativeMemoryHardDeleted { .. } => {
                 super::native_maintenance::validate_effect(&effect)?
@@ -178,6 +187,7 @@ pub(crate) fn validate_existing(
             _ => {}
         }
         match effect.receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeAdvanced { .. } => {}
             MutationOutcome::NativePhaseMaterialized { .. }
             | MutationOutcome::NativeMemoryHardDeleted { .. } => {}
             MutationOutcome::NativeMemoryInserted { .. }
@@ -385,7 +395,8 @@ impl MetadataStore {
             }
             RecordMutation::NativeHardDelete(_)
             | RecordMutation::GraphOnly
-            | RecordMutation::PurgeChunk(_) => {}
+            | RecordMutation::PurgeChunk(_)
+            | RecordMutation::NativePurgeChunk(_, _) => {}
         }
         if let RecordMutation::Tombstoned { record, old_phase }
         | RecordMutation::NativeTombstoned {
@@ -558,9 +569,13 @@ impl MetadataStore {
                     }
                     change.after.edge_count = count;
                 }
-                if let RecordMutation::NativeHardDelete(proof) = &mut mutation {
-                    let peer = proof
-                        .peers
+                let deletion_peers = match &mut mutation {
+                    RecordMutation::NativeHardDelete(proof) => Some(&mut proof.peers),
+                    RecordMutation::NativePurgeChunk(_, proof) => Some(&mut proof.peers),
+                    _ => None,
+                };
+                if let Some(peers) = deletion_peers {
+                    let peer = peers
                         .iter_mut()
                         .find(|p| p.change.memory_id == id)
                         .ok_or_else(|| {
@@ -633,15 +648,24 @@ impl MetadataStore {
                     crate::storage::tombstone::TombstoneStatus::Tombstoned
                 },
             },
-            RecordMutation::GraphOnly | RecordMutation::PurgeChunk(_) => {
-                MutationOutcome::GraphChanged {
-                    edges_put: actual_puts.len(),
-                    edges_removed: deletes.len(),
-                    memories_removed: removed.len(),
-                }
-            }
+            RecordMutation::GraphOnly
+            | RecordMutation::PurgeChunk(_)
+            | RecordMutation::NativePurgeChunk(_, _) => MutationOutcome::GraphChanged {
+                edges_put: actual_puts.len(),
+                edges_removed: deletes.len(),
+                memories_removed: removed.len(),
+            },
         };
-        let receipt = if let RecordMutation::PurgeChunk(progress) = &mutation {
+        let receipt = if let RecordMutation::NativePurgeChunk(progress, chunk) = &mutation {
+            super::purge::record_next_native(
+                &tx,
+                progress,
+                crate::storage::purge::PurgeStage::Deleting,
+                &removed,
+                deletes.len(),
+                Some(chunk.clone()),
+            )?
+        } else if let RecordMutation::PurgeChunk(progress) = &mutation {
             super::purge::record_next(
                 &tx,
                 progress,
@@ -906,6 +930,7 @@ pub(crate) fn validate_plan(
         ));
     }
     super::native_maintenance::validate_pending_records(effect, records)?;
+    crate::storage::native_purge::validate_pending_records(effect, records)?;
     if let Some(proof) = native_proof(effect) {
         for change in &proof.records {
             let record = records

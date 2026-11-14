@@ -162,6 +162,16 @@ pub(crate) fn validate_policy_history(
             return Err(invalid("duplicate lifecycle generation"));
         }
         let namespace = match &receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.before_namespace.namespace_id,
+                    t.before_namespace.schema.lifecycle_version,
+                    t.before_namespace.schema.policy_revision,
+                ));
+                Some(t.before_namespace.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => Some(t.namespace_id),
             MutationOutcome::NativeNamespaceCreated { transition: t } => {
                 if key.value()
                     != control::scoped_key(
@@ -349,6 +359,20 @@ pub(crate) fn validate_policy_history(
             Ok((ns.id.get(), ns))
         })
         .collect::<Result<HashMap<_, _>, StorageError>>()?;
+    let live_namespaces: std::collections::HashSet<_> = configs.keys().copied().collect();
+    let retired = super::metadata::purge::historical_namespaces(read, control)?;
+    for ns in retired {
+        if let Some(existing) = configs.get(&ns.id.get()) {
+            if super::native_purge::NativeNamespaceProof::capture(existing)?
+                != super::native_purge::NativeNamespaceProof::capture(&ns)?
+            {
+                return Err(invalid("retired namespace witness differs"));
+            }
+        } else {
+            configs.insert(ns.id.get(), ns);
+        }
+    }
+    let historical_configs = configs.clone();
     let creations = super::native_records::creation_proofs(read)?;
     // Numeric policy is mutable, including on restored stores. Rewind its
     // complete retained revision chain before checking immutable creation state.
@@ -412,6 +436,7 @@ pub(crate) fn validate_policy_history(
     for row in read.open_table(control::RECEIPTS)?.iter()? {
         let (_, bytes) = row?;
         let receipt = control::validate_receipt(bytes.value())?.receipt;
+        super::native_purge::validate_evidence(&receipt, &configs, ledger.as_ref())?;
         super::native_maintenance::validate_ledger(&receipt, ledger.as_ref())?;
         super::native_maintenance::validate_namespace_profiles(&receipt, &configs)?;
     }
@@ -433,9 +458,7 @@ pub(crate) fn validate_policy_history(
         );
     }
     let mut current_policy = HashMap::new();
-    for row in read.open_table(NAMESPACE_TABLE)?.iter()? {
-        let (_, v) = row?;
-        let ns = NamespaceConfig::decode(v.value())?;
+    for ns in configs.values() {
         let fields = ns
             .schema
             .as_ref()
@@ -482,6 +505,9 @@ pub(crate) fn validate_policy_history(
     if records.keys().any(|ns| !current_policy.contains_key(ns)) {
         return Err(invalid("record namespace missing"));
     }
+    current_policy.retain(|id, _| live_namespaces.contains(id));
+    configs.retain(|id, _| live_namespaces.contains(id));
+    records.retain(|id, _| live_namespaces.contains(id));
     let mut namespace_highwater = read
         .open_table(super::metadata::NAMESPACE_COUNTER)?
         .get("max_id")?
@@ -497,6 +523,60 @@ pub(crate) fn validate_policy_history(
     // assumption that every token increment was a namespace policy migration.
     for receipt in suffix.values().rev() {
         match &receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                let ns = configs
+                    .get(&t.before_namespace.namespace_id.get())
+                    .ok_or_else(|| invalid("purge start namespace absent"))?;
+                let mut expected = t.before_namespace.clone();
+                // Lifecycle revision fields are tracked separately during reverse replay.
+                let (version, revision) = current_policy
+                    .get(&ns.id.get())
+                    .copied()
+                    .ok_or_else(|| invalid("purge start policy absent"))?;
+                expected.schema.lifecycle_version = version;
+                expected.schema.policy_revision = revision;
+                if expected != t.before_namespace
+                    || super::native_purge::NativeNamespaceProof::capture(ns)? != t.before_namespace
+                {
+                    return Err(invalid("purge start namespace proof mismatch"));
+                }
+            }
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => match t.stage {
+                super::purge::PurgeStage::Complete => {
+                    if configs.contains_key(&t.namespace_id.get()) {
+                        return Err(invalid("completed purge namespace still present"));
+                    }
+                }
+                super::purge::PurgeStage::Cleanup => {
+                    let ns = historical_configs
+                        .get(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("purge namespace witness absent"))?
+                        .clone();
+                    let schema = ns
+                        .schema
+                        .as_ref()
+                        .ok_or_else(|| invalid("purge schema missing"))?;
+                    if configs.insert(ns.id.get(), ns.clone()).is_some()
+                        || records.get(&ns.id.get()).is_some_and(|rs| !rs.is_empty())
+                    {
+                        return Err(invalid("purge cleanup canonical state mismatch"));
+                    }
+                    current_policy.insert(
+                        ns.id.get(),
+                        (schema.lifecycle_version, schema.policy_revision),
+                    );
+                    records.entry(ns.id.get()).or_default();
+                }
+                super::purge::PurgeStage::Deleting => {
+                    if !configs.contains_key(&t.namespace_id.get()) {
+                        return Err(invalid("purge chunk namespace absent"));
+                    }
+                    t.chunk
+                        .as_ref()
+                        .ok_or_else(|| invalid("purge chunk witness absent"))?
+                        .rewind(&mut records)?;
+                }
+            },
             MutationOutcome::NativeNamespaceCreated { transition: t } => {
                 if current_policy.remove(&t.namespace_id.get())
                     != Some((LifecycleVersion::LegacyAccessV1, Generation::default()))

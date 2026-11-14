@@ -29,8 +29,11 @@ pub mod logical_export;
 pub mod metadata;
 pub mod native_catalog;
 pub mod native_lifecycle;
-pub mod native_policy;
 pub mod native_maintenance;
+pub mod native_policy;
+pub mod native_purge;
+#[cfg(test)]
+mod native_purge_tests;
 pub mod native_records;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
