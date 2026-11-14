@@ -283,8 +283,11 @@ impl QueryEngine {
                     }
                     related.insert(id, edges);
                 }
-                // Preserve named v1's ten-neighbor cap and five-text policy.
-                // Eligibility is checked from the same canonical transaction.
+                // Preserve named v1's cap-before-filter and five-text policy.
+                // Equal-weight HashMap order (including per-neighbor link ties)
+                // is intentionally still legacy behavior, NOT deterministic replay.
+                // Before v2/reset promotion: filter before cap and test stable
+                // UUID/edge/connected-to tie ordering. Eligibility is at this G.
                 let mut candidates: Vec<_> = candidates.into_iter().collect();
                 candidates.sort_by(|a, b| {
                     b.1.0
