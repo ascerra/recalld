@@ -1,0 +1,164 @@
+{
+  "validation": {
+    "sourceCommit": "ccae79b88d348739148e8277933af95301383735",
+    "immutableFiles": 738,
+    "sourceVerified": true,
+    "preAndPostVerified": true,
+    "network": "none",
+    "cpus": 2,
+    "memoryGiB": 4,
+    "rust": "1.94.1",
+    "normalParallel": true,
+    "results": {
+      "focused.log": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1089 filtered out; finished in 57.86s"
+      ],
+      "cas.log": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1088 filtered out; finished in 28.06s"
+      ],
+      "full.log": [
+        "test result: ok. 1095 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 635.12s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.57s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s",
+        "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.18s"
+      ]
+    },
+    "fmtExit": 0,
+    "clippyExit": 0,
+    "clippyWarnings": [
+      "warning: `recalld` (lib) generated 782 warnings (run `cargo clippy --fix --lib -p recalld` to apply 100 suggestions)",
+      "warning: `recalld` (bin \"recalld\" test) generated 1 warning",
+      "warning: `recalld` (bin \"recalld\") generated 1 warning (1 duplicate)",
+      "warning: `recalld` (lib test) generated 859 warnings (763 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 7 suggestions)"
+    ],
+    "binaries": {
+      "/target/debug/deps/lifecycle_cli-ef7aa35bda05dfab": "69e935951344d6a806dba3c2562b26e0b9ac0372d298f230c3d4cbb9c4b5d3fb",
+      "/target/debug/deps/recalld-27bbb81e23f12ff5": "99df1ad472c6e79a00db245a7a1972cdc4ba2ae5044629f787275098108397b3",
+      "/target/debug/deps/recalld-7025a4141187b374": "426da30f679114650cb169a883013da47abc5dcdeac7c9e1f2a6b251e0da8da4",
+      "/target/debug/deps/recalld_cli-16a6b9f5f1a3f682": "cd54291dbc43bf0933db0f91e2778f6d761f59b19001aaa1e7f370636c833176",
+      "/target/debug/deps/recalld_text_migrate-b3ddbfaa472dba30": "cc3a30679a3bccdf954e467e46ad603341622e14941d3d6a5fc329fad62061ac",
+      "/target/debug/deps/text_migration_cli-c242142a48e76014": "61834551a8cf038b4c621423bf48788af16968952a3248a9ec7bf52f0829b35c"
+    }
+  },
+  "parents": {
+    "PR106": "fe99020926eb81a6994c7e9214ad4623180eeed1",
+    "PR88": "3961f6653d6c3076bdf9b5b8c27fa6b01a8f0b2e"
+  },
+  "localJoin": "0f1b322",
+  "artifacts": {
+    "cas-initial": {
+      "clean.log": "297c4914f21eb5ab2a94cedc4557346e12d9a2277fa671254b531a7238c116f5",
+      "commit.txt": "15958962bcf6e1f4026fa70064661affb0252ae194fa62a2ab53a2bab4d4fa68",
+      "docker-command.json": "31881a2ed0fc61649869ebf73c50439c945eb2eb1d1882d63bc851d690fbb99c",
+      "executed-binary-sha256.json": "55ee76fc8d84414db6fff0de85a57e9e36476e82e70c17da1df4f6841413a674",
+      "fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "focused.log": "30d03f95949a2edbabd5c1c8a2a8b400199bd90cc10dd043d45c9903b0237fb1",
+      "input.sha256": "2312f87d7f024287d3e6a6010fa743db97dd5dd949624973e2a508fc04930bc5",
+      "source-after.log": "f50bcf20f9fa3e33c64663c0cac3cb52f9625440a8022401948da0a749261601",
+      "source-before.log": "f50bcf20f9fa3e33c64663c0cac3cb52f9625440a8022401948da0a749261601",
+      "source-sha256.json": "017afc11f1ecadcdf0edaf8ed0924f42d61f15396dc53f4e327edb0e5fc0086e",
+      "status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "verification.json": "4a4d409834e0a1453cc38c08da8a82315c2f70bb35812b56e68a9c628c85aa7d"
+    },
+    "before-106": {
+      "before-batch_tests.rs": "606b78ab51c449ae73d19560b4a190a99aa7aed1410a3cd635046175f192902f",
+      "before-store_batch_tests.rs": "a74c8e7ff1ec57e649eb769f5e4d180614652c656f8f94aee48fced3d994751b",
+      "clean.log": "6a35bae7b38827c24c345a0a1b160ed7ff56388a083d5fdf5b3f62c3a48310e8",
+      "commit.txt": "933c9007b98689915c56558f4cedc73fe45635796bb65b91a4e3119435d7b55e",
+      "docker-command.json": "f40f3c708e8e9f34e46ce611a393a0a4323704fe9e05b06a515f0ff2337a7dee",
+      "executed-binary-sha256.json": "86c1dfda8489d2ce84ed23bdaa4b069494fb5ca6b2d6722103fa770b8ba88aa8",
+      "input.sha256": "5fbd234940a012057cd94171a8a63152aa12272f6cb097235e2c04c29dfa0a19",
+      "instrumented-batch_tests.rs": "738766836064f57bf0269dff4ccf07a8008837a0153a18adb514612492d98ab1",
+      "instrumented-store_batch_tests.rs": "231f38bf9c54d8200f03801d0a515ef038968c5abe6431712786975415bf348b",
+      "probe.log": "ebe3808bfa8a5066c0e712bb7cdf3bffaa1abdbcb585fac3949354fead1612dc",
+      "source-after.log": "17f46c7984040a9dba300410b929c7d6affff22f28003398efcc2a21a9ef2d15",
+      "source-before.log": "17f46c7984040a9dba300410b929c7d6affff22f28003398efcc2a21a9ef2d15",
+      "source-sha256.json": "f2d6325f01bd9df7d2709c7f870b00f6fb27e8b04d61e3cf220d76924bf30eae",
+      "status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "verification.json": "efb08a8f1e074231d8264b109bd5fdedffb852b7920b42a5f1b55601ee951629"
+    },
+    "before-106-oversize": {
+      "before-tests.rs": "a74c8e7ff1ec57e649eb769f5e4d180614652c656f8f94aee48fced3d994751b",
+      "clean.log": "6a35bae7b38827c24c345a0a1b160ed7ff56388a083d5fdf5b3f62c3a48310e8",
+      "commit.txt": "90ce99ea2aa9fb1ad7d98eddcc88e6892bb609fbb1dc72da542ee8b02adc8828",
+      "docker-command.json": "da18e3a6da65625395307aa4b69a11a8a6937a495921460d1f306453ca07421c",
+      "executed-binary-sha256.json": "d43f1821e38ec3d7bfa16a9fc3615a5674961343deb9fc04d09f26c8d6894dde",
+      "input.sha256": "3e33886ff32f7806844f21b9b13338195f8e000c49df2a3e505a55494a3579fe",
+      "instrumented-tests.rs": "d1c5802b285fbfa668de52d9ab57f61354a4fd6d10d285ce77b29f860a7cd7ab",
+      "probe.log": "386c8dce259798b7ec88ad84dc38850c8fc164fd079623751a83bcd4b5beae9e",
+      "source-after.log": "17f46c7984040a9dba300410b929c7d6affff22f28003398efcc2a21a9ef2d15",
+      "source-before.log": "17f46c7984040a9dba300410b929c7d6affff22f28003398efcc2a21a9ef2d15",
+      "source-sha256.json": "2d1c105a5a4ef195c0a191fbcb49cacae1b7df25f442acf834994e3301655a6a",
+      "status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "verification.json": "1530866e6cf56ccd1a72e5c583985ca16a91cd8802dd3cbdc075a1c8fce87250"
+    },
+    "wire-1347f2f": {
+      "clean.log": "6a35bae7b38827c24c345a0a1b160ed7ff56388a083d5fdf5b3f62c3a48310e8",
+      "commit.txt": "e9c89cb2839307b07c69894cf42bdd36ec4419649c26923dd88f22ca8211b9ee",
+      "docker-command.json": "084768fe21e0c8b1ff584be1c76123139cfcfce8b85cfd0037d670a0b44617f3",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "focused.log": "f6c04df42e3fec36cac5488a479e8bb4d5575384298044df18efed8164ad6691",
+      "input.sha256": "d734938f0185b7fe219c438ad3733b00de8605910c6ee18c85ee553bd3e1aeb3",
+      "source-after.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-before.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-sha256.json": "308ea5cb78927365ea4df23681760a8816cd6148a20df17d1ebbb309a56b0566",
+      "status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "verification.json": "96b92bc7fbcd8dbc703ee289f70b0914d67ed0b964664ad1ae374b33b5de2269"
+    },
+    "wire-6b48232": {
+      "clean.log": "a7f5b3668514c314678e59426896df2aeac789d31d70e73b5a5aacc58a1c84b7",
+      "commit.txt": "f19f95aced83e590868547b8bbc6c4f1b524f1ccdfb5d810c340f33b26cb3491",
+      "docker-command.json": "879e27d70ec0de4023be562a355520f623b5ee093f65074a0cfb890d2ad040e0",
+      "executed-binary-sha256.json": "f4c963436ffd064e179ca15b72f547b2f0f39ad0f2ca38044ac75986fc2b20af",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "focused.log": "7cd3660c7dbe689a6241f905a4be68d69b31e1c98b7f8ccdb68f45bafddd835d",
+      "input.sha256": "3c1ce43e7e0c81ac4b7663ad264732718c6d55f06c0a59d076fa43faa9a2ddc7",
+      "source-after.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-before.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-sha256.json": "f34a9828d3a8e6d16f5e070c79a42305913d3ef000398fd2c26ee8508ba0d4ae",
+      "status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "verification.json": "9dcb0f1ac25a1fe86afefe77c6dcd0294823f804f5efacff872b02397b4158c9"
+    },
+    "wire-540edaf": {
+      "clean.log": "6a35bae7b38827c24c345a0a1b160ed7ff56388a083d5fdf5b3f62c3a48310e8",
+      "commit.txt": "1dcf19db57035f0a0ffb273240ba1d118aa924dcb6e6d36c03a40534aef7319b",
+      "docker-command.json": "dc7f78620e9db20ea1bd087e371a38e99114d5a90a93ee83e87a82c520d72b65",
+      "executed-binary-sha256.json": "65c0e6fb1987864e2775f0974f1f5ffdbfabe87997218d92ddbda4492f096463",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "focused.log": "f8cf1567e9967df336f9ae3c77992913c1730930303f730dd3aeecff7e9851b8",
+      "historical-none.log": "de30ade88dafeaa426e982f6d9e8e8719eb2e1f1e501a9e76f8447b7ee958258",
+      "input.sha256": "54ee71e260890fce22a800bdc257753646a001a21c16bb6cb49fda746d2abd94",
+      "source-after.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-before.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-sha256.json": "64f8516f5f8689e31cc02723d3be8a6946e53826afc8f98e77472b2dc9593d4e",
+      "status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "verification.json": "e4a451b6a2542a0fdf8dd63683b8552d375af596c5e7822ee6769aeab9ea34a8"
+    },
+    "final-ccae79b": {
+      "cas.log": "e7e8f93764a298b0e7bf193be8aef3cfcd461cd43e8e137533e54cc9ed53a790",
+      "clean.log": "6a35bae7b38827c24c345a0a1b160ed7ff56388a083d5fdf5b3f62c3a48310e8",
+      "clippy.log": "361c135d56afbd8d0a39897a11a49d827def75a100c10604bddbc17448984ec2",
+      "commit.txt": "6a525fa65bf98e890e976cb87a22bfcccfa0ea6d4fb3fd728d36ade0e5e02a90",
+      "container-state.json": "8244b5cf7beca339b0b322dc3a4683fcd4c53f6f30a37781c1027bd6c833b02e",
+      "docker-command.json": "77cd7fb9558c54be269470fb8b4d8b05b9f71c590ab39d1961ed725bbfac67a3",
+      "executed-binary-sha256.json": "37e3637771459b6a6a8b170117afe21c9f52e417671c045c18e0b4fe4295bdcc",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "focused.log": "53ca50e92a24a69601e5ca47b5e45526abf1e0aab092530605305fd58ce77406",
+      "full.log": "2aaa8d47ffa94146d358c3281ed86ad1f51d05fd4d18b7a0daac375cdd04facf",
+      "input.sha256": "8c41e391c84629e376ff469ff6e01cfb26d3ca070ded09c8f04ad0faec544356",
+      "source-after.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-before.log": "62144361f7ac6bd1253d65303755f59388e992985dab87449d9c67f1faae64c4",
+      "source-sha256.json": "50600e0d079dd2c06f59442a3c45e03e045d1fa5839900508aa97850ddf7e01b",
+      "status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "verification.json": "9d995e845249ed884cdd4cd9f1abc84dea24356762bd1f171a4c521effa91aec"
+    }
+  },
+  "historicalOversizedResponseBytes": 96660111,
+  "sourceReview": {
+    "Curie": "6b4823200c2db7efa4776ae96b1a0816fc035463 no blocker, source only",
+    "Feynman": "6b4823200c2db7efa4776ae96b1a0816fc035463 no blocker, source only"
+  }
+}

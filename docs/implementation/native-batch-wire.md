@@ -2,8 +2,10 @@
 
 Approved actual parents: PR106 `fe99020926eb81a6994c7e9214ad4623180eeed1`
 and PR88 `3961f6653d6c3076bdf9b5b8c27fa6b01a8f0b2e`; local join `0f1b322`.
-No catalog/policy/list or moving writer ancestry. Implementation and tests are
-in progress; this document is not a passing validation claim.
+No catalog/policy/list or moving writer ancestry. Frozen source `ccae79b` passed
+six wire tests, seven CAS/history tests, normal-parallel1,095lib+2CLI, fmt and
+clippy (with warnings). See ../evidence/native-batch-wire/final-ccae79b/REPORT.md
+for exact proof limits and preserved failures.
 
 ## Retained precondition
 
