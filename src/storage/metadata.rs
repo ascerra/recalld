@@ -14,6 +14,7 @@ mod lifecycle_updates;
 pub(crate) mod namespace_state;
 mod native_lifecycle;
 mod native_records;
+mod observation;
 pub(crate) mod purge;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
@@ -91,6 +92,8 @@ pub struct MetadataStore {
     pub(crate) canonical_pending: std::sync::atomic::AtomicBool,
     derived_dirty: std::sync::atomic::AtomicBool,
     effects_epoch: std::sync::atomic::AtomicU64,
+    #[cfg(test)]
+    pub(crate) observation_fault: std::sync::atomic::AtomicU8,
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
@@ -228,6 +231,8 @@ impl MetadataStore {
             canonical_pending: std::sync::atomic::AtomicBool::new(false),
             derived_dirty: std::sync::atomic::AtomicBool::new(false),
             effects_epoch: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            observation_fault: std::sync::atomic::AtomicU8::new(0),
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
@@ -594,15 +599,7 @@ impl MetadataStore {
         self.ensure_available()?;
         let publication = self.mutation_guard()?;
         let (tx, receipt) = self.prepare_access(&publication, ctx, id, timestamp, kind)?;
-        if !receipt.replayed {
-            tx.commit().map_err(|source| {
-                self.mark_unavailable();
-                StorageError::CommitOutcomeUnknown {
-                    operation_id: receipt.operation_id,
-                    source,
-                }
-            })?;
-        }
+        self.commit_observation(tx, &receipt)?;
         Ok(receipt)
     }
 
@@ -1022,6 +1019,34 @@ impl MetadataStore {
         Ok(ids)
     }
 
+    /// Load namespace members and canonical records from one redb read snapshot.
+    /// This is metadata-only coherence, not a snapshot of graph/vector/FTS views.
+    pub fn records_in_namespace(
+        &self,
+        namespace_id: NamespaceId,
+    ) -> Result<Vec<DiskRecord>, StorageError> {
+        let read = self.db.begin_read()?;
+        let namespaces = read.open_multimap_table(NAMESPACE_INDEX)?;
+        let records = read.open_table(META_TABLE)?;
+        let mut result = Vec::new();
+        for entry in namespaces.get(namespace_id.get())? {
+            let key = entry?;
+            let bytes: [u8; 16] = key.value().try_into().map_err(|_| {
+                StorageError::CorruptIndex("invalid UUID length in namespace index".into())
+            })?;
+            if let Some(value) = records.get(bytes.as_slice())? {
+                let record = DiskRecord::from_bytes(value.value())?;
+                if record.id != bytes || record.namespace_id != namespace_id.get() {
+                    return Err(StorageError::CorruptIndex(
+                        "namespace index disagrees with record identity".into(),
+                    ));
+                }
+                result.push(record);
+            }
+        }
+        Ok(result)
+    }
+
     /// Number of live (non-tombstoned) memories in `namespace_id`.
     ///
     /// Applies the same predicate as [`list_memories_filtered`] with no
@@ -1084,6 +1109,28 @@ impl MetadataStore {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<(MemoryId, DiskRecord)>, u64), StorageError> {
+        self.list_memories_filtered_by(
+            namespace_id,
+            require_tags,
+            time_range_start,
+            time_range_end,
+            offset,
+            limit,
+            |_| true,
+        )
+    }
+
+    /// Apply additional canonical predicates before totals, offset and limit.
+    pub(crate) fn list_memories_filtered_by(
+        &self,
+        namespace_id: NamespaceId,
+        require_tags: &[crate::model::Tag],
+        time_range_start: Option<i64>,
+        time_range_end: Option<i64>,
+        offset: usize,
+        limit: usize,
+        eligible: impl Fn(&DiskRecord) -> bool,
+    ) -> Result<(Vec<(MemoryId, DiskRecord)>, u64), StorageError> {
         self.ensure_available()?;
         // Step 1: Get all memory IDs in this namespace from the index.
         let read_txn = self.db.begin_read()?;
@@ -1108,7 +1155,10 @@ impl MetadataStore {
             let record = DiskRecord::from_bytes(record_value.value())?;
 
             // Skip tombstoned records.
-            if record.phase == DecayPhase::Tombstone {
+            if record.namespace_id != namespace_id.get()
+                || record.phase == DecayPhase::Tombstone
+                || !eligible(&record)
+            {
                 continue;
             }
 
@@ -2010,6 +2060,85 @@ mod tests {
         record.id = *id.as_bytes();
         store.insert(id, &record).expect("insert");
         id
+    }
+
+    #[test]
+    fn canonical_label_list_predicate_precedes_total_offset_and_limit() {
+        use crate::model::schema::{
+            LabelProvenance, RecordSchemaV2, StructuredLabels, VectorReference,
+        };
+        use crate::model::tag::StructuredLabelFilter;
+        let (_dir, store) = open_store();
+        let mut matching = Vec::new();
+        // Codec-level synthetic canonical payloads inside the already-open test
+        // store exercise the list reader only; no ordinary v2 writer is enabled.
+        for index in 0..5 {
+            let id = insert(&store, 1, index, &["entity/caleb"]);
+            let mut record = store.get(id).unwrap().unwrap();
+            record.created_at = index as i64;
+            record.last_accessed_at = record.created_at;
+            let mut schema = RecordSchemaV2::from_legacy(
+                &record,
+                10,
+                Some(VectorReference {
+                    slot: index,
+                    allocation_epoch: control::Generation::default(),
+                    sha256: [1; 32],
+                }),
+            );
+            schema.labels = StructuredLabels {
+                entities: if index == 1 || index == 3 {
+                    vec!["José".into()]
+                } else {
+                    vec![]
+                },
+                topics: vec![],
+                emotions: vec![],
+                provenance: LabelProvenance::LegacyRetainedOnly,
+            };
+            if index == 1 || index == 3 {
+                matching.push(id);
+            }
+            record.version = 2;
+            record.schema = Some(schema);
+            let tx = store.db.begin_write().unwrap();
+            tx.open_table(META_TABLE)
+                .unwrap()
+                .insert(
+                    id.as_bytes().as_slice(),
+                    record.encode().unwrap().as_slice(),
+                )
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        let filter = StructuredLabelFilter {
+            entities: vec!["josé".into()],
+            ..Default::default()
+        }
+        .compile();
+        let (page, total) = store
+            .list_memories_filtered_by(NamespaceId::new(1), &[], None, None, 1, 1, |record| {
+                filter.matches(&record.tags, record.schema.as_ref().map(|s| &s.labels))
+            })
+            .unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].0, matching[0]);
+        let legacy = StructuredLabelFilter {
+            entities: vec!["caleb".into()],
+            ..Default::default()
+        }
+        .compile();
+        let (page, total) = store
+            .list_memories_filtered_by(NamespaceId::new(1), &[], None, None, 0, 10, |record| {
+                legacy.matches(&record.tags, record.schema.as_ref().map(|s| &s.labels))
+            })
+            .unwrap();
+        assert_eq!(total, 0);
+        assert!(
+            page.is_empty(),
+            "canonical empty labels must not match retained tags"
+        );
     }
 
     #[test]

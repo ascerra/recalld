@@ -618,13 +618,7 @@ impl Recalld {
 
         // -- Step 6c: Build entity index from scanned records ----------
         let entity_index = {
-            let mut idx = EntityIndex::with_capacity(all_records.len());
-            for (memory_id, record) in &all_records {
-                let entities = crate::model::parse_structured_tags(&record.tags).entities;
-                if !entities.is_empty() {
-                    idx.add(*memory_id, &entities);
-                }
-            }
+            let idx = EntityIndex::from_records(&all_records);
             tracing::info!(memories = idx.len(), "entity index built");
             Arc::new(RwLock::new(idx))
         };
@@ -666,8 +660,10 @@ impl Recalld {
                 Arc::new(SharedGraphReader::new(graph.clone()));
             let rif_proc: Arc<dyn crate::search::RifProcessor> =
                 Arc::new(RifProcessorAdapter::new(rif_engine.clone(), graph.clone()));
-            let access_rec: Arc<dyn crate::search::AccessRecorder> =
-                Arc::new(StorageAccessRecorder::new(storage.clone()));
+            let access_rec: Arc<dyn crate::search::AccessRecorder> = Arc::new(
+                StorageAccessRecorder::new(storage.clone(), cache.clone())
+                    .with_clock(clock.clone()),
+            );
 
             let engine = QueryEngine::new(
                 ns_resolver,
@@ -680,6 +676,11 @@ impl Recalld {
                 graph_reader,
                 rif_proc,
                 access_rec,
+            )
+            .with_lifecycle_inputs(
+                clock.clone(),
+                DecayConfig::default(),
+                config.decay.decay_rate_multiplier,
             );
             tracing::info!("query engine initialized");
             Arc::new(engine)
@@ -708,6 +709,7 @@ impl Recalld {
                 config.decay.decay_rate_multiplier,
             ) {
                 Ok(runner) => {
+                    let runner = runner.with_clock(clock.clone());
                     let runner =
                         runner.with_completion(crate::derived_completion::DerivedCompletion {
                             storage: storage.clone(),
@@ -717,7 +719,6 @@ impl Recalld {
                             fts: fts_index.clone(),
                             entities: entity_index.clone(),
                         });
-                    let runner = runner.with_clock(clock.clone());
                     let handle = runner.start();
                     tracing::info!("decay sweep runner started");
                     (Some(runner), Some(handle))
@@ -1203,7 +1204,12 @@ mod tests {
         use crate::mcp::bridge::{SearchPipeline, StorageEngine as McpStorage};
         use crate::mcp::bridge_adapters::{McpSearchAdapter, McpStorageAdapter};
         let fx = Fixture::new();
-        let live = fx.insert_memory().await;
+        let live = fx
+            .insert_memory_with(crate::test_support::MemorySpec {
+                embedding: Some(&[1.0, 0.0, 0.0, 0.0]),
+                ..crate::test_support::MemorySpec::new(crate::model::NamespaceId::new(1))
+            })
+            .await;
         let dead = fx.insert_memory().await;
         let dir = fx.close();
         let system = Recalld::new(offline_config(dir.path())).await.unwrap();
@@ -1236,9 +1242,14 @@ mod tests {
         );
         system.cache.insert(dead, stale.clone()).await;
         system.storage.write().unwrap().delete_memory(dead).unwrap();
-        assert!(search.find_similar(live, 5, None, true).await.is_err());
-        assert!(adapter.get_memory(dead).await.is_err());
-        assert!(adapter.get_memory(live).await.is_err());
+        assert!(
+            search
+                .find_similar(live, 5, None, true, true, None)
+                .await
+                .is_err()
+        );
+        assert!(adapter.get_memory(dead, false, None).await.is_err());
+        assert!(adapter.get_memory(live, false, None).await.is_err());
         system.complete_pending_effects().await.unwrap();
         system.cache.insert(dead, stale).await;
         assert!(
@@ -1249,9 +1260,26 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(adapter.get_memory(dead).await.unwrap().is_none());
-        assert!(adapter.get_memory(live).await.unwrap().is_some());
-        assert!(search.find_similar(live, 5, None, true).await.is_ok());
+        assert!(
+            adapter
+                .get_memory(dead, false, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            adapter
+                .get_memory(live, false, None)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            search
+                .find_similar(live, 5, None, true, true, None)
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1570,5 +1598,39 @@ mod tests {
             .search(&[1.0, 0.0, 0.0, 0.0], 5, &SearchFilter::default())
             .expect("search");
         assert_eq!(hits.first().map(|h| h.id), Some(id));
+    }
+    #[tokio::test]
+    async fn entity_rebuild_uses_each_records_namespace_and_only_retained_labels() {
+        let (dir, other, local_id, foreign_id) = {
+            let fx = Fixture::new();
+            let other = fx.create_namespace("other");
+            let local_id = fx.insert_memory_in(ns(), &["entity/alice"]).await;
+            let foreign_id = fx
+                .insert_memory_in(other, &["entity/alice", "entity/bob"])
+                .await;
+            (fx.close(), other, local_id, foreign_id)
+        };
+        for _ in 0..2 {
+            let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+            let index = system.entity_index().read().await;
+            assert_eq!(index.len(), 2);
+            let query = vec!["Alice".into(), "Bob".into()];
+            assert_eq!(
+                index.find_by_entities(ns(), &query, MemoryId::new()),
+                vec![(local_id, 1)]
+            );
+            assert_eq!(
+                index.find_by_entities(other, &query, MemoryId::new()),
+                vec![(foreign_id, 2)]
+            );
+            // This fixture claims fidelity only for labels retained in legacy tags.
+            assert!(
+                index
+                    .find_by_entities(ns(), &["José".into()], MemoryId::new())
+                    .is_empty()
+            );
+            drop(index);
+            system.shutdown().await.unwrap();
+        }
     }
 }

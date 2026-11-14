@@ -516,6 +516,35 @@ pub fn spreading_activation(
     namespace_id: NamespaceId,
     config: &SpreadingActivationConfig,
 ) -> Vec<(MemoryId, f32)> {
+    spreading_activation_resolved(graph, seeds, namespace_id, config, None)
+}
+
+pub fn spreading_activation_with_records(
+    graph: &RelationshipGraph,
+    seeds: &[(MemoryId, f32)],
+    namespace_id: NamespaceId,
+    config: &SpreadingActivationConfig,
+    records: &HashMap<MemoryId, crate::model::CachedRecord>,
+) -> Vec<(MemoryId, f32)> {
+    spreading_activation_resolved(graph, seeds, namespace_id, config, Some(records))
+}
+
+fn spreading_activation_resolved(
+    graph: &RelationshipGraph,
+    seeds: &[(MemoryId, f32)],
+    namespace_id: NamespaceId,
+    config: &SpreadingActivationConfig,
+    records: Option<&HashMap<MemoryId, crate::model::CachedRecord>>,
+) -> Vec<(MemoryId, f32)> {
+    let canonical_strength = |node: &GraphNode| {
+        records
+            .and_then(|values| values.get(&node.memory_id))
+            .filter(|r| {
+                r.namespace_id == namespace_id
+                    && !matches!(r.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+            })
+            .map(|r| r.strength)
+    };
     // -- Accumulated activation per node --
     let mut activation: HashMap<NodeKey, f32> = HashMap::with_capacity(seeds.len() * 4);
     // -- Nodes that have already been expanded --
@@ -543,13 +572,17 @@ pub fn spreading_activation(
 
         // Ghost/Tombstone gate: ghosts and tombstones don't seed activation.
         // Tombstones have no content relevance; ghosts are nearly forgotten.
-        // Retained structural edges do not make either identity a relay.
-        if node.decay_phase == DecayPhase::Ghost || node.decay_phase == DecayPhase::Tombstone {
+        // Terminal identities remain structural only; canonical projections govern v2.
+        if (records.is_none()
+            && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
+            || (records.is_some() && canonical_strength(node).is_none())
+        {
             continue;
         }
 
         // Initial activation = similarity * FSRS retrievability
-        let initial = (similarity_score * node.strength).clamp(0.0, 1.0);
+        let initial =
+            (similarity_score * canonical_strength(node).unwrap_or(node.strength)).clamp(0.0, 1.0);
         if initial < config.firing_threshold {
             continue; // too weak to fire
         }
@@ -592,8 +625,11 @@ pub fn spreading_activation(
             continue;
         };
 
-        // Preserve terminal identities/edges for structural resolution only.
-        if matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone) {
+        // Terminal identities remain structural only; canonical projections govern v2.
+        if (records.is_none()
+            && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
+            || (records.is_some() && canonical_strength(node).is_none())
+        {
             continue;
         }
 
@@ -643,11 +679,14 @@ pub fn spreading_activation(
                 continue;
             }
 
-            // Terminal identities neither receive nor relay activation.
-            if matches!(
-                neighbor.decay_phase,
-                DecayPhase::Ghost | DecayPhase::Tombstone
-            ) {
+            // Terminal identities remain structural only; canonical projections govern v2.
+            if (records.is_none()
+                && matches!(
+                    neighbor.decay_phase,
+                    DecayPhase::Ghost | DecayPhase::Tombstone
+                ))
+                || (records.is_some() && canonical_strength(neighbor).is_none())
+            {
                 continue;
             }
 
@@ -657,7 +696,7 @@ pub fn spreading_activation(
                 * edge_factor           // edge type modifier [0,1]
                 * fan_attenuation       // ACT-R fan effect [0, s_max]
                 * config.hop_decay      // per-hop signal decay
-                * neighbor.strength; // FSRS retrievability gate
+                * canonical_strength(neighbor).unwrap_or(neighbor.strength); // FSRS retrievability gate
 
             // Drop negligible increments
             if spread < config.min_spread {
@@ -696,7 +735,9 @@ pub fn spreading_activation(
             // Exclude tombstone nodes from output — they served as
             // relay nodes during spreading but have no content to
             // return to the caller.
-            if node.decay_phase == DecayPhase::Tombstone {
+            if (records.is_none() && node.decay_phase == DecayPhase::Tombstone)
+                || (records.is_some() && canonical_strength(node).is_none())
+            {
                 return None;
             }
             Some((node.memory_id, act))

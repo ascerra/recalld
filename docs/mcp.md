@@ -66,6 +66,14 @@ namespace = "my-project"
 
 When recalld starts in MCP mode, it walks up from the current working directory to find the nearest `.recalld.toml`. The `namespace` field sets the default namespace for scoped MCP operations (store, recall, lists, stats, and duplicate scans) in that directory tree. If no `.recalld.toml` is found, the default namespace is `"default"`.
 
+### Optional by-ID namespace assertions
+
+`get_memory`, `reinforce_memory`, `forget_memory`, and single-mode `find_similar_memories` accept an optional `namespace` string. It asserts the namespace of the canonical record; it does not select a different scope. Omission keeps UUID-based scope even when the session default differs. An explicit mismatch (including a nonexistent namespace) fails with `NAMESPACE_MISMATCH` before embedding, access recording, or mutation. Unknown UUIDs remain not found. Null, empty strings, and invalid names are rejected as assertions.
+
+HTTP uses `?namespace=name` on `GET /memories/:id` and `DELETE /memories/:id`, and a JSON `namespace` field on `POST /memories/:id/reinforce` and `POST /similar/:id`. Mismatches return HTTP 409 with error code `NAMESPACE_MISMATCH`.
+
+Daemon forwarding uses dedicated `*_scoped` RPC methods. Combining a namespace assertion with `recordAccess=false` uses `get_memory_scoped_read_only` or `find_similar_scoped_read_only`; these require a namespace and force nonobserving retrieval. Older daemons reject unknown methods, and the client never retries through a weaker method. Existing assertion-only RPCs reject `recordAccess` fields, and existing read-only RPCs reject namespace assertions. Assertion-only true mode omits the wire flag to remain compatible. These are additive v1 controls, not authentication, receipts, or a transactional whole-store contract. Batch assertions remain outside this slice.
+
 ### Other MCP-compatible tools
 
 Any MCP client can use recalld via either transport.
@@ -137,6 +145,10 @@ Every length limit below is measured in **UTF-8 bytes, not characters**. For pla
 Array fields (`tags`, `entities`, `topics`, `emotions`) carry two limits: a plain item count, and a maximum byte length per element. A `tags` element may be up to 128 bytes. `entities`, `topics`, and `emotions` labels are slightly shorter — 121, 122, and 120 bytes — because each label is merged into `tags` as `entity/<label>`, `topic/<label>`, or `emotion/<label>`, and the derived tag has to fit the same 128 bytes. A rejection names the offending element by index, e.g. `entities[3] is 183 bytes (61 characters), which exceeds the 121-byte limit.`
 
 Before this limit existed there was no per-element bound at all: an over-long entity was accepted, merged into an over-long tag, and then dropped by the storage layer while the call still reported success.
+
+Legacy writes require nonempty structured labels that the prefixed tag codec can retain: ASCII letters/digits and `/ _ . : -`, within the limits above. Unrepresentable labels and invalid raw tags are rejected with field/index errors before embedding or allocation; they are not silently dropped. Native UTF-8 write admission remains a separate, gated feature.
+
+Canonical reader results preserve already-persisted structured metadata. Existing `entities`, `topics`, and `emotions` arrays retain their types. An optional `labels` object carries exact canonical arrays and their persisted `provenance` (`native_v2` or `legacy_retained_only`); it is omitted for legacy physical records. Empty canonical arrays are authoritative and do not fall back to retained tags. This additive read representation does not advertise native serving readiness or recover labels already lost by legacy writes. See [consumer scope and fixture provenance](implementation/canonical-label-consumers.md).
 
 > **Known limitation:** `entities`, `topics`, and `emotions` are converted into `entity/…`, `topic/…`, and `emotion/…` tags *after* validation runs, and the `tags` limit of 64 is checked against the tags you supplied. A memory that supplies 64 tags plus 32 entities, 32 topics, and 32 emotions can therefore end up with up to 160 tags stored. This is accepted today and is not treated as an error.
 
@@ -541,6 +553,7 @@ Retrieve a specific memory by its ID.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory UUID |
+| `namespace` | string | no | record scope | Assert the canonical namespace before effects. Omit to use UUID scope; null is invalid. |
 
 #### Example
 
@@ -582,6 +595,7 @@ Strengthen a memory. Increases its stability so it decays more slowly.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory UUID to reinforce |
+| `namespace` | string | no | record scope | Assert the canonical namespace before effects. Omit to use UUID scope; null is invalid. |
 | `quality` | integer | no | `3` | Rating 1-4: 1=forgot (weakens), 2=hard, 3=good, 4=easy |
 
 Quality guide:
@@ -628,6 +642,7 @@ Use for incorrect, outdated or harmful information that must stop being recalled
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory UUID to forget. The memory moves to the Tombstone phase; its graph edges are kept and its UUID is never reused. |
+| `namespace` | string | no | record scope | Assert the canonical namespace before effects. Omit to use UUID scope; null is invalid. |
 
 #### Example
 
@@ -765,7 +780,7 @@ Find memories semantically similar to a given memory, or scan a namespace for du
 |-----------|------|----------|---------|-------------|
 | `mode` | string | no | `"single"` | `"single"` or `"scan"` |
 | `id` | string | single mode | -- | Source memory UUID (required for single mode) |
-| `namespace` | string/null | no | session default | Namespace to sample in scan mode. Ignored in single mode, which uses the source record namespace. |
+| `namespace` | string/null | no | session default | Scan mode: namespace to sample. Single mode: optional assertion against the source record namespace; omission uses record scope, null is invalid. |
 | `limit` | integer | no | `10` | Maximum results per source memory in single mode (1-100) |
 | `minScore` | number | no | -- | Minimum similarity threshold for single mode (0.0-1.0) |
 | `threshold` | number | no | `0.85` | Similarity threshold for scan mode duplicate detection (0.0-1.0) |

@@ -26,6 +26,7 @@ use crate::serialization::ApiError;
 /// human-readable message, and an optional field name for validation errors.
 #[derive(Debug)]
 pub enum AppError {
+    Observation(crate::decay::observation::ObservationError),
     CommittedMutation {
         receipt: crate::storage::control::WriteReceipt,
         message: String,
@@ -50,6 +51,11 @@ pub enum AppError {
     /// 409 -- Resource already exists (e.g. duplicate namespace name).
     Conflict {
         /// Human-readable description.
+        message: String,
+    },
+
+    /// 409 -- Explicit by-ID namespace assertion failed.
+    NamespaceMismatch {
         message: String,
     },
 
@@ -87,12 +93,22 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        if let AppError::Observation(error) = self {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "OBSERVATION_FAILED", "observation": error,
+                })),
+            )
+                .into_response();
+        }
         if let AppError::CommittedMutation { receipt, message } = self {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
                 "error": "INDEX_NOT_READY", "commitState": "committed", "ready": false, "receipt": receipt, "message": message,
             }))).into_response();
         }
         let (status, error_code, message, field) = match &self {
+            AppError::Observation(_) => unreachable!(),
             AppError::CommittedMutation { .. } => unreachable!(),
             AppError::NotFound { resource, id } => (
                 StatusCode::NOT_FOUND,
@@ -105,6 +121,12 @@ impl IntoResponse for AppError {
                 "BAD_REQUEST".to_string(),
                 message.clone(),
                 field.clone(),
+            ),
+            AppError::NamespaceMismatch { message } => (
+                StatusCode::CONFLICT,
+                "NAMESPACE_MISMATCH".into(),
+                message.clone(),
+                Some("namespace".into()),
             ),
             AppError::Conflict { message } => (
                 StatusCode::CONFLICT,
@@ -168,6 +190,13 @@ pub use crate::storage::StorageError;
 impl From<StorageError> for AppError {
     fn from(err: StorageError) -> Self {
         match &err {
+            StorageError::NamespaceMismatch { .. } => AppError::NamespaceMismatch {
+                message: err.to_string(),
+            },
+            StorageError::InvalidNamespaceName { .. } => AppError::BadRequest {
+                message: err.to_string(),
+                field: Some("namespace".into()),
+            },
             StorageError::CommittedMutation { receipt, source } => AppError::CommittedMutation {
                 receipt: (**receipt).clone(),
                 message: source.to_string(),
@@ -238,6 +267,7 @@ impl From<EmbeddingError> for AppError {
 impl From<SearchError> for AppError {
     fn from(err: SearchError) -> Self {
         match &err {
+            SearchError::Observation(error) => AppError::Observation(error.clone()),
             SearchError::Unavailable(message) => AppError::ServiceUnavailable {
                 message: message.clone(),
             },
@@ -251,6 +281,10 @@ impl From<SearchError> for AppError {
             SearchError::EmptyQuery => AppError::BadRequest {
                 message: "query text is required".to_string(),
                 field: Some("query".to_string()),
+            },
+            SearchError::InvalidEmbedding(message) => AppError::UnprocessableEntity {
+                message: message.clone(),
+                field: Some("embedding".into()),
             },
             SearchError::MemoryNotFound(id) => AppError::NotFound {
                 resource: "memory",
@@ -355,5 +389,11 @@ mod tests {
             namespace: "default".to_string(),
         });
         assert!(matches!(err, AppError::UnprocessableEntity { .. }));
+    }
+}
+
+impl From<crate::decay::observation::ObservationError> for AppError {
+    fn from(error: crate::decay::observation::ObservationError) -> Self {
+        Self::Observation(error)
     }
 }

@@ -106,8 +106,16 @@ impl DerivedCompletion {
     /// Legacy bool adapter. Resolve namespace and commit under one store guard;
     /// each batch caller invokes this in order, with independent child commits.
     pub async fn forget(&self, id: crate::model::MemoryId) -> Result<bool, StorageError> {
+        self.forget_scoped(id, None).await
+    }
+
+    pub async fn forget_scoped(
+        &self,
+        id: crate::model::MemoryId,
+        namespace: Option<String>,
+    ) -> Result<bool, StorageError> {
         let work = self.accept_work(None)?;
-        let result = self.forget_accepted(id, &work).await;
+        let result = self.forget_accepted(id, namespace, &work).await;
         self.finish_known_work(work);
         result
     }
@@ -115,6 +123,7 @@ impl DerivedCompletion {
     async fn forget_accepted(
         &self,
         id: crate::model::MemoryId,
+        namespace: Option<String>,
         work: &WorkTicket,
     ) -> Result<bool, StorageError> {
         let gate = publication_gate(&self.storage).await?;
@@ -124,6 +133,9 @@ impl DerivedCompletion {
         let receipt = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = (|| {
+                if let Some(namespace) = namespace.as_deref() {
+                    storage.assert_memory_namespace(id, namespace)?;
+                }
                 let Some(record) = storage.get_record(id)? else {
                     return Ok(None);
                 };
@@ -210,7 +222,7 @@ impl DerivedCompletion {
                     let records = storage.scan_all()?;
                     let mut next_graph = RelationshipGraph::with_capacity(records.len());
                     let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
-                    let mut next_entities = EntityIndex::with_capacity(records.len());
+                    let next_entities = EntityIndex::from_records(&records);
                     fts.clear().map_err(|e| failed(e.to_string()))?;
                     for (id, record) in &records {
                         let ns = NamespaceId::new(record.namespace_id);
@@ -256,10 +268,6 @@ impl DerivedCompletion {
                         };
                         fts.add(ns, *id, &record.summary, text.as_deref(), &tags)
                             .map_err(|e| failed(e.to_string()))?;
-                        next_entities.add(
-                            *id,
-                            &crate::model::parse_structured_tags(&record.tags).entities,
-                        );
                     }
                     let edges = storage.load_all_edges()?;
                     let count = edges.len();
@@ -531,7 +539,12 @@ mod tests {
             panic!()
         };
         assert_eq!(receipt.committed_generation, before.next().unwrap());
-        assert!(fx.storage_adapter().get_memory(memory_id).await.is_err());
+        assert!(
+            fx.storage_adapter()
+                .get_memory(memory_id, false, None)
+                .await
+                .is_err()
+        );
         assert_eq!(
             fx.storage
                 .read()
@@ -619,10 +632,13 @@ mod tests {
             .pending_effects()
             .unwrap();
         assert_eq!(pending.len(), 1);
-        assert!(adapter.get_memory(dead).await.is_err());
-        assert!(adapter.get_memory(live).await.is_err());
+        assert!(adapter.get_memory(dead, false, None).await.is_err());
+        assert!(adapter.get_memory(live, false, None).await.is_err());
         assert!(
-            adapter.get_memory(MemoryId::new()).await.is_err(),
+            adapter
+                .get_memory(MemoryId::new(), false, None)
+                .await
+                .is_err(),
             "no false miss while blocked"
         );
 
@@ -631,7 +647,7 @@ mod tests {
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
         assert!(matches!(publisher(&fx).complete().await,
             Err(StorageError::CommittedEffectsPending {operation_id, ..}) if operation_id == pending[0].receipt.operation_id));
-        assert!(adapter.get_memory(live).await.is_err());
+        assert!(adapter.get_memory(live, false, None).await.is_err());
         assert_eq!(
             fx.storage
                 .read()
@@ -653,8 +669,20 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(adapter.get_memory(dead).await.unwrap().is_none());
-        assert!(adapter.get_memory(live).await.unwrap().is_some());
+        assert!(
+            adapter
+                .get_memory(dead, false, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            adapter
+                .get_memory(live, false, None)
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert!(fx.vector_index.read().await.get_vector(dead).is_none());
         assert!(fx.vector_index.read().await.get_vector(live).is_some());
         assert!(!fx.graph.read().await.contains(&dead));
@@ -677,7 +705,13 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(adapter.get_memory(dead).await.unwrap().is_none());
+        assert!(
+            adapter
+                .get_memory(dead, false, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
         publisher(&fx).complete().await.unwrap();
     }
 
@@ -821,10 +855,68 @@ mod tests {
         );
         assert!(
             fx.storage_adapter()
-                .get_memory(dead)
+                .get_memory(dead, false, None)
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+    #[tokio::test]
+    async fn entity_rebuild_online_completion_replaces_stale_namespace_postings() {
+        let fx = Fixture::new();
+        let local = NamespaceId::new(1);
+        let foreign = fx.create_namespace("foreign");
+        let live = fx.insert_memory_in(local, &["entity/alice"]).await;
+        let peer = fx
+            .insert_memory_in(foreign, &["entity/alice", "entity/bob"])
+            .await;
+        let dead = fx.insert_memory_in(local, &["entity/dead"]).await;
+        {
+            let mut index = fx.entity_index.write().await;
+            index.add(local, live, &["stale".into()]);
+            index.add(local, dead, &["dead".into()]);
+        }
+        // Real canonical deletion dirties every view and requires completion.
+        fx.storage.write().unwrap().delete_memory(dead).unwrap();
+        let query = vec!["Alice".into(), "Bob".into()];
+        for _ in 0..2 {
+            publisher(&fx).complete().await.unwrap();
+            let index = fx.entity_index.read().await;
+            assert_eq!(index.len(), 2);
+            assert_eq!(
+                index.find_by_entities(local, &query, MemoryId::new()),
+                vec![(live, 1)]
+            );
+            assert_eq!(
+                index.find_by_entities(foreign, &query, MemoryId::new()),
+                vec![(peer, 2)]
+            );
+            assert!(
+                index
+                    .find_by_entities(local, &["stale".into(), "dead".into()], MemoryId::new())
+                    .is_empty()
+            );
+            assert!(
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .effects_stamp()
+                    .is_ok()
+            );
+        }
+        fx.storage.write().unwrap().delete_memory(live).unwrap();
+        publisher(&fx).complete().await.unwrap();
+        let index = fx.entity_index.read().await;
+        assert_eq!(index.len(), 1);
+        assert!(
+            index
+                .find_by_entities(local, &query, MemoryId::new())
+                .is_empty()
+        );
+        assert_eq!(
+            index.find_by_entities(foreign, &query, MemoryId::new()),
+            vec![(peer, 2)]
         );
     }
 }

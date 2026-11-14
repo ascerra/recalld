@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::model::decay::DecayPhase;
 use crate::model::id::MemoryId;
 use crate::model::memory::AccessEvent;
-use crate::model::parse_structured_tags;
 use crate::model::record::CachedRecord;
+use crate::model::structured_metadata;
 use crate::model::tag::Tag;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -82,6 +82,9 @@ pub struct SearchHit {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryResponse {
+    /// Exact persisted structured metadata; absent for legacy physical records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Unique identifier (UUID v7).
     pub id: MemoryId,
     /// Resolved namespace name.
@@ -99,13 +102,13 @@ pub struct MemoryResponse {
 
     /// Validated tags attached to this memory.
     pub tags: Vec<Tag>,
-    /// Named entities extracted from tags (entity/ prefix).
+    /// Exact canonical entities, or legacy entity-tag display values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<String>,
-    /// Topics extracted from tags (topic/ prefix).
+    /// Exact canonical topics, or legacy topic-tag values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub topics: Vec<String>,
-    /// Emotions extracted from tags (emotion/ prefix).
+    /// Exact canonical emotions, or legacy emotion-tag values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub emotions: Vec<String>,
     /// Current decay phase.
@@ -152,8 +155,9 @@ impl MemoryResponse {
     /// resolved namespace name. Embedding and access history
     /// are set to `None` -- the caller populates them if requested.
     pub fn from_cached(record: &CachedRecord, namespace_name: String) -> Self {
-        let metadata = parse_structured_tags(&record.tags);
+        let metadata = structured_metadata(&record.tags, record.labels.as_ref());
         Self {
+            labels: record.labels.clone(),
             id: record.id,
             namespace: namespace_name,
             created_at: record.created_at,
@@ -220,12 +224,19 @@ fn default_namespace() -> String {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchRequest {
+    /// False forbids retrieval-attributable writes; omission preserves v1 behavior.
+    #[serde(
+        rename = "recordAccess",
+        default = "crate::search::default_record_access"
+    )]
+    pub record_access: bool,
     /// Natural-language query text. The server generates an
-    /// embedding from this for similarity search.
+    /// embedding from this for similarity search unless `embedding` is supplied.
     #[serde(default)]
     pub query: Option<String>,
 
-    /// Pre-computed query embedding. Mutually exclusive with `query`.
+    /// Pre-computed semantic query embedding. When present, `query` is used
+    /// only for FTS; the embedding provider is not invoked.
     #[serde(default)]
     pub embedding: Option<Vec<f32>>,
 
@@ -356,6 +367,8 @@ mod tests {
     /// A `MemoryResponse` as every read endpoint produces it.
     fn response() -> MemoryResponse {
         let record = CachedRecord {
+            labels: None,
+            lifecycle: None,
             id: MemoryId::new(),
             namespace_id: crate::model::NamespaceId::new(1),
             created_at: 0,

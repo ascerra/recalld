@@ -1396,7 +1396,7 @@ pub(super) async fn store_single_memory(
 
     if !entities.is_empty() {
         let mut idx = harness.system.entity_index().write().await;
-        idx.add(memory_id, &entities);
+        idx.add(ns_config.id, memory_id, &entities);
     }
 
     Ok(memory_id)
@@ -1638,6 +1638,8 @@ pub(super) async fn search_memories(
             ..PipelineSearchFilter::default()
         };
         let query = SearchQuery {
+            record_access: true,
+            query_embedding: None,
             text: Some(bq.query.clone()),
             fts_query: bq.fts_query.clone(),
             namespace: "default".to_string(),
@@ -1725,6 +1727,8 @@ pub(super) async fn search_memories(
                             ..PipelineSearchFilter::default()
                         };
                         let query = SearchQuery {
+                            record_access: true,
+                            query_embedding: None,
                             text: Some(bq.query.clone()),
                             fts_query: bq.fts_query.clone(),
                             namespace: "default".to_string(),
