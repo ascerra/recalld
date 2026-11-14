@@ -58,6 +58,7 @@ async fn contract_http_rejects_before_parsing_provider_and_all_mutations() {
             ("POST", "/memories/batch"),
             ("POST", "/search"),
             ("POST", "/namespaces"),
+            ("PUT", "/namespaces/1/policy"),
             ("DELETE", "/memories/00000000-0000-0000-0000-000000000001"),
             (
                 "POST",

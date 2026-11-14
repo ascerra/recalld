@@ -7,6 +7,7 @@ pub mod catalog;
 pub mod contract;
 mod json;
 pub(crate) mod pair_cursor;
+pub mod policy;
 pub mod scan;
 pub mod session;
 

@@ -70,12 +70,35 @@ impl Clock for FixedClock {
     }
 }
 fn fixture() -> (Fixture, std::path::PathBuf, Arc<Provider>) {
+    fixture_with_record(false)
+}
+fn fixture_with_record(seed: bool) -> (Fixture, std::path::PathBuf, Arc<Provider>) {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("legacy");
     let mut old = RedbStorageEngine::open(&source).unwrap();
     let mut ns = crate::model::NamespaceConfig::default_namespace(100);
     ns.embedding_dim = 4;
-    old.create_namespace(&ns).unwrap();
+    let namespace_id = old.create_namespace(&ns).unwrap();
+    if seed {
+        let input = crate::storage::insertion::InsertMemory {
+            id: None,
+            summary: "canonical publication witness".into(),
+            full_text: None,
+            tags: vec![],
+            initial_stability: None,
+            created_at: Some(100),
+            embedding: Some(vec![1., 0., 0., 0.]),
+            parent_id: None,
+            supersedes: None,
+        };
+        old.insert_memory_with_receipt(
+            &crate::storage::control::MutationContext::unkeyed(namespace_id),
+            &input,
+            &[],
+            100,
+        )
+        .unwrap();
+    }
     old.sync().unwrap();
     drop(old);
     let target = dir.path().join("native");
@@ -140,6 +163,11 @@ async fn native_catalog_wire_real_cross_transport_replay_and_reopen() {
         provider.clone(),
         NativePolicyInputs::default(),
         Arc::new(FixedClock),
+        fixture.cache.clone(),
+        fixture.graph.clone(),
+        fixture.vector_index.clone(),
+        fixture.fts_index.clone(),
+        fixture.entity_index.clone(),
     );
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.namespaces = Arc::new(fixture.namespace_adapter().with_native_catalog(
@@ -236,6 +264,11 @@ async fn native_catalog_wire_invalid_before_provider_and_typed_profile_conflict(
         provider.clone(),
         NativePolicyInputs::default(),
         Arc::new(FixedClock),
+        fixture.cache.clone(),
+        fixture.graph.clone(),
+        fixture.vector_index.clone(),
+        fixture.fts_index.clone(),
+        fixture.entity_index.clone(),
     );
     let before = bytes(&path);
     for request in [
@@ -270,6 +303,11 @@ async fn native_catalog_wire_invalid_before_provider_and_typed_profile_conflict(
         Arc::new(UnknownProvider),
         NativePolicyInputs::default(),
         Arc::new(FixedClock),
+        fixture.cache.clone(),
+        fixture.graph.clone(),
+        fixture.vector_index.clone(),
+        fixture.fts_index.clone(),
+        fixture.entity_index.clone(),
     );
     let (status, out) = rest(&unknown, &json!({"name":"unbound"}), None).await;
     assert_eq!(status, 503);
@@ -356,6 +394,11 @@ async fn native_catalog_wire_actual_fault_receipt_and_unknown_reconcile() {
                     provider.clone(),
                     NativePolicyInputs::default(),
                     Arc::new(FixedClock),
+                    fixture.cache.clone(),
+                    fixture.graph.clone(),
+                    fixture.vector_index.clone(),
+                    fixture.fts_index.clone(),
+                    fixture.entity_index.clone(),
                 )
                 .with_catalog_fault(point);
             let mut body = request.clone();
@@ -449,4 +492,457 @@ async fn native_catalog_wire_actual_fault_receipt_and_unknown_reconcile() {
         drop(reopened);
         drop(dir);
     }
+}
+
+struct NoPolicyClock;
+impl Clock for NoPolicyClock {
+    fn now_millis(&self) -> i64 {
+        panic!("policy/replay sampled a clock")
+    }
+}
+fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompletion {
+    crate::derived_completion::DerivedCompletion {
+        storage: f.storage.clone(),
+        cache: f.cache.clone(),
+        graph: f.graph.clone(),
+        vectors: f.vector_index.clone(),
+        fts: f.fts_index.clone(),
+        entities: f.entity_index.clone(),
+    }
+}
+fn rest_adapter(
+    f: &Fixture,
+    provider: Arc<Provider>,
+    clock: Arc<dyn Clock>,
+) -> NamespaceRegistryAdapter {
+    NamespaceRegistryAdapter::new(f.storage.clone()).with_native_catalog(
+        provider,
+        NativePolicyInputs::default(),
+        clock,
+        f.cache.clone(),
+        f.graph.clone(),
+        f.vector_index.clone(),
+        f.fts_index.clone(),
+        f.entity_index.clone(),
+    )
+}
+async fn ready(f: &Fixture) -> crate::storage::control::GenerationRef {
+    let actual = f
+        .storage
+        .read()
+        .unwrap()
+        .control_state()
+        .unwrap()
+        .generation_ref();
+    let report = completion(f)
+        .readiness_barrier(
+            actual,
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    assert!(report.ready);
+    assert_eq!(report.pending_work, 0);
+    assert_eq!(report.committed_generation, actual.generation);
+    assert_eq!(report.derived.len(), 4);
+    assert!(
+        report
+            .derived
+            .iter()
+            .all(|v| v.ready && v.applied_generation == actual.generation)
+    );
+    let status = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .work_tracker()
+        .status();
+    assert_eq!(status.pending, 0);
+    assert_eq!(status.unresolved, 0);
+    actual
+}
+async fn policy_rest(adapter: &NamespaceRegistryAdapter, id: &str, body: &Value) -> (u16, Value) {
+    let response = crate::api::update_namespace_policy_v2(adapter, id, body, None).await;
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(
+        response.into_body(),
+        crate::daemon::protocol::MAX_MESSAGE_SIZE,
+    )
+    .await
+    .unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+fn policy_body(f: &Fixture, key: Option<&str>) -> Value {
+    let engine = f.storage.read().unwrap();
+    let ns = engine
+        .get_namespace(crate::model::NamespaceId::new(1))
+        .unwrap()
+        .unwrap();
+    let values = crate::serialization::policy::PolicyValues::retained(
+        &crate::storage::native_catalog::NamespacePolicyState::capture(&ns).unwrap(),
+    );
+    let mut body = json!({"policy":values,"storeId":engine.control_state().unwrap().store_id});
+    if let Some(key) = key {
+        body["idempotencyKey"] = json!(key)
+    }
+    body
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_policy_wire_catalog_noop_change_and_replay_publish_current_generation() {
+    let (f, path, provider) = fixture_with_record(true);
+    let create = rest_adapter(&f, provider.clone(), Arc::new(FixedClock));
+    let before = f
+        .storage
+        .read()
+        .unwrap()
+        .control_state()
+        .unwrap()
+        .generation_ref();
+    assert!(
+        completion(&f)
+            .readiness_barrier(
+                before,
+                std::time::Instant::now() + std::time::Duration::from_secs(2)
+            )
+            .await
+            .is_err()
+    );
+    let create_body =
+        json!({"name":"created","storeId":before.store_id,"idempotencyKey":"catalog-ready"});
+    let (status, created) = rest(&create, &create_body, None).await;
+    assert_eq!(status, 200, "{created}");
+    let created_at = ready(&f).await;
+    assert_eq!(created_at.generation.get(), before.generation.get() + 1);
+    provider.available.store(false, Ordering::SeqCst);
+    let adapter = rest_adapter(&f, provider.clone(), Arc::new(NoPolicyClock));
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.namespaces = Arc::new(f.namespace_adapter().with_native_catalog(
+        provider.clone(),
+        NativePolicyInputs::default(),
+        Arc::new(NoPolicyClock),
+    ));
+    let mut original = policy_body(&f, Some("noop-A"));
+    original["expectedGeneration"] = json!(created_at.generation);
+    let before_row = f.storage.read().unwrap().scan_all().unwrap()[0]
+        .1
+        .to_bytes();
+    let (status, noop) = policy_rest(&adapter, "1", &original).await;
+    assert_eq!(status, 200, "{noop}");
+    assert_eq!(noop["data"]["changed"], false);
+    let noop_at = ready(&f).await;
+    assert_eq!(noop_at.generation.get(), created_at.generation.get() + 1);
+    assert_eq!(
+        f.storage.read().unwrap().scan_all().unwrap()[0]
+            .1
+            .to_bytes(),
+        before_row
+    );
+    let mut change = original.clone();
+    change["idempotencyKey"] = json!("change-B");
+    change["expectedGeneration"] = json!(noop_at.generation);
+    change["policy"]["initialStability"] = json!(7.0);
+    let (status, changed) = policy_rest(&adapter, "1", &change).await;
+    assert_eq!(status, 200, "{changed}");
+    assert_eq!(changed["data"]["changed"], true);
+    let changed_at = ready(&f).await;
+    assert_eq!(changed_at.generation.get(), noop_at.generation.get() + 1);
+    assert_ne!(
+        f.storage.read().unwrap().scan_all().unwrap()[0]
+            .1
+            .to_bytes(),
+        before_row
+    );
+    let before_replay = bytes(&path);
+    let mut mcp = original.clone();
+    mcp["namespaceId"] = json!(1);
+    mcp["contractVersion"] = json!(2);
+    let response =
+        crate::mcp::tools::dispatch_v2(&bridge, "update_namespace_policy", mcp.clone()).await;
+    assert_ne!(response.is_error, Some(true));
+    let response = serde_json::to_value(response).unwrap();
+    let text: Value =
+        serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text, response["structuredContent"]);
+    assert_eq!(text["receipt"]["replayed"], true);
+    assert_eq!(
+        text["receipt"]["operationId"],
+        noop["receipt"]["operationId"]
+    );
+    assert_eq!(
+        text["receipt"]["committedGeneration"],
+        noop["receipt"]["committedGeneration"]
+    );
+    assert_eq!(text["data"], noop["data"]);
+    let (status, rest_replay) = policy_rest(&adapter, "1", &original).await;
+    assert_eq!(status, 200);
+    assert_eq!(text, rest_replay);
+    assert_eq!(ready(&f).await, changed_at);
+    assert_eq!(bytes(&path), before_replay);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .get_namespace(crate::model::NamespaceId::new(1))
+            .unwrap()
+            .unwrap()
+            .initial_stability,
+        7.0
+    );
+    let no_key = policy_body(&f, None);
+    let (status, unchanged) = policy_rest(&adapter, "1", &no_key).await;
+    assert_eq!(status, 200);
+    assert!(unchanged.get("receipt").is_none());
+    assert_eq!(ready(&f).await, changed_at);
+    // Catalog replay also repairs current-G publication rather than rewinding to
+    // the original creation receipt. No provider or clock is sampled.
+    let (status, replayed) = rest(&adapter, &create_body, None).await;
+    assert_eq!(status, 200, "{replayed}");
+    assert_eq!(
+        replayed["receipt"]["operationId"],
+        created["receipt"]["operationId"]
+    );
+    assert_eq!(ready(&f).await, changed_at);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_policy_wire_real_completion_failures_keep_original_receipt_and_replay_repairs() {
+    for kind in ["catalog", "noop", "changed"] {
+        let catalog = kind == "catalog";
+        let (f, _path, provider) = fixture_with_record(true);
+        completion(&f).complete().await.unwrap();
+        let before = ready(&f).await;
+        let adapter = rest_adapter(&f, provider.clone(), Arc::new(FixedClock));
+        let mut body = if catalog {
+            json!({"name":"failed-publication","storeId":before.store_id,"idempotencyKey":"failure"})
+        } else {
+            policy_body(&f, Some("failure"))
+        };
+        if kind == "changed" {
+            body["policy"]["initialStability"] = json!(9.0);
+        }
+        if !catalog {
+            provider.available.store(false, Ordering::SeqCst);
+        }
+        // Real coordinator dimension failure, not injected success stamps.
+        *f.vector_index.write().await =
+            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+        let (status, error) = if catalog {
+            rest(&adapter, &body, None).await
+        } else {
+            policy_rest(&adapter, "1", &body).await
+        };
+        assert_eq!(status, 503, "{error}");
+        assert_eq!(error["error"]["commitState"], "committed");
+        assert_eq!(error["error"]["code"], "INDEX_NOT_READY");
+        assert!(error["receipt"].is_object());
+        let after = f
+            .storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref();
+        assert_eq!(after.generation.get(), before.generation.get() + 1);
+        assert!(
+            completion(&f)
+                .readiness_barrier(
+                    after,
+                    std::time::Instant::now() + std::time::Duration::from_secs(2)
+                )
+                .await
+                .is_err()
+        );
+        let scope = if catalog {
+            MutationScope::Catalog
+        } else {
+            MutationScope::Namespace(crate::model::NamespaceId::new(1))
+        };
+        let operation = serde_json::from_value(error["receipt"]["operationId"].clone()).unwrap();
+        let stored = f
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .lookup_operation(after.store_id, scope, operation)
+            .unwrap()
+            .unwrap();
+        let encoded = crate::storage::control::encode(&stored).unwrap();
+        assert_eq!(
+            error["receipt"],
+            serde_json::from_slice::<Value>(&encoded).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_value::<WriteReceipt>(error["receipt"].clone()).unwrap(),
+            stored
+        );
+        // Retrying a known receipt must still fail while actual completion fails.
+        let (status, failed_replay) = if catalog {
+            rest(&adapter, &body, None).await
+        } else {
+            policy_rest(&adapter, "1", &body).await
+        };
+        assert_eq!(status, 503, "{kind}: {failed_replay}");
+        assert_eq!(failed_replay["error"]["commitState"], "committed");
+        let mut retained_replay = stored.clone();
+        retained_replay.replayed = true;
+        assert_eq!(
+            failed_replay["receipt"],
+            serde_json::from_slice::<Value>(
+                &crate::storage::control::encode(&retained_replay).unwrap()
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .generation_ref(),
+            after
+        );
+        *f.vector_index.write().await =
+            crate::search::FlatVectorIndex::new(crate::test_support::DIM);
+        provider.available.store(false, Ordering::SeqCst);
+        let (status, replayed) = if catalog {
+            rest(&adapter, &body, None).await
+        } else {
+            policy_rest(&adapter, "1", &body).await
+        };
+        assert_eq!(status, 200, "{replayed}");
+        assert_eq!(
+            replayed["receipt"]["operationId"],
+            error["receipt"]["operationId"]
+        );
+        assert_eq!(
+            replayed["receipt"]["committedGeneration"],
+            error["receipt"]["committedGeneration"]
+        );
+        assert_eq!(replayed["receipt"]["replayed"], true);
+        assert_eq!(ready(&f).await, after);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_policy_wire_actual_completion_uses_root_accepted_before_close() {
+    for catalog in [false, true] {
+        let (f, _, provider) = fixture_with_record(true);
+        let owner = completion(&f);
+        let adapter = NativeCatalogAdapter::new(
+            owner.clone(),
+            provider,
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+        );
+        let root = owner.accept_work(None).unwrap();
+        let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+        let other = tracker.clone();
+        let drain = std::thread::spawn(move || {
+            other
+                .close_and_drain(std::time::Instant::now() + std::time::Duration::from_secs(10))
+                .unwrap()
+        });
+        tracker.wait_until_closed();
+        assert!(owner.accept_work(None).is_err());
+        if catalog {
+            let request =
+                CreateNamespaceRequest::from_http(&json!({"name":"accepted"}), None).unwrap();
+            adapter.create_accepted(request, &root).await.unwrap();
+        } else {
+            let request = crate::serialization::policy::PolicyRequest::from_http(
+                &policy_body(&f, Some("accepted")),
+                "1",
+                None,
+            )
+            .unwrap();
+            adapter.policy_accepted(request, &root).await.unwrap();
+        }
+        owner.finish_known_work(root);
+        drop(drain.join().unwrap());
+        ready(&f).await;
+    }
+}
+
+struct BlockingClock {
+    entered: std::sync::mpsc::Sender<()>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+impl Clock for BlockingClock {
+    fn now_millis(&self) -> i64 {
+        self.entered.send(()).unwrap();
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        2000
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_policy_wire_cancelled_spawn_retains_unknown_root_and_executing_child() {
+    let (f, _, provider) = fixture();
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let adapter = NativeCatalogAdapter::new(
+        completion(&f),
+        provider,
+        NativePolicyInputs::default(),
+        Arc::new(BlockingClock {
+            entered: entered_tx,
+            release: std::sync::Mutex::new(release_rx),
+        }),
+    );
+    let request = CreateNamespaceRequest::from_http(&json!({"name":"cancelled"}), None).unwrap();
+    let task = tokio::spawn(async move { adapter.create(request).await });
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    assert!(tracker.status().pending >= 2);
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let status = tracker.status();
+    assert!(status.pending >= 2);
+    assert_eq!(status.unresolved, 1);
+    release_tx.send(()).unwrap();
+    // Engine lock acquisition waits for the real detached worker to leave its
+    // canonical commit. Its known child can finish; the cancelled root cannot.
+    tokio::task::spawn_blocking({
+        let storage = f.storage.clone();
+        move || {
+            assert_eq!(storage.read().unwrap().list_namespaces().unwrap().len(), 2);
+        }
+    })
+    .await
+    .unwrap();
+    let status = tracker.status();
+    assert_eq!(status.pending, 1);
+    assert_eq!(status.unresolved, 1);
+    assert!(
+        tracker
+            .close_and_drain(std::time::Instant::now() + std::time::Duration::from_millis(10))
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_policy_wire_unknown_worker_keeps_root_unresolved() {
+    let (f, _, provider) = fixture();
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let adapter = NativeCatalogAdapter::new(
+        completion(&f),
+        provider,
+        NativePolicyInputs::default(),
+        Arc::new(NoPolicyClock),
+    );
+    let request = CreateNamespaceRequest::from_http(&json!({"name":"panic"}), None).unwrap();
+    assert!(matches!(
+        adapter.create(request).await,
+        Err(CatalogError::WorkerUnknown)
+    ));
+    let status = tracker.status();
+    assert!(status.pending >= 2);
+    assert_eq!(status.pending, status.unresolved);
 }

@@ -1414,9 +1414,21 @@ impl NamespaceRegistryAdapter {
         provider: Arc<dyn EmbeddingProvider>,
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
         clock: Arc<dyn crate::time::Clock>,
+        cache: Arc<CacheManager>,
+        graph: crate::graph::SharedGraph,
+        vectors: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        fts: Arc<tokio::sync::Mutex<FtsIndex>>,
+        entities: Arc<tokio::sync::RwLock<EntityIndex>>,
     ) -> Self {
         self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
-            self.storage.clone(),
+            crate::derived_completion::DerivedCompletion {
+                storage: self.storage.clone(),
+                cache,
+                graph,
+                vectors,
+                fts,
+                entities,
+            },
             provider,
             policy,
             clock,
@@ -1435,6 +1447,20 @@ impl NamespaceRegistryAdapter {
 
 #[async_trait]
 impl state::NamespaceRegistry for NamespaceRegistryAdapter {
+    async fn update_native_policy(
+        &self,
+        request: crate::serialization::policy::PolicyRequest,
+    ) -> Result<
+        crate::native_catalog_adapter::PolicyOutcome,
+        crate::native_catalog_adapter::CatalogError,
+    > {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .update_policy(request)
+            .await
+    }
+
     async fn create_native_namespace(
         &self,
         request: crate::serialization::catalog::CreateNamespaceRequest,

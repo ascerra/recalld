@@ -541,6 +541,11 @@ async fn run_serve(
                 system.embedding().clone(),
                 system.query_engine().native_policy_inputs(),
                 system.clock().clone(),
+                system.cache().clone(),
+                system.graph().clone(),
+                system.vector_index().clone(),
+                system.fts_index().clone(),
+                system.entity_index().clone(),
             ),
         );
         let metrics: Arc<dyn recalld::api::MetricsCollector> = Arc::new(NoopMetricsCollector);

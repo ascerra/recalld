@@ -2427,3 +2427,77 @@ pub async fn capabilities(State(state): State<super::state::AppState>) -> axum::
     );
     response
 }
+
+/// Contract2-only numeric policy replacement; existing application gate remains.
+pub async fn update_namespace_policy(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::ContractVersion;
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version != ContractVersion::V2 {
+        return AppError::BadRequest {
+            message: "numeric policy replacement requires contractVersion 2".into(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    let key = match catalog_header_key(request.headers()) {
+        Ok(key) => key,
+        Err(error) => return native_policy_response(Err(error.into()), None),
+    };
+    let Json(body) = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(body) => body,
+        Err(error) => return error.into_response(),
+    };
+    update_namespace_policy_v2(state.namespaces.as_ref(), &id, &body, key.as_deref()).await
+}
+pub(crate) async fn update_namespace_policy_v2(
+    registry: &dyn super::state::NamespaceRegistry,
+    id: &str,
+    body: &serde_json::Value,
+    key: Option<&str>,
+) -> axum::response::Response {
+    let mut namespace_id = None;
+    let result = match crate::serialization::policy::PolicyRequest::from_http(body, id, key) {
+        Ok(request) => {
+            namespace_id = Some(request.namespace_id);
+            registry.update_native_policy(request).await
+        }
+        Err(error) => Err(error.into()),
+    };
+    native_policy_response(result, namespace_id)
+}
+fn native_policy_response(
+    result: Result<
+        crate::native_catalog_adapter::PolicyOutcome,
+        crate::native_catalog_adapter::CatalogError,
+    >,
+    id: Option<NamespaceId>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (status, envelope) = crate::native_catalog_adapter::policy_response(result, id);
+    (
+        StatusCode::from_u16(status).expect("fixed status"),
+        Json(envelope),
+    )
+        .into_response()
+}

@@ -2029,7 +2029,14 @@ impl McpNamespaceAdapter {
         clock: Arc<dyn crate::time::Clock>,
     ) -> Self {
         self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
-            self.storage.clone(),
+            crate::derived_completion::DerivedCompletion {
+                storage: self.storage.clone(),
+                cache: self.cache.clone(),
+                graph: self.graph.clone(),
+                vectors: self.vector_index.clone(),
+                fts: self.fts_index.clone(),
+                entities: self.entity_index.clone(),
+            },
             provider,
             policy,
             clock,
@@ -2146,6 +2153,20 @@ impl DeleteFailure {
 
 #[async_trait]
 impl bridge::NamespaceRegistry for McpNamespaceAdapter {
+    async fn update_native_policy(
+        &self,
+        request: crate::serialization::policy::PolicyRequest,
+    ) -> Result<
+        crate::native_catalog_adapter::PolicyOutcome,
+        crate::native_catalog_adapter::CatalogError,
+    > {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .update_policy(request)
+            .await
+    }
+
     async fn create_native_namespace(
         &self,
         request: crate::serialization::catalog::CreateNamespaceRequest,
