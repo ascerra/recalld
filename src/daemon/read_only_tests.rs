@@ -396,7 +396,7 @@ async fn http_call(
     )
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn read_only_http_get_search_and_existing_similarity_error() {
+async fn read_only_http_get_search_and_vector_similarity_succeed_without_effects() {
     let h = Harness::new().await;
     let before = h.snapshot().await;
     let get = format!("/memories/{}", h.ids[0]);
@@ -418,17 +418,27 @@ async fn read_only_http_get_search_and_existing_similarity_error() {
     .await;
     assert!(status.is_success(), "{body}");
     assert_eq!(body["hits"].as_array().unwrap().len(), 3);
-    // Existing HTTP vector-only adapter rejects EmptyQuery. Verify false mode
-    // also bypasses the source cache before this failure; do not claim success.
-    let (status, _) = http_call(
+    // Main's vector-query path now succeeds; false mode must still bypass caches
+    // and leave canonical records, graph, vectors and indexes unchanged.
+    let (status, body) = http_call(
         h.http(),
         "POST",
         &format!("/similar/{}", h.ids[0]),
         json!({"recordAccess":false}),
     )
     .await;
-    assert!(status.is_client_error());
-    assert!(h.f.cache.get(h.ids[0]).await.is_none());
+    assert!(status.is_success(), "{body}");
+    let hits = body["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 2);
+    for hit in hits {
+        assert_ne!(hit["memory"]["id"], h.ids[0].to_string());
+        assert!(h.ids[1..]
+            .iter()
+            .any(|id| hit["memory"]["id"] == id.to_string()));
+    }
+    for id in &h.ids {
+        assert!(h.f.cache.get(*id).await.is_none());
+    }
     h.assert_quiet(&before).await;
     for suffix in ["", "?recordAccess=true"] {
         assert!(
