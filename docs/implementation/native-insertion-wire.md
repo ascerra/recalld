@@ -5,6 +5,63 @@ PR123 `d7c4d5f` (including PR118/96), and readiness observation `cc865c2`
 (runtime `f8765b2`, direct PR96). Local joins are development compositions,
 not inherited validation. Public application contract 2 remains closed.
 
+The next single-write consumer additionally requires published PR121
+`3fa91d4e542ec8ed5519fe4c3b87e9e665043a40` for
+`MetadataStore::capture_namespace_binding`: canonical namespace identity remains
+available from retained purge evidence after namespace removal. This is identity
+evidence, not fresh policy admission or derived readiness. Replay must precede
+fresh namespace/configuration/provider/CAS checks, and a binding-capture failure
+must preserve an already known full receipt.
+
+An ancestry check of PR122 `abd0371`, PR123 `d7c4d5f`, observer `cc865c2`, and
+PR121 `3fa91d4` found no candidate head contained in another. Their shared PR96
+and other ancestors need no additional merge. PR121 has not yet been joined into
+this development composition. Curie's `e2b4f94` validation branch (join
+`866482da`, reported 1,152 library and two CLI tests) is resolution/reference
+evidence only; it is not a shipping parent or validation of this consumer.
+The performance hold permits source review but defers join validation and builds.
+
+## Activation dependency order
+
+Prepared format-aware adapters and producer dispatch can be validated and shipped
+against explicitly owned native fixtures before ordinary native startup is
+enabled. Such fixture validation proves the exercised adapter path, not ordinary
+startup admission or public API2 readiness. Original API1 request identity and
+payload defaults remain independent of disk format and lifecycle version.
+
+Feynman's ordinary native admission then consumes the validated writers and
+adapters, including existing public API1 compatibility. It must not depend on
+public API2 activation. Huygens' public API2 activation follows that startup work
+and the actual A2 retrieval selection consumer, together with the remaining
+writer/coherence/schema gates. An API2 envelope around legacy retrieval is not
+that selection consumer.
+
+A6 can construct a native instance using API1 once those native API1 paths are
+supported, then consume independently versioned capabilities. Neither A6 nor
+startup needs an early public API2 advertisement. Only frozen, validated actual
+dependencies may be joined; moving implementation branches are not prerequisites
+merely because they make a combined checkout convenient.
+
+Huygens owns format-aware routing and legacy response projection for MCP
+`store_memory` and HTTP `create_memory`. The planned native branch must select
+the owned native format before legacy label conversion, embedding, insertion,
+and post-creation callbacks. Its single `NativeMemoryInsertedWithLinks` proof
+already includes graph changes; it must bypass the whole legacy post-creation
+link sequence rather than invoke legacy edge writers after native insertion.
+This API1 route remains unimplemented and requires validated original-context-1
+producer support; using context 2 internally is not a compatibility substitute.
+Curie owns standalone graph helpers and eventual LoCoMo routing separately.
+
+The narrow record-API1 child on PR121 enables only plain
+`NativeMemoryInserted` and forget; it does not enable API1
+`NativeMemoryInsertedWithLinks`, native-store replay, or the profile consumer.
+The concrete sequence is validated explicit2 wire, then Curie's linked-store
+and batch original-API child using the narrow record child (and Feynman's
+retained context only where compound operations consume it), then the API1
+native projection consumer. Ordinary startup follows that validated API1
+closure. Prepared explicit2 wire remains testable on owned fixtures throughout;
+none of these steps requires public API2 activation.
+
 ## Failure readiness clarification
 
 CONTRACTS' integer `pendingWork` is not a deduplicated aggregate promise. An
