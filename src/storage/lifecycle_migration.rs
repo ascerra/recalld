@@ -417,20 +417,11 @@ pub(crate) fn validate_policy_history(
         })
         .collect::<Result<HashMap<_, _>, StorageError>>()?;
     let live_namespaces: std::collections::HashSet<_> = configs.keys().copied().collect();
-    let retired = purge_progress
-        .iter()
-        .filter_map(|p| match &p.start_receipt.outcome {
-            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
-                Some(t.before_namespace.namespace())
-            }
-            _ => None,
-        })
-        .collect::<Result<Vec<_>, StorageError>>()?;
-    for ns in retired {
+    let retired = super::native_purge::retired_namespace_bindings(&purge_progress)?;
+    for proof in retired.values() {
+        let ns = proof.namespace()?;
         if let Some(existing) = configs.get(&ns.id.get()) {
-            if super::native_purge::NativeNamespaceProof::capture(existing)?
-                != super::native_purge::NativeNamespaceProof::capture(&ns)?
-            {
+            if super::native_purge::NativeNamespaceProof::capture(existing)? != **proof {
                 return Err(invalid("retired namespace witness differs"));
             }
         } else {

@@ -243,6 +243,32 @@ impl NativePurgeChunk {
     }
 }
 
+/// Borrow typed namespace evidence from history returned by
+/// metadata::purge::validate_existing. Never parse a second unchecked copy or
+/// resolve an old ID through a recreated mutable name.
+pub(crate) fn retired_namespace_bindings(
+    progress: &[super::purge::PurgeProgress],
+) -> Result<HashMap<u32, &NativeNamespaceProof>, StorageError> {
+    let mut bindings = HashMap::new();
+    for p in progress.iter().filter(|p| p.version == 2) {
+        let super::control::MutationOutcome::NativeNamespacePurgeStarted { transition } =
+            &p.start_receipt.outcome
+        else {
+            return Err(invalid("native purge namespace witness missing"));
+        };
+        let proof = &transition.before_namespace;
+        if proof.namespace_id != p.namespace_id {
+            return Err(invalid("native purge namespace witness identity mismatch"));
+        }
+        if let Some(previous) = bindings.insert(proof.namespace_id.get(), proof) {
+            if previous != proof {
+                return Err(invalid("ambiguous retired namespace witness"));
+            }
+        }
+    }
+    Ok(bindings)
+}
+
 pub(crate) fn validate_evidence(
     receipt: &WriteReceipt,
     configs: &HashMap<u32, NamespaceConfig>,

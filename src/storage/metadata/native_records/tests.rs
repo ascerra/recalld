@@ -755,3 +755,6 @@ mod store;
 
 #[path = "mixed_history_tests.rs"]
 mod mixed_history;
+
+#[path = "namespace_binding_tests.rs"]
+mod namespace_binding;
