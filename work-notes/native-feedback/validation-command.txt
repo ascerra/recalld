@@ -1,3 +1,3 @@
 Docker image recalld-ci:1.94; --rm --network none --cpus 2 --memory 4g; RUSTUP_TOOLCHAIN=1.94.1 CARGO_BUILD_JOBS=2 CARGO_HOME=/cargo CARGO_TARGET_DIR=/target. Only this worktree:/work and private .test-scratch/cargo:/cargo,target:/target mounted. Own package cargo clean -p recalld before source compilation.
-Focused: cargo test --offline native_feedback_consumer -- --nocapture
+Focused: cargo test --offline native_feedback -- --nocapture
 Full: cargo fmt --all -- --check && cargo test --offline && cargo clippy --offline --all-targets
