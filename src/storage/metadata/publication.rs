@@ -184,8 +184,8 @@ impl MetadataStore {
         }
         if view.at != expected {
             return Err(StorageError::GenerationConflict {
-                expected: expected.generation.to_string(),
-                actual: view.at.generation.to_string(),
+                expected: expected.generation.get().to_string(),
+                actual: view.at.generation.get().to_string(),
             });
         }
         copy(&view)

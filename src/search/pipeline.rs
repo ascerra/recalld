@@ -21,7 +21,7 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 mod diagnostics;
 #[path = "read_view.rs"]
 mod read_view;
-pub use read_view::{CoherentPayload, CoherentSearchResponse};
+pub use read_view::CoherentSearchResponse;
 #[path = "strength.rs"]
 mod strength;
 use strength::StrengthContext;

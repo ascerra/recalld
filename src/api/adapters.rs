@@ -101,7 +101,12 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Option<crate::search::CoherentSearchResponse>, crate::search::SearchError> {
         self.query_engine
-            .prepare_coherent_payload(Self::pipeline_query(query), include_embeddings, parent)
+            .prepare_coherent_payload(
+                Self::pipeline_query(query)?,
+                include_embeddings,
+                false,
+                parent,
+            )
             .await
     }
 
@@ -1846,7 +1851,9 @@ mod tests {
 }
 
 impl SearchPipelineAdapter {
-    fn pipeline_query(query: state::SearchQuery) -> crate::search::SearchQuery {
+    fn pipeline_query(
+        query: state::SearchQuery,
+    ) -> Result<crate::search::SearchQuery, crate::search::SearchError> {
         // Convert API-layer SearchQuery to the pipeline's SearchQuery.
         let (text, query_embedding) = match query.query {
             state::QueryInput::Text(t) => (Some(t), None),
@@ -1880,7 +1887,7 @@ impl SearchPipelineAdapter {
             })
             .unwrap_or_default();
 
-        crate::search::SearchQuery {
+        Ok(crate::search::SearchQuery {
             record_access: query.record_access,
             query_embedding,
             text,
@@ -1905,7 +1912,7 @@ impl SearchPipelineAdapter {
             time_range_start: query.time_range_start, // Issue 3: pass time range
             time_range_end: query.time_range_end,     // Issue 3: pass time range
             entities: query.entities.clone(),         // Issue 4: pass entities
-        }
+        })
     }
 
     async fn search_inner(
@@ -1914,7 +1921,7 @@ impl SearchPipelineAdapter {
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        let pipeline_query = Self::pipeline_query(query.clone());
+        let pipeline_query = Self::pipeline_query(query.clone())?;
         let response = if defer_recording {
             self.query_engine
                 .prepare_search_with_work(pipeline_query, parent)

@@ -220,6 +220,129 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 entities: query.entities.clone(),
             };
 
+            if let Some(prepared) = self
+                .query_engine
+                .prepare_coherent_payload(
+                    pipeline_query.clone(),
+                    false,
+                    query.include_neighbors,
+                    accepted.as_ref(),
+                )
+                .await
+                .map_err(map_search_error)?
+            {
+                let payload = prepared.payload.ok_or_else(|| {
+                    bridge::BridgeError::Internal("coherent payload missing".into())
+                })?;
+                if payload.namespace.id != ns_config.id
+                    || payload.rows.len() != prepared.response.response.results.len()
+                {
+                    return Err(bridge::BridgeError::Storage(
+                        "coherent page scope changed".into(),
+                    ));
+                }
+                let mut hits = Vec::with_capacity(payload.rows.len());
+                let mut exposures = Vec::new();
+                for (selected, row) in prepared
+                    .response
+                    .response
+                    .results
+                    .into_iter()
+                    .zip(payload.rows)
+                {
+                    if row.record.id != *selected.memory_id.as_bytes() {
+                        return Err(bridge::BridgeError::Storage(
+                            "coherent page identity mismatch".into(),
+                        ));
+                    }
+                    let labels = row.record.schema.as_ref().map(|s| s.labels.clone());
+                    let metadata =
+                        crate::model::structured_metadata(&row.record.tags, labels.as_ref());
+                    let related = payload
+                        .related
+                        .get(&selected.memory_id)
+                        .map(|edges| {
+                            edges
+                                .iter()
+                                .map(|e| bridge::RelatedMemory {
+                                    id: e.id.to_string(),
+                                    edge_type: e.edge_type.clone(),
+                                    weight: e.weight,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    exposures.push((
+                        selected.memory_id,
+                        if selected.activation_score.is_some() {
+                            crate::model::AccessKind::AssociativeRetrieval
+                        } else {
+                            crate::model::AccessKind::DirectRetrieval
+                        },
+                    ));
+                    hits.push(bridge::SearchHit {
+                        labels,
+                        id: selected.memory_id.to_string(),
+                        summary: row.record.summary.clone(),
+                        full_text: row.full_text,
+                        score: selected.score.unwrap_or(0.),
+                        namespace: payload.namespace.name.clone(),
+                        tags: row.record.tags.iter().map(ToString::to_string).collect(),
+                        entities: metadata.entities,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        phase: format!("{:?}", row.record.phase),
+                        strength: selected.retrievability,
+                        created_at: format_timestamp(row.record.created_at, self.timezone),
+                        last_accessed_at: format_timestamp(
+                            row.record.last_accessed_at,
+                            self.timezone,
+                        ),
+                        related,
+                    });
+                }
+                let mut neighbors = Vec::with_capacity(payload.neighbors.len());
+                for neighbor in payload.neighbors {
+                    let disk = neighbor.payload.record;
+                    let id = crate::model::MemoryId::from_bytes(disk.id);
+                    let labels = disk.schema.as_ref().map(|s| s.labels.clone());
+                    let metadata = crate::model::structured_metadata(&disk.tags, labels.as_ref());
+                    exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));
+                    neighbors.push(bridge::NeighborMemory {
+                        labels,
+                        id: id.to_string(),
+                        summary: disk.summary,
+                        full_text: neighbor.payload.full_text,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        edge_type: neighbor.edge_type,
+                        weight: neighbor.weight,
+                        connected_to: neighbor.connected_to.to_string(),
+                    });
+                }
+                check_read_admission(&self.storage, stamp).await?;
+                let receipts = if query.record_access {
+                    self.query_engine
+                        .record_exposures_with_work(
+                            &exposures,
+                            crate::storage::control::ExposureScope {
+                                namespace: payload.namespace.name,
+                                source: None,
+                            },
+                            accepted.as_ref(),
+                        )
+                        .await
+                        .map_err(map_search_error)?
+                } else {
+                    Vec::new()
+                };
+                return Observed {
+                    value: bridge::SearchResponse { hits, neighbors },
+                    receipts,
+                }
+                .finish(check_read_admission(&self.storage, stamp).await);
+            }
+
             let response = self
                 .query_engine
                 .prepare_search_with_work(pipeline_query, accepted.as_ref())

@@ -22,6 +22,19 @@ pub struct CoherentSearchResponse {
 pub struct CoherentPayload {
     pub namespace: NamespaceConfig,
     pub rows: Vec<crate::storage::engine::HydratedRecord>,
+    pub related: HashMap<MemoryId, Vec<CoherentRelation>>,
+    pub neighbors: Vec<CoherentNeighbor>,
+}
+pub struct CoherentRelation {
+    pub id: MemoryId,
+    pub edge_type: String,
+    pub weight: f32,
+}
+pub struct CoherentNeighbor {
+    pub payload: crate::storage::engine::HydratedRecord,
+    pub edge_type: String,
+    pub weight: f32,
+    pub connected_to: MemoryId,
 }
 
 fn unavailable(error: impl std::fmt::Display) -> SearchError {
@@ -141,6 +154,7 @@ impl QueryEngine {
         &self,
         query: SearchQuery,
         include_embeddings: bool,
+        include_neighbors: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Option<CoherentSearchResponse>> {
         let Some((owner, rif)) = &self.coherent_owner else {
@@ -152,7 +166,7 @@ impl QueryEngine {
             query,
             RetrievalSemantics::V1,
             std::time::Instant::now() + std::time::Duration::from_secs(30),
-            Some(include_embeddings),
+            Some((include_embeddings, include_neighbors)),
             parent,
         )
         .await
@@ -166,7 +180,7 @@ impl QueryEngine {
         query: SearchQuery,
         semantics: RetrievalSemantics,
         deadline: std::time::Instant,
-        payload_embeddings: Option<bool>,
+        payload_embeddings: Option<(bool, bool)>,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<CoherentSearchResponse> {
         let work = owner.accept_work(parent).map_err(unavailable)?;
@@ -216,25 +230,86 @@ impl QueryEngine {
                 fts_index: Arc::new(SharedFtsIndexRegistry::pinned(fts)),
                 entity_index: Arc::new(SharedEntityIndexReader::pinned(entities)),
                 cache: Arc::new(BypassCache),
-                meta_store: canonical,
+                meta_store: canonical.clone(),
                 graph: Arc::new(SharedGraphReader::pinned(graph.clone())),
-                rif_engine: Arc::new(RifProcessorAdapter::pinned(rif, graph)),
+                rif_engine: Arc::new(RifProcessorAdapter::pinned(rif, graph.clone())),
                 access_recorder: Arc::new(RejectExposure),
             };
             // Preserve requested mode for policy resolution, but never expose
             // until all selected content is copied and transport selection is final.
             let response = engine.search_checked(query, semantics, true).await?;
-            let payload = if let Some(include_embeddings) = payload_embeddings {
-                let ids: Vec<_> = response
+            let payload = if let Some((include_embeddings, include_neighbors)) = payload_embeddings
+            {
+                let mut ids: Vec<_> = response
                     .response
                     .results
                     .iter()
                     .map(|r| r.memory_id)
                     .collect();
+                let selected_count = ids.len();
+                let selected: HashSet<_> = ids.iter().copied().collect();
+                let mut related = HashMap::new();
+                let mut candidates: HashMap<MemoryId, (f32, String, MemoryId)> = HashMap::new();
+                for &id in &ids {
+                    let Some(key) = graph.resolve(&id) else {
+                        continue;
+                    };
+                    let mut edges = Vec::new();
+                    for edge in graph.edges_for(&id) {
+                        let other = if edge.source == key {
+                            edge.target
+                        } else {
+                            edge.source
+                        };
+                        let Some(node) = graph.get_node_by_key(other) else {
+                            continue;
+                        };
+                        let kind = format!("{:?}", edge.edge_type).to_lowercase();
+                        if selected.contains(&node.memory_id) {
+                            edges.push(CoherentRelation {
+                                id: node.memory_id,
+                                edge_type: kind,
+                                weight: edge.weight,
+                            });
+                        } else if include_neighbors {
+                            let entry =
+                                candidates
+                                    .entry(node.memory_id)
+                                    .or_insert((0., kind.clone(), id));
+                            if edge.weight > entry.0 {
+                                *entry = (edge.weight, kind, id);
+                            }
+                        }
+                    }
+                    related.insert(id, edges);
+                }
+                // Preserve named v1's ten-neighbor cap and five-text policy.
+                // Eligibility is checked from the same canonical transaction.
+                let mut candidates: Vec<_> = candidates.into_iter().collect();
+                candidates.sort_by(|a, b| {
+                    b.1.0
+                        .partial_cmp(&a.1.0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                candidates.truncate(10);
+                let mut neighbors = Vec::new();
+                for (position, (id, link)) in candidates.into_iter().enumerate() {
+                    let Some(record) = canonical.get(id).map_err(unavailable)? else {
+                        continue;
+                    };
+                    if record.namespace_id != namespace.id
+                        || matches!(record.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+                        || record.summary.is_empty()
+                    {
+                        continue;
+                    }
+                    ids.push(id);
+                    neighbors.push((link, position < 5));
+                }
                 let storage = owner.storage.clone();
                 let namespace_id = namespace.id;
                 let child = work.child().map_err(unavailable)?;
-                let rows = tokio::task::spawn_blocking(move || {
+                let mut rows = tokio::task::spawn_blocking(move || {
                     let storage = storage.read().map_err(unavailable)?;
                     let result = storage
                         .hydrate_at(at, namespace_id, &ids, include_embeddings)
@@ -244,12 +319,37 @@ impl QueryEngine {
                 })
                 .await
                 .map_err(unavailable)??;
-                Some(CoherentPayload { namespace, rows })
+                let neighbor_rows = rows.split_off(selected_count);
+                let neighbors = neighbor_rows
+                    .into_iter()
+                    .zip(neighbors)
+                    .map(
+                        |(mut payload, ((weight, edge_type, connected_to), full_text))| {
+                            if !full_text {
+                                payload.full_text = None;
+                            }
+                            CoherentNeighbor {
+                                payload,
+                                weight,
+                                edge_type,
+                                connected_to,
+                            }
+                        },
+                    )
+                    .collect();
+                Some(CoherentPayload {
+                    namespace,
+                    rows,
+                    related,
+                    neighbors,
+                })
             } else {
                 None
             };
             // Explicit release before root completion, including the canonical tx.
             drop(engine);
+            drop(canonical);
+            drop(graph);
             drop(publication);
             Ok(CoherentSearchResponse {
                 read_generation: at,
