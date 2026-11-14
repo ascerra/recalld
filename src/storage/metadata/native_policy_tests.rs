@@ -279,6 +279,18 @@ fn native_policy_commit_faults_preserve_original_keyed_noop_outcome() {
     }
 }
 
+// Import canonicalizes the unused physical slot of rows without vector ownership.
+// Retained vector references, all f32 fields, payload and lifecycle bytes remain checked.
+fn imported_rows(session: &NativeLifecycleSession) -> Vec<Vec<u8>> {
+    let mut all = rows(session);
+    for r in &mut all {
+        if r.schema.as_ref().unwrap().vector.is_none() {
+            r.vector_slot = 0;
+        }
+    }
+    encoded(&all)
+}
+
 #[tokio::test]
 async fn native_policy_offline_roundtrip_and_foreign_noop_proof_rejects_forged_policy() {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
@@ -297,7 +309,7 @@ async fn native_policy_offline_roundtrip_and_foreign_noop_proof_rejects_forged_p
     s.update_policy(&ctx(&s, id, "changed"), scope(&s, id), &changed)
         .unwrap()
         .unwrap();
-    let before_rows = encoded(&rows(&s));
+    let before_rows = imported_rows(&s);
     let config = control::encode(&s.engine.get_namespace(id).unwrap().unwrap()).unwrap();
     drop(s);
     let source_bytes = std::fs::read(path.join("meta.db")).unwrap();
@@ -309,7 +321,7 @@ async fn native_policy_offline_roundtrip_and_foreign_noop_proof_rejects_forged_p
     );
     assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), source_bytes);
     let mut s = open(&imported);
-    assert_eq!(encoded(&rows(&s)), before_rows);
+    assert_eq!(imported_rows(&s), before_rows);
     assert_eq!(
         control::encode(&s.engine.get_namespace(id).unwrap().unwrap()).unwrap(),
         config
@@ -340,7 +352,7 @@ async fn native_policy_offline_roundtrip_and_foreign_noop_proof_rejects_forged_p
     .unwrap();
     let mut s = open(&imported);
     assert_ne!(s.engine.control_state().unwrap().store_id, noop.store_id);
-    assert_eq!(encoded(&rows(&s)), before_rows);
+    assert_eq!(imported_rows(&s), before_rows);
     assert_eq!(
         control::encode(&s.engine.get_namespace(id).unwrap().unwrap()).unwrap(),
         config
