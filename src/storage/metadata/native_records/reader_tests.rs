@@ -7,6 +7,9 @@ use crate::search::adapters::*;
 use crate::test_support::Fixture;
 use serde_json::{Value, json};
 
+#[path = "forget_consumer_tests.rs"]
+mod forget_consumer;
+
 struct NoProvider;
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for NoProvider {
