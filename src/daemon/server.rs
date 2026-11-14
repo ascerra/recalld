@@ -1362,6 +1362,28 @@ pub(crate) async fn native_method_test_rpc(
         rx,
         tx.clone(),
     ));
+    // Match the real client's handshake before testing a large native reply.
+    // An unannounced peer is correctly limited to the legacy 1 MiB frame.
+    write_framed_request(
+        &mut client,
+        &DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 0,
+            method: "ping".into(),
+            params: serde_json::json!({
+                "protocolVersion": PROTOCOL_VERSION,
+                "maxMessageSize": MAX_MESSAGE_SIZE,
+            }),
+        },
+        LEGACY_MAX_MESSAGE_SIZE,
+    )
+    .await
+    .unwrap();
+    let hello = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+        .await
+        .unwrap();
+    assert!(hello.error.is_none());
+    assert_eq!(hello.result.unwrap()["maxMessageSize"], MAX_MESSAGE_SIZE);
     write_framed_request(
         &mut client,
         &DaemonRequest {
@@ -1370,11 +1392,11 @@ pub(crate) async fn native_method_test_rpc(
             method: method.into(),
             params,
         },
-        LEGACY_MAX_MESSAGE_SIZE,
+        MAX_MESSAGE_SIZE,
     )
     .await
     .unwrap();
-    let response = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+    let response = read_framed_response(&mut client, MAX_MESSAGE_SIZE)
         .await
         .unwrap();
     tx.send(true).unwrap();

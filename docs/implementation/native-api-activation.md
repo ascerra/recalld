@@ -90,3 +90,15 @@ V1 similarity correction filters canonical eligibility before candidate caps;
 it preserves legacy ranking/history and default scope while honoring explicit
 `sameNamespace:false` only across provably compatible profiles. Neither that
 work nor this insertion consumer opens public2 independently.
+
+The next native API1 REST insertion wrapper may add `embeddingProfileId` without
+changing existing success fields. Native supplied vectors require an explicit
+matching Bound ID: missing identity is a semantic422 with a profile-required
+remediation, malformed ID is400 and a different binding is409. Legacy-disk
+supplied vectors with no ID retain their documented unverified compatibility
+lane. An explicitly supplied ID must be verified or explicitly rejected as
+unsupported; it must never be silently ignored. Native generated vectors use
+the actual provider identity. MCP API1 single-store's historical ignored
+`embedding` field remains unchanged. Tests must cover both formats before
+ordinary native startup consumes this wrapper; this is an approved follow-up,
+not implemented by the frozen explicit2 wire.

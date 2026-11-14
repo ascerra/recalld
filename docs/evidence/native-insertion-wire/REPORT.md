@@ -118,3 +118,14 @@ The original failed source, log and executed binary SHA
 `aef40c5b89d4d415179a5df5d0a879c2c1cc3b5b4a325ca4ed5d037877f101a0`
 remain in `run-d12a9a3` under the active validation root until results/publication
 cleanup handoff. Current consumer is not READY from this run.
+
+The corrected `cb81448` passed21 focused tests (one explicit ignored fixture) in
+20.45s, including setup-stale/current-publication, unchanged generation and strict
+retired replay byte identity. The separate genuine BEFORE test then failed at
+its framed RPC assertion: the helper had skipped `ping` negotiation, so the
+server correctly refused a3,221,546-byte reply at the legacy1,048,576-byte limit.
+Exact HTTP receipt and MCP text/structured equality had passed before that
+assertion. The real daemon client negotiates protocol2's8MiB limit; the correction
+adds that existing handshake to the test-only helper, not production code or
+transport limits. Full-suite/clippy did not run on `cb81448`. Executed binary SHA:
+`523fa6e66d706dfc675a2d380cd34b31bf4cb907355c81fadb8d86effce9e29d`.
