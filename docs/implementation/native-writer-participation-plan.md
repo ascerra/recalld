@@ -1,8 +1,10 @@
-# Native writer participation: proposed implementation boundary
+# Native writer participation: approved implementation boundary
 
-2026-11-14. Planning only; no implementation or validation claim. Prepared
-during the A5 scheduling hold. The combined checkpoint remains an isolated
-validation branch, not a shipping parent.
+2026-11-14. Approved boundaries prepared during the A5 scheduling hold.
+Namespace creation is implemented in this child; its exact validation and
+remaining consumers are recorded in native-catalog-creation.md. Other slices
+below remain required work. The combined checkpoint is an isolated validation
+branch, not a shipping parent.
 
 ## Owners and parents
 
@@ -19,8 +21,8 @@ validation branch, not a shipping parent.
 - Huygens owns A4 parsing/profile evidence and transport activation; Halley owns
   the publication registry, barrier and whole-query ReadView.
 
-Start the native catalog child from Pascal's **validated frozen** reader join
-of 69/eefc987 and 79/6a70174. Its current work-in-progress is not a passed parent.
+The native catalog child uses Pascal's validated PR82 reader join of
+69/eefc987 and 79/6a70174, including frozen phase-clock correction a69865b.
 Actual profile62/ed242ec is already an ancestor; no extra profile merge is needed.
 Add actual 80/ca205aa for the maintenance/purge/batch child, which supplies the
 70+77 runtime/offline composition. Reuse the frozen Curie producer join only
@@ -34,7 +36,7 @@ Names below are proposals, to be reconciled with the actual frozen parent.
 All run on the existing owning `RedbStorageEngine` and `MetadataStore`.
 
 ```rust,ignore
-create_native_namespace(ctx, input, active_profile, clock, parent)
+create_native_namespace(ctx, input, active_profile, policy_inputs, clock, parent)
     -> Result<WriteReceipt, StorageError>
 capture_native_policy(namespace_id, replacement, policy_inputs)
     -> Result<NativePolicyIntent, StorageError>
@@ -114,7 +116,8 @@ accepted as arbitrary caller authority. No synchronous guard crosses an await.
    New native child results finalize atomically with their mutation and receipt.
    Pending/unknown commits reconcile before retry; bookkeeping generations do
    not imply atomic batches. Feynman updates strict table/export/restore proof;
-   Curie routes actual producers through the typed seam.
+   Curie owns the native codec/child binding and routes actual producers through
+   the existing ordered runner and typed seam.
 
 Every slice preserves replay-before-CAS and checks stale lineage before replay.
 History validation recognizes exact typed transitions and verified ancestry,
