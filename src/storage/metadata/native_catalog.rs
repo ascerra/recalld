@@ -3,6 +3,7 @@ use crate::model::schema::EmbeddingProfile;
 use crate::storage::native_catalog::{
     NamespacePolicyState, NativeNamespaceCreated, NativeNamespaceInput,
 };
+use crate::storage::native_lifecycle::NativePolicyInputs;
 use crate::time::Clock;
 
 fn validate_context(ctx: &MutationContext) -> Result<(), StorageError> {
@@ -33,6 +34,7 @@ impl MetadataStore {
         ctx: &MutationContext,
         input: &NativeNamespaceInput,
         profile: &EmbeddingProfile,
+        policy: &NativePolicyInputs,
         clock: &dyn Clock,
         prepare: impl FnOnce(&NamespaceConfig) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
@@ -46,6 +48,9 @@ impl MetadataStore {
         let state = control::read_control(&tx)?;
         state.committed_generation.next()?;
         let mut config = input.prepare(profile, clock.now_millis())?;
+        // Resolve the frozen inherited inputs before reserving an ID or staging
+        // files. A retained receipt above remains replayable under new inputs.
+        policy.resolve(&config)?;
         let previous_max_id;
         {
             let mut namespaces = tx.open_table(NAMESPACE_TABLE)?;

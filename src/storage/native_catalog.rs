@@ -67,8 +67,12 @@ impl NativeNamespaceInput {
         self.validate()?;
         // Fixed v2 numeric defaults are expanded here. Generated ID/time and
         // sampled provider identity/dimension are outcomes, not caller intent.
-        let fields =
-            control::encode(&(self, NamespacePolicyState::capture(&self.policy_config())?))?;
+        let fields = control::encode(&(
+            &self.name,
+            self.embedding_dim,
+            &self.embedding_profile_id,
+            NamespacePolicyState::capture(&self.policy_config())?,
+        ))?;
         Ok(control::request_hash(
             ctx,
             "namespace_create_v2",
@@ -240,8 +244,14 @@ impl super::native_lifecycle::NativeLifecycleSession {
                 "active provider dimension mismatch".into(),
             ));
         }
-        self.engine
-            .create_native_namespace(ctx, input, &profile, self.clock.as_ref(), None)
+        self.engine.create_native_namespace(
+            ctx,
+            input,
+            &profile,
+            &self.policy,
+            self.clock.as_ref(),
+            None,
+        )
     }
 }
 

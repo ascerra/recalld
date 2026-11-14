@@ -7,14 +7,15 @@ validation branch, not a shipping parent.
 ## Owners and parents
 
 - Feynman owns canonical catalog/configuration, maintenance/phase-loss, purge,
-  and native batch validation/child binding. This includes new receipt proof
-  variants and the shared history-validation/rewind dispatcher.
+  strict offline/history review of native batches, and the shared
+  history-validation/rewind dispatcher.
 - Pascal owns native readers and observation, and reviews A3 transition/clock
   semantics. Existing native insertion/tombstone/lifecycle serialization stays
   unchanged. `NativeRecordWrite::validate(..., false)` remains tombstone-only.
-- Curie owns producer admission, accepted/transitive work scheduling, and the
-  ordered transport batch runner. He confirmed this split. There will be no
-  second runner, tracker, or native codec owner.
+- Curie owns producer admission, accepted/transitive work scheduling, native
+  batch codec/child binding, and the ordered transport batch runner. Native
+  bookkeeping reaches the shared dispatcher only through validated manifest
+  references. There will be no second runner, tracker, or native codec owner.
 - Huygens owns A4 parsing/profile evidence and transport activation; Halley owns
   the publication registry, barrier and whole-query ReadView.
 

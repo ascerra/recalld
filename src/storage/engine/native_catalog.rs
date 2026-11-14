@@ -1,6 +1,7 @@
 use super::*;
 use crate::model::schema::EmbeddingProfile;
 use crate::storage::native_catalog::NativeNamespaceInput;
+use crate::storage::native_lifecycle::NativePolicyInputs;
 use crate::storage::work::WorkTicket;
 use crate::time::Clock;
 
@@ -10,6 +11,7 @@ impl RedbStorageEngine {
         ctx: &MutationContext,
         input: &NativeNamespaceInput,
         active_profile: &EmbeddingProfile,
+        policy: &NativePolicyInputs,
         clock: &dyn Clock,
         parent: Option<&WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
@@ -23,7 +25,15 @@ impl RedbStorageEngine {
             &mut self.vector_manager,
             &self.db_path,
             |prepare| {
-                meta.create_native_catalog(&guard, ctx, input, active_profile, clock, prepare)
+                meta.create_native_catalog(
+                    &guard,
+                    ctx,
+                    input,
+                    active_profile,
+                    policy,
+                    clock,
+                    prepare,
+                )
             },
         )
     }
