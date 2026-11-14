@@ -16,6 +16,9 @@ use std::sync::{
 #[path = "reader_tests.rs"]
 mod readers;
 
+#[path = "phase_clock_tests.rs"]
+mod phase_clock;
+
 struct FixedClock(AtomicUsize);
 impl Clock for FixedClock {
     fn now_millis(&self) -> i64 {
