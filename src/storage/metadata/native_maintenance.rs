@@ -6,9 +6,9 @@ use crate::storage::native_records::{NativeEdgeProof, NativeRecordChange, Native
 
 pub(crate) fn request_hash(ctx: &MutationContext, id: MemoryId) -> Result<[u8; 32], StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || !matches!(ctx.scope, MutationScope::Namespace(_)) {
+    if !matches!(ctx.scope, MutationScope::Namespace(_)) {
         return Err(StorageError::InvalidMutationContext(
-            "native maintenance requires contract2 namespace scope".into(),
+            "native maintenance requires namespace scope".into(),
         ));
     }
     Ok(control::request_hash(

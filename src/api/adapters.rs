@@ -1197,6 +1197,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
 
 /// Adapts the decay subsystem to the API `FsrsEngine` trait.
 pub struct FsrsEngineAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1207,6 +1208,89 @@ pub struct FsrsEngineAdapter {
 }
 
 impl FsrsEngineAdapter {
+    pub(crate) async fn trigger_sweep_with_origin(
+        &self,
+        as_of_millis: Option<i64>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
+        use crate::graph::ActivationConfig;
+
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(Box::new(
+                crate::storage::StorageError::InvalidMutationContext(
+                    "unsupported original application contract".into(),
+                ),
+            ));
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| e.to_string())?
+            .meta_store()
+            .uses_native_lifecycle();
+        let legacy = crate::storage::native_lifecycle::NativePolicyInputs {
+            global: crate::decay::DecayConfig::default(),
+            multiplier: self.config.decay.decay_rate_multiplier as f64,
+        };
+        let policy = if native {
+            self.native_policy.as_ref().ok_or_else(|| {
+                crate::storage::StorageError::InvalidMutationContext(
+                    "native manual sweep requires configured lifecycle policy".into(),
+                )
+            })?
+        } else {
+            &legacy
+        };
+        let sweep_config = SweepConfig::default();
+        let activation_config = ActivationConfig::default();
+
+        let result = DecaySweepRunner::execute_sweep_with_origin_work(
+            &sweep_config,
+            &policy.global,
+            &activation_config,
+            &self.storage,
+            &self.graph,
+            &self.cache,
+            policy.multiplier,
+            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
+            None,
+            self.completion.as_ref(),
+            original_contract_version,
+        )
+        .await;
+
+        // Do not let a subsequent unavailable-handle error hide the original
+        // canonical receipt or uncertain operation identity.
+        if let Some((receipt, message)) = &result.failed_commit {
+            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    message.clone(),
+                )),
+            }));
+        }
+        if let Some(operation_id) = result.uncertain_operation {
+            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
+                format!(
+                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
+                ),
+            )));
+        }
+        if let Some(error) = &result.publication_error {
+            return Err(error.clone().into());
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     /// Creates a new adapter with the storage engine, cache, and sweep-thread liveness flag.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1217,6 +1301,7 @@ impl FsrsEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -1318,49 +1403,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         &self,
         as_of_millis: Option<i64>,
     ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
-        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
-        use crate::graph::ActivationConfig;
-
-        let sweep_config = SweepConfig::default();
-        let decay_config = crate::decay::DecayConfig::default();
-        let activation_config = ActivationConfig::default();
-        let global_multiplier = self.config.decay.decay_rate_multiplier as f64;
-
-        let result = DecaySweepRunner::execute_sweep_with_work(
-            &sweep_config,
-            &decay_config,
-            &activation_config,
-            &self.storage,
-            &self.graph,
-            &self.cache,
-            global_multiplier,
-            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
-            None,
-            self.completion.as_ref(),
-        )
-        .await;
-
-        // Do not let a subsequent unavailable-handle error hide the original
-        // canonical receipt or uncertain operation identity.
-        if let Some((receipt, message)) = &result.failed_commit {
-            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
-                receipt: Box::new(receipt.clone()),
-                source: Box::new(crate::storage::StorageError::RecoveryRequired(
-                    message.clone(),
-                )),
-            }));
-        }
-        if let Some(operation_id) = result.uncertain_operation {
-            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
-                format!(
-                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
-                ),
-            )));
-        }
-        if let Some(error) = &result.publication_error {
-            return Err(error.clone().into());
-        }
-        Ok(result)
+        self.trigger_sweep_with_origin(as_of_millis, 1).await
     }
 }
 

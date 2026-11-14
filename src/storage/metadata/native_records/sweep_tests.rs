@@ -611,3 +611,6 @@ async fn native_sweep_actual_interval_registers_only_at_tick_and_publishes_fresh
     assert_eq!(tracker.status().pending, 0);
     assert_eq!(tracker.status().unresolved, 0);
 }
+
+#[path = "sweep_origin_tests.rs"]
+mod origin;

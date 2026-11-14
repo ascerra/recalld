@@ -14,6 +14,7 @@ impl DecaySweepRunner {
         as_of_millis: Option<i64>,
         work: &WorkTicket,
         completion: Option<&crate::derived_completion::DerivedCompletion>,
+        original_contract_version: u32,
     ) -> SweepResult {
         let start = Instant::now();
         let mut result = SweepResult::default();
@@ -68,14 +69,15 @@ impl DecaySweepRunner {
             result.memories_scanned += 1;
             let id = intent.memory_id;
             let phase = intent.captured_phase;
-            // Background work is an internal unkeyed attempt. Skips do not bind
-            // retry identity and must never be promoted to keyed no-op success.
+            // Each producer supplies its explicit origin; attempts are unkeyed.
+            // Skips do not bind retry identity and must never be promoted to
+            // keyed no-op success.
             let ctx = MutationContext {
                 store_id: Some(intent.capture_generation().store_id),
                 scope: MutationScope::Namespace(intent.scope.namespace_id),
                 idempotency_key: None,
                 expected_generation: None,
-                contract_version: 2,
+                contract_version: original_contract_version,
             };
             match completion
                 .apply_native_decay_accepted(ctx, intent, policy.clone(), work)

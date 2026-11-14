@@ -537,7 +537,7 @@ impl DecaySweepRunner {
                 return;
             }
             if let Some(work) = startup {
-                let result = Self::execute_sweep_with_work(
+                let result = Self::execute_sweep_with_origin_work(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -548,6 +548,7 @@ impl DecaySweepRunner {
                     Some(clock.now_millis()),
                     Some(&work),
                     completion.as_ref(),
+                    2,
                 )
                 .await;
                 finish_work(&storage, work);
@@ -573,7 +574,7 @@ impl DecaySweepRunner {
                 let Some(work) = work else {
                     continue;
                 };
-                let result = Self::execute_sweep_with_work(
+                let result = Self::execute_sweep_with_origin_work(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -584,6 +585,7 @@ impl DecaySweepRunner {
                     Some(clock.now_millis()),
                     Some(&work),
                     completion.as_ref(),
+                    2,
                 )
                 .await;
                 finish_work(&storage, work);
@@ -606,7 +608,9 @@ impl DecaySweepRunner {
         );
     }
 
-    /// Trigger an immediate sweep outside the regular interval.
+    /// Internal autonomous notification, explicitly in the contract2 domain.
+    /// It carries no public request origin or key; request-owned manual sweeps
+    /// use execute_sweep_with_origin_work instead of this coalescing queue.
     ///
     /// Non-blocking -- the sweep runs asynchronously in the background task.
     /// If a sweep is already in progress, the trigger is consumed and a
@@ -712,6 +716,42 @@ impl DecaySweepRunner {
         parent: Option<&WorkTicket>,
         completion: Option<&crate::derived_completion::DerivedCompletion>,
     ) -> SweepResult {
+        // Rust compatibility/manual entry is application1.
+        Self::execute_sweep_with_origin_work(
+            config,
+            decay_config,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            global_decay_multiplier,
+            as_of_millis,
+            parent,
+            completion,
+            1,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_sweep_with_origin_work(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        parent: Option<&WorkTicket>,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+        original_contract_version: u32,
+    ) -> SweepResult {
+        if !matches!(original_contract_version, 1 | 2) {
+            return SweepResult {
+                publication_error: Some("unsupported original application contract".into()),
+                ..Default::default()
+            };
+        }
         let work = match accept_work(storage, parent) {
             Ok(work) => work,
             Err(error) => {
@@ -735,6 +775,7 @@ impl DecaySweepRunner {
                     as_of_millis,
                     &work,
                     completion,
+                    original_contract_version,
                 )
                 .await
             }
@@ -749,6 +790,7 @@ impl DecaySweepRunner {
                     global_decay_multiplier,
                     as_of_millis,
                     &work,
+                    original_contract_version,
                 )
                 .await
             }
@@ -790,6 +832,7 @@ impl DecaySweepRunner {
         global_decay_multiplier: f64,
         as_of_millis: Option<i64>,
         work: &WorkTicket,
+        original_contract_version: u32,
     ) -> SweepResult {
         let start = Instant::now();
         let now_millis = as_of_millis
@@ -810,6 +853,7 @@ impl DecaySweepRunner {
             global_decay_multiplier,
             &mut result,
             work,
+            original_contract_version,
         )
         .await;
 
@@ -826,6 +870,7 @@ impl DecaySweepRunner {
             global_decay_multiplier,
             &mut result,
             work,
+            original_contract_version,
         )
         .await;
 
@@ -842,6 +887,7 @@ impl DecaySweepRunner {
             global_decay_multiplier,
             &mut result,
             work,
+            original_contract_version,
         )
         .await;
 
@@ -939,6 +985,7 @@ impl DecaySweepRunner {
         global_decay_multiplier: f64,
         result: &mut SweepResult,
         work: &WorkTicket,
+        original_contract_version: u32,
     ) {
         // Get all memory IDs in this phase from the PhaseIndex.
         let memory_ids = Self::load_phase_ids(phase, storage).await;
@@ -1034,6 +1081,7 @@ impl DecaySweepRunner {
                         graph,
                         result,
                         Some(work),
+                        original_contract_version,
                     )
                     .await;
                 }
@@ -1047,6 +1095,7 @@ impl DecaySweepRunner {
                         cache,
                         result,
                         work,
+                        original_contract_version,
                     )
                     .await;
                     pending_transitions.clear();
@@ -1058,8 +1107,16 @@ impl DecaySweepRunner {
 
         // Flush remaining transitions.
         if !pending_transitions.is_empty() {
-            Self::flush_transitions(&pending_transitions, storage, graph, cache, result, work)
-                .await;
+            Self::flush_transitions(
+                &pending_transitions,
+                storage,
+                graph,
+                cache,
+                result,
+                work,
+                original_contract_version,
+            )
+            .await;
         }
     }
 
@@ -1321,7 +1378,7 @@ impl DecaySweepRunner {
         result: &mut SweepResult,
     ) {
         Self::update_record_state_with_work(
-            memory_id, phase, evaluation, meta, storage, graph, result, None,
+            memory_id, phase, evaluation, meta, storage, graph, result, None, 1,
         )
         .await
     }
@@ -1335,6 +1392,7 @@ impl DecaySweepRunner {
         graph: &SharedGraph,
         result: &mut SweepResult,
         parent: Option<&WorkTicket>,
+        original_contract_version: u32,
     ) {
         let work = match accept_work(storage, parent) {
             Ok(work) => work,
@@ -1373,7 +1431,12 @@ impl DecaySweepRunner {
                 let effective_r = projection.decay_strength;
                 let outcome = storage
                     .apply_legacy_decay_with_work(
-                        &crate::storage::control::MutationContext::unkeyed(expected.namespace.id),
+                        &crate::storage::control::MutationContext {
+                            contract_version: original_contract_version,
+                            ..crate::storage::control::MutationContext::unkeyed(
+                                expected.namespace.id,
+                            )
+                        },
                         memory_id,
                         &current,
                         &expected.namespace,
@@ -1450,10 +1513,17 @@ impl DecaySweepRunner {
         cache: &Arc<CacheManager>,
         result: &mut SweepResult,
         work: &WorkTicket,
+        original_contract_version: u32,
     ) {
         for t in transitions {
-            let outcome =
-                Self::apply_transition_with_work(t.clone(), storage, graph, Some(work)).await;
+            let outcome = Self::apply_transition_with_work(
+                t.clone(),
+                storage,
+                graph,
+                Some(work),
+                original_contract_version,
+            )
+            .await;
             // Even a partial storage failure may have changed the canonical phase.
             cache.invalidate(t.memory_id).await;
             match outcome {
@@ -1493,7 +1563,7 @@ impl DecaySweepRunner {
         storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
         graph: &SharedGraph,
     ) -> Result<Option<PhaseTransition>, SweepError> {
-        Self::apply_transition_with_work(t, storage, graph, None).await
+        Self::apply_transition_with_work(t, storage, graph, None, 1).await
     }
 
     async fn apply_transition_with_work(
@@ -1501,6 +1571,7 @@ impl DecaySweepRunner {
         storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
         graph: &SharedGraph,
         parent: Option<&WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Option<PhaseTransition>, SweepError> {
         let work = accept_work(storage, parent).map_err(SweepError::Mutation)?;
         let worker = work
@@ -1584,10 +1655,11 @@ impl DecaySweepRunner {
                             })
                             .collect::<Result<Vec<_>, SweepError>>()?;
                         let Some(_) = storage
-                            .delete_memory_with_edges_with_work(
+                            .delete_memory_with_edges_with_origin_work(
                                 t.memory_id,
                                 &bridges,
                                 Some(&worker),
+                                original_contract_version,
                             )
                             .map_err(map_error)?
                         else {
@@ -1610,7 +1682,12 @@ impl DecaySweepRunner {
                 }
                 let outcome = storage
                     .apply_legacy_decay_with_work(
-                        &crate::storage::control::MutationContext::unkeyed(t.expected.namespace.id),
+                        &crate::storage::control::MutationContext {
+                            contract_version: original_contract_version,
+                            ..crate::storage::control::MutationContext::unkeyed(
+                                t.expected.namespace.id,
+                            )
+                        },
                         t.memory_id,
                         &current,
                         &t.expected.namespace,
@@ -2010,6 +2087,7 @@ mod independent_review_regressions {
             &f.cache,
             &mut result,
             &work,
+            1,
         )
         .await;
         finish_work(&f.storage, work);
