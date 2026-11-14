@@ -77,7 +77,7 @@ fn step_fields(
         _ => None,
     }
 }
-fn start_matches(p: &PurgeProgress) -> bool {
+pub(super) fn start_matches(p: &PurgeProgress) -> bool {
     match &p.start_receipt.outcome {
         MutationOutcome::NamespacePurgeStarted {
             namespace_id,
@@ -94,6 +94,67 @@ fn start_matches(p: &PurgeProgress) -> bool {
         }
         _ => false,
     }
+}
+
+/// Current completed native row on an owner whose startup history proof passed.
+/// Point-check its two receipt anchors; never rescan lifetime history here.
+/// Startup proved ancestry/count chains and participating writers preserve them.
+pub(super) fn check_completed_native_progress(
+    read: &redb::ReadTransaction,
+    p: &PurgeProgress,
+) -> Result<(), StorageError> {
+    let MutationOutcome::NativeNamespacePurgeStarted { transition: start } =
+        &p.start_receipt.outcome
+    else {
+        return Err(invalid("current native purge start kind"));
+    };
+    let MutationOutcome::NativeNamespacePurgeAdvanced { transition: last } =
+        &p.last_receipt.outcome
+    else {
+        return Err(invalid("current native purge final kind"));
+    };
+    if p.version != 2
+        || p.stage != PurgeStage::Complete
+        || p.next_operation_id.is_some()
+        || p.namespace_id.is_unset()
+        || !start_matches(p)
+        || last.namespace_id != p.namespace_id
+        || last.parent_operation_id != p.start_receipt.operation_id
+        || last.stage != p.stage
+        || last.sequence != p.sequence
+        || p.last_receipt.committed_generation <= p.start_receipt.committed_generation
+        || p.tombstones_removed > p.removed
+        || (p.removed == 0) != p.cursor.is_none()
+        || p.cursor.is_some_and(|id| id == MemoryId::nil())
+    {
+        return Err(invalid("current native purge row/proof mismatch"));
+    }
+    start.validate(&p.start_receipt)?;
+    last.validate(&p.last_receipt)?;
+    let receipts = read.open_table(control::RECEIPTS)?;
+    for receipt in [&p.start_receipt, &p.last_receipt] {
+        if receipt.store_id != p.store_id
+            || receipt.operation_id.is_nil()
+            || receipt.receipt_version != 1
+            || receipt.replayed
+        {
+            return Err(invalid("current native purge receipt identity"));
+        }
+        // A completed restored row is anchored in its original lineage, never
+        // rewritten or looked up under the new current store ID.
+        let key = control::scoped_key(
+            p.store_id,
+            MutationScope::Namespace(p.namespace_id),
+            receipt.operation_id.as_bytes(),
+        );
+        let stored = receipts
+            .get(key.as_slice())?
+            .ok_or_else(|| invalid("current native purge receipt missing"))?;
+        if control::validate_receipt(stored.value())?.receipt != *receipt {
+            return Err(invalid("current native purge receipt differs"));
+        }
+    }
+    Ok(())
 }
 
 /// Pure validation, also called before any writable source open. Unknown tables

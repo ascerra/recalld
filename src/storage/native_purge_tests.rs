@@ -290,7 +290,37 @@ async fn native_purge_complete_export_import_backup_fork_preserves_witness() {
     .unwrap();
     let s = open(&imported);
     assert_ne!(s.engine.control_state().unwrap().store_id, receipt.store_id);
-    drop(s);
+    // The actual four-view barrier must accept completed validated ancestry
+    // using original receipt keys, not the new fork's store ID.
+    let fx = crate::test_support::Fixture::from_open_engine(root, s.engine);
+    let publisher = crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    };
+    publisher.rebuild_all().await.unwrap();
+    let target = fx
+        .storage
+        .read()
+        .unwrap()
+        .control_state()
+        .unwrap()
+        .generation_ref();
+    assert!(
+        publisher
+            .readiness_barrier(
+                target,
+                std::time::Instant::now() + std::time::Duration::from_secs(5)
+            )
+            .await
+            .unwrap()
+            .ready
+    );
+    drop(publisher);
+    let _root = fx.close();
     let (_copy, db) = validation::inspect_database(&imported.join("meta.db")).unwrap();
     let read = db.begin_read().unwrap();
     let state = control::validate_existing(&read).unwrap();
