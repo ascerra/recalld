@@ -1,0 +1,15 @@
+{
+  "left": "/tmp/recalld-reset-supervisor-3ff4e313-g7e6wsm8/output/episode-0/evaluator/original/suffix.json",
+  "right": "/tmp/recalld-reset-supervisor-3ff4e313-g7e6wsm8/output/canaries/changed-label-episode/evaluator/original/suffix.json",
+  "leftSha256": "77332ed7243b226f9cccac21e9ea33b9602e9051aec49bb94843e5b1b5c362b2",
+  "rightSha256": "420fb6e74598c12dac401cdebf3f5f7e23c0f01f0a197679c3571517aaee83ec",
+  "exactEqual": false,
+  "differences": [
+    {
+      "path": "/logicalHash",
+      "before": "6b0d8dad3a265787af45b55ad74b1ad11c4cf73e626fa892cea2d0f652d2cb7b",
+      "after": "5ad97378fe0847265cd669c06180920d8857232f5880c2fc575b04fe0a8747d5"
+    }
+  ],
+  "comparison": "Diagnostic only; original raw values and failing equality remain unchanged."
+}

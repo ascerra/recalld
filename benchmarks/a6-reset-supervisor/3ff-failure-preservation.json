@@ -1,0 +1,13 @@
+{
+  "status": "preserved-failure",
+  "manifestSha256": "bfd78b72a63481f66200ee9fbcb4cecaf90edb265e45684449bb5fd454134652",
+  "failureLogSha256": "ee3e37d9abb21366ffb9f4980134fd15080516933111139a7b72563a0c84e6e5",
+  "sourceBeforeSha256": "0c349387cb680f33b6c237c96dfff4a7349f54c7c1c8c3fa66ff3bf6b7963a80",
+  "sourceAfterSha256": "f7de8ac612f7b3d7a3b974efc69d659d0a1c83b266b68671df2a66897af4b434",
+  "binaryHashesAfter": {
+    "/tmp/recalld-reset-supervisor-3ff4e313-g7e6wsm8/target/debug/examples/owned_evaluator": "bfb11cf17fd037a002048ffd255a815c63eab9077fa986b964f5a3af6d3ad401",
+    "/tmp/recalld-reset-supervisor-3ff4e313-g7e6wsm8/target/debug/examples/score_mcp_episode": "bca9a2c3f210dd8bf06d7628453b8fc0f09ebe51729065d3b84463e997d92f75"
+  },
+  "matchedExecutedPreHashes": true,
+  "scope": "Post-run read-only verification; original failed logs/manifest unchanged. Each actual episode passed3 restores; cross-independent-run checker failed private logicalHash equality."
+}
