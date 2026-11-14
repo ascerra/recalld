@@ -23,7 +23,9 @@ CAS. It does not fabricate a descriptor to make old replay fit a new API.
 
 Only a fresh supplied-vector request reads the live canonical namespace binding.
 `NamespaceConfig::decode` and schema/binding validation check the descriptor,
-dimension and descriptor-derived profile ID. The requested ID must match;
+dimension and descriptor-derived profile ID. A well-formed but different ID returns typed `StorageError::EmbeddingProfileMismatch`
+for the wire owner to map to `EMBEDDING_PROFILE_MISMATCH`/409. Malformed IDs and
+invalid vector shapes remain invalid input. The requested ID must match;
 `UnknownLegacy` cannot become Known from width, configured provider or caller
 assertion. The validated canonical descriptor is then supplied to the existing
 private insertion pipeline, which rechecks the binding and all other final

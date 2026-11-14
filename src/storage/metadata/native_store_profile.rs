@@ -56,6 +56,16 @@ impl MetadataStore {
         }
         let mut resolved = input.clone();
         if let Some(requested) = supplied_profile_id {
+            if requested.len() != 68
+                || !requested.starts_with("ep1:")
+                || !requested.as_bytes()[4..]
+                    .iter()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+            {
+                return Err(StorageError::InvalidMutation(
+                    "malformed supplied profile ID".into(),
+                ));
+            }
             let table = tx.open_table(NAMESPACE_TABLE)?;
             let row = table
                 .get(namespace_id.get())?
@@ -80,9 +90,7 @@ impl MetadataStore {
                 ));
             };
             if requested != profile_id {
-                return Err(StorageError::InvalidMutation(
-                    "supplied profile ID differs from canonical namespace binding".into(),
-                ));
+                return Err(StorageError::EmbeddingProfileMismatch);
             }
             // Validation above checks dimension and descriptor-derived ID. The
             // actual insert rechecks the binding under its final write guard.

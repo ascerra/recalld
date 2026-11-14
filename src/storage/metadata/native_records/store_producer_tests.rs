@@ -1110,17 +1110,26 @@ async fn native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mut
             5 => input.insert.memory.embedding = Some(vec![0.; 4]),
             _ => input.insert.memory.embedding = Some(vec![1.; 3]),
         }
-        assert!(matches!(
-            a.store_native_single_by_profile_id(
+        let error = a
+            .store_native_single_by_profile_id(
                 single_context(&f, &d, "bad-profile"),
                 input,
                 selector,
                 NativePolicyInputs::default(),
-                None
+                None,
             )
-            .await,
-            Err(StorageError::InvalidMutation(_))
-        ));
+            .await
+            .err()
+            .unwrap();
+        if case == 3 {
+            assert!(matches!(error, StorageError::EmbeddingProfileMismatch));
+            assert_eq!(error.to_string(), "EMBEDDING_PROFILE_MISMATCH");
+        } else {
+            assert!(
+                matches!(error, StorageError::InvalidMutation(_)),
+                "{error:?}"
+            );
+        }
         assert_eq!(state, f.storage.read().unwrap().control_state().unwrap());
         assert_eq!(receipt_rows(&f), rows);
         assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 1);
@@ -1198,7 +1207,7 @@ async fn native_single_profile_id_replays_genuine_before_fixture_bytes() {
     assert_eq!(
         receipt_rows(&f),
         rows,
-        "old receipt/key bytes must not be rewritten"
+        "old receipt bytes must not be rewritten"
     );
     assert_eq!(state, f.storage.read().unwrap().control_state().unwrap());
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
