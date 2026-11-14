@@ -67,22 +67,29 @@ impl DerivedCompletion {
             let storage = storage.read().map_err(|e| failed(e.to_string()))?;
             let metadata = storage.meta_store();
             let frozen = metadata.freeze_current_metadata(admission)?;
-            let state = metadata.frozen_publication_state(&frozen)?;
-            if target.is_some_and(|target| {
-                state.canonical.store_id != target.store_id
-                    || state.canonical.generation < target.generation
-            }) {
-                return Err(failed(
-                    "barrier target is not committed in this lineage".into(),
-                ));
-            }
-            let ready = state.ready_report()?;
-            let result = capture(&storage, &frozen, ready)?;
-            // Never return a successful staged capture after its deadline.
-            // Capture callbacks stage data only; manifest publication belongs
-            // after this checked result, not inside a potentially blocking copy.
-            metadata.frozen_publication_state(&frozen)?.ready_report()?;
-            Ok(result)
+            let result = (|| {
+                let state = metadata.frozen_publication_state(&frozen)?;
+                if target.is_some_and(|target| {
+                    state.canonical.store_id != target.store_id
+                        || state.canonical.generation < target.generation
+                }) {
+                    return Err(failed(
+                        "barrier target is not committed in this lineage".into(),
+                    ));
+                }
+                let ready = state.ready_report()?;
+                let result = capture(&storage, &frozen, ready)?;
+                // Never return a successful staged capture after its deadline.
+                // Capture callbacks stage data only; manifest publication belongs
+                // after this checked result, not inside a potentially blocking copy.
+                metadata.frozen_publication_state(&frozen)?.ready_report()?;
+                Ok(result)
+            })();
+            let admission = frozen.release_publication();
+            drop(storage);
+            drop(_leases);
+            drop(admission);
+            result
         })
         .await
         .map_err(|e| failed(e.to_string()))?

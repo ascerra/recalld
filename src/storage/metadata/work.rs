@@ -54,6 +54,17 @@ impl MetadataFreeze<'_> {
     pub fn generation(&self) -> GenerationRef {
         self.generation
     }
+
+    /// The whole-core coordinator drops outer leases before reopening roots.
+    pub(crate) fn release_publication(self) -> WorkFreeze {
+        let Self {
+            _publication,
+            _admission,
+            ..
+        } = self;
+        drop(_publication);
+        _admission
+    }
 }
 
 impl MetadataStore {
