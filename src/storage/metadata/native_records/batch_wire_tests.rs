@@ -220,6 +220,107 @@ async fn native_single_wire_fresh_budget_scope_and_profile_fail_before_provider_
 }
 
 #[tokio::test]
+async fn native_single_and_batch_rpc_require_full_frame_before_any_work() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let session = open(&d, clock.clone());
+    let store_id = session.metadata().control_state().unwrap().store_id;
+    let f = Fixture::from_open_engine(root, session.engine);
+    let provider = Arc::new(RecoveringProvider {
+        profile: d.profile.clone(),
+        unavailable: false.into(),
+        calls: AtomicUsize::new(0),
+        profiles: AtomicUsize::new(0),
+        corrupt: Default::default(),
+    });
+    let a = Arc::new(adapter(
+        &f,
+        provider.clone(),
+        clock.clone(),
+        Default::default(),
+    ));
+    let single = crate::serialization::native_single::Request::parse(
+        &json!({"summary":"admission single","namespaceId":d.ns,"storeId":store_id,"idempotencyKey":"frame-single"}),
+        true, None, "native",
+    ).unwrap();
+    let mut batch = request(&d, store_id);
+    batch.items = vec![json!({"summary":"admission batch","namespace":"native"})];
+    let requests = [
+        (
+            "store_native_single_observed_v1",
+            serde_json::to_value(single).unwrap(),
+        ),
+        (
+            "mutate_native_batch_observed_v1",
+            serde_json::to_value(batch).unwrap(),
+        ),
+    ];
+    let before = readers::bytes(&d.path);
+    let generation = f
+        .storage
+        .read()
+        .unwrap()
+        .control_state()
+        .unwrap()
+        .generation_ref();
+    for limit in [
+        None,
+        Some(crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE),
+        Some(crate::daemon::protocol::MAX_MESSAGE_SIZE / 2),
+    ] {
+        for (method, params) in &requests {
+            let response = crate::daemon::server::native_method_test_rpc_with_limit(
+                a.clone(),
+                params.clone(),
+                method,
+                limit,
+            )
+            .await;
+            let error = response
+                .error
+                .expect("undersized peer must be rejected before dispatch");
+            assert_eq!(error.code, crate::daemon::protocol::ERR_INVALID_INPUT);
+            assert!(error.message.contains("before execution"));
+            assert!(response.result.is_none());
+        }
+    }
+    assert!(
+        readers::bytes(&d.path) == before,
+        "frame admission mutated canonical files"
+    );
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref(),
+        generation
+    );
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    // Identical, valid requests execute once negotiation proves the peer can
+    // receive the complete receipt; there is no retry through a legacy alias.
+    for (method, params) in requests {
+        let response =
+            crate::daemon::server::native_method_test_rpc(a.clone(), params, method).await;
+        assert!(response.error.is_none(), "{response:?}");
+        if method == "store_native_single_observed_v1" {
+            let reply: crate::serialization::native_single::Reply =
+                serde_json::from_value(response.result.unwrap()).unwrap();
+            assert!(reply.error.is_none());
+            assert!(reply.receipt.is_some());
+        } else {
+            let reply: NativeBatchReply = serde_json::from_value(response.result.unwrap()).unwrap();
+            assert!(reply.result().is_ok());
+        }
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
 async fn native_single_wire_retired_namespace_id_replays_original_binding_after_recreation() {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());

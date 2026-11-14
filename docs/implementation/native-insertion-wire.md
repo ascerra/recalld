@@ -99,7 +99,10 @@ The response uses the existing single-memory fields inside the explicit2
 envelope. MCP emits compact typed JSON plus equal structured content; REST keeps
 typed JSON, and the dedicated non-retrying daemon method is
 `store_native_single_observed_v1`. A missing method or lost reply never falls
-back to a legacy write. Prepared adapters are exercised directly on owned native
+back to a legacy write. The two new observed-write daemon aliases require
+daemon transport negotiation proving the peer accepts the full8MiB frame before any
+mutation dispatch. Unannounced,1MiB and4MiB peers are rejected before work;
+existing legacy methods keep their original admission. Prepared adapters are exercised directly on owned native
 fixtures while the public contract2 gate remains closed. Default API1 routing,
 payload shapes, and pretty formatting remain unchanged in this slice.
 
@@ -157,9 +160,13 @@ not all valid histories.
 A separate synthetic typed serializer stress test measured 4,110,022 receipt
 bytes and 8,483,341 MCP bytes. Repeated IDs and invented maximum hash commitments
 make it invalid as canonical native state. It is not a reachability proof and
-does not authorize a new historical oversize receipt-reference shape. Fresh
-worst-case admission, actual bounded serialization, and final transport tests
-remain part of this consumer's unfinished work.
+does not authorize a new historical oversize receipt-reference shape. Fresh admission now uses conservative typed full-receipt bounds. The genuine
+BEFORE replay through the prepared single consumer measured3,220,501 receipt
+bytes (replayed=true),3,221,543 HTTP bytes,6,650,384 MCP framed bytes and3,221,546
+daemon framed bytes; the counting serializer's conservative bound was6,715,808.
+Those complete replies fit a negotiated8MiB frame. This remains fixture evidence,
+not proof that every valid historical receipt fits; no receipt-reference shape
+or changed historical request hash is introduced.
 
 ## Profile-ID batch preparation
 

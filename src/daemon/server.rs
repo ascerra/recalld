@@ -205,10 +205,22 @@ async fn handle_connection(
                             peer_limit = peer_frame_limit(&request.params);
                         }
 
-                        let response = dispatch(
-                            &*search, &*storage, &*namespaces, &*health,
-                            &request.method, request.params,
-                        ).await;
+                        // These aliases carry complete canonical receipts. Reject
+                        // an undersized peer BEFORE admitting any mutation; a
+                        // post-commit framing error cannot replace that evidence.
+                        let response = if matches!(method.as_str(),
+                            "store_native_single_observed_v1" | "mutate_native_batch_observed_v1")
+                            && peer_limit < MAX_MESSAGE_SIZE
+                        {
+                            Err(BridgeError::InvalidInput(
+                                format!("native observed writes require ping negotiation with protocolVersion {PROTOCOL_VERSION} and maxMessageSize {MAX_MESSAGE_SIZE} before execution"),
+                            ))
+                        } else {
+                            dispatch(
+                                &*search, &*storage, &*namespaces, &*health,
+                                &request.method, request.params,
+                            ).await
+                        };
 
                         let resp = match response {
                             Ok(result) => DaemonResponse::success(request.id, result),
@@ -1348,6 +1360,15 @@ pub(crate) async fn native_method_test_rpc(
     params: serde_json::Value,
     method: &str,
 ) -> DaemonResponse {
+    native_method_test_rpc_with_limit(storage, params, method, Some(MAX_MESSAGE_SIZE)).await
+}
+#[cfg(test)]
+pub(crate) async fn native_method_test_rpc_with_limit(
+    storage: Arc<dyn BridgeStorageEngine>,
+    params: serde_json::Value,
+    method: &str,
+    negotiated_limit: Option<usize>,
+) -> DaemonResponse {
     let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
     let stub = Arc::new(crate::test_support::StubBridge::default());
     let (tx, rx) = watch::channel(false);
@@ -1364,26 +1385,28 @@ pub(crate) async fn native_method_test_rpc(
     ));
     // Match the real client's handshake before testing a large native reply.
     // An unannounced peer is correctly limited to the legacy 1 MiB frame.
-    write_framed_request(
-        &mut client,
-        &DaemonRequest {
-            jsonrpc: "2.0".into(),
-            id: 0,
-            method: "ping".into(),
-            params: serde_json::json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "maxMessageSize": MAX_MESSAGE_SIZE,
-            }),
-        },
-        LEGACY_MAX_MESSAGE_SIZE,
-    )
-    .await
-    .unwrap();
-    let hello = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+    if let Some(limit) = negotiated_limit {
+        write_framed_request(
+            &mut client,
+            &DaemonRequest {
+                jsonrpc: "2.0".into(),
+                id: 0,
+                method: "ping".into(),
+                params: serde_json::json!({
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "maxMessageSize": limit,
+                }),
+            },
+            LEGACY_MAX_MESSAGE_SIZE,
+        )
         .await
         .unwrap();
-    assert!(hello.error.is_none());
-    assert_eq!(hello.result.unwrap()["maxMessageSize"], MAX_MESSAGE_SIZE);
+        let hello = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert!(hello.error.is_none());
+        assert_eq!(hello.result.unwrap()["maxMessageSize"], MAX_MESSAGE_SIZE);
+    }
     write_framed_request(
         &mut client,
         &DaemonRequest {
