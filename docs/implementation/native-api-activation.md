@@ -57,3 +57,36 @@ opening public2, the final actual composition needs positive public MCP/REST/RPC
 conformance, default-API1 native calls, readAccess true/false, same-key replay and
 unknown/partial failures, full schema validation and capabilities matching real
 callers. No single component's passing suite establishes that combined result.
+
+## Post-cleanup ownership and validation checkpoint
+
+The current single/profile-ID batch composition is frozen for validation at
+`d12a9a3`, with actual parents PR122, PR123, readiness-observation `cc865c2`,
+and published PR121 `3fa91d4`. It is not yet a validated startup prerequisite.
+The single consumer preserves retained namespace identity and full known
+receipts; the batch consumer requires the actual current-generation publication
+barrier after completing its root, rather than trusting per-item booleans.
+
+Curie owns the next linked-insertion and compound original-API context child,
+including a typed caller-vector validation error so HTTP422 does not depend on
+parsing storage error strings. Provider-output failures remain unavailable;
+corrupt persisted-vector ownership is not caller-invalid input. Huygens owns
+public routing, response projection, strict schemas and the final activation
+matrix. The narrow plain-record API1 proof does not establish linked-insertion
+or compound API1 support.
+
+Pascal owns bounded legacy-disk API2 feedback, exposure and forget consumers,
+including necessary private plumbing and the legacy tombstone admission proof.
+Feynman owns purge/catalog original-context and startup closure. These are
+independent of native-disk API1 compatibility: neither proof substitutes for the
+other, and no blanket guard widening is authorized. Legacy receipt-backed
+lifecycle data must retain only fields actually present in those outcomes; it
+must not invent native strength, phase-history or policy revision.
+
+Hume's frozen PR133 `27a6cd4` supplies actual A2 V2 selection. Its final response
+coverage includes post-supplemental graph and supersession counters and omission
+diagnostics, not only the earlier pipeline counters. The separately documented
+V1 similarity correction filters canonical eligibility before candidate caps;
+it preserves legacy ranking/history and default scope while honoring explicit
+`sameNamespace:false` only across provably compatible profiles. Neither that
+work nor this insertion consumer opens public2 independently.

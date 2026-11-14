@@ -293,6 +293,54 @@ async fn native_single_wire_retired_namespace_id_replays_original_binding_after_
         transition.namespace_id
     };
     assert_ne!(new_id, d.ns);
+    // The setup deliberately uses core purge/catalog methods, which do not
+    // publish derived views. Complete that setup before requiring byte-stable
+    // replay; replay is otherwise allowed to finish its pending publication.
+    let generation = f
+        .storage
+        .read()
+        .unwrap()
+        .control_state()
+        .unwrap()
+        .generation_ref();
+    assert!(
+        !f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    crate::derived_completion::DerivedCompletion {
+        storage: f.storage.clone(),
+        cache: f.cache.clone(),
+        graph: f.graph.clone(),
+        vectors: f.vector_index.clone(),
+        fts: f.fts_index.clone(),
+        entities: f.entity_index.clone(),
+    }
+    .complete()
+    .await
+    .unwrap();
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref(),
+        generation
+    );
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
     let before = readers::bytes(&d.path);
     let ticks = clock.0.load(Ordering::SeqCst);
     let (error, replay) = single_mcp(a.clone(), body.clone()).await;
@@ -301,7 +349,10 @@ async fn native_single_wire_retired_namespace_id_replays_original_binding_after_
     assert_eq!(replay["scope"]["namespace"], "native");
     assert_eq!(replay["receipt"], canonical(&receipt));
     assert_eq!(replay["readiness"]["ready"], true);
-    assert_eq!(readers::bytes(&d.path), before);
+    assert!(
+        readers::bytes(&d.path) == before,
+        "retired replay changed store bytes"
+    );
     assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
@@ -311,7 +362,10 @@ async fn native_single_wire_retired_namespace_id_replays_original_binding_after_
     assert_eq!(status, 409, "{error}");
     assert_eq!(error["error"]["code"], "NAMESPACE_MISMATCH");
     assert_eq!(error["receipt"], canonical(&receipt));
-    assert_eq!(readers::bytes(&d.path), before);
+    assert!(
+        readers::bytes(&d.path) == before,
+        "retired replay changed store bytes"
+    );
 }
 
 #[tokio::test]

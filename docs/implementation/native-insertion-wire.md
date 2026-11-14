@@ -5,7 +5,7 @@ PR123 `d7c4d5f` (including PR118/96), and readiness observation `cc865c2`
 (runtime `f8765b2`, direct PR96). Local joins are development compositions,
 not inherited validation. Public application contract 2 remains closed.
 
-The next single-write consumer additionally requires published PR121
+The prepared single-write consumer includes published PR121
 `3fa91d4e542ec8ed5519fe4c3b87e9e665043a40` for
 `MetadataStore::capture_namespace_binding`: canonical namespace identity remains
 available from retained purge evidence after namespace removal. This is identity
@@ -16,7 +16,8 @@ must preserve an already known full receipt.
 An ancestry check of PR122 `abd0371`, PR123 `d7c4d5f`, observer `cc865c2`, and
 PR121 `3fa91d4` found no candidate head contained in another. Their shared PR96
 and other ancestors need no additional merge. PR121 is joined directly into
-this development composition, pending validation. Curie's `e2b4f94` validation branch (join
+this development composition. Frozen source `d12a9a3` is under validation; its
+results must be read separately from earlier focused passes. Curie's `e2b4f94` validation branch (join
 `866482da`, reported 1,152 library and two CLI tests) is resolution/reference
 evidence only; it is not a shipping parent or validation of this consumer.
 The quiet window ended before this join. Its conflict resolutions reuse the
@@ -75,6 +76,47 @@ MCP neighbors are distinct consumer paths, with returned UUID deduplication and
 namespace grouping verified at their respective boundaries. This is an explicit
 activation prerequisite, not coverage implemented by this insertion consumer.
 It does not change the compact full-receipt design or any sealed write evidence.
+
+## Prepared single-write transport
+
+The strict request accepts an immutable `namespaceId`, optional namespace-name
+assertion, shared store/key/CAS selectors, and an `embeddingProfileId` paired with
+a supplied vector. Original vector bits remain part of retry identity; a copy is
+normalized only for validation. HTTP retains its existing `createdAt` integer
+millisecond and positive `initialStability` controls. MCP does not silently accept
+those HTTP-only fields, internal observation times, or public profile descriptors.
+
+The actual owned adapter resolves matching retained history before current
+namespace policy, generation CAS, graph settings, provider identity or clock.
+Published PR121 supplies the live or retired namespace binding; recreating the
+same name cannot redirect an ID-scoped replay. Fresh admission conservatively
+bounds the full typed receipt from the frozen graph settings and actual native
+edge cap before provider work or allocation. It does not lower link settings or
+change request hashes to fit a response. Retained replay ignores changed fresh
+settings and returns the original full receipt.
+
+The response uses the existing single-memory fields inside the explicit2
+envelope. MCP emits compact typed JSON plus equal structured content; REST keeps
+typed JSON, and the dedicated non-retrying daemon method is
+`store_native_single_observed_v1`. A missing method or lost reply never falls
+back to a legacy write. Prepared adapters are exercised directly on owned native
+fixtures while the public contract2 gate remains closed. Default API1 routing,
+payload shapes, and pretty formatting remain unchanged in this slice.
+
+After the known root finishes, success requires the actual owner's current-G
+barrier. Publication failure keeps the full receipt and observes readiness without
+draining unresolved work. Missing private reply identity or data fails closed
+without erasing an in-hand receipt, warnings, or readiness. Unknown outcomes do
+not invent a receipt. Scope/profile conflicts are409, absent namespace404;
+malformed vector shape is400 and semantic norm/length rejection422.
+
+The genuine BEFORE123 replay fixture uses an HTTP-only creation timestamp. Its
+HTTP and daemon paths execute the prepared consumers; its MCP check exercises
+the real full-reply serializer, not a fabricated MCP acceptance of that field.
+A separate ordinary-fields test executes actual MCP dispatch, HTTP and framed
+RPC. Neither fixture proves ordinary native startup or that every valid
+historical receipt fits a transport frame. No receipt-reference exception is
+introduced.
 
 ## Failure readiness clarification
 

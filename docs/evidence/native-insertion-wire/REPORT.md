@@ -97,3 +97,24 @@ removed. All 34 evidence files, including the stopped formatter run, were copied
 and SHA-verified in the referenced work-notes artifact directory. No full suite
 or clippy run on this join is claimed, and this active branch is not READY for
 integration or publication.
+
+## Single-wire validation after disk cleanup
+
+Runtime `d12a9a3` used a new bounded private target, the protected offline Cargo
+cache, and an immutable source snapshot. Formatting passed; focused execution
+finished with20 passed,1 failed,1 explicitly ignored in19.67s. The ignored dense
+historical replay requires its separate read-only BEFORE artifact mount. The
+full suite and that separate replay did not run after the failure.
+
+The new retired-namespace replay returned the original complete receipt and
+ready=true, then failed its strict whole-store byte equality assertion. Only
+`meta.db` differed. Fixture setup had invoked raw core purge and namespace
+creation without the real derived completion owner. The correction will assert
+that setup is unpublished, complete it through the real owner, assert unchanged
+canonical generation and current derived publications, then capture the byte
+baseline. Replay must still preserve all bytes, clock/provider counts and the
+original namespace ID after same-name recreation. No runtime relaxation is made.
+The original failed source, log and executed binary SHA
+`aef40c5b89d4d415179a5df5d0a879c2c1cc3b5b4a325ca4ed5d037877f101a0`
+remain in `run-d12a9a3` under the active validation root until results/publication
+cleanup handoff. Current consumer is not READY from this run.
