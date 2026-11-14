@@ -5,6 +5,7 @@ import runpy
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 runner = runpy.run_path(str(Path(__file__).with_name("offline-evaluation.py")))
 
@@ -121,6 +122,29 @@ class SourceSnapshotTests(unittest.TestCase):
         (self.output / "run-2/control-after.json").write_text('{}\n')
         with self.assertRaisesRegex(RuntimeError, "false query changed control"):
             runner["verify_replays"](self.output, 3)
+
+
+class ManifestInputTests(unittest.TestCase):
+    def test_synthetic_actor_evaluator_separation_and_nonrecursive_hashes(self):
+        args = SimpleNamespace(records=100, dimensions=16, k=5, warmup=1, samples=3, seed=7)
+        # Metadata values here are not executed; full validation is through the compiled consumer.
+        diagnostic = dict.fromkeys(("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
+                                    "lockfileSha256", "containerImageId", "limits"))
+        manifest, actor, evaluator = runner["evaluation_inputs"](args, diagnostic)
+        labels = json.loads(evaluator)
+        self.assertNotIn(labels["labelCanary"].encode(), actor)
+        self.assertEqual(manifest["actorInputs"]["sha256"], runner["hashlib"].sha256(actor).hexdigest())
+        self.assertEqual(manifest["evaluatorLabels"]["sha256"], runner["hashlib"].sha256(evaluator).hexdigest())
+        self.assertEqual(manifest["dataset"]["datasetRevision"], manifest["actorInputs"]["sha256"])
+        self.assertEqual(len(json.loads(actor)["sources"]), 100)
+        self.assertNotIn("manifestSha256", manifest)
+        self.assertFalse(manifest["capabilities"]["reset"])
+        self.assertIsNone(manifest["dataset"]["thirdPartyLicense"])
+
+    def test_bad_plan_rejected_before_any_runner_side_effect(self):
+        args = SimpleNamespace(records=99, dimensions=16, k=5, warmup=1, samples=3, seed=7)
+        with self.assertRaises(ValueError):
+            runner["evaluation_inputs"](args, {})
 
 
 if __name__ == "__main__":
