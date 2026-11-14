@@ -74,6 +74,37 @@ fn score(input: Episode) -> Result<Value> {
             .map(|s| ordinals.get(s).copied().context("unmapped source"))
             .collect()
     };
+    let mut accepted = std::collections::BTreeSet::new();
+    for line in input.source_events.lines() {
+        let event: Value = serde_json::from_str(line)?;
+        let source = event["sourceId"].as_str().context("missing event source")?;
+        ensure!(
+            ordinals.contains_key(&source.to_owned()),
+            "unknown event source"
+        );
+        if event["status"] == "accepted" {
+            accepted.insert((
+                event["memoryId"]
+                    .as_str()
+                    .context("accepted event missing public UUID")?
+                    .to_owned(),
+                source.to_owned(),
+            ));
+        }
+    }
+    let mapped: std::collections::BTreeSet<_> = input
+        .mappings
+        .iter()
+        .flat_map(|(id, sources)| {
+            sources
+                .iter()
+                .map(move |source| (id.clone(), source.clone()))
+        })
+        .collect();
+    ensure!(
+        accepted == mapped,
+        "accepted events and source mappings differ"
+    );
     let mut retained = Vec::new();
     for (memory, sources) in &input.mappings {
         ensure!(
@@ -85,6 +116,16 @@ fn score(input: Episode) -> Result<Value> {
     for labels in input.relevant.values() {
         resolve(labels)?;
     }
+    let query_ids: std::collections::BTreeSet<_> =
+        input.queries.iter().map(|q| q.query_id.as_str()).collect();
+    ensure!(
+        query_ids.len() == input.queries.len()
+            && input
+                .relevant
+                .keys()
+                .all(|q| query_ids.contains(q.as_str())),
+        "duplicate/unknown evaluator query"
+    );
     let mut metrics = Vec::new();
     let mut trace = Vec::new();
     for query in input.queries {
@@ -142,7 +183,7 @@ fn main() -> Result<()> {
             .context("configuration identity unavailable")?;
         println!(
             "{}",
-            json!({"activeEmbedding":{"identity":"configuration","dimension":4,"profileId":profile.profile_id()?},
+            json!({"activeEmbedding":{"identity":"configuration","dimension":4,"profileId":profile.profile_id().map_err(anyhow::Error::msg)?},
                 "sourceCommit":option_env!("RECALLD_A6_SOURCE_COMMIT"),"sourceTreeSha256":option_env!("RECALLD_A6_SOURCE_TREE_SHA256"),
                 "containerImageId":option_env!("RECALLD_A6_IMAGE_ID")})
         );
@@ -159,4 +200,35 @@ fn main() -> Result<()> {
         .open(out)?;
     file.write_all(&serde_json::to_vec_pretty(&result)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn input() -> Episode {
+        let events = ["seen", "attempted", "accepted"].iter().map(|status| json!({"sourceId":"turn-0","status":status,"reason":"synthetic-test","memoryId":"00000000-0000-0000-0000-000000000001"}).to_string()).collect::<Vec<_>>().join("\n");
+        serde_json::from_value(json!({"profile":"synthetic-unique-source-v1","environmentHash":"a".repeat(64),
+            "sourceIds":["turn-0"],"mappings":{"00000000-0000-0000-0000-000000000001":["turn-0"]},
+            "relevant":{"q0":["turn-0"]},"queries":[{"queryId":"q0","memoryIds":["00000000-0000-0000-0000-000000000001"]}],
+            "sourceEvents":events,"sourceEventsSha256":hash(events.as_bytes())})).unwrap()
+    }
+    #[test]
+    fn actual_episode_projection_requires_mapped_public_ids_and_known_queries() {
+        assert_eq!(
+            score(input()).unwrap()["scoring"]["means"]["retrievalRecallAt5"],
+            1.0
+        );
+        let mut unknown = input();
+        unknown.queries[0].memory_ids[0] = "unmapped".into();
+        assert!(score(unknown).is_err());
+        let mut duplicate = input();
+        duplicate.queries.push(Query {
+            query_id: "q0".into(),
+            memory_ids: vec![],
+        });
+        assert!(score(duplicate).is_err());
+        let mut foreign = input();
+        foreign.relevant.insert("foreign".into(), vec![]);
+        assert!(score(foreign).is_err());
+    }
 }

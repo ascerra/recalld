@@ -25,7 +25,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
                     canonicalSchemaAttested=False)
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
-EXTRA = ("scripts/public-mcp-evaluation.py", "scripts/test_public_mcp_evaluation.py",
+EXTRA = ("scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl")
 
 
@@ -56,14 +56,17 @@ def fixtures():
         sources.append(dict(sourceId=f"turn-{i}", groupId="synthetic-regression", conversationId="synthetic-conversation",
                             sessionId="synthetic-session", turnId=f"turn-{i}", role="user", sourceTimestamp=1767225600000,
                             ordinal=i, summary=text, namespace=namespace, contentSha256=digest(text.encode())))
-    actor = dict(adapterVersion=1, sources=sources, queries=[dict(queryId=f"q{i}", text="amber") for i in range(4)])
+    actor = dict(adapterVersion=1, sources=sources)
+    schedule = dict(scheduleVersion=1, queries=[dict(queryId=f"q{i}", text="amber" if i < 3 else "amber FUTURE_QUESTION_CANARY") for i in range(4)],
+                    futureQueryCanary="FUTURE_QUESTION_CANARY")
     labels = dict(adapterVersion=1, annotationUnit="synthetic-unit", relevant={"q0": ["turn-0"], "q1": [], "q3": ["turn-0", "turn-3"]},
                   labelCanary="EVALUATOR_LABEL_CANARY_ONLY")
     cache = dict(model=MODEL, dimension=4, entries={"amber": [1., 0., 0., 0.], "birch": [0., 1., 0., 0.],
                  "olive": [0., 0., 1., 0.], "foreign": [1., 0., 0., 0.], "health check": [0., 0., 0., 1.]})
     cache["entries"] = {"a6-document:" + text: vector for text, vector in cache["entries"].items()}
     cache["entries"]["a6-query:amber"] = [1., 0., 0., 0.]
-    return actor, labels, cache
+    cache["entries"]["a6-query:amber FUTURE_QUESTION_CANARY"] = [1., 0., 0., 0.]
+    return actor, labels, cache, schedule
 
 
 def validate(manifest_path, binary, scorer, source_root):
@@ -72,7 +75,7 @@ def validate(manifest_path, binary, scorer, source_root):
     m = json.loads(raw)
     exact_keys(m, ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
                    "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
-                   "evaluatorLabels", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
+                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
     if m["track"] != TRACK or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
@@ -94,20 +97,20 @@ def validate(manifest_path, binary, scorer, source_root):
     if m["executables"] != {"recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}:
         raise ValueError("executable hash mismatch")
     artifacts = []
-    for key, name in (("actorInputs", "actor-inputs.json"), ("evaluatorLabels", "evaluator-labels.json"), ("replayCache", "actor-cache.json")):
+    for key, name in (("actorInputs", "actor-inputs.json"), ("evaluatorLabels", "evaluator-labels.json"), ("replayCache", "evaluator-cache.json"), ("evaluatorSchedule", "evaluator-schedule.json")):
         exact_keys(m[key], ("file", "sha256"))
         p = manifest_path.parent / name
         if m[key]["file"] != name or not p.is_file() or p.is_symlink() or digest(p.read_bytes()) != m[key]["sha256"]:
             raise ValueError("artifact hash/reference mismatch")
         artifacts.append(json.loads(p.read_text()))
-    actor, labels, cache = artifacts
-    expected_actor, _, expected_cache = fixtures()
-    if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache):
+    actor, labels, cache, schedule = artifacts
+    expected_actor, _, expected_cache, expected_schedule = fixtures()
+    if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
     exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
     if type(labels["adapterVersion"]) is not int or labels["adapterVersion"] != 1 or labels["annotationUnit"] != "synthetic-unit" or not isinstance(labels["labelCanary"], str) or not labels["labelCanary"]:
         raise ValueError("unsupported annotations")
-    if not isinstance(labels["relevant"], dict) or not set(labels["relevant"]) <= {q["queryId"] for q in actor["queries"]}:
+    if not isinstance(labels["relevant"], dict) or not set(labels["relevant"]) <= {q["queryId"] for q in schedule["queries"]}:
         raise ValueError("unknown evaluator query")
     for values in labels["relevant"].values():
         if not isinstance(values, list) or any(v not in {s["sourceId"] for s in actor["sources"]} for v in values) or len(set(values)) != len(values):
@@ -121,19 +124,19 @@ def validate(manifest_path, binary, scorer, source_root):
         raise ValueError("compiled provenance mismatch")
     if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
         raise ValueError("configuration profile mismatch")
-    return m, actor, labels, cache, digest(raw)
+    return m, actor, labels, cache, schedule, digest(raw)
 
 
 def prepare(args):
     args.out.mkdir()
     build = json.loads(args.build.read_text())
-    actor, labels, cache = fixtures()
+    actor, labels, cache, schedule = fixtures()
     m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
              capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
              executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
              activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
-    for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels), ("replayCache", "actor-cache.json", cache)):
+    for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels), ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
         save(args.out / name, value)
         m[key] = dict(file=name, sha256=digest((args.out / name).read_bytes()))
     m["dataset"] = dict(kind="generated-synthetic", upstreamRevision=None, upstreamUrl=None, thirdPartyLicense=None,
@@ -141,69 +144,6 @@ def prepare(args):
     save(args.out / "manifest.json", m)
 
 
-def actor_main(args):
-    projection = json.load(sys.stdin)
-    exact_keys(projection, ("actor", "activeEmbedding"))
-    source = projection["actor"]
-    assert source == fixtures()[0], "actor input projection must be the frozen synthetic fixture"
-    read = os.fdopen(args.read_fd, "rb", buffering=0)
-    write = os.fdopen(args.write_fd, "wb", buffering=0)
-    serial = 0
-    def rpc(method, params, tag, notification=False, expected_error=False):
-        nonlocal serial
-        serial += 1
-        request = dict(jsonrpc="2.0", method=method, params=params)
-        if not notification:
-            request["id"] = serial
-        # Retain the attempt before waiting for a response.
-        print(json.dumps(dict(event="attempt", stepId=str(serial), tag=tag, request=request)), flush=True)
-        write.write(json.dumps(request).encode() + b"\n")
-        response = None
-        if not notification:
-            if not select.select([read], [], [], 20)[0]:
-                raise RuntimeError("MCP timeout; no retry of an unkeyed action")
-            raw = read.readline(4 * 1024 * 1024)
-            response = json.loads(raw)
-            if response.get("id") != serial:
-                raise RuntimeError("mismatched MCP response id")
-        print(json.dumps(dict(event="outcome", stepId=str(serial), tag=tag, request=request, response=response)), flush=True)
-        if expected_error:
-            assert response["error"]["code"] == -32601
-            return None
-        if notification:
-            return None
-        if "error" in response:
-            raise RuntimeError("MCP request rejected")
-        return response["result"]
-    def call(name, arguments, tag, error=False):
-        result = rpc("tools/call", dict(name=name, arguments=arguments), tag)
-        if error:
-            assert result.get("isError") is True
-            return None
-        assert not result.get("isError", False)
-        text = json.loads(result["content"][0]["text"])
-        if "structuredContent" in result:
-            assert result["structuredContent"] == text
-        return text
-    result = rpc("initialize", dict(protocolVersion="2025-06-18", capabilities={}, clientInfo=dict(name=TRACK, version="1")), "initialize")
-    assert result["protocolVersion"] == "2025-06-18"
-    rpc("notifications/initialized", {}, "initialized", notification=True)
-    names = {t["name"] for t in rpc("tools/list", {}, "tools")["tools"]}
-    assert {"store_memory", "recall_memories"} <= names
-    assert not names & {"barrier", "snapshot", "reset", "advance", "inspect", "evaluator/capabilities"}
-    session = rpc("resources/read", dict(uri="recalld://session"), "session")
-    context = json.loads(session["contents"][0]["text"])
-    assert context["supportedContractVersions"] == [1]
-    assert context["backendContext"]["contextVersion"] == 1
-    assert context["backendContext"]["activeEmbedding"] == projection["activeEmbedding"]
-    assert uuid.UUID(context["backendContext"]["storeId"]).int != 0
-    rpc("evaluator/capabilities", {}, "private-control-denied", expected_error=True)
-    call("create_namespace", dict(name="foreign", embeddingDim=4), "namespace")
-    for entry in source["sources"]:
-        call("store_memory", dict(summary=entry["summary"], namespace=entry["namespace"], checkDuplicates=False), "store:" + entry["sourceId"])
-    for query in source["queries"]:
-        call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=1), "query:" + query["queryId"])
-    call("recall_memories", dict(query="unrecorded-query", namespace="default", recordAccess=False, depth=0, limit=1), "replay-miss", error=True)
 
 
 class Replay(http.server.BaseHTTPRequestHandler):
@@ -221,7 +161,7 @@ class Replay(http.server.BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             status, body = 400, dict(error=dict(message="offline replay miss; no fallback"))
         with self.server.log.open("a") as log:
-            log.write(json.dumps(dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])])) + "\n")
+            log.write(json.dumps(dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])])) + "\n")
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -231,20 +171,23 @@ class Replay(http.server.BaseHTTPRequestHandler):
 
 
 def run_episode(args):
-    m, actor, labels, cache, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
+    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
     args.out.mkdir()
     evaluator = args.out / "evaluator"
     evaluator.mkdir()
-    save(args.out / "actor-projection.json", dict(actor=actor, activeEmbedding=m["activeEmbedding"]))
+    ingest_projection = dict(phase="ingest", sources=actor["sources"], activeEmbedding=m["activeEmbedding"], startId=0, deliveryOrdinal=0)
+    save(args.out / "actor-projection.json", ingest_projection)
+    (args.out / "actor-inputs").mkdir()
     # Cache server receives only the actor cache projection, never evaluator labels.
     stub = http.server.HTTPServer(("127.0.0.1", 0), Replay)
-    stub.log, stub.environment = args.out / "actor-provider.jsonl", environment
+    stub.log, stub.environment, stub.delivery = args.out / "actor-provider.jsonl", environment, 0
     stub.key = lambda text: digest(encoded(dict(environmentHash=environment, model=MODEL, dimension=4, prefixedInput=text)))
-    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items()}
+    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:")}
     threading.Thread(target=stub.serve_forever, daemon=True).start()
     result = dict(status="running", environmentHash=environment, capabilities=CAPABILITIES)
     process = None
     runtime_failure = None
+    guard_read, guard_write = os.pipe()
     try:
         with tempfile.TemporaryDirectory(prefix="a6-public-runtime-") as temporary:
             root = Path(temporary)
@@ -278,17 +221,49 @@ warm_file_enabled = false
             with (args.out / "runtime.log").open("wb") as runtime_log, (args.out / "actor-wire.jsonl").open("wb") as wire, (args.out / "actor.log").open("wb") as actor_log:
                 process = subprocess.Popen([str(args.binary), "--config", str(root / "config.toml"), "--data-dir", str(root / "data"), "mcp"],
                                            cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=runtime_log, bufsize=0)
-                child = subprocess.run([sys.executable, str(Path(__file__).resolve()), "actor", "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno())],
-                    input=(args.out / "actor-projection.json").read_bytes(), stdout=wire, stderr=actor_log,
-                    env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC"),
-                    pass_fds=(process.stdin.fileno(), process.stdout.fileno()), timeout=90)
+                actor_path = root / "actor.py"
+                shutil.copyfile(Path(__file__).with_name("public-mcp-actor.py"), actor_path)
+                shutil.copyfile(actor_path, args.out / "actor-code.py")
+                result["actorCodeSha256"] = digest(actor_path.read_bytes())
+                assert digest(actor_path.read_bytes()) == m["sourceFilesSha256"]["scripts/public-mcp-actor.py"]
+                start_id = 0
+                # The supervisor owns this schedule. Each actor process sees only its current question.
+                for ordinal in range(len(schedule["queries"]) + 2):
+                    stub.delivery = ordinal
+                    if ordinal == 0:
+                        projection = ingest_projection
+                    else:
+                        miss = ordinal == len(schedule["queries"]) + 1
+                        question = dict(queryId="replay-miss", text="unrecorded-query") if miss else schedule["queries"][ordinal - 1]
+                        if not miss:
+                            text = "a6-query:" + question["text"]
+                            # Load only the current frozen cache entry, never generate on a miss.
+                            stub.entries[stub.key(text)] = cache["entries"][text]
+                        projection = dict(phase="query", startId=start_id, deliveryOrdinal=ordinal,
+                                          currentQuestion=question, expectedMiss=miss)
+                    save(args.out / "actor-inputs" / f"step-{ordinal}.json", projection)
+                    child = subprocess.run([sys.executable, str(actor_path), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read)],
+                        input=encoded(projection), stdout=wire, stderr=actor_log, cwd=root,
+                        env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC"),
+                        pass_fds=(process.stdin.fileno(), process.stdout.fileno()), timeout=90)
+                    wire.flush()
+                    delivered = rows(args.out / "actor-wire.jsonl")
+                    acknowledgments = [r for r in delivered if r["event"] == "outcome"]
+                    if child.returncode != 0:
+                        runtime_failure = f"actor exited {child.returncode} at delivery {ordinal}"
+                        break
+                    assert acknowledgments and int(acknowledgments[-1]["stepId"]) > start_id
+                    start_id = int(acknowledgments[-1]["stepId"])
+                    with (evaluator / "schedule-ledger.jsonl").open("a") as log:
+                        log.write(json.dumps(dict(deliveryOrdinal=ordinal, acknowledgedThroughStepId=str(start_id))) + "\n")
                 process.stdin.close()
                 process.wait(timeout=20)
-                if child.returncode != 0 or process.returncode != 0:
+                if runtime_failure is None and process.returncode != 0:
                     runtime_failure = f"actor/runtime exited {child.returncode}/{process.returncode}"
             if "falling back to direct mode" not in (args.out / "runtime.log").read_text():
                 raise RuntimeError("isolated direct fallback not observed")
         wire = rows(args.out / "actor-wire.jsonl")
+        assert wire[0] == dict(event="isolation", tag="private-fd-closed", stepId="0", deliveryOrdinal=0, fdClosed=True)
         outcomes = [r for r in wire if r["event"] == "outcome"]
         mappings, events, queries = {}, [], []
         for row in wire:
@@ -329,7 +304,16 @@ warm_file_enabled = false
         providers = rows(args.out / "actor-provider.jsonl")
         assert sum(r["status"] == 400 for r in providers) == 1
         assert any(r["tag"] == "replay-miss" and r["response"]["result"]["isError"] for r in outcomes)
-        result.update(status="passed", actorActions=len(outcomes), expectedProviderMisses=1, storeMappings=len(mappings))
+        canary = schedule["futureQueryCanary"]
+        assert canary not in (args.out / "actor-code.py").read_text()
+        assert labels["labelCanary"] not in (args.out / "actor-code.py").read_text()
+        for ordinal in range(4):
+            assert canary not in (args.out / "actor-inputs" / f"step-{ordinal}.json").read_text()
+        assert canary in (args.out / "actor-inputs/step-4.json").read_text()
+        assert all(canary not in json.dumps(row) for row in wire if row["deliveryOrdinal"] < 4)
+        assert all(canary not in json.dumps(row) for row in providers if row["deliveryOrdinal"] < 4)
+        assert len(rows(evaluator / "schedule-ledger.jsonl")) == 6
+        result.update(futureQueryCanaryWithheldUntilDelivery=True, status="passed", actorActions=len(outcomes), expectedProviderMisses=1, storeMappings=len(mappings))
     except BaseException as error:
         result.update(status="failed", error=str(error))
         raise
@@ -337,6 +321,8 @@ warm_file_enabled = false
         if process is not None and process.poll() is None:
             process.terminate()
             process.wait(timeout=10)
+        os.close(guard_read)
+        os.close(guard_write)
         stub.shutdown()
         stub.server_close()
         result["artifactsSha256"] = {str(p.relative_to(args.out)): digest(p.read_bytes()) for p in sorted(args.out.rglob("*")) if p.is_file() and p.name != "result.json"}
@@ -362,6 +348,19 @@ def host(args):
     image = json.loads(subprocess.check_output(["docker", "image", "inspect", "recalld-ci:1.94"]))[0]["Id"]
     metadata = dict(sourceCommit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(), sourceFilesSha256=pins,
                     containerImageId=image, status="running")
+    if args.library_evidence:
+        prior = json.loads((args.library_evidence / "build.json").read_text())
+        library = lambda files: {k:v for k,v in files.items() if k.startswith("src/") or k in ("Cargo.toml", "Cargo.lock")}
+        if library(prior["sourceFilesSha256"]) != library(pins):
+            raise ValueError("prior library evidence belongs to different runtime source")
+        import re
+        inherited = {}
+        for name in ("session-tests.log", "structured-tests.log", "performance-tests.log"):
+            data = (args.library_evidence / name).read_bytes()
+            if not re.search(rb"test result: ok\. [1-9][0-9]* passed; 0 failed", data):
+                raise ValueError("prior focused library check did not pass")
+            inherited[name] = digest(data)
+        metadata["inheritedFocusedLibraryEvidence"] = dict(sourceCommit=prior["sourceCommit"], originalOutput=str(args.library_evidence), logsSha256=inherited)
     save(output / "build.json", metadata)
     script = '''set -eu
 mkdir -p /tmp/home
@@ -376,6 +375,8 @@ cargo build --offline --locked --bin recalld --example score_mcp_episode > /work
 python3 scripts/public-mcp-evaluation.py prepare --binary /work/target/debug/recalld --scorer /work/target/debug/examples/score_mcp_episode --build /work/output/build.json --out /work/output/inputs
 python3 scripts/public-mcp-evaluation.py run --binary /work/target/debug/recalld --scorer /work/target/debug/examples/score_mcp_episode --source-root /work/source --manifest /work/output/inputs/manifest.json --out /work/output/episode-0
 '''
+    if args.library_evidence:
+        script = "\n".join(line for line in script.split("\n") if "cargo test --offline --locked --lib " not in line)
     (root / "build.sh").write_text(script)
     command = ["docker", "run", "--rm", "--network", "none", "--cpus", "2", "--memory", "4g", "--memory-swap", "4g", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev", "--mount", f"type=bind,src={root},dst=/work", "--workdir", "/work/source", "--env", "HOME=/tmp/home", "--env", "CARGO_HOME=/work/cargo", "--env", "CARGO_TARGET_DIR=/work/target", "--env", "CARGO_BUILD_JOBS=2", "--env", "RUSTUP_TOOLCHAIN=1.94.1", "--env", f"RECALLD_A6_SOURCE_COMMIT={metadata['sourceCommit']}", "--env", f"RECALLD_A6_SOURCE_TREE_SHA256={digest(encoded(pins))}", "--env", f"RECALLD_A6_IMAGE_ID={image}", image, "bash", "/work/build.sh"]
     try:
@@ -393,15 +394,14 @@ python3 scripts/public-mcp-evaluation.py run --binary /work/target/debug/recalld
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
-    p = sub.add_parser("actor"); p.add_argument("--write-fd", type=int, required=True); p.add_argument("--read-fd", type=int, required=True)
     p = sub.add_parser("prepare")
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p = sub.add_parser("host")
-    p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True)
+    p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True); p.add_argument("--library-evidence", type=Path)
     args = parser.parse_args()
-    {"actor": actor_main, "prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
 
 
 if __name__ == "__main__":
