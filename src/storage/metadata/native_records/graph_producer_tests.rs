@@ -241,3 +241,128 @@ async fn native_graph_producer_cancelled_before_graph_ownership_stays_unresolved
             .is_empty()
     );
 }
+
+#[test]
+fn native_graph_producer_crash_child() {
+    let Ok(path) = std::env::var("RECALLD_NATIVE_GRAPH_PRODUCER_PATH") else {
+        return;
+    };
+    let request =
+        std::fs::read(std::env::var("RECALLD_NATIVE_GRAPH_PRODUCER_REQUEST").unwrap()).unwrap();
+    let (store_id, namespace_id, source, target): (uuid::Uuid, NamespaceId, MemoryId, MemoryId) =
+        serde_json::from_slice(&request).unwrap();
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let session = NativeLifecycleSession::open(
+        Path::new(&path),
+        NativePolicyInputs::default(),
+        clock.clone(),
+    )
+    .unwrap();
+    let f = Fixture::from_open_engine(tempfile::tempdir().unwrap(), session.engine);
+    let input = NativeGraphInput {
+        edges: vec![NativeEdgeInput {
+            source,
+            target,
+            edge_type: EdgeType::Entity,
+            weight: 0.75,
+            auto_created: true,
+        }],
+    };
+    let context = MutationContext {
+        store_id: Some(store_id),
+        scope: MutationScope::Namespace(namespace_id),
+        idempotency_key: Some("producer-graph".into()),
+        expected_generation: None,
+        contract_version: 2,
+    };
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(completion(&f).native_graph(
+            context,
+            input,
+            NativePolicyInputs::default(),
+            clock,
+            None,
+        ))
+        .unwrap();
+    panic!("producer crash point did not execute");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_graph_producer_process_exit_reopens_and_completes_original_receipt_without_new_clock()
+ {
+    for point in ["after_metadata_commit", "before_online_derived_ack"] {
+        let (f, d, context, input, clock) = prepared();
+        let publisher = completion(&f);
+        publisher.rebuild_all().await.unwrap();
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let request = d.path.parent().unwrap().join("graph-request.json");
+        std::fs::write(
+            &request,
+            serde_json::to_vec(&(
+                before.store_id,
+                d.ns,
+                input.edges[0].source,
+                input.edges[0].target,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        drop(publisher);
+        let root = f.close();
+        let status=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","storage::metadata::native_records::tests::graph_producers::native_graph_producer_crash_child","--nocapture"])
+            .env("RECALLD_NATIVE_GRAPH_PRODUCER_PATH",&d.path).env("RECALLD_NATIVE_GRAPH_PRODUCER_REQUEST",&request).env("RECALLD_TEST_EFFECT_CRASH",point).status().unwrap();
+        assert_eq!(status.code(), Some(91), "{point}");
+        let session = open(&d, clock.clone());
+        let receipt = session
+            .metadata()
+            .lookup_native_graph(&context, &input, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            receipt.committed_generation,
+            before.committed_generation.next().unwrap()
+        );
+        let f = Fixture::from_open_engine(root, session.engine);
+        let publisher = completion(&f);
+        let replay = publisher
+            .native_graph(
+                context,
+                input.clone(),
+                NativePolicyInputs {
+                    multiplier: f64::NAN,
+                    ..Default::default()
+                },
+                Arc::new(NeverClock),
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(replay.receipt, receipt);
+        assert!(replay.receipt.replayed);
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation,
+            receipt.committed_generation
+        );
+        assert!(
+            f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .pending_effects()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(f.graph.read().await.has_typed_edge_between_ids(
+            &input.edges[0].source,
+            &d.parent,
+            EdgeType::Entity
+        ));
+    }
+}
