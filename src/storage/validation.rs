@@ -114,7 +114,20 @@ pub(crate) fn validate_import_stage(path: &Path) -> Result<HashSet<String>, Stor
 }
 /// Strict private-native preflight admits only validated native recovery plans.
 pub(crate) fn preflight_native(path: &Path) -> Result<(), StorageError> {
-    validate_snapshot(path, false, true).map(|_| ())
+    let result = validate_snapshot(path, false, true).map(|_| ());
+    #[cfg(test)]
+    NATIVE_PREFLIGHT_PROBE.with(|probe| {
+        if let Some(check) = probe.borrow().as_ref() {
+            check(path);
+        }
+    });
+    result
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static NATIVE_PREFLIGHT_PROBE:
+        std::cell::RefCell<Option<Box<dyn Fn(&Path)>>> = const { std::cell::RefCell::new(None) };
 }
 fn validate_snapshot(
     path: &Path,
@@ -130,6 +143,8 @@ fn validate_snapshot(
     for name in ["meta.db", "edges.db", "fulltext.dat"] {
         require_file(&path.join(name))?;
     }
+    // Only native startup permits redb recovery, and only on disposable copies.
+    // All canonical validation still precedes writable opens of the originals.
     let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
     let read = meta.begin_read()?;
     let control = super::control::validate_existing(&read)?;
