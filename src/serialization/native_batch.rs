@@ -286,7 +286,11 @@ pub struct NativeBatchOutcome {
 }
 impl From<BatchOutcome> for NativeBatchOutcome {
     fn from(outcome: BatchOutcome) -> Self {
-        Self { outcome, readiness: None, warnings: vec![] }
+        Self {
+            outcome,
+            readiness: None,
+            warnings: vec![],
+        }
     }
 }
 
@@ -425,7 +429,11 @@ pub(crate) fn response(result: Result<NativeBatchOutcome, BatchFailure>) -> (u16
         kind: CatalogKind::Catalog,
     };
     match result {
-        Ok(NativeBatchOutcome { outcome: out, readiness, warnings }) => {
+        Ok(NativeBatchOutcome {
+            outcome: out,
+            readiness,
+            warnings,
+        }) => {
             let states = out
                 .items
                 .iter()
@@ -544,7 +552,8 @@ pub(crate) fn input_schema() -> Value {
         "embedding":{"type":"array","minItems":1,"maxItems":8192,"items":{"type":"number"},"description":"Finite nonzero vector matching the canonical Bound profile. Original caller bits remain retry identity."},
         "embeddingProfileId":{"type":"string","pattern":"^ep1:[0-9a-f]{64}$","minLength":68,"maxLength":68},
         "checkDuplicates":{"type":["boolean","null"],"default":true,"description":"Omitted/null enables advisory duplicate checks."}}});
-    item["dependentRequired"] = json!({"embedding":["embeddingProfileId"],"embeddingProfileId":["embedding"]});
+    item["dependentRequired"] =
+        json!({"embedding":["embeddingProfileId"],"embeddingProfileId":["embedding"]});
     for (name, count, bytes) in [
         ("tags", MAX_TAGS, TAG_MAX_BYTES),
         ("entities", MAX_ENTITIES, ENTITY_MAX_BYTES),

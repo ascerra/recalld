@@ -1503,8 +1503,10 @@ impl bridge::StorageEngine for McpStorageAdapter {
     async fn mutate_native_batch(
         &self,
         input: crate::storage::batch::BatchInput,
-    ) -> Result<crate::serialization::native_batch::NativeBatchOutcome, crate::serialization::native_batch::BatchFailure>
-    {
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
         use crate::serialization::native_batch::BatchFailure;
         if input.mutation_version != 3
             || input.result_version != 1
@@ -1514,7 +1516,8 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 bridge::BridgeError::InvalidInput("native insertion batch version mismatch".into()),
             ));
         }
-        let result = self.run_batch_budgeted(input, Some(crate::mcp::batch_budget::BatchBudget::STANDARD))
+        let result = self
+            .run_batch_budgeted(input, Some(crate::mcp::batch_budget::BatchBudget::STANDARD))
             .await
             .map_err(|e| match e {
                 StoreWriteError::Canonical(e) => BatchFailure::from_storage(e),

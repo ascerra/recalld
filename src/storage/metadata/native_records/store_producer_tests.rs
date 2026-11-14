@@ -1374,9 +1374,17 @@ async fn batch_profile_id_mismatch_and_invalid_pair_are_retained_without_provide
     ];
     let out = a.mutate_native_batch(r.clone()).await.unwrap();
     assert_eq!(out.outcome.failed, 3);
-    assert_eq!(out.outcome.items[0].error.as_ref().unwrap().code, "CONFLICT");
     assert_eq!(
-        out.outcome.items[0].error.as_ref().unwrap().field.as_deref(),
+        out.outcome.items[0].error.as_ref().unwrap().code,
+        "CONFLICT"
+    );
+    assert_eq!(
+        out.outcome.items[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .field
+            .as_deref(),
         Some("embeddingProfileId")
     );
     let (status, envelope) = crate::serialization::native_batch::response(Ok(out.clone()));
