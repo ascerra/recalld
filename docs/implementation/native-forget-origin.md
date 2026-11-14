@@ -34,3 +34,18 @@ NativeLifecycleSession API with NeverClock. Second passed4/failed1: forgetting
 the only live vector did not exercise the intended dimension error. A surviving
 record is now created through the real native insert transaction before the
 publication fault. No runtime change was needed; all four new cases then passed.
+
+## Evidence and cleanup handoff
+
+Frozen runtime/testsource `0c82d18cd7adcd051f9c44aaeed206ed2e729302`; evidence
+`48ad2c51f35054d5bb5315537cfc7d93181f1477`. Report:
+`work-notes/native-forget-origin/REPORT.md`. Actual HOME copy:
+`/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-forget-origin-48ad2c5`.
+COPY.json SHA256 `f16a04fe3032a04994dcc2196a946bb8814ff05ec951f83a2ab5a2b6d958e039`.
+All46 files/6,194,341 bytes verified individually; existing research notebook
+appended. No executable or cache copied. All own validation containers exited.
+
+After publication, release only .test-scratch/cargo and .test-scratch/target to
+the central cleanup owner. No next Rust task requires retaining a private cache.
+Keep the worktree, .git, all source, failed-run logs/archives and sealed evidence.
+No tests rerun for this documentation-only handoff.
