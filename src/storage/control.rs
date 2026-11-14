@@ -438,6 +438,12 @@ pub(crate) fn validate_existing(
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                scope == MutationScope::Namespace(t.before_namespace.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => {
+                scope == MutationScope::Namespace(t.namespace_id)
+            }
             MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
             MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
@@ -474,7 +480,9 @@ pub(crate) fn validate_existing(
         // schema table is entirely absent. Legacy decode alone is not proof.
         if matches!(
             stored.receipt.outcome,
-            MutationOutcome::LifecyclePolicyMigrated { .. }
+            MutationOutcome::NativeNamespacePurgeStarted { .. }
+                | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                | MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
                 | MutationOutcome::NativeNamespacePolicyUpdated { .. }
                 | MutationOutcome::NativeNamespacePolicyUnchanged { .. }

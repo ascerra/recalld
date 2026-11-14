@@ -37,6 +37,11 @@ impl NativeNamespaceProof {
         Ok(proof)
     }
     pub(crate) fn namespace(&self) -> Result<NamespaceConfig, StorageError> {
+        if !self.schema.extensions.is_empty() {
+            return Err(invalid(
+                "native purge requires a consumer for unknown namespace extensions",
+            ));
+        }
         if self.namespace_id.is_unset()
             || !(1..=8192).contains(&self.embedding_dim)
             || chrono::DateTime::from_timestamp_millis(self.created_at).is_none()

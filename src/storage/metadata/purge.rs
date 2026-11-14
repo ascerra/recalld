@@ -438,11 +438,21 @@ impl MetadataStore {
         }
         crate::model::validation::validate_namespace_name(&config.name)
             .map_err(|_| StorageError::InvalidPath)?;
-        if !force {
+        if !force || ctx.contract_version == 2 {
             for row in tx.open_table(META_TABLE)?.iter()? {
                 let (_, value) = row?;
                 let r = DiskRecord::from_bytes(value.value())?;
-                if r.namespace_id == namespace.get() && r.phase != DecayPhase::Tombstone {
+                if r.namespace_id != namespace.get() {
+                    continue;
+                }
+                if ctx.contract_version == 2
+                    && r.schema.as_ref().is_none_or(|s| !s.extensions.is_empty())
+                {
+                    return Err(StorageError::RecoveryRequired(
+                        "native purge requires a consumer for unknown record extensions".into(),
+                    ));
+                }
+                if !force && r.phase != DecayPhase::Tombstone {
                     return Err(StorageError::InvalidMutation(
                         "namespace contains live memories; force is required".into(),
                     ));
@@ -892,20 +902,4 @@ fn capture_chunk(
         peers,
         removed_edges,
     })
-}
-
-/// Fully validated retired configuration, used only for immutable history.
-pub(crate) fn historical_namespaces(
-    read: &redb::ReadTransaction,
-    state: &ControlState,
-) -> Result<Vec<NamespaceConfig>, StorageError> {
-    validate_existing(read, Some(state))?
-        .iter()
-        .filter_map(|p| match &p.start_receipt.outcome {
-            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
-                Some(t.before_namespace.namespace())
-            }
-            _ => None,
-        })
-        .collect()
 }

@@ -322,7 +322,28 @@ pub(crate) fn validate_policy_history(
     }
     // Retained historical native operations still require an explicit policy
     // selection. Their record sets need not survive a deletion-aware restore.
+    let purge_progress = super::metadata::purge::validate_existing(read, Some(control))?;
+    let before_purge =
+        |receipt: &WriteReceipt, namespace: NamespaceId| -> Result<(), StorageError> {
+            if purge_progress.iter().any(|p| {
+                p.version == 2
+                    && p.namespace_id == namespace
+                    && p.store_id == receipt.store_id
+                    && receipt.committed_generation > p.start_receipt.committed_generation
+            }) {
+                return Err(invalid(
+                    "native namespace mutation ordered after purge start",
+                ));
+            }
+            Ok(())
+        };
+    for history in policies.values() {
+        for (receipt, t) in history.values() {
+            before_purge(receipt, t.namespace_id)?;
+        }
+    }
     for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        before_purge(&receipt, namespace_id)?;
         let version = if policy_revision == Generation::default() {
             LifecycleVersion::LegacyAccessV1
         } else {
@@ -360,7 +381,15 @@ pub(crate) fn validate_policy_history(
         })
         .collect::<Result<HashMap<_, _>, StorageError>>()?;
     let live_namespaces: std::collections::HashSet<_> = configs.keys().copied().collect();
-    let retired = super::metadata::purge::historical_namespaces(read, control)?;
+    let retired = purge_progress
+        .iter()
+        .filter_map(|p| match &p.start_receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                Some(t.before_namespace.namespace())
+            }
+            _ => None,
+        })
+        .collect::<Result<Vec<_>, StorageError>>()?;
     for ns in retired {
         if let Some(existing) = configs.get(&ns.id.get()) {
             if super::native_purge::NativeNamespaceProof::capture(existing)?

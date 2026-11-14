@@ -167,7 +167,22 @@ fn native_purge_mixed_chunks_restart_replay_policy_and_ledger() {
     let mut s = open(&path);
     policy(&mut s, id);
     let key = ctx(&s, id, "purge");
+    let tombstone = s.capture_tombstone(ids[0], Some(id)).unwrap();
+    let kept = s.engine.get_namespace_by_name("kept").unwrap().unwrap().id;
     let p = s.engine.begin_namespace_purge(&key, true).unwrap();
+    let mut other = key.clone();
+    other.idempotency_key = Some("blocked-tombstone".into());
+    other.expected_generation = None;
+    assert!(matches!(
+        s.tombstone(&other, &tombstone),
+        Err(StorageError::RecoveryRequired(_))
+    ));
+    other.scope = MutationScope::Namespace(kept);
+    other.idempotency_key = Some("second-purge".into());
+    assert!(matches!(
+        s.engine.begin_namespace_purge(&other, true),
+        Err(StorageError::RecoveryRequired(_))
+    ));
     assert_eq!(p.version, 2);
     let r = s.engine.begin_namespace_purge(&key, true).unwrap();
     assert!(r.start_receipt.replayed);
@@ -825,4 +840,62 @@ async fn native_purge_foreign_terminal_boundary_rejects_later_noop() {
             .is_err()
     );
     assert_eq!(before, std::fs::read(path.join("meta.db")).unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_purge_accepted_unknown_child_preserves_reserved_id_and_reopens() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let key = ctx(&s, id, "unknown-child");
+    let start = s.engine.begin_namespace_purge(&key, true).unwrap();
+    let fx = crate::test_support::Fixture::from_open_engine(root, s.engine);
+    let publisher = crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    };
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    let root = tracker.begin().unwrap();
+    fx.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .fail_purge_child_commit
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let error = publisher
+        .purge_native_accepted(key, true, &root)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error,StorageError::CommitOutcomeUnknown{operation_id,..} if Some(operation_id)==start.next_operation_id)
+    );
+    let committed = fx
+        .storage
+        .read()
+        .unwrap()
+        .lookup_namespace_purge(start.store_id, id, start.start_receipt.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        committed.last_receipt.operation_id,
+        start.next_operation_id.unwrap()
+    );
+    assert_eq!(committed.removed, 4);
+    assert!(tracker.status().unresolved > 0);
+    root.finish();
+    drop(publisher);
+    let _directory = fx.close();
+    let s = open(&path);
+    let complete = s
+        .engine
+        .lookup_namespace_purge(start.store_id, id, start.start_receipt.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(complete.stage, PurgeStage::Complete);
+    assert_eq!(complete.removed, 4);
+    assert_eq!(complete.sequence, 3);
 }
