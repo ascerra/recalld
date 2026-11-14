@@ -57,7 +57,13 @@ def main():
             old=h["rows"](a/"actor-wire.jsonl");new=h["rows"](b/"actor-wire.jsonl")
             actions=lambda rows:[r["request"] for r in rows if r["event"]=="attempt"]
             assert actions(old)==actions(new),name  # Actual owned IDs, no normalization.
-            assert json.loads((a/"suffix.json").read_text()) == json.loads((b/"suffix.json").read_text()),name
+            suffixes=[json.loads((p/"suffix.json").read_text()) for p in (a,b)]
+            # Independent ingestions create legacy namespaces on wall time; their
+            # private canonical hashes are not an actor-output equality contract.
+            # Each run separately requires full logicalHash equality on 3 restores.
+            for field in ("outputs","mappings","state","readiness","provider"):
+                assert suffixes[0][field] == suffixes[1][field],(name,field)
+            report.setdefault("independentLogicalHashes",{})[name]=[v["logicalHash"] for v in suffixes]
             compared+=len(actions(old))
             for p in (a/"actor-inputs").glob("*.json"):
                 assert p.read_bytes()==(b/"actor-inputs"/p.name).read_bytes()
