@@ -100,3 +100,40 @@ This is a combined source assessment of the current correction, not a claim
 that9e70229 has passed runtime validation. The previous a4acd5f unknown-child
 GREEN is narrower evidence. Repeat this assessment against the final frozen
 source and include its exact hash in the handoff after focused/full validation.
+
+## Quiet-window validation queue
+
+The coordinating agent authorized the quiet window for2026-11-14
+21:31:06UTC through hard end22:31:06UTC, with explicit END required before new
+heavy work. All own heavy jobs were drained before START. No build, formatter,
+test, container, benchmark or large artifact copy runs during this window.
+Frozen targets, binaries, genuine BEFORE fixtures and raw logs remain untouched.
+
+After explicit END, execute in this order:
+
+1. Record receipt-red's retained source pointer a4acd5f, tree, raw log and existing
+   executable hashes before modifying its target. Preserve the frozen cb6a452
+   failed full run and574850d owner-error diagnostic separately.
+2. Format the source-only9e70229 correction and test additions, inspect any diff,
+   commit the resulting exact source, and generate its tracked-file hash list.
+3. Run the existing unknown-child regression unchanged:
+   `cargo test --offline --lib native_purge_accepted_unknown_child_preserves_reserved_id_and_reopens -- --nocapture`.
+4. Run `cargo test --offline --lib native_context_ -- --nocapture`, with the
+   sealed genuine BEFORE fixtures and old executable mounted read-only. This
+   includes the new API1/API2 known-receipt damage/missing-progress cases,
+   prelookup missing-receipt negative, and both-contract legacy-owner rejection.
+   Preserve each failure against its actual source before correcting it.
+5. Once focused checks pass, freeze source and run exactly one appropriate full
+   corrected validation: `cargo fmt --check && cargo test --offline && cargo clippy --offline --all-targets`.
+   Use the existing bounded offline image/private target and verify tracked
+   source hashes inside the container before and after the run. Do not switch
+   source roots on that target or rerun Rust solely for evidence/doc tails.
+6. Review the combined native-owner predicate, actual guarded transaction fence
+   and known-receipt wrapper at the final source hash. Seal compact repo evidence
+   and actual HOME copies, then hand off the actual consumer parent to compound
+   batch/public routing and Halley's owned-allocator child. No ordinary startup
+   activation or standalone-writer ancestry requirement is implied.
+
+The deliberate unanchored candidate f79614e remains a separate expected-failure
+artifact and target. It is never a publication parent. Its stripping RED already
+has source/log/executable provenance and does not need another run absent change.
