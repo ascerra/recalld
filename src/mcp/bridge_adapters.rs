@@ -3654,12 +3654,17 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn entity_postings_survive_disabled_autolink_and_delete_without_legacy_tags() {
+    async fn entity_postings_preserve_legacy_validation_and_survive_disabled_autolink() {
         let fx = Fixture::new();
         let foreign = fx.create_namespace("foreign");
         let mut adapter = fx.storage_adapter();
         Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
-        let names = vec!["John Smith".into(), "José".into(), "Alice's".into()];
+        let before = fx.storage.read().unwrap().control_state().unwrap();
+        let mut invalid = store_input("unrepresentable legacy names", "default", unit_x());
+        invalid.entities = vec!["John Smith".into(), "José".into(), "Alice's".into()];
+        assert!(adapter.store_memory(invalid).await.is_err());
+        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
+        let names = vec!["John_Smith".into(), "Jose".into(), "Alice".into()];
         let mut ids = Vec::new();
         for namespace in ["default", "foreign"] {
             let mut input = store_input("accepted names", namespace, unit_x());
@@ -3674,11 +3679,11 @@ mod tests {
             assert_eq!(index.len(), 2);
             assert_eq!(
                 index.find_by_entities(default_ns(), &names, MemoryId::new()),
-                vec![(ids[0], 4)]
+                vec![(ids[0], 3)]
             );
             assert_eq!(
                 index.find_by_entities(foreign, &names, MemoryId::new()),
-                vec![(ids[1], 4)]
+                vec![(ids[1], 3)]
             );
         }
         assert!(adapter.delete_memory(ids[0], None).await.unwrap());
@@ -3691,16 +3696,18 @@ mod tests {
         );
         assert_eq!(
             index.find_by_entities(foreign, &names, MemoryId::new()),
-            vec![(ids[1], 4)]
+            vec![(ids[1], 3)]
         );
     }
 
     #[tokio::test]
-    async fn namespace_deletion_clears_orphan_entity_postings_only_in_its_scope() {
+    async fn namespace_deletion_rebuild_preserves_canonical_foreign_postings() {
         let fx = Fixture::new();
         let scratch = fx.create_namespace("scratch");
-        let orphan = MemoryId::new();
-        let names = vec!["José".into()];
+        // The completion rebuild must retain the actual foreign record, not
+        // preserve a phantom posting whose UUID has no canonical row.
+        let orphan = fx.insert_memory_in(default_ns(), &["entity/alice"]).await;
+        let names = vec!["Alice".into()];
         {
             let mut index = fx.entity_index.write().await;
             index.add(scratch, orphan, &names);
