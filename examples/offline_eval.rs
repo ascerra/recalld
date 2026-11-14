@@ -157,7 +157,11 @@ struct DiagnosticAccessRecorder {
 }
 #[async_trait::async_trait]
 impl AccessRecorder for DiagnosticAccessRecorder {
-    async fn record_access(&self, _: MemoryId, _: AccessKind) -> Result<Vec<WriteReceipt>, SearchError> {
+    async fn record_access(
+        &self,
+        _: MemoryId,
+        _: AccessKind,
+    ) -> Result<Vec<WriteReceipt>, SearchError> {
         self.completed.add_permits(1);
         Ok(Vec::new())
     }
