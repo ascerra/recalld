@@ -903,6 +903,17 @@ impl Recalld {
             .await
     }
 
+    pub(crate) fn derived_owner(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+    }
+
     /// Internal owned-core barrier. Returns a readiness observation, not a
     /// retained freeze lease or snapshot/reset authorization. No public wire
     /// capability is enabled by this entry point.

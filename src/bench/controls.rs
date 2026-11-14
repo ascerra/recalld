@@ -30,7 +30,35 @@ fn error(code: &'static str, message: impl ToString) -> Value {
     json!({"code":code,"message":message.to_string()})
 }
 
-async fn dispatch(core: &Arc<Recalld>, request: &Request) -> Result<Value, Value> {
+async fn dispatch(
+    core: &Arc<Recalld>,
+    evaluator: Option<&super::frozen::OwnedEvaluator>,
+    request: &Request,
+) -> Result<Value, Value> {
+    if request.method == "advance" {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Advance {
+            delta_ms: i64,
+            deadline_ms: u64,
+        }
+        let evaluator =
+            evaluator.ok_or_else(|| error("UNSUPPORTED_CONTROL", "owned clock required"))?;
+        let params: Advance = serde_json::from_value(request.params.clone())
+            .map_err(|e| error("INVALID_PARAMS", e))?;
+        if params.delta_ms < 0 || !(1..=30_000).contains(&params.deadline_ms) {
+            return Err(error(
+                "INVALID_PARAMS",
+                "nonnegative deltaMs and deadlineMs 1..30000 required",
+            ));
+        }
+        let deadline = Instant::now() + Duration::from_millis(params.deadline_ms);
+        let now = evaluator
+            .advance(params.delta_ms, deadline)
+            .await
+            .map_err(|e| error("CONTROL_UNAVAILABLE", e))?;
+        return Ok(json!({"nowMillis":now}));
+    }
     match request.method.as_str() {
         "capabilities" => {
             if request.params != json!({}) {
@@ -41,12 +69,13 @@ async fn dispatch(core: &Arc<Recalld>, request: &Request) -> Result<Value, Value
             }
             Ok(json!({
                 "controlVersion":1,
-                "methods":["capabilities","inspect","barrier"],
+                "methods": if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance"] } else { vec!["capabilities","inspect","barrier"] },
                 "publicContract":"legacy-v1",
                 "guarantees":{
                     "barrier":"owned-work-and-required-derived-generations",
                     "logicalHash":false,"snapshot":false,"reset":false,
-                    "controlledClock":false,"controlledIds":false,"controlledRng":false
+                    "controlledClock":false,"lifecycleClockControlled":evaluator.is_some(),
+                    "controlledIds":false,"controlledRng":false
                 }
             }))
         }
@@ -98,7 +127,32 @@ async fn dispatch(core: &Arc<Recalld>, request: &Request) -> Result<Value, Value
 /// from actor MCP stdin/stdout; this function never changes actor tool discovery.
 /// EOF ends the evaluator channel. Oversized frames fail closed and end it too.
 /// Deadlines are cooperative; blocking OS I/O has no hard real-time bound.
-pub async fn serve<R, W>(core: Arc<Recalld>, input: R, mut output: W) -> std::io::Result<()>
+pub async fn serve<R, W>(core: Arc<Recalld>, input: R, output: W) -> std::io::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    serve_inner(core, None, input, output).await
+}
+
+pub async fn serve_owned<R, W>(
+    evaluator: Arc<super::frozen::OwnedEvaluator>,
+    input: R,
+    output: W,
+) -> std::io::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    serve_inner(evaluator.core().clone(), Some(evaluator), input, output).await
+}
+
+async fn serve_inner<R, W>(
+    core: Arc<Recalld>,
+    evaluator: Option<Arc<super::frozen::OwnedEvaluator>>,
+    input: R,
+    mut output: W,
+) -> std::io::Result<()>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -122,7 +176,7 @@ where
         } else {
             match serde_json::from_slice::<Request>(&line) {
                 Err(e) => json!({"id":null,"error":error("INVALID_REQUEST",e)}),
-                Ok(request) => match dispatch(&core, &request).await {
+                Ok(request) => match dispatch(&core, evaluator.as_deref(), &request).await {
                     Ok(result) => json!({"id":request.id,"result":result}),
                     Err(error) => json!({"id":request.id,"error":error}),
                 },

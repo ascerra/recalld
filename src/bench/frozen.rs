@@ -1,0 +1,242 @@
+//! Same-core isolated control owner. No process-global clock or second registry.
+use std::sync::Arc;
+use std::time::Instant;
+
+use crate::derived_completion::DerivedCompletion;
+use crate::storage::{Readiness, RedbStorageEngine, StorageError, metadata::MetadataFreeze};
+use crate::time::{Clock, ManualClock};
+
+/// The actor receives `core()` only. Runtime sources stay private to controls.
+/// This constructor currently controls lifecycle time, not UUIDs or all RNG.
+pub struct OwnedEvaluator {
+    core: Arc<crate::Recalld>,
+    controls: FrozenControls,
+}
+
+impl OwnedEvaluator {
+    pub async fn new(config: crate::config::RecalldConfig) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            config.decay.disable_sweep,
+            "isolated controls require explicit sweeps"
+        );
+        let clock = Arc::new(ManualClock::new(1_767_225_600_000));
+        let core = Arc::new(crate::Recalld::with_clock(config, clock.clone()).await?);
+        let controls = FrozenControls::new(core.derived_owner(), clock);
+        Ok(Self { core, controls })
+    }
+
+    pub fn core(&self) -> &Arc<crate::Recalld> {
+        &self.core
+    }
+
+    pub(crate) async fn advance(
+        &self,
+        delta_ms: i64,
+        deadline: Instant,
+    ) -> Result<i64, StorageError> {
+        self.controls.advance(delta_ms, deadline).await
+    }
+}
+
+struct FrozenControls {
+    owner: DerivedCompletion,
+    clock: Arc<ManualClock>,
+    // A controller permit, not a work ticket or a readiness registry. The join
+    // task owns this until the blocking worker exits, even if its caller leaves.
+    busy: Arc<tokio::sync::Mutex<()>>,
+}
+
+fn unavailable(message: impl ToString) -> StorageError {
+    StorageError::RecoveryRequired(message.to_string())
+}
+
+impl FrozenControls {
+    fn new(owner: DerivedCompletion, clock: Arc<ManualClock>) -> Self {
+        Self {
+            owner,
+            clock,
+            busy: Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+
+    async fn capture<T: Send + 'static>(
+        &self,
+        deadline: Instant,
+        capture: impl FnOnce(
+            &RedbStorageEngine,
+            &MetadataFreeze<'_>,
+            Readiness,
+        ) -> Result<T, StorageError>
+        + Send
+        + 'static,
+    ) -> Result<T, StorageError> {
+        let permit = self
+            .busy
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| unavailable("prior frozen control worker has not joined"))?;
+        let owner = self.owner.clone();
+        let join = tokio::spawn(async move {
+            let _permit = permit;
+            owner.with_frozen_core(None, deadline, capture).await
+        });
+        // Dropping this JoinHandle detaches the join task, not its busy permit.
+        // New clock/ID/cache controls cannot race a timed-out blocking capture.
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), join)
+            .await
+            .map_err(|_| unavailable("control deadline expired; worker may still be joining"))?
+            .map_err(unavailable)?
+    }
+
+    async fn advance(&self, delta_ms: i64, deadline: Instant) -> Result<i64, StorageError> {
+        if delta_ms < 0 {
+            return Err(unavailable("negative clock advance"));
+        }
+        let clock = self.clock.clone();
+        self.capture(deadline, move |_, _, _| {
+            let next = clock
+                .now_millis()
+                .checked_add(delta_ms)
+                .ok_or_else(|| unavailable("clock advance overflow"))?;
+            clock.advance_to(next).map_err(unavailable)?;
+            Ok(next)
+        })
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::Fixture;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    async fn controls() -> (Fixture, FrozenControls) {
+        let fx = Fixture::new();
+        let owner = DerivedCompletion {
+            storage: fx.storage.clone(),
+            cache: fx.cache.clone(),
+            graph: fx.graph.clone(),
+            vectors: fx.vector_index.clone(),
+            fts: fx.fts_index.clone(),
+            entities: fx.entity_index.clone(),
+        };
+        owner.complete().await.unwrap();
+        (
+            fx,
+            FrozenControls::new(owner, Arc::new(ManualClock::new(1000))),
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn capture_timeout_keeps_clock_and_all_leases_frozen_until_worker_joins() {
+        let (fx, controls) = controls().await;
+        let controls = Arc::new(controls);
+        let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let published = Arc::new(AtomicBool::new(false));
+        let seen = published.clone();
+        let capturing = controls.clone();
+        let clock = controls.clock.clone();
+        let task = tokio::spawn(async move {
+            let result = capturing
+                .capture(
+                    Instant::now() + Duration::from_millis(500),
+                    move |_, _, _| {
+                        started.send(()).unwrap();
+                        released.recv_timeout(Duration::from_secs(10)).unwrap();
+                        assert_eq!(clock.now_millis(), 1000);
+                        Ok("staged, never yet published")
+                    },
+                )
+                .await;
+            if result.is_ok() {
+                seen.store(true, Ordering::SeqCst);
+            }
+            result
+        });
+        entered.await.unwrap();
+        assert!(task.await.unwrap().is_err());
+        assert!(!tracker.status().admission_open);
+        assert_eq!(
+            tracker.status().pending,
+            0,
+            "controller must not drain itself"
+        );
+        assert!(tracker.begin().is_err());
+        assert!(fx.graph.try_write().is_err());
+        assert!(fx.vector_index.try_write().is_err());
+        assert!(fx.fts_index.try_lock().is_err());
+        assert!(fx.entity_index.try_write().is_err());
+        assert!(fx.storage.try_write().is_err());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        assert!(
+            controls
+                .advance(50, deadline)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("not joined")
+        );
+        assert!(
+            controls
+                .capture(deadline, |_, _, _| Ok(()))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("not joined")
+        );
+        assert_eq!(controls.clock.now_millis(), 1000);
+        assert!(!published.load(Ordering::SeqCst));
+        release.send(()).unwrap();
+        // Acquiring this exact permit proves the detached coordinator has joined
+        // the worker, rather than observing a speculative zero pending count.
+        let joined = tokio::time::timeout(Duration::from_secs(5), controls.busy.lock())
+            .await
+            .unwrap();
+        assert!(tracker.status().admission_open);
+        assert!(!published.load(Ordering::SeqCst));
+        drop(joined);
+        assert_eq!(controls.advance(50, deadline).await.unwrap(), 1050);
+        assert_eq!(controls.clock.now_millis(), 1050);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn advance_drains_accepted_descendants_and_rejects_bad_time_without_change() {
+        let (fx, controls) = controls().await;
+        let controls = Arc::new(controls);
+        let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+        let parent = tracker.begin().unwrap();
+        let advancing = controls.clone();
+        let task = tokio::spawn(async move {
+            advancing
+                .advance(10, Instant::now() + Duration::from_secs(5))
+                .await
+        });
+        let closing = tracker.clone();
+        tokio::task::spawn_blocking(move || closing.wait_until_closed())
+            .await
+            .unwrap();
+        assert_eq!(controls.clock.now_millis(), 1000);
+        let child = parent.child().unwrap();
+        parent.finish();
+        assert!(!task.is_finished());
+        child.finish();
+        assert_eq!(task.await.unwrap().unwrap(), 1010);
+        assert!(
+            controls
+                .advance(-1, Instant::now() + Duration::from_secs(5))
+                .await
+                .is_err()
+        );
+        assert!(
+            controls
+                .advance(i64::MAX, Instant::now() + Duration::from_secs(5))
+                .await
+                .is_err()
+        );
+        assert_eq!(controls.clock.now_millis(), 1010);
+    }
+}

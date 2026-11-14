@@ -120,6 +120,14 @@ decay_rate_multiplier = 0.0
         capabilities = control.call('capabilities', {})['result']
         assert capabilities['guarantees']['snapshot'] is False
         assert capabilities['guarantees']['controlledIds'] is False
+        assert capabilities['guarantees']['lifecycleClockControlled'] is True
+        assert control.call('advance', {'deltaMs': 0, 'deadlineMs': 30000})['result']['nowMillis'] == 1767225600000
+        for params in [{'deltaMs': -1, 'deadlineMs': 100}, {'deltaMs': 1.5, 'deadlineMs': 100},
+                       {'deltaMs': 1, 'deadlineMs': 0}, {'deltaMs': 1, 'deadlineMs': 30001},
+                       {'deltaMs': 1, 'deadlineMs': 100, 'unknown': True}]:
+            assert control.call('advance', params)['error']['code'] == 'INVALID_PARAMS'
+        assert 'error' in control.call('advance', {'deltaMs': 9223372036854775807, 'deadlineMs': 30000})
+        assert control.call('advance', {'deltaMs': 60000, 'deadlineMs': 30000})['result']['nowMillis'] == 1767225660000
         initial = inspect()
         barrier(initial)
         # Real actor work is admitted before the fixture provider blocks. A
@@ -154,6 +162,7 @@ decay_rate_multiplier = 0.0
         assert actor_done.is_set() and barrier_done.is_set()
         assert len(stored_values) == len(barrier_values) == 1
         stored = stored_values[0]
+        assert stored['createdAt'].startswith('2026-01-01T00:01:00'), stored
         accepted_barrier = barrier_values[0]
         assert 'error' not in accepted_barrier, accepted_barrier
         assert accepted_barrier['result']['ready'] and accepted_barrier['result']['pendingWork'] == 0
@@ -179,7 +188,7 @@ decay_rate_multiplier = 0.0
         before = files(root / 'data')
         tool('recall_memories', {'query': 'fixture-miss', 'recordAccess': False}, ok=False)
         assert inspect() == reinforced and files(root / 'data') == before
-        for method in ['snapshot', 'reset', 'advance', 'sweep']:
+        for method in ['snapshot', 'reset', 'sweep']:
             assert control.call(method, {})['error']['code'] == 'UNSUPPORTED_CONTROL'
         for target in [dict(reinforced, storeId='00000000-0000-0000-0000-000000000000'),
                        dict(reinforced, generation=str(int(reinforced['generation']) + 1))]:

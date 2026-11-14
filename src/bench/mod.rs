@@ -8,3 +8,6 @@ pub mod locomo;
 
 /// Private evaluator-channel consumer, never an actor MCP tool.
 pub mod controls;
+
+/// Shared-clock evaluator constructor; snapshot/reset remain unavailable.
+pub mod frozen;

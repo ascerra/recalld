@@ -80,7 +80,8 @@ async fn run(args: Args, input: std::fs::File, output: std::fs::File) -> anyhow:
     config
         .validate()
         .map_err(|errors| anyhow::anyhow!("invalid explicit fixture config: {errors:?}"))?;
-    let core = Arc::new(recalld::Recalld::new(config).await?);
+    let evaluator = Arc::new(recalld::bench::frozen::OwnedEvaluator::new(config).await?);
+    let core = evaluator.core().clone();
     let bridge = recalld::mcp::bridge_adapters::direct_bridge(&core, "default".into());
     let server = Arc::new(tokio::sync::Mutex::new(recalld::mcp::McpServer::new(
         Arc::new(bridge),
@@ -89,7 +90,7 @@ async fn run(args: Args, input: std::fs::File, output: std::fs::File) -> anyhow:
     // snapshot or a certificate about a request whose ACK was not received.
     tokio::select! {
         result = recalld::mcp::run_stdio(server) => result.map_err(Into::into),
-        result = recalld::bench::controls::serve(core, tokio::fs::File::from_std(input), tokio::fs::File::from_std(output)) => result.map_err(Into::into),
+        result = recalld::bench::controls::serve_owned(evaluator, tokio::fs::File::from_std(input), tokio::fs::File::from_std(output)) => result.map_err(Into::into),
     }
 }
 
