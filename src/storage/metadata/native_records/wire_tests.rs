@@ -544,3 +544,6 @@ async fn native_lifecycle_wire_old_rpc_unknown_method_fails_closed_without_legac
 
 #[path = "origin_tests.rs"]
 mod origin;
+
+#[path = "forget_origin_tests.rs"]
+mod forget_origin;
