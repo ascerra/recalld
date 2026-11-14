@@ -899,3 +899,99 @@ async fn native_purge_accepted_unknown_child_preserves_reserved_id_and_reopens()
     assert_eq!(complete.removed, 4);
     assert_eq!(complete.sequence, 3);
 }
+
+#[tokio::test]
+async fn native_purge_foreign_peer_requires_its_actual_policy_revision() {
+    use redb::ReadableTable;
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let p = s
+        .engine
+        .begin_namespace_purge(&ctx(&s, id, "peer-proof"), true)
+        .unwrap();
+    done(&mut s, p);
+    drop(s);
+    let archive = crate::backup::run_backup(
+        &crate::config::RecalldConfig::default(),
+        &root.path().join("peer.zip"),
+        Some(&path),
+        false,
+    )
+    .await
+    .unwrap();
+    crate::backup::restore_from_backup(crate::backup::RestoreOptions {
+        backup_path: archive,
+        data_dir: path.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: false,
+    })
+    .await
+    .unwrap();
+    {
+        let db = redb::Database::open(path.join("meta.db")).unwrap();
+        let tx = db.begin_write().unwrap();
+        let mut table = tx.open_table(control::RECEIPTS).unwrap();
+        let selected = table
+            .iter()
+            .unwrap()
+            .map(|row| {
+                let (k, v) = row.unwrap();
+                (
+                    k.value().to_vec(),
+                    control::decode::<control::StoredReceipt>(v.value()).unwrap(),
+                )
+            })
+            .find(|(_, r)| match &r.receipt.outcome {
+                control::MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => t
+                    .chunk
+                    .as_ref()
+                    .is_some_and(|c| c.peers.iter().any(|p| p.namespace_id != id)),
+                _ => false,
+            })
+            .expect("actual historical cross-namespace peer");
+        let (key, mut stored) = selected;
+        let control::MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } =
+            &mut stored.receipt.outcome
+        else {
+            unreachable!()
+        };
+        let peer = t
+            .chunk
+            .as_mut()
+            .unwrap()
+            .peers
+            .iter_mut()
+            .find(|p| p.namespace_id != id)
+            .unwrap();
+        assert_eq!(
+            peer.change.after.lifecycle.lifecycle.policy_revision,
+            control::Generation::default()
+        );
+        peer.change
+            .before
+            .as_mut()
+            .unwrap()
+            .lifecycle
+            .lifecycle
+            .policy_revision = control::Generation::default().next().unwrap();
+        peer.change.after.lifecycle.lifecycle.policy_revision =
+            control::Generation::default().next().unwrap();
+        table
+            .insert(key.as_slice(), control::encode(&stored).unwrap().as_slice())
+            .unwrap();
+        drop(table);
+        tx.commit().unwrap();
+    }
+    let before = std::fs::read(path.join("meta.db")).unwrap();
+    assert!(
+        validation::canonical_files(&path).is_err(),
+        "foreign peer with nonexistent policy revision accepted"
+    );
+    assert!(
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(NoClock))
+            .is_err()
+    );
+    assert_eq!(before, std::fs::read(path.join("meta.db")).unwrap());
+}
