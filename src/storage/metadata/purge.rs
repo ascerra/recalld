@@ -574,6 +574,7 @@ impl MetadataStore {
                 true,
                 false,
                 super::effects::RecordMutation::PurgeChunk(p),
+                None,
             )?;
             return Ok(Some(result));
         }

@@ -14,6 +14,26 @@ impl MetadataStore {
         replay_insert(&tx, ctx, input)
     }
 
+    pub(crate) fn lookup_insert_child_with_work(
+        &self,
+        child: &crate::storage::batch::BatchChild,
+        input: &InsertMemory,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let _guard = self.mutation_guard_with_work(parent)?;
+        let tx = self.db.begin_write()?;
+        let hash = input.request_hash(
+            &child.context(),
+            f32::from_bits(child.defaults.initial_stability_bits),
+            child.defaults.embedding_dim,
+        )?;
+        let replay = super::batch::replay_child(&tx, child, hash)?;
+        if replay.is_none() {
+            super::batch::check_policy(&tx, child)?;
+        }
+        Ok(replay)
+    }
+
     /// Replay and all fresh canonical checks precede payload allocation. The
     /// caller stages payloads through the closure while this publication guard
     /// and redb transaction are held; no metadata writer can acquire ownership
@@ -26,6 +46,29 @@ impl MetadataStore {
         sampled_at: i64,
         embedding: &[f32],
         existing_edges: &[PersistedEdge],
+        stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_reserved_with_effects(
+            guard,
+            ctx,
+            input,
+            sampled_at,
+            embedding,
+            existing_edges,
+            None,
+            stage,
+        )
+    }
+
+    pub(crate) fn insert_reserved_with_effects(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        sampled_at: i64,
+        embedding: &[f32],
+        existing_edges: &[PersistedEdge],
+        child: Option<&crate::storage::batch::BatchChild>,
         stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
@@ -41,7 +84,17 @@ impl MetadataStore {
             ));
         };
         let tx = self.db.begin_write()?;
-        if let Some(receipt) = replay_insert(&tx, ctx, input)? {
+        if let Some(child) = child {
+            let hash = input.request_hash(
+                ctx,
+                f32::from_bits(child.defaults.initial_stability_bits),
+                child.defaults.embedding_dim,
+            )?;
+            if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
+                return Ok(receipt);
+            }
+            super::batch::check_policy(&tx, child)?;
+        } else if let Some(receipt) = replay_insert(&tx, ctx, input)? {
             return Ok(receipt);
         }
         // Reserve a generation before writing external bytes (without advancing
@@ -189,6 +242,7 @@ impl MetadataStore {
             false,
             false,
             effects::RecordMutation::Inserted(&record, config.embedding_dim),
+            child,
         )
         .map(|result| result.receipt)
     }

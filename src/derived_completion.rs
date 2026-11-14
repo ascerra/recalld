@@ -23,12 +23,15 @@ pub(crate) struct DerivedCompletion {
 impl DerivedCompletion {
     // Register before any await/enqueue. Never hold this storage read lock while
     // draining work: queued workers need the storage write lock to complete.
-    fn accept_work(&self, parent: Option<&WorkTicket>) -> Result<WorkTicket, StorageError> {
+    pub(crate) fn accept_work(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<WorkTicket, StorageError> {
         let storage = self.storage.read().map_err(|e| failed(e.to_string()))?;
         Ok(storage.meta_store().work_tracker().admit(parent)?)
     }
 
-    fn finish_known_work(&self, work: WorkTicket) {
+    pub(crate) fn finish_known_work(&self, work: WorkTicket) {
         if let Ok(storage) = self.storage.read() {
             storage.meta_store().finish_work(work);
         }
@@ -43,9 +46,29 @@ impl DerivedCompletion {
         generated_embedding: Vec<f32>,
         sampled_at: i64,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
-        let work = self.accept_work(None)?;
+        self.insert_reserved_with_work(ctx, input, generated_embedding, sampled_at, None, None)
+            .await
+    }
+
+    pub(crate) async fn insert_reserved_with_work(
+        &self,
+        ctx: crate::storage::control::MutationContext,
+        input: crate::storage::insertion::InsertMemory,
+        generated_embedding: Vec<f32>,
+        sampled_at: i64,
+        reservation: Option<crate::storage::batch::BatchChild>,
+        parent: Option<&WorkTicket>,
+    ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
+        let work = self.accept_work(parent)?;
         let result = self
-            .insert_accepted(ctx, input, generated_embedding, sampled_at, &work)
+            .insert_accepted(
+                ctx,
+                input,
+                generated_embedding,
+                sampled_at,
+                reservation,
+                &work,
+            )
             .await;
         self.finish_known_work(work);
         result
@@ -57,6 +80,7 @@ impl DerivedCompletion {
         input: crate::storage::insertion::InsertMemory,
         generated_embedding: Vec<f32>,
         sampled_at: i64,
+        reservation: Option<crate::storage::batch::BatchChild>,
         work: &WorkTicket,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
         let gate = publication_gate(&self.storage).await?;
@@ -66,11 +90,12 @@ impl DerivedCompletion {
         let result = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = (|| {
-                let receipt = storage.insert_memory_with_work(
+                let receipt = storage.insert_memory_reserved_with_work(
                     &ctx,
                     &input,
                     &generated_embedding,
                     sampled_at,
+                    reservation.as_ref(),
                     Some(&child),
                 )?;
                 let id = crate::storage::insertion::inserted_id(&receipt)?;
@@ -177,6 +202,52 @@ impl DerivedCompletion {
                 ..
             }
         ))
+    }
+
+    pub(crate) async fn forget_reserved_with_work(
+        &self,
+        reservation: crate::storage::batch::BatchChild,
+        id: crate::model::MemoryId,
+        parent: Option<&WorkTicket>,
+    ) -> Result<crate::storage::control::WriteReceipt, StorageError> {
+        let work = self.accept_work(parent)?;
+        let result = self.forget_reserved_accepted(reservation, id, &work).await;
+        self.finish_known_work(work);
+        result
+    }
+
+    async fn forget_reserved_accepted(
+        &self,
+        reservation: crate::storage::batch::BatchChild,
+        id: crate::model::MemoryId,
+        work: &WorkTicket,
+    ) -> Result<crate::storage::control::WriteReceipt, StorageError> {
+        let gate = publication_gate(&self.storage).await?;
+        let lease = gate.read_owned().await;
+        let storage = self.storage.clone();
+        let child = work.child()?;
+        let result = tokio::task::spawn_blocking(move || {
+            let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
+            let result = storage.tombstone_memory_reserved_with_work(
+                &reservation.context(),
+                id,
+                Some(&reservation),
+                Some(&child),
+            );
+            storage.meta_store().finish_work(child);
+            result
+        })
+        .await
+        .map_err(|e| failed(format!("batch forget worker outcome unknown: {e}")))?;
+        drop(lease);
+        let receipt = result?;
+        self.complete_with_work(Some(work))
+            .await
+            .map_err(|source| StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(source),
+            })?;
+        Ok(receipt)
     }
 
     /// Retrying is safe: no receipt is acknowledged until every view is ready.

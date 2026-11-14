@@ -288,6 +288,7 @@ impl MetadataStore {
                 before: &before,
                 after: &after,
             },
+            None,
         )
         .map(|result| DecayMutationResult::Committed(result.receipt))
     }

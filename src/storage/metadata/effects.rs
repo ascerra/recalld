@@ -320,6 +320,7 @@ impl MetadataStore {
             delete_records,
             release_vectors,
             RecordMutation::GraphOnly,
+            None,
         )
     }
 
@@ -337,6 +338,7 @@ impl MetadataStore {
         delete_records: bool,
         release_vectors: bool,
         mutation: RecordMutation<'_>,
+        child: Option<&crate::storage::batch::BatchChild>,
     ) -> Result<EffectResult, StorageError> {
         _guard.check(self)?;
         let MutationScope::Namespace(namespace) = ctx.scope else {
@@ -556,6 +558,8 @@ impl MetadataStore {
                 &removed,
                 deletes.len(),
             )?
+        } else if let Some(child) = child {
+            super::batch::record_child(&tx, child, ctx, hash, outcome)?
         } else {
             control::record_receipt(&tx, ctx, hash, outcome)?
         };
@@ -634,7 +638,13 @@ impl MetadataStore {
         // not assume failure means its staged bytes can be reclaimed.
         #[cfg(test)]
         let committed = committed.and_then(|()| {
-            if FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.replace(false)) {
+            if FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.replace(false))
+                || child.is_some()
+                    && self
+                        .fail_batch_commit
+                        .compare_exchange(3, 0, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+            {
                 Err(redb::CommitError::Storage(redb::StorageError::Io(
                     std::io::Error::other("injected unknown record commit"),
                 )))

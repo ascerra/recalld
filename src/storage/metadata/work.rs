@@ -133,6 +133,17 @@ impl MetadataStore {
             StorageError::RecoveryRequired("metadata publication busy or poisoned".into())
         })?;
         self.ensure_available()?;
+        // No input can be invented from a payload-free batch manifest. A
+        // stopped executor is not proof that its durable children completed.
+        let pending = self.pending_batch_items_checked(|| {
+            admission.check(&self.work_tracker)?;
+            Ok(())
+        })?;
+        if pending != 0 {
+            return Err(StorageError::RecoveryRequired(format!(
+                "{pending} durable batch items require matching caller resubmission"
+            )));
+        }
         let read = self.db.begin_read()?;
         let state = control::validate_existing(&read)?
             .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;

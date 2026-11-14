@@ -22,7 +22,25 @@ impl RedbStorageEngine {
         generated_embedding: &[f32],
         sampled_at: i64,
     ) -> Result<WriteReceipt, StorageError> {
-        self.insert_memory_with_work(ctx, input, generated_embedding, sampled_at, None)
+        self.insert_memory_reserved(ctx, input, generated_embedding, sampled_at, None)
+    }
+
+    pub(crate) fn insert_memory_reserved(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        sampled_at: i64,
+        child: Option<&crate::storage::batch::BatchChild>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            sampled_at,
+            child,
+            None,
+        )
     }
 
     pub(crate) fn insert_memory_with_work(
@@ -33,6 +51,25 @@ impl RedbStorageEngine {
         sampled_at: i64,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            sampled_at,
+            None,
+            parent,
+        )
+    }
+
+    pub(crate) fn insert_memory_reserved_with_work(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        sampled_at: i64,
+        child: Option<&crate::storage::batch::BatchChild>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
         let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let edges = self.edge_store.load_all_edges()?;
@@ -40,13 +77,14 @@ impl RedbStorageEngine {
         let text = &mut self.text_store;
         let mut staging_started = false;
         let embedding = input.embedding.as_deref().unwrap_or(generated_embedding);
-        let result = self.meta_store.insert_with_effects(
+        let result = self.meta_store.insert_reserved_with_effects(
             &guard,
             ctx,
             input,
             sampled_at,
             embedding,
             &edges,
+            child,
             |namespace, record, normalized| {
                 let store = vectors
                     .get_mut(namespace.id)
