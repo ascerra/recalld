@@ -1,0 +1,12 @@
+{
+  "runtime_commit": "a69865b706beb958881b6b808fe6977222e7d1a9",
+  "parent": "6f566245342daa3374ea7f7426073b59d01af08a",
+  "source_files": [
+    "docs/implementation/native-phase-clock.md",
+    "src/storage/metadata/native_records.rs",
+    "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl",
+    "src/storage/metadata/native_records/phase_clock_tests.rs",
+    "src/storage/metadata/native_records/tests.rs",
+    "src/storage/native_records.rs"
+  ]
+}

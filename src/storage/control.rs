@@ -245,6 +245,9 @@ pub enum MutationOutcome {
         #[serde(rename = "removedFieldsMask")]
         removed_fields_mask: u8,
     },
+    NativeNamespaceCreated {
+        transition: super::native_catalog::NativeNamespaceCreated,
+    },
     NativeMemoryInserted {
         transition: super::native_records::NativeRecordWrite,
     },
@@ -431,7 +434,8 @@ pub(crate) fn validate_existing(
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
-            MutationOutcome::NamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::NamespaceCreated { .. }
+            | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
             MutationOutcome::NamespacePolicyUpdated { namespace_id }
             | MutationOutcome::NamespacePurgeStarted { namespace_id, .. }
             | MutationOutcome::NamespacePurgeAdvanced { namespace_id, .. } => {
@@ -464,6 +468,7 @@ pub(crate) fn validate_existing(
         if matches!(
             stored.receipt.outcome,
             MutationOutcome::LifecyclePolicyMigrated { .. }
+                | MutationOutcome::NativeNamespaceCreated { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
                 | MutationOutcome::LifecycleFeedbackApplied { .. }
                 | MutationOutcome::NativeMemoryInserted { .. }
@@ -634,6 +639,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativeNamespaceCreated { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeMemoryInserted { transition } => {
             transition.validate(&stored.receipt, true)?
         }
@@ -769,7 +777,8 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::NativeMemoryInserted { .. }
+        MutationOutcome::NativeNamespaceCreated { .. }
+        | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
         | MutationOutcome::LifecycleFeedbackApplied { .. }
