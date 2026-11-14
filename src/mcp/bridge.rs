@@ -78,6 +78,14 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    async fn mutate_native_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, crate::serialization::native_batch::BatchFailure>
+    {
+        Err(crate::serialization::native_batch::BatchFailure::unavailable())
+    }
+
     /// Old implementations cannot manufacture durable receipts. The actual
     /// direct and daemon adapters opt in; callers never fall back after a write.
     fn supports_durable_batches(&self) -> bool {

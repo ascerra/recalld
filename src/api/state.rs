@@ -579,6 +579,9 @@ pub struct NamespaceListInfo {
 /// themselves -- they receive them through `AppState`.
 #[derive(Clone)]
 pub struct AppState {
+    /// Optional same-owner native batch producer. Absence fails closed.
+    pub native_batches: Option<Arc<dyn crate::mcp::bridge::StorageEngine>>,
+    pub default_namespace: String,
     /// The search pipeline: embedding, vector search, graph expansion.
     pub search: Arc<dyn SearchPipeline>,
 
@@ -605,6 +608,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn with_native_batches(
+        mut self,
+        producer: Arc<dyn crate::mcp::bridge::StorageEngine>,
+        default_namespace: String,
+    ) -> Self {
+        self.native_batches = Some(producer);
+        self.default_namespace = default_namespace;
+        self
+    }
+
     /// Construct a new `AppState` from pre-initialized subsystems.
     ///
     /// All subsystems must be fully initialized before the API server
@@ -619,6 +632,8 @@ impl AppState {
         metrics: Arc<dyn MetricsCollector>,
     ) -> Self {
         Self {
+            native_batches: None,
+            default_namespace: crate::model::constants::DEFAULT_NAMESPACE_NAME.into(),
             search,
             storage,
             cache,

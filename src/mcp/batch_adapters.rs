@@ -23,11 +23,26 @@ impl McpStorageAdapter {
         &self,
         input: BatchInput,
     ) -> Result<BatchOutcome, bridge::BridgeError> {
+        self.run_batch_typed(input)
+            .await
+            .map_err(StoreWriteError::into_bridge)
+    }
+
+    pub(crate) async fn run_batch_typed(
+        &self,
+        input: BatchInput,
+    ) -> Result<BatchOutcome, StoreWriteError> {
+        self.run_batch_budgeted(input, None).await
+    }
+
+    pub(crate) async fn run_batch_budgeted(
+        &self,
+        input: BatchInput,
+        budget: Option<crate::mcp::batch_budget::BatchBudget>,
+    ) -> Result<BatchOutcome, StoreWriteError> {
         let completion = self.batch_completion();
-        let work = completion
-            .accept_work(None)
-            .map_err(super::map_mutation_error)?;
-        let result = self.run_batch_accepted(input, &work).await;
+        let work = completion.accept_work(None)?;
+        let result = self.run_batch_accepted(input, &work, budget).await;
         completion.finish_known_work(work);
         result
     }
@@ -36,13 +51,25 @@ impl McpStorageAdapter {
         &self,
         input: BatchInput,
         work: &crate::storage::work::WorkTicket,
-    ) -> Result<BatchOutcome, bridge::BridgeError> {
+        budget: Option<crate::mcp::batch_budget::BatchBudget>,
+    ) -> Result<BatchOutcome, StoreWriteError> {
         // Prepare the entire ordered caller intent before policy/default reads.
-        let prepared = if input.mutation_version == 3 {
+        let mut prepared = if input.mutation_version == 3 {
             batches::prepare_native_store(&input)?
         } else {
             batches::prepare(&input)?
         };
+        let budget_plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
+        if budget.is_some() {
+            for (index, (item, value)) in prepared.iter_mut().zip(&input.items).enumerate() {
+                if let Some(error) = crate::serialization::native_batch::item_error(value, index) {
+                    item.plan = BatchItemPlan::Invalid {
+                        request_hash: item.plan.request_hash(),
+                        error,
+                    };
+                }
+            }
+        }
         let plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
         let ctx = input.context();
         let kind = input.kind;
@@ -50,20 +77,22 @@ impl McpStorageAdapter {
         let version = input.mutation_version;
         let config = self.config.clone();
         let storage = self.storage.clone();
-        let worker = work
-            .child()
-            .map_err(|e| super::map_mutation_error(e.into()))?;
+        let worker = work.child().map_err(StorageError::from)?;
         let reserved=tokio::task::spawn_blocking(move||{
             let storage=storage.read().map_err(|e|StorageError::RecoveryRequired(e.to_string()))?;
             let result=(|| {
                 let store_id=storage.meta_store().control_state()?.store_id;
-                let reservation=if version==3 {storage.meta_store().reserve_native_store_batch_with_work(&ctx,&plans,parent,Some(&worker),||crate::graph::native_selection::freeze_settings(&config.graph))}else{storage.meta_store().reserve_or_resume_batch_with_work(&ctx,kind,&plans,parent,Some(&worker))};
+                let reservation=if version==3 {storage.meta_store().reserve_native_store_batch_with_work(&ctx,&plans,parent,Some(&worker),|| {
+                    let settings = crate::graph::native_selection::freeze_settings(&config.graph)?;
+                    if let Some(budget) = budget { budget.fresh(&plans, &settings)?; }
+                    Ok(settings)
+                })}else{storage.meta_store().reserve_or_resume_batch_with_work(&ctx,kind,&plans,parent,Some(&worker))};
                 Ok::<_,StorageError>((store_id,reservation))
             })();
             storage.meta_store().finish_work(worker);
             result
         }).await.map_err(|e|bridge::BridgeError::PartiallyApplied(format!("batch reservation worker outcome unknown; resubmit the same full request and key after recovery: {e}")))?
-            .map_err(super::map_mutation_error)?;
+            .map_err(StoreWriteError::Canonical)?;
         let (store_id, reserved) = reserved;
         let mut progress = match reserved {
             Ok(progress) => progress,
@@ -96,8 +125,11 @@ impl McpStorageAdapter {
                     unresolved: prepared.len(),
                 });
             }
-            Err(e) => return Err(super::map_mutation_error(e)),
+            Err(e) => return Err(e.into()),
         };
+        if let Some(budget) = budget {
+            budget.retained(&progress, &budget_plans)?;
+        }
         let mut outcome = outcome_from_progress(&progress, &prepared, self.timezone)?;
         // A previous attempt may have committed a child but failed publication.
         // Replay never calls a provider or allocates another payload/identity.
@@ -117,9 +149,7 @@ impl McpStorageAdapter {
             let child = progress.child(index).ok_or_else(|| {
                 bridge::BridgeError::Internal("pending batch item has no reservation".into())
             })?;
-            let item_work = work
-                .child()
-                .map_err(|e| super::map_mutation_error(e.into()))?;
+            let item_work = work.child().map_err(StorageError::from)?;
             let result = if input.mutation_version == 3 {
                 self.run_linked_batch_child(prepared, &child, &item_work)
                     .await
@@ -154,7 +184,8 @@ impl McpStorageAdapter {
             } else {
                 return Err(bridge::BridgeError::Internal(
                     "pending item has no prepared input".into(),
-                ));
+                )
+                .into());
             };
             self.batch_completion().finish_known_work(item_work);
             match result {
@@ -208,9 +239,7 @@ impl McpStorageAdapter {
                             final_error = error.clone();
                         }
                         let storage = self.storage.clone();
-                        let worker = work
-                            .child()
-                            .map_err(|e| super::map_mutation_error(e.into()))?;
+                        let worker = work.child().map_err(StorageError::from)?;
                         let finalized = tokio::task::spawn_blocking(move || {
                             let storage = storage
                                 .read()

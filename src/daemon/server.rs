@@ -496,6 +496,24 @@ async fn dispatch(
             }
         }
 
+        "mutate_native_batch_v1" => {
+            use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};
+            let reply = match serde_json::from_value::<crate::storage::batch::BatchInput>(params) {
+                Ok(input) => match storage.mutate_native_batch(input).await {
+                    Ok(out) => NativeBatchReply::Outcome(out),
+                    Err(e) => NativeBatchReply::Failure(e),
+                },
+                Err(_) => NativeBatchReply::Failure(BatchFailure::from_bridge(
+                    BridgeError::InvalidInput("invalid native batch parameters".into()),
+                )),
+            };
+            serde_json::to_value(reply).map_err(|_| {
+                BridgeError::PartiallyApplied(
+                    "native batch reply serialization failed; reconcile original identity".into(),
+                )
+            })
+        }
+
         "mutate_batch" => {
             let input: crate::storage::batch::BatchInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(format!("batch parameters: {e}")))?;

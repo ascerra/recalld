@@ -1323,6 +1323,27 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    async fn mutate_native_batch(
+        &self,
+        input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, crate::serialization::native_batch::BatchFailure>
+    {
+        use crate::serialization::native_batch::BatchFailure;
+        if input.mutation_version != 3
+            || input.result_version != 1
+            || input.kind != crate::storage::batch::BatchKind::Insert
+        {
+            return Err(BatchFailure::from_bridge(
+                bridge::BridgeError::InvalidInput("native insertion batch version mismatch".into()),
+            ));
+        }
+        self.run_batch_budgeted(input, Some(crate::mcp::batch_budget::BatchBudget::STANDARD))
+            .await
+            .map_err(|e| match e {
+                StoreWriteError::Canonical(e) => BatchFailure::from_storage(e),
+                StoreWriteError::Bridge(e) => BatchFailure::from_bridge(e),
+            })
+    }
     async fn backend_context(
         &self,
     ) -> Result<crate::serialization::session::BackendContext, bridge::BridgeError> {

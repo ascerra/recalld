@@ -504,3 +504,6 @@ fn process_child_boundaries(cas: bool) {
 
 #[path = "batch_cas_tests.rs"]
 mod cas;
+
+#[path = "batch_wire_tests.rs"]
+mod wire;

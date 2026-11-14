@@ -1870,6 +1870,19 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if name == "store_memories" {
+        let result = match crate::serialization::native_batch::parse(
+            &arguments,
+            true,
+            None,
+            bridge.default_namespace(),
+        ) {
+            Ok(input) => bridge.storage.mutate_native_batch(input).await,
+            Err(e) => Err(e.into()),
+        };
+        let (status, envelope) = crate::serialization::native_batch::response(result);
+        return crate::serialization::native_batch::mcp_result(status, &envelope);
+    }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{
         contract::{CommitState, Envelope, ErrorCategory, ExecutionError},

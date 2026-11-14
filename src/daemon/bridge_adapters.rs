@@ -134,6 +134,24 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn mutate_native_batch(
+        &self,
+        input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, crate::serialization::native_batch::BatchFailure>
+    {
+        use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};
+        let params = serde_json::to_value(input).map_err(|_| BatchFailure::unavailable())?;
+        // Dedicated non-retrying RPC. Never fall back to the legacy writer.
+        let value = self
+            .client
+            .call("mutate_native_batch_v1", params)
+            .await
+            .map_err(|_| BatchFailure::uncertain())?;
+        serde_json::from_value::<NativeBatchReply>(value)
+            .map_err(|_| BatchFailure::uncertain())?
+            .result()
+    }
+
     fn supports_durable_batches(&self) -> bool {
         true
     }

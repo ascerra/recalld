@@ -48,3 +48,5 @@ pub enum McpError {
 }
 
 pub(crate) mod native_advisory;
+
+pub(crate) mod batch_budget;

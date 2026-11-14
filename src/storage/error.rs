@@ -8,6 +8,12 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    /// Existing item receipts remain retained. This is reservation evidence only,
+    /// never an assertion that the batch committed atomically or became ready.
+    #[error("RESPONSE_TOO_LARGE: complete native batch result exceeds transport budget")]
+    BatchResponseTooLarge {
+        reservation_receipt: Option<Box<crate::storage::control::WriteReceipt>>,
+    },
     #[error("LIFECYCLE_CONFLICT: {0}")]
     LifecycleConflict(String),
     #[error("CONTENT_UNAVAILABLE")]

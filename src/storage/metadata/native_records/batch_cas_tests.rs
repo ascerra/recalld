@@ -1,5 +1,84 @@
 use super::*;
 
+#[test]
+fn batch_cas_genuine_before106_none_bytes_hashes_reopen_and_replay() {
+    let artifacts =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native-batch-before106");
+    let root = tempfile::tempdir().unwrap();
+    for version in [1, 2, 3] {
+        let manifest = std::fs::read(artifacts.join(format!("v{version}-manifest.json"))).unwrap();
+        let p: batch::BatchProgress = control::decode(&manifest).unwrap();
+        assert!(p.reservation_precondition.is_none());
+        assert_eq!(control::encode(&p).unwrap(), manifest);
+        let raw_receipt =
+            std::fs::read(artifacts.join(format!("v{version}-reservation.json"))).unwrap();
+        let retained = control::validate_receipt(&raw_receipt).unwrap();
+        assert_eq!(control::encode(&retained).unwrap(), raw_receipt);
+        let request_bytes =
+            std::fs::read(artifacts.join(format!("v{version}-request.json"))).unwrap();
+        let r: BatchInput = serde_json::from_slice(&request_bytes).unwrap();
+        assert!(r.expected_generation.is_none());
+        assert_eq!(serde_json::to_vec(&r).unwrap(), request_bytes);
+        assert_eq!(
+            retained.request_hash,
+            control::request_hash(
+                &r.context(),
+                batch::reservation_domain(version).unwrap(),
+                &[&p.caller_hash]
+            )
+        );
+        let destination = root.path().join(format!("store-{version}"));
+        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+        let native;
+        let legacy;
+        let meta = if version == 1 {
+            let mut archive =
+                zip::ZipArchive::new(std::fs::File::open(artifacts.join("v1-store.zip")).unwrap())
+                    .unwrap();
+            archive.extract(&destination).unwrap();
+            legacy = RedbStorageEngine::open(&destination).unwrap();
+            legacy.meta_store()
+        } else {
+            crate::storage::logical_export::import_store(
+                &artifacts.join(format!("v{version}.jsonl")),
+                &destination,
+            )
+            .unwrap();
+            native = NativeLifecycleSession::open(
+                &destination,
+                NativePolicyInputs::default(),
+                clock.clone(),
+            )
+            .unwrap();
+            native.metadata()
+        };
+        let before = readers::bytes(&destination);
+        let prepared = if version == 3 {
+            plans(&r)
+        } else {
+            crate::mcp::batches::prepare(&r)
+                .unwrap()
+                .into_iter()
+                .map(|p| p.plan)
+                .collect()
+        };
+        let actual = if version == 3 {
+            meta.reserve_native_store_batch_with_work(&r.context(), &prepared, None, None, || {
+                panic!("historical replay sampled settings")
+            })
+            .unwrap()
+        } else {
+            meta.reserve_batch(&r.context(), r.kind, &prepared).unwrap()
+        };
+        assert!(actual.reservation_receipt.replayed);
+        let mut expected = p.clone();
+        expected.reservation_receipt.replayed = true;
+        assert_eq!(actual, expected);
+        assert_eq!(readers::bytes(&destination), before);
+        assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    }
+}
+
 fn cas_request(s: &NativeLifecycleSession, d: &Data) -> BatchInput {
     let state = s.metadata().control_state().unwrap();
     let mut r = request(d, state.store_id);
