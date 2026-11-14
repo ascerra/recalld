@@ -85,8 +85,8 @@ impl McpStorageAdapter {
                     if let Some(expected) = ctx.expected_generation {
                         if expected != generation.generation {
                             return Err(StorageError::GenerationConflict {
-                                expected: expected.to_string(),
-                                actual: generation.generation.to_string(),
+                                expected: String::from(expected),
+                                actual: String::from(generation.generation),
                             });
                         }
                     }
