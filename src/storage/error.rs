@@ -138,6 +138,9 @@ pub enum StorageError {
     #[error("namespace not found: {0}")]
     NamespaceNotFound(u32),
 
+    #[error("namespace not found: {0}")]
+    NamespaceNameNotFound(String),
+
     /// An explicit namespace assertion does not match the record's immutable scope.
     #[error("NAMESPACE_MISMATCH: memory {id} does not belong to namespace '{namespace}'")]
     NamespaceMismatch {

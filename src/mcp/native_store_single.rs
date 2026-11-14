@@ -45,7 +45,7 @@ impl McpStorageAdapter {
                         engine
                             .get_namespace_by_name(&parsed.store.namespace)?
                             .ok_or_else(|| {
-                                StorageError::InvalidMutation("namespace does not exist".into())
+                                StorageError::NamespaceNameNotFound(parsed.store.namespace.clone())
                             })?
                             .id
                     }
@@ -70,7 +70,13 @@ impl McpStorageAdapter {
                     .meta_store()
                     .capture_namespace_binding(&guard, namespace_id)?;
                 let binding = binding.ok_or_else(|| {
-                    StorageError::RecoveryRequired("namespace binding unavailable".into())
+                    if known.is_some() {
+                        StorageError::RecoveryRequired(
+                            "retained namespace binding unavailable".into(),
+                        )
+                    } else {
+                        StorageError::NamespaceNotFound(namespace_id.get())
+                    }
                 })?;
                 if parsed
                     .asserted_name
@@ -159,10 +165,17 @@ impl McpStorageAdapter {
                         error: None,
                         warnings: warnings.into_iter().map(str::to_owned).collect(),
                     },
-                    Err(source) => Reply::failure(StorageError::CommittedMutation {
-                        receipt: Box::new(receipt),
-                        source: Box::new(source),
-                    }),
+                    Err(source) => {
+                        let mut reply = Reply::failure(StorageError::CommittedMutation {
+                            receipt: Box::new(receipt),
+                            source: Box::new(source),
+                        });
+                        reply.read_generation = read_generation;
+                        reply
+                            .warnings
+                            .extend(warnings.into_iter().map(str::to_owned));
+                        reply
+                    }
                 }
             }
             Err(error) => {
@@ -181,7 +194,12 @@ impl McpStorageAdapter {
             reply.namespace_id = Some(id);
             reply.namespace = Some(name);
         }
-        if reply.error.is_some() && reply.receipt.is_some() {
+        if reply.error.as_ref().is_some_and(|error| {
+            matches!(
+                error.commit_state,
+                CommitState::Committed | CommitState::Unknown
+            )
+        }) {
             match completion
                 .observe_readiness(deadline())
                 .await

@@ -114,25 +114,27 @@ impl Request {
             })
             .transpose()?;
         if let Some(value) = object.get("embedding") {
-            if value
-                .as_array()
-                .is_none_or(|v| !(1..=8192).contains(&v.len()))
-            {
-                return Err(invalid(
-                    "/embedding",
-                    "embedding must contain 1–8192 values",
-                ));
+            let values = value.as_array().ok_or_else(|| InputError {
+                code: "INVALID_TYPE",
+                field: "/embedding".into(),
+                message: "embedding must be an array",
+            })?;
+            if !(1..=8192).contains(&values.len()) {
+                return Err(InputError {
+                    code: "OUT_OF_RANGE",
+                    field: "/embedding".into(),
+                    message: "embedding must contain 1–8192 values",
+                });
             }
             let vector: Vec<f32> = serde_json::from_value(value.clone())
                 .map_err(|_| invalid("/embedding", "embedding must be a finite f32 array"))?;
             let mut normalized = vector.clone();
             let dimension = normalized.len();
             crate::embedding::validation::normalize_vector(&mut normalized, dimension).map_err(
-                |_| {
-                    invalid(
-                        "/embedding",
-                        "embedding must contain 1–8192 finite values with nonzero norm",
-                    )
+                |_| InputError {
+                    code: "OUT_OF_RANGE",
+                    field: "/embedding".into(),
+                    message: "embedding must contain finite values with nonzero norm",
                 },
             )?;
             store.embedding = Some(vector); // Original bits, not the validation copy.
@@ -204,26 +206,36 @@ impl Reply {
         if let Some(error) = &mut out.error {
             error.code = "COMMIT_OUTCOME_UNKNOWN".into();
             error.commit_state = CommitState::Unknown;
+            error.message =
+                "native single reply unavailable; reconcile the original request and key".into();
         }
         out
     }
     pub(crate) fn failure(error: crate::storage::StorageError) -> Self {
+        let uncertain = matches!(&error, crate::storage::StorageError::RecoveryRequired(_));
         let source = match &error {
             crate::storage::StorageError::CommittedMutation { source, .. } => source.as_ref(),
             other => other,
         };
         let specific = match source {
             crate::storage::StorageError::EmbeddingProfileMismatch => Some((
-                ErrorCategory::InvalidInput,
+                ErrorCategory::Conflict,
                 "EMBEDDING_PROFILE_MISMATCH",
                 "/embeddingProfileId",
                 "supplied profile ID differs from canonical binding",
             )),
             crate::storage::StorageError::MutationNamespaceMismatch => Some((
-                ErrorCategory::InvalidInput,
+                ErrorCategory::Conflict,
                 "NAMESPACE_MISMATCH",
                 "/namespace",
                 "namespace assertion differs from canonical binding",
+            )),
+            crate::storage::StorageError::NamespaceNotFound(_)
+            | crate::storage::StorageError::NamespaceNameNotFound(_) => Some((
+                ErrorCategory::NotFound,
+                "NAMESPACE_NOT_FOUND",
+                "/namespace",
+                "namespace does not exist",
             )),
             crate::storage::StorageError::BatchResponseTooLarge {
                 reservation_receipt: None,
@@ -236,6 +248,14 @@ impl Reply {
             _ => None,
         };
         let mut failure = super::native_batch::BatchFailure::from_storage(error);
+        if failure.error.code == "STORAGE_UNAVAILABLE" {
+            failure.error.message = "native single consumer unavailable".into();
+        }
+        if uncertain {
+            failure.error.code = "COMMIT_OUTCOME_UNKNOWN".into();
+            failure.error.commit_state = CommitState::Unknown;
+            failure.error.message = "native single outcome unavailable; recover and reconcile the original request and key".into();
+        }
         if let Some((category, code, field, message)) = specific {
             failure.error.category = category;
             failure.error.code = code.into();
@@ -283,6 +303,12 @@ impl Reply {
             });
         let (status, mut envelope) = if let Some(error) = self.error {
             let status = match error.category {
+                ErrorCategory::InvalidInput
+                    if error.code == "OUT_OF_RANGE"
+                        && error.field.as_deref() == Some("/embedding") =>
+                {
+                    422
+                }
                 ErrorCategory::InvalidInput => 400,
                 ErrorCategory::NotFound => 404,
                 ErrorCategory::Conflict => 409,
@@ -494,6 +520,12 @@ mod tests {
                 Request::parse(&bad, false, None, "native").is_err(),
                 "{field}"
             );
+        }
+        for (value, status) in [(json!(null), 400), (json!([0., 0.]), 422), (json!([]), 422)] {
+            let mut bad = good.clone();
+            bad["embedding"] = value;
+            let error = Request::parse(&bad, false, None, "native").unwrap_err();
+            assert_eq!(Reply::invalid(error).response().0, status);
         }
         assert_eq!(input_schema(false)["additionalProperties"], false);
         assert!(input_schema(false)["properties"].get("createdAt").is_none());
