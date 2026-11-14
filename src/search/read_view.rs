@@ -284,8 +284,23 @@ mod tests {
         Instant::now() + Duration::from_secs(10)
     }
     fn bytes(f: &Fixture) -> Vec<(std::path::PathBuf, Vec<u8>)> {
-        crate::storage::validation::canonical_files(f.path())
-            .unwrap()
+        // Inspect this owned fixture's actual catalog/selection. Offline full
+        // validation opens database copies and is not a live-handle byte reader.
+        // This is a test invariant, never permission to capture a snapshot.
+        let storage = f.storage.read().unwrap();
+        let mut paths: Vec<_> = ["meta.db", "edges.db", "fulltext.dat"]
+            .into_iter()
+            .map(|name| f.path().join(name))
+            .collect();
+        for namespace in storage.list_namespaces().unwrap() {
+            paths.push(f.path().join(namespace.name).join("vectors.dat"));
+        }
+        if let Some(selected) = storage.meta_store().text_selection().unwrap() {
+            paths.push(f.path().join(selected.filename));
+        }
+        paths.sort();
+        paths.dedup();
+        paths
             .into_iter()
             .map(|p| {
                 let bytes = std::fs::read(&p).unwrap();
