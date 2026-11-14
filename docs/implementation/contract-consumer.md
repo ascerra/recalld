@@ -41,3 +41,22 @@ Additional A4 work remains: versioned public profile/keyed write adapters over
 actual native/batch APIs, full per-operation schemas and envelopes, truthful
 resolved session discovery, generation-bound filtered list/catalog continuations
 and whole-query ReadView. No blanket A4-complete claim is made by this branch.
+
+## Capture cost and measurement limits
+
+Initial consumer caps are100000 namespace rows and256MiB of accounted encoded
+record/copied vector bytes, with checked arithmetic and whole-page error on
+overflow. All rows, including terminal/excluded ones, count against bounds.
+The snapshot is recaptured for every pairBudget page; no cursor-owned vector
+cache or implicit server-side job is introduced. This can dominate comparison
+cost, particularly at20000 records with1536-dimensional vectors. The simple
+implementation is correctness-first, not a performance-gate result.
+
+Coordinate actual backend accounting with the storage owner and record per-page
+rows, accounted metadata/vector bytes, capture wall time, pair comparisons and
+comparison wall time in isolated validation artifacts. Accounting bytes are not
+allocator-exact memory or physical disk I/O. Do not estimate invalid-vector read
+bytes from only Available rows. Actual200/2000/20000 measurements remain required;
+pure oracle fixtures and focused correctness tests do not satisfy that gate.
+A bounded iterator or explicitly bounded pinned state can be considered later,
+only with a concrete lifecycle/invalidation design and measurements.

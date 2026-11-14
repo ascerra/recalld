@@ -14,6 +14,7 @@ mod simd;
 
 // Near-duplicate detection at store time.
 mod duplicates;
+pub(crate) mod exact_pairs;
 
 // CS-26: FTS5 full-text search (replaces custom BM25)
 mod fts;
