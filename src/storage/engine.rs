@@ -10,8 +10,8 @@
 mod catalog;
 mod effects;
 mod insertion;
-mod native_records;
 mod maintenance;
+mod native_records;
 mod purge;
 mod text_compaction;
 mod tombstone;

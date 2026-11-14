@@ -139,6 +139,19 @@ pub(crate) fn validate_policy_history(
             Ok(v.value().to_vec())
         })
         .collect::<Result<std::collections::HashSet<_>, StorageError>>()?;
+    // This API first validates complete manifest/receipt/origin bindings. It
+    // returns only native-v2 bookkeeping, never a table or variant allowlist.
+    let native_bookkeeping = super::metadata::batch::validated_native_bookkeeping(read)?;
+    let is_native_bookkeeping = |receipt: &WriteReceipt| {
+        native_bookkeeping.iter().any(|entry| {
+            entry.generation
+                == GenerationRef {
+                    store_id: receipt.store_id,
+                    generation: receipt.committed_generation,
+                }
+                && entry.operation_id == receipt.operation_id
+        })
+    };
     let mut suffix = BTreeMap::new();
     let mut policies: HashMap<u32, BTreeMap<Generation, (WriteReceipt, PolicyTransition)>> =
         HashMap::new();
@@ -200,6 +213,11 @@ pub(crate) fn validate_policy_history(
                     t.policy_revision,
                 ));
                 Some(t.namespace_id)
+            }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(&receipt) =>
+            {
+                None
             }
             _ if active => return Err(invalid("unrecognized operation after schema publication")),
             _ => None,
@@ -396,6 +414,8 @@ pub(crate) fn validate_policy_history(
                         .ok_or_else(|| invalid("native record namespace absent"))?,
                 )?;
             }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(receipt) => {}
             _ => return Err(invalid("unrecognized operation in lifecycle proof")),
         }
     }

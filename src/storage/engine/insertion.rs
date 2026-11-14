@@ -33,7 +33,15 @@ impl RedbStorageEngine {
         profile: Option<&crate::model::schema::EmbeddingProfile>,
         sampled_at: i64,
     ) -> Result<WriteReceipt, StorageError> {
-        self.insert_memory_reserved_with_work(ctx, input, generated_embedding, profile, sampled_at, None, None)
+        self.insert_memory_reserved_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            profile,
+            sampled_at,
+            None,
+            None,
+        )
     }
 
     pub(crate) fn insert_memory_reserved(

@@ -14,7 +14,8 @@ pub(crate) struct PreparedItem {
 }
 
 pub(crate) fn prepare(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::BridgeError> {
-    if input.result_version != 1
+    if !matches!(input.mutation_version, 1 | 2)
+        || input.result_version != 1
         || input.items.is_empty()
         || input.items.len() > crate::model::constants::MAX_BATCH_MEMORIES
     {
@@ -33,6 +34,9 @@ pub(crate) fn prepare(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::B
         return Err(bridge::BridgeError::InvalidInput(
             "batchOperationId resume requires storeId and no idempotencyKey".into(),
         ));
+    }
+    if input.mutation_version == 2 {
+        return prepare_native(input);
     }
     input
         .items
@@ -318,6 +322,7 @@ mod tests {
     use super::*;
     fn request(namespace: &str, value: Value) -> BatchInput {
         BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![value],
@@ -375,16 +380,29 @@ pub(crate) fn stored_from_receipt(
     receipt: &control::WriteReceipt,
     timezone: chrono_tz::Tz,
 ) -> Result<bridge::StoredMemory, bridge::BridgeError> {
-    let control::MutationOutcome::MemoryInserted {
-        memory_id,
-        created_at,
-        initial_stability_bits,
-        ..
-    } = receipt.outcome
-    else {
-        return Err(bridge::BridgeError::Internal(
-            "wrong batch insertion receipt".into(),
-        ));
+    let (memory_id, created_at, initial_stability_bits) = match &receipt.outcome {
+        control::MutationOutcome::MemoryInserted {
+            memory_id,
+            created_at,
+            initial_stability_bits,
+            ..
+        } => (*memory_id, *created_at, *initial_stability_bits),
+        control::MutationOutcome::NativeMemoryInserted { transition } => {
+            let after = &transition
+                .primary()
+                .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
+                .after;
+            (
+                transition.memory_id,
+                after.lifecycle.created_at,
+                after.lifecycle.stability.get().to_bits(),
+            )
+        }
+        _ => {
+            return Err(bridge::BridgeError::Internal(
+                "wrong batch insertion receipt".into(),
+            ));
+        }
     };
     Ok(bridge::StoredMemory {
         id: memory_id.to_string(),
@@ -398,4 +416,140 @@ pub(crate) fn stored_from_receipt(
         }),
         near_duplicates: None,
     })
+}
+
+/// Versioned native boundary: verbatim structured labels, strict raw tags,
+/// explicit supplied-profile identity, and no lossy legacy-tag conversion.
+fn prepare_native(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::BridgeError> {
+    input
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            if input.kind == BatchKind::Forget {
+                let hash = item_hash(input.kind, value, None, &input.default_namespace)?;
+                let id = value
+                    .as_str()
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                    .map(MemoryId::from_uuid)
+                    .filter(|id| *id != MemoryId::nil());
+                return Ok(PreparedItem {
+                    plan: match id {
+                        Some(id) => BatchItemPlan::Forget {
+                            request_hash: hash,
+                            id,
+                        },
+                        None => BatchItemPlan::Invalid {
+                            request_hash: hash,
+                            error: BatchError {
+                                code: "INVALID_INPUT".into(),
+                                field: Some(format!("ids[{index}]")),
+                            },
+                        },
+                    },
+                    store: None,
+                    forget: id,
+                });
+            }
+            let parsed = parse_store(value, index, &input.default_namespace);
+            let hash = item_hash(
+                input.kind,
+                value,
+                parsed.as_ref().ok(),
+                &input.default_namespace,
+            )?;
+            let store = parsed.ok();
+            let native = store
+                .as_ref()
+                .ok_or_else(|| bridge::BridgeError::InvalidInput("invalid native item".into()))
+                .and_then(|s| native_input(s, value));
+            let hash = if let (Some(store), Ok(native)) = (&store, &native) {
+                let mut original = value.clone();
+                let object = original.as_object_mut().expect("parsed native object");
+                object.remove("embeddingProfile");
+                object.remove("observedAt");
+                let semantic =
+                    item_hash(input.kind, &original, Some(store), &input.default_namespace)?;
+                let profile = native
+                    .embedding_profile
+                    .as_ref()
+                    .map(|p| p.profile_id())
+                    .transpose()
+                    .map_err(bridge::BridgeError::InvalidInput)?;
+                let extra = control::encode(&(native.observed_at, profile))
+                    .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
+                control::request_hash(
+                    &input.context(),
+                    "batch_item_intent_v2",
+                    &[&semantic, &extra],
+                )
+            } else {
+                hash
+            };
+            let plan = match native {
+                Ok(native) => BatchItemPlan::NativeInsert {
+                    request_hash: hash,
+                    namespace: store.as_ref().unwrap().namespace.clone(),
+                    input: native,
+                },
+                Err(_) => BatchItemPlan::Invalid {
+                    request_hash: hash,
+                    error: BatchError {
+                        code: "INVALID_INPUT".into(),
+                        field: Some(format!("memories[{index}]")),
+                    },
+                },
+            };
+            Ok(PreparedItem {
+                plan,
+                store,
+                forget: None,
+            })
+        })
+        .collect()
+}
+fn native_input(
+    store: &bridge::StoreInput,
+    value: &Value,
+) -> Result<crate::storage::native_records::NativeInsert, bridge::BridgeError> {
+    let invalid = |e: String| bridge::BridgeError::InvalidInput(e);
+    let tags = store
+        .tags
+        .iter()
+        .map(|t| crate::model::Tag::new(t.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| invalid(e.to_string()))?;
+    let observed_at = value
+        .get("observedAt")
+        .map(|v| serde_json::from_value(v.clone()))
+        .transpose()
+        .map_err(|e| invalid(e.to_string()))?;
+    let embedding_profile = value
+        .get("embeddingProfile")
+        .map(|v| serde_json::from_value(v.clone()))
+        .transpose()
+        .map_err(|e| invalid(e.to_string()))?;
+    let native = crate::storage::native_records::NativeInsert {
+        memory: InsertMemory {
+            id: None,
+            summary: store.summary.clone(),
+            full_text: store.full_text.clone(),
+            tags,
+            initial_stability: store.initial_stability,
+            created_at: None,
+            embedding: store.embedding.clone(),
+            parent_id: store.parent_id,
+            supersedes: store.supersedes,
+        },
+        observed_at,
+        entities: store.entities.clone(),
+        topics: store.topics.clone(),
+        emotions: store.emotions.clone(),
+        embedding_profile,
+    };
+    native.validate().map_err(|e| invalid(e.to_string()))?;
+    if let Some(profile) = &native.embedding_profile {
+        profile.validate().map_err(invalid)?;
+    }
+    Ok(native)
 }

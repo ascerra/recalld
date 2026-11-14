@@ -29,6 +29,27 @@ impl RedbStorageEngine {
         clock: &dyn Clock,
         parent: Option<&WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.insert_native_record_reserved(ctx, intent, generated, policy, clock, parent, None)
+    }
+    pub(crate) fn insert_native_record_reserved(
+        &mut self,
+        ctx: &MutationContext,
+        intent: &NativeInsertIntent,
+        generated: &GeneratedEmbedding,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+        child: Option<&crate::storage::batch::BatchChild>,
+    ) -> Result<WriteReceipt, StorageError> {
+        if let Some(child) = child {
+            crate::storage::metadata::native_records::check_child_context(ctx, child)?;
+            if let Some(receipt) =
+                self.meta_store
+                    .lookup_native_insert_child(child, &intent.original, parent)?
+            {
+                return Ok(receipt);
+            }
+        }
         // Replay before current row/policy/provider output, then repeat inside
         // the actual final transaction. A miss here reserves nothing.
         if let Some(receipt) =
@@ -86,6 +107,7 @@ impl RedbStorageEngine {
                 crate::storage::metadata::effects::crash_point("after_insert_payload_sync");
                 Ok(())
             },
+            child,
         );
         if result.is_err() && staged {
             self.meta_store.mark_unavailable();
@@ -113,6 +135,26 @@ impl RedbStorageEngine {
         clock: &dyn Clock,
         parent: Option<&WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.tombstone_native_record_reserved(ctx, intent, policy, clock, parent, None)
+    }
+    pub(crate) fn tombstone_native_record_reserved(
+        &mut self,
+        ctx: &MutationContext,
+        intent: &NativeTombstoneIntent,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+        child: Option<&crate::storage::batch::BatchChild>,
+    ) -> Result<WriteReceipt, StorageError> {
+        if let Some(child) = child {
+            crate::storage::metadata::native_records::check_child_context(ctx, child)?;
+            if let Some(receipt) =
+                self.meta_store
+                    .lookup_native_forget_child(child, intent.memory_id, parent)?
+            {
+                return Ok(receipt);
+            }
+        }
         let guard = self.meta_store.native_guard_with_work(parent)?;
         if let Some(receipt) = self
             .meta_store
@@ -129,6 +171,7 @@ impl RedbStorageEngine {
             clock,
             &self.edge_store.load_all_edges()?,
             text_hash,
+            child,
         )?;
         if !receipt.replayed {
             effects::apply_pending(

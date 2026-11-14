@@ -482,7 +482,7 @@ pub async fn perform_entity_link(
 ) -> Result<usize, AutoLinkError> {
     perform_entity_link_with_work(
         new_memory_id,
-        _namespace_id,
+        namespace_id,
         entities,
         max_entity_links,
         entity_index,

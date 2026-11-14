@@ -130,7 +130,7 @@ fn validate_snapshot(
     for name in ["meta.db", "edges.db", "fulltext.dat"] {
         require_file(&path.join(name))?;
     }
-    let (_meta_copy, meta) = inspect_database(&path.join("meta.db"))?;
+    let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
     let read = meta.begin_read()?;
     let control = super::control::validate_existing(&read)?;
     if native_recovery {
@@ -150,7 +150,7 @@ fn validate_snapshot(
     }
     if super::metadata::batch::validate_existing(&read, control.as_ref())?
         .iter()
-        .any(|p| p.unresolved() != 0)
+        .any(|p| p.unresolved() != 0 && (!native_recovery || p.version != 2))
     {
         return Err(StorageError::RecoveryRequired(
             "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
@@ -321,7 +321,7 @@ fn validate_snapshot(
     for effect in effects.iter().filter(|e| !e.canonical_applied) {
         super::metadata::effects::validate_plan(effect, &decoded)?;
     }
-    let (_edges_copy, edges) = inspect_database(&path.join("edges.db"))?;
+    let (_edges_copy, edges) = inspect_database_copy(&path.join("edges.db"), native_recovery)?;
     let read = edges.begin_read()?;
     let forward = read.open_table(FORWARD_EDGES)?;
     let reverse = read.open_table(REVERSE_EDGES)?;

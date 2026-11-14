@@ -717,30 +717,17 @@ impl super::native_lifecycle::NativeLifecycleSession {
                 profile: None,
             }
         } else {
-            let profile = provider.profile().ok_or_else(|| {
-                StorageError::ProviderVectorUnavailable("provider identity missing".into())
-            })?;
-            crate::embedding::profile::require_compatible(&intent.namespace, &profile)
-                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
-            if provider.dimensions() != intent.namespace.embedding_dim as usize {
-                return Err(StorageError::ProviderVectorUnavailable(
-                    "provider dimension differs".into(),
-                ));
-            }
-            let values = provider
-                .embed(
-                    input
-                        .memory
-                        .full_text
-                        .as_deref()
-                        .unwrap_or(&input.memory.summary),
-                )
-                .await
-                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
-            crate::embedding::runtime::GeneratedEmbedding {
-                values,
-                profile: Some(profile),
-            }
+            crate::embedding::runtime::generate_native(
+                provider,
+                &intent.namespace,
+                input
+                    .memory
+                    .full_text
+                    .as_deref()
+                    .unwrap_or(&input.memory.summary),
+            )
+            .await
+            .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?
         };
         self.engine.insert_native_record(
             ctx,

@@ -268,9 +268,6 @@ pub enum MutationOutcome {
         #[serde(rename = "removedFieldsMask")]
         removed_fields_mask: u8,
     },
-    LifecyclePolicyMigrated {
-        transition: super::lifecycle_migration::PolicyTransition,
-    },
     NamespacePurgeStarted {
         namespace_id: NamespaceId,
         name_hash: [u8; 32],

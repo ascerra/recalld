@@ -8,7 +8,7 @@ use crate::storage::control::{MutationOutcome, WriteReceipt};
 use serde_json::json;
 
 impl McpStorageAdapter {
-    fn batch_completion(&self) -> crate::derived_completion::DerivedCompletion {
+    pub(super) fn batch_completion(&self) -> crate::derived_completion::DerivedCompletion {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -113,7 +113,10 @@ impl McpStorageAdapter {
             let item_work = work
                 .child()
                 .map_err(|e| super::map_mutation_error(e.into()))?;
-            let result = if let Some(input) = &prepared.store {
+            let result = if input.mutation_version == 2 {
+                self.run_native_batch_child(prepared, &child, &item_work)
+                    .await
+            } else if let Some(input) = &prepared.store {
                 let mut input = input.clone();
                 input.namespace = progress.items[index]
                     .defaults
@@ -406,8 +409,24 @@ fn item_outcome(
     Ok(outcome)
 }
 
-fn forget_result(id: crate::model::MemoryId, receipt: &WriteReceipt) -> serde_json::Value {
-    json!({"id":id.to_string(),"deleted":matches!(receipt.outcome,MutationOutcome::MemoryTombstoned{status:crate::storage::tombstone::TombstoneStatus::Tombstoned,..})})
+pub(super) fn forget_result(
+    id: crate::model::MemoryId,
+    receipt: &WriteReceipt,
+) -> serde_json::Value {
+    let deleted = match &receipt.outcome {
+        MutationOutcome::MemoryTombstoned { status, .. } => {
+            *status == crate::storage::tombstone::TombstoneStatus::Tombstoned
+        }
+        MutationOutcome::NativeMemoryTombstoned { transition } => {
+            transition.primary().is_ok_and(|p| {
+                p.before
+                    .as_ref()
+                    .is_some_and(|b| b.lifecycle.phase != crate::model::DecayPhase::Tombstone)
+            })
+        }
+        _ => false,
+    };
+    json!({"id":id.to_string(),"deleted":deleted})
 }
 
 fn final_error(error: &StoreWriteError) -> Option<BatchError> {
@@ -438,6 +457,7 @@ mod tests {
 
     fn request(f: &Fixture, key: &str, items: Vec<serde_json::Value>) -> BatchInput {
         BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items,

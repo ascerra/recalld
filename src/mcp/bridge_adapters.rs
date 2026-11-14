@@ -6,6 +6,8 @@
 
 #[path = "batch_adapters.rs"]
 mod batch_adapters;
+#[path = "native_batch.rs"]
+mod native_batch;
 
 use crate::decay::observation::Observed;
 use std::sync::Arc;
@@ -1046,14 +1048,18 @@ impl McpStorageAdapter {
                     if !merged_tags.is_empty() {
                         embed_text = format!("{} {}", embed_text, merged_tags.join(" "));
                     }
-                    crate::embedding::runtime::generate(self.embedding.as_ref(), &ns_config, &embed_text)
-                        .await
-                        .map_err(|e| match e {
-                            crate::embedding::EmbeddingError::TextTooLong { .. } => {
-                                bridge::BridgeError::InvalidInput(e.to_string())
-                            }
-                            _ => bridge::BridgeError::Unavailable(e.to_string()),
-                        })?
+                    crate::embedding::runtime::generate(
+                        self.embedding.as_ref(),
+                        &ns_config,
+                        &embed_text,
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        crate::embedding::EmbeddingError::TextTooLong { .. } => {
+                            bridge::BridgeError::InvalidInput(e.to_string())
+                        }
+                        _ => bridge::BridgeError::Unavailable(e.to_string()),
+                    })?
                 }
             };
 
@@ -1188,7 +1194,7 @@ impl McpStorageAdapter {
 
                     // Update entity index.
                     let mut idx = self.entity_index.write().await;
-                    idx.add(memory_id, &entities);
+                    idx.add(ns_config.id, memory_id, &entities);
                 }
 
                 // Temporal edges: link to recently-stored memories in the same namespace.
@@ -1428,6 +1434,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         }
         let outcome = self
             .run_batch(crate::storage::batch::BatchInput {
+                mutation_version: 1,
                 result_version: 1,
                 kind: crate::storage::batch::BatchKind::Forget,
                 items: ids

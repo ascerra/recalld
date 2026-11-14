@@ -427,6 +427,7 @@ fn batch_offline_run(
     use batch::{BatchError, BatchInput, BatchItemPlan, BatchItemState};
     let mut engine = RedbStorageEngine::open(source).unwrap();
     let input = BatchInput {
+        mutation_version: 1,
         result_version: 1,
         kind,
         items,
@@ -467,7 +468,9 @@ fn batch_offline_run(
                         .tombstone_memory_reserved(&child.context(), *id, Some(&child))
                         .unwrap();
                 }
-                BatchItemPlan::Invalid { .. } => unreachable!(),
+                BatchItemPlan::Invalid { .. } | BatchItemPlan::NativeInsert { .. } => {
+                    unreachable!()
+                }
             }
         }
     }
