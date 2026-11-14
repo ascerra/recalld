@@ -412,3 +412,30 @@ async fn coherent_by_id_marker_missing_empty_and_owned_payload_survive_handle_ch
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn coherent_by_id_point_capture_requires_canonical_admission_not_unused_index_stamps() {
+    let h = Harness::new().await;
+    let before = h.snapshot();
+    // Raw legacy fixture insertion has canonical rows but no published derived
+    // registry. A canonical point fetch does not consume any of those indexes.
+    assert!(
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .capture_read_view()
+            .is_err()
+    );
+    let (ok, body) = call(&h, true, false, false, Some("default")).await;
+    assert!(ok, "{body}");
+    assert!(body.contains("other"));
+    h.assert_quiet(&before).await;
+    let (ok, body) = call(&h, true, false, true, Some("missing")).await;
+    assert!(!ok && body.contains("NAMESPACE_MISMATCH"), "{body}");
+    h.assert_quiet(&before).await;
+    h.f.storage.read().unwrap().mark_unavailable();
+    let (ok, body) = call(&h, true, false, false, None).await;
+    assert!(!ok, "{body}");
+    assert_eq!(h.access.completed.load(Ordering::SeqCst), 0);
+}

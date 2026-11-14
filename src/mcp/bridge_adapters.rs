@@ -1542,13 +1542,16 @@ impl bridge::StorageEngine for McpStorageAdapter {
                     .read()
                     .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
                 let result = (|| {
-                    let view = storage
-                        .meta_store()
-                        .capture_read_view()
-                        .map_err(map_canonical_read_error)?;
+                    // Canonical point payload does not read derived indexes.
+                    // hydrate_get_at rechecks this G under metadata ownership and
+                    // rejects pending effects before copying any row/text.
+                    let at = storage
+                        .control_state()
+                        .map_err(map_canonical_read_error)?
+                        .generation_ref();
                     let sampled_at = clock.now_millis();
                     let payload = storage
-                        .hydrate_get_at(view.at, id, namespace.as_deref())
+                        .hydrate_get_at(at, id, namespace.as_deref())
                         .map_err(map_canonical_read_error)?;
                     let value = payload.map(|(namespace, payload)| {
                         let record = payload.record;

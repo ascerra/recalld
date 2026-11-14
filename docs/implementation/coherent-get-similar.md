@@ -98,3 +98,22 @@ The implementation uses actual PR96 `387c711` only. PR106 producers, unrelated
 native graph/catalog changes, public-v2 activation, ID/reset ownership and the
 registry are not dependencies. Native policy/exposure consumers and A2-v2
 similarity remain separate joins. This slice makes no whole-core freeze guarantee.
+
+## Canonical point-read correction
+
+The first full run on c67795e passed 997 tests and failed nine existing MCP/daemon
+scope, false-mode and observation-error cases. This was an actual overrestriction
+introduced by this change, not obsolete fixtures. Canonical-only MCP get wrongly
+required all four derived stamps through capture_read_view. Its payload consumes
+no derived index. The original full log, source archive, source and executable
+hashes, and exact nine failed test names are retained without rewriting.
+
+The correction obtains actual control G, then hydrates under the existing
+metadata generation guard and engine read ownership with a pending-effects check
+inside that guard. Effects admission is supplementary to the actual G check,
+never a generation substitute. Unknown/unavailable handles and pending canonical
+effects still reject. Ranked/projected query get and similarity retain full
+pinned views. True get still completes the new exposure before acknowledgement,
+retaining its full receipt on failure. A new actual adapter boundary test covers
+canonical point success without unused derived stamps and unavailable-handle
+rejection. Main and Halley confirmed this distinction against CONTRACTS section68.

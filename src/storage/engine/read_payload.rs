@@ -22,6 +22,11 @@ impl RedbStorageEngine {
     ) -> Result<Option<(NamespaceConfig, HydratedRecord)>, StorageError> {
         self.ensure_available()?;
         self.meta_store.with_generation_read_at(at, |view| {
+            // The metadata generation guard supplies the canonical view. Point
+            // reads also require completed canonical effects, not unrelated index
+            // stamps; ranking/projection callers retain their own pinned views.
+            self.meta_store.effects_stamp()?;
+
             if let Some(namespace) = asserted_namespace {
                 validate_namespace_name(namespace).map_err(|e| {
                     StorageError::InvalidNamespaceName {
