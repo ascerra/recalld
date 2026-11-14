@@ -23,7 +23,7 @@
 //! 3. **Markup detection** ([`scan_client_markup`]) — text fields that
 //!    contain literal tool-call markup are rejected rather than stored.
 //! 4. Everything about *how long* or *how many* is delegated to
-//!    [`crate::model::validation::validate_memory_input`], which the
+//!    [`crate::model::validation::validate_legacy_memory_input`], which the
 //!    HTTP API shares.
 //!
 //! A *numeric* bound is treated the same way. An out-of-range `limit` is
@@ -52,7 +52,9 @@ use crate::model::MemoryId;
 use crate::model::constants::{
     DEFAULT_LIST_LIMIT, DEFAULT_TAG_LIMIT, MAX_LIST_LIMIT, MAX_TAG_LIMIT,
 };
-use crate::model::validation::{MemoryInputRef, truncate_on_char_boundary, validate_memory_input};
+use crate::model::validation::{
+    MemoryInputRef, truncate_on_char_boundary, validate_legacy_memory_input,
+};
 
 // ═══════════════════════════════════════════════════════════════════════
 // Error type
@@ -701,7 +703,7 @@ pub fn reject_client_markup(field: &str, text: &str) -> Result<(), ArgError> {
 /// `summary` (presence, type, markup), `fullText` (type, markup), the
 /// four array fields, `namespace`, `parentId`, `supersedes`,
 /// `checkDuplicates`, and finally the shared content limits from
-/// [`validate_memory_input`](crate::model::validation::validate_memory_input).
+/// [`validate_legacy_memory_input`](crate::model::validation::validate_legacy_memory_input).
 pub fn parse_store_input(item: &Value, default_namespace: &str) -> Result<StoreInput, ArgError> {
     if !item.is_object() {
         return Err(ArgError::new(
@@ -729,7 +731,7 @@ pub fn parse_store_input(item: &Value, default_namespace: &str) -> Result<StoreI
     let supersedes = opt_uuid(item, "supersedes")?;
     let check_duplicates = opt_bool(item, "checkDuplicates")?;
 
-    validate_memory_input(MemoryInputRef {
+    validate_legacy_memory_input(MemoryInputRef {
         summary: &summary,
         full_text: full_text.as_deref(),
         tags: &tags,
@@ -850,6 +852,18 @@ pub fn opt_enum(obj: &Value, key: &str, allowed: &[&str]) -> Result<Option<Strin
     Ok(Some(value))
 }
 
+/// The new access switch is missing-only defaulted, never null/string coerced.
+pub fn record_access(obj: &Value) -> Result<bool, ArgError> {
+    match obj.get("recordAccess") {
+        None => Ok(true),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(ArgError::new(
+            "recordAccess",
+            "recordAccess must be a boolean",
+        )),
+    }
+}
+
 /// A parsed `recall_memories` call.
 pub struct RecallArgs {
     /// What the search pipeline is given.
@@ -883,6 +897,8 @@ pub fn parse_recall_input(obj: &Value, default_namespace: &str) -> Result<Recall
 
     Ok(RecallArgs {
         input: SearchInput {
+            include_neighbors: !compact,
+            record_access: record_access(obj)?,
             query,
             namespace,
             limit,
@@ -899,8 +915,34 @@ pub fn parse_recall_input(obj: &Value, default_namespace: &str) -> Result<Recall
     })
 }
 
+/// Parse an opt-in by-ID assertion. Only omission disables the assertion.
+pub fn parse_namespace_assertion(obj: &Value) -> Result<Option<&str>, ArgError> {
+    let Some(value) = obj.get("namespace") else {
+        return Ok(None);
+    };
+    let name = value.as_str().ok_or_else(|| {
+        ArgError::new(
+            "namespace",
+            "namespace assertion must be a string; omit it to use the record scope",
+        )
+    })?;
+    crate::model::validation::validate_namespace_name(name)
+        .map_err(|e| ArgError::new("namespace", e.to_string()))?;
+    Ok(Some(name))
+}
+
+/// Deserialize a present namespace assertion; serde default handles omission.
+pub fn deserialize_namespace_assertion<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let name = <String as serde::Deserialize>::deserialize(deserializer)?;
+    crate::model::validation::validate_namespace_name(&name).map_err(serde::de::Error::custom)?;
+    Ok(Some(name))
+}
+
 /// A parsed `find_similar_memories` call in `single` mode.
 pub struct FindSimilarArgs {
+    pub record_access: bool,
     /// The memory to find neighbours of.
     pub id: MemoryId,
     /// Maximum neighbours to return.
@@ -920,6 +962,7 @@ pub fn parse_find_similar_args(obj: &Value) -> Result<FindSimilarArgs, ArgError>
     let same_namespace = opt_bool(obj, "sameNamespace")?.unwrap_or(true);
 
     Ok(FindSimilarArgs {
+        record_access: record_access(obj)?,
         id,
         limit,
         min_score,
