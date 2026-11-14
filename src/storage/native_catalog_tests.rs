@@ -567,3 +567,6 @@ fn native_context_api1_catalog_replay_cross_contract_and_unkeyed() {
         expected
     );
 }
+
+#[path = "native_catalog_tests/owned_ids.rs"]
+mod owned_ids;
