@@ -87,7 +87,10 @@ fn native_graph_rejects_real_foreign_endpoint_and_preserves_unknown_profile() {
     ));
     let receipt = session
         .put_graph(
-            &MutationContext::unkeyed(cfg.id),
+            &MutationContext {
+                contract_version: 2,
+                ..MutationContext::unkeyed(cfg.id)
+            },
             LifecycleScope {
                 namespace_id: cfg.id,
                 namespace_name: cfg.name.clone(),
