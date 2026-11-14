@@ -2057,7 +2057,10 @@ mod tests {
         assert!(engine.sync().is_err());
         drop(engine);
         let engine = open_engine(dir.path());
-        assert_eq!(engine.meta_store().records_in_namespace(ns).unwrap().len(), 1);
+        assert_eq!(
+            engine.meta_store().records_in_namespace(ns).unwrap().len(),
+            1
+        );
         assert_eq!(
             engine.get_record(id).unwrap().unwrap().to_bytes(),
             record.to_bytes()
