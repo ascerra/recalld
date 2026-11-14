@@ -217,7 +217,7 @@ impl MetadataStore {
             false,
             false,
             effects::RecordMutation::NativeGraph(transition),
-                    None,
+            None,
         )
         .map(Some)
     }

@@ -934,7 +934,8 @@ impl MetadataStore {
         crash_point("after_metadata_commit");
         let mut phases = self.phase_index.write().unwrap_or_else(|e| e.into_inner());
         if let RecordMutation::LifecyclePatched { before, after }
-        | RecordMutation::NativePhase { before, after, .. } = &mutation {
+        | RecordMutation::NativePhase { before, after, .. } = &mutation
+        {
             phases.transition(
                 after.namespace_id,
                 after.vector_slot,
