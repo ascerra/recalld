@@ -25,7 +25,7 @@ def fixtures(base):
              dict(tag="invalid-quality", tool="reinforce_memory", arguments=dict(id="$turn-0", namespace="default", quality=0), expectedError=True)]
     for q in schedule["queries"]:
         steps.append(dict(tag="query:" + q["queryId"], tool="recall_memories",
-            arguments=dict(query=q["text"], namespace="default", recordAccess=q["queryId"] == "q0", depth=1, limit=1), expectedError=False))
+            arguments=dict(query=q["text"], namespace="default", recordAccess=q["queryId"] == "q0", depth=1, limit=1, compact=False), expectedError=False))
     steps.append(dict(tag="replay-miss", tool="recall_memories", arguments=dict(query="unrecorded-query", namespace="default", recordAccess=False, depth=1, limit=1), expectedError=True))
     labels["relevant"]["q0"] = ["turn-0", "turn-4"]
     schedule["steps"] = steps
@@ -146,10 +146,14 @@ def verify(wire, schedule, mappings, receipts):
         changed = step["tag"] in {"store:turn-4", "observed-get", "feedback", "query:q0"}
         assert (generation(after["generation"]) > generation(before["generation"])) if changed else after == before, step["tag"]
         if step["tag"].startswith("query:"):
-            memories = json.loads(row["response"]["result"]["content"][0]["text"])["memories"]
-            returned = [m["id"] for m in memories]
+            value = json.loads(row["response"]["result"]["content"][0]["text"])
+            memories, context = value["memories"], value["graphContext"]
+            neighbors = context["neighbors"]
+            assert value["count"] == len(memories) == 1 and context["neighborCount"] == len(neighbors) == 1
+            assert memories[0]["id"] == ids["turn-0"] and memories[0]["namespace"] == "default"
+            assert neighbors[0]["id"] == ids["turn-4"] and neighbors[0]["connectedTo"] == ids["turn-0"]
+            returned = [m["id"] for m in memories + neighbors]
             assert len(returned) == 2 and set(returned) == {ids["turn-0"], ids["turn-4"]}, returned
-            assert all(m["namespace"] == "default" for m in memories)
     return dict(actualReadyCheckpoints=len(receipts), actualRequiredDerivedViews=4, graphReturnedUniqueIds=[ids["turn-0"], ids["turn-4"]],
         unlinkedAndForeignExcluded=True, observedGetFeedbackAndNeighborSearchAdvancedGeneration=True,
         invalidAndFalseQueriesPreservedGeneration=True, perRecordExposureCount="not-exposed-by-frozen-public-v1-or-control-v1", readGeneration=None)

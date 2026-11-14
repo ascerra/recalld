@@ -360,7 +360,8 @@ warm_file_enabled = false
                         events.append(dict(sourceId=source_id, status="accepted", reason="public-success-no-readiness-claim", memoryId=memory))
             elif row["tag"].startswith("query:") and row["event"] == "outcome":
                 value = json.loads(row["response"]["result"]["content"][0]["text"])
-                queries.append(dict(queryId=row["tag"][6:], memoryIds=[r["id"] for r in value["memories"]]))
+                returned = value["memories"] + (value.get("graphContext", {}).get("neighbors", []) if owned else [])
+                queries.append(dict(queryId=row["tag"][6:], memoryIds=[r["id"] for r in returned]))
         event_text = "".join(json.dumps(e) + "\n" for e in events)
         (evaluator / "source-events.jsonl").write_text(event_text)
         save(args.out / "source-mappings.json", dict(sourceMappingVersion=1, actorArtifactSha256=m["actorInputs"]["sha256"], mappings=mappings, sources=actor["sources"]))

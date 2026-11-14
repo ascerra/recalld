@@ -20,7 +20,7 @@ def run(args):
         assert set(action) == {"tag", "tool", "arguments"}, "unexpected current action fields"
         allowed = {"store_memory": {"summary", "fullText", "tags", "namespace", "checkDuplicates", "supersedes", "parentId"},
                    "get_memory": {"id", "namespace", "recordAccess"},
-                   "recall_memories": {"query", "namespace", "recordAccess", "depth", "limit"},
+                   "recall_memories": {"query", "namespace", "recordAccess", "depth", "limit", "compact"},
                    "reinforce_memory": {"id", "namespace", "quality"}, "forget_memory": {"id", "namespace"}}
         assert action["tool"] in allowed and isinstance(action["arguments"], dict)
         assert set(action["arguments"]) <= allowed[action["tool"]], "unexpected current action arguments"
