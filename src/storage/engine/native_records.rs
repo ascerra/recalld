@@ -52,6 +52,18 @@ impl RedbStorageEngine {
         clock: &dyn Clock,
         parent: Option<&WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.store_native_prepared_reserved(ctx, prepared, generated, policy, clock, parent, None)
+    }
+    pub(crate) fn store_native_prepared_reserved(
+        &mut self,
+        ctx: &MutationContext,
+        prepared: &crate::storage::native_store::PreparedNativeStore,
+        generated: &GeneratedEmbedding,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+        child: Option<&crate::storage::batch::BatchChild>,
+    ) -> Result<WriteReceipt, StorageError> {
         self.insert_native_record_common(
             ctx,
             &prepared.intent.insert,
@@ -60,7 +72,7 @@ impl RedbStorageEngine {
             clock,
             parent,
             Some(prepared),
-            None,
+            child,
         )
     }
     fn insert_native_record_common(
@@ -76,10 +88,20 @@ impl RedbStorageEngine {
     ) -> Result<WriteReceipt, StorageError> {
         if let Some(child) = child {
             crate::storage::metadata::native_records::check_child_context(ctx, child)?;
-            if let Some(receipt) =
+            let replay = if let Some(p) = prepared {
+                self.meta_store.lookup_native_store_child(
+                    child,
+                    &crate::storage::native_store::NativeStoreInput {
+                        insert: intent.original.clone(),
+                        check_duplicates: p.intent.check_duplicates,
+                    },
+                    parent,
+                )?
+            } else {
                 self.meta_store
                     .lookup_native_insert_child(child, &intent.original, parent)?
-            {
+            };
+            if let Some(receipt) = replay {
                 return Ok(receipt);
             }
         }

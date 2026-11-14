@@ -90,6 +90,11 @@ pub(crate) enum BatchItemPlan {
         namespace: String,
         input: super::native_records::NativeInsert,
     },
+    NativeStore {
+        request_hash: [u8; 32],
+        namespace: String,
+        input: super::native_store::NativeStoreInput,
+    },
     Forget {
         request_hash: [u8; 32],
         id: MemoryId,
@@ -104,6 +109,7 @@ impl BatchItemPlan {
         match self {
             Self::Insert { request_hash, .. }
             | Self::NativeInsert { request_hash, .. }
+            | Self::NativeStore { request_hash, .. }
             | Self::Forget { request_hash, .. }
             | Self::Invalid { request_hash, .. } => *request_hash,
         }
@@ -130,7 +136,7 @@ impl BatchChild {
             scope: MutationScope::Namespace(self.defaults.namespace_id),
             idempotency_key: None,
             expected_generation: None,
-            contract_version: self.version,
+            contract_version: contract_version(self.version).unwrap_or(0),
         }
     }
     pub(crate) fn namespace_name(&self) -> &str {
@@ -274,7 +280,7 @@ impl BatchInput {
             scope: MutationScope::Catalog,
             idempotency_key: self.idempotency_key.clone(),
             expected_generation: None,
-            contract_version: self.mutation_version,
+            contract_version: contract_version(self.mutation_version).unwrap_or(0),
         }
     }
 }
@@ -293,15 +299,16 @@ pub(crate) fn caller_hash_version(
 ) -> Result<[u8; 32], super::StorageError> {
     let ctx = MutationContext {
         scope: MutationScope::Catalog,
-        contract_version: version,
+        contract_version: contract_version(version)?,
         ..MutationContext::unkeyed(NamespaceId::new(1))
     };
     Ok(super::control::request_hash(
         &ctx,
-        if version == 1 {
-            "batch_caller_v1"
-        } else {
-            "batch_caller_v2"
+        match version {
+            1 => "batch_caller_v1",
+            2 => "batch_caller_v2",
+            3 => "batch_caller_v3",
+            _ => unreachable!(),
         },
         &[&super::control::encode(&(kind, hashes))?],
     ))
@@ -328,16 +335,49 @@ pub(crate) fn resolution_hash_version(
         .collect();
     let ctx = MutationContext {
         scope: MutationScope::Catalog,
-        contract_version: version,
+        contract_version: contract_version(version)?,
         ..MutationContext::unkeyed(NamespaceId::new(1))
     };
     Ok(super::control::request_hash(
         &ctx,
-        if version == 1 {
-            "batch_resolved_v1"
-        } else {
-            "batch_resolved_v2"
+        match version {
+            1 => "batch_resolved_v1",
+            2 => "batch_resolved_v2",
+            3 => "batch_resolved_v3",
+            _ => unreachable!(),
         },
         &[&super::control::encode(&rows)?],
     ))
+}
+
+/// Manifest/writer versions are not public contract versions. Historical 1/2
+/// domains remain immutable; 3 selects same-insert native store under contract 2.
+pub(crate) fn contract_version(version: u32) -> Result<u32, super::StorageError> {
+    match version {
+        1 => Ok(1),
+        2 | 3 => Ok(2),
+        _ => Err(super::StorageError::InvalidControl(
+            "unsupported batch version".into(),
+        )),
+    }
+}
+pub(crate) fn reservation_domain(version: u32) -> Result<&'static str, super::StorageError> {
+    match version {
+        1 => Ok("batch_reserve_v1"),
+        2 => Ok("batch_reserve_v2"),
+        3 => Ok("batch_reserve_v3"),
+        _ => Err(super::StorageError::InvalidControl(
+            "unsupported batch version".into(),
+        )),
+    }
+}
+pub(crate) fn rejection_domain(version: u32) -> Result<&'static str, super::StorageError> {
+    match version {
+        1 => Ok("batch_item_error_v1"),
+        2 => Ok("batch_item_error_v2"),
+        3 => Ok("batch_item_error_v3"),
+        _ => Err(super::StorageError::InvalidControl(
+            "unsupported batch version".into(),
+        )),
+    }
 }

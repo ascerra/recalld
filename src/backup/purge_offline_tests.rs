@@ -468,7 +468,9 @@ fn batch_offline_run(
                         .tombstone_memory_reserved(&child.context(), *id, Some(&child))
                         .unwrap();
                 }
-                BatchItemPlan::Invalid { .. } | BatchItemPlan::NativeInsert { .. } => {
+                BatchItemPlan::Invalid { .. }
+                | BatchItemPlan::NativeInsert { .. }
+                | BatchItemPlan::NativeStore { .. } => {
                     unreachable!()
                 }
             }

@@ -123,3 +123,40 @@ settings are not consumed. Completed replay uses the stored expansion before
 current settings, provider or candidate discovery. Generated plan/UUID/time/vector
 output remains outside caller identity; the original advisory boolean after fixed
 true expansion is part of the new store request identity.
+
+## Actual private version3 binding
+
+The same-insert core `a863804` is joined in `9263920`, with all 61 focused
+native-record tests passing (119.84 seconds). Hume's test-only follow-up
+`08707c7` is included through `df4d463`. Source and executable hashes are pinned
+in the private validation directory before subsequent builds.
+
+The new private reservation API accepts a lazy settings resolver. It first
+reconciles the original ordered caller hash and returns an existing manifest;
+only a fresh reservation evaluates current settings. Version3 insertion defaults
+include frozen store settings; versions1/2 omit that optional field and retain
+their original domains. The new child uses the actual shared core request hash,
+checks its reserved settings and current namespace policy before allocation, and
+records the new typed outcome in the same transaction as its record and effects.
+Version3 means native contract2, never contract3. Version3 forget is unsupported.
+
+Private preparation reuses the existing native canonical parser and wraps its
+ordered intent in a new domain. Omitted fixed defaults (including
+checkDuplicates=true and empty label/tag arrays) are equivalent to explicit
+values. Original supplied vector bits and meaningful caller changes remain
+distinct. Mutable scope/default resolution is not repeated for matching replay.
+
+The initial three new tests passed. The expanded frozen run passed all 82
+batch-filtered tests (72.99 seconds), including old1/2 cases, new3 strict reopen,
+completed export/import, retained-state fork restore, and actual exits before
+metadata commit, after commit, and after canonical acknowledgement. These are
+process-exit tests, not power-loss evidence. Unknown versions, missing new
+settings, and rewriting the new manifest as version2 fail closed on startup.
+The temporal selection probe now delegates to the actual core selector.
+
+Public version3 preparation still rejects requests. The private binding is a
+checkpoint, not a transport handoff: actual MCP/daemon prepared execution,
+provider-zero replay, current advisory readGeneration/warnings, publication
+failure and accepted-root close-race tests remain before activation and final
+full-suite/fmt/Clippy validation. PR91 is unchanged. Halley retains owned ID/RNG
+injection; this slice introduces no competing source or reset mechanism.

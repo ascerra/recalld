@@ -40,6 +40,28 @@ pub(super) fn replay_store(
 }
 
 impl MetadataStore {
+    pub(crate) fn lookup_native_store_child(
+        &self,
+        child: &crate::storage::batch::BatchChild,
+        input: &NativeStoreInput,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let _guard = self.native_guard_with_work(parent)?;
+        if child.version != 3 {
+            return Err(StorageError::InvalidMutationContext(
+                "linked store requires batch 3".into(),
+            ));
+        }
+        let tx = self.db.begin_write()?;
+        let hash =
+            crate::storage::batch::native::store_hash(&child.context(), input, &child.defaults)?;
+        let replay = super::batch::replay_child(&tx, child, hash)?;
+        if replay.is_none() {
+            super::batch::check_policy(&tx, child)?;
+        }
+        Ok(replay)
+    }
+
     pub(crate) fn lookup_native_store(
         &self,
         ctx: &MutationContext,

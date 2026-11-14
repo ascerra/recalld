@@ -297,27 +297,25 @@ impl NativeCandidates {
         created_at: i64,
         settings: &GraphConfig,
     ) -> Vec<SelectedNativeLink> {
-        if !settings.autolink_enabled || settings.temporal_window_ms == 0 {
+        let Ok(settings) = freeze_settings(settings) else {
             return vec![];
-        }
-        let mut candidates: Vec<_> = self
-            .candidates
-            .iter()
-            .filter_map(|c| {
-                let delta = created_at.abs_diff(c.created_at);
-                (delta <= settings.temporal_window_ms).then_some((c.id, delta))
-            })
-            .collect();
-        candidates.sort_by_key(|&(id, delta)| (delta, id));
-        candidates
-            .into_iter()
-            .take(settings.max_temporal_links)
-            .map(|(target, delta)| SelectedNativeLink {
-                target,
-                edge_type: EdgeType::Temporal,
-                weight: (1. - delta as f64 / settings.temporal_window_ms as f64).max(0.05) as f32,
-            })
-            .collect()
+        };
+        crate::storage::native_store::select_temporal_links(
+            &self
+                .candidates
+                .iter()
+                .map(|c| (c.id, c.created_at))
+                .collect::<Vec<_>>(),
+            created_at,
+            &settings,
+        )
+        .into_iter()
+        .map(|(target, edge_type, weight)| SelectedNativeLink {
+            target,
+            edge_type,
+            weight,
+        })
+        .collect()
     }
 
     /// Numeric/ID-only selection; hydration of current visible summaries belongs

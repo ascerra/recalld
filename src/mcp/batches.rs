@@ -13,6 +13,54 @@ pub(crate) struct PreparedItem {
     pub forget: Option<MemoryId>,
 }
 
+/// Private preparation for the same-insert consumer. Public dispatch continues
+/// rejecting version 3 until the actual runner is wired and validated.
+pub(crate) fn prepare_native_store(
+    input: &BatchInput,
+) -> Result<Vec<PreparedItem>, bridge::BridgeError> {
+    if input.mutation_version != 3 || input.kind != BatchKind::Insert {
+        return Err(bridge::BridgeError::InvalidInput(
+            "linked store requires insertion batch version 3".into(),
+        ));
+    }
+    let mut historical = input.clone();
+    historical.mutation_version = 2;
+    let mut items = prepare(&historical)?;
+    for item in &mut items {
+        let hash = control::request_hash(
+            &input.context(),
+            "batch_item_intent_v3",
+            &[&item.plan.request_hash()],
+        );
+        item.plan = match &item.plan {
+            BatchItemPlan::NativeInsert {
+                namespace, input, ..
+            } => BatchItemPlan::NativeStore {
+                request_hash: hash,
+                namespace: namespace.clone(),
+                input: crate::storage::native_store::NativeStoreInput {
+                    insert: input.clone(),
+                    check_duplicates: item
+                        .store
+                        .as_ref()
+                        .and_then(|s| s.check_duplicates)
+                        .unwrap_or(true),
+                },
+            },
+            BatchItemPlan::Invalid { error, .. } => BatchItemPlan::Invalid {
+                request_hash: hash,
+                error: error.clone(),
+            },
+            _ => {
+                return Err(bridge::BridgeError::Internal(
+                    "unexpected linked store preparation".into(),
+                ));
+            }
+        };
+    }
+    Ok(items)
+}
+
 pub(crate) fn prepare(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::BridgeError> {
     if !matches!(input.mutation_version, 1 | 2)
         || input.result_version != 1

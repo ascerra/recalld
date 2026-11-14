@@ -758,3 +758,6 @@ mod selection;
 
 #[path = "store_tests.rs"]
 mod store;
+
+#[path = "store_batch_tests.rs"]
+mod store_batches;

@@ -165,7 +165,7 @@ fn validate_snapshot(
     }
     if super::metadata::batch::validate_existing(&read, control.as_ref())?
         .iter()
-        .any(|p| p.unresolved() != 0 && (!native_recovery || p.version != 2))
+        .any(|p| p.unresolved() != 0 && (!native_recovery || !matches!(p.version, 2 | 3)))
     {
         return Err(StorageError::RecoveryRequired(
             "unfinished batch needs matching caller resubmission; offline inventory is unavailable"

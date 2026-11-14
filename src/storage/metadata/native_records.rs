@@ -147,6 +147,11 @@ impl MetadataStore {
     ) -> Result<Option<WriteReceipt>, StorageError> {
         let _guard = self.native_guard_with_work(parent)?;
         let tx = self.db.begin_write()?;
+        if child.version != 2 {
+            return Err(StorageError::InvalidMutationContext(
+                "historical native insert requires batch 2".into(),
+            ));
+        }
         let hash =
             crate::storage::batch::native::insert_hash(&child.context(), input, &child.defaults)?;
         let replay = super::batch::replay_child(&tx, child, hash)?;
@@ -163,6 +168,11 @@ impl MetadataStore {
     ) -> Result<Option<WriteReceipt>, StorageError> {
         let _guard = self.native_guard_with_work(parent)?;
         let tx = self.db.begin_write()?;
+        if child.version != 2 {
+            return Err(StorageError::InvalidMutationContext(
+                "native forget requires batch 2".into(),
+            ));
+        }
         let hash = control::request_hash(&child.context(), "native_tombstone", &[id.as_bytes()]);
         let replay = super::batch::replay_child(&tx, child, hash)?;
         if replay.is_none() {
@@ -188,19 +198,36 @@ impl MetadataStore {
         guard.check(self)?;
         context(ctx, intent.scope.namespace_id)?;
         let tx = self.db.begin_write()?;
-        if prepared.is_some() && child.is_some() {
-            return Err(StorageError::InvalidMutation(
-                "linked store requires a versioned store batch consumer".into(),
-            ));
-        }
         let store_input = prepared.map(|p| crate::storage::native_store::NativeStoreInput {
             insert: intent.original.clone(),
             check_duplicates: p.intent.check_duplicates,
         });
         if let Some(child) = child {
             check_child_context(ctx, child)?;
-            let hash =
-                crate::storage::batch::native::insert_hash(ctx, &intent.original, &child.defaults)?;
+            let hash = match (&store_input, prepared, child.version) {
+                (Some(input), Some(p), 3) => {
+                    if child
+                        .defaults
+                        .native
+                        .as_ref()
+                        .and_then(|n| n.store_settings.as_ref())
+                        != Some(&p.intent.settings)
+                    {
+                        return Err(StorageError::IdempotencyConflict);
+                    }
+                    crate::storage::batch::native::store_hash(ctx, input, &child.defaults)?
+                }
+                (None, None, 2) => crate::storage::batch::native::insert_hash(
+                    ctx,
+                    &intent.original,
+                    &child.defaults,
+                )?,
+                _ => {
+                    return Err(StorageError::InvalidMutationContext(
+                        "native writer/batch version mismatch".into(),
+                    ));
+                }
+            };
             if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
                 return Ok(receipt);
             }
@@ -245,7 +272,11 @@ impl MetadataStore {
             ));
         }
         let hash = if let Some(child) = child {
-            crate::storage::batch::native::insert_hash(ctx, input, &child.defaults)?
+            if let Some(input) = &store_input {
+                crate::storage::batch::native::store_hash(ctx, input, &child.defaults)?
+            } else {
+                crate::storage::batch::native::insert_hash(ctx, input, &child.defaults)?
+            }
         } else if let Some(p) = prepared {
             store_input.as_ref().unwrap().request_hash(
                 ctx,
@@ -632,7 +663,7 @@ pub(crate) fn check_child_context(
     ctx: &MutationContext,
     child: &BatchChild,
 ) -> Result<(), StorageError> {
-    if child.version != 2
+    if !matches!(child.version, 2 | 3)
         || ctx.contract_version != 2
         || ctx.store_id != Some(child.store_id)
         || ctx.scope != MutationScope::Namespace(child.namespace())

@@ -11,9 +11,14 @@ pub struct NativeBatchDefaults {
     pub lifecycle_version: LifecycleVersion,
     pub policy_revision: control::Generation,
     pub embedding_binding: EmbeddingBinding,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_settings: Option<crate::storage::native_store::NativeStoreSettings>,
 }
 impl NativeBatchDefaults {
     pub(crate) fn validate(&self, dimension: u32, kind: BatchKind) -> Result<(), StorageError> {
+        if let Some(settings) = &self.store_settings {
+            settings.validate()?;
+        }
         let difficulty = f32::from_bits(self.default_difficulty_bits);
         if !difficulty.is_finite() || !(1.0..=10.0).contains(&difficulty) {
             return Err(StorageError::InvalidControl(
@@ -97,6 +102,7 @@ pub(crate) fn child_matches(
             | (1, BatchKind::Forget, MemoryTombstoned { .. })
             | (2, BatchKind::Insert, NativeMemoryInserted { .. })
             | (2, BatchKind::Forget, NativeMemoryTombstoned { .. })
+            | (3, BatchKind::Insert, NativeMemoryInsertedWithLinks { .. })
     )
 }
 
@@ -107,6 +113,28 @@ pub(crate) fn validate_outcome(
     let Some(native) = &defaults.native else {
         return Ok(());
     };
+    if let control::MutationOutcome::NativeMemoryInsertedWithLinks { transition } = outcome {
+        let after = &transition.primary()?.after;
+        if transition.namespace_id != defaults.namespace_id
+            || transition.embedding_dim != defaults.embedding_dim
+            || transition.policy_revision != native.policy_revision
+            || transition.lifecycle_version != native.lifecycle_version
+            || native.store_settings.as_ref() != Some(&transition.settings)
+            || after.lifecycle.stability.get().to_bits() != defaults.initial_stability_bits
+            || after.lifecycle.difficulty.get().to_bits() != native.default_difficulty_bits
+            || after.content.profile_id.as_deref() != Some(native.profile_id()?)
+        {
+            return Err(StorageError::InvalidControl(
+                "linked child disagrees with frozen defaults".into(),
+            ));
+        }
+        return Ok(());
+    }
+    if native.store_settings.is_some() {
+        return Err(StorageError::InvalidControl(
+            "old child contains linked-store defaults".into(),
+        ));
+    }
     let (transition, inserted) = match outcome {
         control::MutationOutcome::NativeMemoryInserted { transition } => (transition, true),
         control::MutationOutcome::NativeMemoryTombstoned { transition } => (transition, false),
@@ -131,4 +159,27 @@ pub(crate) fn validate_outcome(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn store_hash(
+    ctx: &MutationContext,
+    input: &crate::storage::native_store::NativeStoreInput,
+    defaults: &BatchDefaults,
+) -> Result<[u8; 32], StorageError> {
+    let native = defaults
+        .native
+        .as_ref()
+        .ok_or_else(|| StorageError::InvalidControl("native store defaults missing".into()))?;
+    let settings = native
+        .store_settings
+        .as_ref()
+        .ok_or_else(|| StorageError::InvalidControl("native store settings missing".into()))?;
+    input.request_hash(
+        ctx,
+        f32::from_bits(defaults.initial_stability_bits),
+        f32::from_bits(native.default_difficulty_bits),
+        defaults.embedding_dim,
+        native.profile_id()?,
+        settings,
+    )
 }
