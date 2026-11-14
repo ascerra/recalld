@@ -1493,7 +1493,7 @@ impl QueryEngine {
 
         let receipts = if record_access && !defer_recording && record.phase != DecayPhase::Tombstone
         {
-            self.record_exposures_at_with_work(
+            self.record_query_exposures(
                 &[(id, AccessKind::DirectRetrieval)],
                 crate::storage::control::ExposureScope {
                     namespace: namespace.name.clone(),
@@ -1765,19 +1765,29 @@ impl QueryEngine {
             .collect();
 
         let receipts = if context.requested_record_access && !defer_recording {
-            self.record_exposures_at_with_work(
-                &results
-                    .iter()
-                    .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
-                    .collect::<Vec<_>>(),
-                crate::storage::control::ExposureScope {
-                    namespace: namespace.name.clone(),
-                    source: Some(id),
-                },
-                context.diagnostics.evaluated_at,
-                parent,
-            )
-            .await?
+            let scope = crate::storage::control::ExposureScope {
+                namespace: namespace.name.clone(),
+                source: Some(id),
+            };
+            if self.access_recorder.supports_native_exposure() {
+                self.record_exposures_at_with_work(
+                    &results
+                        .iter()
+                        .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
+                        .collect::<Vec<_>>(),
+                    scope,
+                    context.diagnostics.evaluated_at,
+                    parent,
+                )
+                .await?
+            } else {
+                self.record_similar_accesses_with_work(
+                    &results.iter().map(|r| r.memory_id).collect::<Vec<_>>(),
+                    scope,
+                    parent,
+                )
+                .await?
+            }
         } else {
             Vec::new()
         };
@@ -2061,7 +2071,7 @@ impl QueryEngine {
             })
             .collect();
 
-        self.record_exposures_at_with_work(&accesses, scope, sampled_at, parent)
+        self.record_query_exposures(&accesses, scope, sampled_at, parent)
             .await
     }
 
@@ -2094,6 +2104,24 @@ impl QueryEngine {
         self.record_exposures_sampled(accesses, scope, Some(sampled_at), parent)
             .await
     }
+    /// Native queries reuse their sampled projection time. Legacy direct callers
+    /// retain their existing recorder method and clock fallback. Explicit `_at`
+    /// APIs always preserve the supplied time regardless of recorder capability.
+    async fn record_query_exposures(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        let sampled_at = self
+            .access_recorder
+            .supports_native_exposure()
+            .then_some(sampled_at);
+        self.record_exposures_sampled(accesses, scope, sampled_at, parent)
+            .await
+    }
+
     async fn record_exposures_sampled(
         &self,
         accesses: &[(MemoryId, AccessKind)],

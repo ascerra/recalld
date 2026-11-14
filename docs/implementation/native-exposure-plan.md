@@ -26,8 +26,10 @@ Current scope, terminal eligibility, record and policy tokens remain checked.
 
 The query's sampled value is wrapped in the existing ManualClock only to call the
 native core Clock interface. No second runtime clock/configuration source exists.
-Direct search/get/similar fallback paths also forward their existing
-StrengthContext time rather than resampling the recorder. V1 retention formulas
+Native-capable direct search/get/similar fallback paths forward their existing
+StrengthContext time rather than resampling the recorder. Legacy fallback paths
+retain their previous recorder dispatch/clock, and explicit pre-sampled APIs
+always retain their supplied time. V1 retention formulas
 and defaults are unchanged; native v1-policy namespaces use the schema-aware
 writer, while v2 exposure preserves the retention anchor, stability, feedback,
 retained phase and provenance. Effective time still clamps against canonical
@@ -69,3 +71,5 @@ unit-struct test constructor failed compilation; no test ran. A formatter then
 reported a truncated Docker mount read while the host file was complete; the
 failure and host hash/source are retained, and the next run verified all mounted
 runtime input hashes before formatting/building. A further metadata-only fixture omitted its required filter; its 7PASS/1FAIL source and binary are preserved without relaxing validation. Corrected focused validation passes 9 tests (8 new consumer tests plus the existing both-policy native core test). Full-suite/fmt/clippy validation is pending.
+
+The initial full frozen3955 run finished989PASS/27FAIL: unconditional inferred-time forwarding broke legacy-only recorder dispatch and bypassed a legacy configured clock. Exact source, binary identity, full log and27 failed names are preserved. The bounded correction selects inferred time only for native-capable recorders; no legacy assertions or explicit pre-sampled semantics are relaxed. Corrected validation pending.
