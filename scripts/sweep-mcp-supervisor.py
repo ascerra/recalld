@@ -26,7 +26,7 @@ def fixtures(base):
     canary = "FUTURE_SWEEP_QUERY"
     questions = [dict(queryId=q, text="chronological-sweep" + (" " + canary if q == "deleted" else ""))
                  for q in ("full", "summary", "ghost", "deleted")]
-    cache["entries"] = {"a6-document:chronological-sweep\n\none retained payload": [1., 0., 0., 0.],
+    cache["entries"] = {"a6-document:chronological-sweep\n\none retained payload sweep-payload-canary": [1., 0., 0., 0.],
                         "a6-document:blocked-worker-canary": [0., 0., 0., 1.],
                         "a6-query:chronological-sweep": [1., 0., 0., 0.],
                         "a6-query:chronological-sweep " + canary: [1., 0., 0., 0.]}
