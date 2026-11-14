@@ -14,6 +14,38 @@ pub(crate) struct NativeSingleResult {
 }
 
 impl McpStorageAdapter {
+    /// Wire boundary: input carries original fields/vectors and no descriptor.
+    /// A supplied vector requires its explicit ID; generated input omits both.
+    pub(crate) async fn store_native_single_by_profile_id(
+        &self,
+        ctx: MutationContext,
+        input: NativeStoreInput,
+        supplied_profile_id: Option<String>,
+        policy: NativePolicyInputs,
+        parent: Option<&WorkTicket>,
+    ) -> Result<NativeSingleResult, StorageError> {
+        let completion = self.batch_completion();
+        let work = completion.accept_work(parent)?;
+        let result = async {
+            let receipt = completion
+                .store_native_profile_with_work(
+                    ctx,
+                    input,
+                    supplied_profile_id,
+                    self.embedding.clone(),
+                    self.config.graph.clone(),
+                    policy,
+                    self.clock.clone(),
+                    Some(&work),
+                )
+                .await?;
+            self.native_single_result(receipt)
+        }
+        .await;
+        completion.finish_known_work(work);
+        result
+    }
+
     pub(crate) async fn store_native_single(
         &self,
         ctx: MutationContext,
@@ -35,36 +67,41 @@ impl McpStorageAdapter {
                     Some(&work),
                 )
                 .await?;
-            let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome
-            else {
-                return Err(StorageError::CommittedMutation {
-                    receipt: Box::new(receipt),
-                    source: Box::new(StorageError::InvalidControl(
-                        "wrong native single outcome".into(),
-                    )),
-                });
-            };
-            let advisory_requested = transition.check_duplicates;
-            let advisory = match self.storage.read() {
-                Ok(engine) => crate::mcp::native_advisory::hydrate(
-                    &engine,
-                    transition.namespace_id,
-                    transition.advisory_matches().as_deref(),
-                ),
-                Err(_) => crate::mcp::native_advisory::NativeAdvisoryRead {
-                    report: None,
-                    read_generation: None,
-                    warnings: vec!["ADVISORY_UNAVAILABLE"],
-                },
-            };
-            Ok(NativeSingleResult {
-                receipt,
-                advisory_requested,
-                advisory,
-            })
+            self.native_single_result(receipt)
         }
         .await;
         completion.finish_known_work(work);
         result
+    }
+    fn native_single_result(
+        &self,
+        receipt: WriteReceipt,
+    ) -> Result<NativeSingleResult, StorageError> {
+        let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome else {
+            return Err(StorageError::CommittedMutation {
+                receipt: Box::new(receipt),
+                source: Box::new(StorageError::InvalidControl(
+                    "wrong native single outcome".into(),
+                )),
+            });
+        };
+        let advisory_requested = transition.check_duplicates;
+        let advisory = match self.storage.read() {
+            Ok(engine) => crate::mcp::native_advisory::hydrate(
+                &engine,
+                transition.namespace_id,
+                transition.advisory_matches().as_deref(),
+            ),
+            Err(_) => crate::mcp::native_advisory::NativeAdvisoryRead {
+                report: None,
+                read_generation: None,
+                warnings: vec!["ADVISORY_UNAVAILABLE"],
+            },
+        };
+        Ok(NativeSingleResult {
+            receipt,
+            advisory_requested,
+            advisory,
+        })
     }
 }

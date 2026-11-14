@@ -17,6 +17,8 @@ pub(crate) mod native_graph;
 mod native_lifecycle;
 pub(crate) mod native_records;
 mod native_store;
+mod native_store_profile;
+pub(crate) use native_store_profile::NativeStoreProfileResolution;
 mod observation;
 mod publication;
 pub(crate) use publication::CanonicalReadView;

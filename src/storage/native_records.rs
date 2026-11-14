@@ -94,13 +94,34 @@ impl NativeInsert {
     ) -> Result<[u8; 32], StorageError> {
         // Reuse exact original caller float bits/default expansion. The v2
         // operation tag and additional fields keep its identity distinct.
-        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let supplied_profile = self
             .embedding_profile
             .as_ref()
             .map(|p| p.profile_id())
             .transpose()
             .map_err(StorageError::InvalidMutation)?;
+        self.request_hash_with_profile_id(
+            ctx,
+            stability,
+            difficulty,
+            dimensions,
+            profile_id,
+            supplied_profile.as_deref(),
+        )
+    }
+
+    /// The wire supplies an ID, not a descriptor. Preserve the existing hash
+    /// encoding so historical replay needs no live descriptor or provider.
+    pub(crate) fn request_hash_with_profile_id(
+        &self,
+        ctx: &MutationContext,
+        stability: f32,
+        difficulty: f32,
+        dimensions: u32,
+        profile_id: &str,
+        supplied_profile: Option<&str>,
+    ) -> Result<[u8; 32], StorageError> {
+        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let extra = super::control::encode(&(
             self.observed_at,
             &self.entities,
