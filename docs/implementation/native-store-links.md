@@ -57,9 +57,14 @@ Common creation checks are extracted without weakening the old
 small actual-primary `CreationCommitment` for both outcomes, not a fabricated old
 insertion proof. New receipts validate policy, exact peer transitions, allowances,
 advisory presence/order, and before/after immutable namespace profile bindings
-across all origins. Physical edge history, pending-effect validation, startup,
+across all origins. The proof dimension must equal the validated namespace
+dimension as well as satisfy the supported range; a well-formed profile ID alone
+does not establish this equality. Physical edge history, pending-effect validation, startup,
 logical export/import and deletion-aware restore recognize the additive outcome.
-Unknown canonical outcomes still fail closed.
+Each peer policy version/revision equals the single-namespace operation header;
+the header participates in policy-history validation before any foreign-origin
+record rewind is skipped. This does not validate separate cross-namespace purge
+or hard-delete peer proofs. Unknown canonical outcomes still fail closed.
 
 Existing ownership, admission, sync, uncertain-commit poisoning and full committed
 receipt errors remain. Canonical success is not a derived-readiness claim; the
