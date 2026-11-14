@@ -2,8 +2,9 @@
 
 Work in progress on PR91 `b033c95` plus Hume's actual native graph core. The
 initial local join used `2cad0f7`; the keyed no-op correction `962aeac` and
-foreign-history binding correction `ca314d3` are now consumed. The final actual
-core head must be included before final validation. No catalog, maintenance, public activation or
+foreign-history binding correction `ca314d3` are now consumed. Published graph
+head `292fb29` and the same-insert type header `6c2bf2a` are included. The header
+alone does not supply the new proof or enable its consumer. No catalog, maintenance, public activation or
 broad checkpoint ancestry is required by this producer branch.
 
 The existing accepted-work registry and derived coordinator now have a typed
@@ -81,6 +82,14 @@ original receipt without resampling a clock or changing generation. These are
 process-exit tests, not power-loss evidence. No publication is authorized for
 this preparation alone: the next store child still requires its actual new proof
 and consumer, with the unsupported guard retained until validation.
+
+The typed frozen-plan adapter passed all five `native_selection` tests on the
+current joined source, including frozen settings and namespace/profile mismatch
+rejection. Formatting passed. `selection-focused-7.log` matched zero tests because
+the Rust module is named `selection`, not its filename `selection_tests`; that
+script mismatch is retained and contributes no test count. The corrected filter
+in `selection-focused-8.log` ran five tests. No final full-suite or Clippy result
+is claimed for this producer branch.
 
 
 ## Version3 consumer audit before implementation

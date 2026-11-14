@@ -7,6 +7,7 @@ use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
 use crate::search::{canonicalize_entity, dot_product_simd};
 use crate::storage::control::{Generation, GenerationRef};
 use crate::storage::native_records::NativeInsertIntent;
+use crate::storage::native_store::{FrozenInsertLinks, NativeStoreIntent, NativeStoreSettings};
 use crate::storage::{RedbStorageEngine, StorageEngine, StorageError};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -156,7 +157,78 @@ pub(crate) fn capture(
     })
 }
 
+/// Freeze only settings the insertion producer actually consumes. Server-side
+/// defaults are mutable, so a resumed batch must reuse this original value.
+pub(crate) fn freeze_settings(graph: &GraphConfig) -> Result<NativeStoreSettings, StorageError> {
+    let count = |value: usize| {
+        u32::try_from(value)
+            .map_err(|_| StorageError::InvalidMutation("native link cap exceeds u32".into()))
+    };
+    if !graph.auto_link_threshold.is_finite() || !(0.0..=1.0).contains(&graph.auto_link_threshold) {
+        return Err(StorageError::InvalidMutation(
+            "invalid native autolink threshold".into(),
+        ));
+    }
+    Ok(NativeStoreSettings {
+        autolink_enabled: graph.autolink_enabled,
+        auto_link_threshold_bits: graph.auto_link_threshold.to_bits(),
+        max_auto_links: count(graph.max_auto_links)?,
+        max_entity_links: count(graph.max_entity_links)?,
+        temporal_window_ms: graph.temporal_window_ms,
+        max_temporal_links: count(graph.max_temporal_links)?,
+    })
+}
+
 impl NativeCandidates {
+    /// Convert actual selection into the frozen core plan. No current config is
+    /// consulted; final temporal selection belongs to the core's one clock.
+    pub(crate) fn frozen_plan(
+        &self,
+        intent: &NativeStoreIntent,
+    ) -> Result<FrozenInsertLinks, StorageError> {
+        let insert = intent.insert_intent();
+        if self.generation != insert.capture_generation()
+            || self.namespace_id != insert.scope.namespace_id
+            || Some(self.profile_id.as_str())
+                != crate::storage::native_records::profile_id(&insert.namespace).as_deref()
+        {
+            return Err(conflict(
+                "native selection belongs to another insert capture",
+            ));
+        }
+        let frozen = intent.settings();
+        let settings = GraphConfig {
+            autolink_enabled: frozen.autolink_enabled,
+            auto_link_threshold: f64::from_bits(frozen.auto_link_threshold_bits),
+            max_auto_links: frozen.max_auto_links as usize,
+            max_entity_links: frozen.max_entity_links as usize,
+            temporal_window_ms: frozen.temporal_window_ms,
+            max_temporal_links: frozen.max_temporal_links as usize,
+            ..Default::default()
+        };
+        Ok(FrozenInsertLinks {
+            generation: self.generation,
+            profile_id: self.profile_id.clone(),
+            static_links: self
+                .static_links(&settings)?
+                .into_iter()
+                .map(|e| (e.target, e.edge_type, e.weight))
+                .collect(),
+            temporal: if settings.autolink_enabled
+                && settings.temporal_window_ms > 0
+                && settings.max_temporal_links > 0
+            {
+                self.candidates
+                    .iter()
+                    .map(|c| (c.id, c.created_at))
+                    .collect()
+            } else {
+                vec![]
+            },
+            advisory: self.advisory(intent.check_duplicates),
+        })
+    }
+
     /// Selected semantic/entity links; temporal selection waits for the core's
     /// one final sampled clock. No UUID or clock allocation occurs here.
     pub(crate) fn static_links(

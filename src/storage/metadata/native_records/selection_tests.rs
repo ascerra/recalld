@@ -294,3 +294,43 @@ fn native_selection_equal_scores_entities_and_times_use_uuid_ties_before_caps() 
         ids
     );
 }
+
+#[test]
+fn native_selection_frozen_core_plan_preserves_settings_scope_and_requested_advisory() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock);
+    let insert = probe(&s, &d);
+    let candidates = capture(&s.engine, &insert, &generated()).unwrap();
+    let mut config = crate::config::GraphConfig::default();
+    config.auto_link_threshold = 0.5000000001;
+    let settings = crate::graph::native_selection::freeze_settings(&config).unwrap();
+    let mut intent = crate::storage::native_store::NativeStoreIntent {
+        insert,
+        check_duplicates: true,
+        settings: settings.clone(),
+    };
+    config.autolink_enabled = false;
+    config.auto_link_threshold = 0.99;
+    let plan = candidates.frozen_plan(&intent).unwrap();
+    assert!(!plan.static_links.is_empty());
+    assert!(!plan.temporal.is_empty());
+    assert!(plan.advisory.is_some());
+    assert_eq!(
+        intent.settings().auto_link_threshold_bits,
+        0.5000000001f64.to_bits()
+    );
+    assert_ne!(
+        crate::graph::native_selection::freeze_settings(&config).unwrap(),
+        settings
+    );
+    intent.check_duplicates = false;
+    assert!(candidates.frozen_plan(&intent).unwrap().advisory.is_none());
+    let mut wrong = candidates.clone();
+    wrong.profile_id = "wrong".into();
+    assert!(wrong.frozen_plan(&intent).is_err());
+    wrong = candidates.clone();
+    wrong.namespace_id = NamespaceId::new(d.ns.get() + 1);
+    assert!(wrong.frozen_plan(&intent).is_err());
+}
