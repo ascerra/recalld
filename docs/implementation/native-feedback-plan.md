@@ -47,3 +47,5 @@ requires bool; source/log preserved, no test executable ran for that attempt.
 Ordinary schema2 serving remains gated. Native exposure's accepted adapter is a
 separate next slice, coordinated with Curie/Hume/Huygens. No public keyed-query,
 whole ReadView, deterministic-ID, performance or full-A3 completion claim.
+
+Validated runtime `db88dbf7319b28e366a4c9564dce3acce0c20284`: 1007 library + 2 CLI tests, 7 focused tests and fmt PASS; clippy exit0 WITH702 library/769 test warnings (681 duplicates), plus existing one binary warning. Evidence `1fa7d2a` seals all225 runtime inputs and7 executable identities. Actual HOME mirror: `/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-feedback-1fa7d2a` (16 files byte/hash verified); COPY SHA256 `379dd8eb1a12a09e72aa97122fb671402da4dd81a0e1178c6a60f60a82017351`. Notebook entry appended; no runtime change in evidence/doc tails.
