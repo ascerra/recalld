@@ -100,7 +100,7 @@ fn token_digest(records: &[DiskRecord], rewind: u64) -> Result<String, StorageEr
         .collect::<Result<Vec<_>, StorageError>>()?;
     Ok(token_digest_values(tokens))
 }
-fn token_digest_values(values: impl IntoIterator<Item = ([u8; 16], u64)>) -> String {
+pub(crate) fn token_digest_values(values: impl IntoIterator<Item = ([u8; 16], u64)>) -> String {
     let mut tokens = values.into_iter().collect::<Vec<_>>();
     tokens.sort_unstable();
     let mut digest = Sha256::new();
@@ -142,6 +142,10 @@ pub(crate) fn validate_policy_history(
     let mut suffix = BTreeMap::new();
     let mut policies: HashMap<u32, BTreeMap<Generation, (WriteReceipt, PolicyTransition)>> =
         HashMap::new();
+    let mut numeric_policies: HashMap<
+        u32,
+        BTreeMap<Generation, super::native_policy::NativeNamespacePolicyUpdated>,
+    > = HashMap::new();
     let mut native_history = Vec::new();
     let mut namespace_creations = HashMap::new();
     for row in read.open_table(control::RECEIPTS)?.iter()? {
@@ -179,6 +183,34 @@ pub(crate) fn validate_policy_history(
                     return Err(invalid("invalid native namespace receipt origin/identity"));
                 }
                 None
+            }
+            MutationOutcome::NativeNamespacePolicyUpdated { transition: t } => {
+                if policies
+                    .entry(t.namespace_id.get())
+                    .or_default()
+                    .insert(t.next_revision, (receipt.clone(), t.revision_transition()))
+                    .is_some()
+                    || numeric_policies
+                        .entry(t.namespace_id.get())
+                        .or_default()
+                        .insert(t.next_revision, t.clone())
+                        .is_some()
+                {
+                    return Err(invalid("ambiguous numeric policy revision"));
+                }
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePolicyUnchanged { transition: t } => {
+                if !keys.contains(key.value()) {
+                    return Err(invalid("policy no-change receipt lacks retry key"));
+                }
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
             }
             MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
                 if !keys.contains(key.value())
@@ -288,7 +320,7 @@ pub(crate) fn validate_policy_history(
             }
         }
     }
-    let configs = read
+    let mut configs = read
         .open_table(NAMESPACE_TABLE)?
         .iter()?
         .map(|row| {
@@ -298,8 +330,22 @@ pub(crate) fn validate_policy_history(
         })
         .collect::<Result<HashMap<_, _>, StorageError>>()?;
     let creations = super::native_records::creation_proofs(read)?;
+    // Numeric policy is mutable, including on restored stores. Rewind its
+    // complete retained revision chain before checking immutable creation state.
+    let mut creation_configs = configs.clone();
+    for (id, history) in &numeric_policies {
+        let ns = creation_configs
+            .get_mut(id)
+            .ok_or_else(|| invalid("numeric policy namespace missing"))?;
+        for t in history.values().rev() {
+            if super::native_catalog::NamespacePolicyState::capture(ns)? != t.after {
+                return Err(invalid("numeric policy configuration chain mismatch"));
+            }
+            t.before.apply(ns);
+        }
+    }
     for (id, creation) in &namespace_creations {
-        let ns = configs
+        let ns = creation_configs
             .get(id)
             .ok_or_else(|| invalid("native namespace creation lacks retained namespace"))?;
         if !creation.matches_namespace(ns)? {
@@ -407,6 +453,58 @@ pub(crate) fn validate_policy_history(
                 }
                 namespace_highwater = t.previous_max_id;
                 records.remove(&t.namespace_id.get());
+            }
+            MutationOutcome::NativeNamespacePolicyUnchanged { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                    || super::native_catalog::NamespacePolicyState::capture(
+                        configs
+                            .get(&t.namespace_id.get())
+                            .ok_or_else(|| invalid("policy no-change namespace absent"))?,
+                    )? != t.policy
+                {
+                    return Err(invalid(
+                        "policy no-change proof differs from historical policy",
+                    ));
+                }
+            }
+            MutationOutcome::NativeNamespacePolicyUpdated { transition: t } => {
+                let policy = current_policy
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("numeric policy namespace absent"))?;
+                let rows = records
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("numeric policy record set absent"))?;
+                let ns = configs
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("numeric policy configuration absent"))?;
+                if *policy != (t.lifecycle_version, t.next_revision)
+                    || super::native_catalog::NamespacePolicyState::capture(ns)? != t.after
+                    || t.record_count != rows.len() as u64
+                    || t.record_token_digest
+                        != token_digest_values(rows.iter().map(|r| {
+                            (
+                                *r.id.as_bytes(),
+                                r.state.lifecycle.lifecycle.record_generation.get(),
+                            )
+                        }))
+                {
+                    return Err(invalid("numeric policy affected-record proof mismatch"));
+                }
+                for row in rows {
+                    let fields = &mut row.state.lifecycle.lifecycle;
+                    fields.record_generation = Generation::try_from(
+                        fields
+                            .record_generation
+                            .get()
+                            .checked_sub(1)
+                            .ok_or_else(|| invalid("numeric policy token underflow"))?
+                            .to_string(),
+                    )?;
+                    fields.policy_revision = t.previous_revision;
+                }
+                t.before.apply(ns);
+                *policy = (t.lifecycle_version, t.previous_revision);
             }
             MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
                 let policy = current_policy
