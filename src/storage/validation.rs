@@ -148,15 +148,6 @@ fn validate_snapshot(
     let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
     let read = meta.begin_read()?;
     let control = super::control::validate_existing(&read)?;
-    if super::metadata::batch::validate_existing(&read, control.as_ref())?
-        .iter()
-        .any(|p| p.unresolved() != 0)
-    {
-        return Err(StorageError::RecoveryRequired(
-            "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
-                .into(),
-        ));
-    }
     if native_recovery {
         let state = control
             .as_ref()
@@ -172,10 +163,21 @@ fn validate_snapshot(
         super::metadata::restoration::validate_inventory(&read)?;
         super::canonical_schema::validate_metadata_format(&read, Some(state))?;
     }
+    if super::metadata::batch::validate_existing(&read, control.as_ref())?
+        .iter()
+        .any(|p| p.unresolved() != 0 && (!native_recovery || !matches!(p.version, 2 | 3)))
+    {
+        return Err(StorageError::RecoveryRequired(
+            "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
+                .into(),
+        ));
+    }
 
     if super::metadata::purge::validate_existing(&read, control.as_ref())?
         .iter()
-        .any(|p| p.stage != super::purge::PurgeStage::Complete)
+        .any(|p| {
+            p.stage != super::purge::PurgeStage::Complete && (!native_recovery || p.version != 2)
+        })
     {
         return Err(StorageError::RecoveryRequired(
             "unfinished namespace purge; reopen and finish before offline inventory".into(),
@@ -204,8 +206,14 @@ fn validate_snapshot(
             && (!native_recovery
                 || !matches!(
                     e.receipt.outcome,
-                    super::control::MutationOutcome::NativeMemoryInserted { .. }
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                        | super::control::MutationOutcome::NativePhaseMaterialized { .. }
+                        | super::control::MutationOutcome::NativeMemoryHardDeleted { .. }
+                        | super::control::MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+                        | super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
+                        | super::control::MutationOutcome::NativeGraphChanged { .. }
+                        | super::control::MutationOutcome::NativeGraphUnchanged { .. }
                 ))
     }) {
         return Err(StorageError::RecoveryRequired(
@@ -345,6 +353,7 @@ fn validate_snapshot(
             "edge index counts disagree".into(),
         ));
     }
+    let mut decoded_edges = Vec::new();
     for item in forward.iter()? {
         let (key, value) = item?;
         let edge = PersistedEdge::from_forward(key.value(), value.value())?;
@@ -352,14 +361,56 @@ fn validate_snapshot(
         reverse_key[..16].copy_from_slice(edge.target.as_bytes());
         reverse_key[16] = edge.edge_type.as_u8();
         reverse_key[17..].copy_from_slice(edge.source.as_bytes());
-        if !ids.contains(&edge.source)
-            || !ids.contains(&edge.target)
+        // A committed native hard deletion can precede its separate edge-DB
+        // replay. Admit only the exact, already validated pending deletion;
+        // unrelated dangling edges and missing reverse entries still fail.
+        let pending_delete = native_recovery
+            && effects.iter().any(|effect| {
+                let permitted_deleted = |id: &MemoryId| match &effect.receipt.outcome {
+                    super::control::MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                        *id == t.memory_id
+                    }
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced {
+                        transition: t,
+                    } => t
+                        .chunk
+                        .as_ref()
+                        .is_some_and(|c| c.deletions.iter().any(|d| d.memory_id == *id)),
+                    _ => false,
+                };
+                !effect.canonical_applied
+                    && effect.deletes.iter().any(|deleted| {
+                        super::native_records::NativeEdgeProof::from(deleted)
+                            == super::native_records::NativeEdgeProof::from(&edge)
+                    })
+                    && [edge.source, edge.target]
+                        .iter()
+                        .all(|id| permitted_deleted(id) || ids.contains(id))
+            });
+        if ((!ids.contains(&edge.source) || !ids.contains(&edge.target)) && !pending_delete)
             || reverse.get(reverse_key.as_slice())?.is_none()
         {
             return Err(StorageError::CorruptIndex(
                 "dangling or inconsistent edge".into(),
             ));
         }
+        if schema_state.is_some() {
+            decoded_edges.push(edge);
+        }
+    }
+    if let (Some(state), Some(schema)) = (control.as_ref(), schema_state.as_ref()) {
+        let baseline = if schema.source.store_id == state.store_id {
+            schema.publication_generation
+        } else {
+            super::control::Generation::default().next()?
+        };
+        super::native_graph::validate_edge_history(
+            &meta.begin_read()?,
+            state,
+            baseline,
+            &decoded_edges,
+            &effects,
+        )?;
     }
     Ok(inventory)
 }

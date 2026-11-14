@@ -1,0 +1,98 @@
+[
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known\n\noffline payload"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "fixture-miss"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known\n\noffline payload"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "fixture-miss"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known\n\noffline payload"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "offline-known"
+    ],
+    "model": "offline-known-v1"
+  },
+  {
+    "dimensions": 4,
+    "encoding_format": "float",
+    "input": [
+      "fixture-miss"
+    ],
+    "model": "offline-known-v1"
+  }
+]

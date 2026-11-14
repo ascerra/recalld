@@ -21,15 +21,6 @@ pub(crate) const RECEIPTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("mutation_receipts");
 pub(crate) const KEYS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("mutation_keys");
 
-/// Final exposure assertion, checked with canonical records in the write transaction.
-/// Namespace is the name pinned during selection; a by-ID source must still
-/// belong to that same namespace even when it is not itself exposed.
-#[derive(Debug, Clone, Serialize)]
-pub struct ExposureScope {
-    pub namespace: String,
-    pub source: Option<crate::model::MemoryId>,
-}
-
 // Per-test-thread work counts, not timing or a process-wide instrumentation
 // switch. Count receipt decoding as well as full proof entry so a regression
 // cannot hide a history scan behind a different validation helper.
@@ -48,6 +39,15 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn take_validation_work() -> ValidationWork {
     VALIDATION_WORK.with(|work| work.replace(ValidationWork::default()))
+}
+
+/// Final exposure assertion, checked with canonical records in the write transaction.
+/// Namespace is the name pinned during selection; a by-ID source must still
+/// belong to that same namespace even when it is not itself exposed.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExposureScope {
+    pub namespace: String,
+    pub source: Option<crate::model::MemoryId>,
 }
 
 /// Canonical decimal-string u63. JSON numbers, signs and leading zeros fail.
@@ -231,6 +231,36 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativeNamespacePurgeStarted {
+        transition: super::native_purge::NativePurgeStarted,
+    },
+    NativeNamespacePurgeAdvanced {
+        transition: super::native_purge::NativePurgeAdvanced,
+    },
+    NativeNamespacePolicyUnchanged {
+        transition: super::native_policy::NativeNamespacePolicyUnchanged,
+    },
+    NativeNamespacePolicyUpdated {
+        transition: super::native_policy::NativeNamespacePolicyUpdated,
+    },
+    NativeNamespaceCreated {
+        transition: super::native_catalog::NativeNamespaceCreated,
+    },
+    NativePhaseMaterialized {
+        transition: super::native_maintenance::NativePhaseWrite,
+    },
+    NativeMemoryHardDeleted {
+        transition: super::native_maintenance::NativeHardDeleteWrite,
+    },
+    NativeGraphUnchanged {
+        transition: super::native_graph::NativeGraphNoChange,
+    },
+    NativeGraphChanged {
+        transition: super::native_graph::NativeGraphWrite,
+    },
+    NativeMemoryInsertedWithLinks {
+        transition: super::native_store::NativeStoreWrite,
+    },
     NativeMemoryInserted {
         transition: super::native_records::NativeRecordWrite,
     },
@@ -242,6 +272,17 @@ pub enum MutationOutcome {
     },
     LifecycleFeedbackApplied {
         transition: super::native_lifecycle::NativeLifecycleWrite,
+    },
+    BatchReserved {
+        batch_kind: super::batch::BatchKind,
+        item_count: u32,
+        caller_hash: [u8; 32],
+        resolution_hash: [u8; 32],
+    },
+    BatchItemRejected {
+        batch_operation_id: Uuid,
+        index: u32,
+        error: super::batch::BatchError,
     },
     LifecycleMaterialized {
         #[serde(rename = "memoryId")]
@@ -256,17 +297,6 @@ pub enum MutationOutcome {
         decay_strength_bits: u32,
         #[serde(rename = "removedFieldsMask")]
         removed_fields_mask: u8,
-    },
-    BatchReserved {
-        batch_kind: super::batch::BatchKind,
-        item_count: u32,
-        caller_hash: [u8; 32],
-        resolution_hash: [u8; 32],
-    },
-    BatchItemRejected {
-        batch_operation_id: Uuid,
-        index: u32,
-        error: super::batch::BatchError,
     },
     NamespacePurgeStarted {
         namespace_id: NamespaceId,
@@ -443,9 +473,22 @@ pub(crate) fn validate_existing(
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                scope == MutationScope::Namespace(t.before_namespace.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => {
+                scope == MutationScope::Namespace(t.namespace_id)
+            }
             MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::BatchReserved { .. }
-            | MutationOutcome::BatchItemRejected { .. } => scope == MutationScope::Catalog,
+            | MutationOutcome::BatchItemRejected { .. }
+            | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
+                scope == MutationScope::Namespace(transition.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePolicyUpdated { transition } => {
+                scope == MutationScope::Namespace(transition.namespace_id)
+            }
             MutationOutcome::NamespacePolicyUpdated { namespace_id }
             | MutationOutcome::NamespacePurgeStarted { namespace_id, .. }
             | MutationOutcome::NamespacePurgeAdvanced { namespace_id, .. } => {
@@ -476,11 +519,21 @@ pub(crate) fn validate_existing(
         // schema table is entirely absent. Legacy decode alone is not proof.
         if matches!(
             stored.receipt.outcome,
-            MutationOutcome::LifecyclePolicyMigrated { .. }
+            MutationOutcome::NativeNamespacePurgeStarted { .. }
+                | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                | MutationOutcome::LifecyclePolicyMigrated { .. }
+                | MutationOutcome::NativeNamespaceCreated { .. }
+                | MutationOutcome::NativeNamespacePolicyUpdated { .. }
+                | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
                 | MutationOutcome::LifecycleFeedbackApplied { .. }
+                | MutationOutcome::NativePhaseMaterialized { .. }
+                | MutationOutcome::NativeMemoryHardDeleted { .. }
+                | MutationOutcome::NativeMemoryInsertedWithLinks { .. }
                 | MutationOutcome::NativeMemoryInserted { .. }
                 | MutationOutcome::NativeMemoryTombstoned { .. }
+                | MutationOutcome::NativeGraphChanged { .. }
+                | MutationOutcome::NativeGraphUnchanged { .. }
         ) && state.control_schema_version != 2
         {
             return Err(StorageError::InvalidControl(
@@ -651,6 +704,36 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativeNamespacePurgeStarted { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePurgeAdvanced { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePolicyUpdated { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespaceCreated { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativePhaseMaterialized { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeMemoryHardDeleted { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeGraphUnchanged { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeGraphChanged { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeMemoryInserted { transition } => {
             transition.validate(&stored.receipt, true)?
         }
@@ -663,13 +746,13 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::LifecycleFeedbackApplied { transition } => {
             transition.validate(&stored.receipt, true)?
         }
-        MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
-        | MutationOutcome::LifecycleMaterialized { .. }
+        MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::BatchReserved { .. }
         | MutationOutcome::BatchItemRejected { .. }
         | MutationOutcome::ExposuresRecorded { .. }
         | MutationOutcome::LegacyFeedbackRecorded { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
@@ -789,23 +872,34 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
             }
         }
         MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::NativeNamespacePurgeStarted { .. }
+        | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+        | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+        | MutationOutcome::NativeNamespacePolicyUpdated { .. }
+        | MutationOutcome::NativeNamespaceCreated { .. }
+        | MutationOutcome::NativePhaseMaterialized { .. }
+        | MutationOutcome::NativeMemoryHardDeleted { .. }
+        | MutationOutcome::NativeMemoryInsertedWithLinks { .. }
         | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
+        | MutationOutcome::NativeGraphChanged { .. }
+        | MutationOutcome::NativeGraphUnchanged { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
         | MutationOutcome::LifecycleFeedbackApplied { .. }
+        | MutationOutcome::NamespaceCreated { .. }
+        | MutationOutcome::NamespacePolicyUpdated { .. }
+        | MutationOutcome::NamespacePurgeStarted { .. }
+        | MutationOutcome::NamespacePurgeAdvanced { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::AccessRecorded { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
-        MutationOutcome::BatchReserved { .. }
-        | MutationOutcome::BatchItemRejected { .. }
-        | MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
-        | MutationOutcome::LifecycleMaterialized { .. }
-        | MutationOutcome::NamespaceCreated { .. }
-        | MutationOutcome::NamespacePolicyUpdated { .. }
-        | MutationOutcome::NamespacePurgeStarted { .. }
-        | MutationOutcome::NamespacePurgeAdvanced { .. } => {}
+        MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::BatchReserved { .. }
+        | MutationOutcome::BatchItemRejected { .. } => {}
     }
     Ok(stored)
 }
