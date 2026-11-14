@@ -1,0 +1,18 @@
+{
+  "source": "a9053ef1287b0b2a1a266c7c72268ad61f84291b",
+  "tree": "fa4fed7d18d206304edcc15984cad0713289a09a",
+  "exit": 0,
+  "log_sha256": "929d4fa700b430d707bb5b07e9e3d30fb6e9da0dec2165c5f2145fdacc4df42b",
+  "binary": [
+    {
+      "path": "debug/deps/recalld-b2844bb1c4a63074",
+      "sha256": "06d68a6608425bfaa628df7ce55724a7e52e52d6d5e7c685d5996713d726df6a"
+    }
+  ],
+  "results": [
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1102 filtered out; finished in 1.90s",
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1102 filtered out; finished in 8.83s"
+  ]
+}

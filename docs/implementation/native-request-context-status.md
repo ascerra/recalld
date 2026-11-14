@@ -1,139 +1,121 @@
-# Original API context consumer status
+# Native request context: validated consumer handoff
 
-Actual base: PR121 `3fa91d4`. The reviewed plan and bounded four-candidate
-compatibility refinement are in native-request-context-plan.md. This branch
-changes compound retained context and actual purge/catalog/policy consumers only.
-MutationContext::validate and native_records/native_lifecycle/native_maintenance
-remain unchanged. Standalone owners proceed on their actual parents; compound
-batch later consumes this codec. No ordinary startup or public API gate opens.
+Validated source `a9053ef1287b0b2a1a266c7c72268ad61f84291b`, tree
+`fa4fed7d18d206304edcc15984cad0713289a09a`, actual parent PR121
+`3fa91d4e542ec8ed5519fe4c3b87e9e665043a40`. Later evidence and planning commits
+change no Rust, Cargo or test sources. Publication requires coordinating-agent
+review of the final head/report/HOME manifest, followed by an exact READY handoff
+and branch push freeze for Halley, the dedicated integrator.
 
-## Frozen evidence and followups
+## Implemented behavior
 
-- Runtime d933e5f, topology-doc head cb6a452: eight focused PASS12.85s with genuine
-  old2 force/CAS source/fork artifacts and old binary proof rejection.
-- Deliberately unanchored new API1 candidate f79614e: one stripping test FAIL as
-  intended1.37s. This is a proposed-candidate defect, not a published API1 exploit.
-- Frozen cb6a452 full:1100PASS/1FAIL516.61s. Existing unknown-child test failed;
-  CLI and Clippy did not run after cargo test exited101. Log SHA256
-  764391cb73717f3d932325571f61e3ecce3ad672d25abb27f275c79a01c23e14,
-  test executable SHA256
-  a6a1f06bf4d6576875277ca39764e694856492fe8abdc47eecd1f9b609d2972b.
-- Test-only574850d exposed the actual error: ordinary control_state rejected
-  pending purge before retry, with RecoveryRequired("namespace purge pending;
-  resume canonical deletion before admission"). Its exact assertion remains.
-- Runtime a4acd5f replaces that ordinary read with a narrow immutable owner-mode
-  check under the existing storage write guard. The shared purge transaction
-  still verifies current control schema under its mutation guard; ordinary reads
-  remain blocked. Existing unknown-child test PASS1.57s, exact reserved child
-  CommitOutcomeUnknown classification and reopen preserved.
-- The same a4acd5f binary then reproduced the separate known-receipt gap:
-  API1 replay of damaged scope progress returned bare InvalidControl after its
-  canonical receipt was found. New regression FAIL1.10s. The proposed correction
-  wraps load/start-validation errors with that already-in-hand full replay
-  receipt. It does not reconstruct or reread a receipt. Lookup failures before
-  a receipt is known retain their original error class.
+Native catalog and numeric policy accept the existing closed API1|2 context
+without changing their native owner/scope guards or hash domains. Purge selects
+its canonical codec from owned store mode independently of the originating API.
+The existing MutationContext validator and standalone native_records,
+native_lifecycle and native_maintenance modules are unchanged.
 
-The coordinating agent reviewed d933e5f source and requested the narrow receipt
-correction. The final regression covers both originating contracts, damaged
-start scope, missing progress, and missing receipt before lookup, through the
-actual accepted coordinator. It asserts exact receipt equality, retained raw
-receipt bytes, unchanged generation/metadata, and no invented receipt for an
-missing canonical receipt. A separate test preserves legacy-owner
-rejection for both contracts.
+The new shared retained context is consumed by actual native purge. API1 start
+proof retains original force/CAS; known historical native API2 omits the field,
+preserving old bytes. Missing proof must match exactly one of four original
+force/CAS hashes using original previousG, never fork currentG. One canonical
+helper validates start identity for strict offline/startup reads, current reads,
+resume and replay; child hashes derive from that validated origin. Null, unknown
+or altered proofs fail closed. This is not a general API inference mechanism.
 
-At the performance DRAIN instruction, the already-running a4acd5f probe finished
-normally and all own heavy jobs drained. Wrapping correction/test additions are
-source-only and **not validated yet**. No subsequent formatter, build, test,
-container or large artifact copy is authorized before explicit END. Preserve
-receipt-red source pointer, target and log until its binary hash is recorded;
-then run focused checks followed by one full corrected fmt/test/all-target
-Clippy run. Do not advertise a final green or publish this unfinished slice.
+Fresh CAS equals the transaction's current generation and the start receipt
+advances it once. The start proof checks previousG+1 equals committedG. Genuine
+BEFORE artifacts prove both force values with absent/present CAS, including
+pre-child recovery and completed/forked histories without receipt rewriting.
 
-## Remaining actual consumers
+## Combined owner, transaction and receipt review
 
-Huygens owns public catalog/policy/purge routing. Curie owns compound batch codec
-consumption and independent standalone record propagation. Pascal owns independent
-lifecycle/exposure/manual propagation. Ordinary startup remains Feynman's later
-actual consumer integration; no second engine or forced API2 context is allowed.
+The private native-owner mode is constructor state established after schema2,
+lineage and selected-text preflight. The accepted worker holds its publication
+lease, graph guard and storage write guard while checking this mode. It then
+enters the existing purge mutation guard, checks handle/accepted-work availability,
+and compares decoded current control schema with owner mode inside the actual
+write transaction before replay or fresh mutation. Incoming API does not select
+or alter owner mode. Ordinary reads still reject active purge.
 
-Halley's frozen controls inventory35aa7a identifies an additional real seam:
-124's owned ID allocator must replace free control::record_receipt calls in
-native catalog/policy on the actual shared-context join, with cursor/create/
-update/keyed-nochange/replay proofs. He owns that adaptation. It is not present
-in this121 child. Published PR125 `0b50168b64ad353e4f7a53c6459c270fe8500070` and
-PR128 `5deb840a21ad5f1f80006e0d05a6372919292acf` must enter the later recomputed startup
-closure through actual consumers, not a blind ancestry merge.
+After replay returns an exact receipt, failure to load progress or validate its
+start anchor returns CommittedMutation carrying that in-hand receipt. No second
+lookup reconstructs evidence. Failures before a receipt is available retain their
+original error class. The existing unknown-child test still returns the reserved
+CommitOutcomeUnknown identity and recovers correctly. Cancellation retains worker
+ownership. Coordinating-agent and Curie bounded reviews of earlier source found
+no blocker; final source inspection verified these combined boundaries on a9053ef.
+Those source reviews are distinct from the runtime results below.
 
-During DRAIN, Curie independently reviewed d933e5f's retained codec and purge
-start/child anchoring and found no blocker: closed Some1, explicit-null rejection,
-exactly-one old2 four-candidate match using original previousG, canonical start
-equality and derived child contract. This was bounded source review only, not
-full review or runtime proof. It does not validate the subsequent owner-mode or
-known-receipt corrections; those await the recorded focused/full checks.
+## Actual validation
 
-## Combined owner and transaction review for final handoff
+All runs were isolated Docker, network none, two CPUs/4GiB, Rust1.94.1,
+CARGO_BUILD_JOBS2/RUST_TEST_THREADS2, private source-specific targets. Final source
+and genuine BEFORE artifacts were read-only mounted, with tracked file SHA256
+checks inside the container before and after each final run. No personal data,
+credentials, daemon or socket mounts. See the [evidence README](../evidence/native-request-context/README.md)
+and [final manifest](../evidence/native-request-context/final-manifest.json).
 
-Coordinating-agent source review of9e70229 found no blocker in the narrow
-load/start-validation error wrapper: it retains the receipt already returned by
-replay lookup and performs no fabricated lookup or reconstruction. Actual GREEN
-and the final full suite remain pending explicit END.
+| Check on a9053ef | Result |
+| --- | --- |
+| Complete context-focused filter, with genuine BEFORE fixtures/old executable | 10 passed,24.37s |
+| Unknown-child recovery regression | 1 passed,1.90s |
+| API1/API2 known-receipt damage/missing-progress and prelookup missing-receipt matrix | 1 passed,8.83s; also included in the ten-test filter |
+| Full default-feature library suite | 1103 passed,715.68s |
+| Actual lifecycle/text migration CLI tests | Both passed,2.59s/5.13s |
+| Formatting | Passed |
+| Default all-target Clippy | Exit0,869 library/929 test warnings,840 duplicates |
+| All-feature test compilation (`--no-run`) and all-target/all-feature Clippy | Exit0,890 library/950 test warnings,862 duplicates; one main-binary warning, duplicated for test target |
 
-Combined source inspection of the owner fence and transaction path confirms:
+Four existing doctests remain ignored. The optional bench feature adds command/
+module code but no tests or conditional core branches on this source. Its targets
+were compiled/linted without repeating the full runtime suite. No local
+all-feature full-runtime execution is claimed. All logs and executable hashes
+are retained; no Rust rerun is required for this documentation/evidence tail.
 
-- `native_lifecycle_only` is private constructor state. Native open validates
-  schema2, selected-text fencing and serving lineage on a disposable inspection
-  before writable construction. Incoming API contract does not set this flag.
-- The accepted coordinator holds the publication lease and graph guard inside
-  the blocking worker, then takes the storage write guard. Its narrow owner
-  predicate rejects a legacy owner without invoking an ordinary metadata read.
-- The same call enters the existing purge mutation guard, which still checks
-  handle availability and accepted work. Its write transaction reads and decodes
-  current control and rejects owner/schema mismatch before replay or fresh writes.
-  The cached predicate is not a replacement for this canonical transaction check.
-- Original API1|2 and namespace scope validation remain independent. Hash/domain
-  selection uses the owned mode; hashes still include the original contract.
-- Ordinary reads still reject pending purge. Only the existing purge path can
-  resume it. Unknown commits and pending canonical effects retain their handle
-  guards; no raw public read or second engine was introduced.
+## Preserved failures
 
-This is a combined source assessment of the current correction, not a claim
-that9e70229 has passed runtime validation. The previous a4acd5f unknown-child
-GREEN is narrower evidence. Repeat this assessment against the final frozen
-source and include its exact hash in the handoff after focused/full validation.
+- Genuine old runtime parent3fa91d4, exporter-only1b4eb26: all four force/CAS
+  combinations authored, completed, exported/imported and forked by the old
+  binary. PASS28.02s;180-file artifact manifest retained.
+- Deliberately unanchored proposed API1 candidate f79614e: stripping all three
+  start copies before any child incorrectly passed preflight, so the negative
+  test failed1.37s. This is a candidate bug, not a published API1 exploit.
+- Frozen cb6a452 full:1100 passed/1 failed516.61s. New coordinator ordinary control
+  read blocked active purge before replay; exact diagnostic574850d retained.
+- a4acd5f owner correction restored unknown-child classification (PASS1.57s),
+  then the actual known-receipt regression failed1.10s on bare InvalidControl
+  after successful lookup.9e70229 supplies the narrow receipt wrapper, validated
+  by the final a9053ef source. Both REDs and the earlier full failure remain.
+- Earlier test compilation and read-only fixture-mount failures have separate
+  source/log/binary manifests. Sealed BEFORE originals were never modified.
 
-## Quiet-window validation queue
+No source-root switching reused an executable. The negative candidate used a
+separate package-cleaned target. Heavy jobs drained before the explicit quiet
+window; only source/docs changed during HOLD. Validation resumed after explicit
+END22:14UTC, preserving the earlier a4 source pointer/binary before rebuilding.
 
-The coordinating agent authorized the quiet window for2026-11-14
-21:31:06UTC through hard end22:31:06UTC, with explicit END required before new
-heavy work. All own heavy jobs were drained before START. No build, formatter,
-test, container, benchmark or large artifact copy runs during this window.
-Frozen targets, binaries, genuine BEFORE fixtures and raw logs remain untouched.
+## Actual changed sources and remaining consumers
 
-After explicit END, execute in this order:
+Production changes: storage/request_context.rs and mod.rs; native_purge.rs;
+metadata/purge.rs; metadata/native_catalog.rs; native_policy.rs; and the actual
+derived_completion/native_purge.rs coordinator. Regressions are in the catalog,
+policy and purge tests, including new purge_context_tests.rs and
+native_purge_tests/request_context.rs. Exact paths are in final-manifest.json.
 
-1. Record receipt-red's retained source pointer a4acd5f, tree, raw log and existing
-   executable hashes before modifying its target. Preserve the frozen cb6a452
-   failed full run and574850d owner-error diagnostic separately.
-2. Format the source-only9e70229 correction and test additions, inspect any diff,
-   commit the resulting exact source, and generate its tracked-file hash list.
-3. Run the existing unknown-child regression unchanged:
-   `cargo test --offline --lib native_purge_accepted_unknown_child_preserves_reserved_id_and_reopens -- --nocapture`.
-4. Run `cargo test --offline --lib native_context_ -- --nocapture`, with the
-   sealed genuine BEFORE fixtures and old executable mounted read-only. This
-   includes the new API1/API2 known-receipt damage/missing-progress cases,
-   prelookup missing-receipt negative, and both-contract legacy-owner rejection.
-   Preserve each failure against its actual source before correcting it.
-5. Once focused checks pass, freeze source and run exactly one appropriate full
-   corrected validation: `cargo fmt --check && cargo test --offline && cargo clippy --offline --all-targets`.
-   Use the existing bounded offline image/private target and verify tracked
-   source hashes inside the container before and after the run. Do not switch
-   source roots on that target or rerun Rust solely for evidence/doc tails.
-6. Review the combined native-owner predicate, actual guarded transaction fence
-   and known-receipt wrapper at the final source hash. Seal compact repo evidence
-   and actual HOME copies, then hand off the actual consumer parent to compound
-   batch/public routing and Halley's owned-allocator child. No ordinary startup
-   activation or standalone-writer ancestry requirement is implied.
+This is an actual PR121 consumer slice, not ordinary startup/public activation.
+Huygens owns real versioned transport projection. Curie owns compound batch
+consumption and graph/link producers; Pascal owns independent lifecycle/exposure/
+manual propagation. Standalone writers do not inherit this codec for coordination.
+The [startup plan](native-startup-admission-plan.md) keeps prepared fixture-tested
+adapters before ordinary API1-native admission, then public API2 plus actual A2
+selection. The [legacy API2 inventory](legacy-api2-writer-inventory.md) separately
+records real legacy restrictions and catalog caller gaps without blanket widening.
 
-The deliberate unanchored candidate f79614e remains a separate expected-failure
-artifact and target. It is never a publication parent. Its stripping RED already
-has source/log/executable provenance and does not need another run absent change.
+Next assigned slice: Feynman consumes actual124 plus this validated parent to
+route the three native catalog/policy receipt calls through the owned allocator,
+preserving typed purge starts and124 batch/child reservations. Halley's prepared
+8c3494b proof draft/merge review is input, not executed evidence. Halley now owns
+integration; A6 constructor/control/checkpoint work transfers to a helper. No
+moving WIP parents, second engine, implicit migration, profile blessing,
+atomic-batch claim or arbitrary power-loss claim is introduced here.
