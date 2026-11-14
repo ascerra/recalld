@@ -1,0 +1,126 @@
+{
+  "runtime_sha": "08707c7a1d61213504534ae55e00597598d285ed",
+  "base_pr": 97,
+  "actual_parent": "292fb290e24736f5ff86baf345f5b2794d17aa9d",
+  "initial_types_commit": "6c2bf2a",
+  "core_commit": "a863804558462fd83318e374bdb886266d98bc3e",
+  "home_evidence": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-store-links-08707c7",
+  "raw_in_git": false,
+  "environment": {
+    "image_id": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "network_mode": "none",
+    "nano_cpus": 2000000000,
+    "memory_bytes": 4294967296,
+    "binds": [
+      "/tmp/recalld-implementation/native-store-links/.validation/run-4/source:/work:ro",
+      "/tmp/recalld-implementation/native-store-links/.validation/run-4/validate.sh:/validate.sh:ro",
+      "/tmp/recalld-implementation/native-store-links/.validation/cargo:/cargo",
+      "/tmp/recalld-implementation/native-store-links/.validation/target:/target"
+    ],
+    "started_at": "2026-11-14T18:13:21.184371552Z",
+    "toolchain": "1.94.1",
+    "cargo_build_jobs": 2
+  },
+  "runs": [
+    {
+      "name": "check-1",
+      "status": "Compiler failure: sibling called private native_control_at; corrected to existing canonical capture_at, no admission relaxation.",
+      "source_manifest_sha256": "69a6799c88374ba97f07547e812206c53054b8bc677bdee4fc017691f8e7f622",
+      "post_validation": {
+        "source_verified": true,
+        "exit_code": 101,
+        "failure": "private native_control_at called from sibling; use existing capture_at instead",
+        "source_manifest_sha256": "69a6799c88374ba97f07547e812206c53054b8bc677bdee4fc017691f8e7f622"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "8cd2650c90636d27df77635b8313df1a69d415df18b250b1c76f2778cacb6639",
+        "source.json": "69a6799c88374ba97f07547e812206c53054b8bc677bdee4fc017691f8e7f622",
+        "validate.sh": "5e4b974dfe296e7a7e17e8818cf96b8e01ce0fe30a8b0c3ba77d929d3427c397",
+        "validation.log": "e06192a3705016d3e9c1c03ef96722251223a45c4f3341319ffedbb37cf7cc07"
+      }
+    },
+    {
+      "name": "run-2",
+      "status": "Test compile failure: subprocess fixture parsed MemoryId directly; corrected UUID wrapper conversion. No tests executed.",
+      "source_manifest_sha256": "5b68f771ad3dc721aa748aa821c6166a946635b4528133b679d0ad6b9945afb0",
+      "post_validation": {
+        "source_verified": true,
+        "exit_code": 101,
+        "failure": "process fixture parsed MemoryId directly rather than UUID wrapper; no tests executed",
+        "source_manifest_sha256": "5b68f771ad3dc721aa748aa821c6166a946635b4528133b679d0ad6b9945afb0"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "7fe196d10d9bcb2a71062457094580a3520669553bf44fed53ea5a4ce09458ed",
+        "source.json": "5b68f771ad3dc721aa748aa821c6166a946635b4528133b679d0ad6b9945afb0",
+        "validate.sh": "55ae244b5da3da21196d0ba6ee2d2282956748f61e4fe14ecaca304e5f94ecf7",
+        "validation.log": "fde990d31f513718770ee977c3a045917f6c7f9539f212ad232a1fdac25fecfd"
+      }
+    },
+    {
+      "name": "run-3",
+      "status": "7 focused actual engine tests passed; includes subprocess child helper and four exit boundaries.",
+      "source_manifest_sha256": "9c30508d767a27d511b48316c3c6e5c835e047aa7eaf43639c29cff0756a49d5",
+      "post_validation": {
+        "source_manifest_sha256": "9c30508d767a27d511b48316c3c6e5c835e047aa7eaf43639c29cff0756a49d5",
+        "source_verified_before_and_after": true,
+        "working_source_verified": true,
+        "exit_code": 0,
+        "focused": 7,
+        "binary_sha256": "526202e083e7f5a495364bdfa6682f81b5aa59da431a972a742b2dbbf29a36ac",
+        "log_sha256": "84893a934fa300e48c2d4f0e38cb649d6d7509a20b94dea6372bb8cce0e6c579",
+        "completion_observed_at": "2026-11-14T18:11:58.981968+00:00"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "606a9f6a2c8ac721fe34c01b669643e66fe7d8e423c1c0b4c87f2c60b186858a",
+        "source.json": "9c30508d767a27d511b48316c3c6e5c835e047aa7eaf43639c29cff0756a49d5",
+        "validate.sh": "55ae244b5da3da21196d0ba6ee2d2282956748f61e4fe14ecaca304e5f94ecf7",
+        "validation.log": "84893a934fa300e48c2d4f0e38cb649d6d7509a20b94dea6372bb8cce0e6c579"
+      }
+    },
+    {
+      "name": "run-4",
+      "status": "Final 8 focused + 948 library + 2 CLI passed; fmt passed; clippy exit 0 with warnings; 4 doctests ignored.",
+      "source_manifest_sha256": "d9d86275daa54250dbefb06c6f46b8ed33fb07f352345ea3222781c305adfcb7",
+      "post_validation": {
+        "source_manifest_sha256": "d9d86275daa54250dbefb06c6f46b8ed33fb07f352345ea3222781c305adfcb7",
+        "source_verified_before_and_after": true,
+        "working_source_verified": true,
+        "file_count": 215,
+        "exit_code": 0,
+        "focused": 8,
+        "library": 948,
+        "cli": 2,
+        "ignored_doctests": 4,
+        "fmt": "passed",
+        "clippy": "exit 0 with warnings",
+        "clippy_summaries": [
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib) generated 2 warnings",
+          "warning: `recalld` (lib) generated 627 warnings (run `cargo clippy --fix --lib -p recalld` to apply 82 suggestions)",
+          "warning: `recalld` (bin \"recalld\" test) generated 1 warning",
+          "warning: `recalld` (bin \"recalld\") generated 1 warning (1 duplicate)",
+          "warning: `recalld` (lib test) generated 666 warnings (626 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 3 suggestions)"
+        ],
+        "binary_sha256": {
+          "/target/debug/deps/lifecycle_cli-4843a41927cafc6b": "699ce472e86a05feac2ad147e4feecb675d777fbe32a05ead62e557aff662488",
+          "/target/debug/deps/recalld-c8392f2a5ef64898": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+          "/target/debug/deps/recalld-e423ca3d07310388": "2b0efc23cbd10e650bd712609042ad5fd74b3d81744831ed41e9d299fe05f484",
+          "/target/debug/deps/recalld_cli-2dba722497aafcf6": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f",
+          "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41",
+          "/target/debug/deps/text_migration_cli-92bf02c892a58814": "7e95cd5e260f303def5c1c6c9f2b3802cef6ffecd530b32cedcdcf6d396c529e",
+          "/target/debug/recalld": "4e7ec903ccf909c206bd68f7b623fc4088f909b5baa5e2840b3e13448517f027"
+        },
+        "validation_log_sha256": "9332a7cd0ce1fb143e5dbea270feb9eb5894873d6e3a44cfb51c73afbd0af9a3",
+        "completion_observed_at": "2026-11-14T18:22:47.171057+00:00"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "cf387e6f764a0f18490acebf4f04b5b5e0ff7141915c493ed542e28098c03526",
+        "runtime.json": "2054b42aaa1b942d47af0371ce1d60f0af788dd462f6635012f79443f9f20c0b",
+        "source.json": "d9d86275daa54250dbefb06c6f46b8ed33fb07f352345ea3222781c305adfcb7",
+        "validate.sh": "ca316a4c14bf12f24c03923ea4ac119fecfe6b496188e86271c96aebf3bdc5a3",
+        "validation.log": "9332a7cd0ce1fb143e5dbea270feb9eb5894873d6e3a44cfb51c73afbd0af9a3"
+      }
+    }
+  ]
+}
