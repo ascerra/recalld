@@ -1,0 +1,70 @@
+   Compiling recalld v1.0.0 (/work)
+error[E0277]: the trait bound `id::MemoryId: FromStr` is not satisfied
+  --> src/storage/metadata/native_records/recovery_tests.rs:54:14
+   |
+54 |             .parse()
+   |              ^^^^^ unsatisfied trait bound
+   |
+help: the trait `FromStr` is not implemented for `id::MemoryId`
+  --> src/model/id.rs:19:1
+   |
+19 | pub struct MemoryId(Uuid);
+   | ^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `FromStr`:
+             AsyncInvokeStatus
+             AudioFormat
+             Authority
+             Braced
+             ByteString
+             CString
+             CachePointType
+             CacheTtl
+           and 201 others
+note: required by a bound in `core::str::<impl str>::parse`
+  --> /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/core/src/str/mod.rs:2749:4
+
+error[E0277]: the trait bound `id::MemoryId: FromStr` is not satisfied
+  --> src/storage/metadata/native_records/recovery_tests.rs:66:10
+   |
+66 |         .parse()
+   |          ^^^^^ unsatisfied trait bound
+   |
+help: the trait `FromStr` is not implemented for `id::MemoryId`
+  --> src/model/id.rs:19:1
+   |
+19 | pub struct MemoryId(Uuid);
+   | ^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `FromStr`:
+             AsyncInvokeStatus
+             AudioFormat
+             Authority
+             Braced
+             ByteString
+             CString
+             CachePointType
+             CacheTtl
+           and 201 others
+note: required by a bound in `core::str::<impl str>::parse`
+  --> /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/core/src/str/mod.rs:2749:4
+
+error[E0599]: no method named `encode` found for struct `namespace::NamespaceConfig` in the current scope
+   --> src/storage/metadata/native_records/recovery_tests.rs:111:44
+    |
+111 |                     .insert(d.ns.get(), ns.encode().unwrap().as_slice())
+    |                                            ^^^^^^ method not found in `namespace::NamespaceConfig`
+    |
+   ::: src/model/namespace.rs:67:1
+    |
+ 67 | pub struct NamespaceConfig {
+    | -------------------------- method `encode` not found for this struct
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following traits define an item `encode`, perhaps you need to implement one of them:
+            candidate #1: `Engine`
+            candidate #2: `ring::rsa::padding::RsaEncoding`
+            candidate #3: `rustls::msgs::codec::Codec`
+            candidate #4: `tokio_util::codec::encoder::Encoder`
+
+Some errors have detailed explanations: E0277, E0599.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `recalld` (lib test) due to 3 previous errors

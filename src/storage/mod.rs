@@ -14,6 +14,7 @@
 //! - `error` — Unified `StorageError` type
 //! - `fsync` — Filesystem sync helpers for crash safety
 
+pub mod batch;
 pub mod canonical_schema;
 pub(crate) mod canonical_vector_snapshot;
 pub mod catalog;
@@ -35,6 +36,8 @@ pub mod native_lifecycle;
 pub mod native_records;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
+pub(crate) mod publication;
+pub use publication::{DerivedReadiness, Readiness};
 pub mod purge;
 #[cfg(test)]
 mod purge_tests;

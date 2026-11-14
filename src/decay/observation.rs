@@ -22,6 +22,24 @@ impl<T> Observed<T> {
         }
     }
 
+    /// Complete the actual owned views only after the payload leases are gone.
+    /// A postcommit publication error retains every original receipt.
+    pub(crate) async fn publish_derived(
+        self,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Self, ObservationError> {
+        if !self.receipts.is_empty() {
+            if let Some(completion) = completion {
+                completion
+                    .complete_with_work(parent)
+                    .await
+                    .map_err(|e| ObservationError::not_ready(self.receipts.clone(), e))?;
+            }
+        }
+        Ok(self)
+    }
+
     pub fn finish<E>(self, admission: Result<(), E>) -> Result<T, E>
     where
         E: From<ObservationError> + std::fmt::Debug,
@@ -132,56 +150,96 @@ pub async fn record_exposures_scoped(
     sampled_at: i64,
     scope: Option<crate::storage::control::ExposureScope>,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
+    record_exposures_scoped_with_work(storage, cache, accesses, sampled_at, scope, None).await
+}
+
+pub(crate) async fn record_exposures_scoped_with_work(
+    storage: Arc<RwLock<RedbStorageEngine>>,
+    cache: Arc<CacheManager>,
+    accesses: Vec<(MemoryId, AccessKind)>,
+    sampled_at: i64,
+    scope: Option<crate::storage::control::ExposureScope>,
+    parent: Option<&crate::storage::work::WorkTicket>,
+) -> Result<Vec<WriteReceipt>, ObservationError> {
     if accesses.is_empty() {
         return Ok(Vec::new());
     }
+    let work = crate::storage::work::accept_work(&storage, parent)
+        .map_err(|e| ObservationError::storage(e, vec![]))?;
+    let child = work
+        .child()
+        .map_err(|e| ObservationError::failed(e, vec![]))?;
+    let worker_storage = storage.clone();
     let worker = crate::performance::Worker::new("exposure.worker_queue");
-    tokio::task::spawn_blocking(move || worker.run(|| {
+    let result = tokio::task::spawn_blocking(move || worker.run(|| {
         let wait = crate::performance::Timer::new("storage.write.wait");
-        let storage = storage
+        let storage = worker_storage
             .write()
             .map_err(|e| ObservationError::failed(e, vec![]))?;
         wait.complete();
         let storage = crate::performance::Hold::new("storage.write.hold", storage);
-        let transaction = crate::performance::Timer::new("exposure.canonical_commit");
-        let result = record_locked_scoped(&storage, &accesses, sampled_at, scope.as_ref());
-        transaction.outcome(result.is_ok());
-        let receipts = match &result {
-            Ok(r) => r,
-            Err(e) => &e.receipts,
-        };
-        crate::performance::receipts(receipts);
-        let ids: Vec<_> = accesses.iter().map(|(id, _)| *id).collect();
-        let publication = crate::performance::Timer::new("exposure.cache_publication");
-        // Publish even preceding successful batches when a later batch fails.
-        if let Err(mut publication) = publish(&storage, receipts, || {
-            tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&ids));
-        }) {
-            if let Err(prior) = &result
-                && prior.commit_state == "unknown"
-            {
-                publication.commit_state = "unknown";
-                publication.unknown_operation_id = prior.unknown_operation_id;
+        let result = (|| {
+            let transaction = crate::performance::Timer::new("exposure.canonical_commit");
+            let result = record_locked_scoped_with_work(
+                &storage,
+                &accesses,
+                sampled_at,
+                scope.as_ref(),
+                Some(&child),
+            );
+            transaction.outcome(result.is_ok());
+            let receipts = match &result {
+                Ok(r) => r,
+                Err(e) => &e.receipts,
+            };
+            crate::performance::receipts(receipts);
+            let publication = crate::performance::Timer::new("exposure.cache_publication");
+            let ids: Vec<_> = accesses.iter().map(|(id, _)| *id).collect();
+            // Publish even preceding successful batches when a later batch fails.
+            if let Err(mut publication) = publish(&storage, receipts, || {
+                tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&ids));
+            }) {
+                if let Err(prior) = &result
+                    && prior.commit_state == "unknown"
+                {
+                    publication.commit_state = "unknown";
+                    publication.unknown_operation_id = prior.unknown_operation_id;
+                }
+                return Err(publication);
             }
-            return Err(publication);
-        }
-        publication.complete();
-        tracing::trace!(target: "recalld::performance", kind = "exposure", requested = accesses.len(), receipt_count = receipts.len(), success = result.is_ok());
-        #[cfg(test)]
-        if result.as_ref().is_ok_and(|r| !r.is_empty()) {
-            storage.meta_store().after_observation_probe();
-        }
+            publication.complete();
+            tracing::trace!(target: "recalld::performance", kind = "exposure", requested = accesses.len(), receipt_count = receipts.len(), success = result.is_ok());
+            #[cfg(test)]
+            if result.as_ref().is_ok_and(|r| !r.is_empty()) {
+                storage.meta_store().after_observation_probe();
+            }
+            result
+        })();
+        storage.meta_store().finish_work(child);
         result
     }))
     .await
-    .map_err(ObservationError::worker_failed)?
+    .map_err(ObservationError::worker_failed)?;
+    crate::storage::work::finish_work(&storage, work);
+    result
 }
 
+#[cfg(test)]
 fn record_locked_scoped(
     storage: &RedbStorageEngine,
     accesses: &[(MemoryId, AccessKind)],
     sampled_at: i64,
     scope: Option<&crate::storage::control::ExposureScope>,
+) -> Result<Vec<WriteReceipt>, ObservationError> {
+    record_locked_scoped_with_work(storage, accesses, sampled_at, scope, None)
+}
+
+fn record_locked_scoped_with_work(
+    storage: &RedbStorageEngine,
+    accesses: &[(MemoryId, AccessKind)],
+    sampled_at: i64,
+    scope: Option<&crate::storage::control::ExposureScope>,
+    parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
     // First occurrence order within each namespace; namespace order ascending.
     // Direct exposure dominates an additional associative occurrence.
@@ -216,11 +274,12 @@ fn record_locked_scoped(
     }
     let mut receipts = Vec::new();
     for (namespace, batch) in groups {
-        match storage.meta_store().record_exposure_batch_scoped(
+        match storage.meta_store().record_exposure_batch_scoped_with_work(
             &MutationContext::unkeyed(NamespaceId::new(namespace)),
             &batch,
             sampled_at,
             scope,
+            parent,
         ) {
             Ok(Some(receipt)) => receipts.push(receipt),
             Ok(None) => {}

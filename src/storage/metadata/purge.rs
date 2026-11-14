@@ -410,6 +410,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         super::effects::crash_point("after_purge_commit");
         Ok(())
     }
@@ -585,6 +586,7 @@ impl MetadataStore {
                 true,
                 false,
                 super::effects::RecordMutation::PurgeChunk(p),
+                None,
             )?;
             return Ok(Some(result));
         }

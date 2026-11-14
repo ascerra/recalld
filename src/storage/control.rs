@@ -21,6 +21,15 @@ pub(crate) const RECEIPTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("mutation_receipts");
 pub(crate) const KEYS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("mutation_keys");
 
+/// Final exposure assertion, checked with canonical records in the write transaction.
+/// Namespace is the name pinned during selection; a by-ID source must still
+/// belong to that same namespace even when it is not itself exposed.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExposureScope {
+    pub namespace: String,
+    pub source: Option<crate::model::MemoryId>,
+}
+
 // Per-test-thread work counts, not timing or a process-wide instrumentation
 // switch. Count receipt decoding as well as full proof entry so a regression
 // cannot hide a history scan behind a different validation helper.
@@ -39,15 +48,6 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn take_validation_work() -> ValidationWork {
     VALIDATION_WORK.with(|work| work.replace(ValidationWork::default()))
-}
-
-/// Final exposure assertion, checked with canonical records in the write transaction.
-/// Namespace is the name pinned during selection; a by-ID source must still
-/// belong to that same namespace even when it is not itself exposed.
-#[derive(Debug, Clone, Serialize)]
-pub struct ExposureScope {
-    pub namespace: String,
-    pub source: Option<crate::model::MemoryId>,
 }
 
 /// Canonical decimal-string u63. JSON numbers, signs and leading zeros fail.
@@ -231,6 +231,18 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativeMemoryInserted {
+        transition: super::native_records::NativeRecordWrite,
+    },
+    NativeMemoryTombstoned {
+        transition: super::native_records::NativeRecordWrite,
+    },
+    LifecycleExposureRecorded {
+        transition: super::native_lifecycle::NativeLifecycleWrite,
+    },
+    LifecycleFeedbackApplied {
+        transition: super::native_lifecycle::NativeLifecycleWrite,
+    },
     LifecycleMaterialized {
         #[serde(rename = "memoryId")]
         memory_id: MemoryId,
@@ -245,17 +257,16 @@ pub enum MutationOutcome {
         #[serde(rename = "removedFieldsMask")]
         removed_fields_mask: u8,
     },
-    NativeMemoryInserted {
-        transition: super::native_records::NativeRecordWrite,
+    BatchReserved {
+        batch_kind: super::batch::BatchKind,
+        item_count: u32,
+        caller_hash: [u8; 32],
+        resolution_hash: [u8; 32],
     },
-    NativeMemoryTombstoned {
-        transition: super::native_records::NativeRecordWrite,
-    },
-    LifecycleExposureRecorded {
-        transition: super::native_lifecycle::NativeLifecycleWrite,
-    },
-    LifecycleFeedbackApplied {
-        transition: super::native_lifecycle::NativeLifecycleWrite,
+    BatchItemRejected {
+        batch_operation_id: Uuid,
+        index: u32,
+        error: super::batch::BatchError,
     },
     NamespacePurgeStarted {
         namespace_id: NamespaceId,
@@ -403,6 +414,7 @@ pub(crate) fn validate_existing(
             ));
         }
         super::metadata::purge::validate_existing(tx, None)?;
+        super::metadata::batch::validate_existing(tx, None)?;
         return Ok(None);
     }
     if !present.iter().all(|p| *p) {
@@ -431,7 +443,9 @@ pub(crate) fn validate_existing(
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
-            MutationOutcome::NamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::NamespaceCreated { .. }
+            | MutationOutcome::BatchReserved { .. }
+            | MutationOutcome::BatchItemRejected { .. } => scope == MutationScope::Catalog,
             MutationOutcome::NamespacePolicyUpdated { namespace_id }
             | MutationOutcome::NamespacePurgeStarted { namespace_id, .. }
             | MutationOutcome::NamespacePurgeAdvanced { namespace_id, .. } => {
@@ -519,6 +533,7 @@ pub(crate) fn validate_existing(
         }
     }
     super::metadata::purge::validate_existing(tx, Some(&state))?;
+    super::metadata::batch::validate_existing(tx, Some(&state))?;
     Ok(Some(state))
 }
 
@@ -646,11 +661,13 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::LifecycleFeedbackApplied { transition } => {
             transition.validate(&stored.receipt, true)?
         }
-        MutationOutcome::ExposuresRecorded { .. }
-        | MutationOutcome::LegacyFeedbackRecorded { .. }
-        | MutationOutcome::MemoryInserted { .. }
+        MutationOutcome::MemoryInserted { .. }
         | MutationOutcome::MemoryTombstoned { .. }
         | MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::BatchReserved { .. }
+        | MutationOutcome::BatchItemRejected { .. }
+        | MutationOutcome::ExposuresRecorded { .. }
+        | MutationOutcome::LegacyFeedbackRecorded { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
@@ -769,22 +786,24 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::NativeMemoryInserted { .. }
+        MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
         | MutationOutcome::LifecycleFeedbackApplied { .. }
-        | MutationOutcome::NamespaceCreated { .. }
-        | MutationOutcome::NamespacePolicyUpdated { .. }
-        | MutationOutcome::NamespacePurgeStarted { .. }
-        | MutationOutcome::NamespacePurgeAdvanced { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
-        | MutationOutcome::LifecycleMaterialized { .. }
-        | MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::AccessRecorded { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
+        MutationOutcome::BatchReserved { .. }
+        | MutationOutcome::BatchItemRejected { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
+        | MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::NamespaceCreated { .. }
+        | MutationOutcome::NamespacePolicyUpdated { .. }
+        | MutationOutcome::NamespacePurgeStarted { .. }
+        | MutationOutcome::NamespacePurgeAdvanced { .. } => {}
     }
     Ok(stored)
 }

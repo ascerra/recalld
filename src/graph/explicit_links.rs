@@ -258,30 +258,50 @@ async fn apply_explicit_edge(
     storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: &Arc<CacheManager>,
 ) -> EdgeApplication {
-    let live = graph.clone().write_owned().await;
-    let mut planned = (*live).clone();
-    let key = match planned.add_edge(source, target, edge_type, 1.0, false) {
-        Ok(key) => key,
-        Err(crate::graph::GraphError::EdgeExists(_, _)) => return EdgeApplication::AlreadyPresent,
-        Err(e) => return EdgeApplication::Rejected(e.to_string()),
+    let work = match crate::storage::work::accept_work(storage, None) {
+        Ok(work) => work,
+        Err(e) => return EdgeApplication::Unavailable(e.to_string()),
     };
-    let persisted = PersistedEdge {
-        source,
-        target,
-        edge_type,
-        weight: 1.0,
-        auto_created: false,
-        created_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64,
-    };
+    let result = async {
+        let live = graph.clone().write_owned().await;
+        let mut planned = (*live).clone();
+        let key = match planned.add_edge(source, target, edge_type, 1.0, false) {
+            Ok(key) => key,
+            Err(crate::graph::GraphError::EdgeExists(_, _)) => {
+                return EdgeApplication::AlreadyPresent;
+            }
+            Err(e) => return EdgeApplication::Rejected(e.to_string()),
+        };
+        let persisted = PersistedEdge {
+            source,
+            target,
+            edge_type,
+            weight: 1.0,
+            auto_created: false,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        };
 
-    planned.edges[key].created_at = persisted.created_at as i64;
-    match super::autolink::publish_edge_plan(live, planned, vec![persisted], storage, cache).await {
-        Ok(_) => EdgeApplication::Created,
-        Err(e) => EdgeApplication::Unavailable(e.to_string()),
+        planned.edges[key].created_at = persisted.created_at as i64;
+        match super::autolink::publish_edge_plan_with_work(
+            live,
+            planned,
+            vec![persisted],
+            storage,
+            cache,
+            Some(&work),
+        )
+        .await
+        {
+            Ok(_) => EdgeApplication::Created,
+            Err(e) => EdgeApplication::Unavailable(e.to_string()),
+        }
     }
+    .await;
+    crate::storage::work::finish_work(storage, work);
+    result
 }
 
 /// Create and persist the `Supersedes` edge for a memory that has already

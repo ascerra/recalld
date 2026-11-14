@@ -10,6 +10,18 @@ impl MetadataStore {
         config: &NamespaceConfig,
         prepare: impl FnOnce(NamespaceId) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
+        let guard = self.mutation_guard()?;
+        self.create_catalog_guarded(&guard, ctx, config, prepare)
+    }
+
+    pub(crate) fn create_catalog_guarded(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        config: &NamespaceConfig,
+        prepare: impl FnOnce(NamespaceId) -> Result<(), StorageError>,
+    ) -> Result<WriteReceipt, StorageError> {
+        guard.check(self)?;
         if ctx.scope != MutationScope::Catalog {
             return Err(StorageError::InvalidMutationContext(
                 "create requires catalog scope".into(),
@@ -19,7 +31,6 @@ impl MetadataStore {
         let policy = NamespacePolicy::from(config);
         let fields = control::encode(&(&config.name, config.embedding_dim, &policy))?;
         let hash = control::request_hash(ctx, "namespace_create_v1", &[&fields]);
-        let _guard = self.mutation_guard()?;
         let tx = self.db.begin_write()?;
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
@@ -68,6 +79,15 @@ impl MetadataStore {
         ctx: &MutationContext,
         policy: &NamespacePolicy,
     ) -> Result<WriteReceipt, StorageError> {
+        self.update_namespace_policy_with_work(ctx, policy, None)
+    }
+
+    pub(crate) fn update_namespace_policy_with_work(
+        &self,
+        ctx: &MutationContext,
+        policy: &NamespacePolicy,
+        parent: Option<&WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
         let MutationScope::Namespace(id) = ctx.scope else {
             return Err(StorageError::InvalidMutationContext(
                 "policy update requires namespace scope".into(),
@@ -76,7 +96,7 @@ impl MetadataStore {
         policy.validate()?;
         let fields = control::encode(policy)?;
         let hash = control::request_hash(ctx, "namespace_policy_update_v1", &[&fields]);
-        let _guard = self.mutation_guard()?;
+        let _guard = self.mutation_guard_with_work(parent)?;
         let tx = self.db.begin_write()?;
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
@@ -124,6 +144,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         crate::storage::catalog::boundary("after_metadata_commit").map_err(|source| {
             self.mark_unavailable();
             StorageError::CommittedEffectsPending {

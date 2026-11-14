@@ -7,6 +7,7 @@
 //!
 //! See CS-07 for the full specification.
 
+pub(crate) mod batch;
 mod canonical_vector_snapshot;
 mod catalog;
 pub(crate) mod effects;
@@ -16,6 +17,8 @@ pub(crate) mod namespace_state;
 mod native_lifecycle;
 mod native_records;
 mod observation;
+mod publication;
+pub(crate) use publication::CanonicalReadView;
 pub(crate) mod purge;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
@@ -88,6 +91,7 @@ pub struct MetadataStore {
     db: Database,
     native_lifecycle_only: bool,
     work_tracker: WorkTracker,
+    view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
     unavailable: std::sync::atomic::AtomicBool,
     purge_pending: std::sync::atomic::AtomicBool,
     pub(crate) canonical_pending: std::sync::atomic::AtomicBool,
@@ -95,11 +99,16 @@ pub struct MetadataStore {
     effects_epoch: std::sync::atomic::AtomicU64,
     #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
+    pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     pub(crate) fail_purge_child_commit: std::sync::atomic::AtomicBool,
+    /// Store-local lost-ack probes: 1 reservation, 2 rejection, 3 child.
+    #[cfg(test)]
+    pub(crate) fail_batch_commit: std::sync::atomic::AtomicU8,
     // Lock order: engine gate -> publication -> redb -> phase_index.
     // Hold across commit and bitmap publication, including direct callers.
     publication: std::sync::RwLock<()>,
@@ -227,6 +236,9 @@ impl MetadataStore {
             db,
             native_lifecycle_only,
             work_tracker: WorkTracker::new(store_id),
+            view_publication: std::sync::Arc::new(
+                super::publication::PublicationRegistry::default(),
+            ),
             unavailable: std::sync::atomic::AtomicBool::new(false),
             purge_pending: std::sync::atomic::AtomicBool::new(false),
             canonical_pending: std::sync::atomic::AtomicBool::new(false),
@@ -234,11 +246,15 @@ impl MetadataStore {
             effects_epoch: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             observation_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            tombstone_publication_fault: std::sync::atomic::AtomicBool::new(false),
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             fail_purge_child_commit: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_batch_commit: std::sync::atomic::AtomicU8::new(0),
             publication: std::sync::RwLock::new(()),
             phase_index: std::sync::RwLock::new(PhaseIndex::new()),
         };
@@ -299,7 +315,9 @@ impl MetadataStore {
         tx.commit().map_err(|e| {
             self.mark_unavailable();
             StorageError::RedbCommit(e)
-        })
+        })?;
+        self.view_publication.canonical_committed();
+        Ok(())
     }
 
     fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
@@ -1339,8 +1357,15 @@ impl MetadataStore {
     /// Persist the current in-memory phase bitmaps to INDEX_TABLE.
     /// Called periodically (end of decay sweep, graceful shutdown).
     pub fn persist_phase_index(&self) -> Result<(), StorageError> {
+        self.persist_phase_index_with_work(None)
+    }
+
+    pub(crate) fn persist_phase_index_with_work(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<(), StorageError> {
         self.ensure_available()?;
-        let _publication = self.mutation_guard()?;
+        let _publication = self.mutation_guard_with_work(parent)?;
         let bytes = {
             let pi = self.phase_index.read().unwrap_or_else(|e| e.into_inner());
             pi.to_bytes()
