@@ -24,6 +24,8 @@ pub struct NativeCatalogAdapter {
     provider: Arc<dyn EmbeddingProvider>,
     policy: NativePolicyInputs,
     clock: Arc<dyn Clock>,
+    #[cfg(test)]
+    pub(crate) failure: Option<&'static str>,
 }
 impl NativeCatalogAdapter {
     pub(crate) fn new(
@@ -37,6 +39,8 @@ impl NativeCatalogAdapter {
             provider,
             policy,
             clock,
+            #[cfg(test)]
+            failure: None,
         }
     }
 
@@ -56,6 +60,8 @@ impl NativeCatalogAdapter {
             .map_err(StorageError::from)?;
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            let _fault = tests::Fault::enter(this.failure);
             let mut storage = this
                 .storage
                 .write()

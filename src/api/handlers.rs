@@ -1212,7 +1212,12 @@ fn catalog_response(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     let (status, envelope) = crate::native_catalog_adapter::response(result);
-    (StatusCode::from_u16(status).unwrap(), Json(envelope)).into_response()
+    // Match MCP's one Value representation, including retained f32 outcomes.
+    // Direct struct serialization prints shorter f32 decimals than to_value.
+    match serde_json::to_value(envelope) {
+        Ok(value) => (StatusCode::from_u16(status).unwrap(), Json(value)).into_response(),
+        Err(error) => AppError::Internal { source: Box::new(error) }.into_response(),
+    }
 }
 /// Real inner consumer; the outer route still rejects public contract2.
 pub(crate) async fn create_namespace_v2(

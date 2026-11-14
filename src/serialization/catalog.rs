@@ -51,10 +51,23 @@ impl CreateNamespaceRequest {
         }
         // Keep the established finite/range/name validation; v2 only changes
         // null and unknown-field handling, not legacy numeric bounds.
-        let fields = crate::mcp::args::parse_create_namespace(value).map_err(|e| InputError {
-            code: "INVALID_TYPE",
-            field: format!("/{}", e.field),
-            message: "invalid namespace creation field",
+        let fields = crate::mcp::args::parse_create_namespace(value).map_err(|e| {
+            let numeric_range = match e.field.as_str() {
+                "embeddingDim" => value[&e.field].as_u64().is_some(),
+                "initialStability" | "desiredRetention" | "decayRateMultiplier" => {
+                    value[&e.field].is_number()
+                }
+                _ => false,
+            };
+            InputError {
+                code: if numeric_range {
+                    "OUT_OF_RANGE"
+                } else {
+                    "INVALID_TYPE"
+                },
+                field: format!("/{}", e.field),
+                message: "invalid namespace creation field",
+            }
         })?;
         let embedding_profile_id = object
             .get("embeddingProfileId")

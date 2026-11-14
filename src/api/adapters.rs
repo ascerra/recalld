@@ -1235,6 +1235,12 @@ pub struct NamespaceRegistryAdapter {
 }
 
 impl NamespaceRegistryAdapter {
+    #[cfg(test)]
+    pub(crate) fn with_catalog_fault(mut self, point: &'static str) -> Self {
+        self.native_catalog.as_mut().unwrap().failure = Some(point);
+        self
+    }
+
     /// Bind actual provider, frozen inherited policy and clock from this owner.
     pub fn with_native_catalog(
         mut self,

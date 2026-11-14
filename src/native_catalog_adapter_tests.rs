@@ -40,6 +40,17 @@ impl EmbeddingProvider for Provider {
     }
 }
 struct FixedClock;
+pub(super) struct Fault(Option<&'static str>);
+impl Fault {
+    pub(super) fn enter(point: Option<&'static str>) -> Self {
+        Self(crate::storage::catalog::FAILURE.with(|f| f.replace(point)))
+    }
+}
+impl Drop for Fault {
+    fn drop(&mut self) {
+        crate::storage::catalog::FAILURE.with(|f| f.set(self.0));
+    }
+}
 impl Clock for FixedClock {
     fn now_millis(&self) -> i64 {
         2000
@@ -284,4 +295,121 @@ fn native_catalog_wire_accepted_root_survives_closed_admission_for_lookup_and_co
     );
     engine.meta_store().finish_work(root);
     drop(drain.join().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_wire_actual_fault_receipt_and_unknown_reconcile() {
+    for point in [
+        "after_metadata_commit",
+        "before_handle_publish",
+        "after_handle_publish",
+        "commit_unknown",
+    ] {
+        let (fixture, path, provider) = fixture();
+        let state = fixture.storage.read().unwrap().control_state().unwrap();
+        let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+        bridge.namespaces = Arc::new(
+            fixture
+                .namespace_adapter()
+                .with_native_catalog(
+                    provider.clone(),
+                    NativePolicyInputs::default(),
+                    Arc::new(FixedClock),
+                )
+                .with_catalog_fault(point),
+        );
+        let request = json!({"contractVersion":2,"name":"created","storeId":state.store_id,"idempotencyKey":"fault","expectedGeneration":state.committed_generation});
+        let envelope = if matches!(point, "before_handle_publish" | "commit_unknown") {
+            let adapter = NamespaceRegistryAdapter::new(fixture.storage.clone())
+                .with_native_catalog(
+                    provider.clone(),
+                    NativePolicyInputs::default(),
+                    Arc::new(FixedClock),
+                )
+                .with_catalog_fault(point);
+            let mut body = request.clone();
+            body.as_object_mut().unwrap().remove("contractVersion");
+            let (status, envelope) = rest(&adapter, &body, None).await;
+            assert_eq!(status, 503);
+            envelope
+        } else {
+            let result =
+                crate::mcp::tools::dispatch_v2(&bridge, "create_namespace", request.clone()).await;
+            assert_eq!(result.is_error, Some(true), "{point}");
+            let wire = serde_json::to_value(result).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(wire["content"][0]["text"].as_str().unwrap())
+                    .unwrap(),
+                wire["structuredContent"]
+            );
+            wire["structuredContent"].clone()
+        };
+        assert_eq!(
+            envelope["error"]["commitState"],
+            if point == "commit_unknown" {
+                "unknown"
+            } else {
+                "committed"
+            },
+            "{point}"
+        );
+        assert_eq!(envelope["error"]["retryable"], false);
+        assert!(
+            envelope.get("readiness").is_none(),
+            "no fabricated global readiness"
+        );
+        let operation = serde_json::from_value(envelope["error"]["operationId"].clone()).unwrap();
+        assert!(fixture.storage.read().unwrap().control_state().is_err());
+        assert!(
+            fixture
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .lookup_operation(state.store_id, MutationScope::Catalog, operation)
+                .is_err(),
+            "poisoned lookup must remain closed"
+        );
+        if point == "commit_unknown" {
+            assert!(envelope.get("receipt").is_none());
+        } else {
+            assert_eq!(
+                envelope["receipt"]["operationId"],
+                envelope["error"]["operationId"]
+            );
+        }
+        drop(bridge);
+        let dir = fixture.close();
+        let mut reopened = NativeLifecycleSession::open(
+            &path,
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+        )
+        .unwrap();
+        let stored = reopened
+            .engine
+            .meta_store()
+            .lookup_operation(state.store_id, MutationScope::Catalog, operation)
+            .unwrap()
+            .unwrap();
+        if point != "commit_unknown" {
+            assert_eq!(serde_json::to_value(&stored).unwrap(), envelope["receipt"]);
+        }
+        provider.available.store(false, Ordering::SeqCst);
+        let request = CreateNamespaceRequest::from_mcp(&request).unwrap();
+        let replay = reopened
+            .create_namespace(
+                &request
+                    .write
+                    .context(MutationScope::Catalog, ContractVersion::V2),
+                &request.input,
+                provider.as_ref(),
+            )
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.operation_id, stored.operation_id);
+        assert_eq!(reopened.engine.list_namespaces().unwrap().len(), 2);
+        drop(reopened);
+        drop(dir);
+    }
 }
