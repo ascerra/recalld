@@ -57,4 +57,10 @@ observation. Curie owns narrow forget1 writer admission. Exposure119 and manual1
 origin propagation are independent worktrees. No new keyed-query or keyed sweep
 noop semantics, schema migration, receipt encoding or default policy is added.
 The final test-only tail is validated separately from the earlier full-suite
-source. Evidence/HOME sealing and publication follow; no1141-test full run is claimed.
+source. No1141-test full run is claimed. Evidence is sealed in
+`work-notes/native-feedback-origin/REPORT.md` at `adb9e4c`.
+
+Actual HOME copy: `/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-feedback-origin-adb9e4c`.
+COPY.json SHA256: `c5a6e87a2305e4ec4e84cf72b6d4f29c391bb1f19aa10edb456c09a645de023a`.
+All40 files/7,319,811 bytes were individually hash-verified; the existing research
+notebook was appended. No executables or caches were copied.
