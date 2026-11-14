@@ -788,3 +788,6 @@ mod mixed_history;
 
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
+
+#[path = "request_context_tests.rs"]
+mod request_context;

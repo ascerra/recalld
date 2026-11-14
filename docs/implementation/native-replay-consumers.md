@@ -60,7 +60,7 @@ retained progress requiring the known full receipt and unchanged bytes/clock.
 
 b6011a2 first full run1090PASS/2FAIL at547.46s is preserved. Both were inherited
 fixture assumptions about full-receipt publication errors. The catalog fix is
-only the first hunk from the user-supplied checkpoint2 fixture-boundaries-final
+only the first hunk from the coordinating-agent-supplied checkpoint2 fixture-boundaries-final
 patch, with original path/hash retained. It verifies the exact returned receipt
 against canonical lookup after reopen, preserving unresolved-work/owner checks.
 The purge fixture separately proves the returned deletion-child receipt equals

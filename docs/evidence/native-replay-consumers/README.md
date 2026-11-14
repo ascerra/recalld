@@ -40,7 +40,7 @@ forget original-name assertion rejected despite its matching receipt.
 -611083c:2/2GREEN through purge, recreated name/newID, and reopen.
 -b6011a2:16focusedPASS, then1090PASS/2FAIL full547.46s. Inherited catalog/purge
 fixtures expected older publication error evidence; both strengthened to exact
-canonical receipt equality, not runtime downgrades. User supplied only first
+canonical receipt equality, not runtime downgrades. Coordinating agent supplied only first
 catalog hunk from checkpoint2; patch and provenance are retained.
 -b563b35:1092library+2CLI/4focused/format/ClippyPASS with warnings.
 -17c9d52:actual positive four-view barrier RED after successful purge repair,
@@ -63,4 +63,4 @@ or ordinary native startup closure. Unknown commit handling remains unchanged.
 Every run retains its own source/log/binary hashes. Own target package-cleaned
 before first build, no source-root switching or personal/network/provider inputs.
 Full raw log SHA256 `898bcddaeb72fcc0745fab079735e42f1a0ef9091163a9151daebc41f877f601`; final manifest SHA256
-`06e281d7e53f8b6aebb68270e92ceff5fe65338c46ffc945f6c4b4024204948c`. Main/Halley75bc809 reviews are source-only evidence.
+`6ad9fd734f2b4c2e56245f9f4e6edb1802b84efbe91574c564a60b599a750e6b`. Main/Halley75bc809 reviews are source-only evidence.

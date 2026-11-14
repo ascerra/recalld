@@ -1134,7 +1134,8 @@
   "documents": [
     {
       "path": "docs/implementation/native-replay-consumers.md",
-      "sha256": "e9fe6573c0fa35f20c9158a67245055767dd9535e2367956bd756147fe4ff75f"
+      "sha256": "5ab8c81d2ed4ec15185d8d13d47f56202915a4073d64f6a1441b1277c80bc547"
     }
-  ]
+  ],
+  "documentation_correction": "Attribution only: the coordinating agent supplied the existing checkpoint2 catalog fixture hunk, not the user. Original runtime/source/log/binary evidence unchanged; initial evidence seal remains at723a2a8."
 }
