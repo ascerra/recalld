@@ -63,3 +63,10 @@ update/keyed-nochange/replay proofs. He owns that adaptation. It is not present
 in this121 child. Published PR125 `0b50168b64ad353e4f7a53c6459c270fe8500070` and
 PR128 `5deb840a21ad5f1f80006e0d05a6372919292acf` must enter the later recomputed startup
 closure through actual consumers, not a blind ancestry merge.
+
+During DRAIN, Curie independently reviewed d933e5f's retained codec and purge
+start/child anchoring and found no blocker: closed Some1, explicit-null rejection,
+exactly-one old2 four-candidate match using original previousG, canonical start
+equality and derived child contract. This was bounded source review only, not
+full review or runtime proof. It does not validate the subsequent owner-mode or
+known-receipt corrections; those await the recorded focused/full checks.
