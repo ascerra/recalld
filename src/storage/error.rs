@@ -8,6 +8,13 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error("LIFECYCLE_CONFLICT: {0}")]
+    LifecycleConflict(String),
+    #[error("CONTENT_UNAVAILABLE")]
+    LifecycleContentUnavailable,
+    #[error(transparent)]
+    Work(#[from] crate::storage::work::WorkError),
+
     /// Canonical mutation exists; retry publication, never retry as a new write.
     #[error("INDEX_NOT_READY commitState=committed ready=false receipt={} cause={source}", serde_json::to_string(receipt).unwrap_or_default())]
     CommittedMutation {

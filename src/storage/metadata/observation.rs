@@ -46,7 +46,7 @@ impl MetadataStore {
     #[cfg(test)]
     fn prepare_exposures(
         &self,
-        publication: &std::sync::RwLockWriteGuard<'_, ()>,
+        publication: &MutationGuard<'_>,
         ctx: &MutationContext,
         accesses: &[(MemoryId, AccessKind)],
         sampled_at: i64,
@@ -56,12 +56,13 @@ impl MetadataStore {
 
     fn prepare_exposures_scoped(
         &self,
-        _publication: &std::sync::RwLockWriteGuard<'_, ()>,
+        publication: &MutationGuard<'_>,
         ctx: &MutationContext,
         accesses: &[(MemoryId, AccessKind)],
         sampled_at: i64,
         scope: Option<&crate::storage::control::ExposureScope>,
     ) -> Result<(redb::WriteTransaction, WriteReceipt), StorageError> {
+        publication.check(self)?;
         self.effects_stamp()?;
         let namespace = legacy_scope(ctx)?;
         let mut seen = HashMap::new();
@@ -189,7 +190,7 @@ impl MetadataStore {
     #[cfg(test)]
     fn prepare_feedback(
         &self,
-        publication: &std::sync::RwLockWriteGuard<'_, ()>,
+        publication: &MutationGuard<'_>,
         ctx: &MutationContext,
         id: MemoryId,
         quality: u8,
@@ -209,7 +210,7 @@ impl MetadataStore {
 
     fn prepare_feedback_scoped(
         &self,
-        _publication: &std::sync::RwLockWriteGuard<'_, ()>,
+        publication: &MutationGuard<'_>,
         ctx: &MutationContext,
         id: MemoryId,
         quality: u8,
@@ -217,6 +218,7 @@ impl MetadataStore {
         global_multiplier: f64,
         expected_namespace: Option<&str>,
     ) -> Result<(redb::WriteTransaction, WriteReceipt), StorageError> {
+        publication.check(self)?;
         let namespace = legacy_scope(ctx)?;
         let hash = match expected_namespace {
             Some(name) => control::request_hash(

@@ -1730,7 +1730,7 @@ async fn handle_list_tags(bridge: &McpBridge, arguments: serde_json::Value) -> T
 }
 
 /// Prepared actual consumer, reachable only after the shared version gate opens.
-async fn dispatch_v2(
+pub(crate) async fn dispatch_v2(
     bridge: &McpBridge,
     name: &str,
     arguments: serde_json::Value,

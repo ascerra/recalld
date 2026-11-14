@@ -182,6 +182,19 @@ pub(crate) async fn scan_exact(
     storage: Arc<RwLock<RedbStorageEngine>>,
     request: ExactScanRequest,
 ) -> Result<ExactScanPage, ExactScanError> {
+    scan_exact_after_capture(storage, request, || {}).await
+}
+
+// Deterministic test synchronization uses this callback after releasing capture
+// locks; production supplies a no-op. Storage and comparator are always real.
+pub(crate) async fn scan_exact_after_capture<F>(
+    storage: Arc<RwLock<RedbStorageEngine>>,
+    request: ExactScanRequest,
+    after_capture: F,
+) -> Result<ExactScanPage, ExactScanError>
+where
+    F: FnOnce() + Send + 'static,
+{
     let namespace = request
         .namespace
         .as_deref()
@@ -209,6 +222,7 @@ pub(crate) async fn scan_exact(
             engine.canonical_vector_snapshot(&namespace,expected.as_ref(),SnapshotLimits{max_records:MAX_SNAPSHOT_RECORDS,max_bytes:MAX_SNAPSHOT_BYTES})?
         }; // The storage and publication guards end before vector comparison.
         let capture_time=started.elapsed();
+        after_capture();
         let profile=match snapshot.namespace.schema.as_ref().map(|s|&s.embedding_binding) {
             Some(EmbeddingBinding::Bound{profile_id,descriptor,..}) if descriptor.dimension==snapshot.namespace.embedding_dim && descriptor.profile_id().as_ref()==Ok(profile_id)=>profile_id.clone(),
             _=>return Err(ExactScanError::ProfileUnavailable),

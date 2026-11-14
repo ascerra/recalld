@@ -33,6 +33,9 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         crate::storage::StorageError::ProviderVectorUnavailable(_) => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
+        crate::storage::StorageError::NamespaceMismatch { .. } => {
+            bridge::BridgeError::NamespaceMismatch(error.to_string())
+        }
         crate::storage::StorageError::InvalidMutation(_)
         | crate::storage::StorageError::EdgeConflict(_)
         | crate::storage::StorageError::MutationNamespaceMismatch => {
@@ -1399,7 +1402,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .forget(id, namespace)
+        .forget_scoped(id, namespace.map(str::to_owned))
         .await
         .map_err(map_mutation_error)
     }

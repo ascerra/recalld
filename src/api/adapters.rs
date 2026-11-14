@@ -479,7 +479,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .forget(id, namespace)
+        .forget_scoped(id, namespace.map(str::to_owned))
         .await
     }
 

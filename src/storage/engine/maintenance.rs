@@ -16,7 +16,9 @@ impl RedbStorageEngine {
         decay_strength: f32,
     ) -> Result<DecayMutationResult, StorageError> {
         self.ensure_available()?;
+        let guard = self.meta_store.mutation_guard()?;
         let result = self.meta_store.decay_with_effects(
+            &guard,
             ctx,
             id,
             expected,
@@ -28,7 +30,7 @@ impl RedbStorageEngine {
         )?;
         if let DecayMutationResult::Committed(receipt) = &result {
             if !receipt.replayed {
-                effects::apply_pending(&self.meta_store, &self.edge_store, None).map_err(
+                effects::apply_pending(&self.meta_store, &guard, &self.edge_store, None).map_err(
                     |source| StorageError::CommittedMutation {
                         receipt: Box::new(receipt.clone()),
                         source: Box::new(source),

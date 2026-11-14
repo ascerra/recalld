@@ -79,6 +79,37 @@ final full validation waits for the frozen native reader dependency and actual
 native scan acceptance tests. These interim results are not native activation
 or performance-gate evidence.
 
+## Native acceptance baseline (promotion held)
+
+The exact frozen native reader dependency is PR82 runtime6a71248, whose direct
+prerequisites are native79 and labels69. The combined tests now use its actual
+NativeLifecycleSession open gate and existing migration/attestation APIs. One
+legacy Ghost is produced by real phase-loss receipts before migration; native
+insertion and tombstoning produce 205 eligible records plus one tombstone.
+DerivedCompletion publishes their actual effects, and private views rebuild on
+every reopen. No schema rows, vector references or provenance are fabricated.
+
+Two native exact tests passed in18.83s: all20910 known identical-vector edges
+across10000/10000/910 comparisons, MCP text/structured and REST inner-handler
+parity, dense oversize rejection, byte-immutable reads, valid Ghost eligibility,
+tombstone exclusion, continuation after actual reopen, generation invalidation
+between pages, and deterministic feedback commit after capture causing the
+computed page to be discarded. These are real gated inner-handler/backend
+checks; public MCP/REST contract2 selection remains rejected. The NoProvider
+fixture panics on provider identity/dimension/embed access.
+
+The native forget publication-failure test passed with full receipt equality
+under the existing CommittedMutation error, and the actual legacy phase-loss
+test passed with one work/publication guard spanning metadata commit and effect
+application. Native variants and legacy LifecycleMaterialized receipt/effect
+validation both remain present. MetadataStore::open remains crate-private;
+native startup and old-reader fences are unchanged.
+
+Pascal subsequently found a regressed-clock native-forget marker bug in the
+6a71248 baseline. This passing scan evidence does not fix or disprove that bug.
+Final native consumer promotion is held until his validated corrected PR82 head
+is consumed and the final joined suite passes. No moving WIP is imported.
+
 Required tests: pure exhaustive oracle at201+records including cross-page pairs,
 dense>10,ties/disconnected, budget1, no-match progress, empty/singleton,
 Ghost/exclusion and arithmetic limits; malformed/change-bound cursor rejection;

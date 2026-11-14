@@ -2127,8 +2127,20 @@ pub async fn dispatch_duplicates(
                 .into_response();
         }
     };
-    let result = match crate::serialization::scan::ExactScanRequest::from_http(&body, &name) {
-        Ok(request) => state.storage.scan_duplicate_pairs(request).await,
+    scan_duplicates_v2(state.storage.as_ref(), &name, &body).await
+}
+
+/// Actual gated handler logic, shared with native acceptance checks. The public
+/// route must still pass the version/serving gate before entering this function.
+pub(crate) async fn scan_duplicates_v2(
+    storage: &dyn super::state::StorageEngine,
+    name: &str,
+    body: &serde_json::Value,
+) -> axum::response::Response {
+    use crate::serialization::contract::Envelope;
+    use axum::response::IntoResponse;
+    let result = match crate::serialization::scan::ExactScanRequest::from_http(body, name) {
+        Ok(request) => storage.scan_duplicate_pairs(request).await,
         Err(error) => Err(crate::search::exact_scan::ExactScanError::Input(error)),
     };
     match result {

@@ -101,6 +101,12 @@ impl Fixture {
             engine.create_namespace(&config).expect("create namespace");
         }
 
+        Self::from_open_engine(dir, engine)
+    }
+
+    /// The caller supplies the actual owned engine, including its explicit native
+    /// entry mode. This constructs empty views, never publishes or acknowledges.
+    pub(crate) fn from_open_engine(dir: tempfile::TempDir, engine: RedbStorageEngine) -> Self {
         let fts_index = crate::search::FtsIndex::new(dir.path()).expect("open fts index");
 
         Self {
