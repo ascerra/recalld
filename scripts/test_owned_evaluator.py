@@ -325,7 +325,7 @@ def main():
             self.send_response(200 if ok else 404)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({'data': [{'index': i, 'embedding': [1., 0., 0., 0.]} for i in range(len(values))]} if ok else {'error': 'offline replay miss'}).encode())
+            self.wfile.write(json.dumps({'data': [{'index': i, 'embedding': [1., 0., 0., 0.]} for i in range(len(values))], 'usage': {'prompt_tokens': 0, 'total_tokens': 0}} if ok else {'error': 'offline replay miss'}).encode())
 
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Embeddings)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
