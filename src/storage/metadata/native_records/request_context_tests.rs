@@ -326,10 +326,9 @@ fn native_record_context_replays_genuine_before_api2_bytes() {
     let state = s.metadata().control_state().unwrap();
     let mut insert_key = ctx(&s, &d, "old2-insert");
     insert_key.expected_generation = serde_json::from_value(m["insertExpected"].clone()).unwrap();
+    let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();
     assert_eq!(
-        s.metadata()
-            .lookup_native_insert(&insert_key, &input(&d), None)
-            .unwrap()
+        s.insert_prepared(&insert_key, &intent, &generated())
             .unwrap(),
         replay(&insertion)
     );
@@ -343,8 +342,7 @@ fn native_record_context_replays_genuine_before_api2_bytes() {
     insert_key.contract_version = 1;
     forget_key.contract_version = 1;
     assert!(matches!(
-        s.metadata()
-            .lookup_native_insert(&insert_key, &input(&d), None),
+        s.insert_prepared(&insert_key, &intent, &generated()),
         Err(StorageError::IdempotencyConflict)
     ));
     assert!(matches!(
