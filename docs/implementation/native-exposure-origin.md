@@ -44,8 +44,8 @@ semantics1/2, raw request-hash discrimination, get/similar/false behavior,
 legacy1/2 storage receipts, old-only dispatch, existing partial/unknown and
 publication proofs, strict reopen, full suite/fmt/Clippy. Final5 origin-focused
 and9 native-exposure-focused tests passed; full1021 library+2CLI passed,4doctests
-ignored. Formatting passed; Clippy exit0 with701library/767test warnings
-(676duplicates). All228 source/Cargo/test/toolchain inputs were sealed and
+ignored. Formatting passed; Clippy exit0 with701library/773test warnings
+(682duplicates). All228 source/Cargo/test/toolchain inputs were sealed and
 verified unchanged. Two prior failed fixture runs are retained: missing required
 metadata filter (EmptyQuery), then single-thread Tokio used with the real blocking
 read handle. Only the new test filter/runtime annotation changed; runtime code
