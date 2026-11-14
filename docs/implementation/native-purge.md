@@ -1,73 +1,102 @@
-# Native purge implementation boundary
+# Native namespace purge
 
-Approved plan, not an implementation/validation claim. Draft child begins at
-PR94/8deb56c. Consume Pascal's actual validated maintenance/hard-delete parent
-before wiring the witness. Corrected82 already contains legacy67 and offline74;
-80/77/91/83 and a broad checkpoint are not automatic parents. Add only actual
-consumed APIs. Feynman owns native purge and its strict history/offline integration.
+The implementation uses the existing owning engine, accepted task tracker,
+namespace purge state machine, removal ledger and mutation outbox. The minimal
+parents are native numeric policy PR94 and native maintenance PR98, including
+its historical peer-policy and worker-lease corrections. No batch, graph/store
+producer or broad integration checkpoint is a shipping parent.
 
-Reuse namespace_purge_schema version1 and the existing PurgeProgress table/shape,
-reserved child operation IDs, cursor/counts, and Deleting -> Cleanup -> Complete
-stages. New progress rows have version2 and new typed receipt variants, so old
-readers reject them. Version1 serialization and historical receipt/hash bytes
-remain unchanged. There is no second journal or caller-selected child identity.
+## Canonical transaction and recovery
 
-NativeNamespacePurgeStarted retains a typed namespace proof: immutable ID/name,
-dimension/creation time, existing NamespaceSchemaV2 (binding, lifecycle version,
-policy revision and provenance), and NamespacePolicyState. It contains no memory
-text, labels or embeddings. This state is already reachable through the start
-receipt in progress; a duplicate optional progress field is unnecessary.
+`NativeNamespacePurgeStarted` retains a typed namespace identity, dimension,
+immutable profile/provenance binding and numeric policy. It contains no memory
+text, labels or embeddings. Namespace extensions are rejected before receipt
+creation, and unknown record extensions are rejected before accepting durable
+Purging; an unknown payload must not be copied into a retained witness or leave
+an accepted operation that cannot drain.
 
-NativeNamespacePurgeAdvanced retains the existing parent ID/sequence/stage/counts/
-cursor plus predecessor generation and an optional typed deletion chunk. Chunks
-carry at most the existing1000-record limit, Pascal's NativeDeletionWitness for
-each removed row, NativePeerChange and exact NativeEdgeProof removals. Native
-purge may remove any retained phase; it must not reuse the automatic Ghost-only
-hard-delete planner as its eligibility rule. Per-chunk removal ledger HardDelete/
-ALL, record and peer mutations, receipt, progress and outbox share one metadata
-transaction. Per-record vector release is unnecessary inside a namespace whose
-leased directory is removed after all chunks; surviving peers are not freed.
+`NativeNamespacePurgeAdvanced` binds the reserved child identity, predecessor
+G, sequence, stage and optional deletion chunk. Each chunk has at most 1000
+`NativeDeletionWitness` rows, exact removed edge proofs and surviving peer
+before/after evidence. Counts and cursor are derived from the witness and
+checked against the actual rows in the transaction. All retained phases,
+including Tombstone and vector-owning Ghost, can be purged. The automatic
+Ghost-only hard-delete planner is not the purge eligibility rule.
 
-The actual owning engine performs begin(ctx, force, parent), bounded reserved-ID
-steps and final cleanup. Replay stable IDs before mutable names/policy/CAS. No
-provider or clock is needed. No insertion while Purging; final emptiness and
-configuration removal are checked in the same transaction. Directory cleanup is
-recoverable separate filesystem work; the name lease survives interruption until
-completion. Preserve the current child's full receipt/unknown acknowledgment on
-failure, never mask it with older progress. Await actual DerivedCompletion after
-locks; whole-workflow readiness requires Complete plus publication agreement.
-No atomic whole-purge or automatic readiness claim.
+Record deletion, peer count/token changes, HardDelete/ALL removal-ledger entries,
+receipt, progress and outbox commit in one metadata transaction. Edge-file
+publication and namespace-directory removal remain separate recoverable work.
+The leased namespace directory is removed after the final canonical emptiness
+check; no delayed per-record vector free can target a reused slot. Surviving
+peer vectors remain owned and unchanged.
 
-Strict history builds validated historical namespace configurations from the
-start proof after the live configuration is removed. Numeric revisions and
-retained no-change receipts still validate against their original policy state;
-all-origin graph/maintenance profiles still match the immutable binding. Active
-reverse validation restores namespace proof state at Cleanup, then records and
-peer tokens at each chunk. It reconstructs only validation state, never payloads.
-Historical origin counters are compared only within their lineage. New required
-proof/progress versions fail closed.
+The existing progress table/container stays version1. New native progress rows
+are version2 with new typed outcomes; version1 bytes, hashes, IDs and historical
+receipts are not rewritten. Deleting -> Cleanup -> Complete, stable reserved
+child IDs and sorted UUID cursor remain the existing state machine. Replay
+precedes mutable namespace/policy/CAS checks. A replay of an old completed purge
+cannot target a recreated namespace with the same name and a different ID.
+Purge needs neither provider work nor a fresh clock sample.
 
-Native startup may recover only validated version2 active progress and exact
-pending outbox deletions. A missing endpoint is allowed only if that exact UUID
-is proven deleted by the chunk witness, every surviving endpoint exists, edge
-proofs match bit-for-bit and reverse-index consistency holds. Unknown/extra
-missing edges fail before writable source open. Ordinary offline validation still
-rejects active/Cleanup work. Completed progress, receipts, ledger and retained
-namespace proofs survive export/import/schema copy and production fork restore,
-including target/source history merge; original IDs and origins never change.
+Strict preflight permits native recovery only for validated version2 active
+progress and its exact pending outbox. A missing edge endpoint must be the
+specific UUID proven deleted by that chunk; surviving endpoints, edge bits and
+reverse indices still validate. Other missing/corrupt edges fail before writable
+source open. Ordinary offline export/backup/restore rejects Deleting/Cleanup
+immutably. Completed native progress survives actual logical export/import,
+backup and production restore fork with original origins and operation IDs.
 
-Native batch integration uses the actual frozen manifest validator at its join.
-Pending children remain pending or become explicit final scope errors; they
-cannot rebind a recreated name, silently complete, or lose their original
-namespace/default/profile identity. Completed outcomes remain historical after
-purge. Unknown canonical tables stay rejected until their actual consumer joins.
+## Retained history and publication
 
-Required evidence: mixed Full/Summary/Ghost/Tombstone chunks and foreign incident
-edges; insert/policy/feedback attempts during Purging; original-key and reserved
-child retry; exact cumulative counts, ledger masks and peer tokens; interrupted
-start/chunk/edge/config/directory/ack boundaries; no source mutation on malformed
-proof/outbox; namespace recreation under a new ID; completed export/import/backup/
-fork and unfinished immutable rejections. Feynman owns the later combined
-policy -> graph/maintenance -> purge -> export/import/fork proof using actual
-frozen parents. Hume owns graph core, Pascal maintenance/witness, Curie producer/
-batch roots, Huygens actual A4 consumer, Halley sole completion/readiness registry.
+After live namespace removal, strict history reconstructs validation-only
+configuration from the validated start witness. Numeric policy/no-change and
+lifecycle revision histories still bind to their original namespace. Every
+purge and hard-delete peer binds to its own policy revision/version, including
+foreign-origin receipts after restore. Same-origin operations must precede
+the affected namespace's purge start; a purge's own internal remaining-row
+updates are checked against its retained policy. Reverse validation restores
+namespace configuration at Cleanup and rewinds deletion/peer evidence per chunk.
+This reconstructs commitments for validation, never deleted payloads.
+
+`DerivedCompletion::purge_native_accepted(ctx, force, &parent)` accepts work
+beneath the existing root. Its blocking worker owns publication-read lease,
+graph-read guard and engine-write access in that order. Cancellation of the
+async waiter does not release publication ownership while the worker remains
+queued or blocked. Guards are released before awaited `complete_with_work`.
+The response reports Complete only after completion succeeds. An uncertain
+child acknowledgement remains `CommitOutcomeUnknown`; a known committed
+failure preserves its full current child receipt, not an older parent receipt.
+
+The actual historical peer-policy corruption is a reproduced acceptance bug.
+The separate cancellation probe shows premature publication-lease release in
+the previous helper while graph guard and unresolved tracker evidence remain.
+It does not demonstrate false Ready or a data race. Moving the lease into the
+worker is a preventive lifetime correction backed by that deterministic probe.
+
+## Validation and remaining consumers
+
+Final validation results and exact runtime/tree/binary/log hashes are recorded
+in `../evidence/native-purge/README.md`. Failed source/binary manifests and logs
+are retained, including admission, historical ordering, peer-policy and lease
+probes. Tests use synthetic roots, offline Rust1.94.1, two CPUs, 4GiB and a
+private target with no credentials, personal data, providers or socket mounts.
+
+The actual public purge consumer belongs to Huygens. It must join the sole
+Halley publication registry and preserve accepted roots, full receipts and
+current-generation publication. This minimal parent does not claim the later
+all-component whole-query ReadView or ordinary native serving activation.
+
+Feynman owns the subsequent mixed policy -> graph/linked-store/maintenance ->
+purge -> export/import/fork proof on actual validated dependencies. Retired
+namespace dimension/profile bindings must participate in every all-origin
+validator; edge history must rewind purge and maintenance removals before older
+graph/insertion transitions. Native batch joins must consume the real manifest
+validator and child binding, not an outcome allowlist. Unsupported required
+canonical tables/variants continue to fail closed here.
+
+Feynman also owns ordinary engine/system/daemon startup admission, after actual
+writer and coherent-reader closure. Huygens owns public routing/capabilities,
+Curie producer roots, Pascal lifecycle/maintenance and Halley the sole registry.
+The next admission plan must name exact minimal frozen parents, the existing
+constructor/preflight/recovery seam and startup evidence before implementation.
+No second engine, independent tracker or premature gate removal is introduced.
