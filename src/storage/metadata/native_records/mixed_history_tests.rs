@@ -333,8 +333,35 @@ async fn mixed_history_policy_graph_maintenance_purge_export_import_fork_preserv
             after.schema.as_ref().unwrap().lifecycle,
             record.schema.as_ref().unwrap().lifecycle
         );
-        assert_eq!(s.metadata().removal_ledger_export().unwrap(), ledger);
+        let fork_ledger = s.metadata().removal_ledger_export().unwrap();
+        assert_eq!(fork_ledger.entries, ledger.entries);
+        assert_eq!(
+            fork_ledger.state.tracking_started_at.store_id,
+            s.metadata().control_state().unwrap().store_id
+        );
+        assert_eq!(
+            fork_ledger.state.tracking_started_at.generation,
+            Generation::default()
+        );
+        assert_eq!(
+            fork_ledger.state.prior_history,
+            crate::storage::metadata::removal_ledger::PriorHistory::Unknown
+        );
     }
+    // A fork has fresh conservative coverage; the original coverage remains
+    // explicit ancestry evidence rather than being relabeled as the new store.
+    let (_copy, db) = validation::inspect_database(&imported.join("meta.db")).unwrap();
+    let read = db.begin_read().unwrap();
+    let control = control::validate_existing(&read).unwrap().unwrap();
+    let lineage = crate::storage::lineage::read_lineage(&read, &control)
+        .unwrap()
+        .unwrap();
+    assert!(
+        lineage
+            .ledger_sources
+            .iter()
+            .any(|s| s.coverage == ledger.state)
+    );
     let payload = payloads(&root.path().join("fork.jsonl"));
     let memories: Vec<_> = payload.iter().filter(|p| p["kind"] == "memory").collect();
     assert_eq!(memories.len(), 1);
@@ -451,4 +478,57 @@ async fn mixed_history_foreign_purged_bindings_and_noop_key_reject_immutably() {
         std::fs::write(path.join("meta.db"), &original_db).unwrap();
     }
     inspect_schema(&path).unwrap();
+}
+
+#[test]
+fn mixed_history_pending_purge_outbox_reopens_against_prior_graph_proofs() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let mut s = open(&d, clock.clone());
+    let id = linked(&mut s, &d, "linked");
+    graph(&mut s, &d, id);
+    let start = s
+        .engine
+        .begin_namespace_purge(&ctx(&s, &d, "purge"), true)
+        .unwrap();
+    s.metadata()
+        .fail_effect_application
+        .store(true, Ordering::SeqCst);
+    let error = s
+        .engine
+        .resume_namespace_purge(start.store_id, d.ns, start.start_receipt.operation_id, 1)
+        .unwrap_err();
+    let StorageError::CommittedMutation { receipt, .. } = error else {
+        panic!("wrong error {error}")
+    };
+    assert_eq!(Some(receipt.operation_id), start.next_operation_id);
+    let MutationOutcome::NativeNamespacePurgeAdvanced { transition } = &receipt.outcome else {
+        panic!()
+    };
+    assert!(!transition.chunk.as_ref().unwrap().removed_edges.is_empty());
+    drop(s);
+    let before = bytes(&d.path);
+    assert!(logical_export::export_store(&d.path, &root.path().join("unfinished.jsonl")).is_err());
+    assert_eq!(bytes(&d.path), before);
+    let final_generation;
+    {
+        let s = open(&d, clock.clone());
+        assert!(s.engine.get_namespace(d.ns).unwrap().is_none());
+        let p = s
+            .engine
+            .lookup_namespace_purge(start.store_id, d.ns, start.start_receipt.operation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(p.stage, crate::storage::purge::PurgeStage::Complete);
+        assert_eq!(p.removed, 2);
+        final_generation = s.engine.control_state().unwrap().generation_ref();
+    }
+    let s = open(&d, clock);
+    assert_eq!(
+        s.engine.control_state().unwrap().generation_ref(),
+        final_generation
+    );
+    drop(s);
+    inspect_schema(&d.path).unwrap();
 }
