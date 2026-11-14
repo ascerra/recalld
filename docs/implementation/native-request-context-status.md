@@ -70,3 +70,33 @@ exactly-one old2 four-candidate match using original previousG, canonical start
 equality and derived child contract. This was bounded source review only, not
 full review or runtime proof. It does not validate the subsequent owner-mode or
 known-receipt corrections; those await the recorded focused/full checks.
+
+## Combined owner and transaction review for final handoff
+
+Coordinating-agent source review of9e70229 found no blocker in the narrow
+load/start-validation error wrapper: it retains the receipt already returned by
+replay lookup and performs no fabricated lookup or reconstruction. Actual GREEN
+and the final full suite remain pending explicit END.
+
+Combined source inspection of the owner fence and transaction path confirms:
+
+- `native_lifecycle_only` is private constructor state. Native open validates
+  schema2, selected-text fencing and serving lineage on a disposable inspection
+  before writable construction. Incoming API contract does not set this flag.
+- The accepted coordinator holds the publication lease and graph guard inside
+  the blocking worker, then takes the storage write guard. Its narrow owner
+  predicate rejects a legacy owner without invoking an ordinary metadata read.
+- The same call enters the existing purge mutation guard, which still checks
+  handle availability and accepted work. Its write transaction reads and decodes
+  current control and rejects owner/schema mismatch before replay or fresh writes.
+  The cached predicate is not a replacement for this canonical transaction check.
+- Original API1|2 and namespace scope validation remain independent. Hash/domain
+  selection uses the owned mode; hashes still include the original contract.
+- Ordinary reads still reject pending purge. Only the existing purge path can
+  resume it. Unknown commits and pending canonical effects retain their handle
+  guards; no raw public read or second engine was introduced.
+
+This is a combined source assessment of the current correction, not a claim
+that9e70229 has passed runtime validation. The previous a4acd5f unknown-child
+GREEN is narrower evidence. Repeat this assessment against the final frozen
+source and include its exact hash in the handoff after focused/full validation.
