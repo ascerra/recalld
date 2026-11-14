@@ -132,6 +132,19 @@ impl MetadataStore {
             .publication
             .read()
             .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
+        let view = self.open_canonical_read()?;
+        let at = view.at;
+        if self.needs_effects_rebuild() || !self.view_publication.state(at).matches_canonical() {
+            return Err(StorageError::RecoveryRequired(
+                "canonical and derived generations are not coherent".into(),
+            ));
+        }
+        Ok(view)
+    }
+
+    // Caller holds metadata publication. The same transaction supplies admission,
+    // lineage, namespace/record bytes and G, with no derived readiness assertion.
+    fn open_canonical_read(&self) -> Result<CanonicalReadView, StorageError> {
         self.ensure_available()?;
         let read = self.db.begin_read()?;
         let state = if self.native_lifecycle_only {
@@ -147,25 +160,44 @@ impl MetadataStore {
             ControlState::decode(value.value())?
         };
         crate::storage::lineage::ensure_serving(&read, &state)?;
-        if self.needs_effects_rebuild()
-            || !self
-                .view_publication
-                .state(state.generation_ref())
-                .matches_canonical()
-        {
-            return Err(StorageError::RecoveryRequired(
-                "canonical and derived generations are not coherent".into(),
-            ));
-        }
         Ok(CanonicalReadView {
             read,
             at: state.generation_ref(),
         })
     }
+
+    /// Keep canonical writers excluded until the caller has copied all payload.
+    /// The caller must additionally retain the actual engine read guard, which
+    /// pins selected text handles and excludes vector slot reuse/compaction.
+    pub(crate) fn with_generation_read_at<T>(
+        &self,
+        expected: control::GenerationRef,
+        copy: impl FnOnce(&CanonicalReadView) -> Result<T, StorageError>,
+    ) -> Result<T, StorageError> {
+        let _publication = self
+            .publication
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
+        let view = self.open_canonical_read()?;
+        if view.at.store_id != expected.store_id {
+            return Err(StorageError::StoreLineageMismatch);
+        }
+        if view.at != expected {
+            return Err(StorageError::GenerationConflict {
+                expected: expected.generation.to_string(),
+                actual: view.at.generation.to_string(),
+            });
+        }
+        copy(&view)
+    }
 }
 
 impl CanonicalReadView {
     pub(crate) fn get(&self, id: MemoryId) -> Result<Option<CachedRecord>, StorageError> {
+        Ok(self.disk_record(id)?.as_ref().map(CachedRecord::from))
+    }
+
+    pub(crate) fn disk_record(&self, id: MemoryId) -> Result<Option<DiskRecord>, StorageError> {
         let table = self.read.open_table(META_TABLE)?;
         table
             .get(id.as_bytes().as_slice())?
@@ -176,7 +208,7 @@ impl CanonicalReadView {
                         "record identity mismatch".into(),
                     ));
                 }
-                Ok(CachedRecord::from(&record))
+                Ok(record)
             })
             .transpose()
     }

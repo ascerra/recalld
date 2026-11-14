@@ -21,7 +21,7 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 mod diagnostics;
 #[path = "read_view.rs"]
 mod read_view;
-pub use read_view::CoherentSearchResponse;
+pub use read_view::{CoherentPayload, CoherentSearchResponse};
 #[path = "strength.rs"]
 mod strength;
 use strength::StrengthContext;
@@ -425,6 +425,10 @@ const FTS_ONLY_RATE: f32 = 0.3;
 /// Holds `Arc` references to all subsystems. Cheap to clone, safe to
 /// share across request handlers.
 pub struct QueryEngine {
+    coherent_owner: Option<(
+        crate::derived_completion::DerivedCompletion,
+        Arc<crate::rif::RifEngine>,
+    )>,
     clock: Arc<dyn crate::time::Clock>,
     decay_policy: crate::decay::DecayConfig,
     decay_multiplier: f64,
@@ -508,6 +512,7 @@ impl QueryEngine {
         access_recorder: Arc<dyn AccessRecorder>,
     ) -> Self {
         Self {
+            coherent_owner: None,
             clock: Arc::new(crate::time::SystemClock),
             decay_policy: crate::decay::DecayConfig::default(),
             decay_multiplier: 1.0,

@@ -630,3 +630,176 @@ async fn accepted_http_create_carries_provider_root_through_links_and_publicatio
     drop(frozen);
     assert!(tracker.status().admission_open);
 }
+
+fn coherent_owner(h: &Harness) -> crate::derived_completion::DerivedCompletion {
+    crate::derived_completion::DerivedCompletion {
+        storage: h.f.storage.clone(),
+        cache: h.f.cache.clone(),
+        graph: h.f.graph.clone(),
+        vectors: h.f.vector_index.clone(),
+        fts: h.f.fts_index.clone(),
+        entities: h.f.entity_index.clone(),
+    }
+}
+async fn coherent_harness() -> Harness {
+    let mut h = Harness::new().await;
+    let owner = coherent_owner(&h);
+    let inserted = owner
+        .insert(
+            crate::storage::control::MutationContext::unkeyed(NamespaceId::new(1)),
+            crate::storage::insertion::InsertMemory {
+                id: None,
+                summary: "coherent payload".into(),
+                full_text: Some("owned résumé 日本語".into()),
+                tags: vec![],
+                initial_stability: None,
+                created_at: None,
+                embedding: Some(vec![0., 1., 0., 0.]),
+                parent_id: None,
+                supersedes: None,
+            },
+            Vec::new().into(),
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
+        .unwrap();
+    let id = crate::storage::insertion::inserted_id(&inserted.receipt).unwrap();
+    h.ids.push(id);
+    let mut disk = h.f.record(id).unwrap();
+    disk.difficulty = 7.25;
+    disk.strength = 0.42;
+    disk.decay_strength = 0.67;
+    h.f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .batch_update_records(&[(id, disk)])
+        .unwrap();
+    owner.complete().await.unwrap();
+    h.engine = Arc::new(Arc::try_unwrap(h.engine).ok().unwrap().with_coherent_owner(
+        owner,
+        Arc::new(crate::rif::RifEngine::new(Default::default())),
+    ));
+    h
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_http_preserves_metadata_bytes_and_returned_only_exposure() {
+    let h = coherent_harness().await;
+    let before = h.snapshot();
+    let input = json!({"embedding":[0.,1.,0.,0.],"limit":10,"depth":0,
+        "includeEmbeddings":true,"recordAccess":false});
+    let (status, body) = request(&h, "/search", input.to_string()).await;
+    assert!(status.is_success(), "{body}");
+    let rows = body["hits"].as_array().unwrap();
+    let id = h.ids.last().unwrap().to_string();
+    let row = rows.iter().find(|r| r["memory"]["id"] == id).unwrap();
+    assert_eq!(row["memory"]["fullText"], "owned résumé 日本語");
+    assert_eq!(row["memory"]["difficulty"], 7.25);
+    assert!((row["memory"]["strength"].as_f64().unwrap() - 0.42).abs() < 1e-6);
+    assert!((row["memory"]["decayStrength"].as_f64().unwrap() - 0.67).abs() < 1e-6);
+    assert_eq!(row["memory"]["embedding"], json!([0., 1., 0., 0.]));
+    h.assert_quiet(&before).await;
+    let mut input = input;
+    input["recordAccess"] = json!(true);
+    input["limit"] = json!(1);
+    let (status, body) = request(&h, "/search", input.to_string()).await;
+    assert!(status.is_success(), "{body}");
+    let returned = body["hits"][0]["memory"]["id"].as_str().unwrap();
+    for id in &h.ids {
+        assert_eq!(
+            h.f.record(*id).unwrap().access_history.len(),
+            usize::from(id.to_string() == returned)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_http_rejects_concurrent_forget_and_compaction_before_exposure() {
+    for compact in [false, true] {
+        for access in [false, true] {
+            let h = Arc::new(coherent_harness().await);
+            let owner = coherent_owner(&h);
+            let at =
+                h.f.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .publication_state()
+                    .unwrap()
+                    .canonical;
+            h.embedding.hold.store(true, Ordering::SeqCst);
+            let child = h.clone();
+            let query = tokio::spawn(async move {
+                request(
+                    &child,
+                    "/search",
+                    json!({"query":"payload","depth":0,"limit":10,
+                    "recordAccess":access})
+                    .to_string(),
+                )
+                .await
+            });
+            tokio::time::timeout(Duration::from_secs(10), h.embedding.entered.notified())
+                .await
+                .unwrap();
+            let id = *h.ids.last().unwrap();
+            let writer = tokio::spawn(async move {
+                if compact {
+                    let storage = owner.storage.clone();
+                    tokio::task::spawn_blocking(move || {
+                        storage.write().unwrap().compact_text_log()
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
+                } else {
+                    assert!(owner.forget(id, Some("default")).await.unwrap());
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if h.f
+                        .storage
+                        .read()
+                        .unwrap()
+                        .meta_store()
+                        .publication_state()
+                        .unwrap()
+                        .canonical
+                        != at
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            h.embedding.resume.notify_one();
+            let (status, body) = tokio::time::timeout(Duration::from_secs(10), query)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                !status.is_success(),
+                "compact={compact} access={access}: {body}"
+            );
+            assert!(!body.to_string().contains("owned résumé"));
+            assert_eq!(h.access.completed.load(Ordering::SeqCst), 0);
+            tokio::time::timeout(Duration::from_secs(10), writer)
+                .await
+                .unwrap()
+                .unwrap();
+            let state =
+                h.f.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .work_tracker()
+                    .status();
+            assert_eq!(state.pending, 0);
+            assert_eq!(state.unresolved, 0);
+        }
+    }
+}

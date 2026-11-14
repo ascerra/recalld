@@ -13,6 +13,8 @@ mod insertion;
 mod maintenance;
 mod native_records;
 mod purge;
+mod read_payload;
+pub use read_payload::HydratedRecord;
 mod text_compaction;
 mod tombstone;
 

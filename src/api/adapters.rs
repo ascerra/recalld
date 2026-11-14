@@ -94,6 +94,17 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
         self.query_engine.finish_work(work);
     }
+    async fn prepare_coherent_search_with_work(
+        &self,
+        query: state::SearchQuery,
+        include_embeddings: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSearchResponse>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_coherent_payload(Self::pipeline_query(query), include_embeddings, parent)
+            .await
+    }
+
     async fn prepare_search_with_work(
         &self,
         query: state::SearchQuery,
@@ -1835,12 +1846,7 @@ mod tests {
 }
 
 impl SearchPipelineAdapter {
-    async fn search_inner(
-        &self,
-        query: state::SearchQuery,
-        defer_recording: bool,
-        parent: Option<&crate::storage::work::WorkTicket>,
-    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+    fn pipeline_query(query: state::SearchQuery) -> crate::search::SearchQuery {
         // Convert API-layer SearchQuery to the pipeline's SearchQuery.
         let (text, query_embedding) = match query.query {
             state::QueryInput::Text(t) => (Some(t), None),
@@ -1874,7 +1880,7 @@ impl SearchPipelineAdapter {
             })
             .unwrap_or_default();
 
-        let pipeline_query = crate::search::SearchQuery {
+        crate::search::SearchQuery {
             record_access: query.record_access,
             query_embedding,
             text,
@@ -1899,7 +1905,16 @@ impl SearchPipelineAdapter {
             time_range_start: query.time_range_start, // Issue 3: pass time range
             time_range_end: query.time_range_end,     // Issue 3: pass time range
             entities: query.entities.clone(),         // Issue 4: pass entities
-        };
+        }
+    }
+
+    async fn search_inner(
+        &self,
+        query: state::SearchQuery,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        let pipeline_query = Self::pipeline_query(query.clone());
         let response = if defer_recording {
             self.query_engine
                 .prepare_search_with_work(pipeline_query, parent)

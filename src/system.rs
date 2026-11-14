@@ -681,6 +681,17 @@ impl Recalld {
                 clock.clone(),
                 DecayConfig::default(),
                 config.decay.decay_rate_multiplier,
+            )
+            .with_coherent_owner(
+                crate::derived_completion::DerivedCompletion {
+                    storage: storage.clone(),
+                    cache: cache.clone(),
+                    graph: graph.clone(),
+                    vectors: vector_index.clone(),
+                    fts: fts_index.clone(),
+                    entities: entity_index.clone(),
+                },
+                rif_engine.clone(),
             );
             tracing::info!("query engine initialized");
             Arc::new(engine)

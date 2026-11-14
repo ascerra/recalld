@@ -940,60 +940,120 @@ async fn search_memories_admitted(
         entities: req.entities.clone(),
     };
 
-    let results = state
+    let coherent = state
         .search
-        .prepare_search_with_work(search_query, parent)
+        .prepare_coherent_search_with_work(search_query.clone(), req.include_embeddings, parent)
         .await?;
-
-    // Batch-load embeddings with a single lock acquisition if requested.
-    let embeddings = if req.include_embeddings {
-        let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
-        state.search.get_embeddings_batch(&ids)
-    } else {
-        std::collections::HashMap::new()
-    };
-
-    // Convert to API response, loading full_text from storage
-    let mut hits: Vec<SearchHit> = Vec::with_capacity(results.len());
-    let mut exposures = Vec::new();
-    for r in results {
-        exposures.push((r.memory.id, r.access_kind));
-        let canonical =
-            state
-                .storage
-                .get_record(r.memory.id)
-                .await
-                .ok_or_else(|| AppError::NotFound {
-                    resource: "memory",
-                    id: r.memory.id.to_string(),
+    let (hits, exposures) =
+        if let Some(prepared) = coherent {
+            let payload = prepared
+                .payload
+                .ok_or_else(|| AppError::ServiceUnavailable {
+                    message: "coherent payload capture missing".into(),
                 })?;
-        if canonical.namespace_id != ns.id.get()
-            || matches!(canonical.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
-        {
-            return Err(AppError::ServiceUnavailable {
-                message: "search result changed during hydration".into(),
-            });
-        }
-        let mut mem = MemoryResponse::from_cached(
-            &crate::model::CachedRecord::from(&canonical),
-            ns.name.clone(),
-        );
-        if canonical.schema.as_ref().is_some_and(|s| {
-            s.lifecycle.lifecycle_version
-                == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
-        }) {
-            mem.strength = r.memory.strength;
-            mem.decay_strength = r.memory.decay_strength;
-        }
-        mem.full_text = state.storage.get_full_text(r.memory.id).await?;
-        if req.include_embeddings {
-            mem.embedding = embeddings.get(&r.memory.id).cloned();
-        }
-        hits.push(SearchHit {
-            memory: mem,
-            score: r.score,
-        });
-    }
+            if payload.namespace.id != ns.id
+                || payload.rows.len() != prepared.response.response.results.len()
+            {
+                return Err(AppError::ServiceUnavailable {
+                    message: "coherent page scope changed".into(),
+                });
+            }
+            let mut hits = Vec::with_capacity(payload.rows.len());
+            let mut exposures = Vec::with_capacity(payload.rows.len());
+            for (selected, row) in prepared
+                .response
+                .response
+                .results
+                .into_iter()
+                .zip(payload.rows)
+            {
+                if row.record.id != *selected.memory_id.as_bytes() {
+                    return Err(AppError::ServiceUnavailable {
+                        message: "coherent page identity mismatch".into(),
+                    });
+                }
+                let mut memory = MemoryResponse::from_cached(
+                    &crate::model::CachedRecord::from(&row.record),
+                    payload.namespace.name.clone(),
+                );
+                if row.record.schema.as_ref().is_some_and(|s| {
+                    s.lifecycle.lifecycle_version
+                        == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+                }) {
+                    memory.strength = selected.retrievability;
+                    memory.decay_strength = selected.effective_r;
+                }
+                memory.full_text = row.full_text;
+                memory.embedding = row.embedding;
+                exposures.push((
+                    selected.memory_id,
+                    if selected.activation_score.is_some() {
+                        crate::model::AccessKind::AssociativeRetrieval
+                    } else {
+                        crate::model::AccessKind::DirectRetrieval
+                    },
+                ));
+                hits.push(SearchHit {
+                    memory,
+                    score: selected.score.unwrap_or(0.0),
+                });
+            }
+            (hits, exposures)
+        } else {
+            let results = state
+                .search
+                .prepare_search_with_work(search_query, parent)
+                .await?;
+
+            // Batch-load embeddings with a single lock acquisition if requested.
+            let embeddings = if req.include_embeddings {
+                let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
+                state.search.get_embeddings_batch(&ids)
+            } else {
+                std::collections::HashMap::new()
+            };
+
+            // Convert to API response, loading full_text from storage
+            let mut hits: Vec<SearchHit> = Vec::with_capacity(results.len());
+            let mut exposures = Vec::new();
+            for r in results {
+                exposures.push((r.memory.id, r.access_kind));
+                let canonical = state.storage.get_record(r.memory.id).await.ok_or_else(|| {
+                    AppError::NotFound {
+                        resource: "memory",
+                        id: r.memory.id.to_string(),
+                    }
+                })?;
+                if canonical.namespace_id != ns.id.get()
+                    || matches!(canonical.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+                {
+                    return Err(AppError::ServiceUnavailable {
+                        message: "search result changed during hydration".into(),
+                    });
+                }
+                let mut mem = MemoryResponse::from_cached(
+                    &crate::model::CachedRecord::from(&canonical),
+                    ns.name.clone(),
+                );
+                if canonical.schema.as_ref().is_some_and(|s| {
+                    s.lifecycle.lifecycle_version
+                        == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+                }) {
+                    mem.strength = r.memory.strength;
+                    mem.decay_strength = r.memory.decay_strength;
+                }
+                mem.full_text = state.storage.get_full_text(r.memory.id).await?;
+                if req.include_embeddings {
+                    mem.embedding = embeddings.get(&r.memory.id).cloned();
+                }
+                hits.push(SearchHit {
+                    memory: mem,
+                    score: r.score,
+                });
+            }
+
+            (hits, exposures)
+        };
 
     check_read_admission(&state, admitted_stamp).await?;
     let receipts = if req.record_access {

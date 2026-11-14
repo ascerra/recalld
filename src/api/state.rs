@@ -42,6 +42,17 @@ pub trait SearchPipeline: Send + Sync {
         drop(work);
     }
 
+    /// Owned production engines return a generation-checked payload page.
+    /// Immutable/mock adapters keep their explicit legacy path.
+    async fn prepare_coherent_search_with_work(
+        &self,
+        _query: SearchQuery,
+        _include_embeddings: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSearchResponse>, SearchError> {
+        Ok(None)
+    }
+
     async fn prepare_search_with_work(
         &self,
         query: SearchQuery,

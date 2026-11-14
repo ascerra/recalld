@@ -14,6 +14,14 @@ pub struct CoherentSearchResponse {
     pub read_generation: GenerationRef,
     pub evaluated_at: i64,
     pub response: SemanticsResponse,
+    /// Present only when the owned engine copied every selected payload at G.
+    pub payload: Option<CoherentPayload>,
+}
+
+/// Canonical owned rows in exactly the selected result order. No handler reload.
+pub struct CoherentPayload {
+    pub namespace: NamespaceConfig,
+    pub rows: Vec<crate::storage::engine::HydratedRecord>,
 }
 
 fn unavailable(error: impl std::fmt::Display) -> SearchError {
@@ -114,7 +122,54 @@ impl QueryEngine {
                 "coherent read-only entry point requires recordAccess=false",
             ));
         }
-        let work = owner.accept_work(None).map_err(unavailable)?;
+        self.coherent_selection(owner, rif, query, semantics, deadline, None, None)
+            .await
+    }
+
+    pub(crate) fn with_coherent_owner(
+        mut self,
+        owner: DerivedCompletion,
+        rif: Arc<crate::rif::RifEngine>,
+    ) -> Self {
+        self.coherent_owner = Some((owner, rif));
+        self
+    }
+
+    /// Explicitly absent on immutable/offline adapters. Actual owned production
+    /// construction installs the same coordinator, never a second registry.
+    pub(crate) async fn prepare_coherent_payload(
+        &self,
+        query: SearchQuery,
+        include_embeddings: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<CoherentSearchResponse>> {
+        let Some((owner, rif)) = &self.coherent_owner else {
+            return Ok(None);
+        };
+        self.coherent_selection(
+            owner,
+            rif.clone(),
+            query,
+            RetrievalSemantics::V1,
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            Some(include_embeddings),
+            parent,
+        )
+        .await
+        .map(Some)
+    }
+
+    async fn coherent_selection(
+        &self,
+        owner: &DerivedCompletion,
+        rif: Arc<crate::rif::RifEngine>,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        deadline: std::time::Instant,
+        payload_embeddings: Option<bool>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<CoherentSearchResponse> {
+        let work = owner.accept_work(parent).map_err(unavailable)?;
         let result = async {
             let storage = owner.storage.clone();
             let child = work.child().map_err(unavailable)?;
@@ -149,7 +204,9 @@ impl QueryEngine {
             let at = canonical.at;
             let canonical = Arc::new(canonical);
             let evaluated_at = self.clock.now_millis();
+            let namespace = canonical.resolve(&query.namespace).await?;
             let engine = Self {
+                coherent_owner: None,
                 clock: Arc::new(crate::time::ManualClock::new(evaluated_at)),
                 decay_policy: self.decay_policy.clone(),
                 decay_multiplier: self.decay_multiplier,
@@ -164,7 +221,33 @@ impl QueryEngine {
                 rif_engine: Arc::new(RifProcessorAdapter::pinned(rif, graph)),
                 access_recorder: Arc::new(RejectExposure),
             };
-            let response = engine.search_with_semantics(query, semantics).await?;
+            // Preserve requested mode for policy resolution, but never expose
+            // until all selected content is copied and transport selection is final.
+            let response = engine.search_checked(query, semantics, true).await?;
+            let payload = if let Some(include_embeddings) = payload_embeddings {
+                let ids: Vec<_> = response
+                    .response
+                    .results
+                    .iter()
+                    .map(|r| r.memory_id)
+                    .collect();
+                let storage = owner.storage.clone();
+                let namespace_id = namespace.id;
+                let child = work.child().map_err(unavailable)?;
+                let rows = tokio::task::spawn_blocking(move || {
+                    let storage = storage.read().map_err(unavailable)?;
+                    let result = storage
+                        .hydrate_at(at, namespace_id, &ids, include_embeddings)
+                        .map_err(unavailable);
+                    storage.meta_store().finish_work(child);
+                    result
+                })
+                .await
+                .map_err(unavailable)??;
+                Some(CoherentPayload { namespace, rows })
+            } else {
+                None
+            };
             // Explicit release before root completion, including the canonical tx.
             drop(engine);
             drop(publication);
@@ -172,6 +255,7 @@ impl QueryEngine {
                 read_generation: at,
                 evaluated_at,
                 response,
+                payload,
             })
         };
         let result =
