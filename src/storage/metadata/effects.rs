@@ -339,6 +339,7 @@ impl MetadataStore {
             delete_records,
             release_vectors,
             RecordMutation::GraphOnly,
+            None,
         )
     }
 
@@ -356,6 +357,7 @@ impl MetadataStore {
         delete_records: bool,
         release_vectors: bool,
         mut mutation: RecordMutation<'_>,
+        child: Option<&crate::storage::batch::BatchChild>,
     ) -> Result<EffectResult, StorageError> {
         _guard.check(self)?;
         let MutationScope::Namespace(namespace) = ctx.scope else {
@@ -628,6 +630,8 @@ impl MetadataStore {
                 &removed,
                 deletes.len(),
             )?
+        } else if let Some(child) = child {
+            super::batch::record_child(&tx, child, ctx, hash, outcome)?
         } else {
             control::record_receipt(&tx, ctx, hash, outcome)?
         };
@@ -725,7 +729,13 @@ impl MetadataStore {
         // not assume failure means its staged bytes can be reclaimed.
         #[cfg(test)]
         let committed = committed.and_then(|()| {
-            if FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.replace(false)) {
+            if FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.replace(false))
+                || child.is_some()
+                    && self
+                        .fail_batch_commit
+                        .compare_exchange(3, 0, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+            {
                 Err(redb::CommitError::Storage(redb::StorageError::Io(
                     std::io::Error::other("injected unknown record commit"),
                 )))
@@ -740,6 +750,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         crash_point("after_metadata_commit");
         let mut phases = self.phase_index.write().unwrap_or_else(|e| e.into_inner());
         if let RecordMutation::LifecyclePatched { before, after } = &mutation {
@@ -1003,6 +1014,19 @@ pub(crate) fn validate_plan(
     Ok(())
 }
 
+#[cfg(test)]
+impl MetadataStore {
+    /// Instance-local probe, reached only after actual exposure commit/publication.
+    pub(crate) fn after_observation_probe(&self) {
+        match self.observation_fault.swap(0, Ordering::SeqCst) {
+            1 => self.mark_unavailable(),
+            2 => {
+                self.effects_epoch.fetch_add(1, Ordering::SeqCst);
+            }
+            _ => {}
+        }
+    }
+}
 fn native_proof(
     effect: &PendingEffects,
 ) -> Option<&crate::storage::native_records::NativeRecordWrite> {
@@ -1071,17 +1095,4 @@ fn validate_native_effect(effect: &PendingEffects, insertion: bool) -> Result<()
         ));
     }
     Ok(())
-}
-#[cfg(test)]
-impl MetadataStore {
-    /// Instance-local probe, reached only after actual exposure commit/publication.
-    pub(crate) fn after_observation_probe(&self) {
-        match self.observation_fault.swap(0, Ordering::SeqCst) {
-            1 => self.mark_unavailable(),
-            2 => {
-                self.effects_epoch.fetch_add(1, Ordering::SeqCst);
-            }
-            _ => {}
-        }
-    }
 }

@@ -13,10 +13,21 @@ impl RedbStorageEngine {
         ctx: &MutationContext,
         config: &NamespaceConfig,
     ) -> Result<WriteReceipt, StorageError> {
+        self.create_namespace_with_receipt_and_work(ctx, config, None)
+    }
+
+    pub(crate) fn create_namespace_with_receipt_and_work(
+        &mut self,
+        ctx: &MutationContext,
+        config: &NamespaceConfig,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
         let meta = &self.meta_store;
+        // Retain the accepted owner through canonical commit and handle installation.
+        let guard = meta.mutation_guard_with_work(parent)?;
         publish_namespace(meta, &mut self.vector_manager, &self.db_path, |prepare| {
-            meta.create_catalog(ctx, config, |id| {
+            meta.create_catalog_guarded(&guard, ctx, config, |id| {
                 let mut stored = config.clone();
                 stored.id = id;
                 prepare(&stored)
@@ -24,14 +35,45 @@ impl RedbStorageEngine {
         })
     }
 
+    pub(crate) fn create_namespace_with_work(
+        &mut self,
+        config: &NamespaceConfig,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<NamespaceId, StorageError> {
+        let ctx = MutationContext {
+            scope: MutationScope::Catalog,
+            ..MutationContext::unkeyed(NamespaceId::new(1))
+        };
+        match self
+            .create_namespace_with_receipt_and_work(&ctx, config, parent)?
+            .outcome
+        {
+            crate::storage::control::MutationOutcome::NamespaceCreated { namespace_id, .. } => {
+                Ok(namespace_id)
+            }
+            _ => Err(StorageError::InvalidControl(
+                "create receipt outcome mismatch".into(),
+            )),
+        }
+    }
+
     pub fn update_namespace_policy_with_receipt(
         &self,
         ctx: &MutationContext,
         policy: &NamespacePolicy,
     ) -> Result<WriteReceipt, StorageError> {
+        self.update_namespace_policy_with_work(ctx, policy, None)
+    }
+
+    pub(crate) fn update_namespace_policy_with_work(
+        &self,
+        ctx: &MutationContext,
+        policy: &NamespacePolicy,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
         self.meta_store
-            .update_namespace_policy_with_receipt(ctx, policy)
+            .update_namespace_policy_with_work(ctx, policy, parent)
     }
 }
 
@@ -183,6 +225,121 @@ mod tests {
         let result = f();
         FAILURE.with(|v| v.set(None));
         result
+    }
+
+    #[test]
+    fn accepted_catalog_covers_preparation_commit_and_handle_install() {
+        use std::{
+            sync::mpsc,
+            time::{Duration, Instant},
+        };
+        let root = tempfile::tempdir().unwrap();
+        let mut engine = RedbStorageEngine::open(root.path()).unwrap();
+        let tracker = engine.meta_store().work_tracker();
+        let (at, paused) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            crate::storage::catalog::BOUNDARY_HOOK.with(|h| {
+                *h.borrow_mut() = Some(Box::new(move |point| {
+                    if point == "before_handle_publish" {
+                        at.send(()).unwrap();
+                        resume.recv_timeout(Duration::from_secs(10)).unwrap();
+                    }
+                }))
+            });
+            let id = engine.create_namespace(&config("accepted")).unwrap();
+            crate::storage::catalog::BOUNDARY_HOOK.with(|h| *h.borrow_mut() = None);
+            (engine, id)
+        });
+        paused.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(tracker.status().pending, 1);
+        let closing = tracker.clone();
+        let drain = std::thread::spawn(move || {
+            closing.close_and_drain(Instant::now() + Duration::from_secs(10))
+        });
+        tracker.wait_until_closed();
+        assert!(!drain.is_finished());
+        release.send(()).unwrap();
+        let (engine, id) = worker.join().unwrap();
+        let freeze = drain.join().unwrap().unwrap();
+        assert!(engine.vector_manager.get(id).is_some());
+        assert_eq!(engine.get_namespace(id).unwrap().unwrap().name, "accepted");
+        let capture = engine.meta_store().freeze_metadata(freeze).unwrap();
+        assert_eq!(
+            capture.generation(),
+            engine.control_state().unwrap().generation_ref()
+        );
+    }
+
+    #[test]
+    fn accepted_catalog_and_policy_children_finish_while_new_roots_are_closed() {
+        use std::time::{Duration, Instant};
+        let root = tempfile::tempdir().unwrap();
+        let mut engine = RedbStorageEngine::open(root.path()).unwrap();
+        let tracker = engine.meta_store().work_tracker();
+        let work = tracker.begin().unwrap();
+        let closing = tracker.clone();
+        let drain = std::thread::spawn(move || {
+            closing.close_and_drain(Instant::now() + Duration::from_secs(10))
+        });
+        tracker.wait_until_closed();
+        assert!(matches!(
+            engine.create_namespace(&config("rejected")),
+            Err(StorageError::Work(_))
+        ));
+        assert!(!root.path().join("rejected").exists());
+        let id = engine
+            .create_namespace_with_work(&config("child"), Some(&work))
+            .unwrap();
+        let mut policy = NamespacePolicy::from(&engine.get_namespace(id).unwrap().unwrap());
+        policy.initial_stability = 7.;
+        let ctx = MutationContext::unkeyed(id);
+        assert!(matches!(
+            engine.update_namespace_policy_with_receipt(&ctx, &policy),
+            Err(StorageError::Work(_))
+        ));
+        engine
+            .update_namespace_policy_with_work(&ctx, &policy, Some(&work))
+            .unwrap();
+        assert_eq!(
+            engine.get_namespace(id).unwrap().unwrap().initial_stability,
+            7.
+        );
+        engine.meta_store().finish_work(work);
+        let freeze = drain.join().unwrap().unwrap();
+        assert_eq!(tracker.status().pending, 0);
+        drop(freeze);
+        drop(engine);
+        assert_eq!(
+            RedbStorageEngine::open(root.path())
+                .unwrap()
+                .get_namespace(id)
+                .unwrap()
+                .unwrap()
+                .initial_stability,
+            7.
+        );
+    }
+
+    #[test]
+    fn catalog_handle_publication_failure_retains_unresolved_work_until_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let mut engine = RedbStorageEngine::open(root.path()).unwrap();
+        let tracker = engine.meta_store().work_tracker();
+        let error = fault("before_handle_publish", || {
+            engine.create_namespace(&config("recover"))
+        })
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            StorageError::CommittedEffectsPending { .. }
+        ));
+        assert!(tracker.status().unresolved > 0);
+        drop(engine);
+        let engine = RedbStorageEngine::open(root.path()).unwrap();
+        let id = engine.get_namespace_by_name("recover").unwrap().unwrap().id;
+        assert!(engine.vector_manager.get(id).is_some());
+        assert_eq!(engine.meta_store().work_tracker().status().pending, 0);
     }
 
     #[test]

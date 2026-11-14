@@ -146,9 +146,10 @@ async fn shutdown_signal() {
 }
 
 #[cfg(test)]
-mod legacy_label_tests;
-#[cfg(test)]
 mod vector_query_tests;
+
+#[cfg(test)]
+mod legacy_label_tests;
 
 #[cfg(test)]
 pub(crate) use handlers::create_namespace_v2;

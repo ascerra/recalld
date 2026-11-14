@@ -148,6 +148,15 @@ fn validate_snapshot(
     let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
     let read = meta.begin_read()?;
     let control = super::control::validate_existing(&read)?;
+    if super::metadata::batch::validate_existing(&read, control.as_ref())?
+        .iter()
+        .any(|p| p.unresolved() != 0)
+    {
+        return Err(StorageError::RecoveryRequired(
+            "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
+                .into(),
+        ));
+    }
     if native_recovery {
         let state = control
             .as_ref()

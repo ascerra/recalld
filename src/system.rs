@@ -622,22 +622,6 @@ impl Recalld {
             tracing::info!(memories = idx.len(), "entity index built");
             Arc::new(RwLock::new(idx))
         };
-        // All startup graph/vector/FTS/entity/cache construction has completed.
-        storage
-            .read()
-            .map_err(|e| RecalldError::Init {
-                step: "effects_ack",
-                message: e.to_string(),
-                source: None,
-            })?
-            .meta_store()
-            .acknowledge_rebuilt_effects()
-            .map_err(|e| RecalldError::Init {
-                step: "effects_ack",
-                message: e.to_string(),
-                source: Some(Box::new(e)),
-            })?;
-
         // -- Step 7: Create QueryEngine -------------------------------
         let query_engine = {
             use crate::search::adapters::*;
@@ -681,59 +665,23 @@ impl Recalld {
                 clock.clone(),
                 DecayConfig::default(),
                 config.decay.decay_rate_multiplier,
+            )
+            .with_coherent_owner(
+                crate::derived_completion::DerivedCompletion {
+                    storage: storage.clone(),
+                    cache: cache.clone(),
+                    graph: graph.clone(),
+                    vectors: vector_index.clone(),
+                    fts: fts_index.clone(),
+                    entities: entity_index.clone(),
+                },
+                rif_engine.clone(),
             );
             tracing::info!("query engine initialized");
             Arc::new(engine)
         };
 
-        // -- Step 8: Start decay sweep runner -------------------------
-        let (decay_runner, decay_handle) = if config.decay.disable_sweep {
-            tracing::info!("decay sweep disabled by config");
-            (None, None)
-        } else {
-            let sweep_cfg = SweepConfig {
-                interval: Duration::from_secs_f64(config.decay.sweep_interval_hours * 3600.0),
-                sweep_on_startup: true,
-                ..SweepConfig::default()
-            };
-            let decay_cfg = Arc::new(DecayConfig::default());
-            let activation_cfg = ActivationConfig::default();
-
-            match DecaySweepRunner::new(
-                sweep_cfg,
-                decay_cfg,
-                activation_cfg,
-                storage.clone(),
-                graph.clone(),
-                cache.clone(),
-                config.decay.decay_rate_multiplier,
-            ) {
-                Ok(runner) => {
-                    let runner = runner.with_clock(clock.clone());
-                    let runner =
-                        runner.with_completion(crate::derived_completion::DerivedCompletion {
-                            storage: storage.clone(),
-                            cache: cache.clone(),
-                            graph: graph.clone(),
-                            vectors: vector_index.clone(),
-                            fts: fts_index.clone(),
-                            entities: entity_index.clone(),
-                        });
-                    let handle = runner.start();
-                    tracing::info!("decay sweep runner started");
-                    (Some(runner), Some(handle))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        %e,
-                        "decay sweep runner failed to start, continuing without sweeps"
-                    );
-                    (None, None)
-                }
-            }
-        };
-
-        // -- Step 9: Ensure "default" namespace exists ----------------
+        // -- Step 8: Ensure "default" namespace exists ----------------
         {
             let storage_r = storage.read().map_err(|e| RecalldError::Init {
                 step: "check_default_namespace",
@@ -784,6 +732,72 @@ impl Recalld {
                 );
             }
         }
+
+        // A reopened FTS file has no durable generation certificate. Rebuild
+        // through the actual publisher before exposing this owner or starting
+        // background writers; never stamp an unchecked reused index as current.
+        crate::derived_completion::DerivedCompletion {
+            storage: storage.clone(),
+            cache: cache.clone(),
+            graph: graph.clone(),
+            vectors: vector_index.clone(),
+            fts: fts_index.clone(),
+            entities: entity_index.clone(),
+        }
+        .rebuild_all()
+        .await
+        .map_err(|e| RecalldError::Init {
+            step: "startup_view_publication",
+            message: e.to_string(),
+            source: Some(Box::new(e)),
+        })?;
+
+        // -- Step 9: Start decay sweep runner -------------------------
+        let (decay_runner, decay_handle) = if config.decay.disable_sweep {
+            tracing::info!("decay sweep disabled by config");
+            (None, None)
+        } else {
+            let sweep_cfg = SweepConfig {
+                interval: Duration::from_secs_f64(config.decay.sweep_interval_hours * 3600.0),
+                sweep_on_startup: true,
+                ..SweepConfig::default()
+            };
+            let decay_cfg = Arc::new(DecayConfig::default());
+            let activation_cfg = ActivationConfig::default();
+
+            match DecaySweepRunner::new(
+                sweep_cfg,
+                decay_cfg,
+                activation_cfg,
+                storage.clone(),
+                graph.clone(),
+                cache.clone(),
+                config.decay.decay_rate_multiplier,
+            ) {
+                Ok(runner) => {
+                    let runner = runner.with_clock(clock.clone());
+                    let runner =
+                        runner.with_completion(crate::derived_completion::DerivedCompletion {
+                            storage: storage.clone(),
+                            cache: cache.clone(),
+                            graph: graph.clone(),
+                            vectors: vector_index.clone(),
+                            fts: fts_index.clone(),
+                            entities: entity_index.clone(),
+                        });
+                    let handle = runner.start();
+                    tracing::info!("decay sweep runner started");
+                    (Some(runner), Some(handle))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        %e,
+                        "decay sweep runner failed to start, continuing without sweeps"
+                    );
+                    (None, None)
+                }
+            }
+        };
 
         tracing::info!("Recalld initialized");
 
@@ -864,6 +878,48 @@ impl Recalld {
             entities: self.entity_index.clone(),
         }
         .complete()
+        .await
+    }
+
+    /// Internal Rust coherent read consumer. Requires explicitly false access;
+    /// stale/unpublished views fail closed rather than rebuilding during a read.
+    /// This does not enable public v2, snapshot/reset, or native serving.
+    pub async fn search_coherent_read_only(
+        &self,
+        query: crate::search::SearchQuery,
+        semantics: crate::search::RetrievalSemantics,
+        deadline: std::time::Instant,
+    ) -> crate::search::error::Result<crate::search::CoherentSearchResponse> {
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        };
+        self.query_engine
+            .search_coherent_read_only(&owner, self.rif_engine.clone(), query, semantics, deadline)
+            .await
+    }
+
+    /// Internal owned-core barrier. Returns a readiness observation, not a
+    /// retained freeze lease or snapshot/reset authorization. No public wire
+    /// capability is enabled by this entry point.
+    pub(crate) async fn readiness_barrier(
+        &self,
+        target: crate::storage::control::GenerationRef,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<crate::storage::Readiness, crate::storage::StorageError> {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .readiness_barrier(target, deadline)
         .await
     }
 
@@ -1382,6 +1438,78 @@ mod tests {
             "the three memories on disk should be searchable by vector \
              immediately, before this process stores anything"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn coherent_payload_restart_publishes_actual_views_before_first_read() {
+        let (dir, id) = {
+            let f = Fixture::new();
+            let id = f
+                .insert_memory_with(MemorySpec {
+                    embedding: Some(&[1., 0., 0., 0.]),
+                    ..MemorySpec::new(ns())
+                })
+                .await;
+            (f.close(), id)
+        };
+        for _ in 0..2 {
+            let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+            let state = system
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap();
+            assert!(state.matches_canonical());
+            let before = system
+                .storage
+                .read()
+                .unwrap()
+                .get_record(id)
+                .unwrap()
+                .unwrap()
+                .to_bytes();
+            let query = serde_json::from_value(serde_json::json!({
+                "queryEmbedding":[1.,0.,0.,0.], "recordAccess":false, "namespace":"default",
+                "graphDepth":0, "limit":10, "minScore":0.0
+            }))
+            .unwrap();
+            let result = system
+                .query_engine
+                .prepare_coherent_payload(query, true, false, None)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.read_generation, state.canonical);
+            let payload = result.payload.unwrap();
+            assert_eq!(payload.rows.len(), 1);
+            assert_eq!(payload.rows[0].record.id, *id.as_bytes());
+            assert_eq!(payload.rows[0].embedding, Some(vec![1., 0., 0., 0.]));
+            assert_eq!(
+                system
+                    .storage
+                    .read()
+                    .unwrap()
+                    .get_record(id)
+                    .unwrap()
+                    .unwrap()
+                    .to_bytes(),
+                before
+            );
+            assert_eq!(
+                system
+                    .storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .publication_state()
+                    .unwrap()
+                    .canonical,
+                state.canonical
+            );
+            drop(system);
+        }
     }
 
     /// The same property one layer down, where the counts are visible.
