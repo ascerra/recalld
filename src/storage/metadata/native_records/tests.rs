@@ -745,10 +745,13 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
     assert_eq!(tracker.status().unresolved, 0);
 }
 
-#[path = "maintenance_tests.rs"]
-mod maintenance;
 #[path = "graph_tests.rs"]
 mod graph;
+#[path = "maintenance_tests.rs"]
+mod maintenance;
 
 #[path = "store_tests.rs"]
 mod store;
+
+#[path = "mixed_history_tests.rs"]
+mod mixed_history;
