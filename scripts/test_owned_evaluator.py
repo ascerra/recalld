@@ -162,7 +162,7 @@ decay_rate_multiplier = 0.0
         assert actor_done.is_set() and barrier_done.is_set()
         assert len(stored_values) == len(barrier_values) == 1
         stored = stored_values[0]
-        assert stored['createdAt'].startswith('2026-01-01T00:01:00'), stored
+        assert stored['createdAt'] == '2026-01-01 00:01:00 UTC', stored
         accepted_barrier = barrier_values[0]
         assert 'error' not in accepted_barrier, accepted_barrier
         assert accepted_barrier['result']['ready'] and accepted_barrier['result']['pendingWork'] == 0
