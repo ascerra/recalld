@@ -220,6 +220,7 @@ impl QueryEngine {
             let evaluated_at = self.clock.now_millis();
             let namespace = canonical.resolve(&query.namespace).await?;
             let engine = Self {
+                rif_mode: self.rif_mode,
                 coherent_owner: None,
                 clock: Arc::new(crate::time::ManualClock::new(evaluated_at)),
                 decay_policy: self.decay_policy.clone(),

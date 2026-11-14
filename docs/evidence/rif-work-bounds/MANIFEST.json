@@ -1,0 +1,95 @@
+{
+  "source": "8759f11dc81792faaab7a0cc61da8f695ec752e8",
+  "parent": "78f8e6e8a6ca55c4b4d51850858ba41b306a101e",
+  "branch": "impl/rif-work-bounds",
+  "home": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-rif-work-bounds-8759f11",
+  "raw_in_git": false,
+  "files": [
+    {
+      "path": "REPORT.md",
+      "bytes": 6859,
+      "sha256": "2ad2a9385d2a46e76fdd636aa858f4cfeb3227cdad7d65ebb64a71e2f834e470"
+    },
+    {
+      "path": "post-validation.json",
+      "bytes": 2308,
+      "sha256": "0c77ef43063360849085e7434852ce9a9f9f9e5a2703c188d2dd6c2d76d015dd"
+    },
+    {
+      "path": "source-manifest.json",
+      "bytes": 21999,
+      "sha256": "0b7006a296088ebcdfd221070ba6ba1d82913f7153427eb6123653224b169c38"
+    },
+    {
+      "path": "source.patch",
+      "bytes": 26470,
+      "sha256": "ac2441cba0cc3752f767c4c7842b3317fdcea3b6c5b794b4bc489a54ff3974aa"
+    },
+    {
+      "path": "validation.log",
+      "bytes": 433801,
+      "sha256": "53352518720fdf83975560b8f8abbbaf57598de35b8a8159d4bab50b7556cea2"
+    }
+  ],
+  "validation": {
+    "utc": "2026-11-14T16:46:17.796877+00:00",
+    "source_manifest_sha256": "0b7006a296088ebcdfd221070ba6ba1d82913f7153427eb6123653224b169c38",
+    "files": 171,
+    "source_and_working_match": true,
+    "validation_log_sha256": "53352518720fdf83975560b8f8abbbaf57598de35b8a8159d4bab50b7556cea2",
+    "focused_rif_passed": 18,
+    "library_passed": 792,
+    "cli_passed": 2,
+    "ignored_doctests": 4,
+    "fmt": "passed",
+    "clippy": "completed with warnings",
+    "runtime": "Rust1.94.1 offline Docker network none,2CPUs4GiB,private Cargo and package-clean target",
+    "executed_test_and_cli_binaries": [
+      {
+        "container_path": "/target/debug/deps/lifecycle_cli-4843a41927cafc6b",
+        "sha256": "d6fb94bdaaf9c163d65189236a29980782ddca77caf76ff21a578bcb2feef893",
+        "bytes": 244301512
+      },
+      {
+        "container_path": "/target/debug/deps/recalld-c8392f2a5ef64898",
+        "sha256": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+        "bytes": 6908664
+      },
+      {
+        "container_path": "/target/debug/deps/recalld-e423ca3d07310388",
+        "sha256": "739bd3746008d9de0e855372d9e59cd58f63f415cc52c39c8bc97ae68ffe2c97",
+        "bytes": 344215032
+      },
+      {
+        "container_path": "/target/debug/deps/recalld_cli-2dba722497aafcf6",
+        "sha256": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f",
+        "bytes": 6357936
+      },
+      {
+        "container_path": "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb",
+        "sha256": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41",
+        "bytes": 6358016
+      },
+      {
+        "container_path": "/target/debug/deps/text_migration_cli-92bf02c892a58814",
+        "sha256": "6b818facba7007dc2a6e9d49de3ad156c844699a3205e019559bca4c153a28de",
+        "bytes": 243816728
+      },
+      {
+        "container_path": "/target/debug/recalld",
+        "sha256": "5c2a999e8fdeb05a142f782a3aa0830fab349cbfc6536a2119dde67001405ab0",
+        "bytes": 333423456
+      },
+      {
+        "container_path": "/target/debug/recalld-cli",
+        "sha256": "05246c5213bb706db1d4eea230093d54803af12e08beb43203decacd1ab5b75a",
+        "bytes": 256444240
+      },
+      {
+        "container_path": "/target/debug/recalld-text-migrate",
+        "sha256": "dfbab30b10cc9e1b254e22def30d3d83ce1d2ab57bd40c741d9bdaaea1d4e53c",
+        "bytes": 243005528
+      }
+    ]
+  }
+}
