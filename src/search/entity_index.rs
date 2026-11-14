@@ -80,6 +80,17 @@ impl EntityIndex {
         entities: &[String],
         exclude_id: MemoryId,
     ) -> Vec<(MemoryId, usize)> {
+        self.find_by_entities_filtered(namespace_id, entities, exclude_id, |_| true)
+    }
+
+    /// Apply canonical eligibility within the namespace before counting or capping.
+    pub fn find_by_entities_filtered(
+        &self,
+        namespace_id: NamespaceId,
+        entities: &[String],
+        exclude_id: MemoryId,
+        eligible: impl Fn(MemoryId) -> bool,
+    ) -> Vec<(MemoryId, usize)> {
         let Some(postings) = self.index.get(&namespace_id) else {
             return Vec::new();
         };
@@ -92,7 +103,7 @@ impl EntityIndex {
                 }
                 if let Some(ids) = postings.get(&key) {
                     for &id in ids {
-                        if id != exclude_id {
+                        if id != exclude_id && eligible(id) {
                             *counts.entry(id).or_default() += 1;
                         }
                     }
