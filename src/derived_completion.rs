@@ -2,6 +2,8 @@
 //! storage; never hold storage while awaiting a derived lock.
 use std::sync::{Arc, RwLock};
 
+mod native_exposure;
+
 #[path = "derived_readiness.rs"]
 mod readiness;
 

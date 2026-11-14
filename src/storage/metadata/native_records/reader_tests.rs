@@ -7,6 +7,9 @@ use crate::search::adapters::*;
 use crate::test_support::Fixture;
 use serde_json::{Value, json};
 
+#[path = "exposure_consumer_tests.rs"]
+mod exposure_consumer;
+
 struct NoProvider;
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for NoProvider {
@@ -37,28 +40,45 @@ fn readers(
     f: &Fixture,
     clock: Arc<FixedClock>,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
+    readers_with_exposure(f, clock, false)
+}
+fn readers_with_exposure(
+    f: &Fixture,
+    clock: Arc<FixedClock>,
+    native_exposure: bool,
+) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
     let provider = Arc::new(NoProvider);
-    let engine = Arc::new(
-        crate::search::QueryEngine::new(
-            Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
-            Arc::new(SingleEmbeddingRegistry::new(provider.clone())),
-            Arc::new(SharedVectorIndexRegistry::new(f.vector_index.clone())),
-            Arc::new(SharedFtsIndexRegistry::new(f.fts_index.clone())),
-            Arc::new(SharedEntityIndexReader::new(f.entity_index.clone())),
-            Arc::new(CacheManagerAdapter::new(f.cache.clone())),
-            Arc::new(StorageMetadataAdapter::new(f.storage.clone())),
-            Arc::new(SharedGraphReader::new(f.graph.clone())),
-            Arc::new(RifProcessorAdapter::new(
-                Arc::new(crate::rif::RifEngine::new(Default::default())),
-                f.graph.clone(),
-            )),
-            Arc::new(
-                StorageAccessRecorder::new(f.storage.clone(), f.cache.clone())
-                    .with_clock(clock.clone()),
-            ),
+    let recorder =
+        StorageAccessRecorder::new(f.storage.clone(), f.cache.clone()).with_clock(clock.clone());
+    let recorder = if native_exposure {
+        recorder.with_completion(completion(f))
+    } else {
+        recorder
+    };
+    let engine = crate::search::QueryEngine::new(
+        Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
+        Arc::new(SingleEmbeddingRegistry::new(provider.clone())),
+        Arc::new(SharedVectorIndexRegistry::new(f.vector_index.clone())),
+        Arc::new(SharedFtsIndexRegistry::new(f.fts_index.clone())),
+        Arc::new(SharedEntityIndexReader::new(f.entity_index.clone())),
+        Arc::new(CacheManagerAdapter::new(f.cache.clone())),
+        Arc::new(StorageMetadataAdapter::new(f.storage.clone())),
+        Arc::new(SharedGraphReader::new(f.graph.clone())),
+        Arc::new(RifProcessorAdapter::new(
+            Arc::new(crate::rif::RifEngine::new(Default::default())),
+            f.graph.clone(),
+        )),
+        Arc::new(recorder),
+    )
+    .with_lifecycle_inputs(clock.clone(), crate::decay::DecayConfig::default(), 1.0);
+    let engine = Arc::new(if native_exposure {
+        engine.with_coherent_owner(
+            completion(f),
+            Arc::new(crate::rif::RifEngine::new(Default::default())),
         )
-        .with_lifecycle_inputs(clock.clone(), crate::decay::DecayConfig::default(), 1.0),
-    );
+    } else {
+        engine
+    });
     let config = Arc::new(crate::config::RecalldConfig::default());
     let router = crate::api::router(
         crate::api::AppState::new(
@@ -97,7 +117,7 @@ fn readers(
                     config,
                     false,
                 )
-                .with_clock(clock),
+                .with_clock(clock.clone()),
             ),
             Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
             Arc::new(NoopMetricsCollector),
@@ -112,7 +132,13 @@ fn readers(
             f.graph.clone(),
             chrono_tz::UTC,
         )),
-        storage: Arc::new(f.storage_adapter()),
+        storage: Arc::new(if native_exposure {
+            f.storage_adapter()
+                .with_clock(clock.clone())
+                .with_query_engine(engine.clone())
+        } else {
+            f.storage_adapter()
+        }),
         namespaces: Arc::new(f.namespace_adapter()),
         health: Arc::new(crate::test_support::StubBridge::default()),
         default_namespace: "different-default".into(),

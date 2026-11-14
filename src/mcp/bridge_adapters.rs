@@ -981,6 +981,7 @@ pub struct McpStorageAdapter {
     graph: SharedGraph,
     config: Arc<RecalldConfig>,
     timezone: chrono_tz::Tz,
+    query_engine: Option<Arc<crate::search::QueryEngine>>,
 }
 
 impl McpStorageAdapter {
@@ -1010,6 +1011,7 @@ impl McpStorageAdapter {
         cache.bind_storage(&storage);
         Self {
             clock: Arc::new(crate::time::SystemClock),
+            query_engine: None,
             storage,
             cache,
             embedding,
@@ -1025,6 +1027,12 @@ impl McpStorageAdapter {
     /// Use the system instance's clock (or an isolated manual clock).
     pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Reuse the configured observer and lifecycle inputs of this system.
+    pub fn with_query_engine(mut self, engine: Arc<crate::search::QueryEngine>) -> Self {
+        self.query_engine = Some(engine);
         self
     }
 
@@ -1588,27 +1596,60 @@ impl bridge::StorageEngine for McpStorageAdapter {
             .await
             .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
             check_read_admission(&self.storage, stamp).await?;
-            let receipts =
-                if record_access && value.as_ref().is_some_and(|r| r.phase != "Tombstone") {
+            let observe = record_access && value.as_ref().is_some_and(|r| r.phase != "Tombstone");
+            let receipts = if observe {
+                let scope = crate::storage::control::ExposureScope {
+                    namespace: value.as_ref().unwrap().namespace.clone(),
+                    source: Some(id),
+                };
+                if let Some(engine) = &self.query_engine {
+                    engine
+                        .record_exposures_at_with_work(
+                            &[(id, crate::model::AccessKind::DirectRetrieval)],
+                            scope,
+                            sampled_at,
+                            Some(&accepted),
+                        )
+                        .await
+                        .map_err(map_search_error)?
+                } else {
+                    // Constructor-only legacy users retain their existing path.
+                    // Native mode needs the actual configured policy/owner; never
+                    // substitute a second default policy or a legacy mutation.
+                    if self
+                        .storage
+                        .read()
+                        .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
+                        .meta_store()
+                        .uses_native_lifecycle()
+                    {
+                        return Err(bridge::BridgeError::Storage(
+                            "native exposure requires the configured query observer".into(),
+                        ));
+                    }
                     crate::decay::observation::record_exposures_scoped_with_work(
                         self.storage.clone(),
                         self.cache.clone(),
                         vec![(id, crate::model::AccessKind::DirectRetrieval)],
                         sampled_at,
-                        Some(crate::storage::control::ExposureScope {
-                            namespace: value.as_ref().unwrap().namespace.clone(),
-                            source: Some(id),
-                        }),
+                        Some(scope),
                         Some(&accepted),
                     )
                     .await?
-                } else {
-                    Vec::new()
-                };
-            Observed { value, receipts }
-                .publish_derived(Some(&self.completion()), Some(&accepted))
-                .await?
-                .finish(check_read_admission(&self.storage, stamp).await)
+                }
+            } else {
+                Vec::new()
+            };
+            let observed = Observed { value, receipts };
+            // QueryEngine has already awaited publication using this accepted root.
+            let observed = if observe && self.query_engine.is_none() {
+                observed
+                    .publish_derived(Some(&self.completion()), Some(&accepted))
+                    .await?
+            } else {
+                observed
+            };
+            observed.finish(check_read_admission(&self.storage, stamp).await)
         }
         .await;
         crate::storage::work::finish_work(&self.storage, accepted);

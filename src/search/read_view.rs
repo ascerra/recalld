@@ -126,9 +126,16 @@ impl RecordCache for BypassCache {
         None
     }
 }
-struct RejectExposure;
+// Deferred selection retains the original observer capability, but this
+// pinned adapter still rejects EVERY attempted write.
+struct RejectExposure {
+    native_writer_available: bool,
+}
 #[async_trait::async_trait]
 impl AccessRecorder for RejectExposure {
+    fn supports_native_exposure(&self) -> bool {
+        self.native_writer_available
+    }
     async fn record_access(
         &self,
         _: MemoryId,
@@ -382,7 +389,9 @@ impl QueryEngine {
             meta_store: canonical.clone(),
             graph: Arc::new(SharedGraphReader::pinned(graph.clone())),
             rif_engine: Arc::new(RifProcessorAdapter::pinned(rif, graph.clone())),
-            access_recorder: Arc::new(RejectExposure),
+            access_recorder: Arc::new(RejectExposure {
+                native_writer_available: self.access_recorder.supports_native_exposure(),
+            }),
         };
         Ok((engine, canonical, graph, publication, evaluated_at))
     }
@@ -597,7 +606,9 @@ mod tests {
             Arc::new(StorageMetadataAdapter::new(f.storage.clone())),
             Arc::new(SharedGraphReader::new(f.graph.clone())),
             Arc::new(RifProcessorAdapter::new(rif, f.graph.clone())),
-            Arc::new(RejectExposure),
+            Arc::new(RejectExposure {
+                native_writer_available: false,
+            }),
         )
         .with_lifecycle_inputs(
             Arc::new(crate::time::ManualClock::new(123)),

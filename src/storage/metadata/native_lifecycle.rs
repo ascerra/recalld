@@ -319,7 +319,18 @@ impl MetadataStore {
         policy: &NativePolicyInputs,
         clock: &dyn Clock,
     ) -> Result<Option<WriteReceipt>, StorageError> {
-        let guard = self.native_guard()?;
+        self.record_native_exposure_with_work(ctx, intent, policy, clock, None)
+    }
+
+    pub(crate) fn record_native_exposure_with_work(
+        &self,
+        ctx: &MutationContext,
+        intent: &ExposureIntent,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let guard = self.native_guard_with_work(parent)?;
         let (tx, receipt) = self.prepare_native(
             &guard,
             ctx,
@@ -330,6 +341,21 @@ impl MetadataStore {
             policy,
             clock,
         )?;
+        // Instance-local consumer regression: report I/O uncertainty after the
+        // real durable commit. Existing values 1/2 belong to legacy observation.
+        #[cfg(test)]
+        if self
+            .observation_fault
+            .compare_exchange(
+                3,
+                0,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            FAIL_AFTER_NATIVE_COMMIT.with(|flag| flag.set(true));
+        }
         self.commit_native(tx, receipt)
     }
     pub fn apply_native_feedback(

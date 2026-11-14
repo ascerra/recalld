@@ -201,6 +201,11 @@ pub struct RifSuppression {
 /// Records access events on memories.
 #[async_trait::async_trait]
 pub trait AccessRecorder: Send + Sync {
+    /// Only a configured, owned native writer may admit observing v2 reads.
+    fn supports_native_exposure(&self) -> bool {
+        false
+    }
+
     /// Receives the query owner's configured policy and already sampled clock.
     /// Legacy recorders keep their existing behavior through this default.
     async fn record_access_batch_for_publication(
@@ -1014,6 +1019,7 @@ impl QueryEngine {
                     namespace: ns_config.name.clone(),
                     source: None,
                 },
+                strength_context.diagnostics.evaluated_at,
                 parent,
             )
             .await?
@@ -1487,12 +1493,13 @@ impl QueryEngine {
 
         let receipts = if record_access && !defer_recording && record.phase != DecayPhase::Tombstone
         {
-            self.record_exposures_with_work(
+            self.record_exposures_at_with_work(
                 &[(id, AccessKind::DirectRetrieval)],
                 crate::storage::control::ExposureScope {
                     namespace: namespace.name.clone(),
                     source: Some(id),
                 },
+                context.diagnostics.evaluated_at,
                 parent,
             )
             .await?
@@ -1758,12 +1765,16 @@ impl QueryEngine {
             .collect();
 
         let receipts = if context.requested_record_access && !defer_recording {
-            self.record_similar_accesses_with_work(
-                &results.iter().map(|r| r.memory_id).collect::<Vec<_>>(),
+            self.record_exposures_at_with_work(
+                &results
+                    .iter()
+                    .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
+                    .collect::<Vec<_>>(),
                 crate::storage::control::ExposureScope {
                     namespace: namespace.name.clone(),
                     source: Some(id),
                 },
+                context.diagnostics.evaluated_at,
                 parent,
             )
             .await?
@@ -1799,12 +1810,14 @@ impl QueryEngine {
             // Consumer preflight only: a schema-aware observation writer must also
             // enforce this under its publication guard on the later A3 join.
             let records = self.meta_store.get_batch(ids).await?;
-            if records.iter().any(|r| {
-                r.lifecycle.as_ref().is_some_and(|fields| {
-                    fields.lifecycle_version
-                        == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+            if !self.access_recorder.supports_native_exposure()
+                && records.iter().any(|r| {
+                    r.lifecycle.as_ref().is_some_and(|fields| {
+                        fields.lifecycle_version
+                            == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+                    })
                 })
-            }) {
+            {
                 return Err(SearchError::Unavailable(
                     "explicit-feedback exposure writer unavailable".into(),
                 ));
@@ -2033,6 +2046,7 @@ impl QueryEngine {
         &self,
         candidates: &[Candidate],
         scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         let accesses: Vec<(MemoryId, AccessKind)> = candidates
@@ -2047,7 +2061,7 @@ impl QueryEngine {
             })
             .collect();
 
-        self.record_exposures_with_work(&accesses, scope, parent)
+        self.record_exposures_at_with_work(&accesses, scope, sampled_at, parent)
             .await
     }
 
@@ -2089,6 +2103,11 @@ impl QueryEngine {
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         if accesses.is_empty() {
             return Ok(Vec::new());
+        }
+        if self.access_recorder.supports_native_exposure() && self.coherent_owner.is_none() {
+            return Err(SearchError::Unavailable(
+                "native exposure requires the query publication owner".into(),
+            ));
         }
         let work = self.accept_work(parent)?;
         let result = async {

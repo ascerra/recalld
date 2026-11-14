@@ -119,6 +119,11 @@ pub struct MetadataStore {
 // ── Constructor ─────────────────────────────────────────────────────
 
 impl MetadataStore {
+    /// Immutable entry mode, selected only after strict native preflight.
+    pub(crate) fn uses_native_lifecycle(&self) -> bool {
+        self.native_lifecycle_only
+    }
+
     /// Open or create meta.db at the given path.
     ///
     /// - Sets a 16 MB read cache (covers top B+tree levels).

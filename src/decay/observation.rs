@@ -86,7 +86,7 @@ impl ObservationError {
         Self::failed(format!("INDEX_NOT_READY: {source}"), receipts)
     }
 
-    pub(super) fn worker_failed(error: impl std::fmt::Display) -> Self {
+    pub(crate) fn worker_failed(error: impl std::fmt::Display) -> Self {
         Self {
             commit_state: "unknown",
             ready: false,
@@ -110,7 +110,7 @@ impl ObservationError {
         }
     }
 
-    pub(super) fn storage(error: StorageError, receipts: Vec<WriteReceipt>) -> Self {
+    pub(crate) fn storage(error: StorageError, receipts: Vec<WriteReceipt>) -> Self {
         let unknown = match &error {
             StorageError::CommitOutcomeUnknown { operation_id, .. } => Some(*operation_id),
             _ => None,
@@ -240,6 +240,30 @@ fn record_locked_scoped_with_work(
     scope: Option<&crate::storage::control::ExposureScope>,
     parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
+    let groups = exposure_groups(storage, accesses)?;
+    let mut receipts = Vec::new();
+    for (namespace, batch) in groups {
+        match storage.meta_store().record_exposure_batch_scoped_with_work(
+            &MutationContext::unkeyed(NamespaceId::new(namespace)),
+            &batch,
+            sampled_at,
+            scope,
+            parent,
+        ) {
+            Ok(Some(receipt)) => receipts.push(receipt),
+            Ok(None) => {}
+            Err(error) => return Err(ObservationError::storage(error, receipts)),
+        }
+    }
+    Ok(receipts)
+}
+
+/// Shared canonical grouping for both legacy and native observation writers.
+/// Validate all kinds/IDs first; direct dominates associative for duplicate UUIDs.
+pub(crate) fn exposure_groups(
+    storage: &RedbStorageEngine,
+    accesses: &[(MemoryId, AccessKind)],
+) -> Result<std::collections::BTreeMap<u32, Vec<(MemoryId, AccessKind)>>, ObservationError> {
     // First occurrence order within each namespace; namespace order ascending.
     // Direct exposure dominates an additional associative occurrence.
     let mut distinct: Vec<(MemoryId, AccessKind)> = Vec::new();
@@ -271,21 +295,7 @@ fn record_locked_scoped_with_work(
             .or_default()
             .push((id, kind));
     }
-    let mut receipts = Vec::new();
-    for (namespace, batch) in groups {
-        match storage.meta_store().record_exposure_batch_scoped_with_work(
-            &MutationContext::unkeyed(NamespaceId::new(namespace)),
-            &batch,
-            sampled_at,
-            scope,
-            parent,
-        ) {
-            Ok(Some(receipt)) => receipts.push(receipt),
-            Ok(None) => {}
-            Err(error) => return Err(ObservationError::storage(error, receipts)),
-        }
-    }
-    Ok(receipts)
+    Ok(groups)
 }
 
 #[cfg(test)]
