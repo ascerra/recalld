@@ -2,7 +2,7 @@
 use super::*;
 use crate::mcp::bridge::{McpBridge, StorageEngine as _};
 use crate::mcp::bridge_adapters::McpStorageAdapter;
-use crate::serialization::native_batch::{self, NativeBatchReply};
+use crate::serialization::native_batch::NativeBatchReply;
 use crate::test_support::{Fixture, StubBridge};
 use serde_json::Value;
 
@@ -102,7 +102,7 @@ async fn batch_wire_historical_oversize_completed_pending_retained_bytes_and_set
             .unwrap()
             .unwrap();
         assert_eq!(old.unresolved(), if state == "pending" { 100 } else { 0 });
-        for links in [0, u32::MAX] {
+        for links in [0, u32::MAX as usize] {
             let mut config = crate::config::RecalldConfig::default();
             config.graph.max_auto_links = links;
             config.graph.max_entity_links = 0;
@@ -122,8 +122,16 @@ async fn batch_wire_historical_oversize_completed_pending_retained_bytes_and_set
                 let daemon =
                     crate::daemon::protocol::DaemonResponse::success(u64::MAX, canonical(&rpc));
                 assert!(serde_json::to_vec(&daemon).unwrap().len() < 64 * 1024);
+                let framed = crate::daemon::server::native_batch_method_test_rpc(
+                    a.clone(),
+                    &replay,
+                    "mutate_native_batch_v1",
+                )
+                .await;
+                assert!(framed.error.is_none());
+                assert_eq!(framed.result, daemon.result);
                 let decoded: NativeBatchReply =
-                    serde_json::from_value(daemon.result.unwrap()).unwrap();
+                    serde_json::from_value(framed.result.unwrap()).unwrap();
                 assert_eq!(
                     decoded.result().unwrap_err().error.operation_id,
                     Some(reservation.operation_id)

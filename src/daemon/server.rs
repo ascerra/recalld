@@ -1317,6 +1317,14 @@ pub(crate) async fn native_batch_test_rpc(
     storage: Arc<dyn BridgeStorageEngine>,
     input: &crate::storage::batch::BatchInput,
 ) -> DaemonResponse {
+    native_batch_method_test_rpc(storage, input, "mutate_batch").await
+}
+#[cfg(test)]
+pub(crate) async fn native_batch_method_test_rpc(
+    storage: Arc<dyn BridgeStorageEngine>,
+    input: &crate::storage::batch::BatchInput,
+    method: &str,
+) -> DaemonResponse {
     let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
     let stub = Arc::new(crate::test_support::StubBridge::default());
     let (tx, rx) = watch::channel(false);
@@ -1336,7 +1344,7 @@ pub(crate) async fn native_batch_test_rpc(
         &DaemonRequest {
             jsonrpc: "2.0".into(),
             id: 1,
-            method: "mutate_batch".into(),
+            method: method.into(),
             params: serde_json::to_value(input).unwrap(),
         },
         LEGACY_MAX_MESSAGE_SIZE,

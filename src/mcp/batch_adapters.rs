@@ -848,7 +848,10 @@ mod tests {
         let closing = tracker.clone();
         let drain = tokio::task::spawn_blocking(move || closing.close_and_drain(deadline()));
         tracker.wait_until_closed();
-        let result = adapter.run_batch_accepted(input, &work).await.unwrap();
+        let result = adapter
+            .run_batch_accepted(input, &work, None)
+            .await
+            .unwrap();
         assert!(result.all_ready(), "{result:?}");
         assert!(
             !drain.is_finished(),

@@ -247,7 +247,7 @@ mod tests {
         l.decay_anchor_at = i64::MIN;
         l.lifecycle_updated_at = i64::MIN;
         l.phase_changed_at = i64::MIN;
-        l.policy_revision = "9223372036854775807".try_into().unwrap();
+        l.policy_revision = "9223372036854775807".to_owned().try_into().unwrap();
         l.record_generation = l.policy_revision;
         record.before = Some(record.after.clone());
         assert!(serde_json::to_vec(&record).unwrap().len() < RECORD_CHANGE_BYTES);
