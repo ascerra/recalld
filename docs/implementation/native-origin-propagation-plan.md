@@ -3,9 +3,10 @@
 Status: caller inventory and interface proposal,2026-11-14. No runtime change in
 this branch yet. PR126 remains frozen at179edf0 (runtimed00cebf). The shared
 1|2 guard and compound request-context codec are Feynman's sole ownership;
-implementation consumes his validated actual consumer, not a parallel type.
-Curie owns the narrow native_records context/child-binding consumer, on that
-common parent only. Huygens owns public version selection/outward compatibility;
+standalone implementation reuses existing MutationContext::validate and native guards,
+without adding his compound purge/catalog parent. No parallel type is created.
+Curie owns the narrow native_records context/child-binding consumer on direct121;
+its insert/forget proof does not depend on the compound codec. Huygens owns public version selection/outward compatibility;
 Hume owns the A2 selector/ranking changes. Pascal owns the lifecycle request and
 observer/manual propagation described here.
 
@@ -33,8 +34,8 @@ Reuse the existing `MutationContext.contract_version: u32` and its request-hash
 component. The closed supported values are1|2, already validated by
 `MutationContext::validate`. Feynman confirms there is no new duplicate validator:
 module owners remove their API2-only restriction while retaining scope checks
-and the existing independent native guard/control proof, on his validated actual
-consumer. His new request_context.rs codec is for compound Some1/absent-old2 only. Do not invent another public protocol selector, origin enum, control
+and the existing independent native guard/control proof. This rule coordination
+is not a new code dependency for the standalone writers. His new request_context.rs codec is for compound Some1/absent-old2 only. Do not invent another public protocol selector, origin enum, control
 record, proof field or receipt codec for standalone lifecycle operations.
 
 The existing `serialization::contract::ContractVersion` parser is the sole public
@@ -60,8 +61,8 @@ follows from internal exposure receipt hashing over selected UUIDs.
 | `serialization/native_lifecycle::{Request,parse,wire}` | Request lacks an origin field; public prepared parser requires2; private wire always writes2 | Add an explicit private numeric original-contract field with no inferred/defaulted native value. Public prepared2 parsing stays strict2. Private RPC requires an explicit supported number, and serializes exactly the saved number. |
 | `mcp/native_lifecycle_adapter::{dispatch,execute}` and API/MCP adapter ports | Executor builds MutationContext with ContractVersion::V2 | Use the request's original validated number. Keep scope lookup, accepted root, matching replay, clock, name proof, known receipt and barrier ordering unchanged. |
 | `daemon/bridge_adapters::RemoteStorageAdapter` and `daemon/server::dispatch` native aliases | feedback_native_v1/forget_native_v1 currently require explicit application2 | Preserve private RPC codec1 alias, original application1|2 in its typed request, no old-method fallback. Older private2-only handler rejects new1 before work. |
-| `derived_completion::{native_feedback,native_forget}` | Already receive caller MutationContext unchanged | Do not rewrite the context. Feedback consumes Feynman's guard change; forget waits only for Curie's narrow actual native_records consumer. |
-| `metadata/native_lifecycle::validate_context` | Explicit contract2 check before real native guard | Reuse existing MutationContext::validate on Feynman's frozen consumer; no competing1|2 implementation. Capture/apply/hash/proof use existing inputs. |
+| `derived_completion::{native_feedback,native_forget}` | Already receive caller MutationContext unchanged | Do not rewrite the context. Feedback removes its local API2-only check using existing validation; forget waits only for Curie's narrow actual native_records consumer. |
+| `metadata/native_lifecycle::validate_context` | Explicit contract2 check before real native guard | Reuse existing MutationContext::validate and remove only the local API2-only restriction; no new parent or competing1|2 implementation. Capture/apply/hash/proof use existing inputs. |
 | `metadata/native_records::context` and child binding | Shared insert/forget check currently requires2 | Curie owns the change and actual insert/forget proof. Pascal consumes its frozen minimal child. |
 | QueryEngine `search/search_with_semantics/search_checked_with_work/search_admitted` | RetrievalSemantics is explicit; application origin is absent | Add explicit private application-origin threading independently of semantics, including deferred selection. Hume retains A2 ranking/eligibility fields. |
 | QueryEngine get/similar, coherent payload methods and pinned selection | Request's access intent and sampled query time are preserved, but application origin is absent | Carry the selected origin to the eventual observer; pinned RejectExposure must still reject every write. Do not turn recordAccess=false into observing work. |
@@ -76,15 +77,15 @@ follows from internal exposure receipt hashing over selected UUIDs.
 | `DecaySweepRunner::start` startup/timer | Captures same injected clock and registers accepted pass; no public request | Explicit internal2 at these autonomous call sites. Do not infer it from schema or reuse a public omitted selector. |
 | `DecaySweepRunner::trigger` notification and pending ticket | Coalesces a ticket only; carries no application request | Keep internal-only unless a real public trigger is wired. A request-owned asynchronous trigger would need its context retained with the ticket and explicit coalescing rules; do not invent those now. Existing HTTP manual route executes directly. |
 | `execute_sweep_with_work` → `execute_native_sweep_accepted` in sweep/native.rs | Native loop creates unkeyed per-record context2 for both timer and manual | Thread required origin through the existing runner; autonomous caller2, request-owned caller1/2. No new scheduler or planner. |
-| `DerivedCompletion::apply_native_decay_accepted` | Already accepts MutationContext | Keep it unchanged; metadata maintenance guard consumes Feynman's validated helper when ready. |
+| `DerivedCompletion::apply_native_decay_accepted` | Already accepts MutationContext | Keep it unchanged; metadata maintenance removes only its local API2-only restriction while retaining scope/native guards. |
 
 ## Proposed private interfaces to agree before edits
 
 Use a required `original_contract_version: u32` on the existing private lifecycle
 Request and on the existing observer/runner call path. Do not add it to public
 SearchQuery JSON or create a second public selector. Reuse the existing `MutationContext::validate`; Feynman confirmed no new shared
-validator function is needed. His frozen actual consumer establishes the revised
-admission/proof seam before its other module owners remove API2-only restrictions.
+validator function is needed. The approved standalone changes do not wait for or
+import his compound-codec consumer.
 
 1. Lifecycle: preserve `parse` as strict prepared-public2. A shared private
    parser/invoker accepts an explicit supported original number for the native
@@ -111,29 +112,29 @@ admission/proof seam before its other module owners remove API2-only restriction
    captured IDs/tokens, donor/fan revalidation and partial-completion receipts
    remain the current implementation.
 
-The public missing-selector default1 is agreed with Huygens. The precise Rust
-compatibility-entry/default-trait adaptation above is a proposal to confirm with
-Hume/Huygens before source edits, so old-only recorder fixtures are not accidentally
+The public missing-selector default1 is agreed with Huygens. The Rust compatibility-entry/default-trait adaptation above is also explicitly
+approved by Main, Hume and Huygens; unsupported2 rejects only if observation is
+actually requested, and recordAccess=false never calls an unused observer, so old-only recorder fixtures are not accidentally
 bypassed as in the preserved PR119 regression. Never infer a fallback from owner
 schema or retrieval semantics merely to keep a test green.
 
 ## Minimal runnable sequence
 
-- Lifecycle feedback origin: PR126 + Feynman's validated actual common consumer.
+- Lifecycle feedback origin: PR126 only; existing common validation is already present.
   Real private request/RPC→coordinator→metadata application1 can be tested without
   waiting for all public routing work. Preserve prepared-public2 and ordinary
   serving gates. Forget1 adds Curie's narrow native-record child when frozen,
   not his broader insertion/batch wire ancestry.
-- Exposure origin: PR119 + the actual common consumer. Apply the same agreed
+- Exposure origin: PR119 only; remove the local native_lifecycle API2 restriction there. Apply the same agreed
   explicit request parameter to actual selection/observer callers. Hume's A2
   selector and Huygens public wrappers join when their actual APIs are ready;
   independent internal/adapter proofs need not wait for unrelated wire leaves.
-- Manual origin: PR107 + the actual common consumer (and the concrete adapter
-  dependency only if that adapter is exercised). Request-owned versus autonomous
+- Manual origin: PR107 only (and a concrete adapter dependency only if actually
+  exercised); remove the local native_maintenance API2 restriction there. Request-owned versus autonomous
   origins run through the same runner. No need to import exposure or all public
   writers just to change this actual consumer.
 
-Do not change published126 while waiting. Current planning worktree is
+Do not change published126. Proceed on these independent standalone parents. Current planning worktree is
 `/tmp/recalld-implementation/native-origin-propagation`; split code worktrees
 around actual dependencies when each interface is frozen.
 
