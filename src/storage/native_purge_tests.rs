@@ -524,11 +524,42 @@ async fn native_purge_accepted_completion_failure_retains_latest_receipt_then_re
     let Err(StorageError::CommittedMutation { receipt, .. }) = result else {
         panic!("expected exact committed receipt: {result:?}");
     };
-    let control::MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } = &receipt.outcome
-    else {
-        panic!("wrong receipt: {receipt:?}");
+    // The joined completion owner preserves the exact pending effect receipt.
+    // Canonical purge completion and derived acknowledgement are separate facts.
+    let (pending, canonical) = {
+        let storage = fx.storage.read().unwrap();
+        assert_eq!(
+            storage
+                .meta_store()
+                .lookup_operation(
+                    receipt.store_id,
+                    MutationScope::Namespace(id),
+                    receipt.operation_id
+                )
+                .unwrap()
+                .unwrap(),
+            *receipt
+        );
+        (
+            storage.meta_store().pending_effects().unwrap(),
+            storage
+                .meta_store()
+                .purge_progress()
+                .unwrap()
+                .into_iter()
+                .find(|p| p.namespace_id == id),
+        )
     };
-    assert_eq!(t.stage, PurgeStage::Complete);
+    let canonical = canonical.unwrap();
+    assert_eq!(canonical.stage, PurgeStage::Complete);
+    assert_eq!(pending.first().unwrap().receipt, *receipt);
+    assert!(pending.iter().all(|effect| effect.canonical_applied));
+    let control::MutationOutcome::NativeNamespacePurgeAdvanced { transition } = &receipt.outcome
+    else {
+        panic!("wrong child receipt: {receipt:?}")
+    };
+    assert_eq!(transition.stage, PurgeStage::Deleting);
+    assert!(receipt.committed_generation < canonical.last_receipt.committed_generation);
     assert!(
         fx.storage
             .read()
@@ -542,7 +573,7 @@ async fn native_purge_accepted_completion_failure_retains_latest_receipt_then_re
         .purge_native_accepted(key, true, &root)
         .await
         .unwrap();
-    assert_eq!(&completed.last_receipt, receipt.as_ref());
+    assert_eq!(completed.last_receipt, canonical.last_receipt);
     assert_eq!(completed.stage, PurgeStage::Complete);
     root.finish();
     assert_eq!(tracker.status().pending, 0);
