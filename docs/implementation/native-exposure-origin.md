@@ -86,3 +86,12 @@ MCP neighbor sets can differ: only the final returned UUIDs, deduplicated and
 grouped by namespace, may drive the actual exposure call. These private origin
 entries carry the caller number alongside that set; they do not select it or
 certify whole-query exposure parity. Native delta remains None/full fallback.
+
+## Sealed evidence
+
+Runtime `4f7d2e667829388b84f0f1feb1802618b20b25bc`; evidence `96bef33e1cd1c4189112938541e8a06a900c0d99`.
+See `work-notes/native-exposure-origin/REPORT.md` for all three source runs.
+Actual HOME copy: `/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-exposure-origin-96bef33`.
+COPY.json SHA256 `cec0444fb61de19c4bae5d5f34f9da3d43a1c00abc325789f16df9c9ccb2b0b9`.
+All44 files/5,628,094 bytes were individually hash-verified; the existing research
+notebook was appended. No executable or cache was copied.
