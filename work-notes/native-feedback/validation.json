@@ -1,0 +1,80 @@
+{
+  "runtime": "db88dbf7319b28e366a4c9564dce3acce0c20284",
+  "parent": "387c7118864040c68d7d28c44fb2600ade520a45",
+  "source_manifest_sha256": "82fa07454bcb986a49829398131c4e2eec99f3340bf3a397cfe21310cd8ab49e",
+  "executables": [
+    {
+      "path": "/target/debug/deps/recalld-e423ca3d07310388",
+      "sha256": "ddf2264b1d764c0afc82f17ffca2a4f86fb2ada4455e81973e9a302db2f08e2a",
+      "size": 399073400,
+      "mtime_ns": 1794684528795042078
+    },
+    {
+      "path": "/target/debug/deps/recalld-c8392f2a5ef64898",
+      "sha256": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+      "size": 6908664,
+      "mtime_ns": 1794684637982169671
+    },
+    {
+      "path": "/target/debug/deps/recalld_cli-2dba722497aafcf6",
+      "sha256": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f",
+      "size": 6357936,
+      "mtime_ns": 1794684643070331475
+    },
+    {
+      "path": "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb",
+      "sha256": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41",
+      "size": 6358016,
+      "mtime_ns": 1794684645476220568
+    },
+    {
+      "path": "/target/debug/deps/lifecycle_cli-4843a41927cafc6b",
+      "sha256": "e318b6b110e0524c3028320c8aa63a4c9c757919981ac14e78c2db0b26663af4",
+      "size": 257400160,
+      "mtime_ns": 1794684649548541486
+    },
+    {
+      "path": "/target/debug/deps/text_migration_cli-92bf02c892a58814",
+      "sha256": "58ca2bb18f256c32f275fe1d4385b710fe5ac67debf029417c1eec73a64e3a00",
+      "size": 256903584,
+      "mtime_ns": 1794684651684948462
+    },
+    {
+      "path": "/target/debug/recalld",
+      "sha256": "cf0a90c757f5464e3c52af922a45af33b385b0cbfd403593b5a1eec33cde557b",
+      "size": 348171808,
+      "mtime_ns": 1794684645110994704
+    }
+  ],
+  "results": {
+    "library": 1007,
+    "cli": 2,
+    "focused": 7,
+    "doctests_ignored": 4,
+    "fmt": "PASS",
+    "clippy_exit": 0
+  },
+  "warnings": [
+    "warning: `recalld` (lib) generated 702 warnings (run `cargo clippy --fix --lib -p recalld` to apply 83 suggestions)",
+    "warning: `recalld` (bin \"recalld\") generated 1 warning",
+    "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+    "warning: `recalld` (lib test) generated 769 warnings (681 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 6 suggestions)"
+  ],
+  "files": {
+    "REPORT.md": "2aa8ee74ba427219db5a12447f3b37fe26c13ff46ef946630e82a9f9a30b76d8",
+    "clippy.log.gz": "973b6e9c1c5b043c824ec450ac487259b8b7ee38c3e8b75e41a227ae5a454697",
+    "compile-initial/NOTE.txt": "a6ca8cd0f110d36b20dbd724a6fd023b1e32f3bca9773143786779e275f7bef8",
+    "compile-initial/compile.log": "6462329dda1a4b965795073e108ef9e18be871911f883303bff9b361651ef4b2",
+    "compile-initial/source-manifest.json": "4cd41893269b2ee735aaec5d796adc46db8f33e82a10bdbac236b196fd03dfec",
+    "compile-initial/source.tar.gz": "414d0992054d648e26b995f55be0333ba734f9046ff39df9cb8921c67e324527",
+    "final-source-manifest.json": "82fa07454bcb986a49829398131c4e2eec99f3340bf3a397cfe21310cd8ab49e",
+    "final-source.tar.gz": "f1a04cbe332b1f723c3712c84ee69b99d2f22de205e9fd03c0dd9d17bd913e47",
+    "fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "focused-2.log": "73ca95439da72647433b9701a1ca51f9855391702476658f141c04482c5f5864",
+    "focused-3.log": "5b4d9625328877e2948648efa12a2de322ba3adc669bd7becf48a5c3a66bf3e2",
+    "full-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "package-clean.log": "77fd95221745be6dec531ac351d60b535c82af3ed66b6402d91dc6e9d04a7556",
+    "release-full.log": "f43a4d7dde84ee9021e070becbc38bb064bd7d9dc2d85b6c9cb535448145c802",
+    "validation-command.txt": "69d300bbf1ada15ab77f7ec2923a70efc75e630ae58d3215f3b694faafbe7e6f"
+  }
+}
