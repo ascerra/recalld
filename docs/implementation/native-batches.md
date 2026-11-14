@@ -82,7 +82,10 @@ is added here.
 
 ## Validation
 
-Pending final frozen-source results. Development logs include parent composition
+Final frozen runtime `febe91310153f2caab9209ca4cfae0d9fbbc5844` passed1000
+library tests and2CLI tests;4doctests were ignored. The evidence README records
+format/Clippy completion and source/executable hashes. Both passed; Clippy emits
+warnings. Development logs include parent composition
 compile fixes, five initial focused passes, and a test-only wrong process-hook
 exit-code expectation (86 versus the existing hook's91). That failed log is
 retained. This is not a reproduced storage failure or a claimed red/green fix.
@@ -92,4 +95,21 @@ passed992 library tests and failed two stale operation-only receipt assertions;
 both now compare the exact committed receipt and each passed its focused run.
 Two independent review probes failed before the fixes (reversed final-error
 generations and UnknownLegacy forget), then passed. Final merged-source full
-results are recorded with the evidence seal, not inferred from focused runs.
+results are recorded with the evidence seal, independently of focused runs.
+
+
+## Remaining producer boundary
+
+The shared private admission helper is
+`native_store_execution_blocker(config, check_duplicates)`. Native wire adapters
+must preserve completed replay priority before invoking it. Its existence does
+not certify consumers on branches that have not integrated it.
+
+The agreed future insert-link seam uses relative NewRecord/Existing endpoints,
+frozen canonical candidate evidence and consumed configuration, then binds the
+new UUID and one sampled clock under the final graph-to-storage guard. Temporal
+selection must use that clock against frozen candidate creation times. Capture
+validation precedes allocation/staging; a new additive creation proof and the
+existing insertion outbox commit the complete edge/peer outcome. This seam is a
+design agreement, not implemented functionality in this branch. The auxiliary
+gate remains until its actual producer/core/recovery integration is validated.
