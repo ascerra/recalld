@@ -99,7 +99,7 @@ weights. True exposure under either lifecycle uses its policy; false reads canno
 record receipts, alter graph/lifecycle or queue later behavioral work. API2 does
 not opt into persistent RIF, approximate search or a different canonical backend.
 
-## Source-confirmed API/context coupling, pending coordinated review
+## Source-confirmed API/context coupling at the audited baseline
 
 Native guards in `metadata/native_catalog.rs`, `native_policy.rs`,
 `metadata/native_graph.rs`, `metadata/native_store.rs`,
@@ -108,8 +108,38 @@ Native guards in `metadata/native_catalog.rs`, `native_policy.rs`,
 uses `ctx.contract_version` as its disk/progress selector. A wire adapter cannot
 fix this by labeling an API1 request API2: that loses original request identity.
 The detailed per-writer plan is [native-request-context-plan.md](native-request-context-plan.md).
-Core edits are held for coordinating-agent review. This adds a concrete activation
-prerequisite, not an alternative engine or a reason to leave API1 permanently gated.
+The coordinated plan is approved and owner implementations are in progress.
+Only actually validated leaves may become dependencies; source-only corrections
+and historical review counts do not establish completion. This is a concrete
+activation prerequisite, not an alternative engine or a reason to leave API1
+permanently gated. Current context-slice evidence and remaining checks are in
+[native-request-context-status.md](native-request-context-status.md).
+
+## Acyclic activation boundaries
+
+The coordinating agent clarified this order during the quiet window:
+
+1. Format-aware adapters and producer dispatch ship and test on explicit owned
+   native fixtures before ordinary native startup is admitted. These are real
+   adapter/producer calls with native guards, original request identity and
+   owned completion, not an alternate serving engine. Their actual validated
+   parents must not depend on the later startup switch merely to run tests.
+2. Feynman's ordinary native admission consumes the complete validated writer,
+   reader and adapter closure needed for existing public API1 compatibility.
+   Omitted API version remains API1; disk schema and lifecycle remain separate.
+   Startup must not depend on public API2 activation or its capability switch.
+3. Huygens's public API2 activation consumes that validated startup plus actual
+   A2 selection and the required versioned adapters/capabilities. It cannot be a
+   prerequisite of its own startup parent. Existing legacy-format capabilities
+   remain governed by their actual implementations.
+
+A6 may consume the real API1-native constructor once stage2 is validated, then
+add independent versioned capabilities when their prerequisites are ready.
+Coherent API1 reads and every participating writer remain startup requirements;
+this ordering does not waive them or declare whole-query readiness from a
+canonical-only snapshot. Stage-specific evidence must identify the exact source
+and ordinary versus explicit-fixture entry point. Never merge unvalidated WIP
+for convenient ancestry or advertise a later stage from an earlier-stage test.
 
 ## Concrete constructor, recovery and readiness sequence
 
@@ -151,8 +181,9 @@ server, second registry, general allowlist or speculative engine replacement.
 1. Freeze owner consumer leaves, recompute ancestry, and record explicit seam
    conflicts. Huygens single/batch/profile/96 join and Pascal lifecycle-wire/121
    join are actual shipping prerequisites. Curie's independent profile+121 proof
-   does not become a broad shipping parent. Hume A2 and Halley clock must supply
-   actual frozen runtimes; no invented completion from older component counts.
+   does not become a broad shipping parent. Halley's required clock/ID consumers
+   must supply actual frozen runtimes; Hume's actual A2 selection is a later
+   public API2 prerequisite. No invented completion from older component counts.
 2. Feynman first joins only necessary readiness/recovery consumer leaves to
    exercise native batch+purge histories with exact4-view publication. Preserve
    cc865 unknown counts plus75bc version/schema/receipt checks and both pending
@@ -160,16 +191,20 @@ server, second registry, general allowlist or speculative engine replacement.
    consumer dependency; validation-only glue cannot be discarded.
 3. Close owned system catalog bootstrap, automatic/manual maintenance dispatch,
    shutdown and remaining producer adapters. Preserve real CLI/benchmark paths.
-   Feynman implements admission only on the exact validated closure; Huygens
-   changes public selectors/capabilities on that same source composition.
+   Feynman implements ordinary API1-native admission only on that exact validated
+   closure. Prepared adapter tests run on explicit owned fixtures beforehand.
+   Huygens subsequently activates public API2 on validated startup plus actual
+   A2 selection; its selectors/capabilities are not a startup dependency.
 4. Validate focused failures first, then full fmt/Clippy/test/bench-example compile
    on the frozen composed source in offline Rust1.94.1,2CPU/4GiB/private target.
    Do not reuse a test executable after switching mounted source roots: separate
    source target or package-clean own target. Preserve all failed source/binary/
    log hashes; no full repeat merely for a documentation seal.
 
-Final tests must use ordinary engine/system/daemon/transport entry points, not
-only `open_native` fixtures: legacy/native x API1/API2 defaults; fresh and reopened
+Each activation stage must test its actual ordinary engine/system/daemon/transport
+entry points, beyond the earlier explicit owned fixtures: startup covers existing
+API1 compatibility on legacy/native disks; later public API2 activation completes
+the version/capability matrix. Across these stages cover fresh and reopened
 native owner; every actual writer followed by get/exact/FTS/entity/graph views;
 policy/catalog-only and no-change G; observed versus false reads; same-key replay
 before stale CAS after purge/name reuse and restore; partial/unknown batch/purge;
