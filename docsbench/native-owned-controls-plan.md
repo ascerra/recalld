@@ -46,6 +46,26 @@ The owned fixture constructor remains separate from production fork/restore
 semantics. No generic `nativeControls: true` capability will be added as a proxy
 for passing only one row.
 
+## Explicit sweep request origin: pending Pascal manual parent
+
+Main's 2026-11-14 handoff reports Pascal's upcoming manual consumer adds
+`execute_sweep_with_origin_work` with an explicit original-contract number.
+Its compatibility `execute_sweep_with_work` wrapper selects origin1, while
+startup/timer callers explicitly select internal origin2. This is a handoff
+about a pending parent, not a claim about frozen107785dfec, whose inspected
+source still predates that interface. Await Pascal's final validated source.
+
+Keep existing128 legacy evaluator behavior on compatibility origin1. The future
+native internal evaluator control must intentionally call the explicit-origin
+entrypoint with its declared internal domain2. Never derive origin from disk
+schema, lifecycle policy, retrieval semantics or a generic native flag, and do
+not accidentally inherit origin1 through the wrapper. A public manual API1
+request retains1 even on native disk; it is not the same operation as an
+internal evaluator sweep. Preserve actual request-hash/receipt provenance and
+keyed no-change/rejection rules in the final consumer. Add a focused origin
+forwarding/receipt test at that join, alongside clock, parent-work and completion
+proof; do not retrofit an unvalidated method into128 or activate native controls.
+
 ## Concrete clock and identity inventory
 
 References below are tied to the inspected frozen tree, not moving line numbers.
