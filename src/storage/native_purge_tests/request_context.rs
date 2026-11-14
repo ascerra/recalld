@@ -74,7 +74,7 @@ fn crashed_start(path: &Path) {
         .unwrap();
     assert_eq!(
         out.status.code(),
-        Some(86),
+        Some(91),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );

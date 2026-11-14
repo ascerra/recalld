@@ -533,7 +533,7 @@ fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
     let mut key = ctx(&s, id, "api1-nochange");
     key.contract_version = 1;
     let first = s
-        .update_policy_accepted(&key, &scope(&s, id), &original)
+        .update_policy(&key, scope(&s, id), &original)
         .unwrap()
         .unwrap();
     assert!(matches!(
@@ -544,7 +544,7 @@ fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
     changed.desired_retention = 0.8;
     let mut fresh = ctx(&s, id, "api1-changed");
     fresh.contract_version = 1;
-    s.update_policy_accepted(&fresh, &scope(&s, id), &changed)
+    s.update_policy(&fresh, scope(&s, id), &changed)
         .unwrap()
         .unwrap();
     let before = rows(&s);
@@ -552,7 +552,7 @@ fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
     let mut expected = first;
     expected.replayed = true;
     assert_eq!(
-        s.update_policy_accepted(&key, &scope(&s, id), &original)
+        s.update_policy(&key, scope(&s, id), &original)
             .unwrap()
             .unwrap(),
         expected
@@ -560,11 +560,11 @@ fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
     let mut other = key.clone();
     other.contract_version = 2;
     assert!(matches!(
-        s.update_policy_accepted(&other, &scope(&s, id), &original),
+        s.update_policy(&other, scope(&s, id), &original),
         Err(StorageError::IdempotencyConflict)
     ));
     assert!(matches!(
-        s.update_policy_accepted(&key, &scope(&s, id), &changed),
+        s.update_policy(&key, scope(&s, id), &changed),
         Err(StorageError::IdempotencyConflict)
     ));
     assert_eq!(rows(&s), before);
@@ -572,7 +572,7 @@ fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
     drop(s);
     let mut s = open(&path);
     assert_eq!(
-        s.update_policy_accepted(&key, &scope(&s, id), &original)
+        s.update_policy(&key, scope(&s, id), &original)
             .unwrap()
             .unwrap(),
         expected
