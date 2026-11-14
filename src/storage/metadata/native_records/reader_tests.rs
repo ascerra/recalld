@@ -11,6 +11,8 @@ use serde_json::{Value, json};
 mod feedback_consumer;
 #[path = "forget_consumer_tests.rs"]
 mod forget_consumer;
+#[path = "graph_producer_tests.rs"]
+mod graph_producer;
 #[path = "replay_consumer_tests.rs"]
 mod replay_consumer;
 
