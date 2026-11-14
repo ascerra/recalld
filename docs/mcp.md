@@ -74,6 +74,12 @@ HTTP uses `?namespace=name` on `GET /memories/:id` and `DELETE /memories/:id`, a
 
 Daemon forwarding uses dedicated `*_scoped` RPC methods. Combining a namespace assertion with `recordAccess=false` uses `get_memory_scoped_read_only` or `find_similar_scoped_read_only`; these require a namespace and force nonobserving retrieval. Older daemons reject unknown methods, and the client never retries through a weaker method. Existing assertion-only RPCs reject `recordAccess` fields, and existing read-only RPCs reject namespace assertions. Assertion-only true mode omits the wire flag to remain compatible. These are additive v1 controls, not authentication, receipts, or a transactional whole-store contract. Batch assertions remain outside this slice.
 
+### Connection context
+
+Read the MCP resource `recalld://session` to inspect the connection's frozen default namespace, its canonical name/ID and configured dimension when it exists, current v1 limits, and bounded duplicate-scan semantics. A missing namespace is reported with `exists: false` and `resolved: null`; the read does not create it. `source: "bridge"` identifies the stored connection default, not whether it originally came from a configuration file or a fallback.
+
+Session resource reads carry `cacheScope: "private"` and `ttlMs: 0`; the public resource catalog contains only a static description. The resource advertises only application contract v1. It does not claim active embedding-profile compatibility, generations, receipts, idempotency, exact scans, or future read-only flags. The dimension is namespace configuration, not an active provider identity. HTTP REST `GET /capabilities` remains unimplemented.
+
 ### Other MCP-compatible tools
 
 Any MCP client can use recalld via either transport.
@@ -856,19 +862,23 @@ Response:
   "clusterCount": 1,
   "coverage": {
     "algorithm": "sampledNearestNeighbors",
-    "sampledCount": null,
-    "eligibleCount": null,
-    "skippedVectorCount": null,
+    "sampledCount": 200,
+    "eligibleCount": 203,
+    "skippedVectorCount": 1,
     "sampleCap": 200,
     "neighborCap": 11,
     "complete": false,
-    "truncated": null,
-    "countsAvailable": false
+    "truncated": true,
+    "countsAvailable": true
   }
 }
 ```
 
-MCP coverage counts and `truncated` are unknown (`null`) because the legacy bridge returns only clusters; cluster membership cannot reconstruct those counts. `complete` is always false, including for empty results. HTTP duplicate scans instead compare pairs within a capped sample (default 500, maximum 10,000), return observed live-record, sampled-record, and missing-vector counts, and report whether sampling was truncated. HTTP `neighborCap` is null because it has no neighbor cap. Its `complete` also remains false because reads are not pinned to a generation. Neither endpoint proves there are no other duplicates. Exact paginated scans and bridge/daemon count reporting remain future work.
+MCP scan coverage comes from the scan itself, including when used through the daemon. `eligibleCount` counts live records before sampling (including ghosts and records with missing vectors); `sampledCount` counts selected live records; `skippedVectorCount` counts sampled records whose vectors were missing when loaded. Tombstones are excluded before sampling. `truncated` reports record sampling only: a false value does not remove the separate neighbor cap or establish that every qualifying pair was found. `neighborCap: 11` includes the extra candidate requested to allow for self-removal.
+
+Older daemons return only clusters. New clients preserve those clusters and report `countsAvailable: false` with null counts and `truncated`, rather than guessing. New daemons still return the legacy array to clients that omit the private `includeCoverage` flag. This flag does not select a public contract version.
+
+`complete` is always false, even for empty scans: the algorithm is bounded and has no generation-consistent read view. HTTP duplicate scans instead compare pairs within a capped sample (default 500, maximum 10,000), report observed counts and truncation, and use a null `neighborCap`. Neither endpoint proves there are no other duplicates. Exact paginated scans and coherent generations remain future work.
 
 ---
 
@@ -1350,3 +1360,17 @@ When working in this repo, also store:
 **Decay tuning:**
 
 If you find memories disappearing too quickly or persisting too long, adjust `decayRateMultiplier` in your namespace or config. Values above 1.0 slow decay; below 1.0 speed it up; 0.0 disables decay entirely.
+
+## Application contract selection
+
+Tools currently support application contract version 1. Omit `contractVersion`
+or supply the integer `1`; explicit `2` and malformed selectors fail before
+handler work. This is separate from MCP transport protocol negotiation. Legacy
+success payloads remain unchanged, including unknown-field compatibility and
+missing arguments on no-argument tools. Modern object results also carry the
+same JSON in `structuredContent`; legacy-era results and array/scalar payloads
+retain text-only encoding. No v2 readiness or public retry/CAS support is advertised.
+
+REST uses `Recalld-Contract-Version: 1` or omission; other values and duplicate
+version headers fail before handler work. See
+[wire preparation and remaining prerequisites](implementation/contract-wire-prep.md).
