@@ -46,6 +46,10 @@ reopen. Canonical terminal identity resolves by ID without session default or
 unnecessary new namespaceID. Known publication failure retains full receipt and
 repairs on replay. Actual effects postcommit failure returns unknown operation ID,
 poisons the owner, and reopens/replays the same operation without a second clock.
+Known publication failure reports committed plus the full receipt and no claimed
+readiness. The injected uncertain commit reports unknown plus its operationID,
+without a receipt; only reopening/reconciliation recovers the stored receipt.
+Neither becomes notCommitted or an ordinary safe blind retry.
 Real namespace purge followed by reopen proves implicit unique terminal scope
 and explicitID retries, and wrong-name failure retains the known committed receipt.
 
@@ -59,9 +63,10 @@ execution of a historical daemon binary.
 Offline Docker recalld-ci:1.94, RUSTUP_TOOLCHAIN1.94.1, jobs2,networknone,2CPU/4GiB;
 only own worktree/privatecargo/privatetarget. No HOME/credentials/socket mounts.
 A private clone was prepared before the user's central-cleanup directive; own
-packageclean ran before first compilation. Future runs retain one Cargo cache,
-not one copy per run. After HOME/repo sealing, the disposable target is released
-only to the central cleanup owner; source, .git and evidence remain protected.
+packageclean ran before first compilation. No next Rust task is assigned at this handoff, so after HOME/repo sealing both
+the disposable target and private Cargo directory are released only to central
+cleanup. A future identified task may retain one needed shared cache, never
+repeat per-run copies. Source, .git and evidence remain protected.
 See validation-command.txt, stage run.py/results.json and seal.py.
 
 Huygens owns public contract routing/API1 outward compatibility/shared failure
