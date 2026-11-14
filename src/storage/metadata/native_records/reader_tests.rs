@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 
 #[path = "feedback_consumer_tests.rs"]
 mod feedback_consumer;
+#[path = "forget_consumer_tests.rs"]
+mod forget_consumer;
 
 struct NoProvider;
 #[async_trait::async_trait]

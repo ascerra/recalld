@@ -21,6 +21,19 @@ fn context(ctx: &MutationContext, namespace: NamespaceId) -> Result<(), StorageE
     Ok(())
 }
 
+fn replay_tombstone(
+    tx: &redb::WriteTransaction,
+    ctx: &MutationContext,
+    id: MemoryId,
+) -> Result<Option<WriteReceipt>, StorageError> {
+    let MutationScope::Namespace(namespace) = ctx.scope else {
+        return Err(StorageError::MutationNamespaceMismatch);
+    };
+    context(ctx, namespace)?;
+    let hash = control::request_hash(ctx, "native_tombstone", &[id.as_bytes()]);
+    control::replay_or_check(tx, ctx, hash)
+}
+
 pub(super) fn replay_insert(
     tx: &redb::WriteTransaction,
     ctx: &MutationContext,
@@ -335,6 +348,16 @@ impl MetadataStore {
         )
         .map(|r| r.receipt)
     }
+    /// Stable caller identity lookup before resolving current record/policy/name.
+    pub(crate) fn lookup_native_tombstone_by_id(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        parent: Option<&super::super::work::WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let _guard = self.native_guard_with_work(parent)?;
+        replay_tombstone(&self.db.begin_write()?, ctx, id)
+    }
     pub(crate) fn lookup_native_tombstone(
         &self,
         guard: &MutationGuard<'_>,
@@ -343,8 +366,7 @@ impl MetadataStore {
     ) -> Result<Option<WriteReceipt>, StorageError> {
         guard.check(self)?;
         context(ctx, intent.scope.namespace_id)?;
-        let hash = control::request_hash(ctx, "native_tombstone", &[intent.memory_id.as_bytes()]);
-        control::replay_or_check(&self.db.begin_write()?, ctx, hash)
+        replay_tombstone(&self.db.begin_write()?, ctx, intent.memory_id)
     }
     pub(crate) fn tombstone_native_with_effects(
         &self,

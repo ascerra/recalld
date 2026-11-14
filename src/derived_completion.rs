@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLock};
 mod readiness;
 
 mod native_feedback;
+mod native_forget;
 
 use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};
