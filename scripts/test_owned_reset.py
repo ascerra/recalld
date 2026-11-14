@@ -202,6 +202,19 @@ autolink_enabled = false
             actual.append(result)
         finally:
             child.close()
+    boundary = Child(binary, config, output / 'clock-range-boundary')
+    try:
+        boundary.initialize()
+        now = boundary.private('inspect', {})['runtimeState']['nowMillis']
+        boundary.private('advance', {'deltaMs': (1 << 48) - now, 'deadlineMs': 30000})
+        before_manifests = set(output.glob('recalld-frozen-canonical-*/manifest.json'))
+        response = boundary.control.call('snapshot', {'deadlineMs': 30000})
+        assert 'error' in response, 'unsupported writable checkpoint clock was published'
+        assert set(output.glob('recalld-frozen-canonical-*/manifest.json')) == before_manifests
+        assert boundary.private('inspect', {})['runtimeState']['nowMillis'] == 1 << 48
+        negative.append('unsupported-clock-not-published')
+    finally:
+        boundary.close()
     # Extra negative manifests were separate files; check all original evidence.
     for name, sha in immutable.items():
         assert hashlib.sha256((manifest_path.parent / name).read_bytes()).hexdigest() == sha

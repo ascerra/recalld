@@ -148,8 +148,10 @@ impl OwnedEvaluator {
                         )
                     })?;
                 SeededIds::from_state(allocation.clone())?;
+                let now = clock.now_millis();
+                allocation.validate_clock(now)?;
                 let stage = engine.stage_frozen_canonical(frozen, deadline)?;
-                Ok((stage, allocation, clock.now_millis()))
+                Ok((stage, allocation, now))
             })
             .await?;
         let manifest = Manifest {
