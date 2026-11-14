@@ -498,3 +498,56 @@ fn native_catalog_review_invalid_inherited_policy_rejects_before_allocation() {
         }
     }
 }
+
+#[test]
+fn native_context_api1_catalog_replay_cross_contract_and_unkeyed() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, clock, mut session) = fixture(root.path());
+    let mut key = context(&session, "original-api1");
+    key.contract_version = 1;
+    let receipt = session
+        .create_namespace(&key, &input(), &Provider(true))
+        .unwrap();
+    let before = bytes(&path);
+    let calls = clock.0.load(Ordering::SeqCst);
+    let mut expected = receipt.clone();
+    expected.replayed = true;
+    assert_eq!(
+        session
+            .create_namespace(&key, &input(), &Provider(false))
+            .unwrap(),
+        expected
+    );
+    let mut other = key.clone();
+    other.contract_version = 2;
+    assert!(matches!(
+        session.create_namespace(&other, &input(), &Provider(false)),
+        Err(StorageError::IdempotencyConflict)
+    ));
+    let mut changed = input();
+    changed.desired_retention = Some(0.8);
+    assert!(matches!(
+        session.create_namespace(&key, &changed, &Provider(false)),
+        Err(StorageError::IdempotencyConflict)
+    ));
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+    assert_eq!(bytes(&path), before);
+    let mut unkeyed = key;
+    unkeyed.idempotency_key = None;
+    unkeyed.expected_generation = None;
+    let mut fresh = input();
+    fresh.name = "unkeyed-api1".into();
+    session
+        .create_namespace(&unkeyed, &fresh, &Provider(true))
+        .unwrap();
+    drop(session);
+    let mut session =
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();
+    other.contract_version = 1;
+    assert_eq!(
+        session
+            .create_namespace(&other, &input(), &Provider(false))
+            .unwrap(),
+        expected
+    );
+}

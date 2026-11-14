@@ -1212,3 +1212,6 @@ async fn native_purge_cancelled_waiter_keeps_worker_publication_lease() {
         "cancelled waiter released publication lease before blocked worker completed"
     );
 }
+
+#[path = "native_purge_tests/request_context.rs"]
+mod request_context;

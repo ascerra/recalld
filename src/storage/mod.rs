@@ -68,3 +68,5 @@ pub use indexes::PhaseIndex;
 pub use metadata::MetadataStore;
 pub use text::{CompactionResult, TextRef, TextStore, recover_text_compaction};
 pub use vectors::{VectorManager, VectorStore};
+
+pub mod request_context;

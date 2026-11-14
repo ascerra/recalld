@@ -32,9 +32,9 @@ pub(crate) fn request_hash(
     input: &NamespacePolicy,
 ) -> Result<[u8; 32], StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || !matches!(ctx.scope, control::MutationScope::Namespace(_)) {
+    if !matches!(ctx.scope, control::MutationScope::Namespace(_)) {
         return Err(StorageError::InvalidMutationContext(
-            "native policy requires contract2 namespace scope".into(),
+            "native policy requires namespace scope".into(),
         ));
     }
     Ok(control::request_hash(

@@ -10,11 +10,7 @@ impl DerivedCompletion {
         force: bool,
         parent: &WorkTicket,
     ) -> Result<PurgeProgress, StorageError> {
-        if ctx.contract_version != 2 {
-            return Err(StorageError::InvalidMutationContext(
-                "native purge requires contract2".into(),
-            ));
-        }
+        ctx.validate()?;
         let work = self.accept_work(Some(parent))?;
         let result = self.native_purge_work(ctx, force, &work).await;
         self.finish_known_work(work);
