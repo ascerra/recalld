@@ -153,8 +153,10 @@ def evaluation_inputs(args, diagnostic):
         **{key: diagnostic[key] for key in ("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
                                            "lockfileSha256", "containerImageId", "limits")},
         "versions": {"contractVersion": 1, "retrievalSemanticsVersion": 1, "rankingProfile": "baseline-v1",
-            "lifecycleVersion": "legacy_access_v1", "rifMode": "off", "canonicalSchemaVersion": 1,
-            "recordSchemaVersion": 1, "backupFormatVersion": 2, "exportFormatVersion": 1,
+            "lifecycleVersion": "legacy_access_v1", "rifMode": "off", "canonicalSchemaVersion": None,
+            "canonicalRepresentation": "legacy-schema-none", "controlSchemaVersion": 1,
+            "recordSchemaVersion": 1, "backupFormatVersion": None, "exportFormatVersion": None,
+            "offlineFormats": "not-used-or-advertised-by-this-track",
             "receiptVersion": 1, "requestHashVersion": 1,
             "derivedIndexFormats": "sourceFilesSha256; no independent format version advertised"},
         "capabilities": {"publicApi": False, "publicV2": False, "coherentReadView": False,
@@ -246,7 +248,9 @@ def main():
     shutil.copytree(cache / "registry", scratch / "cargo" / "registry")
     if args.build_cache:
         build_cache = args.build_cache.resolve()
-        if build_cache.name != "target" or not str(build_cache.parent).startswith(("/tmp/recalld-", "/private/tmp/recalld-")):
+        if build_cache.name != "target" or not (str(build_cache.parent).startswith(("/tmp/recalld-", "/private/tmp/recalld-"))
+                or (build_cache.parent.name.startswith("recalld-evaluation-")
+                    and build_cache.parent.parent == Path(tempfile.gettempdir()).resolve())):
             parser.error("build cache must be target/ in a prior recalld scratch; copied privately")
         shutil.copytree(build_cache, scratch / "target")
     else:

@@ -139,6 +139,8 @@ class ManifestInputTests(unittest.TestCase):
         self.assertEqual(len(json.loads(actor)["sources"]), 100)
         self.assertNotIn("manifestSha256", manifest)
         self.assertFalse(manifest["capabilities"]["reset"])
+        self.assertIsNone(manifest["versions"]["canonicalSchemaVersion"])
+        self.assertEqual(manifest["versions"]["canonicalRepresentation"], "legacy-schema-none")
         self.assertIsNone(manifest["dataset"]["thirdPartyLicense"])
 
     def test_bad_plan_rejected_before_any_runner_side_effect(self):

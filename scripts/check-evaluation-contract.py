@@ -24,6 +24,11 @@ def main():
     for field in ('publicV2', 'barrier', 'snapshot', 'reset', 'deterministicIds', 'deterministicRng', 'clockAdvance'):
         cases.append((field, lambda m, a, e, field=field: m['capabilities'].update({field: True})))
     cases += [
+        ('unused-backup-requirement', lambda m, a, e: m['versions'].update({'backupFormatVersion': 2})),
+        ('unused-export-requirement', lambda m, a, e: m['versions'].update({'exportFormatVersion': 1})),
+        ('invented-canonical-zero', lambda m, a, e: m['versions'].update({'canonicalSchemaVersion': 0})),
+        ('invented-canonical-one', lambda m, a, e: m['versions'].update({'canonicalSchemaVersion': 1})),
+        ('native-representation', lambda m, a, e: m['versions'].update({'canonicalRepresentation': 'native-v2'})),
         ('missing-version', lambda m, a, e: m.pop('traceSchemaVersion')),
         ('unknown-field', lambda m, a, e: m.update({'futureCapability': True})),
         ('unresolved-revision', lambda m, a, e: m.update({'sourceCommit': 'unresolved'})),

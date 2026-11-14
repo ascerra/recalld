@@ -13,7 +13,10 @@ pub const TRACK: &str = "manifest-internal-diagnostic-v1";
 pub const TIME: i64 = 1_767_225_600_000;
 
 pub fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -97,8 +100,9 @@ pub struct Validated {
 
 pub fn versions() -> Value {
     json!({"contractVersion":1,"retrievalSemanticsVersion":1,"rankingProfile":"baseline-v1",
-        "lifecycleVersion":"legacy_access_v1","rifMode":"off","canonicalSchemaVersion":1,
-        "recordSchemaVersion":1,"backupFormatVersion":2,"exportFormatVersion":1,
+        "lifecycleVersion":"legacy_access_v1","rifMode":"off","canonicalSchemaVersion":null,"canonicalRepresentation":"legacy-schema-none","controlSchemaVersion":1,
+        "recordSchemaVersion":1,"backupFormatVersion":null,"exportFormatVersion":null,
+        "offlineFormats":"not-used-or-advertised-by-this-track",
         "receiptVersion":1,"requestHashVersion":1,
         "derivedIndexFormats":"sourceFilesSha256; no independent format version advertised"})
 }

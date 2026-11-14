@@ -354,6 +354,19 @@ async fn main() -> Result<()> {
     let graph = system.graph().clone();
     let before = record_state(&storage.read().unwrap())?;
     let control_before = storage.read().unwrap().control_state()?;
+    ensure!(
+        control_before.control_schema_version == 1,
+        "manifest control representation mismatch"
+    );
+    ensure!(
+        storage
+            .read()
+            .unwrap()
+            .scan_all()?
+            .iter()
+            .all(|(_, r)| r.version == 1 && r.schema.is_none()),
+        "manifest legacy schema-absence/record representation mismatch"
+    );
     write_json(out.join("state-before.json"), &before)?;
     write_json(
         out.join("control-before.json"),
