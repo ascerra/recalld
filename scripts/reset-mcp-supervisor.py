@@ -33,7 +33,7 @@ def fixtures(base):
         dict(tag="observed-get", tool="get_memory", arguments=dict(id="$turn-4", namespace="default", recordAccess=True)),
         dict(tag="feedback", tool="reinforce_memory", arguments=dict(id="$turn-4", namespace="default", quality=3))]
     for question in schedule["queries"]:
-        steps.append(dict(tag="query:" + question["queryId"], tool="recall_memories", arguments=dict(query=question["text"], namespace="default", recordAccess=False, depth=0, limit=1)))
+        steps.append(dict(tag="query:" + question["queryId"], tool="recall_memories", arguments=dict(query=question["text"], namespace="default", recordAccess=False, depth=0, limit=1, compact=False)))
     steps.extend([
         dict(tag="forget", tool="forget_memory", arguments=dict(id="$turn-0", namespace="default")),
         dict(tag="tombstone", tool="get_memory", arguments=dict(id="$turn-0", namespace="default", recordAccess=False)),
@@ -279,7 +279,8 @@ warm_file_enabled = false
             if row["tag"].startswith("query:"):
                 memories=json.loads(row["result"]["content"][0]["text"])["memories"]
                 assert [v["id"] for v in memories] == [mappings["turn-4"]]
-                queries.append(dict(queryId=row["tag"][6:],memoryIds=[v["id"] for v in memories]))
+                returned=memories+json.loads(row["result"]["content"][0]["text"]).get("graphContext",{}).get("neighbors",[])
+                queries.append(dict(queryId=row["tag"][6:],memoryIds=[v["id"] for v in returned]))
         state,ready=owner.ready()
         checkpoint=checked_snapshot(h,owner.control.call("snapshot",dict(deadlineMs=30000)),runtime)
         assert checkpoint["committed"] == state["committed"]
