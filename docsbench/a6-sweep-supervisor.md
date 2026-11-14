@@ -48,7 +48,10 @@ fully-controlled clocks/IDs/RNG and full A6 remain unsupported. Original #127
 studies and zero-multiplier fixtures retain their frozen source/binary pins;
 their strict old capability envelope is not silently upgraded to this binary.
 
-Validation is pending until the same-source evidence report records actual runs.
+Validation and the preserved initial fixture failure are recorded in
+[`benchmarks/a6-sweep-supervisor/REPORT.md`](../benchmarks/a6-sweep-supervisor/REPORT.md):
+measured e16c109 passes both actual runs, three restores per run, and all five
+independent hash pairs; identical Rust/Cargo source inherits the full 13e4dd5 run.
 PR128's timeout/caller-abort proof remains owner evidence; malformed-control and
 old-owner/worker/restore negatives in this consumer do not imply that every
 cancellation invalidates an episode.
