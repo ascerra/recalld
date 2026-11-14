@@ -17,6 +17,7 @@ mod native_lifecycle;
 mod native_records;
 mod observation;
 mod publication;
+pub(crate) use publication::CanonicalReadView;
 pub(crate) mod purge;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;

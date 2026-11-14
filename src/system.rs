@@ -867,6 +867,48 @@ impl Recalld {
         .await
     }
 
+    /// Internal Rust coherent read consumer. Requires explicitly false access;
+    /// stale/unpublished views fail closed rather than rebuilding during a read.
+    /// This does not enable public v2, snapshot/reset, or native serving.
+    pub async fn search_coherent_read_only(
+        &self,
+        query: crate::search::SearchQuery,
+        semantics: crate::search::RetrievalSemantics,
+        deadline: std::time::Instant,
+    ) -> crate::search::error::Result<crate::search::CoherentSearchResponse> {
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        };
+        self.query_engine
+            .search_coherent_read_only(&owner, self.rif_engine.clone(), query, semantics, deadline)
+            .await
+    }
+
+    /// Internal owned-core barrier. Returns a readiness observation, not a
+    /// retained freeze lease or snapshot/reset authorization. No public wire
+    /// capability is enabled by this entry point.
+    pub(crate) async fn readiness_barrier(
+        &self,
+        target: crate::storage::control::GenerationRef,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<crate::storage::Readiness, crate::storage::StorageError> {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .readiness_barrier(target, deadline)
+        .await
+    }
+
     /// Access the FTS5 full-text search index.
     pub fn fts_index(&self) -> &Arc<tokio::sync::Mutex<FtsIndex>> {
         &self.fts_index

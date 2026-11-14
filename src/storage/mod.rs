@@ -36,6 +36,7 @@ pub mod native_records;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
 pub(crate) mod publication;
+pub use publication::{DerivedReadiness, Readiness};
 pub mod purge;
 #[cfg(test)]
 mod purge_tests;

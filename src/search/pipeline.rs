@@ -19,6 +19,9 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 
 #[path = "diagnostics.rs"]
 mod diagnostics;
+#[path = "read_view.rs"]
+mod read_view;
+pub use read_view::CoherentSearchResponse;
 #[path = "strength.rs"]
 mod strength;
 use strength::StrengthContext;
@@ -2496,7 +2499,9 @@ mod tests {
     #[async_trait::async_trait]
     impl NamespaceResolver for SearchFixture {
         async fn resolve(&self, _name: &str) -> Result<NamespaceConfig> {
-            Ok(NamespaceConfig::default_namespace(1_700_000_000_000))
+            let mut config = NamespaceConfig::default_namespace(1_700_000_000_000);
+            config.embedding_dim = 2; // Actual fixture provider width.
+            Ok(config)
         }
     }
 

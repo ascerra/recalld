@@ -2,6 +2,9 @@
 //! storage; never hold storage while awaiting a derived lock.
 use std::sync::{Arc, RwLock};
 
+#[path = "derived_readiness.rs"]
+mod readiness;
+
 use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, NamespaceId};

@@ -1,5 +1,6 @@
 //! Bridge actual canonical transactions and the single owned view registry.
 use super::*;
+use crate::model::CachedRecord;
 use crate::storage::publication::{DerivedView, PublicationState};
 
 impl MetadataStore {
@@ -116,4 +117,193 @@ mod tests {
         assert_eq!(after.applied, [Some(at); 4]);
         assert!(!after.matches_canonical());
     }
+}
+
+/// Actual canonical read transaction retained for the lifetime of a query.
+/// Derived guards are acquired by the coordinator before this transaction opens.
+pub(crate) struct CanonicalReadView {
+    read: redb::ReadTransaction,
+    pub at: control::GenerationRef,
+}
+
+impl MetadataStore {
+    pub(crate) fn capture_read_view(&self) -> Result<CanonicalReadView, StorageError> {
+        let _publication = self
+            .publication
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
+        self.ensure_available()?;
+        // Native reader activation belongs to the owned native consumer join.
+        self.ensure_legacy_operation()?;
+        let read = self.db.begin_read()?;
+        let state = {
+            let table = read.open_table(control::CONTROL)?;
+            let value = table
+                .get("state")?
+                .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
+            ControlState::decode(value.value())?
+        };
+        crate::storage::lineage::ensure_serving(&read, &state)?;
+        if self.needs_effects_rebuild()
+            || !self
+                .view_publication
+                .state(state.generation_ref())
+                .matches_canonical()
+        {
+            return Err(StorageError::RecoveryRequired(
+                "canonical and derived generations are not coherent".into(),
+            ));
+        }
+        Ok(CanonicalReadView {
+            read,
+            at: state.generation_ref(),
+        })
+    }
+}
+
+impl CanonicalReadView {
+    pub(crate) fn get(&self, id: MemoryId) -> Result<Option<CachedRecord>, StorageError> {
+        let table = self.read.open_table(META_TABLE)?;
+        table
+            .get(id.as_bytes().as_slice())?
+            .map(|value| {
+                let record = DiskRecord::from_bytes(value.value())?;
+                if record.id != *id.as_bytes() {
+                    return Err(StorageError::CorruptIndex(
+                        "record identity mismatch".into(),
+                    ));
+                }
+                Ok(CachedRecord::from(&record))
+            })
+            .transpose()
+    }
+
+    pub(crate) fn namespaces(&self) -> Result<Vec<NamespaceConfig>, StorageError> {
+        let table = self.read.open_table(NAMESPACE_TABLE)?;
+        table
+            .iter()?
+            .map(|entry| {
+                let (key, value) = entry?;
+                let config: NamespaceConfig = serde_json::from_slice(value.value())
+                    .map_err(|e| StorageError::Deserialize(e.to_string()))?;
+                if config.id.get() != key.value() {
+                    return Err(StorageError::CorruptIndex(
+                        "namespace identity mismatch".into(),
+                    ));
+                }
+                Ok(config)
+            })
+            .collect()
+    }
+
+    pub(crate) fn records(
+        &self,
+        namespace: NamespaceId,
+    ) -> Result<Vec<CachedRecord>, StorageError> {
+        let namespaces = self.read.open_multimap_table(NAMESPACE_INDEX)?;
+        let mut result = Vec::new();
+        for entry in namespaces.get(namespace.get())? {
+            let entry = entry?;
+            let bytes: [u8; 16] = entry
+                .value()
+                .try_into()
+                .map_err(|_| StorageError::CorruptIndex("invalid namespace member UUID".into()))?;
+            if let Some(record) = self.get(MemoryId::from_bytes(bytes))? {
+                if record.namespace_id != namespace {
+                    return Err(StorageError::CorruptIndex(
+                        "namespace member mismatch".into(),
+                    ));
+                }
+                result.push(record);
+            }
+        }
+        Ok(result)
+    }
+}
+
+/// Current durable work on a handle whose full startup proof already passed.
+/// Reads real tables, never infers zero pending from an in-memory dirty flag.
+/// Deadline checks bound cooperative row processing, not blocking OS I/O.
+pub(super) fn check_current_pending(
+    read: &redb::ReadTransaction,
+    state: &ControlState,
+    mut check: impl FnMut() -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    use super::{effects, purge};
+    use redb::{MultimapTableHandle, TableHandle};
+    let reserved = [
+        effects::SCHEMA.name(),
+        effects::EFFECTS.name(),
+        purge::SCHEMA.name(),
+        purge::PROGRESS.name(),
+    ];
+    check()?;
+    for table in read.list_multimap_tables()? {
+        check()?;
+        if reserved.contains(&table.name()) {
+            return Err(StorageError::InvalidControl(
+                "pending table is a multimap".into(),
+            ));
+        }
+    }
+    let mut names = Vec::new();
+    for table in read.list_tables()? {
+        check()?;
+        names.push(table.name().to_owned());
+    }
+    for (schema, records) in [
+        (effects::SCHEMA, effects::EFFECTS),
+        (purge::SCHEMA, purge::PROGRESS),
+    ] {
+        check()?;
+        let present = [schema.name(), records.name()].map(|name| names.iter().any(|v| v == name));
+        if present == [false, false] {
+            continue;
+        }
+        if present != [true, true] {
+            return Err(StorageError::InvalidControl(
+                "partial current pending schema".into(),
+            ));
+        }
+        let table = read.open_table(schema)?;
+        if table.len()? != 1 || table.get("version")?.is_none_or(|v| v.value() != 1) {
+            return Err(StorageError::InvalidControl(
+                "unsupported current pending schema".into(),
+            ));
+        }
+        if records.name() == effects::EFFECTS.name() {
+            if !read.open_table(records)?.is_empty()? {
+                return Err(StorageError::RecoveryRequired(
+                    "durable effects pending".into(),
+                ));
+            }
+        } else {
+            for row in read.open_table(records)?.iter()? {
+                check()?;
+                let (key, value) = row?;
+                let progress: crate::storage::purge::PurgeProgress =
+                    control::decode(value.value())?;
+                if progress.version != 1
+                    || key.value() != progress.start_receipt.operation_id.as_bytes()
+                {
+                    return Err(StorageError::InvalidControl(
+                        "invalid current purge identity".into(),
+                    ));
+                }
+                // Completed restored ancestry was verified at open and is not
+                // forbidden just because it belongs to an earlier lineage.
+                if progress.stage != crate::storage::purge::PurgeStage::Complete {
+                    if progress.store_id != state.store_id {
+                        return Err(StorageError::InvalidControl(
+                            "active purge has foreign lineage".into(),
+                        ));
+                    }
+                    return Err(StorageError::RecoveryRequired(
+                        "durable purge work pending".into(),
+                    ));
+                }
+            }
+        }
+    }
+    check()
 }

@@ -65,3 +65,45 @@ impl PublicationRegistry {
         self.changed.notify_waiters();
     }
 }
+
+/// Readiness at the barrier's guarded publication point. This does not retain
+/// admission closure and does not grant snapshot/reset permission.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Readiness {
+    pub store_id: uuid::Uuid,
+    pub committed_generation: super::control::Generation,
+    pub ready: bool,
+    pub pending_work: usize,
+    pub derived: Vec<DerivedReadiness>,
+}
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DerivedReadiness {
+    pub name: &'static str,
+    pub applied_generation: super::control::Generation,
+    pub ready: bool,
+}
+impl PublicationState {
+    pub(crate) fn ready_report(&self) -> Result<Readiness, super::StorageError> {
+        if !self.matches_canonical() {
+            return Err(super::StorageError::RecoveryRequired(
+                "barrier found unpublished or stale derived views".into(),
+            ));
+        }
+        Ok(Readiness {
+            store_id: self.canonical.store_id,
+            committed_generation: self.canonical.generation,
+            ready: true,
+            pending_work: 0,
+            derived: ["graph", "vectors", "fts", "entities"]
+                .into_iter()
+                .map(|name| DerivedReadiness {
+                    name,
+                    applied_generation: self.canonical.generation,
+                    ready: true,
+                })
+                .collect(),
+        })
+    }
+}
