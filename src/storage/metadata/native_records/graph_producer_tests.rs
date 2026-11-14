@@ -59,7 +59,7 @@ async fn native_graph_producer_baseline_existing_temporal() {
 async fn native_graph_producer_baseline_actual_adapter() {
     let (f, d, _, id) = setup();
     completion(&f).rebuild_all().await.unwrap();
-    let owner: &dyn crate::api::state::RelationshipGraph = &adapter(&f);
+    let owner: &dyn crate::api::RelationshipGraph = &adapter(&f);
     let outcome = owner.apply_supersedes_edge(id, d.parent).await;
     assert_eq!(outcome.status, crate::model::SupersedesStatus::Applied);
 }
