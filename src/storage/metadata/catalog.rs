@@ -130,8 +130,8 @@ impl MetadataStore {
         })?;
         crate::storage::catalog::boundary("after_metadata_commit").map_err(|source| {
             self.mark_unavailable();
-            StorageError::CommittedEffectsPending {
-                operation_id: receipt.operation_id,
+            StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
                 source: Box::new(source),
             }
         })
