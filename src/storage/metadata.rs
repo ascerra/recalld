@@ -13,6 +13,7 @@ mod insertion;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
 mod observation;
+mod publication;
 pub(crate) mod purge;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
@@ -84,6 +85,7 @@ const NAMESPACE_INDEX: MultimapTableDefinition<u32, &[u8]> =
 pub struct MetadataStore {
     db: Database,
     work_tracker: WorkTracker,
+    view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
     unavailable: std::sync::atomic::AtomicBool,
     purge_pending: std::sync::atomic::AtomicBool,
     pub(crate) canonical_pending: std::sync::atomic::AtomicBool,
@@ -173,6 +175,7 @@ impl MetadataStore {
         let store = Self {
             db,
             work_tracker: WorkTracker::new(store_id),
+            view_publication: std::sync::Arc::new(super::publication::PublicationRegistry::default()),
             unavailable: std::sync::atomic::AtomicBool::new(false),
             purge_pending: std::sync::atomic::AtomicBool::new(false),
             canonical_pending: std::sync::atomic::AtomicBool::new(false),
@@ -244,7 +247,9 @@ impl MetadataStore {
         tx.commit().map_err(|e| {
             self.mark_unavailable();
             StorageError::RedbCommit(e)
-        })
+        })?;
+        self.view_publication.canonical_committed();
+        Ok(())
     }
 }
 

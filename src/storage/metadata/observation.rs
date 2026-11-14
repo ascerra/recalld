@@ -283,6 +283,7 @@ impl MetadataStore {
                     source,
                 }
             })?;
+            self.view_publication.canonical_committed();
         }
         Ok(())
     }

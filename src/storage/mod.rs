@@ -31,6 +31,7 @@ mod maintenance_tests;
 pub mod metadata;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
+pub(crate) mod publication;
 pub mod purge;
 #[cfg(test)]
 mod purge_tests;

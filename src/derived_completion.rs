@@ -7,6 +7,7 @@ use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, NamespaceId};
 use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, VectorIndex, VectorMetadata};
 use crate::storage::work::WorkTicket;
+use crate::storage::publication::{DerivedView, REQUIRED_VIEWS};
 use crate::storage::{RedbStorageEngine, StorageEngine, StorageError, TextRef};
 
 #[derive(Clone)]
@@ -198,15 +199,15 @@ impl DerivedCompletion {
             let result = (|| {
                 storage.resume_pending_purges_with_work(Some(&child))?;
                 storage.ensure_available()?;
-                if !storage.meta_store().needs_effects_rebuild() {
+                let publication = storage.meta_store().publication_state()?;
+                if !storage.meta_store().needs_effects_rebuild() && publication.matches_canonical() {
                     return Ok(());
                 }
                 let pending = storage.meta_store().pending_effects()?;
-                let receipt = pending
-                    .first()
-                    .ok_or_else(|| failed("dirty state without durable effects".into()))?
-                    .receipt
-                    .clone();
+                if storage.meta_store().needs_effects_rebuild() && pending.is_empty() {
+                    return Err(failed("dirty state without durable effects".into()));
+                }
+                let receipt = pending.first().map(|effect| effect.receipt.clone());
                 let result = (|| {
                     // ponytail: O(records + edges) rebuild under the publication locks.
                     // Replace with exact effect application when throughput warrants it.
@@ -214,6 +215,7 @@ impl DerivedCompletion {
                     let mut next_graph = RelationshipGraph::with_capacity(records.len());
                     let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
                     let mut next_entities = EntityIndex::with_capacity(records.len());
+                    storage.meta_store().invalidate_derived_view(DerivedView::Fts);
                     fts.clear().map_err(|e| failed(e.to_string()))?;
                     for (id, record) in &records {
                         let ns = NamespaceId::new(record.namespace_id);
@@ -274,6 +276,11 @@ impl DerivedCompletion {
                     *graph = next_graph;
                     *vectors = next_vectors;
                     *entities = next_entities;
+                    // Every channel above was actually rebuilt from this captured
+                    // canonical state. This is not no-change advancement.
+                    for view in REQUIRED_VIEWS {
+                        storage.meta_store().publish_derived_view(view, publication.canonical)?;
+                    }
                     // Preserve unrelated cached candidates used by legacy temporal
                     // linking. Cache invalidation itself never acquires storage or
                     // graph locks; it is safe to finish its future on this blocking
@@ -290,9 +297,12 @@ impl DerivedCompletion {
                         .meta_store()
                         .acknowledge_rebuilt_effects_with_work(Some(&child))
                 })();
-                result.map_err(|source| StorageError::CommittedMutation {
-                    receipt: Box::new(receipt),
-                    source: Box::new(source),
+                result.map_err(|source| match receipt {
+                    Some(receipt) => StorageError::CommittedMutation {
+                        receipt: Box::new(receipt),
+                        source: Box::new(source),
+                    },
+                    None => source,
                 })
             })();
             storage.meta_store().finish_work(child);

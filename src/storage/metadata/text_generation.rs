@@ -237,6 +237,7 @@ impl MetadataStore {
                 source: e,
             }
         })?;
+        self.view_publication.canonical_committed();
         Ok(receipt)
     }
 }
