@@ -34,6 +34,11 @@ when the captured target previously needed only a strength update. Policy/token
 changes skip stale work; unchanged/exempt/missing-summary cases commit nothing.
 These are internal diagnostics and do not reserve a key or promise a public
 keyed-noop finalization contract.
+Future public/background adapters must never turn a supplied-key skipped
+diagnostic into a durable successful keyed no-op. Otherwise policy/graph state
+A -> B -> retry could execute an operation whose earlier success appeared final.
+Such an adapter needs an explicit typed finalization contract before advertising
+keyed no-op success; it must preserve the current unbound diagnostic otherwise.
 A pass captures each ID once and advances at most one destructive phase.
 
 Phase loss preserves anchors, provenance, access/history, feedback timestamps,
@@ -90,6 +95,11 @@ namespace rows and edges per evaluated record. No scaling/performance claim is
 made. The graph freshness regression changes actual donor feedback and canonical
 fan-out while the target token stays unchanged; native edge-put joins require
 their own producer composition test.
+Pascal retains the later actual background sweep consumer. Its integration must
+consume the existing producer/work ownership APIs, preserve one sampled pass and
+one destructive phase per ID, and keep the keyed-skip boundary above. This PR
+does not register that producer or make the per-record namespace/edge scan a
+performance claim.
 
 Validated evidence: actual migration/native writes, phase boundaries and retained
 payloads, stale feedback/policy/save-edge/no-transition plans, original clock and
