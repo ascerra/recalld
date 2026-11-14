@@ -54,6 +54,17 @@ pub use semantics::{
 pub trait NamespaceResolver: Send + Sync {
     /// Look up a namespace by name, returning its configuration.
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
+    /// Only an actual owned native canonical view can grant this admission.
+    fn check_native_query_profile(
+        &self,
+        _namespace: &NamespaceConfig,
+        _profile: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<()> {
+        Err(SearchError::Unavailable(
+            "native query owner admission unavailable".into(),
+        ))
+    }
+
     /// Resolve canonical by-ID scope without guessing a session default.
     async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
         Err(SearchError::NamespaceNotFound(format!("id {}", id.get())))
@@ -437,6 +448,7 @@ const FTS_ONLY_RATE: f32 = 0.3;
 /// Holds `Arc` references to all subsystems. Cheap to clone, safe to
 /// share across request handlers.
 pub struct QueryEngine {
+    native_query_admission: bool,
     coherent_owner: Option<(
         crate::derived_completion::DerivedCompletion,
         Arc<crate::rif::RifEngine>,
@@ -467,6 +479,11 @@ pub struct QueryEngine {
 }
 
 impl QueryEngine {
+    pub(crate) fn with_native_query_admission(mut self) -> Self {
+        self.native_query_admission = true;
+        self
+    }
+
     pub(crate) fn accept_work(
         &self,
         parent: Option<&crate::storage::work::WorkTicket>,
@@ -524,6 +541,7 @@ impl QueryEngine {
         access_recorder: Arc<dyn AccessRecorder>,
     ) -> Self {
         Self {
+            native_query_admission: false,
             coherent_owner: None,
             clock: Arc::new(crate::time::SystemClock),
             decay_policy: crate::decay::DecayConfig::default(),
@@ -683,8 +701,13 @@ impl QueryEngine {
             _ => {
                 let text = query.text.as_ref().ok_or(SearchError::EmptyQuery)?;
                 let profile = self.embedding_providers.profile();
-                crate::embedding::runtime::check_namespace(&ns_config, profile.as_ref())
-                    .map_err(|e| SearchError::Unavailable(e.to_string()))?;
+                if self.native_query_admission {
+                    self.namespace_resolver
+                        .check_native_query_profile(&ns_config, profile.as_ref())?;
+                } else {
+                    crate::embedding::runtime::check_namespace(&ns_config, profile.as_ref())
+                        .map_err(|e| SearchError::Unavailable(e.to_string()))?;
+                }
                 if self
                     .embedding_providers
                     .dimensions()

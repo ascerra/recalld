@@ -16,6 +16,13 @@ fn failure(code: &str, message: impl ToString, report: Option<&Value>) -> Value 
 
 impl OwnedEvaluator {
     pub(crate) async fn sweep(&self, request_id: u64, deadline: Instant) -> Result<Value, Value> {
+        if self.native_prefix {
+            return Err(failure(
+                "UNSUPPORTED_CONTROL",
+                "native prefix sweep is unavailable",
+                None,
+            ));
+        }
         self.controls
             .sweep(
                 request_id,

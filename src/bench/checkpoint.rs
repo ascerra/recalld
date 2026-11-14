@@ -25,6 +25,10 @@ const CACHE_POLICY: &str = "empty-record-cache-rif-off-autolink-off";
 struct Manifest {
     checkpoint_version: u32,
     track: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    canonical_schema_version: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    logical_hash_contract: Option<String>,
     generation: GenerationRef,
     logical_sha256: String,
     files_sha256: BTreeMap<String, String>,
@@ -156,7 +160,16 @@ impl OwnedEvaluator {
             .await?;
         let manifest = Manifest {
             checkpoint_version: 1,
-            track: TRACK.into(),
+            track: if self.native_prefix {
+                super::native_prefix::TRACK
+            } else {
+                TRACK
+            }
+            .into(),
+            canonical_schema_version: self.native_prefix.then_some(2),
+            logical_hash_contract: self
+                .native_prefix
+                .then(|| super::native_prefix::HASH_CONTRACT.into()),
             generation: stage.generation,
             logical_sha256: digest_array(stage.logical_sha256),
             files_sha256: inventory(&stage.path(), deadline)?,
@@ -182,7 +195,7 @@ impl OwnedEvaluator {
         check(deadline)?;
         let _retained = stage.directory.keep();
         Ok(
-            serde_json::json!({"manifest":path,"sha256":digest(&bytes),"committed":manifest.generation,"logicalHash":manifest.logical_sha256,"track":TRACK}),
+            serde_json::json!({"manifest":path,"sha256":digest(&bytes),"committed":manifest.generation,"logicalHash":manifest.logical_sha256,"track":manifest.track}),
         )
     }
 
@@ -205,9 +218,21 @@ impl OwnedEvaluator {
             "checkpoint manifest digest/size mismatch"
         );
         let manifest: Manifest = serde_json::from_slice(&bytes)?;
+        let native_prefix = manifest.track == super::native_prefix::TRACK;
+        anyhow::ensure!(
+            if native_prefix {
+                manifest.canonical_schema_version == Some(2)
+                    && manifest.logical_hash_contract.as_deref()
+                        == Some(super::native_prefix::HASH_CONTRACT)
+            } else {
+                manifest.canonical_schema_version.is_none()
+                    && manifest.logical_hash_contract.is_none()
+            },
+            "unsupported checkpoint canonical/hash contract"
+        );
         anyhow::ensure!(
             manifest.checkpoint_version == 1
-                && manifest.track == TRACK
+                && (manifest.track == TRACK || native_prefix)
                 && manifest.cache_policy == CACHE_POLICY
                 && manifest.index_policy == "rebuild-all-four-from-validated-canonical-v1",
             "unsupported checkpoint schema/policies"
@@ -293,9 +318,8 @@ impl OwnedEvaluator {
         let snapshot = OfflineSnapshot::open(&canonical)?;
         anyhow::ensure!(
             snapshot.control().generation_ref() == manifest.generation
-                && digest_array(crate::storage::logical_export::isolated_legacy_hash(
-                    &snapshot, deadline
-                )?) == manifest.logical_sha256,
+                && digest_array(checkpoint_hash(&snapshot, native_prefix, deadline)?)
+                    == manifest.logical_sha256,
             "canonical logical generation/hash mismatch"
         );
         drop(snapshot);
@@ -327,18 +351,19 @@ impl OwnedEvaluator {
         let snapshot = OfflineSnapshot::open(&target)?;
         anyhow::ensure!(
             snapshot.control().generation_ref() == manifest.generation
-                && digest_array(crate::storage::logical_export::isolated_legacy_hash(
-                    &snapshot, deadline
-                )?) == manifest.logical_sha256,
+                && digest_array(checkpoint_hash(&snapshot, native_prefix, deadline)?)
+                    == manifest.logical_sha256,
             "clone logical hash mismatch"
         );
         drop(snapshot);
         check(deadline)?;
         crate::storage::engine::rename_new_directory(&target, &destination)?;
         let clock = Arc::new(ManualClock::new(manifest.now_millis));
-        let core = Arc::new(
-            crate::Recalld::with_runtime_sources(config, clock.clone(), Box::new(ids)).await?,
-        );
+        let core = Arc::new(if native_prefix {
+            super::native_prefix::open_core(config, clock.clone(), Box::new(ids)).await?
+        } else {
+            crate::Recalld::with_runtime_sources(config, clock.clone(), Box::new(ids)).await?
+        });
         let controls = FrozenControls::new(core.derived_owner(), clock);
         core.storage()
             .write()
@@ -348,6 +373,7 @@ impl OwnedEvaluator {
             core,
             controls,
             fixture_ancestors: ancestor_roots,
+            native_prefix,
         };
         let cache = evaluator.core.cache().clone();
         let runtime = tokio::runtime::Handle::current();
@@ -372,4 +398,16 @@ impl OwnedEvaluator {
 }
 fn digest_array(bytes: [u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn checkpoint_hash(
+    snapshot: &OfflineSnapshot,
+    native: bool,
+    deadline: Instant,
+) -> Result<[u8; 32], crate::storage::StorageError> {
+    if native {
+        crate::storage::logical_export::isolated_native_hash(snapshot, deadline)
+    } else {
+        crate::storage::logical_export::isolated_legacy_hash(snapshot, deadline)
+    }
 }

@@ -118,8 +118,15 @@ impl RedbStorageEngine {
                 "staged canonical generation mismatch".into(),
             ));
         }
-        let logical_sha256 =
-            crate::storage::logical_export::isolated_legacy_hash(&snapshot, deadline)?;
+        let logical_sha256 = match snapshot.control().control_schema_version {
+            1 => crate::storage::logical_export::isolated_legacy_hash(&snapshot, deadline)?,
+            2 => crate::storage::logical_export::isolated_native_hash(&snapshot, deadline)?,
+            _ => {
+                return Err(StorageError::RecoveryRequired(
+                    "unsupported checkpoint schema".into(),
+                ));
+            }
+        };
         drop(snapshot);
         check(deadline)?;
         self.meta_store

@@ -418,6 +418,25 @@ pub(crate) fn isolated_legacy_hash(
     Ok(hash.hash.finalize().into())
 }
 
+/// Native checkpoint fidelity uses the existing export walker/hash unchanged,
+/// without writing an export envelope or allocating an export identity.
+pub(crate) fn isolated_native_hash(
+    snapshot: &OfflineSnapshot,
+    deadline: std::time::Instant,
+) -> Result<[u8; 32], StorageError> {
+    if snapshot.control().control_schema_version != 2 {
+        return Err(invalid("isolated native hash requires schema 2"));
+    }
+    let mut hash = LogicalHash::new(snapshot.control().generation_ref())?;
+    visit_items(snapshot, |item| {
+        if std::time::Instant::now() >= deadline {
+            return Err(invalid("checkpoint hash deadline"));
+        }
+        hash.item(&item)
+    })?;
+    Ok(hash.hash.finalize().into())
+}
+
 /// Publishes a new export file only after the entire retained-state stream is
 /// written and synced. Existing files are never overwritten.
 pub fn export_store(source: &Path, output: &Path) -> Result<ExportSummary, StorageError> {
