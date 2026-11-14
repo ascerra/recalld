@@ -22,6 +22,24 @@ impl<T> Observed<T> {
         }
     }
 
+    /// Complete the actual owned views only after the payload leases are gone.
+    /// A postcommit publication error retains every original receipt.
+    pub(crate) async fn publish_derived(
+        self,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Self, ObservationError> {
+        if !self.receipts.is_empty() {
+            if let Some(completion) = completion {
+                completion
+                    .complete_with_work(parent)
+                    .await
+                    .map_err(|e| ObservationError::not_ready(self.receipts.clone(), e))?;
+            }
+        }
+        Ok(self)
+    }
+
     pub fn finish<E>(self, admission: Result<(), E>) -> Result<T, E>
     where
         E: From<ObservationError> + std::fmt::Debug,

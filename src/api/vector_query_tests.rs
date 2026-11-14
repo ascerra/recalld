@@ -696,7 +696,10 @@ async fn coherent_call(h: &Harness, mcp: bool, access: bool) -> (bool, String) {
         ));
         let result = crate::mcp::tools::dispatch_tool(&bridge, "recall_memories",
             json!({"query":"payload","depth":0,"limit":10,"recordAccess":access,"includeNeighbors":true})).await;
-        (result.is_error != Some(true), format!("{result:?}"))
+        {
+            let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
+            (result.is_error != Some(true), text.clone())
+        }
     } else {
         let (status, body) = request(
             h,
@@ -820,6 +823,49 @@ async fn coherent_payload_transports_reject_concurrent_forget_and_compaction_bef
                 assert_eq!(state.pending, 0);
                 assert_eq!(state.unresolved, 0);
             }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_postcommit_faults_retain_receipts() {
+    for mcp in [false, true] {
+        for fault in [1, 2] {
+            let h = coherent_harness().await;
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .observation_fault
+                .store(fault, Ordering::SeqCst);
+            let before = h.snapshot();
+            let (ok, body) = coherent_call(&h, mcp, false).await;
+            assert!(ok, "{mcp}/{fault}: {body}");
+            assert!(body.contains("owned résumé"));
+            h.assert_quiet(&before).await;
+            let (ok, body) = coherent_call(&h, mcp, true).await;
+            assert!(!ok, "{mcp}/{fault}: {body}");
+            assert!(!body.contains("owned résumé"));
+            let error: Value = if mcp {
+                let start = body.find("{\"commitState\"").expect(&body);
+                serde_json::Deserializer::from_str(&body[start..])
+                    .into_iter()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+            } else {
+                serde_json::from_str::<Value>(&body).unwrap()["observation"].clone()
+            };
+            assert_eq!(error["commitState"], "committed", "{body}");
+            let receipts: Vec<crate::storage::control::WriteReceipt> =
+                serde_json::from_value(error["receipts"].clone()).unwrap();
+            assert_eq!(receipts.len(), 1);
+            let crate::storage::control::MutationOutcome::ExposuresRecorded { accesses } =
+                &receipts[0].outcome
+            else {
+                panic!("{body}");
+            };
+            assert!(!accesses.is_empty());
         }
     }
 }

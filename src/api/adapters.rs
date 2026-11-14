@@ -1273,7 +1273,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         namespace: Option<&str>,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
-        let outcome = crate::decay::storage_adapter::reinforce_with_work(
+        let outcome = crate::decay::storage_adapter::reinforce_with_completion(
             self.storage.clone(),
             self.cache.clone(),
             id,
@@ -1282,6 +1282,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
             self.clock.now_millis(),
             namespace.map(str::to_owned),
             parent,
+            self.completion.as_ref(),
         )
         .await;
         let plan = outcome?;

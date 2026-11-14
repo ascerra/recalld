@@ -924,6 +924,17 @@ pub struct McpStorageAdapter {
 }
 
 impl McpStorageAdapter {
+    fn completion(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+    }
+
     /// Create a new storage adapter from the given subsystems.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1569,7 +1580,10 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 } else {
                     Vec::new()
                 };
-            Observed { value, receipts }.finish(check_read_admission(&self.storage, stamp).await)
+            Observed { value, receipts }
+                .publish_derived(Some(&self.completion()), Some(&accepted))
+                .await?
+                .finish(check_read_admission(&self.storage, stamp).await)
         }
         .await;
         crate::storage::work::finish_work(&self.storage, accepted);
@@ -1646,7 +1660,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         let accepted =
             crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
         let result = async {
-            let outcome = crate::decay::storage_adapter::reinforce_with_work(
+            let outcome = crate::decay::storage_adapter::reinforce_with_completion(
                 self.storage.clone(),
                 self.cache.clone(),
                 id,
@@ -1655,6 +1669,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 self.clock.now_millis(),
                 namespace.map(str::to_owned),
                 Some(&accepted),
+                Some(&self.completion()),
             )
             .await;
             let plan = outcome.map_err(|e| {

@@ -46,6 +46,31 @@ pub(crate) async fn reinforce_with_work(
     expected_namespace: Option<String>,
     parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<super::lifecycle::FeedbackPlan, super::lifecycle::LifecycleError> {
+    reinforce_with_completion(
+        storage,
+        cache,
+        id,
+        quality,
+        global_multiplier,
+        now_millis,
+        expected_namespace,
+        parent,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn reinforce_with_completion(
+    storage: std::sync::Arc<std::sync::RwLock<crate::storage::RedbStorageEngine>>,
+    cache: std::sync::Arc<crate::cache::CacheManager>,
+    id: MemoryId,
+    quality: u8,
+    global_multiplier: f64,
+    now_millis: i64,
+    expected_namespace: Option<String>,
+    parent: Option<&crate::storage::work::WorkTicket>,
+    completion: Option<&crate::derived_completion::DerivedCompletion>,
+) -> Result<super::lifecycle::FeedbackPlan, super::lifecycle::LifecycleError> {
     use super::lifecycle::{LifecycleError, plan_feedback, resolve_policy};
     let work = crate::storage::work::accept_work(&storage, parent)
         .map_err(|e| LifecycleError::Storage(e.to_string()))?;
@@ -115,12 +140,15 @@ pub(crate) async fn reinforce_with_work(
                         vec![receipt.clone()],
                     )
                 })?;
-            Ok(super::lifecycle::FeedbackPlan {
-                timestamp: current.last_accessed_at,
-                stability: current.stability,
-                strength: current.strength,
-                phase: current.phase,
-                is_permastore: current.is_permastore != 0,
+            Ok(super::observation::Observed {
+                receipts: vec![receipt],
+                value: super::lifecycle::FeedbackPlan {
+                    timestamp: current.last_accessed_at,
+                    stability: current.stability,
+                    strength: current.strength,
+                    phase: current.phase,
+                    is_permastore: current.is_permastore != 0,
+                },
             })
         })();
         storage.meta_store().finish_work(child);
@@ -130,6 +158,14 @@ pub(crate) async fn reinforce_with_work(
     .map_err(|e| {
         LifecycleError::Observation(super::observation::ObservationError::worker_failed(e))
     })?;
+    let result = match result {
+        Ok(observed) => observed
+            .publish_derived(completion, Some(&work))
+            .await
+            .map(|v| v.value)
+            .map_err(LifecycleError::Observation),
+        Err(error) => Err(error),
+    };
     crate::storage::work::finish_work(&storage, work);
     result
 }

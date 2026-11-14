@@ -1962,9 +1962,26 @@ impl QueryEngine {
         if accesses.is_empty() {
             return Ok(Vec::new());
         }
-        self.access_recorder
-            .record_access_batch_with_work(accesses, Some(&scope), parent)
-            .await
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let receipts = self
+                .access_recorder
+                .record_access_batch_with_work(accesses, Some(&scope), work.as_ref())
+                .await?;
+            let observed = Observed {
+                value: (),
+                receipts,
+            }
+            .publish_derived(
+                self.coherent_owner.as_ref().map(|(owner, _)| owner),
+                work.as_ref(),
+            )
+            .await?;
+            Ok(observed.receipts)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 }
 
