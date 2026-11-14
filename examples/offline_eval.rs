@@ -313,6 +313,7 @@ async fn main() -> Result<()> {
             access_history: vec![],
             text_offset: 0,
             text_length: 0,
+            schema: None,
         };
         storage.insert_memory(id(i), namespace(i), &mut record, v, None)?;
         fts.add(namespace(i), id(i), &record.summary, None, &[])?;
