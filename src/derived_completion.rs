@@ -1,9 +1,9 @@
 //! Online completion of committed effects. Lock order is graph -> indexes ->
 //! storage; never hold storage while awaiting a derived lock.
-mod native_graph;
-mod native_store;
 mod native_decay;
+mod native_graph;
 mod native_purge;
+mod native_store;
 
 use std::sync::{Arc, RwLock};
 

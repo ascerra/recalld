@@ -798,10 +798,10 @@ mod store;
 #[path = "store_batch_tests.rs"]
 mod store_batches;
 
-#[path = "store_producer_tests.rs"]
-mod store_producers;
 #[path = "mixed_history_tests.rs"]
 mod mixed_history;
+#[path = "store_producer_tests.rs"]
+mod store_producers;
 
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
