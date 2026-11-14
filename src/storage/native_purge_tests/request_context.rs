@@ -283,12 +283,14 @@ fn native_context_genuine_before_four_cases_reopen_fork_unchanged_receipts() {
                 serde_json::from_slice(&std::fs::read(case.join("case.json")).unwrap()).unwrap();
             let p: PurgeProgress = serde_json::from_value(data["progress"].clone()).unwrap();
             for stage in ["started", "native", "forked"] {
-                let frozen = bytes(&case.join(stage));
-                validation::preflight_native(&case.join(stage)).unwrap();
-                assert_eq!(bytes(&case.join(stage)), frozen);
+                // Keep genuine BEFORE artifacts read-only; the existing vector
+                // inspector opens a writable handle even though it changes no bytes.
                 let root = tempfile::tempdir().unwrap();
                 let copy = root.path().join("store");
                 copy_tree(&case.join(stage), &copy);
+                let frozen = bytes(&copy);
+                validation::preflight_native(&copy).unwrap();
+                assert_eq!(bytes(&copy), frozen);
                 let s = open(&copy);
                 drop(s);
                 assert_eq!(raw_start(&copy, &p), raw);
