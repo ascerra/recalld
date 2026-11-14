@@ -138,6 +138,12 @@ class ManifestInputTests(unittest.TestCase):
         self.assertEqual(manifest["evaluatorLabels"]["sha256"], runner["hashlib"].sha256(evaluator).hexdigest())
         self.assertEqual(manifest["dataset"]["datasetRevision"], manifest["actorInputs"]["sha256"])
         self.assertEqual(len(json.loads(actor)["sources"]), 100)
+        self.assertEqual(manifest["track"], "manifest-internal-diagnostic-v2")
+        self.assertEqual(manifest["manifestVersion"], 1)
+        self.assertEqual(manifest["scoring"]["profile"], "synthetic-unique-source-v1")
+        self.assertEqual(labels["relevant"]["query10"], [])
+        self.assertNotIn("query20", labels["relevant"])
+        self.assertEqual(labels["relevant"]["query30"], ["unit-000030", "unit-000099"])
         self.assertNotIn("manifestSha256", manifest)
         self.assertFalse(manifest["capabilities"]["reset"])
         self.assertIsNone(manifest["versions"]["canonicalSchemaVersion"])
@@ -149,6 +155,13 @@ class ManifestInputTests(unittest.TestCase):
                                  "--cache", "/does-not-exist"], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--track", result.stderr)
+        self.assertNotIn("Artifacts:", result.stdout)
+
+    def test_old_explicit_track_is_rejected_before_scratch(self):
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("offline-evaluation.py")),
+                                 "--track", "manifest-internal-diagnostic-v1", "--cache", "/does-not-exist"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("Artifacts:", result.stdout)
 
     def test_bad_plan_rejected_before_any_runner_side_effect(self):

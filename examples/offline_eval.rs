@@ -7,6 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     io::Write,
+    io::{BufRead, BufReader},
     path::PathBuf,
     sync::Arc,
     time::Instant,
@@ -94,10 +95,14 @@ fn percentiles(values: &[f64]) -> Value {
 }
 
 // Source IDs are evaluator-only. Deduplicate at first occurrence before DCG.
-fn evidence_metrics(relevant: &[usize], retained: &[usize], retrieved: &[usize]) -> Value {
+fn evidence_metrics(relevant: Option<&[usize]>, retained: &[usize], retrieved: &[usize]) -> Value {
+    let Some(relevant) = relevant else {
+        return json!({"scored":false,"annotationStatus":"unknown","reason":"missing_annotations",
+            "annotatedSourceUnits":null});
+    };
     let gold: BTreeSet<_> = relevant.iter().copied().collect();
     if gold.is_empty() {
-        return json!({"scored": false, "reason": "missing_or_empty_annotations"});
+        return json!({"scored":false,"annotationStatus":"zero_label","reason":"zero_annotated_sources","annotatedSourceUnits":0});
     }
     let retained: BTreeSet<_> = retained.iter().copied().collect();
     let mut seen = BTreeSet::new();
@@ -118,12 +123,118 @@ fn evidence_metrics(relevant: &[usize], retained: &[usize], retrieved: &[usize])
     let ideal: f64 = (0..gold.len().min(10))
         .map(|i| 1.0 / ((i + 2) as f64).log2())
         .sum();
-    json!({"scored": true, "annotatedSourceUnits": gold.len(),
+    json!({"scored": true, "annotationStatus":"scored", "annotatedSourceUnits": gold.len(),
+        "retrievedUniqueSourceUnits":ranked.len(),
         "extractionEvidenceRetention": gold.intersection(&retained).count() as f64 / gold.len() as f64,
         "retrievalRecallAt5": recall(5), "retrievalRecallAt10": recall(10),
         "retrievalRecallAt20": recall(20), "allRequiredEvidence": recall(usize::MAX) == 1.0,
         "binarySourceNdcgAt10": dcg / ideal,
         "propositionPreservation": "not measured", "answerQuality": "not measured"})
+}
+
+// Consume the append-only source ledger, including partial attempts on failure.
+fn turn_coverage(reader: impl BufRead, eligible: usize) -> Result<Value> {
+    let mut counts: BTreeMap<&str, usize> = [
+        "seen",
+        "attempted",
+        "accepted",
+        "no_op",
+        "rejected",
+        "truncated",
+    ]
+    .into_iter()
+    .map(|status| (status, 0))
+    .collect();
+    let mut states = BTreeMap::<String, String>::new();
+    let mut events = 0;
+    for line in reader.lines() {
+        let event: Value = serde_json::from_str(&line?)?;
+        let id = event["sourceId"]
+            .as_str()
+            .context("missing source identity")?;
+        let status = event["status"].as_str().context("missing status")?;
+        ensure!(
+            event["reason"].as_str().is_some_and(|r| !r.is_empty()),
+            "missing reason"
+        );
+        let prior = states.get(id).map(String::as_str);
+        ensure!(
+            matches!(
+                (prior, status),
+                (None, "seen")
+                    | (Some("seen"), "attempted" | "no_op" | "truncated")
+                    | (
+                        Some("attempted"),
+                        "accepted" | "rejected" | "no_op" | "truncated"
+                    )
+            ),
+            "invalid source event transition"
+        );
+        *counts.get_mut(status).context("unknown source status")? += 1;
+        states.insert(id.to_owned(), status.to_owned());
+        events += 1;
+    }
+    ensure!(
+        counts["seen"] <= eligible,
+        "more sources seen than eligible"
+    );
+    let processed = ["accepted", "no_op", "rejected", "truncated"]
+        .iter()
+        .map(|s| counts[s])
+        .sum::<usize>();
+    let ratio = |n: usize| {
+        if eligible == 0 {
+            Value::Null
+        } else {
+            json!(n as f64 / eligible as f64)
+        }
+    };
+    Ok(
+        json!({"ledgerVersion":1,"countUnit":"unique-source-turn","eligible":eligible.to_string(),
+        "eventCount":events.to_string(),"statuses":counts.iter().map(|(k,v)| (*k,v.to_string())).collect::<BTreeMap<_,_>>(),
+        "processed":processed.to_string(),"pending":(counts["seen"]-processed).to_string(),
+        "unseen":(eligible-counts["seen"]).to_string(),"processedCoverage":ratio(processed),
+        "acceptedMemoryCoverage":ratio(counts["accepted"]),"propositionPreservation":"not measured"}),
+    )
+}
+
+fn scoring_summary(metrics: &[Value]) -> Value {
+    let scored: Vec<_> = metrics.iter().filter(|m| m["scored"] == true).collect();
+    let count = |status: &str| {
+        metrics
+            .iter()
+            .filter(|m| m["annotationStatus"] == status)
+            .count()
+            .to_string()
+    };
+    let means: BTreeMap<_, _> = [
+        "extractionEvidenceRetention",
+        "retrievalRecallAt5",
+        "retrievalRecallAt10",
+        "retrievalRecallAt20",
+        "binarySourceNdcgAt10",
+    ]
+    .into_iter()
+    .map(|name| {
+        let mean = if scored.is_empty() {
+            Value::Null
+        } else {
+            json!(
+                scored
+                    .iter()
+                    .map(|m| m[name].as_f64().unwrap())
+                    .sum::<f64>()
+                    / scored.len() as f64
+            )
+        };
+        (name, mean)
+    })
+    .collect();
+    json!({"profile":"synthetic-unique-source-v1","denominatorUnit":"measured-query-event",
+        "queryEvents":metrics.len().to_string(),"scored":count("scored"),"zeroLabelUnscored":count("zero_label"),
+        "unknownAnnotations":count("unknown"),"means":means,"allRequiredEvidenceRate": if scored.is_empty() { Value::Null } else {
+            json!(scored.iter().filter(|m| m["allRequiredEvidence"] == true).count() as f64 / scored.len() as f64)
+        },"semanticQualityClaim":false})
 }
 
 struct ReplayEmbeddings {
@@ -187,7 +298,7 @@ async fn main() -> Result<()> {
     )?;
 
     let mut mappings = File::create(out.join("source-mappings.jsonl"))?;
-    let source_lookup: BTreeMap<_, _> = (0..args.records).map(|i| (id(i), i)).collect();
+    let mut source_lookup = BTreeMap::new();
     write_json(
         out.join("actor-inputs.json"),
         &json!({"sources":contract.sources}),
@@ -313,10 +424,18 @@ async fn main() -> Result<()> {
                 writeln!(actor_trace,"{}",contract.trace(&episode,&format!("insert:{i}"),
                     json!({"kind":"canonical-internal-insert","summary":contract.sources[i].summary}),
                     json!({"status":"error","error":error.to_string()})))?;
+                write_json(
+                    out.join("evaluator/turn-coverage.json"),
+                    &turn_coverage(
+                        BufReader::new(File::open(out.join("evaluator/source-events.jsonl"))?),
+                        args.records,
+                    )?,
+                )?;
                 return Err(error);
             }
         };
         writeln!(mappings, "{}", contract.mapping(i, id(i)))?;
+        source_lookup.insert(id(i), i);
         writeln!(
             source_events,
             "{}",
@@ -340,6 +459,11 @@ async fn main() -> Result<()> {
                 "publication": "canonical committed; startup rebuild follows"})
         )?;
     }
+    let coverage = turn_coverage(
+        BufReader::new(File::open(out.join("evaluator/source-events.jsonl"))?),
+        args.records,
+    )?;
+    write_json(out.join("evaluator/turn-coverage.json"), &coverage)?;
     storage.sync()?;
     drop(storage);
     let system = support::open_ready(store_dir.path(), args.dimensions, TIME).await?;
@@ -441,7 +565,8 @@ async fn main() -> Result<()> {
         "error":miss_error,"fallback":false}),
     )?;
 
-    let retained: Vec<_> = (0..args.records).collect();
+    let retained: Vec<_> = source_lookup.values().copied().collect();
+    let mut scored_events = Vec::new();
     for hybrid in [false, true] {
         let cell = if hybrid {
             "internal-engine-hybrid"
@@ -539,6 +664,12 @@ async fn main() -> Result<()> {
                             .context("unmapped returned memory")
                     })
                     .collect::<Result<_>>()?;
+                let metrics = evidence_metrics(
+                    contract.relevant_ordinals(&format!("query{q}")).as_deref(),
+                    &retained,
+                    &sources,
+                );
+                scored_events.push(metrics.clone());
                 let mut timing = serde_json::to_value(
                     response.timings.as_ref().context("missing stage timings")?,
                 )?;
@@ -556,14 +687,15 @@ async fn main() -> Result<()> {
                     json!({"diagnosticTraceVersion": 1, "cell": cell, "step": step - args.warmup,
                     "querySource": q, "resultIds": ids, "stageUs": timing, "responseBytes": encoded.len(),
                     "totalMatchesCandidateCount": response.total_matches,
-                    "metrics": evidence_metrics(&contract.relevant_ordinals(&format!("query{q}"))?, &retained, &sources)})
+                    "metrics": metrics})
                 )?;
                 writeln!(
                     evaluator_trace,
                     "{}",
                     json!({"traceSchemaVersion":1,"episodeId":episode,
-                    "stepId":format!("{cell}:{step}"),"metrics":evidence_metrics(
-                        &contract.relevant_ordinals(&format!("query{q}"))?,&retained,&sources)})
+                    "stepId":format!("{cell}:{step}"),"queryId":format!("query{q}"),
+                    "retrievedSourceIds":sources.iter().map(|i| &contract.sources[*i].source_id).collect::<Vec<_>>(),
+                    "metrics":metrics})
                 )?;
                 replay.push(json!({"cell": cell, "query": q, "results": response.results}));
             }
@@ -571,6 +703,10 @@ async fn main() -> Result<()> {
         summaries.push(json!({"cell": cell, "attempted": args.samples, "completed": args.samples, "failed": 0,
             "stageUs": stages.iter().map(|(k,v)| (k.clone(), percentiles(v))).collect::<BTreeMap<_,_>>() }));
     }
+    write_json(
+        out.join("evaluator/scoring-summary.json"),
+        &scoring_summary(&scored_events),
+    )?;
     let after = record_state(&storage.read().unwrap())?;
     ensure!(before == after, "diagnostic queries mutated stored records");
     write_json(out.join("state-after.json"), &after)?;
@@ -596,8 +732,7 @@ async fn main() -> Result<()> {
         "clock": "ManualClock for lifecycle only; operation/store UUIDs remain random",
         "identity": "explicit caller-supplied canonical memory IDs; not whole-store deterministic replay",
         "extraction": {"track": "raw-synthetic-unit", "sourceUnits": args.records,
-            "attempted": args.records, "accepted": args.records, "rejected": 0,
-            "sourceUnitCoverage": 1.0, "propositionPreservation": "not measured"},
+            "turnCoverage":coverage, "propositionPreservation": "not measured"},
         "cells": summaries, "unmeasured": ["transport", "liveEmbedding", "lockWaitHold", "scanCounters",
             "receiptsLedgerReadiness", "answerQuality", "groupedConfidenceIntervals", "sustainableThroughput"]}),
     )?;
@@ -614,16 +749,104 @@ mod tests {
             percentiles(&(1..=100).map(f64::from).collect::<Vec<_>>())["p95"],
             95.0
         );
-        assert_eq!(evidence_metrics(&[], &[], &[])["scored"], false);
-        assert_eq!(evidence_metrics(&[1], &[1], &[])["retrievalRecallAt5"], 0.0);
-        let partial = evidence_metrics(&[1, 2], &[1], &[1, 1, 3]);
+        assert_eq!(evidence_metrics(Some(&[]), &[], &[])["scored"], false);
+        assert_eq!(
+            evidence_metrics(Some(&[1]), &[1], &[])["retrievalRecallAt5"],
+            0.0
+        );
+        let partial = evidence_metrics(Some(&[1, 2]), &[1], &[1, 1, 3]);
         assert_eq!(partial["extractionEvidenceRetention"], 0.5);
         assert_eq!(partial["retrievalRecallAt5"], 0.5);
         assert_eq!(partial["allRequiredEvidence"], false);
-        let perfect = evidence_metrics(&[1, 2], &[1, 2], &[1, 1, 2]);
+        let perfect = evidence_metrics(Some(&[1, 2]), &[1, 2], &[1, 1, 2]);
         assert_eq!(perfect["binarySourceNdcgAt10"], 1.0);
         assert_eq!(perfect["allRequiredEvidence"], true);
     }
+    #[test]
+    fn source_scorer_hand_calculated_cases_and_denominators() {
+        let unknown = evidence_metrics(None, &[1], &[1]);
+        let zero = evidence_metrics(Some(&[]), &[1], &[1]);
+        assert_eq!(unknown["annotationStatus"], "unknown");
+        assert_eq!(zero["annotationStatus"], "zero_label");
+        assert!(unknown.get("retrievalRecallAt5").is_none());
+        assert!(zero.get("binarySourceNdcgAt10").is_none());
+        let empty = evidence_metrics(Some(&[1, 2]), &[1], &[]);
+        assert_eq!(empty["retrievalRecallAt5"], 0.0);
+        assert_eq!(empty["binarySourceNdcgAt10"], 0.0);
+        assert_eq!(empty["allRequiredEvidence"], false);
+        let partial = evidence_metrics(Some(&[1, 2]), &[1], &[9, 1, 1]);
+        // DCG = 1/log2(3); ideal = 1 + 1/log2(3), hand-calculated binary nDCG.
+        assert!(
+            (partial["binarySourceNdcgAt10"].as_f64().unwrap() - 0.38685280723454163).abs() < 1e-12
+        );
+        assert_eq!(partial["retrievalRecallAt5"], 0.5);
+        assert_eq!(partial["extractionEvidenceRetention"], 0.5);
+        let perfect = evidence_metrics(Some(&[1, 1, 2]), &[1, 1, 2], &[1, 1, 2, 2]);
+        assert_eq!(perfect["annotatedSourceUnits"], 2);
+        assert_eq!(perfect["retrievedUniqueSourceUnits"], 2);
+        assert_eq!(perfect["binarySourceNdcgAt10"], 1.0);
+        assert_eq!(perfect["retrievalRecallAt20"], 1.0);
+        let cut = evidence_metrics(Some(&[1]), &[], &[9, 9, 8, 7, 6, 5, 1]);
+        assert_eq!(cut["retrievalRecallAt5"], 0.0);
+        assert_eq!(cut["retrievalRecallAt10"], 1.0);
+        assert_eq!(cut["allRequiredEvidence"], true);
+        let summary = scoring_summary(&[unknown.clone(), zero.clone(), empty, partial, perfect]);
+        assert_eq!(summary["queryEvents"], "5");
+        assert_eq!(summary["scored"], "3");
+        assert_eq!(summary["unknownAnnotations"], "1");
+        assert_eq!(summary["zeroLabelUnscored"], "1");
+        assert_eq!(summary["means"]["retrievalRecallAt5"], 0.5);
+        assert_eq!(
+            scoring_summary(&[unknown, zero])["means"]["retrievalRecallAt5"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn ledger_counts_no_memory_rejection_truncation_and_partial_attempts() {
+        let rows = [
+            ("a", "seen"),
+            ("a", "attempted"),
+            ("a", "accepted"),
+            ("b", "seen"),
+            ("b", "no_op"),
+            ("c", "seen"),
+            ("c", "attempted"),
+            ("c", "rejected"),
+            ("d", "seen"),
+            ("d", "truncated"),
+            ("e", "seen"),
+            ("e", "attempted"),
+        ];
+        let lines = rows
+            .iter()
+            .map(|(id, status)| {
+                json!({"sourceId":id,"status":status,"reason":"synthetic-test"}).to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let summary = turn_coverage(lines.as_bytes(), 6).unwrap();
+        assert_eq!(summary["eventCount"], "12");
+        assert_eq!(summary["statuses"]["seen"], "5");
+        assert_eq!(summary["statuses"]["accepted"], "1");
+        assert_eq!(summary["statuses"]["no_op"], "1");
+        assert_eq!(summary["statuses"]["rejected"], "1");
+        assert_eq!(summary["statuses"]["truncated"], "1");
+        assert_eq!(summary["pending"], "1");
+        assert_eq!(summary["unseen"], "1");
+        assert_eq!(summary["processedCoverage"], 4.0 / 6.0);
+        assert_eq!(summary["acceptedMemoryCoverage"], 1.0 / 6.0);
+        let invalid = format!(
+            "{lines}\n{}",
+            json!({"sourceId":"a","status":"accepted","reason":"duplicate"})
+        );
+        assert!(turn_coverage(invalid.as_bytes(), 6).is_err());
+        assert_eq!(
+            turn_coverage("".as_bytes(), 0).unwrap()["processedCoverage"],
+            Value::Null
+        );
+    }
+
     #[test]
     fn fixture_is_seeded_normalized_and_oracle_filters() {
         let a = vectors(7, 100, 16);

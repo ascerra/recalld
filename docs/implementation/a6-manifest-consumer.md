@@ -1,6 +1,6 @@
 # Manifest-consuming internal diagnostic
 
-Parent: frozen PR75 `8ecdd5a`; no public-runner, tracker or coherent-core ancestry is imported. This is the independently named `manifest-internal-diagnostic-v1` track. It consumes the real canonical insertion/startup and QueryEngine paths already used by PR75. It is not the A6 public actor, a dataset adapter/scorer implementation, a semantic-quality result, or deterministic canonical reset.
+Manifest foundation: frozen PR75 `8ecdd5a`, PR84 runtime `6ce05ab` / seal `586f02e`; no public-runner, tracker or coherent-core ancestry is imported. This is the independently named `manifest-internal-diagnostic-v2` track. It consumes the real canonical insertion/startup and QueryEngine paths already used by PR75. It is not the A6 public actor, an upstream dataset adapter/scorer implementation, a semantic-quality result, or deterministic canonical reset.
 
 `scripts/offline-evaluation.py` creates an immutable `manifest.json`, `actor-inputs.json` and evaluator-only `evaluator-labels.json` from its explicit synthetic arguments and actual source/image hashes. The mutable supervisor status/output hashes move to `diagnostic-run.json`: the input manifest never hashes itself. Synthetic revision means the SHA-256 of the actual actor artifact, not an invented upstream revision. External datasets, licenses, model revisions and tokenizers are not used or inferred. All units belong to one declared regression group, with no training/split claim.
 
@@ -9,7 +9,7 @@ The actual example requires `--manifest PATH --out NEW_DIRECTORY`. CLI corpus ov
 Run the real supervisor from this checkout:
 
 ```sh
-python3 scripts/offline-evaluation.py --track manifest-internal-diagnostic-v1 \
+python3 scripts/offline-evaluation.py --track manifest-internal-diagnostic-v2 \
   --cache /tmp/recalld-PRIOR-SCRATCH/cargo \
   --build-cache /tmp/recalld-PRIOR-SCRATCH/target \
   --records 100 --dimensions 16 --k 5 --warmup 1 --samples 3 --runs 3 --seed 7
@@ -25,4 +25,14 @@ The manifest pins independent harness versions at 1 and the actual **legacy inte
 
 The exact config/manifest/trace interface is confined to `examples/support/evaluation_manifest.rs`, consumed by `examples/offline_eval.rs`; it adds no production owner or schema framework. Halley owns future coherent-core/barrier/reset/clock/RNG capabilities. Enabling one requires actual integration and a revised supported manifest capability contract, not toggling a claim in the output.
 
-Validation: runtime `6ce05ab` passed 851 library, 2 CLI and 5 example tests, 10 Python checks, format/Clippy, 41 actual-executable preflight rejections, and three real 100-record processes. A separate evaluator-label perturbation kept all 117 actor actions and 10 vector associations unchanged while six evaluator Recall@5 values changed from 1 to 0. The environment hash and replay keys changed as expected; cache identity is distinct from actor behavior. The actual QueryEngine miss errors without fallback. See [retained report and failures](../../benchmarks/a6-manifest-consumer/REPORT.md) for exact source/binary/input hashes, counts, raw receipts and limitations.
+Frozen v1 foundation validation: runtime `6ce05ab` passed 851 library, 2 CLI and 5 example tests, 10 Python checks, format/Clippy, 41 actual-executable preflight rejections, and three real 100-record processes. A separate evaluator-label perturbation kept all 117 actor actions and 10 vector associations unchanged while six evaluator Recall@5 values changed from 1 to 0. The environment hash and replay keys changed as expected; cache identity is distinct from actor behavior. The actual QueryEngine miss errors without fallback. See [retained report and failures](../../benchmarks/a6-manifest-consumer/REPORT.md) for exact source/binary/input hashes, counts, raw receipts and limitations.
+
+The v2 internal track adds `scoring.profile: synthetic-unique-source-v1`, consumed by the actual evaluator. The independent manifest/source-mapping/trace versions remain 1, legacy canonical schema remains absent, and public/coherent/reset capabilities remain unavailable. V1 invocations/manifests are rejected by this checkout; reproduce the frozen v1 study at PR84 `586f02e`.
+
+Missing query annotations are `unknown`; present empty labels are `zero_label`/unscored. Neither enters metric denominators. For annotated queries, map committed UUIDs to supporting source IDs, deduplicate at first occurrence before cutoffs, then compute Recall@5/10/20, binary-source nDCG@10 and all-required over the complete returned unique-source list. These are binary synthetic units, never official BEIR or upstream answer metrics. Returned depth is the explicit plan k; a requested cutoff above that depth does not invent additional candidates.
+
+`evaluator/scoring-summary.json` counts measured query events (both internal engine cells, excluding warmups), separately publishes scored/zero/unknown counts, and averages only scored events. This is not an independent-query statistical estimate. `evaluator/trace.jsonl` records query ID and actual mapped result sources for an independent verifier. Retention uses successful commit mappings, never planned insertions.
+
+`evaluator/turn-coverage.json` consumes append-only source events and counts seen/attempted/accepted/no_op/rejected/truncated, pending and unseen with explicit decimal counters and coverage denominators. It is also emitted on insertion rejection. The raw-unit runner produces accepted events on success; no_op/truncated accounting is exercised by hand-written ledger goldens, not claimed as an extraction runtime. Original receipt ledger remains intact.
+
+The generated evaluator sidecar deliberately marks query10 empty, query20 missing and query30 partially retrievable (self plus a distractor-namespace source); other queries have self labels. Actor bytes are unchanged. Use `--warmup 1 --samples 4` to exercise empty, unknown, partial and perfect measured cases in both engine cells. Current child validation is pending.

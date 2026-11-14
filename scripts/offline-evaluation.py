@@ -149,11 +149,15 @@ def evaluation_inputs(args, diagnostic):
     evaluator = {"adapterVersion": 1, "annotationUnit": "synthetic-unit",
                  "relevant": {f"query{i}": [f"unit-{i:06}"] for i in range(0, args.records, 10)},
                  "labelCanary": "EVALUATOR_ONLY_CANARY_NOT_ACTOR_INPUT"}
+    # Deliberately synthetic annotation coverage cases; actor artifact stays unchanged.
+    evaluator["relevant"]["query10"] = []
+    evaluator["relevant"].pop("query20")
+    evaluator["relevant"]["query30"] = ["unit-000030", f"unit-{args.records-1:06}"]
     encode = lambda v: (json.dumps(v, indent=2, sort_keys=True) + "\n").encode()
     actor_bytes, evaluator_bytes = encode(actor), encode(evaluator)
     actor_hash = hashlib.sha256(actor_bytes).hexdigest()
     manifest = {"manifestVersion": 1, "sourceMappingVersion": 1, "traceSchemaVersion": 1,
-        "track": "manifest-internal-diagnostic-v1",
+        "track": "manifest-internal-diagnostic-v2",
         **{key: diagnostic[key] for key in ("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
                                            "lockfileSha256", "containerImageId", "limits")},
         "sourceTreeSha256": hashlib.sha256(json.dumps(diagnostic["sourceFilesSha256"], sort_keys=True,
@@ -172,6 +176,10 @@ def evaluation_inputs(args, diagnostic):
         "dataset": {"kind": "generated-synthetic", "upstreamUrl": None, "upstreamRevision": None,
             "thirdPartyLicense": None, "intendedUse": "contract-diagnostic-only", "adapterVersion": 1,
             "groupSplit": "one-synthetic-regression-group; no training", "datasetRevision": actor_hash},
+        "scoring": {"profile": "synthetic-unique-source-v1", "annotationUnit": "synthetic-unit",
+            "deduplication": "first-source-occurrence-before-cutoff", "relevance": "binary",
+            "recallCutoffs": [5, 10, 20], "ndcgCutoff": 10, "allRequired": "all-returned-unique-sources",
+            "emptyLabels": "unscored", "missingAnnotations": "unknown", "aggregation": "measured-query-events-only"},
         "embedding": {"generator": "splitmix64-f32-l2-v1", "dimensions": args.dimensions,
             "modelRevision": None, "promptSha256": None, "tokenizerRevision": None,
             "role": "actor-query", "cacheMiss": "error", "externalCalls": False},
@@ -179,6 +187,48 @@ def evaluation_inputs(args, diagnostic):
         "actorInputs": {"file": "actor-inputs.json", "sha256": actor_hash},
         "evaluatorLabels": {"file": "evaluator-labels.json", "sha256": hashlib.sha256(evaluator_bytes).hexdigest()}}
     return manifest, actor_bytes, evaluator_bytes
+
+
+def verify_scoring_outputs(directory, evaluator):
+    """Independently recompute metrics from actual actor UUID results and committed mappings."""
+    import math
+    read_rows = lambda name: [json.loads(line) for line in (directory / name).read_text().splitlines()]
+    mappings = {row["memoryId"]: row["sourceIds"] for row in read_rows("source-mappings.jsonl")}
+    actor = {row["stepId"]: row for row in read_rows("trace.jsonl")}
+    metrics = read_rows("evaluator/trace.jsonl")
+    statuses = {"scored": 0, "zero_label": 0, "unknown": 0}
+    scores = []
+    for row in metrics:
+        action = actor[row["stepId"]]
+        assert action["outcome"]["warmup"] is False
+        assert action["action"]["request"]["text"] == row["queryId"]
+        retrieved = [source for result in action["outcome"]["results"] for source in mappings[result["memoryId"]]]
+        assert retrieved == row["retrievedSourceIds"]
+        labels = evaluator["relevant"].get(row["queryId"])
+        status = "unknown" if labels is None else "zero_label" if not labels else "scored"
+        result = row["metrics"]
+        assert result["annotationStatus"] == status
+        statuses[status] += 1
+        if status != "scored":
+            assert result["scored"] is False and "retrievalRecallAt5" not in result
+            continue
+        gold, ranked = set(labels), list(dict.fromkeys(retrieved))
+        for k in (5, 10, 20):
+            assert result[f"retrievalRecallAt{k}"] == len(gold & set(ranked[:k])) / len(gold)
+        dcg = sum(1 / math.log2(rank + 2) for rank, source in enumerate(ranked[:10]) if source in gold)
+        ideal = sum(1 / math.log2(rank + 2) for rank in range(min(10, len(gold))))
+        assert abs(result["binarySourceNdcgAt10"] - dcg / ideal) < 1e-12
+        assert result["allRequiredEvidence"] == gold.issubset(ranked)
+        retained = set(source for sources in mappings.values() for source in sources)
+        assert result["extractionEvidenceRetention"] == len(gold & retained) / len(gold)
+        scores.append(result)
+    summary = json.loads((directory / "evaluator/scoring-summary.json").read_text())
+    assert summary["queryEvents"] == str(len(metrics))
+    for status, name in (("scored", "scored"), ("zero_label", "zeroLabelUnscored"), ("unknown", "unknownAnnotations")):
+        assert summary[name] == str(statuses[status])
+    for metric, mean in summary["means"].items():
+        assert mean == (sum(r[metric] for r in scores) / len(scores) if scores else None)
+    return statuses
 
 
 def verify_manifest_outputs(output, runs):
@@ -206,6 +256,13 @@ def verify_manifest_outputs(output, runs):
         events = [json.loads(line) for line in (directory / "evaluator/source-events.jsonl").read_text().splitlines()]
         if len(events) != count * 3 or [e["status"] for e in events] != ["seen", "attempted", "accepted"] * count:
             raise RuntimeError("turn accounting mismatch")
+        coverage = json.loads((directory / "evaluator/turn-coverage.json").read_text())
+        assert coverage["statuses"] == {"seen": str(count), "attempted": str(count), "accepted": str(count),
+            "no_op": "0", "rejected": "0", "truncated": "0"}
+        assert coverage["eventCount"] == str(len(events)) and coverage["processed"] == str(count)
+        assert coverage["pending"] == coverage["unseen"] == "0"
+        assert coverage["processedCoverage"] == coverage["acceptedMemoryCoverage"] == 1.0
+        verify_scoring_outputs(directory, evaluator)
         trace = [json.loads(line) for line in (directory / "trace.jsonl").read_text().splitlines()]
         if len(trace) != count + 1 + 4 * (contract["execution"]["warmup"] + contract["execution"]["samples"]):
             raise RuntimeError("actor action/warmup/expected-failure count mismatch")
@@ -222,7 +279,7 @@ def verify_manifest_outputs(output, runs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--track", required=True, choices=["manifest-internal-diagnostic-v1"],
+    parser.add_argument("--track", required=True, choices=["manifest-internal-diagnostic-v2"],
                         help="explicit opt-in; old frozen studies must use their pinned checkout")
     parser.add_argument("--cache", required=True, type=Path, help="Prior scratch Cargo home; only registry/ is copied")
     parser.add_argument("--build-cache", type=Path, help="Optional prior scratch target to copy, never share")

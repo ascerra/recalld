@@ -9,7 +9,7 @@ use std::{
     path::Path,
 };
 
-pub const TRACK: &str = "manifest-internal-diagnostic-v1";
+pub const TRACK: &str = "manifest-internal-diagnostic-v2";
 pub const TIME: i64 = 1_767_225_600_000;
 
 pub fn hash(bytes: &[u8]) -> String {
@@ -55,6 +55,7 @@ pub struct Manifest {
     pub capabilities: Value,
     pub dataset: Value,
     pub embedding: Value,
+    pub scoring: Value,
     pub execution: Plan,
     pub actor_inputs: Artifact,
     pub evaluator_labels: Artifact,
@@ -106,6 +107,13 @@ pub fn versions() -> Value {
         "offlineFormats":"not-used-or-advertised-by-this-track",
         "receiptVersion":1,"requestHashVersion":1,
         "derivedIndexFormats":"sourceFilesSha256; no independent format version advertised"})
+}
+
+pub fn scoring() -> Value {
+    json!({"profile":"synthetic-unique-source-v1","annotationUnit":"synthetic-unit",
+        "deduplication":"first-source-occurrence-before-cutoff","relevance":"binary",
+        "recallCutoffs":[5,10,20],"ndcgCutoff":10,"allRequired":"all-returned-unique-sources",
+        "emptyLabels":"unscored","missingAnnotations":"unknown","aggregation":"measured-query-events-only"})
 }
 
 pub fn capabilities() -> Value {
@@ -186,7 +194,7 @@ impl Validated {
             "unsupported independent harness version"
         );
         ensure!(
-            m.track == TRACK && m.versions == versions(),
+            m.track == TRACK && m.versions == versions() && m.scoring == scoring(),
             "unsupported track/runtime versions"
         );
         ensure!(
@@ -325,8 +333,8 @@ impl Validated {
             .map(|i| format!("query{i}"))
             .collect();
         ensure!(
-            evaluator.relevant.keys().cloned().collect::<BTreeSet<_>>() == queries,
-            "evaluator query coverage mismatch"
+            evaluator.relevant.keys().all(|q| queries.contains(q)),
+            "unknown evaluator query"
         );
         let ids: BTreeSet<_> = actor.sources.iter().map(|s| s.source_id.as_str()).collect();
         for labels in evaluator.relevant.values() {
@@ -348,18 +356,14 @@ impl Validated {
         })
     }
 
-    pub fn relevant_ordinals(&self, query: &str) -> Result<Vec<usize>> {
-        let labels = self
-            .evaluator
-            .relevant
-            .get(query)
-            .context("unknown evaluator query")?;
-        Ok(self
-            .sources
-            .iter()
-            .filter(|s| labels.contains(&s.source_id))
-            .map(|s| s.ordinal)
-            .collect())
+    pub fn relevant_ordinals(&self, query: &str) -> Option<Vec<usize>> {
+        self.evaluator.relevant.get(query).map(|labels| {
+            self.sources
+                .iter()
+                .filter(|s| labels.contains(&s.source_id))
+                .map(|s| s.ordinal)
+                .collect()
+        })
     }
 
     pub fn mapping(&self, ordinal: usize, memory: recalld::model::MemoryId) -> Value {
