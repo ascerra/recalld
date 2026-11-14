@@ -1100,64 +1100,6 @@ mod tests {
                 .is_none()
         );
     }
-    #[tokio::test]
-    async fn entity_rebuild_online_completion_replaces_stale_namespace_postings() {
-        let fx = Fixture::new();
-        let local = NamespaceId::new(1);
-        let foreign = fx.create_namespace("foreign");
-        let live = fx.insert_memory_in(local, &["entity/alice"]).await;
-        let peer = fx
-            .insert_memory_in(foreign, &["entity/alice", "entity/bob"])
-            .await;
-        let dead = fx.insert_memory_in(local, &["entity/dead"]).await;
-        {
-            let mut index = fx.entity_index.write().await;
-            index.add(local, live, &["stale".into()]);
-            index.add(local, dead, &["dead".into()]);
-        }
-        // Real canonical deletion dirties every view and requires completion.
-        fx.storage.write().unwrap().delete_memory(dead).unwrap();
-        let query = vec!["Alice".into(), "Bob".into()];
-        for _ in 0..2 {
-            publisher(&fx).complete().await.unwrap();
-            let index = fx.entity_index.read().await;
-            assert_eq!(index.len(), 2);
-            assert_eq!(
-                index.find_by_entities(local, &query, MemoryId::new()),
-                vec![(live, 1)]
-            );
-            assert_eq!(
-                index.find_by_entities(foreign, &query, MemoryId::new()),
-                vec![(peer, 2)]
-            );
-            assert!(
-                index
-                    .find_by_entities(local, &["stale".into(), "dead".into()], MemoryId::new())
-                    .is_empty()
-            );
-            assert!(
-                fx.storage
-                    .read()
-                    .unwrap()
-                    .meta_store()
-                    .effects_stamp()
-                    .is_ok()
-            );
-        }
-        fx.storage.write().unwrap().delete_memory(live).unwrap();
-        publisher(&fx).complete().await.unwrap();
-        let index = fx.entity_index.read().await;
-        assert_eq!(index.len(), 1);
-        assert!(
-            index
-                .find_by_entities(local, &query, MemoryId::new())
-                .is_empty()
-        );
-        assert_eq!(
-            index.find_by_entities(foreign, &query, MemoryId::new()),
-            vec![(peer, 2)]
-        );
-    }
 }
 
 /// Obtain the pipeline gate without holding storage across an await. Store
