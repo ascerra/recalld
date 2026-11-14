@@ -35,6 +35,8 @@ impl DerivedCompletion {
         let storage = self.storage.clone();
         let child = work.child()?;
         let result = tokio::task::spawn_blocking(move || {
+            // Cancellation of the waiter must not release a running worker's lease.
+            let _lease = lease;
             let _graph = graph;
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = storage.apply_native_decay(&ctx, &intent, &policy, Some(&child));
@@ -43,7 +45,6 @@ impl DerivedCompletion {
         })
         .await
         .map_err(|e| failed(e.to_string()))?;
-        drop(lease);
         let result = result?;
         if let NativeDecayResult::Committed(receipt) = &result {
             self.complete_with_work(Some(work))

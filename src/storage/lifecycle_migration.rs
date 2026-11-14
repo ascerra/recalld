@@ -254,7 +254,11 @@ pub(crate) fn validate_policy_history(
     }
     // Retained historical native operations still require an explicit policy
     // selection. Their record sets need not survive a deletion-aware restore.
-    for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+    let check_record_policy = |receipt: &WriteReceipt,
+                               namespace_id: NamespaceId,
+                               lifecycle_version: LifecycleVersion,
+                               policy_revision: Generation|
+     -> Result<(), StorageError> {
         let version = if policy_revision == Generation::default() {
             LifecycleVersion::LegacyAccessV1
         } else {
@@ -281,6 +285,10 @@ pub(crate) fn validate_policy_history(
                 }
             }
         }
+        Ok(())
+    };
+    for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        check_record_policy(&receipt, namespace_id, lifecycle_version, policy_revision)?;
     }
     let configs = read
         .open_table(NAMESPACE_TABLE)?
@@ -298,6 +306,19 @@ pub(crate) fn validate_policy_history(
         let receipt = control::validate_receipt(bytes.value())?.receipt;
         super::native_maintenance::validate_ledger(&receipt, ledger.as_ref())?;
         super::native_maintenance::validate_namespace_profiles(&receipt, &configs)?;
+        if let MutationOutcome::NativeMemoryHardDeleted { transition } = &receipt.outcome {
+            // Local proof already requires before/after policy equality. Bind
+            // every peer to its own history, including retained foreign origins.
+            for peer in &transition.peers {
+                let lifecycle = &peer.change.after.lifecycle.lifecycle;
+                check_record_policy(
+                    &receipt,
+                    peer.namespace_id,
+                    lifecycle.lifecycle_version,
+                    lifecycle.policy_revision,
+                )?;
+            }
+        }
     }
     let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
     for row in read.open_table(META_TABLE)?.iter()? {
