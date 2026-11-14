@@ -11,6 +11,7 @@ mod canonical_list;
 mod canonical_scope;
 mod canonical_vector_snapshot;
 mod catalog;
+mod catalog_page;
 pub(crate) mod effects;
 mod insertion;
 mod lifecycle_updates;

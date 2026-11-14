@@ -287,6 +287,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `StorageEngine` trait.
 pub struct StorageEngineAdapter {
+    catalog_profile: Option<crate::serialization::session::ActiveEmbedding>,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
@@ -303,6 +304,14 @@ pub struct StorageEngineAdapter {
 }
 
 impl StorageEngineAdapter {
+    /// Capture actual configuration identity once; this is not provider
+    /// availability, namespace attestation, or a readiness guarantee.
+    pub fn with_catalog_profile_context(mut self, provider: &dyn EmbeddingProvider) -> Self {
+        self.catalog_profile =
+            crate::serialization::session::ActiveEmbedding::from_provider(provider).ok();
+        self
+    }
+
     /// Creates a new adapter wrapping the storage engine, the cache, and
     /// the four indexes a delete has to clean.
     pub fn new(
@@ -315,6 +324,7 @@ impl StorageEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            catalog_profile: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -333,6 +343,17 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        self.catalog_profile.clone()
+    }
+
+    async fn list_catalog_page(
+        &self,
+        request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        crate::catalog_page::read(self.storage.clone(), request).await
+    }
+
     async fn list_canonical_page(
         &self,
         request: crate::serialization::list::ListPageRequest,

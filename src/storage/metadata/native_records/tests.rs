@@ -770,3 +770,6 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
 
 #[path = "list_tests.rs"]
 mod canonical_list;
+
+#[path = "catalog_tests.rs"]
+mod catalog_pages;

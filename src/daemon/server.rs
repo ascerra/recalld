@@ -55,7 +55,8 @@ impl DaemonServer {
                 std::sync::Arc::new(system.config().clone()),
                 tz,
             )
-            .with_clock(system.clock().clone()),
+            .with_clock(system.clock().clone())
+            .with_catalog_profile_context(system.embedding().as_ref()),
         );
         let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(McpNamespaceAdapter::new(
             system.storage().clone(),

@@ -14,3 +14,5 @@ pub use json::{
     ApiError, ApiResponse, CreateMemoryRequest, MemoryResponse, NamespaceRequest,
     NamespaceResponse, SearchHit, SearchRequest, SearchResponse,
 };
+
+pub mod catalog_page;

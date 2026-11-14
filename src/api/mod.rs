@@ -152,3 +152,6 @@ mod vector_query_tests;
 
 #[cfg(test)]
 pub(crate) use handlers::list_memories_v2;
+
+#[cfg(test)]
+pub(crate) use handlers::catalog_v2;

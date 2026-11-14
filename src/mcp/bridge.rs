@@ -78,6 +78,19 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Optional identity captured from the configured provider when this adapter
+    /// was constructed. Metadata calls never invoke a provider to obtain it.
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        None
+    }
+    /// Canonical catalogs; older/remote adapters fail closed without v1 fallback.
+    async fn list_catalog_page(
+        &self,
+        _request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        Err(crate::catalog_page::CatalogError::Unavailable)
+    }
+
     /// Canonical metadata page; unsupported/remote adapters fail closed.
     async fn list_canonical_page(
         &self,

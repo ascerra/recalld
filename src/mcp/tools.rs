@@ -1735,6 +1735,40 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if matches!(name, "list_namespaces" | "list_tags") {
+        use crate::serialization::catalog_page::{CatalogKind, CatalogPageRequest};
+        let kind = if name == "list_namespaces" {
+            CatalogKind::Namespaces
+        } else {
+            CatalogKind::Tags
+        };
+        let result = match CatalogPageRequest::from_mcp(&arguments, kind) {
+            Ok(mut request) => {
+                if !request.all_namespaces {
+                    request
+                        .namespace
+                        .get_or_insert_with(|| bridge.default_namespace().into());
+                }
+                bridge.storage.list_catalog_page(request).await
+            }
+            Err(error) => Err(error.into()),
+        };
+        let result = match result {
+            Ok(page) => {
+                let active = bridge.storage.catalog_profile_context();
+                Ok(page.with_active_embedding(active))
+            }
+            Err(error) => Err(error),
+        };
+        let (status, envelope) = crate::catalog_page::response(result);
+        let mut out = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        if status >= 400 {
+            out.is_error = Some(true);
+        }
+        return out;
+    }
+
     if name == "list_memories" {
         let result = match crate::serialization::list::ListPageRequest::from_mcp(&arguments) {
             Ok(mut request) => {

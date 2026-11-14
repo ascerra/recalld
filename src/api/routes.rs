@@ -67,6 +67,7 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
 
     let ops_routes = Router::new()
         .route("/capabilities", get(handlers::capabilities))
+        .route("/tags", get(handlers::list_tags))
         .route("/health", get(handlers::health_check))
         .route("/health/report", get(handlers::health_report))
         .route("/metrics", get(handlers::metrics))
