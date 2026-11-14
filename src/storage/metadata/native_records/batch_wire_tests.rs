@@ -216,6 +216,32 @@ async fn native_single_wire_fresh_budget_scope_and_profile_fail_before_provider_
 }
 
 #[tokio::test]
+async fn native_single_wire_retired_namespace_id_replays_original_binding_after_recreation() {
+    let root=tempfile::tempdir().unwrap(); let d=fixture(root.path()); let clock=Arc::new(FixedClock(AtomicUsize::new(0))); let s=open(&d,clock.clone()); let store_id=s.metadata().control_state().unwrap().store_id; let f=Fixture::from_open_engine(root,s.engine);
+    let provider=Arc::new(RecoveringProvider { profile:d.profile.clone(), unavailable:true.into(), calls:AtomicUsize::new(0),profiles:AtomicUsize::new(0),corrupt:Default::default() });
+    let a=Arc::new(adapter(&f,provider.clone(),clock.clone(),Default::default()));
+    let body=json!({"namespaceId":d.ns,"storeId":store_id,"idempotencyKey":"retained-single","summary":"retire later","embedding":[1.,0.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap(),"checkDuplicates":false});
+    let (status,first)=single_http(&a,&body).await; assert_eq!(status,200,"{first}");
+    let mut receipt:WriteReceipt=serde_json::from_value(first["receipt"].clone()).unwrap(); receipt.replayed=true;
+    let new_id={
+        let mut engine=f.storage.write().unwrap();
+        let key=MutationContext { store_id:Some(store_id),scope:MutationScope::Namespace(d.ns),idempotency_key:Some("retire".into()),expected_generation:None,contract_version:2 };
+        let mut progress=engine.begin_namespace_purge(&key,true).unwrap();
+        while progress.stage!=crate::storage::purge::PurgeStage::Complete { progress=engine.resume_namespace_purge(progress.store_id,d.ns,progress.start_receipt.operation_id,64).unwrap(); }
+        let key=MutationContext { scope:MutationScope::Catalog,idempotency_key:Some("recreate".into()),..key };
+        let created=engine.create_native_namespace(&key,&crate::storage::native_catalog::NativeNamespaceInput { name:"native".into(),embedding_dim:Some(4),embedding_profile_id:None,initial_stability:None,desired_retention:None,decay_rate_multiplier:None },&d.profile,&NativePolicyInputs::default(),clock.as_ref(),None).unwrap();
+        let MutationOutcome::NativeNamespaceCreated { transition }=created.outcome else { panic!() }; transition.namespace_id
+    };
+    assert_ne!(new_id,d.ns);
+    let before=readers::bytes(&d.path); let ticks=clock.0.load(Ordering::SeqCst);
+    let (error,replay)=single_mcp(a.clone(),body.clone()).await;
+    assert!(!error,"{replay}"); assert_eq!(replay["scope"]["namespaceId"],json!(d.ns)); assert_eq!(replay["scope"]["namespace"],"native"); assert_eq!(replay["receipt"],canonical(&receipt)); assert_eq!(replay["readiness"]["ready"],true);
+    assert_eq!(readers::bytes(&d.path),before); assert_eq!(clock.0.load(Ordering::SeqCst),ticks); assert_eq!(provider.calls.load(Ordering::SeqCst),0); assert_eq!(provider.profiles.load(Ordering::SeqCst),0);
+    let mut wrong=body; wrong["namespace"]=json!("wrong"); let (status,error)=single_http(&a,&wrong).await;
+    assert_eq!(status,400,"{error}"); assert_eq!(error["error"]["code"],"NAMESPACE_MISMATCH"); assert_eq!(error["receipt"],canonical(&receipt)); assert_eq!(readers::bytes(&d.path),before);
+}
+
+#[tokio::test]
 async fn native_single_wire_known_publication_failure_retains_full_receipt_and_repairs_key() {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
@@ -263,6 +289,66 @@ async fn native_single_wire_known_publication_failure_retains_full_receipt_and_r
     assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
     assert_eq!(provider.profiles.load(Ordering::SeqCst), profiles);
     assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+}
+
+#[tokio::test]
+#[ignore = "requires immutable BEFORE123 producer artifacts via RECALLD_SINGLE_BEFORE_ARTIFACTS"]
+async fn native_single_wire_genuine_before_dense_full_receipt_fits_all_transports() {
+    let artifacts = PathBuf::from(std::env::var("RECALLD_SINGLE_BEFORE_ARTIFACTS").expect("explicit BEFORE artifact mount required"));
+    let old_path = std::fs::read_to_string(artifacts.join("path.txt")).unwrap();
+    let original = artifacts.join(Path::new(&old_path).file_name().unwrap()).join("v2");
+    fn copy(source: &Path, target: &Path) {
+        std::fs::create_dir_all(target).unwrap();
+        for row in std::fs::read_dir(source).unwrap() {
+            let row=row.unwrap(); let to=target.join(row.file_name());
+            if row.file_type().unwrap().is_dir() { copy(&row.path(), &to); }
+            else { std::fs::copy(row.path(),to).unwrap(); }
+        }
+    }
+    let source_bytes=readers::bytes(&original);
+    let root=tempfile::tempdir().unwrap(); let target=root.path().join("copy"); copy(&original,&target);
+    let body:Value=serde_json::from_slice(&std::fs::read(artifacts.join("request.json")).unwrap()).unwrap();
+    let original_receipt:WriteReceipt=serde_json::from_slice(&std::fs::read(artifacts.join("receipt.json")).unwrap()).unwrap();
+    let MutationOutcome::NativeMemoryInsertedWithLinks { transition }=&original_receipt.outcome else { panic!() };
+    assert_eq!(transition.edges.len(),1024); assert_eq!(transition.records.len(),1025);
+    let clock=Arc::new(FixedClock(AtomicUsize::new(0)));
+    let session=NativeLifecycleSession::open(&target,NativePolicyInputs::default(),clock.clone()).unwrap();
+    let f=Fixture::from_open_engine(root,session.engine);
+    let provider=Arc::new(RecoveringProvider { profile:serde_json::from_slice(&std::fs::read(artifacts.join("profile.json")).unwrap()).unwrap(), unavailable:true.into(),calls:AtomicUsize::new(0),profiles:AtomicUsize::new(0),corrupt:Default::default() });
+    let mut config=crate::config::RecalldConfig::default(); config.graph.auto_link_threshold=f64::NAN; config.graph.max_auto_links=1024;
+    let a=Arc::new(adapter(&f,provider.clone(),clock.clone(),config));
+    let before=readers::bytes(&target);
+    let (status,http)=single_http(&a,&body).await; assert_eq!(status,200,"{}",http["error"]);
+    let mut expected=original_receipt.clone(); expected.replayed=true;
+    assert_eq!(http["receipt"],canonical(&expected));
+    let mut mcp_body=body.clone(); mcp_body["contractVersion"]=json!(2);
+    assert!(crate::serialization::native_single::Request::parse(&mcp_body,false,None,"native").is_err());
+    // The genuine fixture has an HTTP-only createdAt field. Exercise its full
+    // reply through the real single MCP serializer without broadening MCP input.
+    let request=crate::serialization::native_single::Request::parse(&body,true,None,"wrong-default").unwrap();
+    let reply=a.store_native_wire(request.clone()).await;
+    assert_eq!(reply.receipt.as_ref(),Some(&expected));
+    let mcp=crate::serialization::native_single::mcp_result(reply);
+    let text:Value=serde_json::from_str(serde_json::to_value(&mcp).unwrap()["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text,http); assert_eq!(serde_json::to_value(&mcp).unwrap()["structuredContent"],http);
+    let frame=json!({"jsonrpc":"2.0","id":i64::MAX,"result":mcp});
+    let mcp_bytes=serde_json::to_vec(&frame).unwrap().len();
+    let rpc=crate::daemon::server::native_method_test_rpc(a.clone(),serde_json::to_value(request).unwrap(),"store_native_single_observed_v1").await;
+    assert!(rpc.error.is_none(),"{rpc:?}");
+    let rpc_bytes=serde_json::to_vec(&rpc).unwrap().len();
+    let rpc_reply:crate::serialization::native_single::Reply=serde_json::from_value(rpc.result.unwrap()).unwrap();
+    assert_eq!(rpc_reply.receipt.as_ref(),Some(&expected));
+    let (_,envelope)=rpc_reply.response(); assert_eq!(canonical(&envelope),http);
+    let bound=crate::serialization::native_single::compact_mcp_bound(&envelope).unwrap();
+    let http_bytes=serde_json::to_vec(&envelope).unwrap().len();
+    println!("GENUINE_SINGLE_WIRE receipt={} http={http_bytes} mcp={mcp_bytes} rpc={rpc_bytes} counted_bound={bound}",serde_json::to_vec(&expected).unwrap().len());
+    assert!(bound >= mcp_bytes); assert!(bound < crate::daemon::protocol::MAX_MESSAGE_SIZE); assert!(rpc_bytes < crate::daemon::protocol::MAX_MESSAGE_SIZE);
+    assert_eq!(readers::bytes(&target),before); assert_eq!(readers::bytes(&original),source_bytes);
+    assert_eq!(provider.calls.load(Ordering::SeqCst),0); assert_eq!(provider.profiles.load(Ordering::SeqCst),0); assert_eq!(clock.0.load(Ordering::SeqCst),0);
+    drop(a); let kept=f.close();
+    let reopened=NativeLifecycleSession::open(&target,NativePolicyInputs::default(),clock).unwrap();
+    assert_eq!(reopened.metadata().control_state().unwrap().committed_generation,expected.committed_generation);
+    drop(reopened); drop(kept);
 }
 
 #[tokio::test]

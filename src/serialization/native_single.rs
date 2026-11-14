@@ -208,7 +208,11 @@ impl Reply {
         out
     }
     pub(crate) fn failure(error: crate::storage::StorageError) -> Self {
-        let specific = match &error {
+        let source = match &error {
+            crate::storage::StorageError::CommittedMutation { source, .. } => source.as_ref(),
+            other => other,
+        };
+        let specific = match source {
             crate::storage::StorageError::EmbeddingProfileMismatch => Some((
                 ErrorCategory::InvalidInput,
                 "EMBEDDING_PROFILE_MISMATCH",
