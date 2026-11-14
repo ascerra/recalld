@@ -59,8 +59,14 @@ Git contains source, this report and text manifests only. Container inspect reco
 remain in the private worktree; published metadata records only this run's resources.
 
 This closes the standalone successful keyed no-op gap, not all A4/native readiness.
-The owner still requires producer-derived completion at the receipt G. Full graph
+The owner still requires producer-derived completion at actual current canonical G;
+a historical replay receipt is not a readiness target. Full graph
 and history scans remain; there is no performance or bounded-total-work claim.
 Incremental publication is a later consumer of the actual #96 coherent registry,
 with typed contiguous deltas, before/current-G guards and explicit per-component
 completion; full rebuild remains the fallback.
+
+Documentation clarification after the original evidence seal: readiness targets
+actual current canonical G, including after historical replay. Runtime and the
+verified HOME evidence copy remain unchanged; its report retains the original
+wording.

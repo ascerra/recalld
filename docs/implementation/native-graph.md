@@ -48,7 +48,8 @@ boolean exception to the mutating proof. Validation requires a retained key,
 checks the same namespace/policy/profile and endpoint eligibility boundaries,
 verifies empty outbox actions, and checks active edge and record history. Recovery
 acknowledges the zero-action outbox without opening an edge write transaction.
-The producer must still complete derived publication at the receipt's generation.
+The producer must still complete derived publication at actual current canonical G.
+A historical replay receipt is not a readiness target.
 
 A new `NativeGraphChanged` outcome records exact edge before/after values and
 payload-free endpoint state commitments. It does not widen historical
