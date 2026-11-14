@@ -143,6 +143,7 @@ pub(crate) fn validate_policy_history(
     let mut policies: HashMap<u32, BTreeMap<Generation, (WriteReceipt, PolicyTransition)>> =
         HashMap::new();
     let mut native_history = Vec::new();
+    let mut namespace_creations = HashMap::new();
     for row in read.open_table(control::RECEIPTS)?.iter()? {
         let (key, value) = row?;
         let receipt = control::validate_receipt(value.value())?.receipt;
@@ -156,6 +157,29 @@ pub(crate) fn validate_policy_history(
             return Err(invalid("duplicate lifecycle generation"));
         }
         let namespace = match &receipt.outcome {
+            MutationOutcome::NativeNamespaceCreated { transition: t } => {
+                if key.value()
+                    != control::scoped_key(
+                        receipt.store_id,
+                        MutationScope::Catalog,
+                        receipt.operation_id.as_bytes(),
+                    )
+                    || !control::permits_generation_origin(
+                        read,
+                        control,
+                        GenerationRef {
+                            store_id: receipt.store_id,
+                            generation: receipt.committed_generation,
+                        },
+                    )?
+                    || namespace_creations
+                        .insert(t.namespace_id.get(), t.clone())
+                        .is_some()
+                {
+                    return Err(invalid("invalid native namespace receipt origin/identity"));
+                }
+                None
+            }
             MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
                 if !keys.contains(key.value())
                     || t.namespace_id.is_unset()
@@ -274,6 +298,26 @@ pub(crate) fn validate_policy_history(
         })
         .collect::<Result<HashMap<_, _>, StorageError>>()?;
     let creations = super::native_records::creation_proofs(read)?;
+    for (id, creation) in &namespace_creations {
+        let ns = configs
+            .get(id)
+            .ok_or_else(|| invalid("native namespace creation lacks retained namespace"))?;
+        if !creation.matches_namespace(ns)? {
+            return Err(invalid("native namespace differs from creation proof"));
+        }
+    }
+    for ns in configs.values() {
+        if matches!(
+            ns.schema.as_ref().map(|s| &s.embedding_binding),
+            Some(crate::model::schema::EmbeddingBinding::Bound {
+                provenance: crate::model::schema::BindingProvenance::NativeV2,
+                ..
+            })
+        ) && !namespace_creations.contains_key(&ns.id.get())
+        {
+            return Err(invalid("native namespace binding lacks creation proof"));
+        }
+    }
     let ledger = super::metadata::removal_ledger::read_export(read, Some(control))?;
     let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
     for row in read.open_table(META_TABLE)?.iter()? {
@@ -334,10 +378,36 @@ pub(crate) fn validate_policy_history(
     if records.keys().any(|ns| !current_policy.contains_key(ns)) {
         return Err(invalid("record namespace missing"));
     }
+    let mut namespace_highwater = read
+        .open_table(super::metadata::NAMESPACE_COUNTER)?
+        .get("max_id")?
+        .map(|v| v.value())
+        .unwrap_or(0);
+    if namespace_creations
+        .keys()
+        .any(|id| *id > namespace_highwater)
+    {
+        return Err(invalid("native namespace exceeds allocation highwater"));
+    }
     // Reverse exactly the recognized active operations. This replaces the old
     // assumption that every token increment was a namespace policy migration.
     for receipt in suffix.values().rev() {
         match &receipt.outcome {
+            MutationOutcome::NativeNamespaceCreated { transition: t } => {
+                if current_policy.remove(&t.namespace_id.get())
+                    != Some((LifecycleVersion::LegacyAccessV1, Generation::default()))
+                    || records
+                        .get(&t.namespace_id.get())
+                        .is_some_and(|rows| !rows.is_empty())
+                    || namespace_highwater != t.namespace_id.get()
+                {
+                    return Err(invalid(
+                        "native namespace creation is out of canonical order",
+                    ));
+                }
+                namespace_highwater = t.previous_max_id;
+                records.remove(&t.namespace_id.get());
+            }
             MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
                 let policy = current_policy
                     .get_mut(&t.namespace_id.get())

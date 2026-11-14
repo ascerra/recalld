@@ -106,7 +106,7 @@ impl MetadataStore {
         Ok(receipt)
     }
 
-    fn commit_catalog(
+    pub(super) fn commit_catalog(
         &self,
         tx: redb::WriteTransaction,
         receipt: &WriteReceipt,

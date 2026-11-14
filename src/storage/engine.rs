@@ -10,6 +10,7 @@
 mod catalog;
 mod effects;
 mod insertion;
+mod native_catalog;
 mod native_records;
 mod purge;
 mod text_compaction;
