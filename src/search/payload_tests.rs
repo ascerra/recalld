@@ -348,6 +348,7 @@ async fn coherent_v2_supplemental_shared_budget_boundaries_are_truthful() {
             RetrievalSemantics::V2(VersionMode::Current),
             true,
             None,
+            1,
         )
         .await
         .unwrap();

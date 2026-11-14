@@ -425,11 +425,6 @@ impl MetadataStore {
     ) -> Result<(redb::WriteTransaction, Option<WriteReceipt>), StorageError> {
         publication.check(self)?;
         ctx.validate()?;
-        if ctx.contract_version != 2 {
-            return Err(StorageError::InvalidMutationContext(
-                "native lifecycle operations require contract version 2".into(),
-            ));
-        }
         if ctx.scope != MutationScope::Namespace(scope.namespace_id) {
             return Err(StorageError::MutationNamespaceMismatch);
         }

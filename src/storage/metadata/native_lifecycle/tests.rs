@@ -1043,7 +1043,7 @@ async fn uncertain_real_commit_poisoning_requires_reopen_then_reconciles_without
 }
 
 #[tokio::test]
-async fn native_contract_one_rejects_feedback_and_exposure_without_bytes_or_time_change() {
+async fn native_unsupported_contracts_reject_feedback_and_exposure_without_bytes_or_time_change() {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(
         root.path(),
@@ -1059,7 +1059,7 @@ async fn native_contract_one_rejects_feedback_and_exposure_without_bytes_or_time
         .capture_exposure(scope(&d), &[(d.a, AccessKind::DirectRetrieval)])
         .unwrap();
     let mut context = ctx(&d, feedback.capture_generation(), "wrong-contract");
-    context.contract_version = 1;
+    context.contract_version = 3;
     let before = std::fs::read(d.path.join("meta.db")).unwrap();
     assert!(matches!(
         session.apply_feedback(&context, &feedback),

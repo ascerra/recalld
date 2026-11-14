@@ -342,7 +342,7 @@ impl QueryEngine {
             .await
             .map_err(unavailable)??;
             let mut response = engine
-                .get_memory_with_access_admitted(id, requested_access, true, None)
+                .get_memory_with_access_admitted(id, requested_access, true, None, 1)
                 .await?
                 .finish::<SearchError>(Ok(()))?;
             if let (Some(response), Some((_, payload))) = (&mut response, &payload) {
@@ -398,7 +398,7 @@ impl QueryEngine {
             .ok_or(SearchError::MemoryNotFound(id))?;
             let namespace = source.0;
             let results = engine
-                .similar_with_access_admitted(id, k, min_score, requested_access, true, None)
+                .similar_with_access_admitted(id, k, min_score, requested_access, true, None, 1)
                 .await?
                 .finish::<SearchError>(Ok(()))?;
             let ids: Vec<_> = results.iter().map(|r| r.memory_id).collect();
@@ -522,7 +522,7 @@ impl QueryEngine {
             let (mut response, selection) = engine
                 // The outer owned root covers this immutable pinned adapter;
                 // CanonicalReadView cannot accept another owned work ticket.
-                .search_checked_with_selection(query, semantics, true, None)
+                .search_checked_with_selection(query, semantics, true, None, 1)
                 .await?;
             let namespace = selection.namespace.clone();
             let payload = if let Some((include_embeddings, include_neighbors)) = payload_embeddings
