@@ -8,7 +8,7 @@ use serde_json::Value;
 
 fn adapter(
     f: &Fixture,
-    provider: Arc<Provider>,
+    provider: Arc<dyn crate::embedding::EmbeddingProvider>,
     clock: Arc<FixedClock>,
     config: crate::config::RecalldConfig,
 ) -> McpStorageAdapter {
@@ -253,7 +253,9 @@ async fn batch_wire_native_partial_full_receipts_replay_and_cas() {
     let ticks = clock.0.load(Ordering::SeqCst);
     let (error, m) = mcp(&bridge(a.clone()), body(&r)).await;
     assert!(error);
-    assert_eq!(m["data"]["outcomes"], h["data"]["outcomes"]);
+    let mut expected_outcomes = h["data"]["outcomes"].clone();
+    expected_outcomes[0]["receipt"]["replayed"] = json!(true);
+    assert_eq!(m["data"]["outcomes"], expected_outcomes);
     assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
     assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
     assert_eq!(readers::bytes(&d.path), before);
@@ -267,4 +269,120 @@ async fn batch_wire_native_partial_full_receipts_replay_and_cas() {
     let out = crate::mcp::tools::dispatch_tool(&bridge(a), "store_memories", gated).await;
     assert_eq!(out.is_error, Some(true));
     assert_eq!(readers::bytes(&d.path), before);
+}
+
+struct RecoveringProvider {
+    profile: crate::model::schema::EmbeddingProfile,
+    unavailable: std::sync::atomic::AtomicBool,
+    calls: AtomicUsize,
+}
+#[async_trait::async_trait]
+impl crate::embedding::EmbeddingProvider for RecoveringProvider {
+    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+        Some(self.profile.clone())
+    }
+    fn dimensions(&self) -> usize {
+        4
+    }
+    fn model_name(&self) -> &str {
+        "isolated-recovering-provider"
+    }
+    async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.unavailable.load(Ordering::SeqCst) {
+            Err(crate::embedding::EmbeddingError::Unavailable(
+                "synthetic offline failure".into(),
+            ))
+        } else {
+            Ok(vec![1., 0., 0., 0.])
+        }
+    }
+}
+#[tokio::test]
+async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let session = open(&d, clock.clone());
+    let mut r = request(&d, session.metadata().control_state().unwrap().store_id);
+    r.items = vec![json!({"summary":"pending provider","checkDuplicates":false})];
+    let f = Fixture::from_open_engine(root, session.engine);
+    let provider = Arc::new(RecoveringProvider {
+        profile: d.profile.clone(),
+        unavailable: true.into(),
+        calls: AtomicUsize::new(0),
+    });
+    let a = Arc::new(adapter(
+        &f,
+        provider.clone(),
+        clock.clone(),
+        Default::default(),
+    ));
+    let (status, pending) = http(&a, &body(&r)).await;
+    assert_eq!(status, 503, "{pending}");
+    assert_eq!(pending["data"]["succeeded"], "0");
+    assert_eq!(pending["data"]["unresolved"], "1");
+    assert!(pending["data"]["outcomes"][0].get("receipt").is_none());
+    let parent = pending["data"]["batchOperationId"].clone();
+    provider.unavailable.store(false, Ordering::SeqCst);
+    let (status, done) = http(&a, &body(&r)).await;
+    assert_eq!(status, 200, "{done}");
+    assert_eq!(done["data"]["batchOperationId"], parent);
+    assert_eq!(done["data"]["outcomes"][0]["status"], "ok");
+    let calls = provider.calls.load(Ordering::SeqCst);
+    let ticks = clock.0.load(Ordering::SeqCst);
+    let mut bad = r.clone();
+    bad.idempotency_key = Some("all-invalid".into());
+    bad.items = vec![json!(null), json!({"summary":"invalid","unexpected":true})];
+    let (status, failed) = http(&a, &body(&bad)).await;
+    assert_eq!(status, 422, "{failed}");
+    assert_eq!(failed["data"]["failed"], "2");
+    assert_eq!(failed["data"]["outcomes"].as_array().unwrap().len(), 2);
+    let (is_error, replayed) = mcp(&bridge(a.clone()), body(&bad)).await;
+    assert!(is_error);
+    assert_eq!(replayed["data"]["outcomes"], failed["data"]["outcomes"]);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
+    assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+    r.idempotency_key = Some("commit-unready".into());
+    r.items[0]["summary"] = json!("actual publication failure");
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let (status, unready) = http(&a, &body(&r)).await;
+    assert_eq!(status, 207, "{unready}");
+    assert_eq!(unready["data"]["succeeded"], "1");
+    let item = &unready["data"]["outcomes"][0];
+    assert_eq!(item["status"], "ok");
+    assert_eq!(item["ready"], false);
+    assert_eq!(item["retryable"], false);
+    assert_eq!(item["error"]["commitState"], "committed");
+    let receipt: WriteReceipt = serde_json::from_value(item["receipt"].clone()).unwrap();
+    assert_eq!(item["receipt"], canonical(&receipt));
+    assert_ne!(
+        item["receipt"]["operationId"],
+        unready["data"]["batchOperationId"]
+    );
+    let calls = provider.calls.load(Ordering::SeqCst);
+    let ticks = clock.0.load(Ordering::SeqCst);
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    let (status, recovered) = http(&a, &body(&r)).await;
+    assert_eq!(status, 200, "{recovered}");
+    let mut expected_replay = receipt.clone();
+    expected_replay.replayed = true;
+    assert_eq!(
+        recovered["data"]["outcomes"][0]["receipt"],
+        canonical(&expected_replay)
+    );
+    assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
+    assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+    let retained = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .lookup_batch(
+            r.store_id.unwrap(),
+            serde_json::from_value(unready["data"]["batchOperationId"].clone()).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.items[0].state, BatchItemState::Ok { receipt });
 }

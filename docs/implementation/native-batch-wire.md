@@ -80,3 +80,63 @@ Known frozen boundaries before this child:
 
 A permanent unsupported gate is not final A4 completion. Public schema,
 discovery and capability activation follow actual native transport tests.
+
+## Bounded full responses
+
+Fresh requests compute a conservative bound from every parsed item and the
+actual frozen link settings before allocating reservation identities or
+committing metadata. The calculation uses the core's 1,024-edge insertion
+limit, primary/edge-peer/advisory record proofs, per-item diagnostics and
+response-only advisory text. It does not change canonical link limits or hashes.
+Matching replay is looked up first. Its budget uses retained settings for pending
+items and the encoded full receipts for resolved items; current settings are
+irrelevant. A counting serializer avoids allocating a second oversized receipt
+serialization. These are response bounds, not limits on historical manifest
+read memory or startup validation cost.
+
+The inner compact JSON allowance is `(8 MiB - 64 KiB) / 4`, reserving space for
+MCP text escaping, its structured-content duplicate, and transport framing.
+V2 batch text uses compact JSON; existing v1 pretty text is unchanged. The
+structured value is decoded from the exact typed serialization. Canonical
+receipt bytes, hashes, floating-point values and decimal generations are not
+rounded or rewritten. REST and RPC use the same bounded outcome/error path.
+
+A fresh failure is HTTP400 / MCP `isError:true`, code `RESPONSE_TOO_LARGE`,
+`commitState:notCommitted`, with no reservation. An oversized historical batch
+instead returns a whole-operation typed error with absent `data`, its
+`batchOperationId` and full small `reservationReceipt`. That receipt proves only
+the reservation; it is not an atomic batch receipt or readiness statement.
+No item is relabelled failed, no partial outcome array is presented as complete,
+and all original item receipts remain persisted. There is no provider or new
+canonical work. Reusing a new key is explicitly discouraged for such a batch.
+
+The actual generated-vector consumer is the private shared MCP/REST adapter and
+non-retrying `mutate_native_batch_v1` RPC. Public API2 remains closed. Native
+precomputed vectors with public `embeddingProfileId` need the separate retained
+binding resolver consumer; an internal full descriptor is not a public selector.
+Complete public schema/discovery and ordinary native/API1 compatibility remain
+activation dependencies. No helper-only or complete-A4 claim is made here.
+
+## Regression provenance and review
+
+Genuine BEFORE artifacts were produced from exact PR106 `fe99020` with only
+fixture-producing test additions, never a current serializer impersonating an
+old writer. The old oversized producer committed 100 actual linked children,
+then serialized a 96,660,111-byte old MCP response. Its completed store and the
+same batch's pending reservation store are compressed test fixtures, with
+per-file SHA-256 manifests. The old producer passed one test in 482.40 seconds.
+The separate old1/2/3-None producer passed in 4.44 seconds; its manifests,
+requests, receipts, real exports and closed legacy store are retained fixtures.
+
+The AFTER tests open those actual stores through native startup, compare all
+store bytes, exercise both key and operation-ID replay, vary new link settings,
+and assert zero provider/clock calls. Serializer-only worst-field stress is
+explicitly synthetic and never authored into canonical storage. Native transport
+fixtures use real legacy→schema→lifecycle migrations and actual writers; private
+inner dispatch and isolated framed sockets are not ordinary startup activation.
+
+Curie and Feynman source-reviewed frozen CAS `dc2d7b9` and found no blocker in
+retained-origin equality, old None encodings, same-transaction proof, or replay
+ordering. This is bounded source review, not independent runtime validation.
+The initial wire `1347f2f` build failed on three test-only compile errors; no
+behavior test ran. The immutable failed source and log are preserved.
