@@ -152,8 +152,12 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         &self,
         query: bridge::SearchInput,
     ) -> Result<bridge::SearchResponse, bridge::BridgeError> {
-        let accepted =
-            crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
+        // Admission follows the actual query metadata owner. Immutable offline
+        // adapters have no mutable core; they cannot inherit a placeholder's ticket.
+        let accepted = self
+            .query_engine
+            .accept_work(None)
+            .map_err(map_search_error)?;
         let result = async {
             let stamp = effects_stamp(&self.storage).await?;
             // Resolve namespace name to verify it exists.
@@ -218,7 +222,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
 
             let response = self
                 .query_engine
-                .prepare_search_with_work(pipeline_query, Some(&accepted))
+                .prepare_search_with_work(pipeline_query, accepted.as_ref())
                 .await
                 .map_err(map_search_error)?;
 
@@ -472,7 +476,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                             namespace: ns_config.name.clone(),
                             source: None,
                         },
-                        Some(&accepted),
+                        accepted.as_ref(),
                     )
                     .await
                     .map_err(map_search_error)?
@@ -486,7 +490,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             .finish(check_read_admission(&self.storage, stamp).await)
         }
         .await;
-        crate::storage::work::finish_work(&self.storage, accepted);
+        self.query_engine.finish_work(accepted);
         result
     }
 
@@ -499,8 +503,12 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         record_access: bool,
         namespace: Option<&str>,
     ) -> Result<Vec<bridge::SearchHit>, bridge::BridgeError> {
-        let accepted =
-            crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
+        // Admission follows the actual query metadata owner. Immutable offline
+        // adapters have no mutable core; they cannot inherit a placeholder's ticket.
+        let accepted = self
+            .query_engine
+            .accept_work(None)
+            .map_err(map_search_error)?;
         let result = async {
             let stamp = effects_stamp(&self.storage).await?;
             let result = async {
@@ -525,7 +533,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         limit,
                         min_score,
                         record_access,
-                        Some(&accepted),
+                        accepted.as_ref(),
                     )
                     .await
                     .map_err(map_search_error)?;
@@ -567,7 +575,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 check_read_admission(&self.storage, stamp).await?;
                 let receipts = if record_access {
                     self.query_engine
-                        .record_similar_accesses_with_work(&ids, exposure_scope, Some(&accepted))
+                        .record_similar_accesses_with_work(&ids, exposure_scope, accepted.as_ref())
                         .await
                         .map_err(map_search_error)?
                 } else {
@@ -582,7 +590,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             result?.finish(check_read_admission(&self.storage, stamp).await)
         }
         .await;
-        crate::storage::work::finish_work(&self.storage, accepted);
+        self.query_engine.finish_work(accepted);
         result
     }
 
