@@ -1216,7 +1216,10 @@ fn catalog_response(
     // Direct struct serialization prints shorter f32 decimals than to_value.
     match serde_json::to_value(envelope) {
         Ok(value) => (StatusCode::from_u16(status).unwrap(), Json(value)).into_response(),
-        Err(error) => AppError::Internal { source: Box::new(error) }.into_response(),
+        Err(error) => AppError::Internal {
+            source: Box::new(error),
+        }
+        .into_response(),
     }
 }
 /// Real inner consumer; the outer route still rejects public contract2.

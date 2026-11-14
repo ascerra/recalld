@@ -40,6 +40,19 @@ impl EmbeddingProvider for Provider {
     }
 }
 struct FixedClock;
+struct UnknownProvider;
+#[async_trait::async_trait]
+impl EmbeddingProvider for UnknownProvider {
+    async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        panic!("catalog embedded text")
+    }
+    fn dimensions(&self) -> usize {
+        4
+    }
+    fn model_name(&self) -> &str {
+        panic!("display label is not profile evidence")
+    }
+}
 pub(super) struct Fault(Option<&'static str>);
 impl Fault {
     pub(super) fn enter(point: Option<&'static str>) -> Self {
@@ -245,6 +258,17 @@ async fn native_catalog_wire_invalid_before_provider_and_typed_profile_conflict(
             .pending,
         0
     );
+
+    let unknown = NamespaceRegistryAdapter::new(fixture.storage.clone()).with_native_catalog(
+        Arc::new(UnknownProvider),
+        NativePolicyInputs::default(),
+        Arc::new(FixedClock),
+    );
+    let (status, out) = rest(&unknown, &json!({"name":"unbound"}), None).await;
+    assert_eq!(status, 503);
+    assert_eq!(out["error"]["code"], "EMBEDDING_UNAVAILABLE");
+    assert_eq!(out["error"]["commitState"], "notCommitted");
+    assert_eq!(bytes(&path), before);
 }
 
 #[test]
