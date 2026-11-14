@@ -307,6 +307,34 @@ fn native_context_api1_purge_malformed_request_proofs_fail_closed_immutable() {
     key.contract_version = 1;
     let p = s.engine.begin_namespace_purge(&key, true).unwrap();
     drop(s);
+    if let Some(binary) = std::env::var_os("RECALLD_CONTEXT_OLD_TEST_BINARY") {
+        let frozen = bytes(&path);
+        let out = std::process::Command::new(binary)
+            .args([
+                "--exact",
+                "storage::native_purge_tests::native_purge_process_child",
+                "--nocapture",
+            ])
+            .env("RECALLD_NATIVE_PURGE_TEST_STORE", &path)
+            .env("RECALLD_NATIVE_PURGE_TEST_NS", id.get().to_string())
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let message = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            message.contains("unknown field") && message.contains("request"),
+            "{message}"
+        );
+        assert_eq!(
+            bytes(&path),
+            frozen,
+            "genuine old binary must reject before modifying source"
+        );
+    }
     let value: serde_json::Value = serde_json::from_slice(&raw_start(&path, &p)).unwrap();
     let request = value["receipt"]["outcome"]["transition"]["request"].clone();
     assert!(request.is_object());
