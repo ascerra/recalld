@@ -255,7 +255,11 @@ impl NativeRecordState {
             && self.content.label_provenance == schema.labels.provenance
             && self.content.vector == schema.vector)
     }
-    pub(crate) fn tombstone(&self, now: i64) -> Result<Self, StorageError> {
+    pub(crate) fn tombstone(
+        &self,
+        now: i64,
+        phase_time_rule: Option<PhaseTimeRule>,
+    ) -> Result<Self, StorageError> {
         if self.lifecycle.phase == DecayPhase::Tombstone {
             return Ok(self.clone());
         }
@@ -267,7 +271,14 @@ impl NativeRecordState {
         result.lifecycle.has_summary = false;
         result.lifecycle.has_text = false;
         result.lifecycle.lifecycle.lifecycle_updated_at = time;
-        result.lifecycle.lifecycle.phase_changed_at = time;
+        result.lifecycle.lifecycle.phase_changed_at = match phase_time_rule {
+            // Absence preserves the original receipt semantics, including a
+            // regressed legacy-inferred marker. Never rewrite old outcomes.
+            None => time,
+            Some(PhaseTimeRule::MonotonicMarkerV1) => {
+                time.max(self.lifecycle.lifecycle.phase_changed_at)
+            }
+        };
         result.lifecycle.lifecycle.record_generation =
             result.lifecycle.lifecycle.record_generation.next()?;
         result.content = self.content.erased()?;
@@ -339,7 +350,30 @@ pub struct NativeRecordWrite {
     pub records: Vec<NativeRecordChange>,
     /// Actual canonical edge puts, retained as structural metadata only.
     pub edges: Vec<NativeEdgeProof>,
+    /// Absent on original native receipts. New forget operations explicitly
+    /// select monotonic phase markers; older readers reject this added field.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_phase_time_rule"
+    )]
+    pub phase_time_rule: Option<PhaseTimeRule>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseTimeRule {
+    MonotonicMarkerV1,
+}
+
+fn deserialize_phase_time_rule<'de, D>(deserializer: D) -> Result<Option<PhaseTimeRule>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Only an absent field denotes the old proof. Explicit null is invalid.
+    PhaseTimeRule::deserialize(deserializer).map(Some)
+}
+
 impl NativeRecordWrite {
     pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
         self.records
@@ -361,6 +395,7 @@ impl NativeRecordWrite {
             || chrono::DateTime::from_timestamp_millis(self.sampled_at).is_none()
             || self.edges.len() > 2
             || (!insertion && !self.edges.is_empty())
+            || (insertion && self.phase_time_rule.is_some())
         {
             return Err(invalid("invalid native record receipt boundary"));
         }
@@ -444,7 +479,7 @@ impl NativeRecordWrite {
                         .before
                         .as_ref()
                         .ok_or_else(|| invalid("native tombstone prior state missing"))?;
-                    if before.tombstone(self.sampled_at)? != *after {
+                    if before.tombstone(self.sampled_at, self.phase_time_rule)? != *after {
                         return Err(invalid("native tombstone transition mismatch"));
                     }
                 }

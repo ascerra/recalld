@@ -318,6 +318,7 @@ impl MetadataStore {
             embedding_dim: ns.embedding_dim,
             records,
             edges: puts.iter().map(NativeEdgeProof::from).collect(),
+            phase_time_rule: None,
         };
         self.finish_record_effects(
             guard,
@@ -375,7 +376,8 @@ impl MetadataStore {
         if chrono::DateTime::from_timestamp_millis(sampled).is_none() {
             return Err(StorageError::InvalidMutation("invalid clock sample".into()));
         }
-        let after = before.tombstone(sampled)?;
+        let phase_time_rule = Some(PhaseTimeRule::MonotonicMarkerV1);
+        let after = before.tombstone(sampled, phase_time_rule)?;
         let old_phase = record.phase;
         if old_phase != DecayPhase::Tombstone {
             for tag in &record.tags {
@@ -414,6 +416,7 @@ impl MetadataStore {
                 after,
             }],
             edges: vec![],
+            phase_time_rule,
         };
         self.finish_record_effects(
             guard,
