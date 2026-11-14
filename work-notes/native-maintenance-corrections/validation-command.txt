@@ -1,0 +1,10 @@
+Image recalld-ci:1.94; ENV RUSTUP_TOOLCHAIN=1.94.1 CARGO_BUILD_JOBS=2 CARGO_HOME=/cargo CARGO_TARGET_DIR=/target.
+Container: docker run --rm --network none --cpus 2 --memory 4g.
+Only mounts: this assigned worktree:/work, its .test-scratch/cargo:/cargo, its .test-scratch/target:/target; workdir /work.
+Cache source: native-maintenance private cargo/target copied by macOS cp -cR; cargo clean -p recalld ran in this OWN target before probe compilation (1361 files,5.4GiB).
+BEFORE peer: cargo test --offline --lib native_harddelete_foreign_peer_requires_actual_policy_history -- --nocapture
+AFTER peer: cargo test --offline --lib storage::metadata::native_records::tests::maintenance -- --nocapture
+BEFORE lease: cargo test --offline --lib native_decay_cancelled_waiter_keeps_worker_publication_lease -- --nocapture
+AFTER lease: cargo test --offline --lib storage::metadata::native_records::tests::readers -- --nocapture
+Final: cargo fmt --all --check && cargo test --offline && cargo clippy --offline --all-targets
+No timing or performance claim. All fixture data synthetic; no personal store/daemon used.
