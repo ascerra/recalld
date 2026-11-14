@@ -278,3 +278,151 @@ fn native_policy_commit_faults_preserve_original_keyed_noop_outcome() {
         }
     }
 }
+
+#[tokio::test]
+async fn native_policy_offline_roundtrip_and_foreign_noop_proof_rejects_forged_policy() {
+    use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
+    use crate::storage::logical_export::{export_store, import_store};
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let original = NamespacePolicy::from(&s.engine.get_namespace(id).unwrap().unwrap());
+    let noop_key = ctx(&s, id, "original-no-change");
+    let noop = s
+        .update_policy(&noop_key, scope(&s, id), &original)
+        .unwrap()
+        .unwrap();
+    let mut changed = original.clone();
+    changed.initial_stability = 9.;
+    s.update_policy(&ctx(&s, id, "changed"), scope(&s, id), &changed)
+        .unwrap()
+        .unwrap();
+    let before_rows = encoded(&rows(&s));
+    let config = control::encode(&s.engine.get_namespace(id).unwrap().unwrap()).unwrap();
+    drop(s);
+    let source_bytes = std::fs::read(path.join("meta.db")).unwrap();
+    let stream = root.path().join("policy.jsonl");
+    let imported = root.path().join("imported");
+    assert_eq!(
+        export_store(&path, &stream).unwrap(),
+        import_store(&stream, &imported).unwrap()
+    );
+    assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), source_bytes);
+    let mut s = open(&imported);
+    assert_eq!(encoded(&rows(&s)), before_rows);
+    assert_eq!(
+        control::encode(&s.engine.get_namespace(id).unwrap().unwrap()).unwrap(),
+        config
+    );
+    let replay = s
+        .update_policy(&noop_key, scope(&s, id), &original)
+        .unwrap()
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.outcome, noop.outcome);
+    drop(s);
+    let archive = run_backup(
+        &crate::config::RecalldConfig::default(),
+        &root.path().join("policy.zip"),
+        Some(&imported),
+        false,
+    )
+    .await
+    .unwrap();
+    restore_from_backup(RestoreOptions {
+        backup_path: archive,
+        data_dir: imported.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: false,
+    })
+    .await
+    .unwrap();
+    let mut s = open(&imported);
+    assert_ne!(s.engine.control_state().unwrap().store_id, noop.store_id);
+    assert_eq!(encoded(&rows(&s)), before_rows);
+    assert_eq!(
+        control::encode(&s.engine.get_namespace(id).unwrap().unwrap()).unwrap(),
+        config
+    );
+    assert!(matches!(
+        s.update_policy(&noop_key, scope(&s, id), &original),
+        Err(StorageError::StoreLineageMismatch)
+    ));
+    let receipt_key = control::scoped_key(
+        noop.store_id,
+        MutationScope::Namespace(id),
+        noop.operation_id.as_bytes(),
+    );
+    let tx = s.metadata().db.begin_write().unwrap();
+    let mut table = tx.open_table(control::RECEIPTS).unwrap();
+    let mut stored: control::StoredReceipt =
+        control::decode(table.get(receipt_key.as_slice()).unwrap().unwrap().value()).unwrap();
+    assert_eq!(stored.receipt, noop);
+    let MutationOutcome::NativeNamespacePolicyUnchanged { transition } =
+        &mut stored.receipt.outcome
+    else {
+        panic!()
+    };
+    transition.policy = crate::storage::native_policy::policy_state(&changed).unwrap();
+    table
+        .insert(
+            receipt_key.as_slice(),
+            control::encode(&stored).unwrap().as_slice(),
+        )
+        .unwrap();
+    drop(table);
+    tx.commit().unwrap();
+    drop(s);
+    let corrupt = std::fs::read(imported.join("meta.db")).unwrap();
+    assert!(
+        NativeLifecycleSession::open(&imported, NativePolicyInputs::default(), Arc::new(NoClock))
+            .is_err(),
+        "foreign no-change policy forged to a later revision was admitted"
+    );
+    assert_eq!(std::fs::read(imported.join("meta.db")).unwrap(), corrupt);
+}
+
+#[test]
+fn native_policy_version_migration_preserves_numeric_revision_chain() {
+    use crate::storage::lifecycle_migration::{LifecycleMigrationOptions, migrate_lifecycle};
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let mut policy = NamespacePolicy::from(&s.engine.get_namespace(id).unwrap().unwrap());
+    policy.desired_retention = 0.7;
+    s.update_policy(&ctx(&s, id, "numeric-before"), scope(&s, id), &policy)
+        .unwrap()
+        .unwrap();
+    let state = s.engine.control_state().unwrap();
+    let ns = s.engine.get_namespace(id).unwrap().unwrap();
+    drop(s);
+    let target = root.path().join("explicit");
+    migrate_lifecycle(
+        &path,
+        &target,
+        &LifecycleMigrationOptions {
+            expected_source: state.generation_ref(),
+            namespace_id: id,
+            expected_policy_revision: ns.schema.unwrap().policy_revision,
+            target: crate::model::schema::LifecycleVersion::ExplicitFeedbackV2,
+            idempotency_key: "switch".into(),
+        },
+    )
+    .unwrap();
+    let mut s = open(&target);
+    policy.desired_retention = 0.6;
+    s.update_policy(&ctx(&s, id, "numeric-after"), scope(&s, id), &policy)
+        .unwrap()
+        .unwrap();
+    let noop = s
+        .update_policy(&ctx(&s, id, "numeric-noop"), scope(&s, id), &policy)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        noop.outcome,
+        MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+    ));
+    drop(s);
+    inspect_schema(&target).unwrap();
+}
