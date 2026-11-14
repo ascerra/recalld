@@ -550,3 +550,79 @@ async fn accepted_query_cancel_keeps_http_and_mcp_roots_unresolved() {
         assert!(tracker.status().admission_open);
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_http_create_carries_provider_root_through_links_and_publication() {
+    let h = Arc::new(Harness::new().await);
+    h.embedding.hold.store(true, Ordering::SeqCst);
+    let tracker =
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .work_tracker()
+            .clone();
+    let running = {
+        let h = h.clone();
+        tokio::spawn(async move {
+            request(
+                &h,
+                "/memories",
+                json!({
+                    "summary":"accepted after close", "namespace":"default",
+                    "fullText":"retained synthetic text", "entities":["fixture"],
+                    "checkDuplicates":false,
+                })
+                .to_string(),
+            )
+            .await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(5), h.embedding.entered.notified())
+        .await
+        .unwrap();
+    assert!(tracker.status().pending > 0);
+    let close = {
+        let tracker = tracker.clone();
+        tokio::task::spawn_blocking(move || {
+            tracker.close_and_drain(std::time::Instant::now() + Duration::from_secs(10))
+        })
+    };
+    let waiting = tracker.clone();
+    tokio::task::spawn_blocking(move || waiting.wait_until_closed())
+        .await
+        .unwrap();
+    assert!(!close.is_finished());
+    h.embedding.resume.notify_one();
+    let (status, body) = tokio::time::timeout(Duration::from_secs(10), running)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, axum::http::StatusCode::CREATED, "{body}");
+    let id: MemoryId = serde_json::from_value(body["data"]["id"].clone()).unwrap();
+    let frozen = close.await.unwrap().unwrap();
+    assert_eq!(tracker.status().pending, 0);
+    assert_eq!(tracker.status().unresolved, 0);
+    assert_eq!(h.f.record(id).unwrap().summary, "accepted after close");
+    assert!(
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    assert!(
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(h.f.cache.get(id).await.is_some());
+    drop(frozen);
+    assert!(tracker.status().admission_open);
+}

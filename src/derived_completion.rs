@@ -136,7 +136,16 @@ impl DerivedCompletion {
         id: crate::model::MemoryId,
         namespace: Option<&str>,
     ) -> Result<bool, StorageError> {
-        let work = self.accept_work(None)?;
+        self.forget_with_work(id, namespace, None).await
+    }
+
+    pub(crate) async fn forget_with_work(
+        &self,
+        id: crate::model::MemoryId,
+        namespace: Option<&str>,
+        parent: Option<&WorkTicket>,
+    ) -> Result<bool, StorageError> {
+        let work = self.accept_work(parent)?;
         let result = self
             .forget_accepted(id, namespace.map(str::to_owned), &work)
             .await;

@@ -405,6 +405,17 @@ impl state::StorageEngine for StorageEngineAdapter {
         input: crate::storage::insertion::InsertMemory,
         generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
     ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
+        self.insert_memory_with_work(namespace_id, input, generated_embedding, None)
+            .await
+    }
+
+    async fn insert_memory_with_work(
+        &self,
+        namespace_id: NamespaceId,
+        input: crate::storage::insertion::InsertMemory,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -413,11 +424,13 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .insert(
+        .insert_reserved_with_work(
             crate::storage::control::MutationContext::unkeyed(namespace_id),
             input,
             generated_embedding,
             self.clock.now_millis(),
+            None,
+            parent,
         )
         .await
     }
@@ -425,6 +438,14 @@ impl state::StorageEngine for StorageEngineAdapter {
     async fn complete_insertion(
         &self,
         receipt: &crate::storage::control::WriteReceipt,
+    ) -> Result<(), crate::storage::StorageError> {
+        self.complete_insertion_with_work(receipt, None).await
+    }
+
+    async fn complete_insertion_with_work(
+        &self,
+        receipt: &crate::storage::control::WriteReceipt,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
@@ -434,7 +455,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .complete()
+        .complete_with_work(parent)
         .await
         .map_err(|source| crate::storage::StorageError::CommittedMutation {
             receipt: Box::new(receipt.clone()),
@@ -511,6 +532,15 @@ impl state::StorageEngine for StorageEngineAdapter {
         id: MemoryId,
         namespace: Option<&str>,
     ) -> Result<bool, crate::storage::StorageError> {
+        self.delete_memory_with_work(id, namespace, None).await
+    }
+
+    async fn delete_memory_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<bool, crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -519,7 +549,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .forget(id, namespace)
+        .forget_with_work(id, namespace, parent)
         .await
     }
 
@@ -958,7 +988,11 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
     }
 
     async fn tombstone_node(&self, id: MemoryId) -> Result<(), crate::graph::GraphError> {
-        let work = crate::storage::work::accept_work(&self.storage, None)
+        self.tombstone_node_with_work(id, None).await
+    }
+
+    async fn tombstone_node_with_work(&self, id: MemoryId) -> Result<(), crate::graph::GraphError> {
+        let work = crate::storage::work::accept_work(&self.storage, parent)
             .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let result = async {
             let mut graph = self.graph.write().await;
@@ -999,17 +1033,38 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         entities: &[String],
         created_at: i64,
     ) {
+        if let Err(error) = self
+            .post_creation_links_with_work(
+                memory_id,
+                namespace_id,
+                embedding,
+                tags,
+                entities,
+                created_at,
+                None,
+            )
+            .await
+        {
+            tracing::warn!(%error, "post-creation graph admission rejected");
+        }
+    }
+
+    async fn post_creation_links_with_work(
+        &self,
+        memory_id: MemoryId,
+        namespace_id: NamespaceId,
+        embedding: &[f32],
+        tags: &[String],
+        entities: &[String],
+        created_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), crate::graph::GraphError> {
         if !self.config.graph.autolink_enabled {
-            return;
+            return Ok(());
         }
 
-        let work = match crate::storage::work::accept_work(&self.storage, None) {
-            Ok(work) => work,
-            Err(error) => {
-                tracing::warn!(%error,"post-creation graph admission rejected");
-                return;
-            }
-        };
+        let work = crate::storage::work::accept_work(&self.storage, parent)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let threshold = self.config.graph.auto_link_threshold as f32;
         let max_links = self.config.graph.max_auto_links;
 
@@ -1100,6 +1155,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
             }
         }
         crate::storage::work::finish_work(&self.storage, work);
+        Ok(())
     }
 }
 
@@ -1187,7 +1243,17 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         quality: u8,
         namespace: Option<&str>,
     ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
-        let outcome = crate::decay::storage_adapter::reinforce(
+        self.reinforce_with_work(id, quality, namespace, None).await
+    }
+
+    async fn reinforce_with_work(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
+        let outcome = crate::decay::storage_adapter::reinforce_with_work(
             self.storage.clone(),
             self.cache.clone(),
             id,
@@ -1195,6 +1261,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
             self.config.decay.decay_rate_multiplier,
             self.clock.now_millis(),
             namespace.map(str::to_owned),
+            parent,
         )
         .await;
         let plan = outcome?;
