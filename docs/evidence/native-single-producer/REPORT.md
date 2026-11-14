@@ -67,3 +67,13 @@ This seal adds evidence only after the tested runtime commit. Public native
 activation, wire profile-ID resolution, native exposure, owned-ID allocation,
 and the separate FTS content-correctness follow-up remain independent work.
 
+
+## Actual work-notes copy
+
+Fourteen files, including the runtime source archive, were copied and verified at
+`/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-single-producer-4d9bc7f`.
+`COPY.sha256` SHA-256:
+`75198f1330d9113408e433cbbf6bd971f09e35d27a733760b600409518ef3f5b`.
+The actual HOME experiment note was appended with counts, source/binary identity,
+failures, and remaining scope. The copied report precedes this copy-confirmation
+paragraph; its own bytes are covered by that manifest.
