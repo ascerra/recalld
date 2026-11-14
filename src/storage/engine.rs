@@ -13,6 +13,7 @@ mod insertion;
 mod native_catalog;
 mod native_maintenance;
 mod native_policy;
+mod native_graph;
 mod native_records;
 mod purge;
 mod text_compaction;

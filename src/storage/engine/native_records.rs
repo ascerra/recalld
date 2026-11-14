@@ -29,12 +29,53 @@ impl RedbStorageEngine {
         clock: &dyn Clock,
         parent: Option<&WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.insert_native_record_common(ctx, intent, generated, policy, clock, parent, None)
+    }
+    pub(crate) fn store_native_prepared(
+        &mut self,
+        ctx: &MutationContext,
+        prepared: &crate::storage::native_store::PreparedNativeStore,
+        generated: &GeneratedEmbedding,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_native_record_common(
+            ctx,
+            &prepared.intent.insert,
+            generated,
+            policy,
+            clock,
+            parent,
+            Some(prepared),
+        )
+    }
+    fn insert_native_record_common(
+        &mut self,
+        ctx: &MutationContext,
+        intent: &NativeInsertIntent,
+        generated: &GeneratedEmbedding,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+        prepared: Option<&crate::storage::native_store::PreparedNativeStore>,
+    ) -> Result<WriteReceipt, StorageError> {
         // Replay before current row/policy/provider output, then repeat inside
         // the actual final transaction. A miss here reserves nothing.
-        if let Some(receipt) =
+        let replay = if let Some(p) = prepared {
+            self.meta_store.lookup_native_store(
+                ctx,
+                &crate::storage::native_store::NativeStoreInput {
+                    insert: intent.original.clone(),
+                    check_duplicates: p.intent.check_duplicates,
+                },
+                parent,
+            )?
+        } else {
             self.meta_store
                 .lookup_native_insert(ctx, &intent.original, parent)?
-        {
+        };
+        if let Some(receipt) = replay {
             return Ok(receipt);
         }
         let guard = self.meta_store.native_guard_with_work(parent)?;
@@ -55,7 +96,13 @@ impl RedbStorageEngine {
             .as_ref()
             .or(generated.profile.as_ref())
             .ok_or_else(|| {
-                StorageError::InvalidMutation("native embedding profile missing".into())
+                if prepared.is_some() && intent.original.memory.embedding.is_none() {
+                    StorageError::ProviderVectorUnavailable(
+                        "native embedding profile missing".into(),
+                    )
+                } else {
+                    StorageError::InvalidMutation("native embedding profile missing".into())
+                }
             })?;
         let vectors = &mut self.vector_manager;
         let text = &mut self.text_store;
@@ -64,6 +111,7 @@ impl RedbStorageEngine {
             &guard,
             ctx,
             intent,
+            prepared,
             policy,
             clock,
             embedding,

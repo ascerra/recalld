@@ -1,0 +1,274 @@
+{
+  "runtime_sha": "0ff05b0cb53593973fef640fb959d815594ea3cc",
+  "actual_parent": "fb804a0a72ccf7dde0a6ee7eaea2e91a6b7ba2db",
+  "shared_helper": "1f4eb18c24a3d3f512030bbee0f9c4adcecfe656",
+  "published_pr82_head_at_handoff": "bb1a0863b2ab0eba940e767941ca4e85fe9b8e77",
+  "branch": "impl/native-graph",
+  "home_evidence": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-graph-0ff05b0",
+  "raw_in_git": false,
+  "environment": {
+    "image_id": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "network_mode": "none",
+    "nano_cpus": 2000000000,
+    "memory_bytes": 4294967296,
+    "binds": [
+      "/tmp/recalld-implementation/native-graph/.validation/run-9/source:/work:ro",
+      "/tmp/recalld-implementation/native-graph/.validation/run-9/validate.sh:/validate.sh:ro",
+      "/tmp/recalld-implementation/native-graph/.validation/cargo:/cargo",
+      "/tmp/recalld-implementation/native-graph/.validation/target:/target"
+    ],
+    "started_at": "2026-11-14T17:44:55.827241476Z",
+    "toolchain": "1.94.1",
+    "cargo_build_jobs": 2
+  },
+  "runs": [
+    {
+      "name": "run-1",
+      "status": "3 focused passed",
+      "source_manifest_sha256": "355e624361d59684ff16537bc4b3a4dfdf06eb4674310e3a3b7da8fa77bc9ab8",
+      "source_files": 212,
+      "post_validation": {
+        "source_verified": true,
+        "test_binary": "/private/tmp/recalld-implementation/native-graph/.validation/target/debug/deps/recalld-e423ca3d07310388",
+        "test_binary_sha256": "3d9d34ed0950dde7f32bde2fd5796eea6677d588839e322d74098b679c0f0127",
+        "log_sha256": "c0d56449939a8cc088df886b372e2575ee0ad3dd1d35f658e369d0bc686b581d"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "b2e00895ecf7bb3d9e8b668dc5894fc7dc3ae330d140fd3e0a264ce4441f272a",
+        "source.json": "355e624361d59684ff16537bc4b3a4dfdf06eb4674310e3a3b7da8fa77bc9ab8",
+        "validate.sh": "e1c8087c42b9f44bc2a9bc66d9728b78196ab0283d70776bebbdc9b0d633826b",
+        "validation.log": "c0d56449939a8cc088df886b372e2575ee0ad3dd1d35f658e369d0bc686b581d"
+      }
+    },
+    {
+      "name": "run-2",
+      "status": "9 focused passed; full intentionally canceled for reviewed fixes (exit 137)",
+      "source_manifest_sha256": "8f0b71e91efb170c64ffaf4a1be822ea4e6c2fa5886a9491d1940c0e4b503edf",
+      "source_files": 212,
+      "post_validation": {
+        "source_verified": true,
+        "focused_tests": "9 passed",
+        "test_binary_sha256": "beca4ccdf6ec26391cd78d213efb5893ec8933f5f0eb98d7cacaae5ecb12ad27",
+        "full_status": "INTENTIONALLY STOPPED; not full-suite evidence",
+        "reason": "Review requires historical profile commitment validation and signed-zero regression before final freeze. No test failure observed before stop."
+      },
+      "artifact_sha256": {
+        "full.log": "f53384b8552dc5f4917c344220af4bcf151d57a1adbf5d0767a9b47b29f5a124",
+        "full.sh": "eaf8181d986e9f60c25da4512ffe6c72c75d0ce7e93631783f431e1376335412",
+        "post-validation.json": "bce6f9296c24cc186f1eb5001bdeae61cd22a5f3ead72886119d583b098c2635",
+        "source.json": "8f0b71e91efb170c64ffaf4a1be822ea4e6c2fa5886a9491d1940c0e4b503edf",
+        "validate.sh": "36aafd43a562b60098570c4b4e8aa0a02396588c79e9a5383d855887fee3be88",
+        "validation.log": "0865e36d3226cb58a132eafc2775cdf634dd4bf24f1468f9557b2385ba4fb33d"
+      }
+    },
+    {
+      "name": "run-3-red",
+      "status": "0 passed / 2 failed: signed-zero update and malformed foreign-origin profile accepted",
+      "source_manifest_sha256": "b08610e95f0d4eeace2499db932625de69be88ad2344f2f6d301b30edcf148fc",
+      "source_files": 212,
+      "post_validation": {
+        "source_verified": true,
+        "test_binary_sha256": "99120297be8d13f1ca20e6693af8df39e21c11e1c1c0c0240c29f986ee105da5",
+        "exit_code": 101,
+        "result": "0 passed; 2 reproduced review defects",
+        "binary_path_in_container": "/target/debug/deps/recalld-e423ca3d07310388"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "645a24bfd3c3389268f52124a2a65b22eab276b399f54128b62c8612b7018c0b",
+        "source.json": "b08610e95f0d4eeace2499db932625de69be88ad2344f2f6d301b30edcf148fc",
+        "validate.sh": "6b791b3b83a9b5f8fa0c75fdd7108d174d7ffa75a15a927213270a91aca9a2d8",
+        "validation.log": "a107e6b46ce0244b919df56f06f55b4709c61ce42c8d1f631af9f33fcfc4742a"
+      }
+    },
+    {
+      "name": "run-4",
+      "status": "12 focused passed; full intentionally canceled for keyed-no-op correction (exit 137)",
+      "source_manifest_sha256": "d73bdae6a49cd75c7928f19fb55063de3357f3a6ca95b791f7bfe86bff45ae89",
+      "source_files": 212,
+      "post_validation": {
+        "source_verified": true,
+        "test_binary_sha256": "d283368219802017ee55e93a1b1b90509bce4a1b7882f2e8e0257b2e00eae859",
+        "focused_tests": "12 passed; both prior review defects corrected",
+        "full_status": "INTENTIONALLY STOPPED; not completed full-suite evidence",
+        "reason": "Newly identified unbound keyed no-op success requires fail-closed correction before final freeze."
+      },
+      "artifact_sha256": {
+        "post-validation.json": "63881d60d906567088bf12872f267e29c1748a27dc060cfa04b6c4c92ab107a0",
+        "source.json": "d73bdae6a49cd75c7928f19fb55063de3357f3a6ca95b791f7bfe86bff45ae89",
+        "validate.sh": "a285fb6f1f5db371fb41466c00bbc339ef74d041c1875a4112ed2f4ae65e0de9",
+        "validation.log": "3f7f38b217c1358f9567efb99724cbb9e62e1a45d324fd5175ab6cb04512c60c"
+      }
+    },
+    {
+      "name": "run-5-red",
+      "status": "0 passed / 1 failed: successful keyed no-op retry wrote G9 after intervening G8",
+      "source_manifest_sha256": "7cc5622e0223b30805a626c6cf28f3c8343297d69707d9ac923483268361e053",
+      "source_files": 212,
+      "post_validation": {
+        "source_verified": true,
+        "test_binary_sha256": "d70968d66cafb975beef5eb71e53d06e5366db549cde38c1a0701e51b54c2fbd",
+        "exit_code": 101,
+        "result": "keyed no-op successful retry changed generation 8 to 9 after writer B"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "cfa57885f672b73ebccae913c210e6bb2e93edc43752643f0f34df39682e4573",
+        "source.json": "7cc5622e0223b30805a626c6cf28f3c8343297d69707d9ac923483268361e053",
+        "validate.sh": "0758b42c4c45358726f474bc9622ba1a39f149a2f5e9a58977fd80397a36d455",
+        "validation.log": "f2ba59eb931c68cfad3db45a984b631d7b4b26f16899604f904c6df0a59bae21"
+      }
+    },
+    {
+      "name": "run-6",
+      "status": "939 library + 2 CLI + 13 focused, fmt/clippy passed; preserved before separate semantic profile binding correction",
+      "source_manifest_sha256": "7696900b81cd45f6d7ededf345e3ff58b8c0fc1bf4abf6fb93ffed63719db182",
+      "source_files": 212,
+      "post_validation": {
+        "source_manifest_sha256": "7696900b81cd45f6d7ededf345e3ff58b8c0fc1bf4abf6fb93ffed63719db182",
+        "source_verified_before_and_after": true,
+        "working_source_verified": true,
+        "file_count": 212,
+        "exit_code": 0,
+        "focused": 13,
+        "library": 939,
+        "cli": 2,
+        "ignored_doctests": 4,
+        "fmt": "passed",
+        "clippy": "exit 0 with warnings",
+        "clippy_summaries": [
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib) generated 2 warnings",
+          "warning: `recalld` (lib) generated 605 warnings (run `cargo clippy --fix --lib -p recalld` to apply 82 suggestions)",
+          "warning: `recalld` (bin \"recalld\") generated 1 warning",
+          "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+          "warning: `recalld` (lib test) generated 644 warnings (604 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 3 suggestions)"
+        ],
+        "binary_sha256": {
+          "/target/debug/deps/lifecycle_cli-4843a41927cafc6b": "bccf95c203a38aaf6143cee95b8d585c1a2a70b1ece63cb53c03c719d9303731",
+          "/target/debug/deps/recalld-c8392f2a5ef64898": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+          "/target/debug/deps/recalld-e423ca3d07310388": "23802ed9488ab8de4d45f3834f65f40512d4fb2006c85f5d29f148647b1fdfc4",
+          "/target/debug/deps/recalld_cli-2dba722497aafcf6": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f",
+          "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41",
+          "/target/debug/deps/text_migration_cli-92bf02c892a58814": "c8d3b5c3e6dfc62fad83e7d2a62708c85a65eda411a617b8b693bae7eeb121d9",
+          "/target/debug/recalld": "0631b456397332c0e8654e253c46f906cf8333724c26b5dd929e5beddf62dc5f"
+        },
+        "validation_log_sha256": "0112bbda289ab0ab0b808a83c0380a9474123f6155aef7749b6d4a82ccd02e40",
+        "completion_observed_at": "2026-11-14T17:36:35.813654+00:00"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "92587f1cceac2d299afef8255b7335955ef3774980cfa751b9d21ba0a7922a7d",
+        "runtime.json": "d375875e79599da64ffb2473f1c09fb9ce6e03b27b53f2c064994059c07c1ad2",
+        "source.json": "7696900b81cd45f6d7ededf345e3ff58b8c0fc1bf4abf6fb93ffed63719db182",
+        "validate.sh": "a285fb6f1f5db371fb41466c00bbc339ef74d041c1875a4112ed2f4ae65e0de9",
+        "validation.log": "0112bbda289ab0ab0b808a83c0380a9474123f6155aef7749b6d4a82ccd02e40"
+      }
+    },
+    {
+      "name": "run-7-red",
+      "status": "Actual RED: well-formed but wrong profile binding accepted after actual restore; 0 passed / 1 failed",
+      "source_manifest_sha256": "03c0b6ccf24a4b7a35a31e186e4db223f5b232d0fd96863f5c73a6be7c364c9d",
+      "source_files": 212,
+      "post_validation": {
+        "source_manifest_sha256": "03c0b6ccf24a4b7a35a31e186e4db223f5b232d0fd96863f5c73a6be7c364c9d",
+        "source_verified_before_and_after": true,
+        "working_source_verified": true,
+        "exit_code": 101,
+        "focused_pass": 0,
+        "focused_fail": 1,
+        "binary_sha256": {
+          ".validation/target/debug/deps/recalld-e423ca3d07310388": "221589464e48d3e8171daeecb620dce925936e96784131051b06324a329410be"
+        },
+        "validation_log_sha256": "a7ea4b677e42b205e104b14f2db04cd11f3515b24fef46ad4153594a6aba601a",
+        "completion_observed_at": "2026-11-14T17:42:05.565548+00:00"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "d597499598a4af262a37e66d1e2d08f6caab717df52a49f1728600f37283ec14",
+        "source.json": "03c0b6ccf24a4b7a35a31e186e4db223f5b232d0fd96863f5c73a6be7c364c9d",
+        "validate.sh": "eb8160bb48f90a3dcb419961bd62ef0a8a7513e8596a80f0ed5ac7cc500770c7",
+        "validation.log": "a7ea4b677e42b205e104b14f2db04cd11f3515b24fef46ad4153594a6aba601a"
+      }
+    },
+    {
+      "name": "run-8",
+      "status": "Binding regression passed; new UnknownLegacy fixture used contract 1 and was correctly rejected: 13 passed / 1 failed; full suite not reached",
+      "source_manifest_sha256": "8b4d6dff7de6d31a019eac5ff0d72b0de3f37afd826d4e126283ef31eaeb853c",
+      "source_files": 212,
+      "post_validation": {
+        "source_manifest_sha256": "8b4d6dff7de6d31a019eac5ff0d72b0de3f37afd826d4e126283ef31eaeb853c",
+        "source_verified_before_and_after": true,
+        "working_source_verified": true,
+        "exit_code": 101,
+        "focused_pass": 13,
+        "focused_fail": 1,
+        "full_suite": "not reached",
+        "failure": "New UnknownLegacy fixture used contract1 default; actual native graph correctly rejects it. Wrong valid profile binding regression passed.",
+        "binary_sha256": {
+          ".validation/target/debug/deps/recalld-e423ca3d07310388": "39f5353a2014325c210a358f30edc850315a992305e93c7ad19bee33be3e7a10"
+        },
+        "validation_log_sha256": "a7bb37ba4cf1594f58018dc556f02d9476ed71c4075078d3473358e708eafc19",
+        "completion_observed_at": "2026-11-14T17:44:50.940748+00:00"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "0a64425db89e192cc91a1ceeae62084701b4134758504dfe01e79de7d3ffbeb7",
+        "runtime.json": "47c006ac71bc0b6d2051075e5616f6e6d3ff3a6bdb25a8fc97ce2c54e42cc411",
+        "source.json": "8b4d6dff7de6d31a019eac5ff0d72b0de3f37afd826d4e126283ef31eaeb853c",
+        "validate.sh": "a285fb6f1f5db371fb41466c00bbc339ef74d041c1875a4112ed2f4ae65e0de9",
+        "validation.log": "a7bb37ba4cf1594f58018dc556f02d9476ed71c4075078d3473358e708eafc19"
+      }
+    },
+    {
+      "name": "run-9",
+      "status": "Final 940 library + 2 CLI + 14 focused, fmt/clippy passed",
+      "source_manifest_sha256": "db040806f862d13722f1e83aeed7b6b508e6032691d431d2e1da79e5d4758856",
+      "source_files": 212,
+      "post_validation": {
+        "source_manifest_sha256": "db040806f862d13722f1e83aeed7b6b508e6032691d431d2e1da79e5d4758856",
+        "source_verified_before_and_after": true,
+        "working_source_verified": true,
+        "file_count": 212,
+        "exit_code": 0,
+        "focused": 14,
+        "library": 940,
+        "cli": 2,
+        "ignored_doctests": 4,
+        "fmt": "passed",
+        "clippy": "exit 0 with warnings",
+        "clippy_summaries": [
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib) generated 2 warnings",
+          "warning: `recalld` (lib) generated 607 warnings (run `cargo clippy --fix --lib -p recalld` to apply 82 suggestions)",
+          "warning: `recalld` (bin \"recalld\") generated 1 warning",
+          "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+          "warning: `recalld` (lib test) generated 646 warnings (606 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 3 suggestions)"
+        ],
+        "binary_sha256": {
+          "/target/debug/deps/lifecycle_cli-4843a41927cafc6b": "2a142ab23e1025df1c951a98a6ca08c0a02a2cd5e84509dfab5d1e5271645bac",
+          "/target/debug/deps/recalld-c8392f2a5ef64898": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+          "/target/debug/deps/recalld-e423ca3d07310388": "750fbfe941c43046a19fa554f3cd05c4578513d91263cf2f0f879a4f3621ccf1",
+          "/target/debug/deps/recalld_cli-2dba722497aafcf6": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f",
+          "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41",
+          "/target/debug/deps/text_migration_cli-92bf02c892a58814": "338fe0a38950be0b5c1500d8ba902a5377a024475ed7086252bf4e97398d4ee3",
+          "/target/debug/recalld": "9887c112a01b02ccd83eeb3dcf6a308415845b80a642b8d40baeaa4f6757e24f"
+        },
+        "validation_log_sha256": "cfc9259b4d7a72322f95d810bd0fad84bc5ecc59f66f31dd0d17c3ef5e12e460",
+        "completion_observed_at": "2026-11-14T17:54:32.564036+00:00"
+      },
+      "artifact_sha256": {
+        "post-validation.json": "4f4b13d252963c160e44566dce0b42f46d9a2c5c191f40a0ccdc78533c4beac5",
+        "runtime.json": "f04112be3f6a72d8b9bd15b282541d08fc3a63b8526fac6b768b9b7316b0d37a",
+        "source.json": "db040806f862d13722f1e83aeed7b6b508e6032691d431d2e1da79e5d4758856",
+        "validate.sh": "a285fb6f1f5db371fb41466c00bbc339ef74d041c1875a4112ed2f4ae65e0de9",
+        "validation.log": "cfc9259b4d7a72322f95d810bd0fad84bc5ecc59f66f31dd0d17c3ef5e12e460"
+      }
+    }
+  ],
+  "remaining_scope": [
+    "typed receipted graph no-op for final A4 contract",
+    "same-insertion frozen links/new additive proof with Curie producer integration",
+    "explicit hard-delete edge-history rewind on future join",
+    "public native activation/readiness and performance gates"
+  ],
+  "shared_binding_helper": "f0a7e15783cfe85b4453933f4d9b10b097fec6de",
+  "formatting_note": "format-8 first formatter attempt rejected read-only scratch file modes; writable scratch modes fixed and formatter completed before runtime freeze. No compiler retry or global cache clean."
+}
