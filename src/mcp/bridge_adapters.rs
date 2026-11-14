@@ -36,6 +36,9 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         crate::storage::StorageError::ProviderVectorUnavailable(_) => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
+        crate::storage::StorageError::NamespaceMismatch { .. } => {
+            bridge::BridgeError::NamespaceMismatch(error.to_string())
+        }
         crate::storage::StorageError::InvalidMutation(_)
         | crate::storage::StorageError::EdgeConflict(_)
         | crate::storage::StorageError::MutationNamespaceMismatch => {
@@ -174,30 +177,16 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         // A label that cannot become a tag is an ERROR, not a dropped
         // filter: dropping one widens the query, and "every memory in
         // the namespace" is indistinguishable from a real result set.
-        let require_tags = match filter_tags(
-            &[
-                ("tags", "", &query.tags),
-                (
-                    "entities",
-                    crate::model::constants::ENTITY_TAG_PREFIX,
-                    &query.entities,
-                ),
-                (
-                    "topics",
-                    crate::model::constants::TOPIC_TAG_PREFIX,
-                    &query.topics,
-                ),
-                (
-                    "emotions",
-                    crate::model::constants::EMOTION_TAG_PREFIX,
-                    &query.emotions,
-                ),
-            ],
-            "recall_memories",
-        ) {
-            Ok(tags) => tags,
-            Err(e) => return Err(bridge::BridgeError::InvalidInput(e)),
+        let require_tags = filter_tags(&[("tags", "", &query.tags)], "recall_memories")
+            .map_err(bridge::BridgeError::InvalidInput)?;
+        let labels = crate::model::tag::StructuredLabelFilter {
+            entities: query.entities.clone(),
+            topics: query.topics.clone(),
+            emotions: query.emotions.clone(),
         };
+        labels
+            .validate(ns_config.schema.is_some())
+            .map_err(bridge::BridgeError::InvalidInput)?;
 
         let pipeline_query = crate::search::SearchQuery {
             record_access: query.record_access,
@@ -206,6 +195,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             fts_query: None,
             namespace: query.namespace.clone(),
             filter: crate::search::PipelineSearchFilter {
+                labels,
                 require_tags,
                 min_strength: query.min_strength,
                 ..Default::default()
@@ -323,10 +313,11 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     })
                     .collect();
 
-                let metadata = crate::model::parse_structured_tags(&r.tags);
+                let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
 
                 let tz = self.timezone;
                 bridge::SearchHit {
+                    labels: r.labels.clone(),
                     id: r.memory_id.to_string(),
                     summary: r.summary.unwrap_or_default(),
                     full_text,
@@ -430,9 +421,13 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     } else {
                         None
                     };
-                    let metadata = crate::model::parse_structured_tags(&disk.tags);
+                    let metadata = crate::model::structured_metadata(
+                        &disk.tags,
+                        disk.schema.as_ref().map(|s| &s.labels),
+                    );
 
                     result.push(bridge::NeighborMemory {
+                        labels: disk.schema.as_ref().map(|s| s.labels.clone()),
                         id: mid.to_string(),
                         summary: disk.summary.clone(),
                         full_text,
@@ -525,10 +520,11 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             let hits = results
                 .into_iter()
                 .map(|r| {
-                    let metadata = crate::model::parse_structured_tags(&r.tags);
+                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
 
                     let tz = self.timezone;
                     bridge::SearchHit {
+                        labels: r.labels.clone(),
                         id: r.memory_id.to_string(),
                         summary: r.summary.unwrap_or_default(),
                         full_text: r.full_text,
@@ -1334,6 +1330,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
                                 .unwrap_or_default();
 
                             return Ok(Some(bridge::MemoryRecord {
+                                labels: record.schema.as_ref().map(|s| s.labels.clone()),
                                 id: id.to_string(),
                                 namespace: ns_name,
                                 summary: String::new(),
@@ -1369,6 +1366,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
                         };
 
                         Ok(Some(bridge::MemoryRecord {
+                            labels: record.schema.as_ref().map(|s| s.labels.clone()),
                             id: id.to_string(),
                             namespace: ns_name,
                             summary: record.summary.clone(),
@@ -1516,22 +1514,11 @@ impl bridge::StorageEngine for McpStorageAdapter {
     ) -> Result<bridge::ListMemoriesResponse, bridge::BridgeError> {
         let stamp = effects_stamp(&self.storage).await?;
         let result = async {
-            // Build tag filters: merge explicit tags + entity tags for AND
-            // semantics. An unfilterable label is an error — see
-            // `filter_tags`.
-            let require_tags = match filter_tags(
-                &[
-                    ("tags", "", &input.tags),
-                    (
-                        "entities",
-                        crate::model::constants::ENTITY_TAG_PREFIX,
-                        &input.entities,
-                    ),
-                ],
-                "list_memories",
-            ) {
-                Ok(tags) => tags,
-                Err(e) => return Err(bridge::BridgeError::InvalidInput(e)),
+            let require_tags = filter_tags(&[("tags", "", &input.tags)], "list_memories")
+                .map_err(bridge::BridgeError::InvalidInput)?;
+            let labels = crate::model::tag::StructuredLabelFilter {
+                entities: input.entities.clone(),
+                ..Default::default()
             };
 
             // Resolve namespace and query in a single blocking task.
@@ -1551,15 +1538,22 @@ impl bridge::StorageEngine for McpStorageAdapter {
                     .ok_or_else(|| {
                         bridge::BridgeError::NotFound(format!("namespace '{}' not found", ns_name,))
                     })?;
+                labels
+                    .validate(ns.schema.is_some())
+                    .map_err(bridge::BridgeError::InvalidInput)?;
+                let labels = labels.compile();
                 let (page, total) = storage_r
                     .meta_store()
-                    .list_memories_filtered(
+                    .list_memories_filtered_by(
                         ns.id,
                         &require_tags,
                         time_range_start,
                         time_range_end,
                         offset,
                         limit,
+                        |record| {
+                            labels.matches(&record.tags, record.schema.as_ref().map(|s| &s.labels))
+                        },
                     )
                     .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
                 Ok::<_, bridge::BridgeError>((ns, page, total))
@@ -1574,8 +1568,12 @@ impl bridge::StorageEngine for McpStorageAdapter {
             let memories: Vec<bridge::ListMemoryEntry> = page
                 .into_iter()
                 .map(|(mid, record)| {
-                    let metadata = crate::model::parse_structured_tags(&record.tags);
+                    let metadata = crate::model::structured_metadata(
+                        &record.tags,
+                        record.schema.as_ref().map(|s| &s.labels),
+                    );
                     bridge::ListMemoryEntry {
+                        labels: record.schema.as_ref().map(|s| s.labels.clone()),
                         id: mid.to_string(),
                         summary: record.summary,
                         entities: metadata.entities,
@@ -3902,5 +3900,6 @@ mod tests {
             index.find_by_entities(default_ns(), &names, MemoryId::new()),
             vec![(orphan, 1)]
         );
+        assert!(fx.record(orphan).is_some());
     }
 }

@@ -261,6 +261,21 @@ impl DerivedCompletion {
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<(), StorageError> {
+        self.complete_impl(parent, false).await
+    }
+
+    /// Explicitly rebuild newly constructed private views after owner reopen,
+    /// even when earlier completion consumed every pending manifest. This does
+    /// not establish a whole-query ReadView or register generation watermarks.
+    pub(crate) async fn rebuild_all(&self) -> Result<(), StorageError> {
+        self.complete_impl(None, true).await
+    }
+
+    async fn complete_impl(
+        &self,
+        parent: Option<&WorkTicket>,
+        rebuild_all: bool,
+    ) -> Result<(), StorageError> {
         let work = self.accept_work(parent)?;
         self.cache.bind_storage(&self.storage);
         let gate = publication_gate(&self.storage).await?;
@@ -278,7 +293,9 @@ impl DerivedCompletion {
                 storage.resume_pending_purges_with_work(Some(&child))?;
                 storage.ensure_available()?;
                 let publication = storage.meta_store().publication_state()?;
-                if !storage.meta_store().needs_effects_rebuild() && publication.matches_canonical()
+                if !rebuild_all
+                    && !storage.meta_store().needs_effects_rebuild()
+                    && publication.matches_canonical()
                 {
                     return Ok(());
                 }
@@ -1081,6 +1098,64 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+    #[tokio::test]
+    async fn entity_rebuild_online_completion_replaces_stale_namespace_postings() {
+        let fx = Fixture::new();
+        let local = NamespaceId::new(1);
+        let foreign = fx.create_namespace("foreign");
+        let live = fx.insert_memory_in(local, &["entity/alice"]).await;
+        let peer = fx
+            .insert_memory_in(foreign, &["entity/alice", "entity/bob"])
+            .await;
+        let dead = fx.insert_memory_in(local, &["entity/dead"]).await;
+        {
+            let mut index = fx.entity_index.write().await;
+            index.add(local, live, &["stale".into()]);
+            index.add(local, dead, &["dead".into()]);
+        }
+        // Real canonical deletion dirties every view and requires completion.
+        fx.storage.write().unwrap().delete_memory(dead).unwrap();
+        let query = vec!["Alice".into(), "Bob".into()];
+        for _ in 0..2 {
+            publisher(&fx).complete().await.unwrap();
+            let index = fx.entity_index.read().await;
+            assert_eq!(index.len(), 2);
+            assert_eq!(
+                index.find_by_entities(local, &query, MemoryId::new()),
+                vec![(live, 1)]
+            );
+            assert_eq!(
+                index.find_by_entities(foreign, &query, MemoryId::new()),
+                vec![(peer, 2)]
+            );
+            assert!(
+                index
+                    .find_by_entities(local, &["stale".into(), "dead".into()], MemoryId::new())
+                    .is_empty()
+            );
+            assert!(
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .effects_stamp()
+                    .is_ok()
+            );
+        }
+        fx.storage.write().unwrap().delete_memory(live).unwrap();
+        publisher(&fx).complete().await.unwrap();
+        let index = fx.entity_index.read().await;
+        assert_eq!(index.len(), 1);
+        assert!(
+            index
+                .find_by_entities(local, &query, MemoryId::new())
+                .is_empty()
+        );
+        assert_eq!(
+            index.find_by_entities(foreign, &query, MemoryId::new()),
+            vec![(peer, 2)]
         );
     }
 }

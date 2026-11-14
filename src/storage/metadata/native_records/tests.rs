@@ -13,6 +13,9 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+#[path = "reader_tests.rs"]
+mod readers;
+
 struct FixedClock(AtomicUsize);
 impl Clock for FixedClock {
     fn now_millis(&self) -> i64 {

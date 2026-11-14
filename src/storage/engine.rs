@@ -16,7 +16,7 @@ mod purge;
 mod text_compaction;
 mod tombstone;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
