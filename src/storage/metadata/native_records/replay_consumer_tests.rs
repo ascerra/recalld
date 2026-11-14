@@ -127,6 +127,34 @@ async fn retired_replay(feedback: bool) {
             invoke(&publisher, feedback, changed, id, None, clock.clone(), true).await,
             Err(StorageError::IdempotencyConflict)
         ));
+        let different_payload = if feedback {
+            publisher
+                .feedback_native_with_work(
+                    context.clone(),
+                    id,
+                    4,
+                    None,
+                    NativePolicyInputs::default(),
+                    clock.clone(),
+                    None,
+                )
+                .await
+        } else {
+            publisher
+                .forget_native_with_work(
+                    context.clone(),
+                    MemoryId::from(uuid::Uuid::new_v4()),
+                    None,
+                    NativePolicyInputs::default(),
+                    clock.clone(),
+                    None,
+                )
+                .await
+        };
+        assert!(matches!(
+            different_payload,
+            Err(StorageError::IdempotencyConflict)
+        ));
         let mut foreign = context.clone();
         foreign.store_id = Some(uuid::Uuid::new_v4());
         assert!(matches!(
@@ -175,6 +203,46 @@ async fn retired_replay(feedback: bool) {
         }
         f = Fixture::from_open_engine(root, s.engine);
     }
+    // Simulate malformed retained evidence on the synthetic owning handle only.
+    // Both consumers must retain the known receipt and reject without writes.
+    let publisher = completion(&f);
+    publisher.rebuild_all().await.unwrap();
+    {
+        let storage = f.storage.read().unwrap();
+        let tx = storage.meta_store().db.begin_write().unwrap();
+        tx.open_table(crate::storage::metadata::purge::PROGRESS)
+            .unwrap()
+            .remove(p.start_receipt.operation_id.as_bytes().as_slice())
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    let before = bytes(&d.path);
+    let calls = clock.0.load(Ordering::SeqCst);
+    let error = invoke(
+        &publisher,
+        feedback,
+        context,
+        id,
+        Some("native"),
+        clock.clone(),
+        true,
+    )
+    .await
+    .unwrap_err();
+    match error {
+        StorageError::CommittedMutation {
+            receipt: known,
+            source,
+        } => {
+            let mut expected = receipt;
+            expected.replayed = !feedback;
+            assert_eq!(*known, expected);
+            assert!(matches!(*source, StorageError::InvalidControl(_)));
+        }
+        other => panic!("binding corruption lost committed receipt: {other:?}"),
+    }
+    assert_eq!(bytes(&d.path), before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
