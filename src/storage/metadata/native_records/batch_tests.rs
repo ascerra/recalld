@@ -396,23 +396,168 @@ async fn native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publica
         let mut conflicting = r.clone();
         conflicting.items[0]["embedding"] = json!([1., 0., 0., 0.]);
         assert!(adapter.mutate_batch(conflicting).await.is_err());
-        // A fresh committed child whose derived publication fails must carry its
-        // own receipt, not the parent or the older successful child.
+        // Reservation publication precedes provider work. Preserve its fail-closed
+        // boundary separately from the later committed-child publication failure.
+        struct Paused {
+            profile: crate::model::schema::EmbeddingProfile,
+            entered: Arc<tokio::sync::Notify>,
+            release: Arc<tokio::sync::Notify>,
+            calls: Arc<AtomicUsize>,
+        }
+        #[async_trait::async_trait]
+        impl crate::embedding::EmbeddingProvider for Paused {
+            fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+                Some(self.profile.clone())
+            }
+            fn dimensions(&self) -> usize {
+                4
+            }
+            fn model_name(&self) -> &str {
+                "native-publication-boundary"
+            }
+            async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                self.entered.notify_one();
+                self.release.notified().await;
+                Ok(vec![2., 0., 0., 0.])
+            }
+        }
         r.idempotency_key = Some("publication".into());
         r.items.truncate(1);
+        r.items[0].as_object_mut().unwrap().remove("embedding");
+        r.items[0]
+            .as_object_mut()
+            .unwrap()
+            .remove("embeddingProfile");
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let adapter = Arc::new(
+            crate::mcp::bridge_adapters::McpStorageAdapter::new(
+                f.storage.clone(),
+                f.cache.clone(),
+                Arc::new(Paused {
+                    profile: d.profile.clone(),
+                    entered: entered.clone(),
+                    release: release.clone(),
+                    calls: calls.clone(),
+                }),
+                f.vector_index.clone(),
+                f.fts_index.clone(),
+                f.entity_index.clone(),
+                f.graph.clone(),
+                disabled_aux_config(),
+                chrono_tz::UTC,
+            )
+            .with_clock(Arc::new(FixedClock(AtomicUsize::new(0)))),
+        );
+        let rows_before_reservation = f.storage.read().unwrap().scan_all().unwrap().len();
         *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
-        let failed = adapter.mutate_batch(r.clone()).await.unwrap();
+        let reservation_failed = adapter.mutate_batch(r.clone()).await.unwrap();
+        assert_eq!(
+            reservation_failed.items[0].status,
+            BatchStatus::NotAttempted
+        );
+        assert!(reservation_failed.items[0].receipt.is_none());
+        assert!(!reservation_failed.items[0].ready);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            f.storage.read().unwrap().scan_all().unwrap().len(),
+            rows_before_reservation
+        );
+        let reservation = reservation_failed.reservation_receipt.as_ref().unwrap();
+        assert_eq!(
+            reservation.operation_id,
+            reservation_failed.batch_operation_id
+        );
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .lookup_operation(
+                    reservation.store_id,
+                    MutationScope::Catalog,
+                    reservation.operation_id
+                )
+                .unwrap()
+                .unwrap(),
+            *reservation
+        );
+        *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+        let pending = r.clone();
+        let writer = adapter.clone();
+        let task = tokio::spawn(async move { writer.mutate_batch(pending).await });
+        tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+            .await
+            .unwrap();
+        let before_child = f.storage.read().unwrap().control_state().unwrap();
+        assert!(
+            f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+        let row_count = f.storage.read().unwrap().scan_all().unwrap().len();
+        // Now the actual reservation publisher completed. The valid generated
+        // vector lets the fresh child commit before its own publication fails.
+        *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+        release.notify_one();
+        let failed = task.await.unwrap().unwrap();
         assert_eq!(failed.items[0].status, BatchStatus::Ok);
         assert!(!failed.items[0].ready);
         let committed = failed.items[0].receipt.as_ref().unwrap();
         assert_ne!(committed.operation_id, failed.batch_operation_id);
         assert_ne!(committed.operation_id, child);
+        assert_eq!(
+            committed.committed_generation,
+            before_child.committed_generation.next().unwrap()
+        );
+        assert_eq!(
+            f.storage.read().unwrap().scan_all().unwrap().len(),
+            row_count + 1
+        );
         *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
         let recovered = adapter.mutate_batch(r).await.unwrap();
         assert!(recovered.all_ready(), "{recovered:?}");
+        assert!(!committed.replayed);
+        let mut replayed = committed.clone();
+        replayed.replayed = true;
+        assert_eq!(recovered.items[0].receipt.as_ref().unwrap(), &replayed);
         assert_eq!(
-            recovered.items[0].receipt.as_ref().unwrap().operation_id,
-            committed.operation_id
+            f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .lookup_operation(
+                    committed.store_id,
+                    MutationScope::Namespace(d.ns),
+                    committed.operation_id
+                )
+                .unwrap()
+                .unwrap(),
+            *committed
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "replay must not call provider"
+        );
+        assert_eq!(
+            f.storage.read().unwrap().scan_all().unwrap().len(),
+            row_count + 1
+        );
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation,
+            committed.committed_generation
         );
     }
 }
