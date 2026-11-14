@@ -103,3 +103,13 @@ execution. The final library SHA-256 matches the focused shipping executable:
 The repository contains compact result summaries and SHA-256 references; full
 logs, the three source archives, and the genuine synthetic before-store artifact
 are retained in the verified HOME evidence package. No profile branch was pushed.
+
+## Verified actual HOME package
+
+Twenty-two files were copied/generated and verified at
+`/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-single-profile-1d9e7d1`.
+The before-store tar members were also checked against all original source files.
+`COPY.sha256` SHA-256:
+`afb890db9e18ebfda24d15a62c2035457b3206879f46a5503886f52bba8eb1b3`.
+The actual HOME experiment note was appended. The copied report precedes this
+copy-confirmation paragraph, and its bytes are covered by that manifest.
