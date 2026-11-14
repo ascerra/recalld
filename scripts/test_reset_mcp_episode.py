@@ -51,6 +51,10 @@ def main():
         assert baseline["status"]==changed["status"]=="passed"
         assert baseline["freshOwnerSuffixReplays"]==changed["freshOwnerSuffixReplays"]==3
         assert baseline["environmentHash"]!=changed["environmentHash"]
+        prefixes=[json.loads((root/"evaluator/prefix-checkpoint.json").read_text()) for root in (args.baseline,variant)]
+        assert prefixes[0]["committed"]==prefixes[1]["committed"]
+        assert prefixes[0]["logicalHash"]==prefixes[1]["logicalHash"],"independent startup prefix differs"
+        report["independentPrefixLogicalHash"]=prefixes[0]["logicalHash"]
         compared=0
         for name in ("original","restored-0","restored-1","restored-2"):
             a,b=[root/"evaluator"/name for root in (args.baseline,variant)]
@@ -58,10 +62,9 @@ def main():
             actions=lambda rows:[r["request"] for r in rows if r["event"]=="attempt"]
             assert actions(old)==actions(new),name  # Actual owned IDs, no normalization.
             suffixes=[json.loads((p/"suffix.json").read_text()) for p in (a,b)]
-            # Independent ingestions create legacy namespaces on wall time; their
-            # private canonical hashes are not an actor-output equality contract.
-            # Each run separately requires full logicalHash equality on 3 restores.
-            for field in ("outputs","mappings","state","readiness","provider"):
+            # The owned namespace-clock fix must close the retained independent
+            # startup gate; compare actual hashes without dropping any field.
+            for field in ("outputs","mappings","state","readiness","provider","logicalHash"):
                 assert suffixes[0][field] == suffixes[1][field],(name,field)
             report.setdefault("independentLogicalHashes",{})[name]=[v["logicalHash"] for v in suffixes]
             compared+=len(actions(old))
@@ -84,6 +87,7 @@ def main():
         assert all(a["cacheKeys"]!=b["cacheKeys"] for a,b in zip(*providers))
         report.update(status="passed",rawActorActionsCompared=compared,rawActorIdsAndVectorsStableUnderLabelChange=True,
             sourceRanksStable=True,environmentAndCacheIdentityChanged=True,freshOwnerSuffixReplaysPerRun=3,
+            independentStartupHashEquality=True,
             comparison="Actual owned fixture IDs/actions compared without normalization; no all-ties/RNG/fullA6 claim.")
     except BaseException as error:
         report.update(status="failed",error=str(error));raise
