@@ -56,3 +56,10 @@ The interval check uses the already-present tokio-test scheduling clock to advan
 the real 60-second timer, separately from the injected retention clock. Migration
 marker checks use real migration with a later unknown phase marker and two actual
 passes with regressed sample time. No new test dependency or timer override is used.
+
+Final runtime `38e8598` passed1023 library +2CLI +7focused tests, fmt, and
+clippy exit0 WITH731library/799test warnings (712duplicates), plus1binary warning.
+Evidence `1f0b07a`: [report](../../work-notes/native-sweep-readiness/REPORT.md).
+Actual verified HOME copy: `/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-sweep-readiness-1f0b07a`;25files.
+COPY-VERIFICATION SHA-256: `e00c02cac117a9c14dc4652c0dcd4c17e98b66f07d296386b72428a23f19937b`.
+The shared experiment notebook contains the same handoff.
