@@ -41,9 +41,10 @@ No request field, default, provider result or missing provenance is guessed.
 Keep `MutationContext` fields and existing request hashes unchanged. Native
 entry validation accepts the already-supported closed contract set1|2, checks
 resolved scope, and independently requires native owner/transaction schema2.
-A common context-validation function can be reused by writer modules, but must
-be consumed by real routes in the same slice; it does not acquire another lock,
-rewrite ctx or select storage based on API version.
+The existing `MutationContext::validate` already accepts1|2 and remains
+unchanged. Standalone writers reuse it without a new helper or dependency on
+this compound-context slice. It does not acquire another lock, rewrite ctx or
+select storage based on API version.
 
 Single-operation retries already supply their original API and full payload.
 Retained receipts contain hash identity; creation/store proofs retain expanded
@@ -261,14 +262,22 @@ Pascal owns lifecycle/exposure/manual-maintenance propagation and original clock
 semantics. Huygens owns parser/default/transport selection and legacy outward
 compatibility. Halley reviews owned acceptance/readiness.
 
-Do not edit the common control context in parallel. Freeze its small actual
-consumer-used change first on121; Huygens/Curie consume it in their actual
-insertion/batch join, and Pascal consumes it in lifecycle wire. Catalog/policy
-core consumption can use121 because its core already exists there;103 is required
-only for its real public adapter test. Purge uses121. Batch integration uses actual
-122/123 plus the shared child, not an unrelated broad checkpoint. The exact
-minimal shipping split will be confirmed with owners and coordinating agent
-before source changes. A helper-only public PR is not the objective.
+The common control context and its validator remain unchanged. Feynman's actual
+121 child changes only the shared compound retained-context codec and its
+purge/catalog/policy consumers. It does not edit `native_records`,
+`native_lifecycle`, or `native_maintenance`. Curie's standalone record/forget
+slice can use actual121 directly; Pascal's feedback126, exposure119 and manual
+maintenance107 slices use their actual required parents independently. Neither
+inherits purge/catalog merely for coordination. Each owner retains native
+owner/scope guards and proves old2 compatibility and original-API replay.
+
+Later compound batch consumes the frozen shared codec because it reconstructs
+request identity without the caller. Its actual wire/profile dependencies remain
+122/123 where used; standalone insertion does not require the codec. Catalog/policy
+core consumption uses121 because its core already exists there;103 is required
+only for its real public adapter test. Purge uses121. This topology correction
+was requested by the coordinating agent and confirmed against the changed-file
+list at d933e5f. A helper-only public PR is not the objective.
 
 ## Genuine BEFORE and RED/GREEN validation plan
 
