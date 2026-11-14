@@ -110,6 +110,101 @@ pub struct NativeGraphWrite {
     pub records: Vec<NativeRecordChange>,
 }
 
+/// A keyed successful no-op binds intent without changing any record or edge.
+/// Edges are witnesses, never puts; the empty request has empty witnesses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeGraphNoChange {
+    pub namespace_id: NamespaceId,
+    pub lifecycle_version: LifecycleVersion,
+    pub policy_revision: Generation,
+    pub capture_generation: GenerationRef,
+    pub previous_generation: Generation,
+    pub edges: Vec<NativeEdgeProof>,
+    pub records: Vec<NativeRecordChange>,
+}
+impl NativeGraphNoChange {
+    pub(crate) fn validate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
+        if self.namespace_id.is_unset()
+            || self.edges.len() > MAX_NATIVE_GRAPH_EDGES
+            || self.records.len() > MAX_NATIVE_GRAPH_ENDPOINTS
+            || self.capture_generation.store_id != receipt.store_id
+            || self.capture_generation.generation > self.previous_generation
+            || self.previous_generation.next()? != receipt.committed_generation
+        {
+            return Err(invalid("invalid native graph no-change boundary"));
+        }
+        let mut keys = BTreeSet::new();
+        let mut endpoints = BTreeSet::new();
+        for e in &self.edges {
+            if !keys.insert(edge_key(e))
+                || e.source == e.target
+                || e.source == MemoryId::nil()
+                || e.target == MemoryId::nil()
+                || !f32::from_bits(e.weight_bits).is_finite()
+                || !(0.0..=1.0).contains(&f32::from_bits(e.weight_bits))
+            {
+                return Err(invalid("invalid native graph no-change edge"));
+            }
+            endpoints.extend([e.source, e.target]);
+        }
+        let mut ids = BTreeSet::new();
+        for change in &self.records {
+            if !ids.insert(change.memory_id)
+                || !endpoints.contains(&change.memory_id)
+                || change.before.as_ref() != Some(&change.after)
+            {
+                return Err(invalid("native graph no-change peer changed"));
+            }
+            let state = &change.after;
+            state.lifecycle.validate()?;
+            state.content.validate_profile_commitment()?;
+            if state.lifecycle.lifecycle.lifecycle_version != self.lifecycle_version
+                || state.lifecycle.lifecycle.policy_revision != self.policy_revision
+            {
+                return Err(invalid("native graph no-change peer policy mismatch"));
+            }
+            for e in &self.edges {
+                for (id, source) in [(e.source, true), (e.target, false)] {
+                    if id == change.memory_id
+                        && !endpoint_allowed(e.edge_type, source, state.lifecycle.phase)
+                    {
+                        return Err(invalid("native graph no-change endpoint unavailable"));
+                    }
+                }
+            }
+        }
+        if ids != endpoints {
+            return Err(invalid("native graph no-change endpoint missing"));
+        }
+        Ok(())
+    }
+    pub(crate) fn validate_namespace_profiles(
+        &self,
+        namespace: &crate::model::NamespaceConfig,
+    ) -> Result<(), StorageError> {
+        if namespace.id != self.namespace_id {
+            return Err(invalid("native graph no-change namespace mismatch"));
+        }
+        for change in &self.records {
+            change.after.content.validate_namespace_profile(namespace)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn rewind(&self, rows: &mut [ProofRecord]) -> Result<(), StorageError> {
+        for change in &self.records {
+            if !rows.iter().any(|row| {
+                row.id == change.memory_id
+                    && row.namespace == self.namespace_id.get()
+                    && row.state == change.after
+            }) {
+                return Err(invalid("native graph no-change differs from retained peer"));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn endpoint_allowed(kind: EdgeType, source: bool, phase: DecayPhase) -> bool {
     matches!(phase, DecayPhase::Full | DecayPhase::Summary)
         || (kind == EdgeType::ParentChild && source)
@@ -270,8 +365,8 @@ impl super::native_lifecycle::NativeLifecycleSession {
             .capture_native_graph(scope, input, &self.policy, None)
     }
     /// Explicit offline primitive; success does not certify derived publication.
-    /// Unkeyed no-ops return None. A fresh keyed no-op is explicitly unsupported;
-    /// successful keyed mutations always have a durable replayable receipt.
+    /// Unkeyed no-ops return None. Keyed no-ops commit a typed receipt and
+    /// zero-action outbox, preserving record tokens and edge timestamps.
     pub fn put_graph_prepared(
         &mut self,
         ctx: &MutationContext,
@@ -330,10 +425,13 @@ pub(crate) fn validate_edge_history(
     }
     // Historical foreign-origin receipts were already ancestry/policy checked;
     // deletion-aware restore may have removed their edges. Never replay them.
-    if !suffix
-        .values()
-        .any(|r| matches!(r.outcome, MutationOutcome::NativeGraphChanged { .. }))
-    {
+    if !suffix.values().any(|r| {
+        matches!(
+            r.outcome,
+            MutationOutcome::NativeGraphChanged { .. }
+                | MutationOutcome::NativeGraphUnchanged { .. }
+        )
+    }) {
         return Ok(());
     }
     let mut current: BTreeMap<_, _> = edges
@@ -364,6 +462,13 @@ pub(crate) fn validate_edge_history(
     }
     for receipt in suffix.values().rev() {
         match &receipt.outcome {
+            MutationOutcome::NativeGraphUnchanged { transition } => {
+                for e in &transition.edges {
+                    if current.get(&edge_key(e)) != Some(e) {
+                        return Err(invalid("native graph no-change differs from retained edge"));
+                    }
+                }
+            }
             MutationOutcome::NativeGraphChanged { transition } => {
                 for e in &transition.edges {
                     let key = edge_key(&e.after);

@@ -104,18 +104,67 @@ impl MetadataStore {
                 },
             });
         }
-        // Identical semantic attributes preserve the old creation timestamp and
-        // cause neither a clock sample nor a fresh receipt/key reservation.
+        // A keyed no-op reserves its outcome in the same receipt/outbox path.
+        // Witnesses preserve the existing timestamp; no clock or peer token changes.
         if changes.is_empty() {
-            // A successful keyed outcome must bind its key durably. This
-            // bounded primitive has no typed no-change receipt; never report
-            // unbound success that could execute on a later retry.
-            if ctx.idempotency_key.is_some() {
-                return Err(StorageError::InvalidMutation(
-                    "keyed native graph no-op is unsupported".into(),
-                ));
+            if ctx.idempotency_key.is_none() {
+                return Ok(None);
             }
-            return Ok(None);
+            let mut records = Vec::with_capacity(current.len());
+            for (id, row) in &current {
+                let before = NativeRecordState::capture(
+                    row,
+                    &ns,
+                    *hashes
+                        .get(id)
+                        .ok_or_else(|| invalid("native graph text commitment missing"))?,
+                )?;
+                records.push(NativeRecordChange {
+                    memory_id: *id,
+                    before: Some(before.clone()),
+                    after: before,
+                });
+            }
+            records.sort_by_key(|r| r.memory_id);
+            let edges = intent
+                .original
+                .edges
+                .iter()
+                .map(|e| {
+                    existing
+                        .iter()
+                        .find(|old| {
+                            old.source == e.source
+                                && old.target == e.target
+                                && old.edge_type == e.edge_type
+                        })
+                        .map(NativeEdgeProof::from)
+                        .ok_or_else(|| invalid("native graph no-change edge missing"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let transition = NativeGraphNoChange {
+                namespace_id: ns.id,
+                lifecycle_version: intent.capture.version,
+                policy_revision: intent.capture.revision,
+                capture_generation: intent.capture.generation,
+                previous_generation: state.committed_generation,
+                edges,
+                records,
+            };
+            return self
+                .finish_record_effects(
+                    guard,
+                    tx,
+                    ctx,
+                    hash,
+                    existing,
+                    &[],
+                    &[],
+                    false,
+                    false,
+                    effects::RecordMutation::NativeGraphUnchanged(transition),
+                )
+                .map(Some);
         }
         let sampled = clock.now_millis();
         if chrono::DateTime::from_timestamp_millis(sampled).is_none() {
@@ -172,12 +221,16 @@ impl MetadataStore {
     }
 }
 pub(crate) fn replay_result(receipt: WriteReceipt) -> Result<effects::EffectResult, StorageError> {
-    let MutationOutcome::NativeGraphChanged { transition } = &receipt.outcome else {
-        return Err(StorageError::IdempotencyConflict);
+    let (peer_counts, edges_put) = match &receipt.outcome {
+        MutationOutcome::NativeGraphChanged { transition } => {
+            (transition.peer_counts(), transition.edges.len())
+        }
+        MutationOutcome::NativeGraphUnchanged { .. } => (vec![], 0),
+        _ => return Err(StorageError::IdempotencyConflict),
     };
     Ok(effects::EffectResult {
-        peer_counts: transition.peer_counts(),
-        edges_put: transition.edges.len(),
+        peer_counts,
+        edges_put,
         edges_removed: 0,
         removed: vec![],
         receipt,

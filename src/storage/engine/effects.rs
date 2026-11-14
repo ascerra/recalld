@@ -1,5 +1,6 @@
 //! Commit metadata first, then deterministically materialize the separate edge DB.
 use super::*;
+use crate::storage::control::MutationOutcome;
 use crate::storage::metadata::effects::{EffectResult, crash_point};
 use std::sync::atomic::Ordering;
 
@@ -113,8 +114,14 @@ pub(super) fn apply_pending(
             let records = meta.scan_all_for_recovery()?;
             // Refuse corrupt recovery instructions before changing any files.
             crate::storage::metadata::effects::validate_plan(effect, &records)?;
-            edges.apply_effects(&effect.puts, &effect.deletes)?;
-            crash_point("after_edge_commit");
+            // A validated no-change receipt has no physical edge transaction.
+            if !matches!(
+                effect.receipt.outcome,
+                MutationOutcome::NativeGraphUnchanged { .. }
+            ) {
+                edges.apply_effects(&effect.puts, &effect.deletes)?;
+                crash_point("after_edge_commit");
+            }
             for release in &effect.releases {
                 let manager = vectors.as_mut().ok_or_else(|| {
                     StorageError::RecoveryRequired(

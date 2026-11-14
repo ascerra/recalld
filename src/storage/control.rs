@@ -231,6 +231,9 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativeGraphUnchanged {
+        transition: super::native_graph::NativeGraphNoChange,
+    },
     NativeGraphChanged {
         transition: super::native_graph::NativeGraphWrite,
     },
@@ -455,6 +458,7 @@ pub(crate) fn validate_existing(
                 | MutationOutcome::NativeMemoryInserted { .. }
                 | MutationOutcome::NativeMemoryTombstoned { .. }
                 | MutationOutcome::NativeGraphChanged { .. }
+                | MutationOutcome::NativeGraphUnchanged { .. }
         ) && state.control_schema_version != 2
         {
             return Err(StorageError::InvalidControl(
@@ -621,6 +625,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativeGraphUnchanged { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeGraphChanged { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -731,6 +738,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
         | MutationOutcome::NativeGraphChanged { .. }
+        | MutationOutcome::NativeGraphUnchanged { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
         | MutationOutcome::LifecycleFeedbackApplied { .. }
         | MutationOutcome::NamespaceCreated { .. }
