@@ -133,6 +133,10 @@ decay_rate_multiplier = 0.0
         assert runtime_initial['runtimeState']['allocation']['version'] == 1
         initial = inspect()
         barrier(initial)
+        namespace = tool('create_namespace', {'name': 'owned-clock', 'embeddingDim': 4})
+        assert namespace['createdAt'] == '2026-01-01 00:01:00 UTC', namespace
+        # Namespace creation on this legacy parent does not itself publish all
+        # derived views. The actual store below publishes before inspection.
         # Real actor work is admitted before the fixture provider blocks. A
         # private barrier targeting the prior G must drain this accepted work
         # and its insertion/publication descendants before replying.
@@ -212,7 +216,7 @@ decay_rate_multiplier = 0.0
         assert child.returncode == 0, child.returncode
         return {'replay': index, 'passed': True, 'initial': initial, 'afterStore': after_store,
                 'afterExposure': exposed, 'afterFeedback': reinforced,
-                'storedId': stored['id'], 'runtimeInitial': runtime_initial['runtimeState'], 'runtimeAfterStore': runtime_after_store,
+                'namespaceCreatedAt': namespace['createdAt'], 'storedId': stored['id'], 'runtimeInitial': runtime_initial['runtimeState'], 'runtimeAfterStore': runtime_after_store,
                 'acceptedBarrierWaitedForStore': True, 'controlEofExitSeconds': time.monotonic() - started, 'command': command}
     finally:
         save(root / 'transcript.json', log)

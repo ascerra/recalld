@@ -2011,6 +2011,7 @@ pub struct McpNamespaceAdapter {
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     graph: SharedGraph,
     timezone: chrono_tz::Tz,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl McpNamespaceAdapter {
@@ -2034,7 +2035,13 @@ impl McpNamespaceAdapter {
             entity_index,
             graph,
             timezone,
+            clock: Arc::new(crate::time::SystemClock),
         }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     async fn complete_effects(&self) -> Result<(), bridge::BridgeError> {
@@ -2185,7 +2192,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         let work =
             crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
         let worker = work.child().map_err(|e| map_mutation_error(e.into()))?;
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = self.clock.now_millis();
         let storage = self.storage.clone();
         let tz = self.timezone;
         let input_name = input.name.clone();
@@ -4194,8 +4201,8 @@ pub fn direct_bridge(
         )
         .with_clock(system.clock().clone()),
     );
-    let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> =
-        Arc::new(McpNamespaceAdapter::new(
+    let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> = Arc::new(
+        McpNamespaceAdapter::new(
             system.storage().clone(),
             system.cache().clone(),
             system.vector_index().clone(),
@@ -4203,7 +4210,9 @@ pub fn direct_bridge(
             system.entity_index().clone(),
             system.graph().clone(),
             tz,
-        ));
+        )
+        .with_clock(system.clock().clone()),
+    );
     let health: Arc<dyn crate::mcp::bridge::HealthChecker> =
         Arc::new(McpHealthAdapter::new(system.storage().clone()));
 

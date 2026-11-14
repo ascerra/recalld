@@ -1398,12 +1398,20 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl NamespaceRegistryAdapter {
     /// Creates a new adapter wrapping the storage engine for namespace operations.
     pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            clock: Arc::new(crate::time::SystemClock),
+        }
+    }
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -1489,7 +1497,7 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
         let work = crate::storage::work::accept_work(&self.storage, None)?;
         let worker = work.child()?;
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = self.clock.now_millis();
         let storage = self.storage.clone();
         let name_owned = name.to_string();
 
