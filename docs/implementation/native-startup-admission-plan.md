@@ -237,3 +237,25 @@ keeps its canonical completion and system bootstrap. His next insertion join is
 only published122 batch-wire abd037 plus validated123 profile d7c, not an
 unrelated catalog or exposure ancestry. Pascal confirms current lifecycle wire
 is private application2 only; API1/native core context compatibility is separate.
+
+### Linked store and batch-origin dependency clarification
+
+Huygens and Curie clarified the actual API1 store closure during the quiet
+window. Curie's narrow121 record child covers plain NativeMemoryInserted and
+forget only. It does not establish linked insertion, profile binding or original
+batch request/replay support. The validated sequence is:
+
+1. Huygens's prepared explicit-API2 wire consumer, tested on owned native fixtures.
+2. Curie's linked-store/batch-origin consumer with the actual narrow record
+   prerequisite. Only its compound workflow consumes the shared retained-context
+   codec; standalone record support does not inherit purge/catalog for coordination.
+3. Huygens's API1-native store projection, preserving original request identity
+   and accepted link/profile/batch semantics.
+4. Feynman's ordinary native startup after these and the other required API1
+   writer/read consumers are validated.
+5. Public API2 activation after startup and actual A2 selection are validated.
+
+Prepared explicit-API2 fixture testing at step1 is not public API2 activation.
+No narrow record-only success or explicit fixture is evidence of completed
+ordinary startup. Each dependency must be an actual validated implementation;
+these planned edges do not authorize merging moving WIP parents.
