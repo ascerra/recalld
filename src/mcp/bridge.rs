@@ -728,12 +728,12 @@ pub enum BridgeError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
-    /// An explicit by-ID namespace assertion failed.
-    #[error("{0}")]
-    NamespaceMismatch(String),
     /// A provider or required service cannot satisfy the operation.
     #[error("Unavailable: {0}")]
     Unavailable(String),
+    /// An explicit by-ID namespace assertion failed.
+    #[error("{0}")]
+    NamespaceMismatch(String),
 
     /// A storage subsystem error occurred.
     #[error("Storage error: {0}")]

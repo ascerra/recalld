@@ -122,9 +122,38 @@ impl MetadataStore {
         }
     }
 
+    pub(crate) fn frozen_publication_state(
+        &self,
+        frozen: &MetadataFreeze<'_>,
+    ) -> Result<crate::storage::publication::PublicationState, StorageError> {
+        frozen._admission.check(&self.work_tracker)?;
+        // The same-owner freeze holds publication exclusively. Its generation
+        // came from the actual guarded canonical transaction, not the registry.
+        Ok(self.view_publication.state(frozen.generation))
+    }
+
     pub fn freeze_metadata(
         &self,
         admission: WorkFreeze,
+    ) -> Result<MetadataFreeze<'_>, StorageError> {
+        self.freeze_metadata_checked(admission, false)
+    }
+
+    /// Healthy owned handle only: startup has already validated immutable
+    /// history, and all live publication still uses this owner's guard. Inspect
+    /// actual current pending tables with cooperative deadline checks rather
+    /// than revalidating every lifetime receipt. Not a whole-core lease.
+    pub(crate) fn freeze_current_metadata(
+        &self,
+        admission: WorkFreeze,
+    ) -> Result<MetadataFreeze<'_>, StorageError> {
+        self.freeze_metadata_checked(admission, true)
+    }
+
+    fn freeze_metadata_checked(
+        &self,
+        admission: WorkFreeze,
+        current_only: bool,
     ) -> Result<MetadataFreeze<'_>, StorageError> {
         admission.check(&self.work_tracker)?;
         // No unbounded wait after the drain deadline. A concurrent read can
@@ -145,16 +174,36 @@ impl MetadataStore {
             )));
         }
         let read = self.db.begin_read()?;
-        let state = control::validate_existing(&read)?
-            .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
-        let effects = super::effects::validate_existing(&read)?;
-        let purges = super::purge::validate_existing(&read, Some(&state))?;
-        if !effects.is_empty()
-            || self.derived_dirty.load(Ordering::SeqCst)
-            || purges.iter().any(|p| p.stage != PurgeStage::Complete)
-        {
+        let state = if current_only {
+            let table = read.open_table(control::CONTROL)?;
+            let value = table
+                .get("state")?
+                .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
+            let state = if self.native_lifecycle_only {
+                self.native_control_at(&read)?
+            } else {
+                ControlState::decode(value.value())?
+            };
+            super::publication::check_current_pending(&read, &state, || {
+                admission.check(&self.work_tracker)?;
+                Ok(())
+            })?;
+            state
+        } else {
+            let state = control::validate_existing(&read)?
+                .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
+            let effects = super::effects::validate_existing(&read)?;
+            let purges = super::purge::validate_existing(&read, Some(&state))?;
+            if !effects.is_empty() || purges.iter().any(|p| p.stage != PurgeStage::Complete) {
+                return Err(StorageError::RecoveryRequired(
+                    "durable effects or purge work pending".into(),
+                ));
+            }
+            state
+        };
+        if self.derived_dirty.load(Ordering::SeqCst) {
             return Err(StorageError::RecoveryRequired(
-                "durable effects or purge work pending".into(),
+                "derived work pending".into(),
             ));
         }
         let generation = state.generation_ref();
@@ -353,6 +402,9 @@ mod tests {
         let admission = tracker.close_and_drain(deadline()).unwrap();
         assert!(store.freeze_metadata(admission).is_err());
         assert!(tracker.status().admission_open);
+        let admission = tracker.close_and_drain(deadline()).unwrap();
+        assert!(store.freeze_current_metadata(admission).is_err());
+        assert!(tracker.status().admission_open);
     }
 
     #[tokio::test]
@@ -389,6 +441,9 @@ mod tests {
         let admission = tracker.close_and_drain(deadline()).unwrap();
         assert!(store.freeze_metadata(admission).is_err());
         assert!(tracker.status().admission_open);
+        let admission = tracker.close_and_drain(deadline()).unwrap();
+        assert!(store.freeze_current_metadata(admission).is_err());
+        assert!(tracker.status().admission_open);
     }
 
     #[test]
@@ -404,5 +459,54 @@ mod tests {
         assert_eq!(tracker.status().unresolved, 1);
         assert!(store.ensure_available().is_err());
         assert!(tracker.close_and_drain(Instant::now()).is_err());
+    }
+    #[test]
+    fn current_freeze_skips_lifetime_receipts_but_strict_freeze_still_validates_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MetadataStore::open(&dir.path().join("meta.db")).unwrap();
+        for index in 0..32 {
+            let mut config = NamespaceConfig::default_namespace(0);
+            config.name = format!("scope-{index}");
+            store.create_namespace(&config).unwrap();
+        }
+        let tracker = store.work_tracker();
+        control::take_validation_work();
+        let frozen = store
+            .freeze_current_metadata(tracker.close_and_drain(deadline()).unwrap())
+            .unwrap();
+        assert_eq!(frozen.generation().generation.get(), 32);
+        let current = control::take_validation_work();
+        assert_eq!(current.full_validations, 0);
+        assert_eq!(current.receipt_decodes, 0);
+        drop(frozen);
+        let frozen = store
+            .freeze_metadata(tracker.close_and_drain(deadline()).unwrap())
+            .unwrap();
+        let strict = control::take_validation_work();
+        assert!(strict.full_validations > 0);
+        assert!(strict.receipt_decodes >= 32);
+        drop(frozen);
+        assert!(tracker.status().admission_open);
+    }
+
+    #[test]
+    fn current_pending_checks_abort_cooperatively_without_lifetime_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MetadataStore::open(&dir.path().join("meta.db")).unwrap();
+        let state = store.control_state().unwrap();
+        let read = store.db.begin_read().unwrap();
+        let mut checks = 0;
+        control::take_validation_work();
+        let error = super::super::publication::check_current_pending(&read, &state, || {
+            checks += 1;
+            if checks == 3 {
+                return Err(StorageError::RecoveryRequired("injected deadline".into()));
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("injected deadline"));
+        assert_eq!(checks, 3);
+        assert_eq!(control::take_validation_work().receipt_decodes, 0);
     }
 }

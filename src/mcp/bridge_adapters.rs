@@ -156,330 +156,470 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         &self,
         query: bridge::SearchInput,
     ) -> Result<bridge::SearchResponse, bridge::BridgeError> {
-        let stamp = effects_stamp(&self.storage).await?;
-        // Resolve namespace name to verify it exists.
-        let ns_config = {
-            let storage = self.storage.clone();
-            let ns_name = query.namespace.clone();
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage.read().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-                storage_r
-                    .get_namespace_by_name(&ns_name)
-                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                    .ok_or_else(|| {
-                        bridge::BridgeError::NotFound(format!("namespace '{}' not found", ns_name,))
-                    })
-            })
-            .await
-            .map_err(|e| {
-                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
-            })??
-        };
-
-        // A label that cannot become a tag is an ERROR, not a dropped
-        // filter: dropping one widens the query, and "every memory in
-        // the namespace" is indistinguishable from a real result set.
-        let require_tags = filter_tags(&[("tags", "", &query.tags)], "recall_memories")
-            .map_err(bridge::BridgeError::InvalidInput)?;
-        let labels = crate::model::tag::StructuredLabelFilter {
-            entities: query.entities.clone(),
-            topics: query.topics.clone(),
-            emotions: query.emotions.clone(),
-        };
-        labels
-            .validate(ns_config.schema.is_some())
-            .map_err(bridge::BridgeError::InvalidInput)?;
-
-        let pipeline_query = crate::search::SearchQuery {
-            record_access: query.record_access,
-            query_embedding: None,
-            text: Some(query.query),
-            fts_query: None,
-            namespace: query.namespace.clone(),
-            filter: crate::search::PipelineSearchFilter {
-                labels,
-                require_tags,
-                min_strength: query.min_strength,
-                ..Default::default()
-            },
-            limit: query.limit,
-            min_score: 0.0,
-            include_ghosts: false,
-            query_mode: crate::search::QueryMode::default(),
-            graph_depth: query.depth.min(3) as u8,
-            time_range_start: query.time_range_start,
-            time_range_end: query.time_range_end,
-            entities: query.entities.clone(),
-        };
-
-        let response = self
+        // Admission follows the actual query metadata owner. Immutable offline
+        // adapters have no mutable core; they cannot inherit a placeholder's ticket.
+        let accepted = self
             .query_engine
-            .prepare_search(pipeline_query)
-            .await
+            .accept_work(None)
             .map_err(map_search_error)?;
-
-        let mut exposures: Vec<_> = response
-            .results
-            .iter()
-            .map(|r| {
-                (
-                    r.memory_id,
-                    if r.activation_score.is_some() {
-                        crate::model::AccessKind::AssociativeRetrieval
-                    } else {
-                        crate::model::AccessKind::DirectRetrieval
-                    },
-                )
-            })
-            .collect();
-
-        let full_texts: std::collections::HashMap<crate::model::MemoryId, String> = {
-            let storage = self.storage.clone();
-            let selected_namespace = ns_config.id;
-            let result_ids: Vec<crate::model::MemoryId> =
-                response.results.iter().map(|r| r.memory_id).collect();
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage.read().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-                let mut map = std::collections::HashMap::new();
-                for mid in &result_ids {
-                    if let Some(disk) = storage_r
-                        .get_record(*mid)
+        let result = async {
+            let stamp = effects_stamp(&self.storage).await?;
+            // Resolve namespace name to verify it exists.
+            let ns_config = {
+                let storage = self.storage.clone();
+                let ns_name = query.namespace.clone();
+                tokio::task::spawn_blocking(move || {
+                    let storage_r = storage.read().map_err(|e| {
+                        bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
+                    })?;
+                    storage_r
+                        .get_namespace_by_name(&ns_name)
                         .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                    {
-                        if disk.namespace_id != selected_namespace.get()
-                            || matches!(disk.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+                        .ok_or_else(|| {
+                            bridge::BridgeError::NotFound(format!(
+                                "namespace '{}' not found",
+                                ns_name,
+                            ))
+                        })
+                })
+                .await
+                .map_err(|e| {
+                    bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
+                })??
+            };
+
+            // A label that cannot become a tag is an ERROR, not a dropped
+            // filter: dropping one widens the query, and "every memory in
+            // the namespace" is indistinguishable from a real result set.
+            let require_tags = filter_tags(&[("tags", "", &query.tags)], "recall_memories")
+                .map_err(bridge::BridgeError::InvalidInput)?;
+            let labels = crate::model::tag::StructuredLabelFilter {
+                entities: query.entities.clone(),
+                topics: query.topics.clone(),
+                emotions: query.emotions.clone(),
+            };
+            labels
+                .validate(ns_config.schema.is_some())
+                .map_err(bridge::BridgeError::InvalidInput)?;
+
+            let pipeline_query = crate::search::SearchQuery {
+                record_access: query.record_access,
+                query_embedding: None,
+                text: Some(query.query),
+                fts_query: None,
+                namespace: query.namespace.clone(),
+                filter: crate::search::PipelineSearchFilter {
+                    labels,
+                    require_tags,
+                    min_strength: query.min_strength,
+                    ..Default::default()
+                },
+                limit: query.limit,
+                min_score: 0.0,
+                include_ghosts: false,
+                query_mode: crate::search::QueryMode::default(),
+                graph_depth: query.depth.min(3) as u8,
+                time_range_start: query.time_range_start,
+                time_range_end: query.time_range_end,
+                entities: query.entities.clone(),
+            };
+
+            if let Some(prepared) = self
+                .query_engine
+                .prepare_coherent_payload(
+                    pipeline_query.clone(),
+                    false,
+                    query.include_neighbors,
+                    accepted.as_ref(),
+                )
+                .await
+                .map_err(map_search_error)?
+            {
+                let payload = prepared.payload.ok_or_else(|| {
+                    bridge::BridgeError::Internal("coherent payload missing".into())
+                })?;
+                if payload.namespace.id != ns_config.id
+                    || payload.rows.len() != prepared.response.response.results.len()
+                {
+                    return Err(bridge::BridgeError::Storage(
+                        "coherent page scope changed".into(),
+                    ));
+                }
+                let mut hits = Vec::with_capacity(payload.rows.len());
+                let mut exposures = Vec::new();
+                for (selected, row) in prepared
+                    .response
+                    .response
+                    .results
+                    .into_iter()
+                    .zip(payload.rows)
+                {
+                    if row.record.id != *selected.memory_id.as_bytes() {
+                        return Err(bridge::BridgeError::Storage(
+                            "coherent page identity mismatch".into(),
+                        ));
+                    }
+                    let labels = row.record.schema.as_ref().map(|s| s.labels.clone());
+                    let metadata =
+                        crate::model::structured_metadata(&row.record.tags, labels.as_ref());
+                    let related = payload
+                        .related
+                        .get(&selected.memory_id)
+                        .map(|edges| {
+                            edges
+                                .iter()
+                                .map(|e| bridge::RelatedMemory {
+                                    id: e.id.to_string(),
+                                    edge_type: e.edge_type.clone(),
+                                    weight: e.weight,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    exposures.push((
+                        selected.memory_id,
+                        if selected.activation_score.is_some() {
+                            crate::model::AccessKind::AssociativeRetrieval
+                        } else {
+                            crate::model::AccessKind::DirectRetrieval
+                        },
+                    ));
+                    hits.push(bridge::SearchHit {
+                        labels,
+                        id: selected.memory_id.to_string(),
+                        summary: row.record.summary.clone(),
+                        full_text: row.full_text,
+                        score: selected.score.unwrap_or(0.),
+                        namespace: payload.namespace.name.clone(),
+                        tags: row.record.tags.iter().map(ToString::to_string).collect(),
+                        entities: metadata.entities,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        phase: format!("{:?}", row.record.phase),
+                        strength: selected.retrievability,
+                        created_at: format_timestamp(row.record.created_at, self.timezone),
+                        last_accessed_at: format_timestamp(
+                            row.record.last_accessed_at,
+                            self.timezone,
+                        ),
+                        related,
+                    });
+                }
+                let mut neighbors = Vec::with_capacity(payload.neighbors.len());
+                for neighbor in payload.neighbors {
+                    let disk = neighbor.payload.record;
+                    let id = crate::model::MemoryId::from_bytes(disk.id);
+                    let labels = disk.schema.as_ref().map(|s| s.labels.clone());
+                    let metadata = crate::model::structured_metadata(&disk.tags, labels.as_ref());
+                    exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));
+                    neighbors.push(bridge::NeighborMemory {
+                        labels,
+                        id: id.to_string(),
+                        summary: disk.summary,
+                        full_text: neighbor.payload.full_text,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        edge_type: neighbor.edge_type,
+                        weight: neighbor.weight,
+                        connected_to: neighbor.connected_to.to_string(),
+                    });
+                }
+                check_read_admission(&self.storage, stamp).await?;
+                let receipts = if query.record_access {
+                    self.query_engine
+                        .record_exposures_at_with_work(
+                            &exposures,
+                            crate::storage::control::ExposureScope {
+                                namespace: payload.namespace.name,
+                                source: None,
+                            },
+                            prepared.evaluated_at,
+                            accepted.as_ref(),
+                        )
+                        .await
+                        .map_err(map_search_error)?
+                } else {
+                    Vec::new()
+                };
+                return Observed {
+                    value: bridge::SearchResponse { hits, neighbors },
+                    receipts,
+                }
+                .finish(check_read_admission(&self.storage, stamp).await);
+            }
+
+            let response = self
+                .query_engine
+                .prepare_search_with_work(pipeline_query, accepted.as_ref())
+                .await
+                .map_err(map_search_error)?;
+
+            let mut exposures: Vec<_> = response
+                .results
+                .iter()
+                .map(|r| {
+                    (
+                        r.memory_id,
+                        if r.activation_score.is_some() {
+                            crate::model::AccessKind::AssociativeRetrieval
+                        } else {
+                            crate::model::AccessKind::DirectRetrieval
+                        },
+                    )
+                })
+                .collect();
+
+            let full_texts: std::collections::HashMap<crate::model::MemoryId, String> = {
+                let storage = self.storage.clone();
+                let selected_namespace = ns_config.id;
+                let result_ids: Vec<crate::model::MemoryId> =
+                    response.results.iter().map(|r| r.memory_id).collect();
+                tokio::task::spawn_blocking(move || {
+                    let storage_r = storage.read().map_err(|e| {
+                        bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
+                    })?;
+                    let mut map = std::collections::HashMap::new();
+                    for mid in &result_ids {
+                        if let Some(disk) = storage_r
+                            .get_record(*mid)
+                            .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
                         {
+                            if disk.namespace_id != selected_namespace.get()
+                                || matches!(disk.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+                            {
+                                return Err(bridge::BridgeError::Storage(
+                                    "search result changed during hydration".into(),
+                                ));
+                            }
+                            if disk.text_length > 0 {
+                                let text_ref = crate::storage::TextRef {
+                                    file_offset: disk.text_offset,
+                                    length: disk.text_length,
+                                };
+                                if let Some(text) = storage_r
+                                    .get_text(text_ref)
+                                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+                                {
+                                    map.insert(*mid, text);
+                                }
+                            }
+                        } else {
                             return Err(bridge::BridgeError::Storage(
-                                "search result changed during hydration".into(),
+                                "search result disappeared during hydration".into(),
                             ));
                         }
-                        if disk.text_length > 0 {
+                    }
+                    Ok::<_, bridge::BridgeError>(map)
+                })
+                .await
+                .map_err(|e| {
+                    bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
+                })??
+            };
+
+            let result_ids: std::collections::HashSet<crate::model::MemoryId> =
+                response.results.iter().map(|r| r.memory_id).collect();
+
+            let graph_r = self.graph.read().await;
+
+            let hits: Vec<bridge::SearchHit> = response
+                .results
+                .into_iter()
+                .map(|r| {
+                    let full_text = full_texts.get(&r.memory_id).cloned();
+
+                    let related = graph_r
+                        .edges_for(&r.memory_id)
+                        .iter()
+                        .filter_map(|edge| {
+                            let src_key = graph_r.resolve(&r.memory_id)?;
+                            let other_key = if edge.source == src_key {
+                                edge.target
+                            } else {
+                                edge.source
+                            };
+                            let neighbor = graph_r.get_node_by_key(other_key)?;
+                            if result_ids.contains(&neighbor.memory_id) {
+                                Some(bridge::RelatedMemory {
+                                    id: neighbor.memory_id.to_string(),
+                                    edge_type: format!("{:?}", edge.edge_type).to_lowercase(),
+                                    weight: edge.weight,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
+
+                    let tz = self.timezone;
+                    bridge::SearchHit {
+                        labels: r.labels.clone(),
+                        id: r.memory_id.to_string(),
+                        summary: r.summary.unwrap_or_default(),
+                        full_text,
+                        score: r.score.unwrap_or(0.0),
+                        namespace: query.namespace.clone(),
+                        tags: r.tags.iter().map(|t| t.to_string()).collect(),
+                        entities: metadata.entities,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        phase: format!("{:?}", r.phase),
+                        strength: r.retrievability,
+                        created_at: format_timestamp(r.created_at, tz),
+                        last_accessed_at: format_timestamp(r.last_accessed_at, tz),
+                        related,
+                    }
+                })
+                .collect();
+
+            const MAX_NEIGHBORS: usize = 10;
+            const FULL_TEXT_NEIGHBORS: usize = 5;
+
+            let mut neighbor_weights: std::collections::HashMap<
+                crate::model::MemoryId,
+                (f32, String, String),
+            > = std::collections::HashMap::new();
+
+            for &mid in &result_ids {
+                let Some(src_key) = graph_r.resolve(&mid) else {
+                    continue;
+                };
+                for edge in graph_r.edges_for(&mid) {
+                    let other_key = if edge.source == src_key {
+                        edge.target
+                    } else {
+                        edge.source
+                    };
+                    if let Some(neighbor_node) = graph_r.get_node_by_key(other_key) {
+                        if !result_ids.contains(&neighbor_node.memory_id) {
+                            let entry =
+                                neighbor_weights.entry(neighbor_node.memory_id).or_insert((
+                                    0.0,
+                                    format!("{:?}", edge.edge_type).to_lowercase(),
+                                    mid.to_string(),
+                                ));
+                            if edge.weight > entry.0 {
+                                *entry = (
+                                    edge.weight,
+                                    format!("{:?}", edge.edge_type).to_lowercase(),
+                                    mid.to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            drop(graph_r);
+
+            let mut sorted: Vec<(crate::model::MemoryId, f32, String, String)> = neighbor_weights
+                .into_iter()
+                .map(|(id, (w, et, ct))| (id, w, et, ct))
+                .collect();
+            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            sorted.truncate(MAX_NEIGHBORS);
+
+            let top_ft_ids: std::collections::HashSet<crate::model::MemoryId> = sorted
+                .iter()
+                .take(FULL_TEXT_NEIGHBORS)
+                .map(|(id, _, _, _)| *id)
+                .collect();
+
+            let neighbors: Vec<bridge::NeighborMemory> = if !query.include_neighbors {
+                Vec::new()
+            } else {
+                let storage = self.storage.clone();
+                tokio::task::spawn_blocking(move || {
+                    let storage_r = storage.read().map_err(|e| {
+                        bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
+                    })?;
+
+                    let mut result = Vec::new();
+                    for (mid, weight, edge_type, connected_to) in sorted {
+                        let Some(disk) = storage_r
+                            .get_record(mid)
+                            .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+                        else {
+                            continue;
+                        };
+                        if disk.namespace_id != ns_config.id.get()
+                            || matches!(disk.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+                            || disk.summary.is_empty()
+                        {
+                            continue;
+                        }
+                        let full_text = if top_ft_ids.contains(&mid) && disk.text_length > 0 {
                             let text_ref = crate::storage::TextRef {
                                 file_offset: disk.text_offset,
                                 length: disk.text_length,
                             };
-                            if let Some(text) = storage_r
+                            storage_r
                                 .get_text(text_ref)
                                 .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                            {
-                                map.insert(*mid, text);
-                            }
-                        }
-                    } else {
-                        return Err(bridge::BridgeError::Storage(
-                            "search result disappeared during hydration".into(),
-                        ));
-                    }
-                }
-                Ok::<_, bridge::BridgeError>(map)
-            })
-            .await
-            .map_err(|e| {
-                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
-            })??
-        };
-
-        let result_ids: std::collections::HashSet<crate::model::MemoryId> =
-            response.results.iter().map(|r| r.memory_id).collect();
-
-        let graph_r = self.graph.read().await;
-
-        let hits: Vec<bridge::SearchHit> = response
-            .results
-            .into_iter()
-            .map(|r| {
-                let full_text = full_texts.get(&r.memory_id).cloned();
-
-                let related = graph_r
-                    .edges_for(&r.memory_id)
-                    .iter()
-                    .filter_map(|edge| {
-                        let src_key = graph_r.resolve(&r.memory_id)?;
-                        let other_key = if edge.source == src_key {
-                            edge.target
-                        } else {
-                            edge.source
-                        };
-                        let neighbor = graph_r.get_node_by_key(other_key)?;
-                        if result_ids.contains(&neighbor.memory_id) {
-                            Some(bridge::RelatedMemory {
-                                id: neighbor.memory_id.to_string(),
-                                edge_type: format!("{:?}", edge.edge_type).to_lowercase(),
-                                weight: edge.weight,
-                            })
                         } else {
                             None
-                        }
-                    })
-                    .collect();
-
-                let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
-
-                let tz = self.timezone;
-                bridge::SearchHit {
-                    labels: r.labels.clone(),
-                    id: r.memory_id.to_string(),
-                    summary: r.summary.unwrap_or_default(),
-                    full_text,
-                    score: r.score.unwrap_or(0.0),
-                    namespace: query.namespace.clone(),
-                    tags: r.tags.iter().map(|t| t.to_string()).collect(),
-                    entities: metadata.entities,
-                    topics: metadata.topics,
-                    emotions: metadata.emotions,
-                    phase: format!("{:?}", r.phase),
-                    strength: r.retrievability,
-                    created_at: format_timestamp(r.created_at, tz),
-                    last_accessed_at: format_timestamp(r.last_accessed_at, tz),
-                    related,
-                }
-            })
-            .collect();
-
-        const MAX_NEIGHBORS: usize = 10;
-        const FULL_TEXT_NEIGHBORS: usize = 5;
-
-        let mut neighbor_weights: std::collections::HashMap<
-            crate::model::MemoryId,
-            (f32, String, String),
-        > = std::collections::HashMap::new();
-
-        for &mid in &result_ids {
-            let Some(src_key) = graph_r.resolve(&mid) else {
-                continue;
-            };
-            for edge in graph_r.edges_for(&mid) {
-                let other_key = if edge.source == src_key {
-                    edge.target
-                } else {
-                    edge.source
-                };
-                if let Some(neighbor_node) = graph_r.get_node_by_key(other_key) {
-                    if !result_ids.contains(&neighbor_node.memory_id) {
-                        let entry = neighbor_weights.entry(neighbor_node.memory_id).or_insert((
-                            0.0,
-                            format!("{:?}", edge.edge_type).to_lowercase(),
-                            mid.to_string(),
-                        ));
-                        if edge.weight > entry.0 {
-                            *entry = (
-                                edge.weight,
-                                format!("{:?}", edge.edge_type).to_lowercase(),
-                                mid.to_string(),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        drop(graph_r);
-
-        let mut sorted: Vec<(crate::model::MemoryId, f32, String, String)> = neighbor_weights
-            .into_iter()
-            .map(|(id, (w, et, ct))| (id, w, et, ct))
-            .collect();
-        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        sorted.truncate(MAX_NEIGHBORS);
-
-        let top_ft_ids: std::collections::HashSet<crate::model::MemoryId> = sorted
-            .iter()
-            .take(FULL_TEXT_NEIGHBORS)
-            .map(|(id, _, _, _)| *id)
-            .collect();
-
-        let neighbors: Vec<bridge::NeighborMemory> = if !query.include_neighbors {
-            Vec::new()
-        } else {
-            let storage = self.storage.clone();
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage.read().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-
-                let mut result = Vec::new();
-                for (mid, weight, edge_type, connected_to) in sorted {
-                    let Some(disk) = storage_r
-                        .get_record(mid)
-                        .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                    else {
-                        continue;
-                    };
-                    if disk.namespace_id != ns_config.id.get()
-                        || matches!(disk.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
-                        || disk.summary.is_empty()
-                    {
-                        continue;
-                    }
-                    let full_text = if top_ft_ids.contains(&mid) && disk.text_length > 0 {
-                        let text_ref = crate::storage::TextRef {
-                            file_offset: disk.text_offset,
-                            length: disk.text_length,
                         };
-                        storage_r
-                            .get_text(text_ref)
-                            .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                    } else {
-                        None
-                    };
-                    let metadata = crate::model::structured_metadata(
-                        &disk.tags,
-                        disk.schema.as_ref().map(|s| &s.labels),
-                    );
+                        let metadata = crate::model::structured_metadata(
+                            &disk.tags,
+                            disk.schema.as_ref().map(|s| &s.labels),
+                        );
 
-                    result.push(bridge::NeighborMemory {
-                        labels: disk.schema.as_ref().map(|s| s.labels.clone()),
-                        id: mid.to_string(),
-                        summary: disk.summary.clone(),
-                        full_text,
-                        topics: metadata.topics,
-                        emotions: metadata.emotions,
-                        edge_type,
-                        weight,
-                        connected_to,
-                    });
-                }
-                Ok::<_, bridge::BridgeError>(result)
-            })
-            .await
-            .map_err(|e| {
-                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
-            })??
-        };
-
-        let receipts = if query.record_access {
-            for neighbor in &neighbors {
-                let id = neighbor
-                    .id
-                    .parse::<uuid::Uuid>()
-                    .map(MemoryId::from_uuid)
-                    .map_err(|e| {
-                        bridge::BridgeError::Internal(format!("invalid hydrated ID: {e}"))
-                    })?;
-                exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));
-            }
-            check_read_admission(&self.storage, stamp).await?;
-            self.query_engine
-                .record_exposures(
-                    &exposures,
-                    crate::storage::control::ExposureScope {
-                        namespace: ns_config.name.clone(),
-                        source: None,
-                    },
-                )
+                        result.push(bridge::NeighborMemory {
+                            labels: disk.schema.as_ref().map(|s| s.labels.clone()),
+                            id: mid.to_string(),
+                            summary: disk.summary.clone(),
+                            full_text,
+                            topics: metadata.topics,
+                            emotions: metadata.emotions,
+                            edge_type,
+                            weight,
+                            connected_to,
+                        });
+                    }
+                    Ok::<_, bridge::BridgeError>(result)
+                })
                 .await
-                .map_err(map_search_error)?
-        } else {
-            Vec::new()
-        };
-        Observed {
-            value: bridge::SearchResponse { hits, neighbors },
-            receipts,
+                .map_err(|e| {
+                    bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
+                })??
+            };
+
+            let receipts = if query.record_access {
+                for neighbor in &neighbors {
+                    let id = neighbor
+                        .id
+                        .parse::<uuid::Uuid>()
+                        .map(MemoryId::from_uuid)
+                        .map_err(|e| {
+                            bridge::BridgeError::Internal(format!("invalid hydrated ID: {e}"))
+                        })?;
+                    exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));
+                }
+                check_read_admission(&self.storage, stamp).await?;
+                self.query_engine
+                    .record_exposures_with_work(
+                        &exposures,
+                        crate::storage::control::ExposureScope {
+                            namespace: ns_config.name.clone(),
+                            source: None,
+                        },
+                        accepted.as_ref(),
+                    )
+                    .await
+                    .map_err(map_search_error)?
+            } else {
+                Vec::new()
+            };
+            Observed {
+                value: bridge::SearchResponse { hits, neighbors },
+                receipts,
+            }
+            .finish(check_read_admission(&self.storage, stamp).await)
         }
-        .finish(check_read_admission(&self.storage, stamp).await)
+        .await;
+        self.query_engine.finish_work(accepted);
+        result
     }
 
     async fn find_similar(
@@ -491,77 +631,95 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         record_access: bool,
         namespace: Option<&str>,
     ) -> Result<Vec<bridge::SearchHit>, bridge::BridgeError> {
-        let stamp = effects_stamp(&self.storage).await?;
+        // Admission follows the actual query metadata owner. Immutable offline
+        // adapters have no mutable core; they cannot inherit a placeholder's ticket.
+        let accepted = self
+            .query_engine
+            .accept_work(None)
+            .map_err(map_search_error)?;
         let result = async {
-            let namespace = namespace.map(str::to_owned);
-            if let Some(namespace) = namespace {
-                let storage = self.storage.clone();
-                tokio::task::spawn_blocking(move || {
-                    let storage = storage
-                        .read()
-                        .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
-                    storage
-                        .assert_memory_namespace(id, &namespace)
-                        .map_err(bridge::BridgeError::from)
-                })
-                .await
-                .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
-            }
-            let results = self
-                .query_engine
-                .prepare_similar_filtered(id, limit, min_score, record_access)
-                .await
-                .map_err(map_search_error)?;
-
-            let ids: Vec<_> = results.iter().map(|r| r.memory_id).collect();
-            let exposure_scope = crate::storage::control::ExposureScope {
-                namespace: results
-                    .first()
-                    .map(|r| r.namespace.clone())
-                    .unwrap_or_default(),
-                source: Some(id),
-            };
-            let hits = results
-                .into_iter()
-                .map(|r| {
-                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
-
-                    let tz = self.timezone;
-                    bridge::SearchHit {
-                        labels: r.labels.clone(),
-                        id: r.memory_id.to_string(),
-                        summary: r.summary.unwrap_or_default(),
-                        full_text: r.full_text,
-                        score: r.score.unwrap_or(0.0),
-                        namespace: r.namespace,
-                        tags: r.tags.iter().map(|t| t.to_string()).collect(),
-                        entities: metadata.entities,
-                        topics: metadata.topics,
-                        emotions: metadata.emotions,
-                        phase: format!("{:?}", r.phase),
-                        strength: r.retrievability,
-                        created_at: format_timestamp(r.created_at, tz),
-                        last_accessed_at: format_timestamp(r.last_accessed_at, tz),
-                        related: Vec::new(),
-                    }
-                })
-                .collect();
-            check_read_admission(&self.storage, stamp).await?;
-            let receipts = if record_access {
-                self.query_engine
-                    .record_similar_accesses(&ids, exposure_scope)
+            let stamp = effects_stamp(&self.storage).await?;
+            let result = async {
+                let namespace = namespace.map(str::to_owned);
+                if let Some(namespace) = namespace {
+                    let storage = self.storage.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let storage = storage
+                            .read()
+                            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
+                        storage
+                            .assert_memory_namespace(id, &namespace)
+                            .map_err(bridge::BridgeError::from)
+                    })
                     .await
-                    .map_err(map_search_error)?
-            } else {
-                Vec::new()
-            };
-            Ok::<_, bridge::BridgeError>(Observed {
-                value: hits,
-                receipts,
-            })
+                    .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
+                }
+                let results = self
+                    .query_engine
+                    .prepare_similar_filtered_with_work(
+                        id,
+                        limit,
+                        min_score,
+                        record_access,
+                        accepted.as_ref(),
+                    )
+                    .await
+                    .map_err(map_search_error)?;
+
+                let ids: Vec<_> = results.iter().map(|r| r.memory_id).collect();
+                let exposure_scope = crate::storage::control::ExposureScope {
+                    namespace: results
+                        .first()
+                        .map(|r| r.namespace.clone())
+                        .unwrap_or_default(),
+                    source: Some(id),
+                };
+                let hits = results
+                    .into_iter()
+                    .map(|r| {
+                        let metadata =
+                            crate::model::structured_metadata(&r.tags, r.labels.as_ref());
+
+                        let tz = self.timezone;
+                        bridge::SearchHit {
+                            labels: r.labels.clone(),
+                            id: r.memory_id.to_string(),
+                            summary: r.summary.unwrap_or_default(),
+                            full_text: r.full_text,
+                            score: r.score.unwrap_or(0.0),
+                            namespace: r.namespace,
+                            tags: r.tags.iter().map(|t| t.to_string()).collect(),
+                            entities: metadata.entities,
+                            topics: metadata.topics,
+                            emotions: metadata.emotions,
+                            phase: format!("{:?}", r.phase),
+                            strength: r.retrievability,
+                            created_at: format_timestamp(r.created_at, tz),
+                            last_accessed_at: format_timestamp(r.last_accessed_at, tz),
+                            related: Vec::new(),
+                        }
+                    })
+                    .collect();
+                check_read_admission(&self.storage, stamp).await?;
+                let receipts = if record_access {
+                    self.query_engine
+                        .record_similar_accesses_with_work(&ids, exposure_scope, accepted.as_ref())
+                        .await
+                        .map_err(map_search_error)?
+                } else {
+                    Vec::new()
+                };
+                Ok::<_, bridge::BridgeError>(Observed {
+                    value: hits,
+                    receipts,
+                })
+            }
+            .await;
+            result?.finish(check_read_admission(&self.storage, stamp).await)
         }
         .await;
-        result?.finish(check_read_admission(&self.storage, stamp).await)
+        self.query_engine.finish_work(accepted);
+        result
     }
 
     async fn scan_duplicates(
@@ -771,6 +929,17 @@ pub struct McpStorageAdapter {
 }
 
 impl McpStorageAdapter {
+    fn completion(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+    }
+
     /// Create a new storage adapter from the given subsystems.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1309,28 +1478,55 @@ impl bridge::StorageEngine for McpStorageAdapter {
         record_access: bool,
         namespace: Option<&str>,
     ) -> Result<Option<bridge::MemoryRecord>, bridge::BridgeError> {
-        let stamp = effects_stamp(&self.storage).await?;
-        let result: Result<Option<bridge::MemoryRecord>, bridge::BridgeError> = async {
-            let namespace = namespace.map(str::to_owned);
-            let storage = self.storage.clone();
-            let tz = self.timezone;
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage.read().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-                if let Some(namespace) = namespace.as_deref() {
-                    storage_r
-                        .assert_memory_namespace(id, namespace)
-                        .map_err(bridge::BridgeError::from)?;
-                }
+        let accepted =
+            crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
+        let result = async {
+            let stamp = effects_stamp(&self.storage).await?;
+            let result: Result<Option<bridge::MemoryRecord>, bridge::BridgeError> = async {
+                let namespace = namespace.map(str::to_owned);
+                let storage = self.storage.clone();
+                let tz = self.timezone;
+                tokio::task::spawn_blocking(move || {
+                    let storage_r = storage.read().map_err(|e| {
+                        bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
+                    })?;
+                    if let Some(namespace) = namespace.as_deref() {
+                        storage_r
+                            .assert_memory_namespace(id, namespace)
+                            .map_err(bridge::BridgeError::from)?;
+                    }
 
-                let disk_record = storage_r
-                    .get_record(id)
-                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
+                    let disk_record = storage_r
+                        .get_record(id)
+                        .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
 
-                match disk_record {
-                    Some(record) => {
-                        if record.phase == DecayPhase::Tombstone {
+                    match disk_record {
+                        Some(record) => {
+                            if record.phase == DecayPhase::Tombstone {
+                                let ns_name = storage_r
+                                    .get_namespace(NamespaceId::new(record.namespace_id))
+                                    .ok()
+                                    .flatten()
+                                    .map(|ns| ns.name.clone())
+                                    .unwrap_or_default();
+
+                                return Ok(Some(bridge::MemoryRecord {
+                                    labels: record.schema.as_ref().map(|s| s.labels.clone()),
+                                    id: id.to_string(),
+                                    namespace: ns_name,
+                                    summary: String::new(),
+                                    full_text: None,
+                                    tags: Vec::new(),
+                                    phase: "Tombstone".to_string(),
+                                    strength: 0.0,
+                                    stability: record.stability,
+                                    created_at: format_timestamp(record.created_at, tz),
+                                    last_accessed_at: format_timestamp(record.last_accessed_at, tz),
+                                    is_permastore: false,
+                                    edge_count: record.edge_count,
+                                }));
+                            }
+
                             let ns_name = storage_r
                                 .get_namespace(NamespaceId::new(record.namespace_id))
                                 .ok()
@@ -1338,83 +1534,70 @@ impl bridge::StorageEngine for McpStorageAdapter {
                                 .map(|ns| ns.name.clone())
                                 .unwrap_or_default();
 
-                            return Ok(Some(bridge::MemoryRecord {
+                            let full_text = if record.text_length > 0 {
+                                let text_ref = crate::storage::TextRef {
+                                    file_offset: record.text_offset,
+                                    length: record.text_length,
+                                };
+                                storage_r
+                                    .get_text(text_ref)
+                                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+                            } else {
+                                None
+                            };
+
+                            Ok(Some(bridge::MemoryRecord {
                                 labels: record.schema.as_ref().map(|s| s.labels.clone()),
                                 id: id.to_string(),
                                 namespace: ns_name,
-                                summary: String::new(),
-                                full_text: None,
-                                tags: Vec::new(),
-                                phase: "Tombstone".to_string(),
-                                strength: 0.0,
+                                summary: record.summary.clone(),
+                                full_text,
+                                tags: record.tags.iter().map(|t| t.to_string()).collect(),
+                                phase: format!("{:?}", record.phase),
+                                strength: record.strength,
                                 stability: record.stability,
                                 created_at: format_timestamp(record.created_at, tz),
                                 last_accessed_at: format_timestamp(record.last_accessed_at, tz),
-                                is_permastore: false,
+                                is_permastore: record.is_permastore != 0,
                                 edge_count: record.edge_count,
-                            }));
+                            }))
                         }
-
-                        let ns_name = storage_r
-                            .get_namespace(NamespaceId::new(record.namespace_id))
-                            .ok()
-                            .flatten()
-                            .map(|ns| ns.name.clone())
-                            .unwrap_or_default();
-
-                        let full_text = if record.text_length > 0 {
-                            let text_ref = crate::storage::TextRef {
-                                file_offset: record.text_offset,
-                                length: record.text_length,
-                            };
-                            storage_r
-                                .get_text(text_ref)
-                                .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                        } else {
-                            None
-                        };
-
-                        Ok(Some(bridge::MemoryRecord {
-                            labels: record.schema.as_ref().map(|s| s.labels.clone()),
-                            id: id.to_string(),
-                            namespace: ns_name,
-                            summary: record.summary.clone(),
-                            full_text,
-                            tags: record.tags.iter().map(|t| t.to_string()).collect(),
-                            phase: format!("{:?}", record.phase),
-                            strength: record.strength,
-                            stability: record.stability,
-                            created_at: format_timestamp(record.created_at, tz),
-                            last_accessed_at: format_timestamp(record.last_accessed_at, tz),
-                            is_permastore: record.is_permastore != 0,
-                            edge_count: record.edge_count,
-                        }))
+                        None => Ok(None),
                     }
-                    None => Ok(None),
-                }
-            })
-            .await
-            .map_err(|e| bridge::BridgeError::Internal(format!("blocking task join error: {e}")))?
+                })
+                .await
+                .map_err(|e| {
+                    bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
+                })?
+            }
+            .await;
+            let value = result?;
+            check_read_admission(&self.storage, stamp).await?;
+            let receipts =
+                if record_access && value.as_ref().is_some_and(|r| r.phase != "Tombstone") {
+                    crate::decay::observation::record_exposures_scoped_with_work(
+                        self.storage.clone(),
+                        self.cache.clone(),
+                        vec![(id, crate::model::AccessKind::DirectRetrieval)],
+                        self.clock.now_millis(),
+                        Some(crate::storage::control::ExposureScope {
+                            namespace: value.as_ref().unwrap().namespace.clone(),
+                            source: Some(id),
+                        }),
+                        Some(&accepted),
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+            Observed { value, receipts }
+                .publish_derived(Some(&self.completion()), Some(&accepted))
+                .await?
+                .finish(check_read_admission(&self.storage, stamp).await)
         }
         .await;
-        let value = result?;
-        check_read_admission(&self.storage, stamp).await?;
-        let receipts = if record_access && value.as_ref().is_some_and(|r| r.phase != "Tombstone") {
-            crate::decay::observation::record_exposures_scoped(
-                self.storage.clone(),
-                self.cache.clone(),
-                vec![(id, crate::model::AccessKind::DirectRetrieval)],
-                self.clock.now_millis(),
-                Some(crate::storage::control::ExposureScope {
-                    namespace: value.as_ref().unwrap().namespace.clone(),
-                    source: Some(id),
-                }),
-            )
-            .await?
-        } else {
-            Vec::new()
-        };
-        Observed { value, receipts }.finish(check_read_admission(&self.storage, stamp).await)
+        crate::storage::work::finish_work(&self.storage, accepted);
+        result
     }
 
     async fn delete_memory(
@@ -1485,37 +1668,48 @@ impl bridge::StorageEngine for McpStorageAdapter {
         quality: u8,
         namespace: Option<&str>,
     ) -> Result<bridge::ReinforceResult, bridge::BridgeError> {
-        let outcome = crate::decay::storage_adapter::reinforce(
-            self.storage.clone(),
-            self.cache.clone(),
-            id,
-            quality,
-            self.config.decay.decay_rate_multiplier,
-            self.clock.now_millis(),
-            namespace.map(str::to_owned),
-        )
+        let accepted =
+            crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
+        let result = async {
+            let outcome = crate::decay::storage_adapter::reinforce_with_completion(
+                self.storage.clone(),
+                self.cache.clone(),
+                id,
+                quality,
+                self.config.decay.decay_rate_multiplier,
+                self.clock.now_millis(),
+                namespace.map(str::to_owned),
+                Some(&accepted),
+                Some(&self.completion()),
+            )
+            .await;
+            let plan = outcome.map_err(|e| {
+                use crate::decay::lifecycle::LifecycleError;
+                match e {
+                    LifecycleError::NotFound | LifecycleError::ContentUnavailable => {
+                        bridge::BridgeError::NotFound(e.to_string())
+                    }
+                    LifecycleError::InvalidInput(_) => {
+                        bridge::BridgeError::InvalidInput(e.to_string())
+                    }
+                    LifecycleError::Storage(_) => bridge::BridgeError::Storage(e.to_string()),
+                    LifecycleError::Observation(error) => error.into(),
+                    LifecycleError::NamespaceMismatch(_) => {
+                        bridge::BridgeError::NamespaceMismatch(e.to_string())
+                    }
+                }
+            })?;
+            Ok(bridge::ReinforceResult {
+                id: id.to_string(),
+                strength: plan.strength,
+                stability: plan.stability,
+                phase: format!("{:?}", plan.phase),
+                is_permastore: plan.is_permastore,
+            })
+        }
         .await;
-        let plan = outcome.map_err(|e| {
-            use crate::decay::lifecycle::LifecycleError;
-            match e {
-                LifecycleError::NotFound | LifecycleError::ContentUnavailable => {
-                    bridge::BridgeError::NotFound(e.to_string())
-                }
-                LifecycleError::InvalidInput(_) => bridge::BridgeError::InvalidInput(e.to_string()),
-                LifecycleError::Storage(_) => bridge::BridgeError::Storage(e.to_string()),
-                LifecycleError::Observation(error) => error.into(),
-                LifecycleError::NamespaceMismatch(_) => {
-                    bridge::BridgeError::NamespaceMismatch(e.to_string())
-                }
-            }
-        })?;
-        Ok(bridge::ReinforceResult {
-            id: id.to_string(),
-            strength: plan.strength,
-            stability: plan.stability,
-            phase: format!("{:?}", plan.phase),
-            is_permastore: plan.is_permastore,
-        })
+        crate::storage::work::finish_work(&self.storage, accepted);
+        result
     }
 
     async fn list_memories(
@@ -3833,12 +4027,17 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn canonical_legacy_entity_postings_survive_disabled_autolink_rebuild_and_delete() {
+    async fn entity_postings_preserve_legacy_validation_and_survive_disabled_autolink() {
         let fx = Fixture::new();
         let foreign = fx.create_namespace("foreign");
         let mut adapter = fx.storage_adapter();
         Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
-        let names = vec!["John-Smith".into(), "JOSE".into(), "Alice".into()];
+        let before = fx.storage.read().unwrap().control_state().unwrap();
+        let mut invalid = store_input("unrepresentable legacy names", "default", unit_x());
+        invalid.entities = vec!["John Smith".into(), "José".into(), "Alice's".into()];
+        assert!(adapter.store_memory(invalid).await.is_err());
+        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
+        let names = vec!["John_Smith".into(), "Jose".into(), "Alice".into()];
         let mut ids = Vec::new();
         for namespace in ["default", "foreign"] {
             let mut input = store_input("accepted names", namespace, unit_x());
@@ -3875,13 +4074,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn namespace_deletion_clears_orphan_entity_postings_only_in_its_scope() {
+    async fn namespace_deletion_rebuild_preserves_canonical_foreign_postings() {
         let fx = Fixture::new();
         let scratch = fx.create_namespace("scratch");
-        // Only the scratch posting is orphaned. The actual purge completion
-        // rebuilds from canonical rows, so a foreign posting needs a real owner.
-        let orphan = fx.insert_memory_in(default_ns(), &["entity/shared"]).await;
-        let names = vec!["Shared".into()];
+        // The completion rebuild must retain the actual foreign record, not
+        // preserve a phantom posting whose UUID has no canonical row.
+        let orphan = fx.insert_memory_in(default_ns(), &["entity/alice"]).await;
+        let names = vec!["Alice".into()];
         {
             let mut index = fx.entity_index.write().await;
             index.add(scratch, orphan, &names);

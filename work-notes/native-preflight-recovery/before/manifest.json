@@ -1,0 +1,12 @@
+{
+  "parent": "360c4531ef2fcfa54d268017ed0d38fdff8e2583",
+  "sources": {
+    "src/storage/validation.rs": "65fa7ee66b802dc1595ba33e8ba22165ec2fb9b69d39c3ee65abfc0b815e2f6b",
+    "src/storage/metadata/native_records/tests.rs": "4904aed4203bea2b0a9787b38f52902711de5766e5b7d92a0da3f02323746afb",
+    "src/storage/metadata/native_records/recovery_tests.rs": "f762b3f1fc78b5695c3333441c25ffa9ca5960746b8aa4a491da5c77a6eb733b"
+  },
+  "binary_sha256": "3900d9ffdb00c76f08b2804eaf6127c3eb08c2234a0851848f50e0c8f193fda9",
+  "binary_mtime_ns": 1794674996277174151,
+  "binary_size": 368156264,
+  "log_sha256": "8ea5ce0aba04f4a75a5504b2e81097648118b2993a9a2ca528796581ba18a89a"
+}

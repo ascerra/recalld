@@ -14,6 +14,8 @@ mod maintenance;
 mod native_graph;
 mod native_records;
 mod purge;
+mod read_payload;
+pub use read_payload::HydratedRecord;
 mod text_compaction;
 mod tombstone;
 

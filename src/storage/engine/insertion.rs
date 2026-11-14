@@ -22,26 +22,7 @@ impl RedbStorageEngine {
         generated_embedding: &[f32],
         sampled_at: i64,
     ) -> Result<WriteReceipt, StorageError> {
-        self.insert_memory_with_profile(ctx, input, generated_embedding, None, sampled_at)
-    }
-
-    pub(crate) fn insert_memory_with_profile(
-        &mut self,
-        ctx: &MutationContext,
-        input: &InsertMemory,
-        generated_embedding: &[f32],
-        profile: Option<&crate::model::schema::EmbeddingProfile>,
-        sampled_at: i64,
-    ) -> Result<WriteReceipt, StorageError> {
-        self.insert_memory_reserved_with_work(
-            ctx,
-            input,
-            generated_embedding,
-            profile,
-            sampled_at,
-            None,
-            None,
-        )
+        self.insert_memory_reserved(ctx, input, generated_embedding, sampled_at, None)
     }
 
     pub(crate) fn insert_memory_reserved(
@@ -56,7 +37,6 @@ impl RedbStorageEngine {
             ctx,
             input,
             generated_embedding,
-            None,
             sampled_at,
             child,
             None,
@@ -75,7 +55,6 @@ impl RedbStorageEngine {
             ctx,
             input,
             generated_embedding,
-            None,
             sampled_at,
             None,
             parent,
@@ -83,6 +62,64 @@ impl RedbStorageEngine {
     }
 
     pub(crate) fn insert_memory_reserved_with_work(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        sampled_at: i64,
+        child: Option<&crate::storage::batch::BatchChild>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_profile_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            None,
+            sampled_at,
+            child,
+            parent,
+        )
+    }
+
+    pub(crate) fn insert_memory_with_profile(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+        sampled_at: i64,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_with_profile_and_work(
+            ctx,
+            input,
+            generated_embedding,
+            profile,
+            sampled_at,
+            None,
+        )
+    }
+
+    pub(crate) fn insert_memory_with_profile_and_work(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_profile_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            profile,
+            sampled_at,
+            None,
+            parent,
+        )
+    }
+
+    pub(crate) fn insert_memory_reserved_profile_with_work(
         &mut self,
         ctx: &MutationContext,
         input: &InsertMemory,
