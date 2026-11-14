@@ -110,6 +110,40 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
+    async fn prepare_coherent_get_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentGetResponse>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_coherent_get(id, namespace, requested_access, parent)
+            .await
+    }
+    async fn prepare_coherent_similar_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        include_embeddings: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSimilarResponse>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_coherent_similar(
+                id,
+                namespace,
+                limit,
+                min_score,
+                requested_access,
+                include_embeddings,
+                parent,
+            )
+            .await
+    }
+
     async fn prepare_search_with_work(
         &self,
         query: state::SearchQuery,

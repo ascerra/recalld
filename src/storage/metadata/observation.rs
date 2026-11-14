@@ -325,11 +325,8 @@ impl MetadataStore {
 
 fn legacy_scope(ctx: &MutationContext) -> Result<NamespaceId, StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 1 {
-        return Err(StorageError::InvalidMutationContext(
-            "explicit-v2 observation is not enabled".into(),
-        ));
-    }
+    // Application origin is independent of this legacy physical writer.
+    // The mutation guard and read_namespace still fence native lifecycle data.
     match ctx.scope {
         MutationScope::Namespace(id) => Ok(id),
         MutationScope::Catalog => Err(StorageError::InvalidMutationContext(

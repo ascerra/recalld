@@ -14,6 +14,18 @@ pub(crate) struct Observed<T> {
     pub receipts: Vec<WriteReceipt>,
 }
 
+/// Rust-only recorder result. Receipts retain the existing full-publication path;
+/// this type does not certify readiness or activate native exposure writes.
+#[derive(Default)]
+pub struct AccessObservation {
+    pub receipts: Vec<WriteReceipt>,
+}
+impl AccessObservation {
+    pub fn from_receipts(receipts: Vec<WriteReceipt>) -> Self {
+        Self { receipts }
+    }
+}
+
 impl<T> Observed<T> {
     pub fn unobserved(value: T) -> Self {
         Self {
@@ -74,7 +86,7 @@ impl ObservationError {
         Self::failed(format!("INDEX_NOT_READY: {source}"), receipts)
     }
 
-    pub(super) fn worker_failed(error: impl std::fmt::Display) -> Self {
+    pub(crate) fn worker_failed(error: impl std::fmt::Display) -> Self {
         Self {
             commit_state: "unknown",
             ready: false,
@@ -98,7 +110,7 @@ impl ObservationError {
         }
     }
 
-    pub(super) fn storage(error: StorageError, receipts: Vec<WriteReceipt>) -> Self {
+    pub(crate) fn storage(error: StorageError, receipts: Vec<WriteReceipt>) -> Self {
         let unknown = match &error {
             StorageError::CommitOutcomeUnknown { operation_id, .. } => Some(*operation_id),
             _ => None,
@@ -158,6 +170,19 @@ pub(crate) async fn record_exposures_scoped_with_work(
     scope: Option<crate::storage::control::ExposureScope>,
     parent: Option<&crate::storage::work::WorkTicket>,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
+    record_exposures_scoped_with_origin_work(storage, cache, accesses, sampled_at, scope, parent, 1)
+        .await
+}
+
+pub(crate) async fn record_exposures_scoped_with_origin_work(
+    storage: Arc<RwLock<RedbStorageEngine>>,
+    cache: Arc<CacheManager>,
+    accesses: Vec<(MemoryId, AccessKind)>,
+    sampled_at: i64,
+    scope: Option<crate::storage::control::ExposureScope>,
+    parent: Option<&crate::storage::work::WorkTicket>,
+    original_contract_version: u32,
+) -> Result<Vec<WriteReceipt>, ObservationError> {
     if accesses.is_empty() {
         return Ok(Vec::new());
     }
@@ -178,6 +203,7 @@ pub(crate) async fn record_exposures_scoped_with_work(
                 sampled_at,
                 scope.as_ref(),
                 Some(&child),
+                original_contract_version,
             );
             let receipts = match &result {
                 Ok(r) => r,
@@ -218,7 +244,7 @@ fn record_locked_scoped(
     sampled_at: i64,
     scope: Option<&crate::storage::control::ExposureScope>,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
-    record_locked_scoped_with_work(storage, accesses, sampled_at, scope, None)
+    record_locked_scoped_with_work(storage, accesses, sampled_at, scope, None, 1)
 }
 
 fn record_locked_scoped_with_work(
@@ -227,7 +253,31 @@ fn record_locked_scoped_with_work(
     sampled_at: i64,
     scope: Option<&crate::storage::control::ExposureScope>,
     parent: Option<&crate::storage::work::WorkTicket>,
+    original_contract_version: u32,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
+    let groups = exposure_groups(storage, accesses)?;
+    let mut receipts = Vec::new();
+    for (namespace, batch) in groups {
+        let mut ctx = MutationContext::unkeyed(NamespaceId::new(namespace));
+        ctx.contract_version = original_contract_version;
+        match storage
+            .meta_store()
+            .record_exposure_batch_scoped_with_work(&ctx, &batch, sampled_at, scope, parent)
+        {
+            Ok(Some(receipt)) => receipts.push(receipt),
+            Ok(None) => {}
+            Err(error) => return Err(ObservationError::storage(error, receipts)),
+        }
+    }
+    Ok(receipts)
+}
+
+/// Shared canonical grouping for both legacy and native observation writers.
+/// Validate all kinds/IDs first; direct dominates associative for duplicate UUIDs.
+pub(crate) fn exposure_groups(
+    storage: &RedbStorageEngine,
+    accesses: &[(MemoryId, AccessKind)],
+) -> Result<std::collections::BTreeMap<u32, Vec<(MemoryId, AccessKind)>>, ObservationError> {
     // First occurrence order within each namespace; namespace order ascending.
     // Direct exposure dominates an additional associative occurrence.
     let mut distinct: Vec<(MemoryId, AccessKind)> = Vec::new();
@@ -259,21 +309,7 @@ fn record_locked_scoped_with_work(
             .or_default()
             .push((id, kind));
     }
-    let mut receipts = Vec::new();
-    for (namespace, batch) in groups {
-        match storage.meta_store().record_exposure_batch_scoped_with_work(
-            &MutationContext::unkeyed(NamespaceId::new(namespace)),
-            &batch,
-            sampled_at,
-            scope,
-            parent,
-        ) {
-            Ok(Some(receipt)) => receipts.push(receipt),
-            Ok(None) => {}
-            Err(error) => return Err(ObservationError::storage(error, receipts)),
-        }
-    }
-    Ok(receipts)
+    Ok(groups)
 }
 
 #[cfg(test)]

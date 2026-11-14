@@ -5,6 +5,8 @@ mod native_purge;
 
 use std::sync::{Arc, RwLock};
 
+mod native_exposure;
+
 #[path = "derived_readiness.rs"]
 mod readiness;
 

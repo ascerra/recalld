@@ -937,3 +937,6 @@ async fn coherent_payload_query_and_exposure_share_one_clock_sample_after_provid
         assert_eq!(h.snapshot(), before);
     }
 }
+
+#[path = "coherent_by_id_tests.rs"]
+mod coherent_by_id_tests;

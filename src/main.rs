@@ -645,7 +645,8 @@ fn create_direct_mcp_bridge(
             std::sync::Arc::new(system.config().clone()),
             tz,
         )
-        .with_clock(system.clock().clone()),
+        .with_clock(system.clock().clone())
+        .with_query_engine(system.query_engine().clone()),
     );
     let namespaces: Arc<dyn recalld::mcp::bridge::NamespaceRegistry> =
         Arc::new(McpNamespaceAdapter::new(
