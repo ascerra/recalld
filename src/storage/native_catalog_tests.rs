@@ -229,7 +229,13 @@ async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
         control::encode(&reopened.engine.get_namespace(id).unwrap().unwrap()).unwrap(),
         control::encode(&ns).unwrap()
     );
-    let read = reopened.engine.meta_store().db.begin_read().unwrap();
+    assert!(matches!(
+        reopened.create_namespace(&ctx, &input(), &Provider(false)),
+        Err(StorageError::StoreLineageMismatch)
+    ));
+    drop(reopened);
+    let snapshot = crate::storage::offline_snapshot::OfflineSnapshot::open(&copy).unwrap();
+    let read = snapshot.metadata.begin_read().unwrap();
     let raw = read
         .open_table(control::RECEIPTS)
         .unwrap()
@@ -246,11 +252,6 @@ async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
         .value()
         .to_vec();
     assert_eq!(control::validate_receipt(&raw).unwrap().receipt, receipt);
-    drop(read);
-    assert!(matches!(
-        reopened.create_namespace(&ctx, &input(), &Provider(false)),
-        Err(StorageError::StoreLineageMismatch)
-    ));
 }
 
 #[test]
