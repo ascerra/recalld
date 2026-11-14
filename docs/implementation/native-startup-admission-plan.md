@@ -88,3 +88,27 @@ a hidden legacy-writer failure is not compatibility. Lifecycle defaults remain
 separate and unchanged. Huygens owns these wire adapters; Feynman owns the
 existing constructor/recovery admission. The matrix and exact source refs must
 be reconciled before startup code, not inferred from a successful native open.
+
+## Owner-reported closure inventory, 2026-11-14
+
+Halley supplied these frozen references after PR111 and the binding handoff.
+This is coordination evidence, not an independent runtime validation or an
+ordinary startup admission proof:
+
+| Surface | Reported runtime / seal | Remaining qualification |
+| --- | --- | --- |
+| Registry PR95 | ddd4cc2 / 5dc7849 | Actual83/209ce38 plus corrected82 parent |
+| Payload PR96 | c16e214 / 387c711 | Four actual-generation components and whole-page hydrate_at; original mode/time/full Observed receipt; reported1000 library+2CLI and9public tests |
+| Curie get/similar | 8a0d260 / 149beb6 | Direct96, reported1007 library+2CLI; actual native joins still need reconciliation |
+| Retained freeze/clock IDs PR104 | d09 / a99; checkpoint2920 | Legacy-only isolated evidence, not native admission evidence |
+| Readiness failure observer | f876, direct96 | Reported2+10focused checks; full validation pending at handoff |
+
+Known gate: Halley reports a confirmed PR96 SQLite FTS rebuild scoring defect,
+owned by Hume. Matching actual GenerationRef stamps cannot establish index
+content correctness while that defect remains. Consume the corrected validated
+runtime and its regression evidence before admission; do not infer closure from
+publication identity alone. Huygens owns actual catalog/policy completion and
+public dispatch. Pascal owns the native feedback/forget/exposure/sweep joins.
+Curie's get/similar join must be reconciled with those actual native writers.
+The shared binding backend55bcf43, sealed5ae31ff, is still awaiting its real
+replay consumer join. None of these inventory rows enables ordinary serving.
