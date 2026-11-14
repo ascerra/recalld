@@ -231,6 +231,30 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativeNamespacePurgeStarted {
+        transition: super::native_purge::NativePurgeStarted,
+    },
+    NativeNamespacePurgeAdvanced {
+        transition: super::native_purge::NativePurgeAdvanced,
+    },
+    NativeNamespacePolicyUnchanged {
+        transition: super::native_policy::NativeNamespacePolicyUnchanged,
+    },
+    NativeNamespacePolicyUpdated {
+        transition: super::native_policy::NativeNamespacePolicyUpdated,
+    },
+    NativeNamespaceCreated {
+        transition: super::native_catalog::NativeNamespaceCreated,
+    },
+    NativePhaseMaterialized {
+        transition: super::native_maintenance::NativePhaseWrite,
+    },
+    NativeMemoryHardDeleted {
+        transition: super::native_maintenance::NativeHardDeleteWrite,
+    },
+    NativeGraphUnchanged {
+        transition: super::native_graph::NativeGraphNoChange,
+    },
     NativeGraphChanged {
         transition: super::native_graph::NativeGraphWrite,
     },
@@ -449,9 +473,22 @@ pub(crate) fn validate_existing(
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                scope == MutationScope::Namespace(t.before_namespace.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => {
+                scope == MutationScope::Namespace(t.namespace_id)
+            }
             MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::BatchReserved { .. }
-            | MutationOutcome::BatchItemRejected { .. } => scope == MutationScope::Catalog,
+            | MutationOutcome::BatchItemRejected { .. }
+            | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
+                scope == MutationScope::Namespace(transition.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePolicyUpdated { transition } => {
+                scope == MutationScope::Namespace(transition.namespace_id)
+            }
             MutationOutcome::NamespacePolicyUpdated { namespace_id }
             | MutationOutcome::NamespacePurgeStarted { namespace_id, .. }
             | MutationOutcome::NamespacePurgeAdvanced { namespace_id, .. } => {
@@ -482,13 +519,21 @@ pub(crate) fn validate_existing(
         // schema table is entirely absent. Legacy decode alone is not proof.
         if matches!(
             stored.receipt.outcome,
-            MutationOutcome::LifecyclePolicyMigrated { .. }
+            MutationOutcome::NativeNamespacePurgeStarted { .. }
+                | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                | MutationOutcome::LifecyclePolicyMigrated { .. }
+                | MutationOutcome::NativeNamespaceCreated { .. }
+                | MutationOutcome::NativeNamespacePolicyUpdated { .. }
+                | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
                 | MutationOutcome::LifecycleFeedbackApplied { .. }
+                | MutationOutcome::NativePhaseMaterialized { .. }
+                | MutationOutcome::NativeMemoryHardDeleted { .. }
                 | MutationOutcome::NativeMemoryInsertedWithLinks { .. }
                 | MutationOutcome::NativeMemoryInserted { .. }
                 | MutationOutcome::NativeMemoryTombstoned { .. }
                 | MutationOutcome::NativeGraphChanged { .. }
+                | MutationOutcome::NativeGraphUnchanged { .. }
         ) && state.control_schema_version != 2
         {
             return Err(StorageError::InvalidControl(
@@ -659,6 +704,30 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativeNamespacePurgeStarted { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePurgeAdvanced { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePolicyUpdated { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespaceCreated { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativePhaseMaterialized { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeMemoryHardDeleted { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeGraphUnchanged { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeGraphChanged { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -802,10 +871,19 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+        MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::NativeNamespacePurgeStarted { .. }
+        | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+        | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+        | MutationOutcome::NativeNamespacePolicyUpdated { .. }
+        | MutationOutcome::NativeNamespaceCreated { .. }
+        | MutationOutcome::NativePhaseMaterialized { .. }
+        | MutationOutcome::NativeMemoryHardDeleted { .. }
+        | MutationOutcome::NativeMemoryInsertedWithLinks { .. }
         | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
         | MutationOutcome::NativeGraphChanged { .. }
+        | MutationOutcome::NativeGraphUnchanged { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
         | MutationOutcome::LifecycleFeedbackApplied { .. }
         | MutationOutcome::NamespaceCreated { .. }

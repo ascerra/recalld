@@ -244,9 +244,35 @@ fn native_graph_keyed_noop_never_reports_unbound_success_then_reexecutes() {
     let noop_key = ctx(&session, &d, "fresh-key-noop");
     let before = session.metadata().control_state().unwrap();
     let calls = clock.0.load(Ordering::SeqCst);
-    let noop = session.put_graph(&noop_key, scope(&d), &a);
+    let prior = session.engine.get_record(id).unwrap().unwrap().to_bytes();
+    let target = session
+        .engine
+        .get_record(d.parent)
+        .unwrap()
+        .unwrap()
+        .to_bytes();
+    let edges_a = session.engine.load_all_edges().unwrap();
+    let noop = session
+        .put_graph(&noop_key, scope(&d), &a)
+        .unwrap()
+        .unwrap();
     let after_noop = session.metadata().control_state().unwrap();
     let after_calls = clock.0.load(Ordering::SeqCst);
+    assert_eq!(
+        session.engine.get_record(id).unwrap().unwrap().to_bytes(),
+        prior
+    );
+    assert_eq!(
+        session
+            .engine
+            .get_record(d.parent)
+            .unwrap()
+            .unwrap()
+            .to_bytes(),
+        target
+    );
+    assert_eq!(session.engine.load_all_edges().unwrap(), edges_a);
+
     let mut b = a.clone();
     b.edges[0].weight = 0.25;
     session
@@ -255,27 +281,26 @@ fn native_graph_keyed_noop_never_reports_unbound_success_then_reexecutes() {
         .unwrap();
     let after_b = session.metadata().control_state().unwrap();
     let edges_b = session.engine.load_all_edges().unwrap();
-    if noop.is_ok() {
-        // Any successful keyed no-op must be durably replayable. This exposes
-        // the original bug after an intervening real writer, not just its None.
-        let retry = session.put_graph(&noop_key, scope(&d), &a).unwrap();
-        assert_eq!(
-            session.metadata().control_state().unwrap(),
-            after_b,
-            "successful keyed no-op was not bound; retry performed another mutation"
-        );
-        assert!(retry.is_some_and(|r| r.replayed));
-        assert!(matches!(
-            session.put_graph(&noop_key, scope(&d), &b),
-            Err(StorageError::IdempotencyConflict)
-        ));
-    } else {
-        // This bounded API explicitly rejects a fresh keyed no-op. It promises
-        // no successful outcome/key reservation, and does not sample the clock.
-        assert!(matches!(noop, Err(StorageError::InvalidMutation(_))));
-        assert_eq!(after_noop, before);
-        assert_eq!(after_calls, calls);
-    }
+    assert_eq!(
+        after_noop.committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    assert_eq!(after_calls, calls);
+    assert!(matches!(
+        noop.outcome,
+        MutationOutcome::NativeGraphUnchanged { .. }
+    ));
+    let retry = session
+        .put_graph(&noop_key, scope(&d), &a)
+        .unwrap()
+        .unwrap();
+    assert!(retry.replayed);
+    assert_eq!(retry.operation_id, noop.operation_id);
+    assert_eq!(session.metadata().control_state().unwrap(), after_b);
+    assert!(matches!(
+        session.put_graph(&noop_key, scope(&d), &b),
+        Err(StorageError::IdempotencyConflict)
+    ));
     let replay = session
         .put_graph(&committed_key, scope(&d), &a)
         .unwrap()
@@ -288,6 +313,17 @@ fn native_graph_keyed_noop_never_reports_unbound_success_then_reexecutes() {
         session.put_graph(&committed_key, scope(&d), &b),
         Err(StorageError::IdempotencyConflict)
     ));
+    drop(session);
+    inspect_schema(&d.path).unwrap();
+    let mut session = open(&d, clock);
+    assert!(
+        session
+            .put_graph(&noop_key, scope(&d), &a)
+            .unwrap()
+            .unwrap()
+            .replayed
+    );
+    assert_eq!(session.engine.load_all_edges().unwrap(), edges_b);
 }
 
 #[test]
@@ -358,15 +394,15 @@ fn native_graph_ghost_cannot_activate_but_retained_parent_can_gain_structural_ed
 
 #[tokio::test]
 async fn native_graph_review_rejects_malformed_foreign_profile_commitment() {
-    reject_foreign_profile_commitment("not-an-ep1-commitment".into(), false).await;
+    reject_foreign_profile_commitment("not-an-ep1-commitment".into(), false, false).await;
 }
 
 #[tokio::test]
 async fn native_graph_review_rejects_wrong_foreign_profile_binding() {
-    reject_foreign_profile_commitment(format!("ep1:{}", "0".repeat(64)), true).await;
+    reject_foreign_profile_commitment(format!("ep1:{}", "0".repeat(64)), true, false).await;
 }
 
-async fn reject_foreign_profile_commitment(profile: String, well_formed: bool) {
+async fn reject_foreign_profile_commitment(profile: String, well_formed: bool, nochange: bool) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
@@ -377,6 +413,18 @@ async fn reject_foreign_profile_commitment(profile: String, well_formed: bool) {
         .put_graph(&ctx(&session, &d, "edges"), scope(&d), &plan(id, d.parent))
         .unwrap()
         .unwrap();
+    let receipt = if nochange {
+        session
+            .put_graph(
+                &ctx(&session, &d, "nochange"),
+                scope(&d),
+                &plan(id, d.parent),
+            )
+            .unwrap()
+            .unwrap()
+    } else {
+        receipt
+    };
     drop(session);
     let archive = run_backup(
         &crate::config::RecalldConfig::default(),
@@ -418,16 +466,13 @@ async fn reject_foreign_profile_commitment(profile: String, well_formed: bool) {
                 .value(),
         )
         .unwrap();
-        let MutationOutcome::NativeGraphChanged { transition } = &mut stored.receipt.outcome else {
-            panic!()
+        let records = match &mut stored.receipt.outcome {
+            MutationOutcome::NativeGraphChanged { transition } => &mut transition.records,
+            MutationOutcome::NativeGraphUnchanged { transition } => &mut transition.records,
+            _ => panic!(),
         };
-        transition.records[0]
-            .before
-            .as_mut()
-            .unwrap()
-            .content
-            .profile_id = Some(profile.clone());
-        transition.records[0].after.content.profile_id = Some(profile.clone());
+        records[0].before.as_mut().unwrap().content.profile_id = Some(profile.clone());
+        records[0].after.content.profile_id = Some(profile.clone());
         tx.open_table(control::RECEIPTS)
             .unwrap()
             .insert(key.as_slice(), control::encode(&stored).unwrap().as_slice())
@@ -464,10 +509,16 @@ async fn reject_foreign_profile_commitment(profile: String, well_formed: bool) {
             .is_err()
     );
     assert_eq!(bytes(&d.path), before);
-    let MutationOutcome::NativeGraphChanged { transition } = &malformed.receipt.outcome else {
-        panic!()
+    let shape = match &malformed.receipt.outcome {
+        MutationOutcome::NativeGraphChanged { transition } => {
+            transition.validate(&malformed.receipt)
+        }
+        MutationOutcome::NativeGraphUnchanged { transition } => {
+            transition.validate(&malformed.receipt)
+        }
+        _ => panic!(),
     };
-    assert_eq!(transition.validate(&malformed.receipt).is_ok(), well_formed);
+    assert_eq!(shape.is_ok(), well_formed);
 }
 
 #[test]
@@ -656,6 +707,9 @@ async fn native_graph_export_import_restore_preserves_history_and_foreign_lineag
     let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
     let input = plan(id, d.parent);
+    session
+        .put_graph(&ctx(&session, &d, "first-edges"), scope(&d), &input)
+        .unwrap();
     let key = ctx(&session, &d, "edges");
     let receipt = session.put_graph(&key, scope(&d), &input).unwrap().unwrap();
     let expected = session.engine.load_all_edges().unwrap();
@@ -928,3 +982,6 @@ fn native_graph_supersedes_cycle_branch_and_multi_source_token_once() {
     drop(session);
     inspect_schema(&d.path).unwrap();
 }
+
+#[path = "graph_nochange_tests.rs"]
+mod nochange;

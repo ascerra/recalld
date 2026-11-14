@@ -1,0 +1,16 @@
+{
+  "source": "574850da3d72fda4611cf911a05cbf46bf1b44b7",
+  "tree": "5582b36e2d22045ca1d75b992fcf4bc33e2d7587",
+  "exit": 101,
+  "log_sha256": "5b396765e5a0fc8a279f6f4fc9c76b0e0e46fbb28cf5b867e5f141f3680d1bec",
+  "binary": [
+    {
+      "path": "debug/deps/recalld-b2844bb1c4a63074",
+      "sha256": "84b8dd4543bd7dacfc4d1e0d5830b310964e036148eca56155534d98f806a541"
+    }
+  ],
+  "results": [
+    "warning: `recalld` (lib test) generated 8 warnings (run `cargo fix --lib -p recalld --tests` to apply 1 suggestion)",
+    "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1101 filtered out; finished in 1.01s"
+  ]
+}
