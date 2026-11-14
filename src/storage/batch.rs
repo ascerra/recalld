@@ -145,6 +145,22 @@ impl BatchChild {
     pub(crate) fn namespace(&self) -> NamespaceId {
         self.defaults.namespace_id
     }
+    pub(crate) fn native_store_settings(
+        &self,
+    ) -> Result<&super::native_store::NativeStoreSettings, super::StorageError> {
+        if self.version != 3 {
+            return Err(super::StorageError::InvalidMutationContext(
+                "linked store requires batch 3".into(),
+            ));
+        }
+        self.defaults
+            .native
+            .as_ref()
+            .and_then(|n| n.store_settings.as_ref())
+            .ok_or_else(|| {
+                super::StorageError::InvalidControl("linked reservation settings missing".into())
+            })
+    }
 }
 
 impl BatchProgress {

@@ -761,3 +761,6 @@ mod store;
 
 #[path = "store_batch_tests.rs"]
 mod store_batches;
+
+#[path = "store_producer_tests.rs"]
+mod store_producers;

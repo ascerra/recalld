@@ -8,6 +8,8 @@
 mod batch_adapters;
 #[path = "native_batch.rs"]
 mod native_batch;
+#[path = "native_store_batch.rs"]
+mod native_store_batch;
 
 use crate::decay::observation::Observed;
 use std::sync::Arc;
@@ -1283,6 +1285,11 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: crate::storage::batch::BatchInput,
     ) -> Result<crate::storage::batch::BatchOutcome, bridge::BridgeError> {
+        if input.mutation_version == 3 {
+            return Err(bridge::BridgeError::Unavailable(
+                "linked native batch consumer remains gated pending transport validation".into(),
+            ));
+        }
         self.run_batch(input).await
     }
 

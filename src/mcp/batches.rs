@@ -446,6 +446,17 @@ pub(crate) fn stored_from_receipt(
                 after.lifecycle.stability.get().to_bits(),
             )
         }
+        control::MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
+            let after = &transition
+                .primary()
+                .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
+                .after;
+            (
+                transition.memory_id,
+                after.lifecycle.created_at,
+                after.lifecycle.stability.get().to_bits(),
+            )
+        }
         _ => {
             return Err(bridge::BridgeError::Internal(
                 "wrong batch insertion receipt".into(),

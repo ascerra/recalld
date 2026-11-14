@@ -38,11 +38,17 @@ impl McpStorageAdapter {
         work: &crate::storage::work::WorkTicket,
     ) -> Result<BatchOutcome, bridge::BridgeError> {
         // Prepare the entire ordered caller intent before policy/default reads.
-        let prepared = batches::prepare(&input)?;
+        let prepared = if input.mutation_version == 3 {
+            batches::prepare_native_store(&input)?
+        } else {
+            batches::prepare(&input)?
+        };
         let plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
         let ctx = input.context();
         let kind = input.kind;
         let parent = input.batch_operation_id;
+        let version = input.mutation_version;
+        let config = self.config.clone();
         let storage = self.storage.clone();
         let worker = work
             .child()
@@ -51,7 +57,8 @@ impl McpStorageAdapter {
             let storage=storage.read().map_err(|e|StorageError::RecoveryRequired(e.to_string()))?;
             let result=(|| {
                 let store_id=storage.meta_store().control_state()?.store_id;
-                Ok::<_,StorageError>((store_id,storage.meta_store().reserve_or_resume_batch_with_work(&ctx,kind,&plans,parent,Some(&worker))))
+                let reservation=if version==3 {storage.meta_store().reserve_native_store_batch_with_work(&ctx,&plans,parent,Some(&worker),||crate::graph::native_selection::freeze_settings(&config.graph))}else{storage.meta_store().reserve_or_resume_batch_with_work(&ctx,kind,&plans,parent,Some(&worker))};
+                Ok::<_,StorageError>((store_id,reservation))
             })();
             storage.meta_store().finish_work(worker);
             result
@@ -113,7 +120,10 @@ impl McpStorageAdapter {
             let item_work = work
                 .child()
                 .map_err(|e| super::map_mutation_error(e.into()))?;
-            let result = if input.mutation_version == 2 {
+            let result = if input.mutation_version == 3 {
+                self.run_linked_batch_child(prepared, &child, &item_work)
+                    .await
+            } else if input.mutation_version == 2 {
                 self.run_native_batch_child(prepared, &child, &item_work)
                     .await
             } else if let Some(input) = &prepared.store {
@@ -325,6 +335,7 @@ impl McpStorageAdapter {
             mark_unready(&mut outcome);
         }
         outcome.recount();
+        self.enrich_linked_batch(&mut outcome);
         Ok(outcome)
     }
 }

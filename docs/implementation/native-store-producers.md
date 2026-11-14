@@ -160,3 +160,39 @@ provider-zero replay, current advisory readGeneration/warnings, publication
 failure and accepted-root close-race tests remain before activation and final
 full-suite/fmt/Clippy validation. PR91 is unchanged. Halley retains owned ID/RNG
 injection; this slice introduces no competing source or reset mechanism.
+
+## Actual prepared runner checkpoint
+
+The existing `McpStorageAdapter::run_batch` now privately executes version3 plans.
+It registers the same accepted root before reservation/provider work, loads the
+stored expansion before fresh settings, captures canonical candidates from the
+original provider/supplied vector, and commits the prepared new proof under
+publication lease, graph ownership, then storage ownership. Guards are released
+before awaited derived completion. Failure retains the current reserved child
+receipt or unknown operation ID, never an earlier parent receipt.
+
+After readiness, `result.advisory` carries `requested`, the current hydration
+`readGeneration`, and bounded warnings. `nearDuplicates` remains optional.
+Checked-empty is therefore distinct from disabled even when both omit the
+report. Matching completed replay visits only frozen advisory IDs; removed
+content produces a warning and cannot be replaced by newly discovered neighbors.
+Huygens owns the MCP/REST/RPC envelope, schema, discovery and activation join.
+The public `mutate_batch` trait entry still rejects version3; no public contract3
+or general native-serving activation is introduced here.
+
+Six actual runner tests passed in 7.84 seconds: unavailable-provider zero-call
+replay with changed/invalid current settings; frozen advisory visibility;
+checked-empty versus disabled; current child receipt after publication failure;
+unknown-commit reopen without reallocation/provider; and root/provider/graph
+close races. A separate pending-provider test proves only parent bookkeeping
+commits, then resumes with the original frozen settings. Two tests cover multiple
+properties above; the count is six, not the number of listed assertions.
+
+The first compile rejected direct access to private batch defaults; a narrow
+read-only accessor fixed that. The next run was three passed/one failed because
+the visibility fixture's keyed tombstone omitted storeId. Its exact source,
+executable hash and failed log are preserved before correcting the fixture and
+adding the unknown/pending-provider cases. This was a fixture error, not a
+reproduced production mutation failure. Final full-suite/fmt/Clippy validation
+awaits Hume's validated foreign-history dimension correction; focused results
+do not replace that final shipping-tree proof.
