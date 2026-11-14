@@ -540,6 +540,22 @@ fn native_context_api1_catalog_replay_cross_contract_and_unkeyed() {
     session
         .create_namespace(&unkeyed, &fresh, &Provider(true))
         .unwrap();
+    let v2_key = context(&session, "original-api2");
+    let mut v2_input = input();
+    v2_input.name = "api2-original".into();
+    session
+        .create_namespace(&v2_key, &v2_input, &Provider(true))
+        .unwrap();
+    let frozen = bytes(&path);
+    let count = clock.0.load(Ordering::SeqCst);
+    let mut wrong_api = v2_key;
+    wrong_api.contract_version = 1;
+    assert!(matches!(
+        session.create_namespace(&wrong_api, &v2_input, &Provider(false)),
+        Err(StorageError::IdempotencyConflict)
+    ));
+    assert_eq!(bytes(&path), frozen);
+    assert_eq!(clock.0.load(Ordering::SeqCst), count);
     drop(session);
     let mut session =
         NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();

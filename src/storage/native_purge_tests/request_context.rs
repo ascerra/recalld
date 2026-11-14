@@ -291,7 +291,42 @@ fn native_context_genuine_before_four_cases_reopen_fork_unchanged_receipts() {
                 let frozen = bytes(&copy);
                 validation::preflight_native(&copy).unwrap();
                 assert_eq!(bytes(&copy), frozen);
-                let s = open(&copy);
+                let mut s = open(&copy);
+                let state = s.engine.control_state().unwrap();
+                let old_ctx = MutationContext {
+                    store_id: Some(p.store_id),
+                    scope: MutationScope::Namespace(p.namespace_id),
+                    idempotency_key: Some("old-purge".into()),
+                    expected_generation: if cas {
+                        Some(serde_json::from_value(data["previousGeneration"].clone()).unwrap())
+                    } else {
+                        None
+                    },
+                    contract_version: 2,
+                };
+                if stage != "forked" {
+                    assert!(
+                        s.engine
+                            .begin_namespace_purge(&old_ctx, force)
+                            .unwrap()
+                            .start_receipt
+                            .replayed
+                    );
+                    let changed = MutationContext {
+                        contract_version: 1,
+                        ..old_ctx
+                    };
+                    assert!(matches!(
+                        s.engine.begin_namespace_purge(&changed, force),
+                        Err(StorageError::IdempotencyConflict)
+                    ));
+                } else {
+                    assert!(matches!(
+                        s.engine.begin_namespace_purge(&old_ctx, force),
+                        Err(StorageError::StoreLineageMismatch)
+                    ));
+                }
+                assert_eq!(s.engine.control_state().unwrap(), state);
                 drop(s);
                 assert_eq!(raw_start(&copy, &p), raw);
                 validation::canonical_files(&copy).unwrap();
@@ -380,4 +415,29 @@ fn native_context_api1_purge_malformed_request_proofs_fail_closed_immutable() {
         );
         assert_eq!(bytes(&copy), frozen);
     }
+}
+
+#[test]
+fn native_context_unkeyed_api1_purge_keeps_native_codec() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let start = s
+        .engine
+        .begin_namespace_purge(&MutationContext::unkeyed(id), true)
+        .unwrap();
+    assert_eq!(start.version, 2);
+    let control::MutationOutcome::NativeNamespacePurgeStarted { transition } =
+        &start.start_receipt.outcome
+    else {
+        panic!()
+    };
+    assert_eq!(
+        transition.request.as_ref().unwrap().expected_generation,
+        None
+    );
+    let complete = done(&mut s, start);
+    assert_eq!(complete.stage, PurgeStage::Complete);
+    drop(s);
+    validation::canonical_files(&path).unwrap();
 }
