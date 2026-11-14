@@ -204,5 +204,46 @@ class Preflight(unittest.TestCase):
             finally:
                 for fd in (request_read, request_write, response_read): os.close(fd)
 
+    def test_reset_profile_separates_constructor_from_broad_control_claims(self):
+        self.install_owned()
+        self.manifest["track"] = m["RESET"]["TRACK"]
+        self.manifest["versions"], self.manifest["capabilities"] = m["track_profile"](self.manifest["track"])
+        actor, labels, cache, schedule = m["fixtures"](self.manifest["track"])
+        for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels),
+                                  ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
+            m["save"](self.root / name, value)
+            self.manifest[key]["sha256"] = m["digest"]((self.root / name).read_bytes())
+        self.manifest["dataset"]["actorArtifactSha256"] = self.manifest["actorInputs"]["sha256"]
+        self.validate()
+        self.assertNotIn("steps",actor)
+        self.assertNotIn(schedule["futureQueryCanary"],m["encoded"](actor).decode())
+        self.assertFalse(self.manifest["capabilities"]["reset"])
+        self.assertFalse(self.manifest["capabilities"]["deterministicIds"])
+        for field in ("reset", "deterministicIds", "deterministicRng", "coherentReadView", "fullA6", "publicV2"):
+            value=copy.deepcopy(self.manifest);value["capabilities"][field]=True
+            with self.assertRaises(ValueError):self.validate(value)
+        value=copy.deepcopy(self.manifest);value["versions"]["checkpointVersion"]=2
+        with self.assertRaises(ValueError):self.validate(value)
+
+    def test_reset_restoration_refuses_unjoined_owner_before_side_effects(self):
+        from types import SimpleNamespace
+        for prior in (None, SimpleNamespace(joined=False,process=SimpleNamespace(poll=lambda:0)),
+                      SimpleNamespace(joined=True,process=SimpleNamespace(poll=lambda:None))):
+            destination=self.root / "must-not-exist"
+            with self.assertRaisesRegex(RuntimeError,"terminated and joined"):
+                m["RESET"]["Child"](m,None,destination,None,destination,{},prior)
+            self.assertFalse(destination.exists())
+
+    def test_reset_inspect_does_not_accept_fake_full_snapshot_or_bad_runtime(self):
+        value=dict(committed=dict(storeId="11111111-1111-4111-8111-111111111111",generation="9"),logicalHash=None,snapshot=False,
+            runtimeState=dict(nowMillis=1000,allocation=dict(version=1,seed=[7]*32,counter=3,lastMemoryMillis=1000)))
+        self.assertEqual(m["RESET"]["checked_state"](m,value),value)
+        for change in (lambda v:v.update(snapshot=True),lambda v:v["runtimeState"].update(nowMillis=True),
+                       lambda v:v["runtimeState"]["allocation"].update(counter=2**64-1),
+                       lambda v:v["runtimeState"]["allocation"].update(lastMemoryMillis=1001),
+                       lambda v:v["runtimeState"]["allocation"].update(seed=[True]*32)):
+            invalid=copy.deepcopy(value);change(invalid)
+            with self.assertRaises(ValueError):m["RESET"]["checked_state"](m,invalid)
+
 if __name__ == "__main__":
     unittest.main()
