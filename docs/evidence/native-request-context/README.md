@@ -155,3 +155,5 @@ this parent for coordination. The next assigned actual124 child must route the
 three new catalog/policy receipt calls through the owned allocator and preserve
 owned purge/batch reservations. All ownership and final activation boundaries
 remain in the implementation plans, with API1 startup preceding public API2.
+
+Per-run tracked source SHA256 lists are gzip-compressed for compact review; their uncompressed bytes are unchanged. Raw lists also remain beside the original private run logs.
