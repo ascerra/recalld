@@ -1,4 +1,5 @@
 use super::*;
+use crate::storage::control::GenerationRef;
 use crate::storage::native_catalog::NativeNamespaceInput;
 use crate::storage::native_purge::NativeNamespaceProof;
 
