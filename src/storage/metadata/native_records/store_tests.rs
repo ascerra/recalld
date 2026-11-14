@@ -418,6 +418,15 @@ fn native_store_process_exit_never_loses_links_or_reexecutes_completed_selection
 
 #[tokio::test]
 async fn native_store_export_restore_retains_proof_and_rejects_foreign_binding_tampering() {
+    reject_foreign_store_binding(false).await;
+}
+
+#[tokio::test]
+async fn native_store_foreign_receipt_dimension_must_match_namespace() {
+    reject_foreign_store_binding(true).await;
+}
+
+async fn reject_foreign_store_binding(wrong_dimension: bool) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
@@ -505,7 +514,12 @@ async fn native_store_export_restore_retains_proof_and_rejects_foreign_binding_t
         else {
             panic!()
         };
-        transition.records[0].after.content.profile_id = Some(format!("ep1:{}", "0".repeat(64)));
+        if wrong_dimension {
+            transition.embedding_dim = 5;
+        } else {
+            transition.records[0].after.content.profile_id =
+                Some(format!("ep1:{}", "0".repeat(64)));
+        }
         tx.open_table(control::RECEIPTS)
             .unwrap()
             .insert(
@@ -516,7 +530,12 @@ async fn native_store_export_restore_retains_proof_and_rejects_foreign_binding_t
         tx.commit().unwrap();
     }
     let before = bytes(&d.path);
-    assert!(NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock).is_err());
+    assert!(
+        NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock).is_err(),
+        "foreign receipt with wrong immutable binding accepted (dimension={wrong_dimension})"
+    );
+    assert_eq!(bytes(&d.path), before);
+    assert!(export_store(&d.path, &root.path().join("rejected.jsonl")).is_err());
     assert_eq!(bytes(&d.path), before);
 }
 
