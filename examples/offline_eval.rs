@@ -16,7 +16,10 @@ use recalld::{
     model::{AccessKind, DecayPhase, DiskRecord, MemoryId, NamespaceConfig, NamespaceId},
     rif::{RifConfig, RifEngine},
     search::{adapters::*, *},
-    storage::{RedbStorageEngine, StorageEngine},
+    storage::{
+        RedbStorageEngine, StorageEngine,
+        control::{ExposureScope, WriteReceipt},
+    },
 };
 use serde_json::{Value, json};
 
@@ -147,20 +150,24 @@ impl EmbeddingProviderRegistry for ReplayEmbeddings {
     }
 }
 
-// The current public API cannot disable access. Suppress ONLY in this diagnostic,
-// and acknowledge every scheduled batch so post-query inspection is not racy.
+// Suppress access ONLY in this internal diagnostic and acknowledge every batch.
+// No mutation occurred, so there are no canonical receipts to return.
 struct DiagnosticAccessRecorder {
     completed: tokio::sync::Semaphore,
 }
 #[async_trait::async_trait]
 impl AccessRecorder for DiagnosticAccessRecorder {
-    async fn record_access(&self, _: MemoryId, _: AccessKind) -> Result<(), SearchError> {
+    async fn record_access(&self, _: MemoryId, _: AccessKind) -> Result<Vec<WriteReceipt>, SearchError> {
         self.completed.add_permits(1);
-        Ok(())
+        Ok(Vec::new())
     }
-    async fn record_access_batch(&self, _: &[(MemoryId, AccessKind)]) -> Result<(), SearchError> {
+    async fn record_access_batch(
+        &self,
+        _: &[(MemoryId, AccessKind)],
+        _: Option<&ExposureScope>,
+    ) -> Result<Vec<WriteReceipt>, SearchError> {
         self.completed.add_permits(1);
-        Ok(())
+        Ok(Vec::new())
     }
 }
 
