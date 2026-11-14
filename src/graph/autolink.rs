@@ -623,9 +623,10 @@ mod entity_scope_tests {
         f.tombstone(removed);
         {
             let mut index = f.entity_index.write().await;
-            index.add(local, &["alice".into()]);
+            index.add(ns, local, &["alice".into()]);
+            // Deliberately stale local postings still require canonical scope/phase checks.
             for id in [foreign, removed, MemoryId::new()] {
-                index.add(id, &["alice".into(), "bob".into()]);
+                index.add(ns, id, &["alice".into(), "bob".into()]);
             }
         }
         let count = perform_entity_link(
@@ -696,8 +697,8 @@ mod entity_scope_tests {
         let b = f.insert_memory_in(ns, &["entity/alice"]).await;
         {
             let mut index = f.entity_index.write().await;
-            index.add(b, &["alice".into()]);
-            index.add(a, &["alice".into()]);
+            index.add(ns, b, &["alice".into()]);
+            index.add(ns, a, &["alice".into()]);
         }
         assert_eq!(
             perform_entity_link(
