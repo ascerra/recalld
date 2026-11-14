@@ -38,6 +38,8 @@ use crate::model::{DecayPhase, MemoryId};
 use crate::storage::maintenance::{DecayMutationResult, DecaySkip};
 use crate::storage::{RedbStorageEngine, StorageEngine as _};
 
+mod native;
+
 // ── Decay Metadata ──────────────────────────────────────────────────
 
 /// Subset of memory metadata needed by the sweep runner.
@@ -191,6 +193,8 @@ pub struct SweepResult {
     pub unchanged_skipped: u64,
     /// Final patch was exempt from materialization; no receipt committed.
     pub exempt_skipped: u64,
+    /// Native Full records whose only retained text must not be destroyed.
+    pub missing_summary_skipped: u64,
     /// Canonical changes may be committed even when derived publication fails.
     pub publication_error: Option<String>,
     /// First known committed mutation whose canonical application failed.
@@ -634,6 +638,7 @@ impl DecaySweepRunner {
             stale_skipped = result.stale_skipped,
             unchanged_skipped = result.unchanged_skipped,
             exempt_skipped = result.exempt_skipped,
+            missing_summary_skipped = result.missing_summary_skipped,
             publication_error = ?result.publication_error,
             permastore_skipped = result.permastore_skipped,
             decay_disabled_skipped = result.decay_disabled_skipped,
@@ -716,18 +721,42 @@ impl DecaySweepRunner {
                 };
             }
         };
-        let mut result = Self::execute_sweep_accepted(
-            config,
-            decay_config,
-            activation_config,
-            storage,
-            graph,
-            cache,
-            global_decay_multiplier,
-            as_of_millis,
-            &work,
-        )
-        .await;
+        let native = storage
+            .read()
+            .map(|s| s.meta_store().uses_native_lifecycle())
+            .map_err(|e| e.to_string());
+        let mut result = match native {
+            Ok(true) => {
+                Self::execute_native_sweep_accepted(
+                    config,
+                    decay_config,
+                    storage,
+                    global_decay_multiplier,
+                    as_of_millis,
+                    &work,
+                    completion,
+                )
+                .await
+            }
+            Ok(false) => {
+                Self::execute_sweep_accepted(
+                    config,
+                    decay_config,
+                    activation_config,
+                    storage,
+                    graph,
+                    cache,
+                    global_decay_multiplier,
+                    as_of_millis,
+                    &work,
+                )
+                .await
+            }
+            Err(error) => SweepResult {
+                publication_error: Some(error.to_string()),
+                ..Default::default()
+            },
+        };
         // Keep the original canonical failure identity; completion may only add
         // publication evidence, never replace a failed receipt or unknown ID.
         if let Some(completion) = completion {

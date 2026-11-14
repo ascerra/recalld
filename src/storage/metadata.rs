@@ -297,6 +297,11 @@ impl MetadataStore {
         self.require_no_active_purge()
     }
 
+    /// The mode was established by strict owned-open validation, not a caller flag.
+    pub(crate) fn uses_native_lifecycle(&self) -> bool {
+        self.native_lifecycle_only
+    }
+
     pub(crate) fn ensure_handle_available(&self) -> Result<(), StorageError> {
         if self.unavailable.load(std::sync::atomic::Ordering::Acquire)
             || self

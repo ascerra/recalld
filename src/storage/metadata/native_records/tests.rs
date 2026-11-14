@@ -16,6 +16,9 @@ use std::sync::{
 #[path = "reader_tests.rs"]
 mod readers;
 
+#[path = "sweep_tests.rs"]
+mod sweep;
+
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 

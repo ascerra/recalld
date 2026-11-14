@@ -30,6 +30,7 @@ pub enum NativeDecayResult {
 pub struct NativeDecayIntent {
     pub(crate) scope: super::native_lifecycle::LifecycleScope,
     pub(crate) memory_id: MemoryId,
+    pub(crate) captured_phase: DecayPhase,
     pub(crate) capture: super::native_lifecycle::CapturedLifecycle,
     pub(crate) sampled_at: i64,
 }
@@ -61,7 +62,7 @@ impl NativeDecayEvidence {
             bonus: finite(bonus)?,
         })
     }
-    fn policy(&self) -> EffectiveLifecyclePolicy {
+    pub(crate) fn policy(&self) -> EffectiveLifecyclePolicy {
         EffectiveLifecyclePolicy {
             decay_rate_multiplier: self.multiplier.get(),
             config: DecayConfig {
