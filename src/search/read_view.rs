@@ -18,6 +18,89 @@ pub struct CoherentSearchResponse {
     pub payload: Option<CoherentPayload>,
 }
 
+impl CoherentSearchResponse {
+    /// Final hydrated exposure selection only. This performs no recording and
+    /// neither changes requested access nor chooses the numeric API origin.
+    pub(crate) fn exposures(&self, returns_neighbors: bool) -> Result<Vec<(MemoryId, AccessKind)>> {
+        let payload = self
+            .payload
+            .as_ref()
+            .ok_or_else(|| unavailable("coherent payload missing for exposure selection"))?;
+        if !returns_neighbors && !payload.neighbors.is_empty() {
+            return Err(unavailable(
+                "ranked-only response received unexpected supplemental neighbors",
+            ));
+        }
+        if payload.rows.len() != self.response.response.results.len() {
+            return Err(unavailable("coherent exposure page length mismatch"));
+        }
+        let mut accesses = Vec::<(MemoryId, AccessKind)>::new();
+        let mut positions = HashMap::<MemoryId, usize>::new();
+        let mut admit = |id, kind| {
+            if let Some(&position) = positions.get(&id) {
+                if kind == AccessKind::DirectRetrieval {
+                    accesses[position].1 = kind;
+                }
+            } else {
+                positions.insert(id, accesses.len());
+                accesses.push((id, kind));
+            }
+        };
+        for (selected, row) in self.response.response.results.iter().zip(&payload.rows) {
+            let id = MemoryId::from_bytes(row.record.id);
+            if id != selected.memory_id || row.record.namespace_id != payload.namespace.id.get() {
+                return Err(unavailable(
+                    "coherent exposure page identity/scope mismatch",
+                ));
+            }
+            let kind = match self.response.diagnostics.semantics {
+                RetrievalSemantics::V1 => {
+                    // Exact named legacy classification, including injected
+                    // terminals whose own activation field may be absent.
+                    if selected.activation_score.is_some() {
+                        AccessKind::AssociativeRetrieval
+                    } else {
+                        AccessKind::DirectRetrieval
+                    }
+                }
+                RetrievalSemantics::V2(_) => {
+                    let provenance = self
+                        .response
+                        .diagnostics
+                        .provenance
+                        .as_ref()
+                        .and_then(|p| p.get(&id))
+                        .ok_or_else(|| unavailable("missing V2 exposure provenance"))?;
+                    let mut channels = provenance
+                        .own_channels
+                        .iter()
+                        .chain(&provenance.inherited_channels)
+                        .peekable();
+                    if channels.peek().is_none() {
+                        return Err(unavailable("empty V2 exposure provenance"));
+                    }
+                    if channels.any(|c| *c != RetrievalChannel::Graph) {
+                        AccessKind::DirectRetrieval
+                    } else {
+                        AccessKind::AssociativeRetrieval
+                    }
+                }
+            };
+            admit(id, kind);
+        }
+        for neighbor in &payload.neighbors {
+            if neighbor.payload.record.namespace_id != payload.namespace.id.get() {
+                return Err(unavailable("coherent neighbor exposure scope mismatch"));
+            }
+            admit(
+                MemoryId::from_bytes(neighbor.payload.record.id),
+                AccessKind::AssociativeRetrieval,
+            );
+        }
+        Ok(accesses)
+    }
+}
+
 /// A direct fetch owns its canonical row and selected text, including markers.
 pub struct CoherentGetResponse {
     pub read_generation: GenerationRef,
@@ -43,6 +126,8 @@ pub struct CoherentPayload {
     pub rows: Vec<crate::storage::engine::HydratedRecord>,
     pub related: HashMap<MemoryId, Vec<CoherentRelation>>,
     pub neighbors: Vec<CoherentNeighbor>,
+    /// None is named legacy selection, not complete V2 supplemental coverage.
+    pub supplemental: Option<super::payload_selection::SupplementalDiagnostics>,
 }
 pub struct CoherentRelation {
     pub id: MemoryId,
@@ -192,6 +277,26 @@ impl QueryEngine {
         include_neighbors: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Option<CoherentSearchResponse>> {
+        self.prepare_coherent_payload_with_semantics(
+            query,
+            RetrievalSemantics::V1,
+            include_embeddings,
+            include_neighbors,
+            parent,
+        )
+        .await
+    }
+
+    /// Internal explicit selector. API contract origin and exposure intent are
+    /// independent inputs; selecting V2 neither changes them nor activates wire V2.
+    pub(crate) async fn prepare_coherent_payload_with_semantics(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        include_embeddings: bool,
+        include_neighbors: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<CoherentSearchResponse>> {
         let Some((owner, rif)) = &self.coherent_owner else {
             return Ok(None);
         };
@@ -199,7 +304,7 @@ impl QueryEngine {
             owner,
             rif.clone(),
             query,
-            RetrievalSemantics::V1,
+            semantics,
             std::time::Instant::now() + std::time::Duration::from_secs(30),
             Some((include_embeddings, include_neighbors)),
             parent,
@@ -321,6 +426,7 @@ impl QueryEngine {
                     rows,
                     related: HashMap::new(),
                     neighbors: Vec::new(),
+                    supplemental: None,
                 },
             })
         };
@@ -411,10 +517,14 @@ impl QueryEngine {
             let (engine, canonical, graph, publication, evaluated_at) =
                 self.pin_read_engine(owner, rif, &work).await?;
             let at = canonical.at;
-            let namespace = canonical.resolve(&query.namespace).await?;
             // Preserve requested mode for policy resolution, but never expose
             // until all selected content is copied and transport selection is final.
-            let response = engine.search_checked(query, semantics, true).await?;
+            let (mut response, selection) = engine
+                // The outer owned root covers this immutable pinned adapter;
+                // CanonicalReadView cannot accept another owned work ticket.
+                .search_checked_with_selection(query, semantics, true, None)
+                .await?;
+            let namespace = selection.namespace.clone();
             let payload = if let Some((include_embeddings, include_neighbors)) = payload_embeddings
             {
                 let mut ids: Vec<_> = response
@@ -424,68 +534,91 @@ impl QueryEngine {
                     .map(|r| r.memory_id)
                     .collect();
                 let selected_count = ids.len();
-                let selected: HashSet<_> = ids.iter().copied().collect();
-                let mut related = HashMap::new();
-                let mut candidates: HashMap<MemoryId, (f32, String, MemoryId)> = HashMap::new();
-                for &id in &ids {
-                    let Some(key) = graph.resolve(&id) else {
-                        continue;
-                    };
-                    let mut edges = Vec::new();
-                    for edge in graph.edges_for(&id) {
-                        let other = if edge.source == key {
-                            edge.target
-                        } else {
-                            edge.source
-                        };
-                        let Some(node) = graph.get_node_by_key(other) else {
+                let (related, neighbors, supplemental) = if let RetrievalSemantics::V2(mode) =
+                    semantics
+                {
+                    let selected = engine
+                        .select_payload_v2(
+                            &graph,
+                            &selection,
+                            &ids,
+                            include_neighbors,
+                            mode,
+                            &mut response.diagnostics,
+                        )
+                        .await?;
+                    let mut neighbors = Vec::new();
+                    for (position, (id, link)) in selected.neighbors.into_iter().enumerate() {
+                        ids.push(id);
+                        neighbors.push((link, position < 5));
+                    }
+                    (selected.related, neighbors, Some(selected.diagnostics))
+                } else {
+                    let selected: HashSet<_> = ids.iter().copied().collect();
+                    let mut related = HashMap::new();
+                    let mut candidates: HashMap<MemoryId, (f32, String, MemoryId)> = HashMap::new();
+                    for &id in &ids {
+                        let Some(key) = graph.resolve(&id) else {
                             continue;
                         };
-                        let kind = format!("{:?}", edge.edge_type).to_lowercase();
-                        if selected.contains(&node.memory_id) {
-                            edges.push(CoherentRelation {
-                                id: node.memory_id,
-                                edge_type: kind,
-                                weight: edge.weight,
-                            });
-                        } else if include_neighbors {
-                            let entry =
-                                candidates
-                                    .entry(node.memory_id)
-                                    .or_insert((0., kind.clone(), id));
-                            if edge.weight > entry.0 {
-                                *entry = (edge.weight, kind, id);
+                        let mut edges = Vec::new();
+                        for edge in graph.edges_for(&id) {
+                            let other = if edge.source == key {
+                                edge.target
+                            } else {
+                                edge.source
+                            };
+                            let Some(node) = graph.get_node_by_key(other) else {
+                                continue;
+                            };
+                            let kind = format!("{:?}", edge.edge_type).to_lowercase();
+                            if selected.contains(&node.memory_id) {
+                                edges.push(CoherentRelation {
+                                    id: node.memory_id,
+                                    edge_type: kind,
+                                    weight: edge.weight,
+                                });
+                            } else if include_neighbors {
+                                let entry = candidates.entry(node.memory_id).or_insert((
+                                    0.,
+                                    kind.clone(),
+                                    id,
+                                ));
+                                if edge.weight > entry.0 {
+                                    *entry = (edge.weight, kind, id);
+                                }
                             }
                         }
+                        related.insert(id, edges);
                     }
-                    related.insert(id, edges);
-                }
-                // Preserve named v1's cap-before-filter and five-text policy.
-                // Equal-weight HashMap order (including per-neighbor link ties)
-                // is intentionally still legacy behavior, NOT deterministic replay.
-                // Before v2/reset promotion: filter before cap and test stable
-                // UUID/edge/connected-to tie ordering. Eligibility is at this G.
-                let mut candidates: Vec<_> = candidates.into_iter().collect();
-                candidates.sort_by(|a, b| {
-                    b.1.0
-                        .partial_cmp(&a.1.0)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-                candidates.truncate(10);
-                let mut neighbors = Vec::new();
-                for (position, (id, link)) in candidates.into_iter().enumerate() {
-                    let Some(record) = canonical.get(id).map_err(unavailable)? else {
-                        continue;
-                    };
-                    if record.namespace_id != namespace.id
-                        || matches!(record.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
-                        || record.summary.is_empty()
-                    {
-                        continue;
+                    // Preserve named v1's cap-before-filter and five-text policy.
+                    // Equal-weight HashMap order (including per-neighbor link ties)
+                    // is intentionally still legacy behavior, NOT deterministic replay.
+                    // Before v2/reset promotion: filter before cap and test stable
+                    // UUID/edge/connected-to tie ordering. Eligibility is at this G.
+                    let mut candidates: Vec<_> = candidates.into_iter().collect();
+                    candidates.sort_by(|a, b| {
+                        b.1.0
+                            .partial_cmp(&a.1.0)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    candidates.truncate(10);
+                    let mut neighbors = Vec::new();
+                    for (position, (id, link)) in candidates.into_iter().enumerate() {
+                        let Some(record) = canonical.get(id).map_err(unavailable)? else {
+                            continue;
+                        };
+                        if record.namespace_id != namespace.id
+                            || matches!(record.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+                            || record.summary.is_empty()
+                        {
+                            continue;
+                        }
+                        ids.push(id);
+                        neighbors.push((link, position < 5));
                     }
-                    ids.push(id);
-                    neighbors.push((link, position < 5));
-                }
+                    (related, neighbors, None)
+                };
                 let storage = owner.storage.clone();
                 let namespace_id = namespace.id;
                 let child = work.child().map_err(unavailable)?;
@@ -522,6 +655,7 @@ impl QueryEngine {
                     rows,
                     related,
                     neighbors,
+                    supplemental,
                 })
             } else {
                 None
@@ -565,6 +699,8 @@ mod tests {
     use crate::test_support::Fixture;
     use std::time::{Duration, Instant};
     use tokio::sync::Notify;
+
+    include!("payload_tests.rs");
 
     struct Embeddings {
         entered: Notify,

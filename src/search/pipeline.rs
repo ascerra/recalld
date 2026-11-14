@@ -19,6 +19,8 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 
 #[path = "diagnostics.rs"]
 mod diagnostics;
+#[path = "payload_selection.rs"]
+mod payload_selection;
 #[path = "read_view.rs"]
 mod read_view;
 pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse};
@@ -26,6 +28,16 @@ pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilar
 mod strength;
 use strength::StrengthContext;
 pub use strength::StrengthDiagnostics;
+
+/// Request-local inputs retained for the coherent payload selector. The caller
+/// reuses the actual validated filters and lifecycle projection, not a second
+/// namespace scan, clock sample, or policy resolution.
+struct SearchSelectionContext {
+    query: SearchQuery,
+    namespace: NamespaceConfig,
+    strength: StrengthContext,
+    eligible: HashMap<MemoryId, CachedRecord>,
+}
 #[path = "semantics.rs"]
 mod semantics;
 #[cfg(test)]
@@ -646,13 +658,26 @@ impl QueryEngine {
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<SemanticsResponse> {
+        self.search_checked_with_selection(query, semantics, defer_recording, parent)
+            .await
+            .map(|(response, _)| response)
+    }
+
+    async fn search_checked_with_selection(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(SemanticsResponse, SearchSelectionContext)> {
         let work = self.accept_work(parent)?;
         let result = async {
             let stamp = self.meta_store.effects_stamp().await?;
-            let observed = self
+            let (observed, selection) = self
                 .search_admitted(query, semantics, defer_recording, work.as_ref())
                 .await?;
-            observed.finish(self.check_effects_stamp(stamp).await)
+            let response = observed.finish(self.check_effects_stamp(stamp).await)?;
+            Ok((response, selection))
         }
         .await;
         self.finish_work(work);
@@ -678,7 +703,7 @@ impl QueryEngine {
         semantics: RetrievalSemantics,
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
-    ) -> Result<Observed<SemanticsResponse>> {
+    ) -> Result<(Observed<SemanticsResponse>, SearchSelectionContext)> {
         let mut diagnostics = SemanticsDiagnostics::new(semantics);
         let pipeline_start = Instant::now();
         let mut timings = StageTimings::default();
@@ -1042,13 +1067,21 @@ impl QueryEngine {
             "search complete"
         );
 
-        Ok(Observed {
-            value: SemanticsResponse {
-                response,
-                diagnostics,
+        Ok((
+            Observed {
+                value: SemanticsResponse {
+                    response,
+                    diagnostics,
+                },
+                receipts,
             },
-            receipts,
-        })
+            SearchSelectionContext {
+                query,
+                namespace: ns_config,
+                strength: strength_context,
+                eligible: eligible_records,
+            },
+        ))
     }
 
     /// Stage 3a: Run vector similarity search.

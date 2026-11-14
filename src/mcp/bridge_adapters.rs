@@ -241,6 +241,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?
             {
+                let exposures = prepared.exposures(true).map_err(map_search_error)?;
                 let payload = prepared.payload.ok_or_else(|| {
                     bridge::BridgeError::Internal("coherent payload missing".into())
                 })?;
@@ -252,7 +253,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     ));
                 }
                 let mut hits = Vec::with_capacity(payload.rows.len());
-                let mut exposures = Vec::new();
                 for (selected, row) in prepared
                     .response
                     .response
@@ -282,14 +282,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    exposures.push((
-                        selected.memory_id,
-                        if selected.activation_score.is_some() {
-                            crate::model::AccessKind::AssociativeRetrieval
-                        } else {
-                            crate::model::AccessKind::DirectRetrieval
-                        },
-                    ));
                     hits.push(bridge::SearchHit {
                         labels,
                         id: selected.memory_id.to_string(),
@@ -317,7 +309,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     let id = crate::model::MemoryId::from_bytes(disk.id);
                     let labels = disk.schema.as_ref().map(|s| s.labels.clone());
                     let metadata = crate::model::structured_metadata(&disk.tags, labels.as_ref());
-                    exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));
                     neighbors.push(bridge::NeighborMemory {
                         labels,
                         id: id.to_string(),

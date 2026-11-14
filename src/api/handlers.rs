@@ -999,6 +999,9 @@ async fn search_memories_admitted(
         .await?;
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
+            // This serializer returns ranked hits only; reject unexpected
+            // supplemental rows before exposing any unreturned neighbor.
+            let exposures = prepared.exposures(false)?;
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -1012,7 +1015,6 @@ async fn search_memories_admitted(
                 });
             }
             let mut hits = Vec::with_capacity(payload.rows.len());
-            let mut exposures = Vec::with_capacity(payload.rows.len());
             for (selected, row) in prepared
                 .response
                 .response
@@ -1038,14 +1040,6 @@ async fn search_memories_admitted(
                 }
                 memory.full_text = row.full_text;
                 memory.embedding = row.embedding;
-                exposures.push((
-                    selected.memory_id,
-                    if selected.activation_score.is_some() {
-                        crate::model::AccessKind::AssociativeRetrieval
-                    } else {
-                        crate::model::AccessKind::DirectRetrieval
-                    },
-                ));
                 hits.push(SearchHit {
                     memory,
                     score: selected.score.unwrap_or(0.0),

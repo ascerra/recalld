@@ -119,7 +119,7 @@ pub struct SemanticsResponse {
 }
 
 /// Internal typed resolution; path IDs never enter aggregate diagnostics.
-enum Resolution {
+pub(super) enum Resolution {
     Current(CachedRecord),
     Resolved {
         terminal: CachedRecord,
@@ -152,7 +152,7 @@ pub(super) fn validate_record(record: &CachedRecord) -> Result<()> {
 }
 
 impl QueryEngine {
-    async fn resolve_path(
+    pub(super) async fn resolve_path(
         &self,
         origin: CachedRecord,
         namespace: NamespaceId,
