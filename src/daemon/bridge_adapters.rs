@@ -134,6 +134,76 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn forget_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        use crate::serialization::{
+            contract::CommitState,
+            native_lifecycle::{Operation, Reply},
+        };
+        match self
+            .client
+            .call("forget_native_v1", request.wire(Operation::Forget))
+            .await
+        {
+            Ok(value) => match serde_json::from_value::<Reply>(value) {
+                Ok(reply) if reply.valid_response(&request, Operation::Forget) => reply,
+                _ => {
+                    let mut reply = Reply::unavailable(
+                        "native lifecycle response invalid; reconcile original intent",
+                    );
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                    reply
+                }
+            },
+            Err(error) => {
+                let mut reply = Reply::unavailable(&error.to_string());
+                // Only the server's typed rejection proves that the method was
+                // rejected. Transport/decode failures never imply rollback.
+                if !matches!(error, BridgeError::InvalidInput(_)) {
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                }
+                reply
+            }
+        }
+    }
+
+    async fn feedback_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        use crate::serialization::{
+            contract::CommitState,
+            native_lifecycle::{Operation, Reply},
+        };
+        match self
+            .client
+            .call("feedback_native_v1", request.wire(Operation::Feedback))
+            .await
+        {
+            Ok(value) => match serde_json::from_value::<Reply>(value) {
+                Ok(reply) if reply.valid_response(&request, Operation::Feedback) => reply,
+                _ => {
+                    let mut reply = Reply::unavailable(
+                        "native lifecycle response invalid; reconcile original intent",
+                    );
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                    reply
+                }
+            },
+            Err(error) => {
+                let mut reply = Reply::unavailable(&error.to_string());
+                // Only the server's typed rejection proves that the method was
+                // rejected. Transport/decode failures never imply rollback.
+                if !matches!(error, BridgeError::InvalidInput(_)) {
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                }
+                reply
+            }
+        }
+    }
+
     fn supports_durable_batches(&self) -> bool {
         true
     }

@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 thread_local! {
-    static FAIL_AFTER_NATIVE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(super) static FAIL_AFTER_NATIVE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static CAPTURE_CHECKED: std::cell::Cell<Option<std::sync::mpsc::Sender<()>>> = const { std::cell::Cell::new(None) };
 }
 

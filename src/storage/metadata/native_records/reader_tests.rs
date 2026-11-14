@@ -795,3 +795,6 @@ async fn native_decay_cancelled_waiter_keeps_worker_publication_lease() {
         "cancelled waiter released publication lease before blocked worker completed"
     );
 }
+
+#[path = "wire_tests.rs"]
+mod native_lifecycle_wire;

@@ -363,6 +363,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `StorageEngine` trait.
 pub struct StorageEngineAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
@@ -379,6 +380,14 @@ pub struct StorageEngineAdapter {
 }
 
 impl StorageEngineAdapter {
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     /// Creates a new adapter wrapping the storage engine, the cache, and
     /// the four indexes a delete has to clean.
     pub fn new(
@@ -391,6 +400,7 @@ impl StorageEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -409,6 +419,33 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn forget_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        let Some(policy) = self.native_policy.as_ref() else {
+            return crate::serialization::native_lifecycle::Reply::unavailable(
+                "native lifecycle policy not configured",
+            );
+        };
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        };
+        crate::mcp::native_lifecycle_adapter::execute(
+            &owner,
+            request,
+            crate::serialization::native_lifecycle::Operation::Forget,
+            policy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
     async fn store_identity(&self) -> Result<uuid::Uuid, crate::storage::StorageError> {
         let storage = self.storage.clone();
         tokio::task::spawn_blocking(move || {
@@ -1224,6 +1261,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
 
 /// Adapts the decay subsystem to the API `FsrsEngine` trait.
 pub struct FsrsEngineAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1234,6 +1272,14 @@ pub struct FsrsEngineAdapter {
 }
 
 impl FsrsEngineAdapter {
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     /// Creates a new adapter with the storage engine, cache, and sweep-thread liveness flag.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1244,6 +1290,7 @@ impl FsrsEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -1279,6 +1326,33 @@ impl FsrsEngineAdapter {
 
 #[async_trait]
 impl state::FsrsEngine for FsrsEngineAdapter {
+    async fn feedback_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        let Some(policy) = self.native_policy.as_ref() else {
+            return crate::serialization::native_lifecycle::Reply::unavailable(
+                "native lifecycle policy not configured",
+            );
+        };
+        let owner = match &self.completion {
+            Some(owner) => owner.clone(),
+            None => {
+                return crate::serialization::native_lifecycle::Reply::unavailable(
+                    "native completion unavailable",
+                );
+            }
+        };
+        crate::mcp::native_lifecycle_adapter::execute(
+            &owner,
+            request,
+            crate::serialization::native_lifecycle::Operation::Feedback,
+            policy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
     async fn record_access_batch(
         &self,
         accesses: &[(MemoryId, AccessKind)],

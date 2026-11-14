@@ -13,3 +13,5 @@ pub use json::{
     ApiError, ApiResponse, CreateMemoryRequest, MemoryResponse, NamespaceRequest,
     NamespaceResponse, SearchHit, SearchRequest, SearchResponse,
 };
+
+pub(crate) mod native_lifecycle;

@@ -958,6 +958,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
 
 /// Adapts `RedbStorageEngine` + subsystems to the MCP `StorageEngine` trait.
 pub struct McpStorageAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
@@ -971,6 +972,14 @@ pub struct McpStorageAdapter {
 }
 
 impl McpStorageAdapter {
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     fn completion(&self) -> crate::derived_completion::DerivedCompletion {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
@@ -996,6 +1005,7 @@ impl McpStorageAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -1488,6 +1498,46 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    async fn feedback_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        let Some(policy) = self.native_policy.as_ref() else {
+            return crate::serialization::native_lifecycle::Reply::unavailable(
+                "native lifecycle policy not configured",
+            );
+        };
+        let owner = self.completion();
+        crate::mcp::native_lifecycle_adapter::execute(
+            &owner,
+            request,
+            crate::serialization::native_lifecycle::Operation::Feedback,
+            policy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
+    async fn forget_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        let Some(policy) = self.native_policy.as_ref() else {
+            return crate::serialization::native_lifecycle::Reply::unavailable(
+                "native lifecycle policy not configured",
+            );
+        };
+        let owner = self.completion();
+        crate::mcp::native_lifecycle_adapter::execute(
+            &owner,
+            request,
+            crate::serialization::native_lifecycle::Operation::Forget,
+            policy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
     async fn backend_context(
         &self,
     ) -> Result<crate::serialization::session::BackendContext, bridge::BridgeError> {

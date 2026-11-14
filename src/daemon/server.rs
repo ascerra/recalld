@@ -505,6 +505,16 @@ async fn dispatch(
                 BridgeError::PartiallyApplied(format!("batch result serialization failed: {e}"))
             })
         }
+        "forget_native_v1" | "feedback_native_v1" => {
+            let operation = if method == "forget_native_v1" {
+                crate::serialization::native_lifecycle::Operation::Forget
+            } else {
+                crate::serialization::native_lifecycle::Operation::Feedback
+            };
+            let reply =
+                crate::mcp::native_lifecycle_adapter::dispatch(storage, operation, params).await;
+            serde_json::to_value(reply).map_err(|e| BridgeError::PartiallyApplied(e.to_string()))
+        }
         "store_memory" => {
             let input: StoreInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
@@ -637,7 +647,7 @@ mod tests {
 
     /// Stub subsystems for the dispatch tests. Only the unknown-method path
     /// is exercised, which never reaches any of these.
-    struct Unused;
+    pub(super) struct Unused;
 
     #[tokio::test]
     async fn actual_batch_socket_roundtrip_preserves_partial_outcome_and_rejects_foreign_resume() {
@@ -1290,3 +1300,35 @@ mod batch_label_tests;
 #[cfg(test)]
 #[path = "coverage_tests.rs"]
 mod coverage_tests;
+
+#[cfg(test)]
+pub(crate) async fn native_lifecycle_test_remote(
+    storage: Arc<dyn BridgeStorageEngine>,
+    path: &Path,
+) -> (
+    crate::daemon::bridge_adapters::RemoteStorageAdapter,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let task = tokio::spawn(async move {
+        let (server, _) = listener.accept().await.unwrap();
+        let (tx, rx) = watch::channel(false);
+        handle_connection(
+            Arc::new(tests::Unused),
+            storage,
+            Arc::new(tests::Unused),
+            Arc::new(tests::Unused),
+            server,
+            Arc::new(AtomicU32::new(1)),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            tx,
+        )
+        .await;
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(path).await.unwrap());
+    (
+        crate::daemon::bridge_adapters::RemoteStorageAdapter::new(client),
+        task,
+    )
+}

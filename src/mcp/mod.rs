@@ -46,3 +46,5 @@ pub enum McpError {
     #[error("Bridge error: {0}")]
     Bridge(String),
 }
+
+pub(crate) mod native_lifecycle_adapter;
