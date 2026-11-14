@@ -104,7 +104,8 @@ fn vector(
     Ok(values)
 }
 
-/// ponytail: exact O(namespace * vector-width) scan under the actual owner.
+/// ponytail: scan canonical edges once and namespace payloads under the owner.
+/// Semantic work is O(namespace * vector-width), with indexed edge exclusion.
 /// Optimize only with a coherent canonical/derived selection, never cache fallbacks.
 pub(crate) fn select(
     engine: &RedbStorageEngine,
@@ -153,18 +154,27 @@ pub(crate) fn select(
         None
     };
     let source_entities = entities(&row)?;
-    let edges = engine.load_all_edges()?;
+    let connected: BTreeSet<_> = engine
+        .load_all_edges()?
+        .into_iter()
+        .filter(|edge| edge.edge_type == kind)
+        .filter_map(|edge| {
+            if edge.source == source {
+                Some(edge.target)
+            } else if edge.target == source {
+                Some(edge.source)
+            } else {
+                None
+            }
+        })
+        .collect();
     let mut candidates = Vec::new();
     for other in engine.meta_store().records_in_namespace(namespace)? {
         let id = MemoryId::from_bytes(other.id);
         if id == source || !matches!(other.phase, DecayPhase::Full | DecayPhase::Summary) {
             continue;
         }
-        if edges.iter().any(|e| {
-            e.edge_type == kind
-                && ((e.source == source && e.target == id)
-                    || (e.source == id && e.target == source))
-        }) {
+        if connected.contains(&id) {
             continue;
         }
         let (weight, rank) = match selection {
@@ -210,9 +220,12 @@ pub(crate) fn select(
         candidates.push((id, weight, rank));
     }
     candidates.sort_by(|a, b| {
-        b.2.cmp(&a.2)
-            .then_with(|| b.1.total_cmp(&a.1))
-            .then(a.0.cmp(&b.0))
+        let rank = if matches!(selection, NativeLinkSelection::Semantic { .. }) {
+            b.1.total_cmp(&a.1)
+        } else {
+            b.2.cmp(&a.2)
+        };
+        rank.then(a.0.cmp(&b.0))
     });
     candidates.truncate(cap);
     if engine.control_state()?.generation_ref() != generation {

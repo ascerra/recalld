@@ -128,7 +128,6 @@ async fn until(mut condition: impl FnMut() -> bool) {
 }
 #[tokio::test]
 async fn native_graph_producer_actual_trait_api_replay_nochange_and_offline_history() {
-    use crate::api::RelationshipGraph as _;
     for api in [1, 2] {
         let (f, d, clock, id) = setup();
         completion(&f).rebuild_all().await.unwrap();
@@ -313,6 +312,27 @@ async fn native_graph_producer_automatic_families_use_canonical_payloads_and_rej
             );
         }
         assert_eq!(f.storage.read().unwrap().load_all_edges().unwrap().len(), 3);
+        let unchanged = f.storage.read().unwrap().control_state().unwrap();
+        let calls = clock.0.load(Ordering::SeqCst);
+        assert!(
+            adapter
+                .select_native_links(
+                    key(&f, &d, api, None),
+                    S::Entity {
+                        source: id,
+                        max_links: 1
+                    },
+                    None
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            f.storage.read().unwrap().control_state().unwrap(),
+            unchanged
+        );
+        assert_eq!(clock.0.load(Ordering::SeqCst), calls);
         drop(adapter);
         let _root = f.close();
         inspect_schema(&d.path).unwrap();
@@ -364,6 +384,29 @@ async fn native_graph_producer_missing_owner_scope_and_unsupported_contract_do_n
     );
     assert!(owner.tombstone_node(id).await.is_err());
     assert_eq!(bytes(&d.path), before);
+    // Supplying the publication handles never turns a legacy engine into a native owner.
+    let legacy = Fixture::new();
+    let namespace = legacy
+        .storage
+        .read()
+        .unwrap()
+        .get_namespace_by_name("default")
+        .unwrap()
+        .unwrap()
+        .id;
+    let legacy_before = bytes(legacy.path());
+    assert!(matches!(
+        owned(&legacy, clock.clone())
+            .put_native_edges(
+                MutationContext::unkeyed(namespace),
+                NativeGraphInput { edges: vec![] },
+                None
+            )
+            .await,
+        Err(StorageError::RecoveryRequired(_))
+    ));
+    assert_eq!(bytes(legacy.path()), legacy_before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
 }
 #[test]
 fn native_graph_producer_final_selection_generation_rejects_phantom_candidate() {
@@ -842,4 +885,53 @@ async fn native_graph_producer_filters_namespace_and_terminal_candidates_before_
             _ => assert_eq!(edge.target, ids[2]),
         }
     }
+}
+
+#[tokio::test]
+async fn native_graph_producer_entity_ties_use_shared_count_then_uuid_not_weight() {
+    use crate::api::RelationshipGraph as _;
+    use crate::graph::native_producer::NativeLinkSelection;
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let mut session = open(&d, clock.clone());
+    let id = |value| MemoryId::from_uuid(uuid::Uuid::from_u128(value));
+    for (value, labels) in [
+        (1, vec!["shared", "extra"]),
+        (2, vec!["shared"]),
+        (3, vec!["shared"]),
+    ] {
+        let mut original = input(&d);
+        original.memory.id = Some(id(value));
+        original.memory.parent_id = None;
+        original.entities = labels.into_iter().map(str::to_owned).collect();
+        let intent = session.capture_insert(scope(&d), &original).unwrap();
+        session
+            .insert_prepared(
+                &ctx(&session, &d, &format!("tie-{value}")),
+                &intent,
+                &generated(),
+            )
+            .unwrap();
+    }
+    let f = Fixture::from_open_engine(root, session.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let receipt = owned(&f, clock)
+        .select_native_links(
+            key(&f, &d, 1, None),
+            NativeLinkSelection::Entity {
+                source: id(3),
+                max_links: 1,
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let MutationOutcome::NativeGraphChanged { transition } = receipt.outcome else {
+        panic!()
+    };
+    assert_eq!(transition.edges.len(), 1);
+    assert_eq!(transition.edges[0].after.target, id(1));
+    assert_eq!(transition.edges[0].after.weight_bits, 0.5f32.to_bits());
 }
