@@ -2,6 +2,7 @@
 //! canonical effect tail. No public serving or derived-readiness boundary.
 use super::*;
 use crate::model::schema::{LifecycleFields, RecordSchemaV2, TimestampOrigin, VectorReference};
+use crate::storage::batch::BatchChild;
 use crate::storage::control::Generation;
 use crate::storage::edges::PersistedEdge;
 use crate::storage::native_lifecycle::{LifecycleScope, NativePolicyInputs, invalid};
@@ -146,6 +147,47 @@ impl MetadataStore {
         let _guard = self.native_guard_with_work(parent)?;
         replay_insert(&self.db.begin_write()?, ctx, input)
     }
+    pub(crate) fn lookup_native_insert_child(
+        &self,
+        child: &BatchChild,
+        input: &NativeInsert,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let _guard = self.native_guard_with_work(parent)?;
+        let tx = self.db.begin_write()?;
+        if child.version != 2 {
+            return Err(StorageError::InvalidMutationContext(
+                "historical native insert requires batch 2".into(),
+            ));
+        }
+        let hash =
+            crate::storage::batch::native::insert_hash(&child.context(), input, &child.defaults)?;
+        let replay = super::batch::replay_child(&tx, child, hash)?;
+        if replay.is_none() {
+            super::batch::check_policy(&tx, child)?;
+        }
+        Ok(replay)
+    }
+    pub(crate) fn lookup_native_forget_child(
+        &self,
+        child: &BatchChild,
+        id: MemoryId,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let _guard = self.native_guard_with_work(parent)?;
+        let tx = self.db.begin_write()?;
+        if child.version != 2 {
+            return Err(StorageError::InvalidMutationContext(
+                "native forget requires batch 2".into(),
+            ));
+        }
+        let hash = control::request_hash(&child.context(), "native_tombstone", &[id.as_bytes()]);
+        let replay = super::batch::replay_child(&tx, child, hash)?;
+        if replay.is_none() {
+            super::batch::check_policy(&tx, child)?;
+        }
+        Ok(replay)
+    }
     pub(crate) fn insert_native_with_effects(
         &self,
         guard: &MutationGuard<'_>,
@@ -159,6 +201,7 @@ impl MetadataStore {
         existing_edges: &[PersistedEdge],
         text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
         stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
+        child: Option<&BatchChild>,
     ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
         context(ctx, intent.scope.namespace_id)?;
@@ -167,6 +210,37 @@ impl MetadataStore {
             insert: intent.original.clone(),
             check_duplicates: p.intent.check_duplicates,
         });
+        if let Some(child) = child {
+            check_child_context(ctx, child)?;
+            let hash = match (&store_input, prepared, child.version) {
+                (Some(input), Some(p), 3) => {
+                    if child
+                        .defaults
+                        .native
+                        .as_ref()
+                        .and_then(|n| n.store_settings.as_ref())
+                        != Some(&p.intent.settings)
+                    {
+                        return Err(StorageError::IdempotencyConflict);
+                    }
+                    crate::storage::batch::native::store_hash(ctx, input, &child.defaults)?
+                }
+                (None, None, 2) => crate::storage::batch::native::insert_hash(
+                    ctx,
+                    &intent.original,
+                    &child.defaults,
+                )?,
+                _ => {
+                    return Err(StorageError::InvalidMutationContext(
+                        "native writer/batch version mismatch".into(),
+                    ));
+                }
+            };
+            if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
+                return Ok(receipt);
+            }
+            super::batch::check_policy(&tx, child)?;
+        }
         let replay = if let Some(input) = &store_input {
             super::native_store::replay_store(&tx, ctx, input)?
         } else {
@@ -205,7 +279,13 @@ impl MetadataStore {
                 "invalid initial stability".into(),
             ));
         }
-        let hash = if let Some(p) = prepared {
+        let hash = if let Some(child) = child {
+            if let Some(input) = &store_input {
+                crate::storage::batch::native::store_hash(ctx, input, &child.defaults)?
+            } else {
+                crate::storage::batch::native::insert_hash(ctx, input, &child.defaults)?
+            }
+        } else if let Some(p) = prepared {
             store_input.as_ref().unwrap().request_hash(
                 ctx,
                 stability,
@@ -469,7 +549,7 @@ impl MetadataStore {
             false,
             false,
             mutation,
-            None,
+            child,
         )
         .map(|r| r.receipt)
     }
@@ -524,12 +604,19 @@ impl MetadataStore {
         clock: &dyn Clock,
         existing_edges: &[PersistedEdge],
         text_hash: Option<[u8; 32]>,
+        child: Option<&BatchChild>,
     ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
         context(ctx, intent.scope.namespace_id)?;
         let tx = self.db.begin_write()?;
         let hash = control::request_hash(ctx, "native_tombstone", &[intent.memory_id.as_bytes()]);
-        if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
+        if let Some(child) = child {
+            check_child_context(ctx, child)?;
+            if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
+                return Ok(receipt);
+            }
+            super::batch::check_policy(&tx, child)?;
+        } else if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }
         let (state, ns, _, mut current) =
@@ -602,7 +689,7 @@ impl MetadataStore {
                 old_phase,
                 transition,
             },
-            None,
+            child,
         )
         .map(|r| r.receipt)
     }
@@ -610,3 +697,21 @@ impl MetadataStore {
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) fn check_child_context(
+    ctx: &MutationContext,
+    child: &BatchChild,
+) -> Result<(), StorageError> {
+    if !matches!(child.version, 2 | 3)
+        || ctx.contract_version != 2
+        || ctx.store_id != Some(child.store_id)
+        || ctx.scope != MutationScope::Namespace(child.namespace())
+        || ctx.idempotency_key.is_some()
+        || ctx.expected_generation.is_some()
+    {
+        return Err(StorageError::InvalidMutationContext(
+            "foreign native batch child context".into(),
+        ));
+    }
+    Ok(())
+}

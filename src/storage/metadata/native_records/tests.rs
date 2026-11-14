@@ -16,6 +16,8 @@ use std::sync::{
 #[path = "reader_tests.rs"]
 mod readers;
 
+#[path = "batch_tests.rs"]
+mod batches;
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 
@@ -750,6 +752,12 @@ mod graph;
 #[path = "maintenance_tests.rs"]
 mod maintenance;
 
+#[path = "graph_producer_tests.rs"]
+mod graph_producers;
+
+#[path = "selection_tests.rs"]
+mod selection;
+
 #[path = "store_tests.rs"]
 mod store;
 
@@ -761,3 +769,8 @@ mod namespace_binding;
 
 #[path = "request_context_tests.rs"]
 mod request_context;
+#[path = "store_batch_tests.rs"]
+mod store_batches;
+
+#[path = "store_producer_tests.rs"]
+mod store_producers;

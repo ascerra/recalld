@@ -4,6 +4,7 @@ use crate::test_support::Fixture;
 
 fn process_input(engine: &crate::storage::RedbStorageEngine) -> crate::storage::batch::BatchInput {
     crate::storage::batch::BatchInput {
+        mutation_version: 1,
         result_version: 1,
         kind: BatchKind::Insert,
         items: vec![item()],
@@ -143,6 +144,7 @@ fn request(
 ) -> (MutationContext, Vec<BatchItemPlan>) {
     let state = f.storage.read().unwrap().control_state().unwrap();
     let input = crate::storage::batch::BatchInput {
+        mutation_version: 1,
         result_version: 1,
         kind: BatchKind::Insert,
         items,

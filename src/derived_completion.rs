@@ -2,6 +2,8 @@
 //! storage; never hold storage while awaiting a derived lock.
 mod native_decay;
 mod native_purge;
+mod native_graph;
+mod native_store;
 
 use std::sync::{Arc, RwLock};
 
@@ -905,7 +907,7 @@ mod tests {
         // and keep all public reads closed. A retry uses the same operation.
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
         assert!(matches!(publisher(&fx).complete().await,
-            Err(StorageError::CommittedMutation {receipt, ..}) if receipt.operation_id == pending[0].receipt.operation_id));
+            Err(StorageError::CommittedMutation {receipt, ..}) if *receipt == pending[0].receipt));
         assert!(adapter.get_memory(live, false, None).await.is_err());
         assert_eq!(
             fx.storage

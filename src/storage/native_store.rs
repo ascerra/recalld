@@ -94,6 +94,36 @@ impl NativeStoreInput {
         let original = self
             .insert
             .request_hash(ctx, stability, difficulty, dimensions, profile)?;
+        self.hash_insert(ctx, original, settings)
+    }
+
+    pub(crate) fn request_hash_with_profile_id(
+        &self,
+        ctx: &MutationContext,
+        stability: f32,
+        difficulty: f32,
+        dimensions: u32,
+        profile: &str,
+        settings: &NativeStoreSettings,
+        supplied_profile: Option<&str>,
+    ) -> Result<[u8; 32], StorageError> {
+        let original = self.insert.request_hash_with_profile_id(
+            ctx,
+            stability,
+            difficulty,
+            dimensions,
+            profile,
+            supplied_profile,
+        )?;
+        self.hash_insert(ctx, original, settings)
+    }
+
+    fn hash_insert(
+        &self,
+        ctx: &MutationContext,
+        original: [u8; 32],
+        settings: &NativeStoreSettings,
+    ) -> Result<[u8; 32], StorageError> {
         let expansion = super::control::encode(&(self.check_duplicates, settings))?;
         Ok(super::control::request_hash(
             ctx,
