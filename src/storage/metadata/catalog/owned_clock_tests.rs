@@ -1,6 +1,7 @@
 use super::*;
-use crate::api::state::NamespaceRegistry as _;
+use crate::api::NamespaceRegistry as _;
 use crate::mcp::bridge::{CreateNamespaceInput, NamespaceRegistry as _};
+use crate::storage::StorageEngine as _;
 use crate::test_support::Fixture;
 use std::sync::{
     Arc,
