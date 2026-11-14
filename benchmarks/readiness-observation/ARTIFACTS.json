@@ -1,0 +1,50 @@
+{
+  "REPORT.md": {
+    "bytes": 3656,
+    "sha256": "f0137190a6311d0dc91564d7474d840f2a21822f76c06af09cdebb81b7519fea"
+  },
+  "changed-files.txt": {
+    "bytes": 151,
+    "sha256": "87a124e515b1a1ae8af8ebcab6817698bae6ce5341ba9022ccb042b4e8513d6c"
+  },
+  "focused.log": {
+    "bytes": 4078,
+    "sha256": "77d2af2dd1cc38c6a9a87d0e05d0410a7df2fb39ae7bfd9c71729016d8f17402"
+  },
+  "freeze-regressions.log": {
+    "bytes": 4854,
+    "sha256": "9fe6043b31adc7f13f0867c760feb5e7bf621de8b68cb1d562ebfd7e9ef2ddb4"
+  },
+  "frozen-source.tar.gz": {
+    "bytes": 977969,
+    "sha256": "624349fb9816b541c1b3fdca0fc965f76127b93e1ff2a9b4ca0e55c623685ca3"
+  },
+  "full-suite.log": {
+    "bytes": 109437,
+    "sha256": "291a57e65fd207982c1c61bedd496aca81cb655c0d020551e9db4c79f80a6533"
+  },
+  "interface.md": {
+    "bytes": 3573,
+    "sha256": "e03980c168dfa2ef15a601bed51fef9513917c4bb44b67d757ab16dfe510de1d"
+  },
+  "manifest.json": {
+    "bytes": 45975,
+    "sha256": "cb888791ae317c71120d4307e7f980c75978eed394cd1783f463f1982ef0f7bf"
+  },
+  "memory-events.txt": {
+    "bytes": 73,
+    "sha256": "32e8ac9cbbc4cea0098a88361b8ef62da82fd0cb3d185e2f4e19888cc6498d0b"
+  },
+  "memory-peak.txt": {
+    "bytes": 11,
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb"
+  },
+  "run-evidence.tar.gz": {
+    "bytes": 90496,
+    "sha256": "e54bbf33bda47f3069940817453632184adaa8a083d44e91aa3a2d559c9d7998"
+  },
+  "source-binaries.json": {
+    "bytes": 862,
+    "sha256": "97485b76672dbd942c5bf82f8a72690158da6d232e95fcab730917b71ccb365a"
+  }
+}
