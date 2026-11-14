@@ -237,7 +237,7 @@ impl QueryEngine {
             .await
             .map_err(unavailable)??;
             let mut response = engine
-                .get_memory_with_access_admitted(id, requested_access, true, None)
+                .get_memory_with_access_admitted(id, requested_access, true, None, 1)
                 .await?
                 .finish::<SearchError>(Ok(()))?;
             if let (Some(response), Some((_, payload))) = (&mut response, &payload) {
@@ -293,7 +293,7 @@ impl QueryEngine {
             .ok_or(SearchError::MemoryNotFound(id))?;
             let namespace = source.0;
             let results = engine
-                .similar_with_access_admitted(id, k, min_score, requested_access, true, None)
+                .similar_with_access_admitted(id, k, min_score, requested_access, true, None, 1)
                 .await?
                 .finish::<SearchError>(Ok(()))?;
             let ids: Vec<_> = results.iter().map(|r| r.memory_id).collect();

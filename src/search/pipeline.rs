@@ -215,7 +215,13 @@ pub trait AccessRecorder: Send + Sync {
         sampled_at: Option<i64>,
         parent: Option<&crate::storage::work::WorkTicket>,
         _policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+        original_contract_version: u32,
     ) -> Result<crate::decay::observation::AccessObservation> {
+        if original_contract_version != 1 {
+            return Err(SearchError::Unavailable(
+                "access recorder cannot preserve original application contract".into(),
+            ));
+        }
         let receipts = match sampled_at {
             Some(at) => {
                 self.record_access_batch_at_with_work(accesses, scope, at, parent)
@@ -613,7 +619,8 @@ impl QueryEngine {
             .response)
     }
 
-    /// Rust-only harness entry point. No transport selects semantics2 until A1/A4 readiness.
+    /// Rust compatibility entry uses application1, including semantics2.
+    /// No transport selects semantics2 until A1/A4 readiness.
     pub async fn search_with_semantics(
         &self,
         query: SearchQuery,
@@ -646,11 +653,30 @@ impl QueryEngine {
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<SemanticsResponse> {
+        self.search_checked_with_origin_work(query, semantics, defer_recording, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn search_checked_with_origin_work(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<SemanticsResponse> {
         let work = self.accept_work(parent)?;
         let result = async {
             let stamp = self.meta_store.effects_stamp().await?;
             let observed = self
-                .search_admitted(query, semantics, defer_recording, work.as_ref())
+                .search_admitted(
+                    query,
+                    semantics,
+                    defer_recording,
+                    work.as_ref(),
+                    original_contract_version,
+                )
                 .await?;
             observed.finish(self.check_effects_stamp(stamp).await)
         }
@@ -678,6 +704,7 @@ impl QueryEngine {
         semantics: RetrievalSemantics,
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Observed<SemanticsResponse>> {
         let mut diagnostics = SemanticsDiagnostics::new(semantics);
         let pipeline_start = Instant::now();
@@ -1021,6 +1048,7 @@ impl QueryEngine {
                 },
                 strength_context.diagnostics.evaluated_at,
                 parent,
+                original_contract_version,
             )
             .await?
         } else {
@@ -1425,6 +1453,18 @@ impl QueryEngine {
         record_access: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Option<MemoryResponse>> {
+        self.get_memory_with_origin_work(id, record_access, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn get_memory_with_origin_work(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Option<MemoryResponse>> {
         let work = self.accept_work(parent)?;
         let result = async {
             let stamp = self.meta_store.effects_stamp().await?;
@@ -1438,7 +1478,7 @@ impl QueryEngine {
                         .as_ref()
                         .is_some_and(|r| r.phase != DecayPhase::Tombstone)
                 {
-                    self.record_exposures_at_with_work(
+                    self.record_exposures_at_with_origin_work(
                         &[(id, AccessKind::DirectRetrieval)],
                         crate::storage::control::ExposureScope {
                             namespace: prepared.response.as_ref().unwrap().namespace.clone(),
@@ -1446,6 +1486,7 @@ impl QueryEngine {
                         },
                         prepared.evaluated_at,
                         work.as_ref(),
+                        original_contract_version,
                     )
                     .await?
                 } else {
@@ -1458,7 +1499,13 @@ impl QueryEngine {
                 .finish(self.check_effects_stamp(stamp).await);
             }
             let observed = self
-                .get_memory_with_access_admitted(id, record_access, false, work.as_ref())
+                .get_memory_with_access_admitted(
+                    id,
+                    record_access,
+                    false,
+                    work.as_ref(),
+                    original_contract_version,
+                )
                 .await?;
             observed.finish(self.check_effects_stamp(stamp).await)
         }
@@ -1473,6 +1520,7 @@ impl QueryEngine {
         record_access: bool,
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Observed<Option<MemoryResponse>>> {
         let Some(mut record) = self.meta_store.get(&id).await? else {
             return Ok(Observed::unobserved(None));
@@ -1501,6 +1549,7 @@ impl QueryEngine {
                 },
                 context.diagnostics.evaluated_at,
                 parent,
+                original_contract_version,
             )
             .await?
         } else {
@@ -1603,6 +1652,29 @@ impl QueryEngine {
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<SearchResult>> {
+        self.similar_with_access_checked_with_origin_work(
+            id,
+            k,
+            min_score,
+            requested_access,
+            defer_recording,
+            parent,
+            1,
+        )
+        .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn similar_with_access_checked_with_origin_work(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<SearchResult>> {
         let work = self.accept_work(parent)?;
         let result = async {
             let stamp = self.meta_store.effects_stamp().await?;
@@ -1627,7 +1699,7 @@ impl QueryEngine {
                         .iter()
                         .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
                         .collect();
-                    self.record_exposures_at_with_work(
+                    self.record_exposures_at_with_origin_work(
                         &accesses,
                         crate::storage::control::ExposureScope {
                             namespace: prepared.payload.namespace.name,
@@ -1635,6 +1707,7 @@ impl QueryEngine {
                         },
                         prepared.evaluated_at,
                         work.as_ref(),
+                        original_contract_version,
                     )
                     .await?
                 } else {
@@ -1654,6 +1727,7 @@ impl QueryEngine {
                     requested_access,
                     defer_recording,
                     work.as_ref(),
+                    original_contract_version,
                 )
                 .await?;
             observed.finish(self.check_effects_stamp(stamp).await)
@@ -1671,6 +1745,7 @@ impl QueryEngine {
         record_access: bool,
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Observed<Vec<SearchResult>>> {
         let k = k.min(SearchQuery::MAX_USER_LIMIT);
         let mut record = self
@@ -1770,7 +1845,7 @@ impl QueryEngine {
                 source: Some(id),
             };
             if self.access_recorder.supports_native_exposure() {
-                self.record_exposures_at_with_work(
+                self.record_exposures_at_with_origin_work(
                     &results
                         .iter()
                         .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
@@ -1778,13 +1853,15 @@ impl QueryEngine {
                     scope,
                     context.diagnostics.evaluated_at,
                     parent,
+                    original_contract_version,
                 )
                 .await?
             } else {
-                self.record_similar_accesses_with_work(
+                self.record_similar_accesses_with_origin_work(
                     &results.iter().map(|r| r.memory_id).collect::<Vec<_>>(),
                     scope,
                     parent,
+                    original_contract_version,
                 )
                 .await?
             }
@@ -1814,6 +1891,18 @@ impl QueryEngine {
         scope: crate::storage::control::ExposureScope,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_similar_accesses_with_origin_work(ids, scope, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn record_similar_accesses_with_origin_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         let work = self.accept_work(parent)?;
         let result = async {
             let mut seen = std::collections::HashSet::new();
@@ -1838,8 +1927,13 @@ impl QueryEngine {
                 .filter(|id| seen.insert(*id))
                 .map(|id| (id, AccessKind::AssociativeRetrieval))
                 .collect();
-            self.record_exposures_with_work(&accesses, scope, work.as_ref())
-                .await
+            self.record_exposures_with_origin_work(
+                &accesses,
+                scope,
+                work.as_ref(),
+                original_contract_version,
+            )
+            .await
         }
         .await;
         self.finish_work(work);
@@ -2058,6 +2152,7 @@ impl QueryEngine {
         scope: crate::storage::control::ExposureScope,
         sampled_at: i64,
         parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         let accesses: Vec<(MemoryId, AccessKind)> = candidates
             .iter()
@@ -2071,8 +2166,14 @@ impl QueryEngine {
             })
             .collect();
 
-        self.record_query_exposures(&accesses, scope, sampled_at, parent)
-            .await
+        self.record_query_exposures(
+            &accesses,
+            scope,
+            sampled_at,
+            parent,
+            original_contract_version,
+        )
+        .await
     }
 
     /// Record the final caller-visible set after any outer hydration/filtering.
@@ -2091,7 +2192,19 @@ impl QueryEngine {
         scope: crate::storage::control::ExposureScope,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
-        self.record_exposures_sampled(accesses, scope, None, parent)
+        self.record_exposures_with_origin_work(accesses, scope, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn record_exposures_with_origin_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(accesses, scope, None, parent, original_contract_version)
             .await
     }
     pub(crate) async fn record_exposures_at_with_work(
@@ -2101,8 +2214,27 @@ impl QueryEngine {
         sampled_at: i64,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
-        self.record_exposures_sampled(accesses, scope, Some(sampled_at), parent)
+        self.record_exposures_at_with_origin_work(accesses, scope, sampled_at, parent, 1)
             .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn record_exposures_at_with_origin_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(
+            accesses,
+            scope,
+            Some(sampled_at),
+            parent,
+            original_contract_version,
+        )
+        .await
     }
     /// Native queries reuse their sampled projection time. Legacy direct callers
     /// retain their existing recorder method and clock fallback. Explicit `_at`
@@ -2113,13 +2245,20 @@ impl QueryEngine {
         scope: crate::storage::control::ExposureScope,
         sampled_at: i64,
         parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         let sampled_at = self
             .access_recorder
             .supports_native_exposure()
             .then_some(sampled_at);
-        self.record_exposures_sampled(accesses, scope, sampled_at, parent)
-            .await
+        self.record_exposures_sampled(
+            accesses,
+            scope,
+            sampled_at,
+            parent,
+            original_contract_version,
+        )
+        .await
     }
 
     async fn record_exposures_sampled(
@@ -2128,6 +2267,7 @@ impl QueryEngine {
         scope: crate::storage::control::ExposureScope,
         sampled_at: Option<i64>,
         parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         if accesses.is_empty() {
             return Ok(Vec::new());
@@ -2151,6 +2291,7 @@ impl QueryEngine {
                     sampled_at,
                     work.as_ref(),
                     Some(&policy),
+                    original_contract_version,
                 )
                 .await?;
             let observed = Observed {
@@ -2192,7 +2333,7 @@ mod tests {
 
     /// Supersedes chains, pre-resolved to their terminal memory.
     #[derive(Default)]
-    struct StubGraph {
+    pub(super) struct StubGraph {
         terminal: HashMap<MemoryId, MemoryId>,
     }
 
@@ -2218,7 +2359,7 @@ mod tests {
     /// Backing store for replacement records, with a switch for making the
     /// batch load fail.
     #[derive(Default)]
-    struct StubMetaStore {
+    pub(super) struct StubMetaStore {
         records: HashMap<MemoryId, CachedRecord>,
         fail: bool,
     }
@@ -2381,7 +2522,7 @@ mod tests {
         serde_json::from_value(value).expect("valid query")
     }
 
-    fn engine(graph: StubGraph, meta: StubMetaStore) -> QueryEngine {
+    pub(super) fn engine(graph: StubGraph, meta: StubMetaStore) -> QueryEngine {
         QueryEngine::new(
             Arc::new(Unused),
             Arc::new(Unused),
@@ -2425,6 +2566,7 @@ mod tests {
                 sampled_at: Option<i64>,
                 parent: Option<&WorkTicket>,
                 policy: Option<&NativePolicyInputs>,
+                original_contract_version: u32,
             ) -> Result<AccessObservation> {
                 let policy = policy.expect("actual configured policy");
                 assert_eq!(scope.unwrap().namespace, "default");
@@ -2444,6 +2586,7 @@ mod tests {
                         sampled_at,
                         parent,
                         Some(policy),
+                        original_contract_version,
                     )
                     .await
             }
@@ -3532,3 +3675,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "origin_tests.rs"]
+mod origin_tests;

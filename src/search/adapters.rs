@@ -559,10 +559,16 @@ impl AccessRecorder for StorageAccessRecorder {
         sampled_at: Option<i64>,
         parent: Option<&crate::storage::work::WorkTicket>,
         policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+        original_contract_version: u32,
     ) -> Result<crate::decay::observation::AccessObservation> {
         if accesses.is_empty() {
             return Ok(crate::decay::observation::AccessObservation::from_receipts(
                 Vec::new(),
+            ));
+        }
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(SearchError::Unavailable(
+                "unsupported original application contract".into(),
             ));
         }
         let native = self
@@ -589,19 +595,20 @@ impl AccessRecorder for StorageAccessRecorder {
                     sampled_at.unwrap_or_else(|| self.clock.now_millis()),
                     policy.clone(),
                     parent,
+                    original_contract_version,
                 )
                 .await?
         } else {
-            match sampled_at {
-                Some(at) => {
-                    self.record_access_batch_at_with_work(accesses, scope, at, parent)
-                        .await?
-                }
-                None => {
-                    self.record_access_batch_with_work(accesses, scope, parent)
-                        .await?
-                }
-            }
+            crate::decay::observation::record_exposures_scoped_with_origin_work(
+                self.storage.clone(),
+                self.cache.clone(),
+                accesses.to_vec(),
+                sampled_at.unwrap_or_else(|| self.clock.now_millis()),
+                scope.cloned(),
+                parent,
+                original_contract_version,
+            )
+            .await?
         };
         // Native exposure initially uses the existing full publication fallback.
         Ok(crate::decay::observation::AccessObservation::from_receipts(

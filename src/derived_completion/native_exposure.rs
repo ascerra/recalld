@@ -14,6 +14,7 @@ impl DerivedCompletion {
         sampled_at: i64,
         policy: NativePolicyInputs,
         parent: Option<&WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Vec<WriteReceipt>, ObservationError> {
         if accesses.is_empty() {
             return Ok(Vec::new());
@@ -22,7 +23,14 @@ impl DerivedCompletion {
             .accept_work(parent)
             .map_err(|e| ObservationError::storage(e, vec![]))?;
         let result = self
-            .native_exposures_accepted(accesses, scope, sampled_at, policy, &work)
+            .native_exposures_accepted(
+                accesses,
+                scope,
+                sampled_at,
+                policy,
+                &work,
+                original_contract_version,
+            )
             .await;
         self.finish_known_work(work);
         result
@@ -35,6 +43,7 @@ impl DerivedCompletion {
         sampled_at: i64,
         policy: NativePolicyInputs,
         work: &WorkTicket,
+        original_contract_version: u32,
     ) -> Result<Vec<WriteReceipt>, ObservationError> {
         let gate = publication_gate(&self.storage)
             .await
@@ -75,7 +84,7 @@ impl DerivedCompletion {
                             .meta_store()
                             .capture_exposure(scope, &batch, &policy)?;
                         let mut ctx = MutationContext::unkeyed(namespace);
-                        ctx.contract_version = 2;
+                        ctx.contract_version = original_contract_version;
                         storage.meta_store().record_native_exposure_with_work(
                             &ctx,
                             &intent,

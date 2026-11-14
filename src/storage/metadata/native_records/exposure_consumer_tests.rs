@@ -151,6 +151,15 @@ async fn native_exposure_http_mcp_get_similar_true_and_false_use_real_observer()
         .await;
         assert!(status.is_success(), "{body}");
         assert_eq!(event_count(&f, id), count + usize::from(access));
+        if access {
+            origin::assert_origin(
+                &f,
+                d.ns,
+                1,
+                Some(id),
+                &[(id, crate::model::AccessKind::DirectRetrieval)],
+            );
+        }
         assert_eq!(clock.0.load(Ordering::SeqCst), calls + 1);
         let count = event_count(&f, id);
         let calls = clock.0.load(Ordering::SeqCst);
@@ -161,6 +170,15 @@ async fn native_exposure_http_mcp_get_similar_true_and_false_use_real_observer()
         )
         .await;
         assert_eq!(event_count(&f, id), count + usize::from(access));
+        if access {
+            origin::assert_origin(
+                &f,
+                d.ns,
+                1,
+                Some(id),
+                &[(id, crate::model::AccessKind::DirectRetrieval)],
+            );
+        }
         assert_eq!(clock.0.load(Ordering::SeqCst), calls + 1);
         let source = event_count(&f, id);
         let target = event_count(&f, d.parent);
@@ -175,6 +193,15 @@ async fn native_exposure_http_mcp_get_similar_true_and_false_use_real_observer()
         assert!(!body["hits"].as_array().unwrap().is_empty());
         assert_eq!(event_count(&f, id), source);
         assert_eq!(event_count(&f, d.parent), target + usize::from(access));
+        if access {
+            origin::assert_origin(
+                &f,
+                d.ns,
+                1,
+                Some(id),
+                &[(d.parent, crate::model::AccessKind::AssociativeRetrieval)],
+            );
+        }
         let target = event_count(&f, d.parent);
         let body = mcp(
             &bridge,
@@ -185,6 +212,15 @@ async fn native_exposure_http_mcp_get_similar_true_and_false_use_real_observer()
         assert!(!body["memories"].as_array().unwrap().is_empty());
         assert_eq!(event_count(&f, id), source);
         assert_eq!(event_count(&f, d.parent), target + usize::from(access));
+        if access {
+            origin::assert_origin(
+                &f,
+                d.ns,
+                1,
+                Some(id),
+                &[(d.parent, crate::model::AccessKind::AssociativeRetrieval)],
+            );
+        }
         if !access {
             assert_eq!(bytes(&d.path), stable);
         }
@@ -439,6 +475,7 @@ async fn native_exposure_per_namespace_failure_publishes_preceding_receipts_with
             86_400_001,
             policy,
             None,
+            2,
         )
         .await
         .unwrap_err();
@@ -633,3 +670,6 @@ async fn native_exposure_invalid_configured_policy_fails_without_writes_and_empt
     assert_eq!(tracker.status().pending, 0);
     assert_eq!(tracker.status().unresolved, 0);
 }
+
+#[path = "exposure_origin_tests.rs"]
+mod origin;
