@@ -37,7 +37,10 @@ with returned-only version/provenance diagnostics and honest scan/omission count
 Any exhaustive canonical/vector enumeration is explicitly a cost, not a bounded
 allocation or performance-promotion claim.
 
-Preserve V1 default/same-namespace ranking and history behavior. Correct the
+Preserve V1 cosine scoring and stored-version behavior, while correcting its
+canonical phase-before-cap defect in the existing shared similarity helper.
+The source-only decision and pending validation are recorded in
+`similarity-v1-eligibility-decision.md`. Correct the
 existing explicit legacy `sameNamespace:false` path by routing it through the
 shared compatible-scope consumer with V1 raw-cosine/history semantics. No implicit
 broad scope, unknown-profile compatibility, public V2 route or startup activation.
@@ -57,5 +60,6 @@ refill; current/history and filtered successor; deterministic ties and chain
 failure/work limits; source assertion/visibility failure before exposure;
 returned-only IDs and per-namespace classification/time/policy/origin; later-group
 commit failure retaining earlier receipts; false byte identity; actual legacy
-false-flag consumer; and unchanged named V1 default behavior. Freeze new source,
+false-flag consumer; V1 eligible top-k against an exhaustive oracle; and unchanged
+V1 cosine scores/stored-version behavior on already eligible inputs. Freeze new source,
 use a separate candidate target, and run offline Rust tests before claiming a fix.

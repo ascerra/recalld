@@ -26,8 +26,12 @@ This is original A2 scope, not a PR133 regression. PR133 closes coherent search
 payload selection and exposure classification; it does not close these similar
 paths. Hume owns the explicit V2 backend, eligibility before caps, current/history,
 profile-compatible scope and returned-only exposures. Huygens owns strict public
-selectors, API1 compatibility mapping, envelopes and activation. Named V1 remains
-unchanged; baseline runtime probes are still required before a fix is claimed.
+selectors, API1 compatibility mapping, envelopes and activation. V1 cosine scoring
+and stored-version behavior remain; ignored explicit cross-scope selection and
+canonical phase-after-cap are correctness defects to fix in legacy calls too.
+See `similarity-v1-eligibility-decision.md` for the source-only correction to this
+review's initial compatibility boundary. Actual baseline failures are recorded in
+`coherent-v2-similar-plan.md`; corrected V1 behavior still needs validation.
 
 ## Exposure join constraint
 
