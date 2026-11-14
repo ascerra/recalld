@@ -438,3 +438,86 @@ fn native_policy_version_migration_preserves_numeric_revision_chain() {
     drop(s);
     inspect_schema(&target).unwrap();
 }
+
+struct CreationClock;
+impl crate::time::Clock for CreationClock {
+    fn now_millis(&self) -> i64 {
+        3000
+    }
+}
+struct CatalogProvider;
+#[async_trait::async_trait]
+impl crate::embedding::EmbeddingProvider for CatalogProvider {
+    async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        panic!("policy called provider")
+    }
+    fn dimensions(&self) -> usize {
+        4
+    }
+    fn model_name(&self) -> &str {
+        "policy-fixture"
+    }
+    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+        Some(crate::embedding::runtime::tests::profile())
+    }
+}
+#[test]
+fn native_policy_creation_proof_rewinds_numeric_changes_in_empty_namespace() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, _, _) = fixture(root.path());
+    let mut s = open(&path);
+    s.clock = Arc::new(CreationClock);
+    let mut create = ctx(&s, NamespaceId::new(1), "new-namespace");
+    create.scope = MutationScope::Catalog;
+    let receipt = s
+        .create_namespace(
+            &create,
+            &crate::storage::native_catalog::NativeNamespaceInput {
+                name: "new-policy".into(),
+                embedding_dim: None,
+                embedding_profile_id: None,
+                initial_stability: None,
+                desired_retention: None,
+                decay_rate_multiplier: None,
+            },
+            &CatalogProvider,
+        )
+        .unwrap();
+    let MutationOutcome::NativeNamespaceCreated { transition } = &receipt.outcome else {
+        panic!()
+    };
+    let id = transition.namespace_id;
+    s.clock = Arc::new(NoClock);
+    let mut policy = NamespacePolicy::from(&s.engine.get_namespace(id).unwrap().unwrap());
+    for (key, stability) in [("first", 5.), ("second", 7.)] {
+        policy.initial_stability = stability;
+        let receipt = s
+            .update_policy(&ctx(&s, id, key), scope(&s, id), &policy)
+            .unwrap()
+            .unwrap();
+        let MutationOutcome::NativeNamespacePolicyUpdated { transition } = &receipt.outcome else {
+            panic!()
+        };
+        assert_eq!(transition.record_count, 0);
+    }
+    s.update_policy(&ctx(&s, id, "no-change"), scope(&s, id), &policy)
+        .unwrap()
+        .unwrap();
+    drop(s);
+    inspect_schema(&path).unwrap();
+    let stream = root.path().join("created-policy.jsonl");
+    let copy = root.path().join("copy");
+    assert_eq!(
+        crate::storage::logical_export::export_store(&path, &stream).unwrap(),
+        crate::storage::logical_export::import_store(&stream, &copy).unwrap()
+    );
+    let s = open(&copy);
+    assert_eq!(
+        s.engine
+            .get_namespace(id)
+            .unwrap()
+            .unwrap()
+            .initial_stability,
+        7.
+    );
+}

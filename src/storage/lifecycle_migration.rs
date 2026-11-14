@@ -146,6 +146,7 @@ pub(crate) fn validate_policy_history(
         u32,
         BTreeMap<Generation, super::native_policy::NativeNamespacePolicyUpdated>,
     > = HashMap::new();
+    let mut policy_noops = Vec::new();
     let mut native_history = Vec::new();
     let mut namespace_creations = HashMap::new();
     for row in read.open_table(control::RECEIPTS)?.iter()? {
@@ -204,6 +205,7 @@ pub(crate) fn validate_policy_history(
                 if !keys.contains(key.value()) {
                     return Err(invalid("policy no-change receipt lacks retry key"));
                 }
+                policy_noops.push(t.clone());
                 native_history.push((
                     receipt.clone(),
                     t.namespace_id,
@@ -344,6 +346,30 @@ pub(crate) fn validate_policy_history(
             t.before.apply(ns);
         }
     }
+    // A restored historical no-op must identify the numeric state at its own
+    // revision, not merely any well-formed policy under the same lifecycle version.
+    for t in &policy_noops {
+        let mut ns = configs
+            .get(&t.namespace_id.get())
+            .ok_or_else(|| invalid("policy no-change namespace missing"))?
+            .clone();
+        if let Some(history) = numeric_policies.get(&t.namespace_id.get()) {
+            for (_, update) in history
+                .range((
+                    std::ops::Bound::Excluded(t.policy_revision),
+                    std::ops::Bound::Unbounded,
+                ))
+                .rev()
+            {
+                update.before.apply(&mut ns);
+            }
+        }
+        if super::native_catalog::NamespacePolicyState::capture(&ns)? != t.policy {
+            return Err(invalid(
+                "policy no-change differs from its historical revision",
+            ));
+        }
+    }
     for (id, creation) in &namespace_creations {
         let ns = creation_configs
             .get(id)
@@ -394,6 +420,14 @@ pub(crate) fn validate_policy_history(
         let mut revision = Generation::default();
         let mut last_in_origin = HashMap::new();
         if let Some(history) = policies.get(&ns.id.get()) {
+            if history
+                .keys()
+                .next_back()
+                .is_some_and(|revision| *revision > fields.policy_revision)
+            {
+                return Err(invalid("policy proof exceeds retained namespace revision"));
+            }
+
             for (_, (receipt, t)) in history.range(..=fields.policy_revision) {
                 if t.previous_revision != revision || t.from != version {
                     return Err(invalid("gap in namespace policy history"));
