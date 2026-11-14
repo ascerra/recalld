@@ -46,7 +46,8 @@ A single in-memory diagnostic slot retains this control request ID and its
 running/final report, exposed by sweepStatus even when capture is unavailable.
 It is not canonical receipt storage or a readiness registry. This prevents a
 late worker result/known receipt disappearing after handler timeout. A timed-out
-or failed sweep invalidates the episode and blocks another sweep on that owner;
+or failed sweep invalidates the episode and blocks another sweep, advance or
+capture on that owner (including a later checkpoint consumer);
 status remains inspectable. A fresh owner is required for another episode.
 The deadline bounds cooperative response waiting, not blocking OS I/O or worker
 termination. No late success is published to the expired caller.

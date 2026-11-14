@@ -35,6 +35,34 @@ async fn dispatch(
     evaluator: Option<&super::frozen::OwnedEvaluator>,
     request: &Request,
 ) -> Result<Value, Value> {
+    if request.method == "sweepStatus" {
+        if request.params != json!({}) {
+            return Err(error("INVALID_PARAMS", "sweepStatus requires empty params"));
+        }
+        return evaluator
+            .map(|owner| owner.sweep_status())
+            .ok_or_else(|| error("UNSUPPORTED_CONTROL", "owned legacy sweep required"));
+    }
+    if request.method == "sweep" {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Sweep {
+            deadline_ms: u64,
+        }
+        let params: Sweep = serde_json::from_value(request.params.clone())
+            .map_err(|e| error("INVALID_PARAMS", e))?;
+        if !(1..=30_000).contains(&params.deadline_ms) {
+            return Err(error("INVALID_PARAMS", "deadlineMs 1..30000 required"));
+        }
+        let owner =
+            evaluator.ok_or_else(|| error("UNSUPPORTED_CONTROL", "owned legacy sweep required"))?;
+        return owner
+            .sweep(
+                request.id,
+                Instant::now() + Duration::from_millis(params.deadline_ms),
+            )
+            .await;
+    }
     if request.method == "advance" {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -69,12 +97,14 @@ async fn dispatch(
             }
             Ok(json!({
                 "controlVersion":1,
-                "methods": if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance"] } else { vec!["capabilities","inspect","barrier"] },
+                "methods": if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance","sweep","sweepStatus"] } else { vec!["capabilities","inspect","barrier"] },
                 "publicContract":"legacy-v1",
+                "sweepControlVersion": if evaluator.is_some() { Some(1) } else { None },
                 "guarantees":{
                     "barrier":"owned-work-and-required-derived-generations",
                     "logicalHash":false,"snapshot":false,"reset":false,
                     "controlledClock":false,"lifecycleClockControlled":evaluator.is_some(),
+                    "explicitLegacySweep":evaluator.is_some(),"nativeSweep":false,
                     "controlledIds":false,"canonicalAllocationControlled":evaluator.is_some(),"controlledRng":false
                 }
             }))
