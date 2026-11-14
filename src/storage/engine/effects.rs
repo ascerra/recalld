@@ -51,7 +51,16 @@ impl RedbStorageEngine {
         id: MemoryId,
         bridges: &[PersistedEdge],
     ) -> Result<Option<EffectResult>, StorageError> {
-        let guard = self.meta_store.mutation_guard()?;
+        self.delete_memory_with_edges_with_work(id, bridges, None)
+    }
+
+    pub(crate) fn delete_memory_with_edges_with_work(
+        &mut self,
+        id: MemoryId,
+        bridges: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<EffectResult>, StorageError> {
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let Some(record) = self.meta_store.get(id)? else {
             return Ok(None);
         };
@@ -70,8 +79,8 @@ impl RedbStorageEngine {
             &self.edge_store,
             Some(&mut self.vector_manager),
         )
-        .map_err(|source| StorageError::CommittedEffectsPending {
-            operation_id: result.receipt.operation_id,
+        .map_err(|source| StorageError::CommittedMutation {
+            receipt: Box::new(result.receipt.clone()),
             source: Box::new(source),
         })?;
         Ok(Some(result))

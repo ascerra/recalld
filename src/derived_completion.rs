@@ -26,14 +26,11 @@ impl DerivedCompletion {
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<WorkTicket, StorageError> {
-        let storage = self.storage.read().map_err(|e| failed(e.to_string()))?;
-        Ok(storage.meta_store().work_tracker().admit(parent)?)
+        crate::storage::work::accept_work(&self.storage, parent)
     }
 
     pub(crate) fn finish_known_work(&self, work: WorkTicket) {
-        if let Ok(storage) = self.storage.read() {
-            storage.meta_store().finish_work(work);
-        }
+        crate::storage::work::finish_work(&self.storage, work);
     }
 
     /// Actual insertion consumer: canonical commit under the store lease, then
@@ -129,9 +126,15 @@ impl DerivedCompletion {
 
     /// Legacy bool adapter. Resolve namespace and commit under one store guard;
     /// each batch caller invokes this in order, with independent child commits.
-    pub async fn forget(&self, id: crate::model::MemoryId) -> Result<bool, StorageError> {
+    pub async fn forget(
+        &self,
+        id: crate::model::MemoryId,
+        namespace: Option<&str>,
+    ) -> Result<bool, StorageError> {
         let work = self.accept_work(None)?;
-        let result = self.forget_accepted(id, &work).await;
+        let result = self
+            .forget_accepted(id, namespace.map(str::to_owned), &work)
+            .await;
         self.finish_known_work(work);
         result
     }
@@ -139,6 +142,7 @@ impl DerivedCompletion {
     async fn forget_accepted(
         &self,
         id: crate::model::MemoryId,
+        namespace: Option<String>,
         work: &WorkTicket,
     ) -> Result<bool, StorageError> {
         let gate = publication_gate(&self.storage).await?;
@@ -148,6 +152,9 @@ impl DerivedCompletion {
         let receipt = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = (|| {
+                if let Some(namespace) = namespace.as_deref() {
+                    storage.assert_memory_namespace(id, namespace)?;
+                }
                 let Some(record) = storage.get_record(id)? else {
                     return Ok(None);
                 };
@@ -269,11 +276,11 @@ impl DerivedCompletion {
                     return Ok(());
                 }
                 let pending = storage.meta_store().pending_effects()?;
-                let operation_id = pending
+                let receipt = pending
                     .first()
                     .ok_or_else(|| failed("dirty state without durable effects".into()))?
                     .receipt
-                    .operation_id;
+                    .clone();
                 let result = (|| {
                     // ponytail: O(records + edges) rebuild under the publication locks.
                     // Replace with exact effect application when throughput warrants it.
@@ -357,8 +364,8 @@ impl DerivedCompletion {
                         .meta_store()
                         .acknowledge_rebuilt_effects_with_work(Some(&child))
                 })();
-                result.map_err(|source| StorageError::CommittedEffectsPending {
-                    operation_id,
+                result.map_err(|source| StorageError::CommittedMutation {
+                    receipt: Box::new(receipt),
                     source: Box::new(source),
                 })
             })();
@@ -538,7 +545,7 @@ mod tests {
             .unwrap()
             .write_owned()
             .await;
-        let task = tokio::spawn(async move { completion.forget(MemoryId::new()).await });
+        let task = tokio::spawn(async move { completion.forget(MemoryId::new(), None).await });
         wait_for_work(&tracker, |s| s.pending == 1).await;
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
@@ -601,7 +608,12 @@ mod tests {
             panic!()
         };
         assert_eq!(receipt.committed_generation, before.next().unwrap());
-        assert!(fx.storage_adapter().get_memory(memory_id).await.is_err());
+        assert!(
+            fx.storage_adapter()
+                .get_memory(memory_id, false, None)
+                .await
+                .is_err()
+        );
         assert_eq!(
             fx.storage
                 .read()
@@ -689,10 +701,13 @@ mod tests {
             .pending_effects()
             .unwrap();
         assert_eq!(pending.len(), 1);
-        assert!(adapter.get_memory(dead).await.is_err());
-        assert!(adapter.get_memory(live).await.is_err());
+        assert!(adapter.get_memory(dead, false, None).await.is_err());
+        assert!(adapter.get_memory(live, false, None).await.is_err());
         assert!(
-            adapter.get_memory(MemoryId::new()).await.is_err(),
+            adapter
+                .get_memory(MemoryId::new(), false, None)
+                .await
+                .is_err(),
             "no false miss while blocked"
         );
 
@@ -700,8 +715,8 @@ mod tests {
         // and keep all public reads closed. A retry uses the same operation.
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
         assert!(matches!(publisher(&fx).complete().await,
-            Err(StorageError::CommittedEffectsPending {operation_id, ..}) if operation_id == pending[0].receipt.operation_id));
-        assert!(adapter.get_memory(live).await.is_err());
+            Err(StorageError::CommittedMutation {receipt, ..}) if receipt.operation_id == pending[0].receipt.operation_id));
+        assert!(adapter.get_memory(live, false, None).await.is_err());
         assert_eq!(
             fx.storage
                 .read()
@@ -723,8 +738,20 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(adapter.get_memory(dead).await.unwrap().is_none());
-        assert!(adapter.get_memory(live).await.unwrap().is_some());
+        assert!(
+            adapter
+                .get_memory(dead, false, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            adapter
+                .get_memory(live, false, None)
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert!(fx.vector_index.read().await.get_vector(dead).is_none());
         assert!(fx.vector_index.read().await.get_vector(live).is_some());
         assert!(!fx.graph.read().await.contains(&dead));
@@ -747,7 +774,13 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(adapter.get_memory(dead).await.unwrap().is_none());
+        assert!(
+            adapter
+                .get_memory(dead, false, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
         publisher(&fx).complete().await.unwrap();
     }
 
@@ -891,7 +924,7 @@ mod tests {
         );
         assert!(
             fx.storage_adapter()
-                .get_memory(dead)
+                .get_memory(dead, false, None)
                 .await
                 .unwrap()
                 .is_none()

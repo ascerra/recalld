@@ -488,6 +488,79 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn single_provider_root_finishes_its_descendants_while_closing() {
+        let f = Fixture::new();
+        let mut adapter = f.storage_adapter();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let calls = Arc::new(AtomicUsize::new(0));
+        adapter.embedding = Arc::new(PausedProvider {
+            entered: entered.clone(),
+            release: release.clone(),
+            calls: calls.clone(),
+        });
+        let input = crate::mcp::args::parse_store_input(
+            &json!({"summary":"single accepted before provider","checkDuplicates":false}),
+            "default",
+        )
+        .unwrap();
+        let task = tokio::spawn(async move { adapter.store_memory(input).await });
+        tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+            .await
+            .unwrap();
+        let tracker = tracker(&f);
+        assert!(tracker.status().pending > 0);
+        let closing = tracker.clone();
+        let drain = tokio::task::spawn_blocking(move || closing.close_and_drain(deadline()));
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while tracker.status().admission_open {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        release.notify_one();
+        let result = task.await.unwrap().unwrap();
+        let freeze = drain.await.unwrap().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(
+            f.storage
+                .read()
+                .unwrap()
+                .get_record(crate::model::MemoryId::from(
+                    uuid::Uuid::parse_str(&result.id).unwrap()
+                ))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .pending_effects()
+                .unwrap()
+                .is_empty()
+        );
+        let before = generation(&f);
+        let input = crate::mcp::args::parse_store_input(
+            &json!({"summary":"new single rejected"}),
+            "default",
+        )
+        .unwrap();
+        assert!(
+            f.storage_adapter()
+                .store_memory(input)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("admission is closed")
+        );
+        assert_eq!(generation(&f), before);
+        drop(freeze);
+    }
+
     #[tokio::test]
     async fn batch_work_close_before_entry_rejects_before_reservation_or_provider() {
         let f = Fixture::new();

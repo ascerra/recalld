@@ -180,35 +180,42 @@ pub(crate) async fn persist_edges_with_work(
     cache: &Arc<CacheManager>,
     parent: Option<&WorkTicket>,
 ) -> Result<usize, AutoLinkError> {
-    if persisted_edges.is_empty() {
-        return Ok(0);
-    }
-    let live = graph.clone().write_owned().await;
-    let mut planned = (*live).clone();
-    let mut accepted = Vec::new();
-    for pe in persisted_edges {
-        match planned.add_edge(
-            pe.source,
-            pe.target,
-            pe.edge_type,
-            pe.weight,
-            pe.auto_created,
-        ) {
-            Ok(key) => {
-                planned.edges[key].created_at = pe.created_at as i64;
-                accepted.push(pe.clone());
-            }
-            Err(
-                crate::graph::GraphError::EdgeExists(_, _)
-                | crate::graph::GraphError::MemoryNotFound(_),
-            ) => {}
-            Err(e) => return Err(AutoLinkError::Graph(e)),
+    let work = crate::storage::work::accept_work(storage, parent)
+        .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
+    let result = async {
+        if persisted_edges.is_empty() {
+            return Ok(0);
         }
+        let live = graph.clone().write_owned().await;
+        let mut planned = (*live).clone();
+        let mut accepted = Vec::new();
+        for pe in persisted_edges {
+            match planned.add_edge(
+                pe.source,
+                pe.target,
+                pe.edge_type,
+                pe.weight,
+                pe.auto_created,
+            ) {
+                Ok(key) => {
+                    planned.edges[key].created_at = pe.created_at as i64;
+                    accepted.push(pe.clone());
+                }
+                Err(
+                    crate::graph::GraphError::EdgeExists(_, _)
+                    | crate::graph::GraphError::MemoryNotFound(_),
+                ) => {}
+                Err(e) => return Err(AutoLinkError::Graph(e)),
+            }
+        }
+        if accepted.is_empty() {
+            return Ok(0);
+        }
+        publish_edge_plan_with_work(live, planned, accepted, storage, cache, Some(&work)).await
     }
-    if accepted.is_empty() {
-        return Ok(0);
-    }
-    publish_edge_plan_with_work(live, planned, accepted, storage, cache, parent).await
+    .await;
+    crate::storage::work::finish_work(storage, work);
+    result
 }
 
 pub(crate) async fn publish_edge_plan(
@@ -356,95 +363,103 @@ pub(crate) async fn perform_autolink_with_work(
     cache: &Arc<CacheManager>,
     parent: Option<&WorkTicket>,
 ) -> Result<usize, AutoLinkError> {
-    // Step 1: Search vector index for top candidates.
-    let search_limit = max_links * 2 + 1;
-    let candidates: Vec<(MemoryId, f32)> = {
-        let index = vector_index.read().await;
-        let filter = SearchFilter {
-            namespace_id: Some(namespace_id),
-            decay_phases: Some(vec![DecayPhase::Full.as_u8(), DecayPhase::Summary.as_u8()]),
-            ..SearchFilter::default()
+    let work = crate::storage::work::accept_work(storage, parent)
+        .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
+    let result = async {
+        // Step 1: Search vector index for top candidates.
+        let search_limit = max_links * 2 + 1;
+        let candidates: Vec<(MemoryId, f32)> = {
+            let index = vector_index.read().await;
+            let filter = SearchFilter {
+                namespace_id: Some(namespace_id),
+                decay_phases: Some(vec![DecayPhase::Full.as_u8(), DecayPhase::Summary.as_u8()]),
+                ..SearchFilter::default()
+            };
+            let results = index
+                .search(embedding, search_limit, &filter)
+                .map_err(|e| AutoLinkError::VectorSearch(e.to_string()))?;
+            results.into_iter().map(|r| (r.id, r.score)).collect()
         };
-        let results = index
-            .search(embedding, search_limit, &filter)
-            .map_err(|e| AutoLinkError::VectorSearch(e.to_string()))?;
-        results.into_iter().map(|r| (r.id, r.score)).collect()
-    };
 
-    if candidates.is_empty() {
-        return Ok(0);
-    }
-
-    // Step 2: Build tag lookup closure from cache.
-    // Collect candidate tags up front to avoid holding locks in the closure.
-    let candidate_ids: Vec<MemoryId> = candidates.iter().map(|(id, _)| *id).collect();
-    let mut candidate_tags_map = std::collections::HashMap::new();
-    for cid in &candidate_ids {
-        if let Some(cached) = cache.get(*cid).await {
-            candidate_tags_map.insert(
-                *cid,
-                cached
-                    .tags
-                    .iter()
-                    .map(|t| t.to_string())
-                    .collect::<Vec<_>>(),
-            );
+        if candidates.is_empty() {
+            return Ok(0);
         }
-    }
 
-    let tag_lookup =
-        |id: &MemoryId| -> Vec<String> { candidate_tags_map.get(id).cloned().unwrap_or_default() };
+        // Step 2: Build tag lookup closure from cache.
+        // Collect candidate tags up front to avoid holding locks in the closure.
+        let candidate_ids: Vec<MemoryId> = candidates.iter().map(|(id, _)| *id).collect();
+        let mut candidate_tags_map = std::collections::HashMap::new();
+        for cid in &candidate_ids {
+            if let Some(cached) = cache.get(*cid).await {
+                candidate_tags_map.insert(
+                    *cid,
+                    cached
+                        .tags
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect::<Vec<_>>(),
+                );
+            }
+        }
 
-    // Step 3: Read-lock graph for auto_link() discovery, then DROP the lock.
-    let edges_to_create = {
-        let graph_r = graph.read().await;
-        auto_link(
+        let tag_lookup = |id: &MemoryId| -> Vec<String> {
+            candidate_tags_map.get(id).cloned().unwrap_or_default()
+        };
+
+        // Step 3: Read-lock graph for auto_link() discovery, then DROP the lock.
+        let edges_to_create = {
+            let graph_r = graph.read().await;
+            auto_link(
+                new_memory_id,
+                &candidates,
+                threshold,
+                tags,
+                &tag_lookup,
+                max_links,
+                &graph_r,
+            )
+        }; // graph read lock dropped here
+
+        if edges_to_create.is_empty() {
+            return Ok(0);
+        }
+
+        // Step 4: Build PersistedEdge records with similarity scores as weights.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Build a lookup for candidate similarity scores.
+        let similarity_map: std::collections::HashMap<MemoryId, f32> =
+            candidates.iter().map(|(id, score)| (*id, *score)).collect();
+
+        let persisted_edges: Vec<PersistedEdge> = edges_to_create
+            .iter()
+            .map(|(target_id, edge_type)| PersistedEdge {
+                source: new_memory_id,
+                target: *target_id,
+                edge_type: *edge_type,
+                weight: similarity_map.get(target_id).copied().unwrap_or(0.0),
+                auto_created: true,
+                created_at: now_ms,
+            })
+            .collect();
+
+        // Steps 5-7: Persist edges, insert into graph, update edge count.
+        persist_edges_with_work(
             new_memory_id,
-            &candidates,
-            threshold,
-            tags,
-            &tag_lookup,
-            max_links,
-            &graph_r,
+            &persisted_edges,
+            graph,
+            storage,
+            cache,
+            Some(&work),
         )
-    }; // graph read lock dropped here
-
-    if edges_to_create.is_empty() {
-        return Ok(0);
+        .await
     }
-
-    // Step 4: Build PersistedEdge records with similarity scores as weights.
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    // Build a lookup for candidate similarity scores.
-    let similarity_map: std::collections::HashMap<MemoryId, f32> =
-        candidates.iter().map(|(id, score)| (*id, *score)).collect();
-
-    let persisted_edges: Vec<PersistedEdge> = edges_to_create
-        .iter()
-        .map(|(target_id, edge_type)| PersistedEdge {
-            source: new_memory_id,
-            target: *target_id,
-            edge_type: *edge_type,
-            weight: similarity_map.get(target_id).copied().unwrap_or(0.0),
-            auto_created: true,
-            created_at: now_ms,
-        })
-        .collect();
-
-    // Steps 5-7: Persist edges, insert into graph, update edge count.
-    persist_edges_with_work(
-        new_memory_id,
-        &persisted_edges,
-        graph,
-        storage,
-        cache,
-        parent,
-    )
-    .await
+    .await;
+    crate::storage::work::finish_work(storage, work);
+    result
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -490,88 +505,95 @@ pub(crate) async fn perform_entity_link_with_work(
     cache: &Arc<CacheManager>,
     parent: Option<&WorkTicket>,
 ) -> Result<usize, AutoLinkError> {
-    if entities.is_empty() {
-        return Ok(0);
-    }
-
-    let candidates = {
-        let idx = entity_index.read().await;
-        idx.find_by_entities(entities, new_memory_id)
-    };
-
-    if candidates.is_empty() {
-        return Ok(0);
-    }
-
-    let new_entity_count = entities.len();
-
-    // Pre-fetch candidate entity counts from cache for Jaccard weight calculation.
-    let candidate_entity_counts: std::collections::HashMap<MemoryId, usize> = {
-        let mut counts = std::collections::HashMap::with_capacity(candidates.len());
-        for (cid, _) in &candidates {
-            if let Some(cached) = cache.get(*cid).await {
-                counts.insert(*cid, cached.entities.len());
-            }
+    let work = crate::storage::work::accept_work(storage, parent)
+        .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
+    let result = async {
+        if entities.is_empty() {
+            return Ok(0);
         }
-        counts
-    };
 
-    // Read-lock graph to filter out existing edges.
-    let edges_to_create: Vec<(MemoryId, f32)> = {
-        let graph_r = graph.read().await;
-        candidates
+        let candidates = {
+            let idx = entity_index.read().await;
+            idx.find_by_entities(entities, new_memory_id)
+        };
+
+        if candidates.is_empty() {
+            return Ok(0);
+        }
+
+        let new_entity_count = entities.len();
+
+        // Pre-fetch candidate entity counts from cache for Jaccard weight calculation.
+        let candidate_entity_counts: std::collections::HashMap<MemoryId, usize> = {
+            let mut counts = std::collections::HashMap::with_capacity(candidates.len());
+            for (cid, _) in &candidates {
+                if let Some(cached) = cache.get(*cid).await {
+                    counts.insert(*cid, cached.entities.len());
+                }
+            }
+            counts
+        };
+
+        // Read-lock graph to filter out existing edges.
+        let edges_to_create: Vec<(MemoryId, f32)> = {
+            let graph_r = graph.read().await;
+            candidates
+                .iter()
+                .filter(|(cid, _)| {
+                    !graph_r.has_typed_edge_between_ids(&new_memory_id, cid, EdgeType::Entity)
+                })
+                .take(max_entity_links)
+                .map(|(cid, shared)| {
+                    // Jaccard similarity: shared / union for order-independent weight.
+                    // Look up candidate's entity count from cache; fall back to
+                    // shared count (which gives weight=1.0, a safe overestimate).
+                    let candidate_entity_count =
+                        candidate_entity_counts.get(cid).copied().unwrap_or(*shared);
+                    let union = new_entity_count + candidate_entity_count - *shared;
+                    let weight = if union > 0 {
+                        (*shared as f32 / union as f32).min(1.0)
+                    } else {
+                        0.0
+                    };
+                    (*cid, weight)
+                })
+                .collect()
+        };
+
+        if edges_to_create.is_empty() {
+            return Ok(0);
+        }
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let persisted_edges: Vec<PersistedEdge> = edges_to_create
             .iter()
-            .filter(|(cid, _)| {
-                !graph_r.has_typed_edge_between_ids(&new_memory_id, cid, EdgeType::Entity)
+            .map(|(target_id, weight)| PersistedEdge {
+                source: new_memory_id,
+                target: *target_id,
+                edge_type: EdgeType::Entity,
+                weight: *weight,
+                auto_created: true,
+                created_at: now_ms,
             })
-            .take(max_entity_links)
-            .map(|(cid, shared)| {
-                // Jaccard similarity: shared / union for order-independent weight.
-                // Look up candidate's entity count from cache; fall back to
-                // shared count (which gives weight=1.0, a safe overestimate).
-                let candidate_entity_count =
-                    candidate_entity_counts.get(cid).copied().unwrap_or(*shared);
-                let union = new_entity_count + candidate_entity_count - *shared;
-                let weight = if union > 0 {
-                    (*shared as f32 / union as f32).min(1.0)
-                } else {
-                    0.0
-                };
-                (*cid, weight)
-            })
-            .collect()
-    };
+            .collect();
 
-    if edges_to_create.is_empty() {
-        return Ok(0);
+        persist_edges_with_work(
+            new_memory_id,
+            &persisted_edges,
+            graph,
+            storage,
+            cache,
+            Some(&work),
+        )
+        .await
     }
-
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    let persisted_edges: Vec<PersistedEdge> = edges_to_create
-        .iter()
-        .map(|(target_id, weight)| PersistedEdge {
-            source: new_memory_id,
-            target: *target_id,
-            edge_type: EdgeType::Entity,
-            weight: *weight,
-            auto_created: true,
-            created_at: now_ms,
-        })
-        .collect();
-
-    persist_edges_with_work(
-        new_memory_id,
-        &persisted_edges,
-        graph,
-        storage,
-        cache,
-        parent,
-    )
-    .await
+    .await;
+    crate::storage::work::finish_work(storage, work);
+    result
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -621,72 +643,79 @@ pub(crate) async fn perform_temporal_link_with_work(
     cache: &Arc<CacheManager>,
     parent: Option<&WorkTicket>,
 ) -> Result<usize, AutoLinkError> {
-    if temporal_window_ms == 0 || recent_memories.is_empty() {
-        return Ok(0);
-    }
+    let work = crate::storage::work::accept_work(storage, parent)
+        .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
+    let result = async {
+        if temporal_window_ms == 0 || recent_memories.is_empty() {
+            return Ok(0);
+        }
 
-    let window = temporal_window_ms as i64;
+        let window = temporal_window_ms as i64;
 
-    // Find memories within the time window.
-    let candidates: Vec<(MemoryId, f32)> = recent_memories
-        .iter()
-        .filter(|(mid, _)| *mid != new_memory_id)
-        .filter_map(|(mid, ts)| {
-            let delta = (created_at_ms - ts).abs();
-            if delta <= window {
-                let weight = (1.0 - delta as f32 / window as f32).max(0.05);
-                Some((*mid, weight))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if candidates.is_empty() {
-        return Ok(0);
-    }
-
-    // Read-lock graph to filter out existing edges.
-    let edges_to_create: Vec<(MemoryId, f32)> = {
-        let graph_r = graph.read().await;
-        candidates
+        // Find memories within the time window.
+        let candidates: Vec<(MemoryId, f32)> = recent_memories
             .iter()
-            .filter(|(cid, _)| {
-                !graph_r.has_typed_edge_between_ids(&new_memory_id, cid, EdgeType::Temporal)
+            .filter(|(mid, _)| *mid != new_memory_id)
+            .filter_map(|(mid, ts)| {
+                let delta = (created_at_ms - ts).abs();
+                if delta <= window {
+                    let weight = (1.0 - delta as f32 / window as f32).max(0.05);
+                    Some((*mid, weight))
+                } else {
+                    None
+                }
             })
-            .take(max_temporal_links)
-            .cloned()
-            .collect()
-    };
+            .collect();
 
-    if edges_to_create.is_empty() {
-        return Ok(0);
+        if candidates.is_empty() {
+            return Ok(0);
+        }
+
+        // Read-lock graph to filter out existing edges.
+        let edges_to_create: Vec<(MemoryId, f32)> = {
+            let graph_r = graph.read().await;
+            candidates
+                .iter()
+                .filter(|(cid, _)| {
+                    !graph_r.has_typed_edge_between_ids(&new_memory_id, cid, EdgeType::Temporal)
+                })
+                .take(max_temporal_links)
+                .cloned()
+                .collect()
+        };
+
+        if edges_to_create.is_empty() {
+            return Ok(0);
+        }
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let persisted_edges: Vec<PersistedEdge> = edges_to_create
+            .iter()
+            .map(|(target_id, weight)| PersistedEdge {
+                source: new_memory_id,
+                target: *target_id,
+                edge_type: EdgeType::Temporal,
+                weight: *weight,
+                auto_created: true,
+                created_at: now_ms,
+            })
+            .collect();
+
+        persist_edges_with_work(
+            new_memory_id,
+            &persisted_edges,
+            graph,
+            storage,
+            cache,
+            Some(&work),
+        )
+        .await
     }
-
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    let persisted_edges: Vec<PersistedEdge> = edges_to_create
-        .iter()
-        .map(|(target_id, weight)| PersistedEdge {
-            source: new_memory_id,
-            target: *target_id,
-            edge_type: EdgeType::Temporal,
-            weight: *weight,
-            auto_created: true,
-            created_at: now_ms,
-        })
-        .collect();
-
-    persist_edges_with_work(
-        new_memory_id,
-        &persisted_edges,
-        graph,
-        storage,
-        cache,
-        parent,
-    )
-    .await
+    .await;
+    crate::storage::work::finish_work(storage, work);
+    result
 }
