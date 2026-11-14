@@ -13,7 +13,7 @@ def run(args):
     projection = json.load(sys.stdin)
     phase = projection["phase"]
     fields = {"ingest": {"sources", "activeEmbedding"}, "connect": {"activeEmbedding"},
-              "query": {"currentQuestion", "expectedMiss"}, "action": {"currentAction"}}
+              "query": {"currentQuestion", "expectedMiss"}, "action": {"currentAction"}, "connect_native_prefix": set()}
     assert phase in fields and set(projection) == {"phase", "startId", "deliveryOrdinal"} | fields[phase], "unexpected actor projection fields"
     if phase == "action":
         action = projection["currentAction"]
@@ -79,11 +79,16 @@ def run(args):
         if "structuredContent" in result:
             assert result["structuredContent"] == text
         return text
-    if phase in ("ingest", "connect"):
+    if phase in ("ingest", "connect", "connect_native_prefix"):
         result = rpc("initialize", dict(protocolVersion="2025-06-18", capabilities={}, clientInfo=dict(name=TRACK, version="1")), "initialize")
         assert result["protocolVersion"] == "2025-06-18"
         rpc("notifications/initialized", {}, "initialized", notification=True)
         names = {t["name"] for t in rpc("tools/list", {}, "tools")["tools"]}
+        if phase == "connect_native_prefix":
+            assert names == {"get_memory", "recall_memories"}
+            assert rpc("resources/list", {}, "native-resources")["resources"] == []
+            rpc("evaluator/capabilities", {}, "private-control-denied", expected_error=True)
+            return
         assert {"store_memory", "recall_memories"} <= names
         assert not names & {"barrier", "snapshot", "reset", "advance", "inspect", "sweep", "sweepStatus", "evaluator/capabilities"}
         session = rpc("resources/read", dict(uri="recalld://session"), "session")

@@ -80,10 +80,10 @@ def checked_state(h, value):
     return value
 
 
-def checked_snapshot(h, value, parent):
+def checked_snapshot(h, value, parent, track=CHECKPOINT_TRACK):
     h["exact_keys"](value, ("manifest", "sha256", "committed", "logicalHash", "track"))
     h["OWNED"]["checked_inspect"](dict(committed=value["committed"], logicalHash=None))
-    if value["track"] != CHECKPOINT_TRACK:
+    if value["track"] != track:
         raise ValueError("unsupported checkpoint track")
     for key in ("sha256", "logicalHash"):
         if not isinstance(value[key], str) or len(value[key]) != 64 or any(c not in "0123456789abcdef" for c in value[key]):
@@ -98,7 +98,7 @@ def checked_snapshot(h, value, parent):
 
 class Child:
     """Owns the actual child and its actor subprocesses. No clone implementation."""
-    def __init__(self, h, args, root, config, output, checkpoint=None, prior=None, negative=False):
+    def __init__(self, h, args, root, config, output, checkpoint=None, prior=None, negative=False, native_prefix=False):
         if checkpoint is not None and prior is None and not negative:
             raise RuntimeError("restore requires a terminated and joined prior owner")
         if prior is not None and (not prior.joined or prior.process.poll() is None):
@@ -110,6 +110,8 @@ class Child:
         self.control_fds = [sr, rw]
         self.stderr = (output / "runtime.log").open("wb")
         command = [str(args.binary), "--config", str(config), "--data-root", str(root), "--control-read-fd", str(rr), "--control-write-fd", str(sw)]
+        if native_prefix:
+            command += ["--native-prefix"]
         if checkpoint:
             command += ["--restore-checkpoint", checkpoint["manifest"], "--checkpoint-sha256", checkpoint["sha256"]]
         self.process = subprocess.Popen(command, cwd=root.parent, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, bufsize=0,

@@ -65,12 +65,11 @@ async fn native_query_admission_matches_canonical_profile_before_provider_and_pr
     completion(&f).rebuild_all().await.unwrap();
     let before = f.storage.read().unwrap().control_state().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
-    let request = || SearchQuery {
-        namespace: "native".into(),
-        text: Some("original parent".into()),
-        record_access: false,
-        limit: 1,
-        ..Default::default()
+    let request = || {
+        serde_json::from_value::<SearchQuery>(json!({
+            "namespace":"native", "text":"original parent", "recordAccess":false, "limit":1
+        }))
+        .unwrap()
     };
     for (admit, profile) in [
         (false, d.profile.clone()),
@@ -156,12 +155,10 @@ async fn native_query_admission_flag_cannot_grant_legacy_owner_authority() {
     assert!(
         query
             .prepare_coherent_payload(
-                SearchQuery {
-                    namespace: "default".into(),
-                    text: Some("read".into()),
-                    record_access: false,
-                    ..Default::default()
-                },
+                serde_json::from_value(
+                    json!({"namespace":"default", "text":"read", "recordAccess":false})
+                )
+                .unwrap(),
                 false,
                 false,
                 None
