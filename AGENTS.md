@@ -1,12 +1,13 @@
 # Agent resource cleanup
 
-Caleb requires agents to clean up temporary resources as work completes. This applies to the coordinating agent and every sub-agent.
+Caleb requires agents to clean up temporary resources when finished. His explicit retention policy (2026-11-14) takes precedence over older experiment instructions requiring raw-data archives.
 
-- Keep tests isolated from personal recalld data, daemon sockets, credentials and backups.
-- Track the exact scratch directories, build targets and containers each task creates. Share active/protected paths with the coordinator and any cleanup agent.
-- Before removing a completed run, retain the evidence needed to reproduce and assess it: commands, exact source/build identity, results, relevant failed attempts, and required raw artifacts. Follow the repository experiment instructions; verify retained copies with hashes. Do not preserve entire build trees as evidence.
-- After evidence is verified and no process or container uses the paths, remove owned disposable Cargo/target copies, temporary fixture copies and completed containers. Reuse a bounded private build cache where practical instead of cloning a full cache for every run. Source changes still require correct rebuilding and executable provenance; never reuse stale binaries as evidence.
-- Do not remove active worktrees, Git metadata, branches, uncommitted source, unique unarchived evidence, personal data or backups. A matching `recalld-*` name alone does not establish that a directory is safe to delete.
-- During coordinated cleanup, release exact paths to the cleanup owner and stop using them. Do not race other agents' deletions or recreate released paths without a fresh ownership handoff. Check live mounts/processes before deletion; do not use broad wildcard deletion or global Docker pruning.
-- Every completion handoff must report cleanup performed, approximate space reclaimed, and any retained scratch paths with an owner and reason. Before starting another large run, clean up completed disposable runs first.
-- Record durable findings and compact reports inside this repository. Keep large raw experiment evidence in the verified work-notes artifact location; do not upload raw build caches or archives merely to free local space.
+- If an experiment is complete, produced a PR, and its results are recorded, delete its temporary data: datasets, databases, raw logs, binaries, copied sources and build caches. Caleb explicitly accepts losing this raw data. Preserve the PR/code and recorded results; do not delay cleanup to create or exhaustively verify raw archives.
+- Keep active experiments and inputs still needed by another task protected. Preserve worktrees, Git metadata, branches, tracked/uncommitted source, recorded reports, personal recalld data and backups. A matching `recalld-*` name alone is not deletion authorization.
+- Track exact owned scratch paths and containers. Before deletion verify ownership/completion, PR and results references, and absence of active process/container use. Do not remove a registered worktree or follow a symlink outside the authorized scratch root.
+- During coordinated cleanup, release exact paths to the cleanup owner and stop using them. Do not race deletions or recreate released paths without a fresh ownership handoff. Do not use broad wildcard deletion or global Docker pruning.
+- Under SSD pressure, pause new large builds and cache copies and prioritize deletion in bounded parallel batches. Avoid expensive size scans and redundant raw-data hashing when completion and recorded results are already established.
+- Reuse a bounded private build cache where useful instead of cloning a full target for every run. Source changes still require correct rebuilding and executable provenance; stale binaries are never valid test evidence.
+- Every completion handoff must report cleanup performed, approximate actual space recovered, and retained scratch paths with owner and reason. Clean completed runs before allocating another large run.
+- Keep durable findings and compact reports inside this repository. Never upload build caches/raw archives merely to free disk space. Experiments without a completed PR still need an explicit retention/release decision before unique raw data is removed; their inactive regenerable build caches may be cleaned safely.
+- Tests must remain isolated from personal recalld data, daemon sockets, credentials and backups.
