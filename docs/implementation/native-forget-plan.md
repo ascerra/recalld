@@ -43,3 +43,9 @@ source/binary/log are retained and the assertion now follows the existing rule.
 There is no performance, deterministic-ID, cross-lineage generation comparison or public activation
 claim. The shared publication implementation remains owned by Halley; its separate
 outer-lease cancellation hypothesis was reported without a falseReady claim.
+
+Validated runtime `51501b6`:1005 library+2CLI+5focused PASS;fmtPASS;clippyexit0
+WITH697library/764test warnings(676duplicates), plus1binarywarning. Evidence
+`b56e455`: [report](../../work-notes/native-forget/REPORT.md). Actual HOME copy:
+`/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-forget-b56e455`;17files verified. COPY-VERIFICATION SHA-256
+`1e32a1d8685fef994c34f6f205d0fce4714c2d53065fe1038243782c5e6e80a0`. Shared notebook updated.
