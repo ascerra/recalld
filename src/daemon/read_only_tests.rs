@@ -754,9 +754,17 @@ async fn scoped_read_only_controls_survive_http_mcp_and_framed_daemon() {
         .await;
         assert_eq!(
             status.as_u16(),
-            if namespace == "other" { 409 } else { 400 },
+            if namespace == "other" { 409 } else { 200 },
             "{body}"
         );
+        if namespace == "default" {
+            let hits = body["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 2);
+            for hit in hits {
+                assert_ne!(hit["memory"]["id"], h.ids[0].to_string());
+                assert_eq!(hit["memory"]["namespace"], namespace);
+            }
+        }
     }
     // A true-mode mismatch also fails before queued observation work.
     let (status, _) = http_call(
