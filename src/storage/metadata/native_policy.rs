@@ -59,7 +59,7 @@ impl MetadataStore {
             if ctx.idempotency_key.is_none() {
                 return Ok(None);
             }
-            let receipt = control::record_receipt(
+            let receipt = self.record_receipt(
                 &tx,
                 ctx,
                 hash,
@@ -140,7 +140,7 @@ impl MetadataStore {
         }
         tx.open_table(NAMESPACE_TABLE)?
             .insert(namespace.id.get(), control::encode(&namespace)?.as_slice())?;
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,

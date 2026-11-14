@@ -81,7 +81,7 @@ impl MetadataStore {
             profile: profile.clone(),
             policy: NamespacePolicyState::capture(&config)?,
         };
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,

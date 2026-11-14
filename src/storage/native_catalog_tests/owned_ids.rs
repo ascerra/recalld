@@ -140,12 +140,25 @@ fn owned_native_numeric_policy_update_and_keyed_nochange_reserve_once() {
             ctx.scope = MutationScope::Namespace(id);
             ctx.contract_version = api;
             let operation = oracle.uuid(IdKind::Operation).unwrap();
+            let before_namespace = s.engine.get_namespace(id).unwrap().unwrap();
+            let before_generation = s.engine.control_state().unwrap().committed_generation;
             let scope = policy_scope(&s, id);
             let receipt = s
                 .update_policy(&ctx, scope.clone(), &replacement)
                 .unwrap()
                 .unwrap();
             assert_eq!(receipt.operation_id, operation);
+            assert_eq!(
+                receipt.committed_generation,
+                before_generation.next().unwrap()
+            );
+            if !changed {
+                assert_eq!(
+                    crate::storage::control::encode(&s.engine.get_namespace(id).unwrap().unwrap())
+                        .unwrap(),
+                    crate::storage::control::encode(&before_namespace).unwrap()
+                );
+            }
             assert!(
                 matches!(
                     &receipt.outcome,
@@ -301,5 +314,65 @@ fn owned_native_catalog_abandoned_precommit_consumes_reserved_id_without_rewind(
         assert_ne!(receipt.operation_id, abandoned_operation);
         assert_receipt_cursor(&s, &oracle);
         assert_eq!(clock.0.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[test]
+fn owned_native_purge_children_consume_reservations_and_closed_reopen_preserves_cursor() {
+    use crate::storage::purge::PurgeStage;
+    for api in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let (path, namespace, records) = crate::storage::native_purge_tests::fixture(root.path());
+        let clock = Arc::new(Clock(AtomicUsize::new(0)));
+        let mut s = with_ids(&path, clock.clone(), SeededIds::new([57; 32]));
+        let oracle = SeededIds::from_state(cursor(&s)).unwrap();
+        let mut ctx = context(&s, "owned-purge");
+        ctx.scope = MutationScope::Namespace(namespace);
+        ctx.contract_version = api;
+        let start = oracle.uuid(IdKind::Operation).unwrap();
+        let mut p = s.engine.begin_namespace_purge(&ctx, true).unwrap();
+        assert_eq!(p.start_receipt.operation_id, start);
+        assert_eq!(
+            p.next_operation_id,
+            Some(oracle.uuid(IdKind::Operation).unwrap())
+        );
+        assert_receipt_cursor(&s, &oracle);
+        let replay = s.engine.begin_namespace_purge(&ctx, true).unwrap();
+        assert_eq!(replay.start_receipt, expected_replay(&p.start_receipt));
+        assert_receipt_cursor(&s, &oracle);
+        while p.stage != PurgeStage::Complete {
+            let reserved = p.next_operation_id.unwrap();
+            p = s
+                .engine
+                .resume_namespace_purge(p.store_id, namespace, start, 1)
+                .unwrap();
+            assert_eq!(p.last_receipt.operation_id, reserved);
+            let expected_next = if p.stage == PurgeStage::Complete {
+                None
+            } else {
+                Some(oracle.uuid(IdKind::Operation).unwrap())
+            };
+            assert_eq!(p.next_operation_id, expected_next);
+            assert_receipt_cursor(&s, &oracle);
+            if p.sequence == 1 {
+                let saved = cursor(&s);
+                drop(s);
+                s = with_ids(
+                    &path,
+                    clock.clone(),
+                    SeededIds::from_state(saved.clone()).unwrap(),
+                );
+                assert_eq!(cursor(&s), saved);
+            }
+        }
+        assert_eq!(p.removed, records.len() as u64);
+        assert!(s.engine.get_namespace(namespace).unwrap().is_none());
+        let state = s.engine.control_state().unwrap();
+        let replay = s.engine.begin_namespace_purge(&ctx, true).unwrap();
+        assert_eq!(replay.last_receipt, p.last_receipt);
+        assert!(replay.start_receipt.replayed);
+        assert_eq!(s.engine.control_state().unwrap(), state);
+        assert_receipt_cursor(&s, &oracle);
+        assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     }
 }
