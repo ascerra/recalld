@@ -259,3 +259,18 @@ Prepared explicit-API2 fixture testing at step1 is not public API2 activation.
 No narrow record-only success or explicit fixture is evidence of completed
 ordinary startup. Each dependency must be an actual validated implementation;
 these planned edges do not authorize merging moving WIP parents.
+
+### Standalone graph producer review boundary
+
+Curie's quiet-window producer plan identifies the actual missing owner/clock and
+four-view completion injection; graph/cache-only helper parameters and void/string
+errors cannot supply them. Source review of121's `NativeGraphInput::request_hash`
+confirms that `native_graph_put_v1` binds ordered edge endpoints/type/weight bits/
+auto-created flags plus original context, not an automatic seed/config selector
+request. Keyed explicit/frozen-edge replay must therefore be distinguished from
+fresh semantic/entity/temporal neighbor selection. Keep existing automatic helpers
+unkeyed unless an actual caller supplies the retained frozen intent; otherwise
+reject unsupported keys before selection. Do not resample neighbors on a keyed
+retry or ignore changed selector settings. This is a source-review constraint,
+not approval of a new graph transport or a runtime validation claim. Curie owns
+the actual producer seam; Hume reviews selection and final peer invariants.
