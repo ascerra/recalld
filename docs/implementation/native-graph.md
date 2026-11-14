@@ -34,12 +34,22 @@ rechecks endpoint tokens, policy, scope, existence and edge constraints.
 - One injected clock sample timestamps changed edges. Float bits, including signed
   zero, are preserved for native edge identity. Legacy float comparison is unchanged.
 
-**Fresh keyed no-ops are unsupported and return `InvalidMutation` before success,
-clock sampling or canonical mutation. No key is reserved and no successful outcome is
-promised.** Unkeyed internal no-ops may return `None`. An existing matching keyed
-receipt always replays first, even when the current graph or endpoint state has
-changed; a different payload under an already committed key conflicts. The error
-alternative avoids introducing an unproven no-change receipt merely to bind a key.
+Fresh keyed no-ops now commit `NativeGraphUnchanged` with a strict
+`NativeGraphNoChange` proof. The key, receipt and zero-action outbox are one
+metadata transaction that advances G once. Existing edge values/timestamps, peer
+record tokens and lifecycle fields do not change; the clock is not sampled.
+Unkeyed internal no-ops still return `None` without writing. Matching keyed replay
+precedes capture and expected-generation checks, including after another writer
+changes an edge. A different request under the same key conflicts.
+
+The proof retains exact existing-edge and unchanged endpoint commitments; an
+empty keyed input has empty witnesses. It is a distinct additive outcome, not a
+boolean exception to the mutating proof. Validation requires a retained key,
+checks the same namespace/policy/profile and endpoint eligibility boundaries,
+verifies empty outbox actions, and checks active edge and record history. Recovery
+acknowledges the zero-action outbox without opening an edge write transaction.
+The producer must still complete derived publication at actual current canonical G.
+A historical replay receipt is not a readiness target.
 
 A new `NativeGraphChanged` outcome records exact edge before/after values and
 payload-free endpoint state commitments. It does not widen historical
@@ -74,23 +84,17 @@ made. Legacy-only inventory does not collect the native edge-history vector.
 
 ## Scope remaining
 
-The final A4 keyed graph contract still needs a strict typed receipted no-op (or
-an explicitly supported specification error). Track that additive follow-up with
-policy no-change semantics: bind a successful key, advance G once, preserve edge
-and peer tokens, validate no-change history, and replay the original result after
-intervening writes. The current explicit error is containment, not completion of
-that contract. The next implementation priority remains same-insertion links.
+The typed no-op closes the standalone keyed no-change gap. It does not add public
+activation, a batch binding, or a readiness certification. Historical request hash
+`native_graph_put_v1` and mutating receipt validation are unchanged. Numeric policy
+no-change receipts remain independently owned; this child needs no policy parent.
 
-Automatic semantic/entity/temporal store linking remains unsupported until its
-producer and core are joined with a frozen plan in the **same insertion outbox**
-and a new additive `NativeMemoryInsertedWithLinks` proof. An accepted work ticket
-alone is not durable intent. Required follow-up proves process exit after insertion
-commit cannot lose required links and completed keyed store replay cannot discover
-new links. Candidate capture must use exact generation equality to catch newly
-inserted candidates; temporal selection anchors to the final record's created_at (caller-supplied or
-the core's single sampled clock); edge timestamps use that same clock sample. The planned
-new store input/hash domain also binds requested advisory behavior without rewriting
-old insertion or batch identities.
+Same-insertion semantic/entity/temporal linking is implemented separately in #101
+(runtime `4ad7965`, head `51da3ca`); this no-op child does not consume it. Its
+`NativeMemoryInsertedWithLinks` proof freezes required links in the same insertion
+outbox, with exact capture generation and one clock, and preserves completed replay
+without discovering new links. Curie's actual producer/batch join remains separate.
+An accepted work ticket alone is not durable insertion/link intent.
 
 Curie owns producer selection/root/provider integration; this slice owns the native
 storage proof. Feynman retains shared history review. Pascal owns native phase and
@@ -99,4 +103,5 @@ publication optimization, performance promotion and the paused publication-contr
 audit are not completed by this change.
 
 Validation results and exact source/binary/log hashes are recorded in
-[the evidence report](../evidence/native-graph/REPORT.md).
+[the original graph evidence](../evidence/native-graph/REPORT.md) and
+[the keyed no-op evidence](../evidence/native-graph-noop/REPORT.md).

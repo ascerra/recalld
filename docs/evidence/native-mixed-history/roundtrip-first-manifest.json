@@ -1,0 +1,8 @@
+{
+  "source": "6c5b77822357c5b8804e1794820f8493300ac6be",
+  "tree": "e51ea5aa6774db353f05a7d03c426c4759518d11",
+  "exit_code": 101,
+  "result": "3 passed; 1 failed; 996 filtered; 11.28s; fixture compared fork-local ledger coverage header to original origin, entries match",
+  "log_sha256": "71d7cedb0168e5068c8d3c15d0840023961fd81041db45cf3f2f1145f3269344",
+  "binary_sha256": "0489da0dbdffb1a1230ce238107513bede8709d8ec854f5a16d65cdecb0c5151"
+}

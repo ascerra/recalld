@@ -1,0 +1,117 @@
+diff --git a/src/storage/metadata/native_records/maintenance_tests.rs b/src/storage/metadata/native_records/maintenance_tests.rs
+index ddb5261..422cb26 100644
+--- a/src/storage/metadata/native_records/maintenance_tests.rs
++++ b/src/storage/metadata/native_records/maintenance_tests.rs
+@@ -664,6 +664,112 @@ fn files(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+     result
+ }
+ #[tokio::test]
++async fn native_harddelete_foreign_peer_requires_actual_policy_history() {
++    use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
++    use crate::storage::ownership::{StoreOwnership, lock_directory};
++    let root = tempfile::tempdir().unwrap();
++    let mut d = fixture(root.path());
++    let c = Arc::new(Clock::new(3000));
++    let mut s = session(&d, c.clone());
++    let id = create(&mut s, &d, "target", input(&d));
++    c.set(10_000 * DAY);
++    committed(s.maintain(&ctx(&s, &d, "summary"), id).unwrap());
++    committed(s.maintain(&ctx(&s, &d, "ghost"), id).unwrap());
++    let deleted = committed(s.maintain(&ctx(&s, &d, "delete"), id).unwrap());
++    let retained = receipt_bytes(&s);
++    drop(s);
++    // Legitimate later policy selection must not invalidate the historical peer.
++    let destination = root.path().join("rollback");
++    migrate_lifecycle(
++        &d.path,
++        &destination,
++        &LifecycleMigrationOptions {
++            expected_source: inspect_schema(&d.path).unwrap().control.generation_ref(),
++            namespace_id: d.ns,
++            expected_policy_revision: Generation::default().next().unwrap(),
++            target: LifecycleVersion::LegacyAccessV1,
++            idempotency_key: "rollback".into(),
++        },
++    )
++    .unwrap();
++    d.path = destination;
++    let backup = run_backup(
++        &crate::config::RecalldConfig::default(),
++        &root.path().join("peer-policy.zip"),
++        Some(&d.path),
++        false,
++    )
++    .await
++    .unwrap();
++    restore_from_backup(RestoreOptions {
++        backup_path: backup,
++        data_dir: d.path.clone(),
++        force: true,
++        no_stop_daemon: true,
++        historical: false,
++    })
++    .await
++    .unwrap();
++    assert_ne!(
++        inspect_schema(&d.path).unwrap().control.store_id,
++        deleted.store_id
++    );
++    let s = session(&d, c.clone());
++    let receipt_key = control::scoped_key(
++        deleted.store_id,
++        MutationScope::Namespace(d.ns),
++        deleted.operation_id.as_bytes(),
++    );
++    let original = retained.get(&receipt_key).unwrap();
++    assert_eq!(receipt_bytes(&s).get(&receipt_key), Some(original));
++    drop(s);
++    for case in ["revision", "version"] {
++        let mut bad: serde_json::Value = serde_json::from_slice(original).unwrap();
++        for state in ["before", "after"] {
++            let lifecycle = &mut bad["receipt"]["outcome"]["transition"]["peers"][0]["change"]
++                [state]["lifecycle"]["lifecycle"];
++            if case == "revision" {
++                lifecycle["policyRevision"] = serde_json::json!("0");
++            } else {
++                lifecycle["lifecycleVersion"] = serde_json::json!("legacy_access_v1");
++            }
++        }
++        let bytes = serde_json::to_vec(&bad).unwrap();
++        // Locally consistent count/token-only changes still need policy history.
++        control::validate_receipt(&bytes).unwrap();
++        let replace = |bytes: &[u8]| {
++            let _owner = StoreOwnership::acquire(&d.path).unwrap();
++            let _directory = lock_directory(&d.path).unwrap();
++            let db = redb::Database::open(d.path.join("meta.db")).unwrap();
++            let tx = db.begin_write().unwrap();
++            tx.open_table(control::RECEIPTS)
++                .unwrap()
++                .insert(receipt_key.as_slice(), bytes)
++                .unwrap();
++            tx.commit().unwrap();
++        };
++        // Negative-only receipt corruption; no writer/control bypass fixture.
++        replace(&bytes);
++        let before = files(&d.path);
++        assert!(
++            inspect_schema(&d.path).is_err(),
++            "{case}: forged historical peer accepted"
++        );
++        assert!(
++            NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone())
++                .is_err()
++        );
++        assert_eq!(
++            before,
++            files(&d.path),
++            "{case}: rejected open mutated source"
++        );
++        replace(original);
++        inspect_schema(&d.path).unwrap();
++        drop(session(&d, c.clone()));
++    }
++}
++#[tokio::test]
+ async fn native_maintenance_export_import_fork_and_foreign_malformed_witnesses_remain_strict() {
+     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
+     use crate::storage::logical_export::{export_store, import_store};

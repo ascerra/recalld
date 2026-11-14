@@ -13,6 +13,129 @@ use std::sync::{
 };
 
 const DAY: i64 = 86_400_000;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_feedback_coordinator_preserves_real_unknown_commit_identity_until_reopen() {
+    struct CommitFaultClock(Arc<TestClock>);
+    impl Clock for CommitFaultClock {
+        fn now_millis(&self) -> i64 {
+            // Reuse the existing actual post-commit I/O fault on the worker thread.
+            FAIL_AFTER_NATIVE_COMMIT.with(|flag| flag.set(true));
+            self.0.now_millis()
+        }
+    }
+    fn publisher(f: &Fixture) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: f.storage.clone(),
+            cache: f.cache.clone(),
+            graph: f.graph.clone(),
+            vectors: f.vector_index.clone(),
+            fts: f.fts_index.clone(),
+            entities: f.entity_index.clone(),
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(
+        root.path(),
+        LifecycleVersion::ExplicitFeedbackV2,
+        1500.,
+        Some(1.),
+    )
+    .await;
+    let clock = Arc::new(TestClock::new(DAY));
+    let session = open(&d, clock.clone());
+    let prior = session.metadata().control_state().unwrap().generation_ref();
+    let key = ctx(&d, prior, "coordinator-unknown");
+    let f = Fixture::from_open_engine(root, session.engine);
+    let completion = publisher(&f);
+    completion.rebuild_all().await.unwrap();
+    let error = completion
+        .feedback_native_with_work(
+            key.clone(),
+            d.a,
+            3,
+            None,
+            NativePolicyInputs::default(),
+            Arc::new(CommitFaultClock(clock.clone())),
+            None,
+        )
+        .await
+        .unwrap_err();
+    let StorageError::CommitOutcomeUnknown { operation_id, .. } = error else {
+        panic!("lost unknown identity: {error}")
+    };
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .work_tracker()
+            .status()
+            .unresolved
+            > 0
+    );
+    assert!(
+        completion
+            .feedback_native_with_work(
+                key.clone(),
+                d.a,
+                3,
+                None,
+                NativePolicyInputs::default(),
+                clock.clone(),
+                None
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
+    drop(completion);
+    let root = f.close();
+    let session = open(&d, clock.clone());
+    let receipt = session
+        .lookup_operation(prior.store_id, d.ns, operation_id)
+        .unwrap()
+        .unwrap();
+    let before = record(&session, d.a).encode().unwrap();
+    let f = Fixture::from_open_engine(root, session.engine);
+    let completion = publisher(&f);
+    let replay = completion
+        .feedback_native_with_work(
+            key,
+            d.a,
+            3,
+            None,
+            NativePolicyInputs::default(),
+            clock.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.operation_id, receipt.operation_id);
+    assert_eq!(replay.committed_generation, receipt.committed_generation);
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(f.record(d.a).unwrap().encode().unwrap(), before);
+    let target = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .control_state()
+        .unwrap()
+        .generation_ref();
+    assert!(
+        completion
+            .readiness_barrier(
+                target,
+                std::time::Instant::now() + std::time::Duration::from_secs(5)
+            )
+            .await
+            .unwrap()
+            .ready
+    );
+}
+
 struct TestClock {
     now: AtomicI64,
     calls: AtomicUsize,

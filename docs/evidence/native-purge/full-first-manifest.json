@@ -1,0 +1,56 @@
+{
+  "source": "d3bc833ab1840b34c09f6714239926cb8c3bac0e",
+  "tree": "cf314f2ef06708799be1c1dc293f2c5fe076ad7d",
+  "exit_code": 0,
+  "results": [
+    "warning: `recalld` (lib) generated 7 warnings (run `cargo fix --lib -p recalld` to apply 2 suggestions)",
+    "test result: ok. 960 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 365.23s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s",
+    "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "warning: `recalld` (lib) generated 680 warnings (run `cargo clippy --fix --lib -p recalld` to apply 85 suggestions)",
+    "warning: `recalld` (lib test) generated 714 warnings (674 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 3 suggestions)"
+  ],
+  "log_sha256": "a7777f537e4d7a4bb8ba7829137c88e30b4ba5bc2ec0512e8454e14be0d46786",
+  "executables": [
+    {
+      "name": "lifecycle_cli-c369125dcd35855a",
+      "sha256": "7238d934d0ef53a9d0a141691dbeaf41b2591ad23bd93fb0ef6677fcd7631e24"
+    },
+    {
+      "name": "recalld-a60730f3f93b30b7",
+      "sha256": "f0e375306e5963e0f25d18253cb3371d265d4cae84a7e10adf5d4ed73e6930ba"
+    },
+    {
+      "name": "recalld_cli-8f457ab03bd2b416",
+      "sha256": "b8ff5ec9db2c4db3ee5f49f4b3296b74d80c1629a12ee35d6e5392a59786aac2"
+    },
+    {
+      "name": "recalld-b2844bb1c4a63074",
+      "sha256": "2c083e0a582559f05e75268cc10859d509516faa3d256be7774f11c0b1ddb47b"
+    },
+    {
+      "name": "recalld_cli-1eeb647232914a85",
+      "sha256": "6a1b019202674db04e27230f33487d31913fce848084d1c808978fc2f2e9c170"
+    },
+    {
+      "name": "text_migration_cli-c3debcbf7a93ee01",
+      "sha256": "536f9485c5ef46e2a5312c83e02353bb05d5d8d3ac338eb94bb979c8a10509f1"
+    },
+    {
+      "name": "recalld_text_migrate-9e1311bf36e47336",
+      "sha256": "11138d8302f42d22d4051255cd21202a3e76951ccd43a52347823941706d243a"
+    },
+    {
+      "name": "recalld-e70475283dff0fcc",
+      "sha256": "fdfb22c6ef07865f51e002e02191c767832b179f3eb581a86128aa6f50edec1e"
+    },
+    {
+      "name": "recalld_text_migrate-e2e689a390b4efcc",
+      "sha256": "0663467c03121eda54a35a92e213ebb28d3d5bc755002f86572d54b8788ef77a"
+    }
+  ]
+}

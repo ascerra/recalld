@@ -783,6 +783,8 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
 
 #[path = "graph_tests.rs"]
 mod graph;
+#[path = "maintenance_tests.rs"]
+mod maintenance;
 
 #[path = "graph_producer_tests.rs"]
 mod graph_producers;
@@ -798,3 +800,8 @@ mod store_batches;
 
 #[path = "store_producer_tests.rs"]
 mod store_producers;
+#[path = "mixed_history_tests.rs"]
+mod mixed_history;
+
+#[path = "namespace_binding_tests.rs"]
+mod namespace_binding;

@@ -330,12 +330,19 @@ fn current_pending_counts(
                 let (key, value) = row?;
                 let progress: crate::storage::purge::PurgeProgress =
                     control::decode(value.value())?;
-                if progress.version != 1
+                if !matches!(progress.version, 1 | 2)
+                    || (progress.version == 2 && state.control_schema_version != 2)
+                    || !purge::start_matches(&progress)
                     || key.value() != progress.start_receipt.operation_id.as_bytes()
                 {
                     return Err(StorageError::InvalidControl(
                         "invalid current purge identity".into(),
                     ));
+                }
+                if progress.version == 2
+                    && progress.stage == crate::storage::purge::PurgeStage::Complete
+                {
+                    purge::check_completed_native_progress(read, &progress)?;
                 }
                 // Completed restored ancestry was verified at open and is not
                 // forbidden just because it belongs to an earlier lineage.

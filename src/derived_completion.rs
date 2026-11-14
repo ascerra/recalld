@@ -2,11 +2,16 @@
 //! storage; never hold storage while awaiting a derived lock.
 mod native_graph;
 mod native_store;
+mod native_decay;
+mod native_purge;
 
 use std::sync::{Arc, RwLock};
 
 #[path = "derived_readiness.rs"]
 mod readiness;
+
+mod native_feedback;
+mod native_forget;
 
 use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};

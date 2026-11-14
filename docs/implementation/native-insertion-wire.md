@@ -15,11 +15,16 @@ must preserve an already known full receipt.
 
 An ancestry check of PR122 `abd0371`, PR123 `d7c4d5f`, observer `cc865c2`, and
 PR121 `3fa91d4` found no candidate head contained in another. Their shared PR96
-and other ancestors need no additional merge. PR121 has not yet been joined into
-this development composition. Curie's `e2b4f94` validation branch (join
+and other ancestors need no additional merge. PR121 is joined directly into
+this development composition, pending validation. Curie's `e2b4f94` validation branch (join
 `866482da`, reported 1,152 library and two CLI tests) is resolution/reference
 evidence only; it is not a shipping parent or validation of this consumer.
-The performance hold permits source review but defers join validation and builds.
+The quiet window ended before this join. Its conflict resolutions reuse the
+reviewed `866482da` source unions while preserving the additional canonical
+vector-snapshot module and exact-scan fixture changes from this branch. The
+existing CAS proof, profile-ID batch preparation and observation changes remain;
+the actual PR121 native-purge pending-reader checks are retained. Neither the
+reference branch's test count nor the prior focused runs validate this new join.
 
 ## Activation dependency order
 

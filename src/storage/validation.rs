@@ -175,7 +175,9 @@ fn validate_snapshot(
 
     if super::metadata::purge::validate_existing(&read, control.as_ref())?
         .iter()
-        .any(|p| p.stage != super::purge::PurgeStage::Complete)
+        .any(|p| {
+            p.stage != super::purge::PurgeStage::Complete && (!native_recovery || p.version != 2)
+        })
     {
         return Err(StorageError::RecoveryRequired(
             "unfinished namespace purge; reopen and finish before offline inventory".into(),
@@ -204,10 +206,14 @@ fn validate_snapshot(
             && (!native_recovery
                 || !matches!(
                     e.receipt.outcome,
-                    super::control::MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                        | super::control::MutationOutcome::NativePhaseMaterialized { .. }
+                        | super::control::MutationOutcome::NativeMemoryHardDeleted { .. }
+                        | super::control::MutationOutcome::NativeMemoryInsertedWithLinks { .. }
                         | super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
                         | super::control::MutationOutcome::NativeGraphChanged { .. }
+                        | super::control::MutationOutcome::NativeGraphUnchanged { .. }
                 ))
     }) {
         return Err(StorageError::RecoveryRequired(
@@ -355,8 +361,33 @@ fn validate_snapshot(
         reverse_key[..16].copy_from_slice(edge.target.as_bytes());
         reverse_key[16] = edge.edge_type.as_u8();
         reverse_key[17..].copy_from_slice(edge.source.as_bytes());
-        if !ids.contains(&edge.source)
-            || !ids.contains(&edge.target)
+        // A committed native hard deletion can precede its separate edge-DB
+        // replay. Admit only the exact, already validated pending deletion;
+        // unrelated dangling edges and missing reverse entries still fail.
+        let pending_delete = native_recovery
+            && effects.iter().any(|effect| {
+                let permitted_deleted = |id: &MemoryId| match &effect.receipt.outcome {
+                    super::control::MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                        *id == t.memory_id
+                    }
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced {
+                        transition: t,
+                    } => t
+                        .chunk
+                        .as_ref()
+                        .is_some_and(|c| c.deletions.iter().any(|d| d.memory_id == *id)),
+                    _ => false,
+                };
+                !effect.canonical_applied
+                    && effect.deletes.iter().any(|deleted| {
+                        super::native_records::NativeEdgeProof::from(deleted)
+                            == super::native_records::NativeEdgeProof::from(&edge)
+                    })
+                    && [edge.source, edge.target]
+                        .iter()
+                        .all(|id| permitted_deleted(id) || ids.contains(id))
+            });
+        if ((!ids.contains(&edge.source) || !ids.contains(&edge.target)) && !pending_delete)
             || reverse.get(reverse_key.as_slice())?.is_none()
         {
             return Err(StorageError::CorruptIndex(
