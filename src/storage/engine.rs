@@ -12,6 +12,7 @@ mod effects;
 mod insertion;
 mod maintenance;
 mod native_catalog;
+mod native_policy;
 mod native_records;
 mod purge;
 mod read_payload;

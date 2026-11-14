@@ -231,6 +231,12 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativeNamespacePolicyUnchanged {
+        transition: super::native_policy::NativeNamespacePolicyUnchanged,
+    },
+    NativeNamespacePolicyUpdated {
+        transition: super::native_policy::NativeNamespacePolicyUpdated,
+    },
     NativeMemoryInserted {
         transition: super::native_records::NativeRecordWrite,
     },
@@ -450,6 +456,12 @@ pub(crate) fn validate_existing(
             | MutationOutcome::BatchReserved { .. }
             | MutationOutcome::BatchItemRejected { .. }
             | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
+                scope == MutationScope::Namespace(transition.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePolicyUpdated { transition } => {
+                scope == MutationScope::Namespace(transition.namespace_id)
+            }
             MutationOutcome::NamespacePolicyUpdated { namespace_id }
             | MutationOutcome::NamespacePurgeStarted { namespace_id, .. }
             | MutationOutcome::NamespacePurgeAdvanced { namespace_id, .. } => {
@@ -483,6 +495,8 @@ pub(crate) fn validate_existing(
             stored.receipt.outcome,
             MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
+                | MutationOutcome::NativeNamespacePolicyUpdated { .. }
+                | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
                 | MutationOutcome::LifecycleFeedbackApplied { .. }
                 | MutationOutcome::NativeMemoryInserted { .. }
@@ -654,6 +668,12 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
+            transition.validate(&stored.receipt)?
+        }
+        MutationOutcome::NativeNamespacePolicyUpdated { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeNamespaceCreated { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -795,6 +815,8 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
             }
         }
         MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+        | MutationOutcome::NativeNamespacePolicyUpdated { .. }
         | MutationOutcome::NativeNamespaceCreated { .. }
         | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
