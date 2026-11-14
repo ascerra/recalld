@@ -113,18 +113,11 @@ async fn native_context_purge_replay_validation_preserves_exact_known_receipt() 
                 canonical.replayed = true;
                 assert_eq!(*receipt, canonical);
             }
+            let storage = fx.storage.read().unwrap();
+            let read = storage.meta_store().db.begin_read().unwrap();
+            let current = read.open_table(control::CONTROL).unwrap();
             assert_eq!(
-                control::validate_existing(
-                    &fx.storage
-                        .read()
-                        .unwrap()
-                        .meta_store()
-                        .db
-                        .begin_read()
-                        .unwrap()
-                )
-                .unwrap()
-                .unwrap(),
+                ControlState::decode(current.get("state").unwrap().unwrap().value()).unwrap(),
                 state
             );
             assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), frozen);

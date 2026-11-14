@@ -531,6 +531,18 @@ impl MetadataStore {
         Ok(guard)
     }
 
+    /// Entry-mode check only: the shared purge transaction independently checks
+    /// current control schema under its mutation guard. Ordinary reads remain
+    /// blocked during active purge, including on this native owner.
+    pub(crate) fn require_native_purge_owner(&self) -> Result<(), StorageError> {
+        if !self.native_lifecycle_only {
+            return Err(StorageError::InvalidMutationContext(
+                "native purge requires native owner".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn begin_purge(
         &self,
         ctx: &MutationContext,
