@@ -167,6 +167,81 @@ mod tests {
     use crate::storage::control::MutationOutcome;
 
     #[test]
+    fn native_single_receipt_framing_size_probe() {
+        let p: BatchProgress = serde_json::from_slice(include_bytes!(
+            "../../tests/fixtures/native-batch-before106/v3-manifest.json"
+        ))
+        .unwrap();
+        let BatchItemState::Ok { receipt } = &p.items[0].state else {
+            panic!()
+        };
+        let mut receipt = receipt.clone();
+        let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &mut receipt.outcome
+        else {
+            panic!()
+        };
+        // Serializer stress only: these synthetic hash commitments and repeated
+        // IDs are NOT valid persisted native state or a reachability proof.
+        let mut peer = transition.records[1].clone();
+        let s = &mut peer.after;
+        s.edge_count = u16::MAX;
+        s.history_sha256 = [255; 32];
+        let c = &mut s.content;
+        c.summary_sha256 = [255; 32];
+        c.tags_sha256 = [255; 32];
+        c.labels_sha256 = [255; 32];
+        c.extensions_sha256 = [255; 32];
+        c.text_sha256 = Some([255; 32]);
+        c.profile_id = Some(format!("ep1:{}", "f".repeat(64)));
+        let max_generation = "9223372036854775807".to_owned().try_into().unwrap();
+        c.vector = Some(crate::model::schema::VectorReference {
+            slot: u32::MAX,
+            allocation_epoch: max_generation,
+            sha256: [255; 32],
+        });
+        let l = &mut s.lifecycle;
+        let oldest = chrono::DateTime::<chrono::Utc>::MIN_UTC.timestamp_millis();
+        l.created_at = oldest;
+        l.last_accessed_at = oldest;
+        l.stability = 1.23456735e-38_f32.try_into().unwrap();
+        l.difficulty = 9.999999_f32.try_into().unwrap();
+        l.strength = 1.23456735e-38_f32.try_into().unwrap();
+        l.decay_strength = 1.23456735e-38_f32.try_into().unwrap();
+        l.phase = crate::model::DecayPhase::Summary;
+        l.is_permastore = false;
+        l.has_summary = true;
+        l.has_text = false;
+        let l = &mut l.lifecycle;
+        l.observed_at = oldest;
+        l.retrieved_at = Some(oldest);
+        l.reinforced_at = Some(oldest);
+        l.decay_anchor_at = oldest;
+        l.lifecycle_updated_at = oldest;
+        l.phase_changed_at = oldest;
+        l.policy_revision = max_generation;
+        l.record_generation = max_generation;
+        peer.before = Some(peer.after.clone());
+        let record_bytes = serde_json::to_vec(&peer).unwrap().len();
+        assert!(record_bytes < RECORD_CHANGE_BYTES);
+        let mut edge = transition.edges[0].clone();
+        edge.edge_type = crate::model::EdgeType::Associative;
+        edge.weight_bits = 1_f32.to_bits();
+        edge.auto_created = true;
+        edge.created_at = chrono::DateTime::<chrono::Utc>::MAX_UTC.timestamp_millis() as u64;
+        transition.records = vec![peer; 1 + MAX_NATIVE_GRAPH_EDGES + 3];
+        transition.edges = vec![edge; MAX_NATIVE_GRAPH_EDGES];
+        let receipt_bytes = serde_json::to_vec(&receipt).unwrap().len();
+        // Use the actual typed JSON encoding before constructing the modern
+        // text+structured wrapper; to_value(f32) has a different representation.
+        let text = serde_json::to_string(&receipt).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let mcp = serde_json::json!({"jsonrpc":"2.0","id":u64::MAX,
+            "result":{"content":[{"type":"text","text":text}],"structuredContent":value}});
+        let mcp_bytes = serde_json::to_vec(&mcp).unwrap().len();
+        println!("SYNTHETIC_NOT_NATIVE record_bytes={record_bytes} receipt_bytes={receipt_bytes} mcp_bytes={mcp_bytes} frame_limit={}", crate::daemon::protocol::MAX_MESSAGE_SIZE);
+    }
+
+    #[test]
     fn batch_wire_budget_exact_boundaries_and_complete_transport_framing() {
         let raw = include_bytes!("../../tests/fixtures/native-batch-before106/v3-manifest.json");
         let mut p: BatchProgress = serde_json::from_slice(raw).unwrap();
