@@ -1870,6 +1870,14 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if name == "store_memory" {
+        use crate::serialization::native_single::{Request, Reply, mcp_result};
+        let reply = match Request::parse(&arguments, false, None, bridge.default_namespace()) {
+            Ok(request) => bridge.storage.store_native_wire(request).await,
+            Err(error) => Reply::invalid(error),
+        };
+        return mcp_result(reply);
+    }
     if name == "store_memories" {
         let result = match crate::serialization::native_batch::parse(
             &arguments,

@@ -78,6 +78,12 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    async fn store_native_wire(
+        &self,
+        _request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        crate::serialization::native_single::Reply::failure(crate::storage::StorageError::RecoveryRequired("native single consumer unavailable".into()))
+    }
     async fn mutate_native_batch(
         &self,
         _input: crate::storage::batch::BatchInput,

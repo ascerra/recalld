@@ -6,6 +6,7 @@
 pub mod contract;
 mod json;
 pub mod native_batch;
+pub mod native_single;
 pub(crate) mod pair_cursor;
 pub mod scan;
 pub mod session;

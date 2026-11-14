@@ -66,6 +66,104 @@ fn canonical<T: serde::Serialize>(v: &T) -> Value {
     serde_json::from_slice(&serde_json::to_vec(v).unwrap()).unwrap()
 }
 
+async fn single_http(a: &McpStorageAdapter, value: &Value) -> (u16, Value) {
+    let r = crate::api::single_store_v2(a, "wrong-default", value, None).await;
+    let status = r.status().as_u16();
+    let bytes = axum::body::to_bytes(r.into_body(), crate::daemon::protocol::MAX_MESSAGE_SIZE).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+async fn single_mcp(a: Arc<McpStorageAdapter>, mut value: Value) -> (bool, Value) {
+    value["contractVersion"] = json!(2);
+    let r = crate::mcp::tools::dispatch_v2(&bridge(a), "store_memory", value).await;
+    assert!(serde_json::to_vec(&r).unwrap().len() < crate::daemon::protocol::MAX_MESSAGE_SIZE);
+    let packet = serde_json::to_value(&r).unwrap();
+    let text: Value = serde_json::from_str(packet["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(packet["structuredContent"], text);
+    (r.is_error == Some(true), text)
+}
+
+#[tokio::test]
+async fn native_single_wire_actual_mcp_http_rpc_profile_cas_and_canonical_labels() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let session = open(&d, clock.clone());
+    let state = session.metadata().control_state().unwrap();
+    let f = Fixture::from_open_engine(root, session.engine);
+    let provider = Arc::new(RecoveringProvider { profile: d.profile.clone(), unavailable: false.into(), calls: AtomicUsize::new(0), profiles: AtomicUsize::new(0), corrupt: Default::default() });
+    let a = Arc::new(adapter(&f, provider.clone(), clock.clone(), Default::default()));
+    let body = json!({"namespaceId":d.ns,"storeId":state.store_id,"expectedGeneration":state.committed_generation,"idempotencyKey":"single","summary":"Unicode native single","entities":["John Smith","José","Alice's"],"embedding":[2.,-0.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap(),"checkDuplicates":false});
+    let (status, h) = single_http(&a, &body).await;
+    assert_eq!(status, 200, "{h}");
+    assert_eq!(h["scope"]["namespace"], "native");
+    assert_eq!(h["readiness"]["ready"], true);
+    let receipt: WriteReceipt = serde_json::from_value(h["receipt"].clone()).unwrap();
+    assert_eq!(h["receipt"], canonical(&receipt));
+    let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome else { panic!() };
+    let record = f.storage.read().unwrap().get_record(transition.memory_id).unwrap().unwrap();
+    assert_eq!(record.schema.unwrap().labels.entities, ["John Smith", "José", "Alice's"]);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
+    let before = readers::bytes(&d.path);
+    let ticks = clock.0.load(Ordering::SeqCst);
+    let (error, m) = single_mcp(a.clone(), body.clone()).await;
+    assert!(!error, "{m}");
+    let mut expected = receipt.clone(); expected.replayed = true;
+    assert_eq!(m["receipt"], canonical(&expected));
+    let (_, h_replay) = single_http(&a, &body).await;
+    assert_eq!(m, h_replay);
+    let request = crate::serialization::native_single::Request::parse(&body, true, None, "wrong-default").unwrap();
+    let rpc = crate::daemon::server::native_method_test_rpc(a.clone(), serde_json::to_value(request).unwrap(), "store_native_single_observed_v1").await;
+    assert!(rpc.error.is_none(), "{rpc:?}");
+    let reply: crate::serialization::native_single::Reply = serde_json::from_value(rpc.result.unwrap()).unwrap();
+    assert_eq!(reply.receipt.as_ref(), Some(&expected));
+    let (_, envelope) = reply.response();
+    assert_eq!(canonical(&envelope), m);
+    assert_eq!(readers::bytes(&d.path), before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+    for (field, value, code) in [("summary",json!("changed"),"IDEMPOTENCY_CONFLICT"),("embedding",json!([1.,0.,0.,0.]),"IDEMPOTENCY_CONFLICT")] {
+        let mut changed=body.clone(); changed[field]=value;
+        let (status, out)=single_http(&a,&changed).await;
+        assert_eq!(status,409,"{out}"); assert_eq!(out["error"]["code"],code);
+    }
+    let mut fresh=body.clone(); fresh["idempotencyKey"]=json!("stale");
+    let (status,out)=single_http(&a,&fresh).await; assert_eq!(status,409,"{out}"); assert_eq!(out["error"]["code"],"GENERATION_CONFLICT");
+    assert_eq!(readers::bytes(&d.path), before);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+}
+
+#[tokio::test]
+async fn native_single_wire_fresh_budget_scope_and_profile_fail_before_provider_or_allocation() {
+    let root=tempfile::tempdir().unwrap(); let d=fixture(root.path()); let clock=Arc::new(FixedClock(AtomicUsize::new(0))); let s=open(&d,clock.clone()); let store_id=s.metadata().control_state().unwrap().store_id; let f=Fixture::from_open_engine(root,s.engine);
+    let provider=Arc::new(RecoveringProvider { profile:d.profile.clone(), unavailable:false.into(), calls:AtomicUsize::new(0),profiles:AtomicUsize::new(0),corrupt:Default::default() });
+    let mut config=crate::config::RecalldConfig::default(); config.graph.max_auto_links=1024;
+    let a=adapter(&f,provider.clone(),clock.clone(),config);
+    let base=json!({"namespaceId":d.ns,"storeId":store_id,"idempotencyKey":"budget","summary":"bounded"});
+    let before=readers::bytes(&d.path);
+    let (status,out)=single_http(&a,&base).await; assert_eq!(status,400,"{out}"); assert_eq!(out["error"]["code"],"RESPONSE_TOO_LARGE"); assert!(out.get("receipt").is_none());
+    let mut wrong=base.clone(); wrong["namespace"]=json!("wrong");
+    let (status,out)=single_http(&a,&wrong).await; assert_eq!(status,400,"{out}"); assert_eq!(out["error"]["code"],"NAMESPACE_MISMATCH");
+    let mut profile=base.clone(); profile["embedding"]=json!([1.,0.,0.,0.]); profile["embeddingProfileId"]=json!(format!("ep1:{}","a".repeat(64)));
+    let (status,out)=single_http(&a,&profile).await; assert_eq!(status,400,"{out}"); assert_eq!(out["error"]["code"],"EMBEDDING_PROFILE_MISMATCH");
+    assert_eq!(readers::bytes(&d.path),before); assert_eq!(provider.calls.load(Ordering::SeqCst),0); assert_eq!(provider.profiles.load(Ordering::SeqCst),0); assert_eq!(clock.0.load(Ordering::SeqCst),0);
+}
+
+#[tokio::test]
+async fn native_single_wire_known_publication_failure_retains_full_receipt_and_repairs_key() {
+    let root=tempfile::tempdir().unwrap(); let d=fixture(root.path()); let clock=Arc::new(FixedClock(AtomicUsize::new(0))); let s=open(&d,clock.clone()); let store_id=s.metadata().control_state().unwrap().store_id; let f=Fixture::from_open_engine(root,s.engine);
+    let provider=Arc::new(RecoveringProvider { profile:d.profile.clone(), unavailable:false.into(), calls:AtomicUsize::new(0),profiles:AtomicUsize::new(0),corrupt:std::sync::Mutex::new(Some(f.vector_index.clone())) });
+    let a=Arc::new(adapter(&f,provider.clone(),clock.clone(),Default::default()));
+    let body=json!({"namespaceId":d.ns,"storeId":store_id,"idempotencyKey":"publish-fault","summary":"known receipt","checkDuplicates":false});
+    let (status,out)=single_http(&a,&body).await; assert_eq!(status,503,"{out}"); assert_eq!(out["error"]["commitState"],"committed");
+    let receipt:WriteReceipt=serde_json::from_value(out["receipt"].clone()).unwrap(); assert_eq!(out["receipt"],canonical(&receipt)); assert_eq!(out["readiness"]["ready"],false);
+    assert!(out["readiness"]["derived"].as_array().unwrap().iter().any(|v| v["appliedGeneration"].is_null()));
+    let calls=provider.calls.load(Ordering::SeqCst); let profiles=provider.profiles.load(Ordering::SeqCst); let ticks=clock.0.load(Ordering::SeqCst);
+    *f.vector_index.write().await=crate::search::FlatVectorIndex::new(4);
+    let (error,replay)=single_mcp(a.clone(),body).await; assert!(!error,"{replay}"); assert_eq!(replay["readiness"]["ready"],true);
+    let mut expected=receipt; expected.replayed=true; assert_eq!(replay["receipt"],canonical(&expected)); assert_eq!(provider.calls.load(Ordering::SeqCst),calls); assert_eq!(provider.profiles.load(Ordering::SeqCst),profiles); assert_eq!(clock.0.load(Ordering::SeqCst),ticks);
+}
+
 #[tokio::test]
 async fn batch_wire_historical_oversize_completed_pending_retained_bytes_and_settings() {
     let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))

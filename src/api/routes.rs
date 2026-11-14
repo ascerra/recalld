@@ -49,7 +49,7 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
 
     let memory_routes = Router::new()
         .route("/", get(handlers::list_memories))
-        .route("/", post(handlers::create_memory))
+        .route("/", post(handlers::single_store_versioned))
         .route("/batch", post(handlers::batch_store_versioned))
         .route("/{id}", get(handlers::get_memory))
         .route("/{id}", delete(handlers::delete_memory))

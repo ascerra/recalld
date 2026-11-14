@@ -48,7 +48,7 @@ impl BatchBudget {
             .ok_or_else(|| Self::error(receipt))?;
         Ok(())
     }
-    fn receipt_bound(input: &NativeStoreInput, settings: &NativeStoreSettings) -> usize {
+    pub(super) fn receipt_bound(input: &NativeStoreInput, settings: &NativeStoreSettings) -> usize {
         let explicit = usize::from(input.insert.memory.parent_id.is_some())
             + usize::from(input.insert.memory.supersedes.is_some());
         let automatic = if settings.autolink_enabled {

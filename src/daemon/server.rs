@@ -496,6 +496,15 @@ async fn dispatch(
             }
         }
 
+        "store_native_single_observed_v1" => {
+            use crate::serialization::native_single::{Request, Reply};
+            let reply = match serde_json::from_value::<Request>(params) {
+                Ok(request) => storage.store_native_wire(request).await,
+                Err(_) => Reply::invalid(crate::serialization::contract::InputError { code: "INVALID_TYPE", field: String::new(), message: "invalid native single parameters" }),
+            };
+            // Preserve the canonical typed f32 JSON representation on this RPC.
+            serde_json::to_vec(&reply).and_then(|bytes| serde_json::from_slice(&bytes)).map_err(|_| BridgeError::PartiallyApplied("single reply serialization failed; reconcile original identity".into()))
+        }
         "mutate_native_batch_v1" | "mutate_native_batch_observed_v1" => {
             use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};
             let reply = match serde_json::from_value::<crate::storage::batch::BatchInput>(params) {
@@ -1321,6 +1330,14 @@ pub(crate) async fn native_batch_method_test_rpc(
     input: &crate::storage::batch::BatchInput,
     method: &str,
 ) -> DaemonResponse {
+    native_method_test_rpc(storage, serde_json::to_value(input).unwrap(), method).await
+}
+#[cfg(test)]
+pub(crate) async fn native_method_test_rpc(
+    storage: Arc<dyn BridgeStorageEngine>,
+    params: serde_json::Value,
+    method: &str,
+) -> DaemonResponse {
     let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
     let stub = Arc::new(crate::test_support::StubBridge::default());
     let (tx, rx) = watch::channel(false);
@@ -1341,7 +1358,7 @@ pub(crate) async fn native_batch_method_test_rpc(
             jsonrpc: "2.0".into(),
             id: 1,
             method: method.into(),
-            params: serde_json::to_value(input).unwrap(),
+            params,
         },
         LEGACY_MAX_MESSAGE_SIZE,
     )

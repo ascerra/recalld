@@ -134,6 +134,14 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn store_native_wire(&self, request: crate::serialization::native_single::Request) -> crate::serialization::native_single::Reply {
+        use crate::serialization::native_single::Reply;
+        let params = match serde_json::to_value(request) { Ok(v) => v, Err(_) => return Reply::failure(crate::storage::StorageError::InvalidMutation("invalid native single request".into())) };
+        match self.client.call("store_native_single_observed_v1", params).await {
+            Ok(value) => serde_json::from_value(value).unwrap_or_else(|_| Reply::uncertain()),
+            Err(_) => Reply::uncertain(),
+        }
+    }
     async fn mutate_native_batch(
         &self,
         input: crate::storage::batch::BatchInput,

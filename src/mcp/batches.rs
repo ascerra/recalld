@@ -624,7 +624,7 @@ fn native_input(
     Ok(native)
 }
 
-fn native_fields(
+pub(crate) fn native_fields(
     store: &bridge::StoreInput,
     value: &Value,
 ) -> Result<crate::storage::native_records::NativeInsert, bridge::BridgeError> {

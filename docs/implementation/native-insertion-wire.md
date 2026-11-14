@@ -67,6 +67,15 @@ native projection consumer. Ordinary startup follows that validated API1
 closure. Prepared explicit2 wire remains testable on owned fixtures throughout;
 none of these steps requires public API2 activation.
 
+Final A4 query coverage must consume Hume's actual V2 result after supplemental
+retrieval, including remaining graph/chain budgets and omission diagnostics.
+Earlier pipeline-channel coverage alone cannot describe the final result.
+Transport exposure accounting must use each actual returned set: HTTP hits and
+MCP neighbors are distinct consumer paths, with returned UUID deduplication and
+namespace grouping verified at their respective boundaries. This is an explicit
+activation prerequisite, not coverage implemented by this insertion consumer.
+It does not change the compact full-receipt design or any sealed write evidence.
+
 ## Failure readiness clarification
 
 CONTRACTS' integer `pendingWork` is not a deduplicated aggregate promise. An
