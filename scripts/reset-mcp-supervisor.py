@@ -74,7 +74,7 @@ def checked_snapshot(h, value, parent):
     path = Path(value["manifest"])
     if not path.is_absolute() or path.name != "manifest.json" or path.is_symlink() or not path.is_file() or path.parent.is_symlink() or path.resolve().parent.parent != parent.resolve():
         raise ValueError("checkpoint outside private fixture parent")
-    if h["digest"](path.read_bytes()) != value["sha256"]:
+    if path.stat().st_size > 1024*1024 or h["digest"](path.read_bytes()) != value["sha256"]:
         raise ValueError("checkpoint receipt digest mismatch")
     return value
 
@@ -115,6 +115,8 @@ class Child:
         self.control.call("reset", {}, error="UNSUPPORTED_CONTROL")
         state, ready = self.ready()
         snapshot = checked_snapshot(self.h, self.control.call("snapshot", dict(deadlineMs=30000)), self.root.parent)
+        if snapshot["committed"] != state["committed"]:
+            raise ValueError("snapshot generation changed before actor admission")
         if checkpoint and (snapshot["logicalHash"] != checkpoint["logicalHash"] or snapshot["committed"] != checkpoint["committed"] or state != expected_state):
             raise ValueError("fresh owner differs before actor admission")
         self.h["save"](self.output / "before-actor.json", dict(state=state, readiness=ready, snapshot=snapshot))
@@ -254,7 +256,7 @@ warm_file_enabled = false
         state,_=owner.ready()
         advance=owner.control.call("advance",dict(deltaMs=schedule["advanceMillis"],deadlineMs=30000))
         assert advance == dict(nowMillis=state["runtimeState"]["nowMillis"]+schedule["advanceMillis"])
-        mappings=dict(prefix_ids); outputs=[]; receipts=[]; start_id=100
+        mappings=dict(prefix_ids); outputs=[]; receipts=[]; actor_acks=[]; start_id=100
         for index, step in enumerate(schedule["steps"]):
             ordinal=ordinal_base+index;server.delivery=ordinal
             projection=h["CONFORMANCE"]["projection"](step,mappings,start_id,ordinal)
@@ -266,7 +268,7 @@ warm_file_enabled = false
             tool=ack["response"]["result"]
             expected_error=step["tag"] in ("invalid-quality","replay-miss")
             assert tool.get("isError",False) == expected_error, step["tag"]
-            outputs.append(dict(tag=step["tag"],result=tool))
+            outputs.append(dict(tag=step["tag"],result=tool));actor_acks.append(ack)
             state,ready=owner.ready();receipts.append(dict(deliveryOrdinal=ordinal,state=state,readiness=ready))
             h["save"](owner.output / "step-receipts.json",receipts)
         assert mappings["turn-4"] != prefix_ids["turn-0"]
@@ -290,12 +292,17 @@ warm_file_enabled = false
         events="".join(json.dumps(v)+"\n" for v in event_rows)
         score=dict(profile=manifest["scoringProfile"],environmentHash=environment,sourceIds=[s["sourceId"] for s in actor["sources"]],mappings={memory:[source] for source,memory in mappings.items()},
             relevant=labels["relevant"],queries=queries,sourceEvents=events,sourceEventsSha256=h["digest"](events.encode()))
+        (owner.output / "source-events.jsonl").write_text(events)
         h["save"](owner.output / "score-input.json",score)
         subprocess.run([str(args.scorer),"--input",str(owner.output / "score-input.json"),"--out",str(owner.output / "scores.json")],check=True,env=dict(PATH="/usr/bin:/bin"))
-        h["save"](owner.output / "source-mappings.json",dict(sourceMappingVersion=1,mappings=score["mappings"],prefixArtifactSha256=h["digest"]((evaluator / "prefix-mappings.json").read_bytes())))
+        h["save"](owner.output / "source-mappings.json",dict(sourceMappingVersion=1,actorArtifactSha256=manifest["actorInputs"]["sha256"],mappings=score["mappings"],sources=actor["sources"]))
+        h["save"](owner.output / "prefix-provenance.json",dict(prefixArtifact="../prefix-mappings.json",prefixArtifactSha256=h["digest"]((evaluator / "prefix-mappings.json").read_bytes())))
         with (owner.output / "trace.jsonl").open("w") as trace:
-            for row,receipt in zip(outputs,receipts):
-                trace.write(json.dumps(dict(traceSchemaVersion=1,environmentHash=environment,stepId=str(receipt["deliveryOrdinal"]),actionTag=row["tag"],outcome=row["result"],readGeneration=None,readiness=dict(scope="post-step-barrier",receipt=receipt["readiness"]),reward=None))+"\n")
+            for ack,receipt in zip(actor_acks,receipts):
+                trace.write(json.dumps(dict(traceSchemaVersion=1,runId=environment,episodeId=owner.output.name,groupId="synthetic-regression",
+                    stepId=ack["stepId"],environmentHash=environment,action=ack["request"],outcome=ack["response"],readGeneration=None,
+                    readiness=dict(available=True,scope="post-step-barrier-not-response-readview",receiptFile="step-receipts.json",deliveryOrdinal=receipt["deliveryOrdinal"]),
+                    simulatedTimeMs=None,snapshot=None,reward=None))+"\n")
         wire=h["rows"](owner.output / "actor-wire.jsonl")
         canary=schedule["futureQueryCanary"]
         first=next(ordinal_base+i for i,s in enumerate(schedule["steps"]) if canary in json.dumps(s))
@@ -324,6 +331,7 @@ warm_file_enabled = false
         assert len(h["rows"](server.log))-warm_start==2
         prefix_state,_=original.ready()
         checkpoint=checked_snapshot(h,original.control.call("snapshot",dict(deadlineMs=30000)),runtime)
+        assert checkpoint["committed"] == prefix_state["committed"]
         h["save"](evaluator / "prefix-checkpoint.json",checkpoint)
         checkpoint_root=Path(checkpoint["manifest"]).parent;checkpoint_files=inventory(checkpoint_root)
         reject("old-owner-active",checkpoint)

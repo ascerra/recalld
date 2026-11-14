@@ -60,6 +60,14 @@ def main():
             compared+=len(actions(old))
             for p in (a/"actor-inputs").glob("*.json"):
                 assert p.read_bytes()==(b/"actor-inputs"/p.name).read_bytes()
+            for directory in (a,b):
+                mapping=json.loads((directory/"source-mappings.json").read_text())
+                assert set(mapping)=={"sourceMappingVersion","actorArtifactSha256","mappings","sources"} and mapping["sourceMappingVersion"]==1
+                traces=h["rows"](directory/"trace.jsonl")
+                for trace in traces:
+                    assert set(trace)=={"traceSchemaVersion","runId","episodeId","groupId","stepId","environmentHash","action","outcome","readGeneration","readiness","simulatedTimeMs","snapshot","reward"}
+                    assert trace["traceSchemaVersion"]==1 and trace["readGeneration"] is None
+                    assert trace["action"]["id"]==trace["outcome"]["id"]==int(trace["stepId"])
             scores=[json.loads((p/"scores.json").read_text()) for p in (a,b)]
             assert scores[0]["scoring"]["scored"]=="2" and scores[0]["scoring"]["unknownAnnotations"]=="1" and scores[0]["scoring"]["zeroLabelUnscored"]=="1"
             assert scores[1]["scoring"]["scored"]=="4" and scores[1]["scoring"]["means"]["retrievalRecallAt5"]==0
