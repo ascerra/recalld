@@ -1143,6 +1143,93 @@ pub async fn list_namespaces(
 /// 4. Return 201 with namespace details.
 pub async fn create_namespace(
     State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::ContractVersion;
+    use axum::extract::FromRequest;
+    use axum::response::IntoResponse;
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version == ContractVersion::V1 {
+        let Json(body) = match Json::<serde_json::Value>::from_request(request, &state).await {
+            Ok(body) => body,
+            Err(error) => return error.into_response(),
+        };
+        return create_namespace_v1(State(state), Json(body))
+            .await
+            .into_response();
+    }
+    let header_key = match catalog_header_key(request.headers()) {
+        Ok(key) => key,
+        Err(error) => return catalog_response(Err(error.into())),
+    };
+    let Json(body) = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(body) => body,
+        Err(error) => return error.into_response(),
+    };
+    create_namespace_v2(state.namespaces.as_ref(), &body, header_key.as_deref()).await
+}
+
+fn catalog_header_key(
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<String>, crate::serialization::contract::InputError> {
+    let mut keys = headers
+        .get_all(crate::serialization::contract::KEY_HEADER)
+        .iter();
+    let first = keys.next();
+    let invalid = || crate::serialization::contract::InputError {
+        code: "INVALID_COMBINATION",
+        field: "/idempotencyKey".into(),
+        message: "one ASCII Idempotency-Key header is required when supplied",
+    };
+    if keys.next().is_some() {
+        return Err(invalid());
+    }
+    first
+        .map(|key| key.to_str().map(str::to_owned).map_err(|_| invalid()))
+        .transpose()
+}
+fn catalog_response(
+    result: Result<
+        crate::storage::control::WriteReceipt,
+        crate::native_catalog_adapter::CatalogError,
+    >,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (status, envelope) = crate::native_catalog_adapter::response(result);
+    (StatusCode::from_u16(status).unwrap(), Json(envelope)).into_response()
+}
+/// Real inner consumer; the outer route still rejects public contract2.
+pub(crate) async fn create_namespace_v2(
+    namespaces: &dyn super::state::NamespaceRegistry,
+    body: &serde_json::Value,
+    header_key: Option<&str>,
+) -> axum::response::Response {
+    let result =
+        match crate::serialization::catalog::CreateNamespaceRequest::from_http(body, header_key) {
+            Ok(request) => namespaces.create_native_namespace(request).await,
+            Err(error) => Err(error.into()),
+        };
+    catalog_response(result)
+}
+
+async fn create_namespace_v1(
+    State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<ApiResponse<NamespaceResponse>>), AppError> {
     let start = Instant::now();

@@ -1,0 +1,1 @@
+Source manifest captured after cargo fmt, while test compilation was running, before any test result was observed. Source not edited during compilation/test. Final hashes must match.

@@ -1230,18 +1230,50 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
+    native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
 }
 
 impl NamespaceRegistryAdapter {
+    /// Bind actual provider, frozen inherited policy and clock from this owner.
+    pub fn with_native_catalog(
+        mut self,
+        provider: Arc<dyn EmbeddingProvider>,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+        clock: Arc<dyn crate::time::Clock>,
+    ) -> Self {
+        self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
+            self.storage.clone(),
+            provider,
+            policy,
+            clock,
+        ));
+        self
+    }
+
     /// Creates a new adapter wrapping the storage engine for namespace operations.
     pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            native_catalog: None,
+        }
     }
 }
 
 #[async_trait]
 impl state::NamespaceRegistry for NamespaceRegistryAdapter {
+    async fn create_native_namespace(
+        &self,
+        request: crate::serialization::catalog::CreateNamespaceRequest,
+    ) -> Result<crate::storage::control::WriteReceipt, crate::native_catalog_adapter::CatalogError>
+    {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .create(request)
+            .await
+    }
+
     fn resolve(&self, name: &str) -> Option<NamespaceConfig> {
         tokio::task::block_in_place(|| {
             let storage_r = self.storage.read().ok()?;

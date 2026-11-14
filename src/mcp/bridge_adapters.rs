@@ -1719,6 +1719,7 @@ fn build_list_tags_response(
 /// to splitting deletion onto `StorageEngine` because that is where the
 /// handles happen to be.
 pub struct McpNamespaceAdapter {
+    native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
@@ -1729,6 +1730,22 @@ pub struct McpNamespaceAdapter {
 }
 
 impl McpNamespaceAdapter {
+    /// Bind actual provider, frozen inherited policy and clock from this owner.
+    pub fn with_native_catalog(
+        mut self,
+        provider: Arc<dyn EmbeddingProvider>,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+        clock: Arc<dyn crate::time::Clock>,
+    ) -> Self {
+        self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
+            self.storage.clone(),
+            provider,
+            policy,
+            clock,
+        ));
+        self
+    }
+
     /// Create a new namespace adapter wrapping the storage engine and
     /// the indexes a namespace deletion has to clean.
     pub fn new(
@@ -1742,6 +1759,7 @@ impl McpNamespaceAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_catalog: None,
             storage,
             cache,
             vector_index,
@@ -1837,6 +1855,18 @@ impl DeleteFailure {
 
 #[async_trait]
 impl bridge::NamespaceRegistry for McpNamespaceAdapter {
+    async fn create_native_namespace(
+        &self,
+        request: crate::serialization::catalog::CreateNamespaceRequest,
+    ) -> Result<crate::storage::control::WriteReceipt, crate::native_catalog_adapter::CatalogError>
+    {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .create(request)
+            .await
+    }
+
     async fn list_namespaces(&self) -> Result<Vec<bridge::NamespaceInfo>, bridge::BridgeError> {
         let stamp = effects_stamp(&self.storage).await?;
         let result = async {

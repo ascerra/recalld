@@ -141,6 +141,15 @@ pub trait StorageEngine: Send + Sync {
 /// Namespace registry interface.
 #[async_trait]
 pub trait NamespaceRegistry: Send + Sync {
+    /// Native catalog entry remains behind the unconditional public v2 gate.
+    async fn create_native_namespace(
+        &self,
+        _request: crate::serialization::catalog::CreateNamespaceRequest,
+    ) -> Result<crate::storage::control::WriteReceipt, crate::native_catalog_adapter::CatalogError>
+    {
+        Err(crate::native_catalog_adapter::CatalogError::Unavailable)
+    }
+
     /// List all namespaces.
     async fn list_namespaces(&self) -> Result<Vec<NamespaceInfo>, BridgeError>;
 

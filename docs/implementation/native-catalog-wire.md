@@ -47,3 +47,38 @@ and an actual same-transaction paging/filter API. Halley's coherent query alone
 does not supply catalog/list pagination or hydrated text at its generation;
 legacy hydration cannot inherit that response's readGeneration. Full native
 wire activation waits for the complete writer/readiness/serving gates.
+
+## Current independent implementation checkpoint
+
+The shared strict request parser and actual namespace adapters/inner MCP and
+REST handlers are implemented. Direct MCP/HTTP/daemon construction supplies the
+actual provider, clock and QueryEngine frozen policy inputs. The same owning
+engine now implements the session and adapter orchestration. Accepted work
+propagates through both replay lookup and final publication; standard locks are
+held only in the blocking worker. Typed profile selector conflicts remain
+distinct from unavailable provider configuration. V1 paths and public2 rejection
+remain in place. Remote native catalog RPC is not implemented and cannot fall
+back to legacy creation.
+
+Five focused tests passed offline in Rust1.94.1 Docker (network none,2CPU/4GiB):
+strict input/key/CAS parsing, actual cross-transport replay with stale CAS and
+provider calls forbidden, reopen/replay, byte-immutable rejected inputs/profile
+conflicts, and accepted-root lookup+commit during closed admission. Actual MCP
+text/structured results agree. These are inner-handler tests, not public2
+activation or full suite evidence. Source and six executable hashes are retained
+under /tmp/recalld-native-catalog-wire-validation/consumer. This source-root switch
+used cargo clean -p recalld in the private target after preserving PR88 hashes.
+
+Feynman now owns the two-site full receipt correction in PR87; this child has not
+edited either publisher site. Await its frozen validation plus Pascal's startup
+correction before final full validation. Catalog success currently omits shared
+readiness explicitly and carries a warning; it must not be presented as whole
+writer/serving readiness. Actual committed/uncertain transport fault checks and
+strict operation schema completion remain outstanding in this child.
+
+The subsequent focused catalog run passed27 tests in28.57s, including existing
+real process-crash recovery cases; the unchanged v1 namespace-option parity
+regression passed1 test in0.36s. These are bounded checks, not the final full
+suite. [Initial evidence](../evidence/native-catalog-wire/initial/manifest.json)
+retains28 artifacts with source/binary hashes and explicitly identified capture
+timing. No before/after source-root switching occurred within these runs.

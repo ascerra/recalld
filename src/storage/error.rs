@@ -90,6 +90,12 @@ pub enum StorageError {
     #[error("EMBEDDING_UNAVAILABLE: invalid provider vector: {0}")]
     ProviderVectorUnavailable(String),
 
+    #[error("active embedding provider configuration is unavailable or invalid")]
+    ProviderConfigurationUnavailable,
+
+    #[error("active embedding profile does not match {field}")]
+    EmbeddingProfileMismatch { field: &'static str },
+
     #[error("EDGE_CONFLICT: {0}")]
     EdgeConflict(String),
 

@@ -536,8 +536,13 @@ async fn run_serve(
                 system.entity_index().clone(),
             ),
         );
-        let namespaces: Arc<dyn recalld::api::NamespaceRegistry> =
-            Arc::new(NamespaceRegistryAdapter::new(system.storage().clone()));
+        let namespaces: Arc<dyn recalld::api::NamespaceRegistry> = Arc::new(
+            NamespaceRegistryAdapter::new(system.storage().clone()).with_native_catalog(
+                system.embedding().clone(),
+                system.query_engine().native_policy_inputs(),
+                system.clock().clone(),
+            ),
+        );
         let metrics: Arc<dyn recalld::api::MetricsCollector> = Arc::new(NoopMetricsCollector);
 
         recalld::api::AppState::new(search, storage, cache, graph, decay, namespaces, metrics)
@@ -647,8 +652,8 @@ fn create_direct_mcp_bridge(
         )
         .with_clock(system.clock().clone()),
     );
-    let namespaces: Arc<dyn recalld::mcp::bridge::NamespaceRegistry> =
-        Arc::new(McpNamespaceAdapter::new(
+    let namespaces: Arc<dyn recalld::mcp::bridge::NamespaceRegistry> = Arc::new(
+        McpNamespaceAdapter::new(
             system.storage().clone(),
             system.cache().clone(),
             system.vector_index().clone(),
@@ -656,7 +661,13 @@ fn create_direct_mcp_bridge(
             system.entity_index().clone(),
             system.graph().clone(),
             tz,
-        ));
+        )
+        .with_native_catalog(
+            system.embedding().clone(),
+            system.query_engine().native_policy_inputs(),
+            system.clock().clone(),
+        ),
+    );
     let health: Arc<dyn recalld::mcp::bridge::HealthChecker> =
         Arc::new(McpHealthAdapter::new(system.storage().clone()));
 

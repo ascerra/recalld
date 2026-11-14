@@ -1735,6 +1735,20 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if name == "create_namespace" {
+        let result =
+            match crate::serialization::catalog::CreateNamespaceRequest::from_mcp(&arguments) {
+                Ok(request) => bridge.namespaces.create_native_namespace(request).await,
+                Err(error) => Err(error.into()),
+            };
+        let (status, envelope) = crate::native_catalog_adapter::response(result);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        if status >= 400 {
+            result.is_error = Some(true);
+        }
+        return result;
+    }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{
         contract::{CommitState, Envelope, ErrorCategory, ExecutionError},

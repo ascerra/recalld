@@ -21,10 +21,11 @@ impl MetadataStore {
         &self,
         ctx: &MutationContext,
         input: &NativeNamespaceInput,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Option<WriteReceipt>, StorageError> {
         validate_context(ctx)?;
         let hash = input.hash(ctx)?;
-        let _guard = self.native_guard()?;
+        let _guard = self.native_guard_with_work(parent)?;
         control::replay_or_check(&self.db.begin_write()?, ctx, hash)
     }
 
