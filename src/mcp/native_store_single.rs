@@ -1,12 +1,12 @@
 //! Typed single producer for the native wire consumer. Public legacy dispatch
 //! is unchanged; a single operation never acquires catalog batch semantics.
 use super::McpStorageAdapter;
+use crate::storage::StorageEngine as _;
 use crate::storage::StorageError;
 use crate::storage::control::{MutationContext, MutationOutcome, WriteReceipt};
 use crate::storage::native_lifecycle::NativePolicyInputs;
 use crate::storage::native_store::NativeStoreInput;
 use crate::storage::work::WorkTicket;
-use crate::storage::StorageEngine as _;
 
 pub(crate) struct NativeSingleResult {
     pub receipt: WriteReceipt,
@@ -15,77 +15,178 @@ pub(crate) struct NativeSingleResult {
 }
 
 impl McpStorageAdapter {
-    pub(super) async fn run_native_single_wire(&self, request: crate::serialization::native_single::Request) -> crate::serialization::native_single::Reply {
+    pub(super) async fn run_native_single_wire(
+        &self,
+        request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
         use crate::serialization::{contract::*, native_single::Reply};
         use crate::storage::metadata::NativeStoreProfileResolution;
-        let mut parsed = match request.prepare() { Ok(v) => v, Err(e) => return Reply::invalid(e) };
+        let mut parsed = match request.prepare() {
+            Ok(v) => v,
+            Err(e) => return Reply::invalid(e),
+        };
         let completion = self.batch_completion();
-        let work = match completion.accept_work(None) { Ok(work) => work, Err(e) => return Reply::failure(e) };
+        let work = match completion.accept_work(None) {
+            Ok(work) => work,
+            Err(e) => return Reply::failure(e),
+        };
         let mut scope = None;
         let mut known = None;
         let result: Result<_, StorageError> = async {
             let ctx;
             {
-                let engine = self.storage.read().map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+                let engine = self
+                    .storage
+                    .read()
+                    .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
                 let namespace_id = match parsed.namespace_id {
                     Some(id) => id,
-                    None => engine.get_namespace_by_name(&parsed.store.namespace)?.ok_or_else(|| StorageError::InvalidMutation("namespace does not exist".into()))?.id,
+                    None => {
+                        engine
+                            .get_namespace_by_name(&parsed.store.namespace)?
+                            .ok_or_else(|| {
+                                StorageError::InvalidMutation("namespace does not exist".into())
+                            })?
+                            .id
+                    }
                 };
-                ctx = parsed.options.context(crate::storage::control::MutationScope::Namespace(namespace_id), ContractVersion::V2);
+                ctx = parsed.options.context(
+                    crate::storage::control::MutationScope::Namespace(namespace_id),
+                    ContractVersion::V2,
+                );
                 // Resolve matching history before current binding, policy, CAS,
                 // settings, provider, clocks or payload allocation.
-                let resolution = engine.meta_store().resolve_native_store_profile(&ctx, &parsed.input, parsed.profile_id.as_deref(), Some(&work))?;
-                if let NativeStoreProfileResolution::Replay(receipt) = &resolution { known = Some(receipt.clone()); }
+                let resolution = engine.meta_store().resolve_native_store_profile(
+                    &ctx,
+                    &parsed.input,
+                    parsed.profile_id.as_deref(),
+                    Some(&work),
+                )?;
+                if let NativeStoreProfileResolution::Replay(receipt) = &resolution {
+                    known = Some(receipt.clone());
+                }
                 let guard = engine.meta_store().native_guard_with_work(Some(&work))?;
-                let (generation, binding) = engine.meta_store().capture_namespace_binding(&guard, namespace_id)?;
-                let binding = binding.ok_or_else(|| StorageError::RecoveryRequired("namespace binding unavailable".into()))?;
-                if parsed.asserted_name.as_ref().is_some_and(|name| !name.eq_ignore_ascii_case(&binding.name)) { return Err(StorageError::MutationNamespaceMismatch); }
+                let (generation, binding) = engine
+                    .meta_store()
+                    .capture_namespace_binding(&guard, namespace_id)?;
+                let binding = binding.ok_or_else(|| {
+                    StorageError::RecoveryRequired("namespace binding unavailable".into())
+                })?;
+                if parsed
+                    .asserted_name
+                    .as_ref()
+                    .is_some_and(|name| !name.eq_ignore_ascii_case(&binding.name))
+                {
+                    return Err(StorageError::MutationNamespaceMismatch);
+                }
                 parsed.store.namespace = binding.name.clone();
                 scope = Some((namespace_id, binding.name));
                 if matches!(resolution, NativeStoreProfileResolution::Fresh(_)) {
                     if let Some(expected) = ctx.expected_generation {
-                        if expected != generation.generation { return Err(StorageError::GenerationConflict { expected: expected.to_string(), actual: generation.generation.to_string() }); }
+                        if expected != generation.generation {
+                            return Err(StorageError::GenerationConflict {
+                                expected: expected.to_string(),
+                                actual: generation.generation.to_string(),
+                            });
+                        }
                     }
-                    let settings = crate::graph::native_selection::freeze_settings(&self.config.graph)?;
-                    let bound = super::super::batch_budget::BatchBudget::receipt_bound(&parsed.input, &settings);
+                    let settings =
+                        crate::graph::native_selection::freeze_settings(&self.config.graph)?;
+                    let bound = super::super::batch_budget::BatchBudget::receipt_bound(
+                        &parsed.input,
+                        &settings,
+                    );
                     // Same typed receipt maximum as batches, plus single data,
                     // readiness and both MCP copies. Never change link settings.
                     if bound + 32 * 1024 > super::super::batch_budget::MAX_BATCH_JSON_BYTES {
-                        return Err(StorageError::BatchResponseTooLarge { reservation_receipt: None });
+                        return Err(StorageError::BatchResponseTooLarge {
+                            reservation_receipt: None,
+                        });
                     }
                 }
             }
-            let policy = NativePolicyInputs { global: crate::decay::DecayConfig::default(), multiplier: self.config.decay.decay_rate_multiplier };
-            let result = self.store_native_single_by_profile_id(ctx, parsed.input, parsed.profile_id, policy, Some(&work)).await?;
+            let policy = NativePolicyInputs {
+                global: crate::decay::DecayConfig::default(),
+                multiplier: self.config.decay.decay_rate_multiplier,
+            };
+            let result = self
+                .store_native_single_by_profile_id(
+                    ctx,
+                    parsed.input,
+                    parsed.profile_id,
+                    policy,
+                    Some(&work),
+                )
+                .await?;
             known = Some(result.receipt.clone());
-            let mut data = super::super::batches::stored_from_receipt(&parsed.store, &result.receipt, self.timezone).map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+            let mut data = super::super::batches::stored_from_receipt(
+                &parsed.store,
+                &result.receipt,
+                self.timezone,
+            )
+            .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
             data.near_duplicates = result.advisory.report;
-            Ok((result.receipt, data, result.advisory.warnings, result.advisory.read_generation))
-        }.await;
+            Ok((
+                result.receipt,
+                data,
+                result.advisory.warnings,
+                result.advisory.read_generation,
+            ))
+        }
+        .await;
         // Finish only the known root; worker tickets retain unknown commits.
         completion.finish_known_work(work);
         let deadline = || std::time::Instant::now() + std::time::Duration::from_secs(30);
         let mut reply = match result {
             Ok((receipt, data, warnings, read_generation)) => {
-                let target = self.storage.read().map_err(|e| StorageError::RecoveryRequired(e.to_string())).and_then(|s| s.control_state().map(|c| c.generation_ref()));
-                let ready = match target { Ok(target) => completion.readiness_barrier(target, deadline()).await, Err(e) => Err(e) };
+                let target = self
+                    .storage
+                    .read()
+                    .map_err(|e| StorageError::RecoveryRequired(e.to_string()))
+                    .and_then(|s| s.control_state().map(|c| c.generation_ref()));
+                let ready = match target {
+                    Ok(target) => completion.readiness_barrier(target, deadline()).await,
+                    Err(e) => Err(e),
+                };
                 match ready {
-                    Ok(ready) => Reply { namespace_id: None, namespace: None, data: Some(data), receipt: Some(receipt), readiness: Some(ready.into()), read_generation, error: None, warnings: warnings.into_iter().map(str::to_owned).collect() },
-                    Err(source) => Reply::failure(StorageError::CommittedMutation { receipt: Box::new(receipt), source: Box::new(source) }),
+                    Ok(ready) => Reply {
+                        namespace_id: None,
+                        namespace: None,
+                        data: Some(data),
+                        receipt: Some(receipt),
+                        readiness: Some(ready.into()),
+                        read_generation,
+                        error: None,
+                        warnings: warnings.into_iter().map(str::to_owned).collect(),
+                    },
+                    Err(source) => Reply::failure(StorageError::CommittedMutation {
+                        receipt: Box::new(receipt),
+                        source: Box::new(source),
+                    }),
                 }
             }
             Err(error) => {
                 let error = match (known, error) {
                     (_, error @ StorageError::CommittedMutation { .. }) => error,
-                    (Some(receipt), source) => StorageError::CommittedMutation { receipt: Box::new(receipt), source: Box::new(source) },
+                    (Some(receipt), source) => StorageError::CommittedMutation {
+                        receipt: Box::new(receipt),
+                        source: Box::new(source),
+                    },
                     (_, error) => error,
                 };
                 Reply::failure(error)
             }
         };
-        if let Some((id, name)) = scope { reply.namespace_id = Some(id); reply.namespace = Some(name); }
+        if let Some((id, name)) = scope {
+            reply.namespace_id = Some(id);
+            reply.namespace = Some(name);
+        }
         if reply.error.is_some() && reply.receipt.is_some() {
-            match completion.observe_readiness(deadline()).await.and_then(Readiness::observed) {
+            match completion
+                .observe_readiness(deadline())
+                .await
+                .and_then(Readiness::observed)
+            {
                 Ok(readiness) => reply.readiness = Some(readiness),
                 Err(_) => reply.warnings.push("READINESS_UNKNOWN".into()),
             }

@@ -497,13 +497,23 @@ async fn dispatch(
         }
 
         "store_native_single_observed_v1" => {
-            use crate::serialization::native_single::{Request, Reply};
+            use crate::serialization::native_single::{Reply, Request};
             let reply = match serde_json::from_value::<Request>(params) {
                 Ok(request) => storage.store_native_wire(request).await,
-                Err(_) => Reply::invalid(crate::serialization::contract::InputError { code: "INVALID_TYPE", field: String::new(), message: "invalid native single parameters" }),
+                Err(_) => Reply::invalid(crate::serialization::contract::InputError {
+                    code: "INVALID_TYPE",
+                    field: String::new(),
+                    message: "invalid native single parameters",
+                }),
             };
             // Preserve the canonical typed f32 JSON representation on this RPC.
-            serde_json::to_vec(&reply).and_then(|bytes| serde_json::from_slice(&bytes)).map_err(|_| BridgeError::PartiallyApplied("single reply serialization failed; reconcile original identity".into()))
+            serde_json::to_vec(&reply)
+                .and_then(|bytes| serde_json::from_slice(&bytes))
+                .map_err(|_| {
+                    BridgeError::PartiallyApplied(
+                        "single reply serialization failed; reconcile original identity".into(),
+                    )
+                })
         }
         "mutate_native_batch_v1" | "mutate_native_batch_observed_v1" => {
             use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};

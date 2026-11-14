@@ -1500,7 +1500,10 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
-    async fn store_native_wire(&self, request: crate::serialization::native_single::Request) -> crate::serialization::native_single::Reply {
+    async fn store_native_wire(
+        &self,
+        request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
         self.run_native_single_wire(request).await
     }
     async fn mutate_native_batch(

@@ -82,7 +82,11 @@ pub trait StorageEngine: Send + Sync {
         &self,
         _request: crate::serialization::native_single::Request,
     ) -> crate::serialization::native_single::Reply {
-        crate::serialization::native_single::Reply::failure(crate::storage::StorageError::RecoveryRequired("native single consumer unavailable".into()))
+        crate::serialization::native_single::Reply::failure(
+            crate::storage::StorageError::RecoveryRequired(
+                "native single consumer unavailable".into(),
+            ),
+        )
     }
     async fn mutate_native_batch(
         &self,

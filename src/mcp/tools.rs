@@ -1871,7 +1871,7 @@ pub(crate) async fn dispatch_v2(
     arguments: serde_json::Value,
 ) -> ToolCallResult {
     if name == "store_memory" {
-        use crate::serialization::native_single::{Request, Reply, mcp_result};
+        use crate::serialization::native_single::{Reply, Request, mcp_result};
         let reply = match Request::parse(&arguments, false, None, bridge.default_namespace()) {
             Ok(request) => bridge.storage.store_native_wire(request).await,
             Err(error) => Reply::invalid(error),
