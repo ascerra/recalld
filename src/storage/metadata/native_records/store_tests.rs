@@ -121,6 +121,46 @@ fn native_store_atomic_edges_tokens_temporal_clock_and_replay() {
     assert_eq!(replay.outcome, receipt.outcome);
     assert_eq!(clock.0.load(Ordering::SeqCst), 1);
     assert_eq!(bytes(&d.path), saved);
+    let mut changed_settings = settings();
+    changed_settings.autolink_enabled = false;
+    changed_settings.max_auto_links = 0;
+    changed_settings.max_entity_links = 0;
+    changed_settings.max_temporal_links = 0;
+    changed_settings.temporal_window_ms = 0;
+    let current_intent = session
+        .capture_store(scope(&d), &input, &changed_settings)
+        .unwrap();
+    let current_plan = FrozenInsertLinks {
+        generation: current_intent.insert_intent().capture_generation(),
+        profile_id: d.profile.profile_id().unwrap(),
+        static_links: vec![],
+        temporal: vec![],
+        advisory: Some(vec![]),
+    };
+    let current_prepared = session
+        .prepare_store_links(&current_intent, &current_plan)
+        .unwrap();
+    let saved = bytes(&d.path);
+    let replay = session
+        .store_prepared(
+            &key,
+            &current_prepared,
+            &GeneratedEmbedding {
+                values: vec![],
+                profile: None,
+            },
+        )
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.outcome, receipt.outcome);
+    assert!(proof(&replay).settings.autolink_enabled);
+    assert_eq!(proof(&replay).edges.len(), 5);
+    assert_eq!(
+        proof(&replay).advisory_matches(),
+        Some(vec![(d.parent, 0.95)])
+    );
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+    assert_eq!(bytes(&d.path), saved);
     let mut changed = input.clone();
     changed.check_duplicates = false;
     assert!(matches!(
@@ -530,4 +570,60 @@ fn native_store_proof_rejects_bad_tokens_edges_advisory_and_old_proof_widening()
         phase_time_rule: None,
     };
     assert!(old.validate(&receipt, true).is_err());
+}
+
+#[test]
+fn native_store_canonical_foreign_and_terminal_candidates_reject_without_writes() {
+    let root = tempfile::tempdir().unwrap();
+    let mut foreign = MemoryId::nil();
+    let d = fixture_with_seed(root.path(), |engine| {
+        let mut ns = NamespaceConfig::default_namespace(0);
+        ns.name = "foreign".into();
+        ns.embedding_dim = 4;
+        let ns = engine.create_namespace(&ns).unwrap();
+        let input = crate::storage::insertion::InsertMemory {
+            id: None,
+            summary: "foreign candidate".into(),
+            full_text: None,
+            tags: vec![],
+            initial_stability: None,
+            created_at: Some(1000),
+            embedding: Some(vec![1., 0., 0., 0.]),
+            parent_id: None,
+            supersedes: None,
+        };
+        foreign = crate::storage::insertion::inserted_id(
+            &engine
+                .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &input, &[], 1000)
+                .unwrap(),
+        )
+        .unwrap();
+    });
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let mut session = open(&d, clock);
+    let input = original(&d);
+    let intent = session
+        .capture_store(scope(&d), &input, &settings())
+        .unwrap();
+    let mut links = selection(&intent, &d);
+    links.static_links[0].0 = foreign;
+    let before = bytes(&d.path);
+    assert!(matches!(
+        session.prepare_store_links(&intent, &links),
+        Err(StorageError::MutationNamespaceMismatch)
+    ));
+    assert_eq!(bytes(&d.path), before);
+    let tombstone = session.capture_tombstone(d.parent, None).unwrap();
+    session
+        .tombstone(&ctx(&session, &d, "terminal"), &tombstone)
+        .unwrap();
+    let intent = session
+        .capture_store(scope(&d), &input, &settings())
+        .unwrap();
+    let before = bytes(&d.path);
+    assert!(matches!(
+        session.prepare_store_links(&intent, &selection(&intent, &d)),
+        Err(StorageError::LifecycleContentUnavailable)
+    ));
+    assert_eq!(bytes(&d.path), before);
 }
