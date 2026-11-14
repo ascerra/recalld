@@ -428,9 +428,7 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
     assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
     *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
     let failure = publisher.complete().await.unwrap_err();
-    assert!(
-        matches!(failure,StorageError::CommittedEffectsPending{operation_id,..} if operation_id==forgotten.operation_id)
-    );
+    assert!(matches!(failure,StorageError::CommittedMutation{receipt,..} if *receipt==forgotten));
     assert!(
         !f.storage
             .read()

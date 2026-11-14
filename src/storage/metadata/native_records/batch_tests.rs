@@ -4,6 +4,29 @@ use crate::storage::batch::{BatchInput, BatchItemPlan, BatchItemState, BatchKind
 use crate::test_support::Fixture;
 use serde_json::json;
 
+fn disabled_aux_config() -> Arc<crate::config::RecalldConfig> {
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.autolink_enabled = false;
+    Arc::new(config)
+}
+fn disabled_aux_adapter(
+    f: &Fixture,
+    clock: Arc<FixedClock>,
+) -> crate::mcp::bridge_adapters::McpStorageAdapter {
+    crate::mcp::bridge_adapters::McpStorageAdapter::new(
+        f.storage.clone(),
+        f.cache.clone(),
+        Arc::new(crate::embedding::PassthroughProvider::new(4)),
+        f.vector_index.clone(),
+        f.fts_index.clone(),
+        f.entity_index.clone(),
+        f.graph.clone(),
+        disabled_aux_config(),
+        chrono_tz::UTC,
+    )
+    .with_clock(clock)
+}
+
 fn request(d: &Data, store_id: uuid::Uuid, key: &str) -> BatchInput {
     BatchInput {
         mutation_version: 2,
@@ -209,7 +232,7 @@ async fn native_batch_actual_adapter_commits_labels_and_replays_then_forgets() {
     );
     let f = Fixture::from_open_engine(root, s.engine);
     completion(&f).rebuild_all().await.unwrap();
-    let adapter = f.storage_adapter().with_clock(clock.clone());
+    let adapter = disabled_aux_adapter(&f, clock.clone());
     let out = adapter.mutate_batch(r.clone()).await.unwrap();
     assert!(out.all_ready(), "{out:?}");
     let receipt = out.items[0].receipt.clone().unwrap();
@@ -265,7 +288,7 @@ async fn native_batch_unknown_child_reconciles_original_id_after_strict_reopen()
         .meta_store()
         .fail_batch_commit
         .store(3, Ordering::SeqCst);
-    let adapter = f.storage_adapter().with_clock(clock.clone());
+    let adapter = disabled_aux_adapter(&f, clock.clone());
     let out = adapter.mutate_batch(r.clone()).await.unwrap();
     assert_eq!(out.items[0].status, BatchStatus::Unknown);
     let child = out.items[0].operation_id.unwrap();
@@ -275,7 +298,7 @@ async fn native_batch_unknown_child_reconciles_original_id_after_strict_reopen()
     let root = f.close();
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
-    let adapter = f.storage_adapter().with_clock(clock);
+    let adapter = disabled_aux_adapter(&f, clock);
     let resumed = adapter.mutate_batch(r).await.unwrap();
     assert!(resumed.all_ready(), "{resumed:?}");
     assert_eq!(
@@ -335,7 +358,7 @@ async fn native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publica
         r.items.push(json!({"summary":"bad tags","tags":[""]}));
         let f = Fixture::from_open_engine(root, s.engine);
         completion(&f).rebuild_all().await.unwrap();
-        let adapter = Arc::new(f.storage_adapter().with_clock(clock));
+        let adapter = Arc::new(disabled_aux_adapter(&f, clock));
         let before = f.storage.read().unwrap().control_state().unwrap();
         let out = if socket {
             let response = crate::daemon::server::native_batch_test_rpc(adapter.clone(), &r).await;
@@ -649,7 +672,7 @@ async fn native_batch_generated_invalid_output_stays_pending_without_payload_the
         f.fts_index.clone(),
         f.entity_index.clone(),
         f.graph.clone(),
-        Arc::new(crate::config::RecalldConfig::default()),
+        disabled_aux_config(),
         chrono_tz::UTC,
     )
     .with_clock(clock);
@@ -744,7 +767,7 @@ async fn native_batch_root_before_provider_drains_descendants_during_close() {
         f.fts_index.clone(),
         f.entity_index.clone(),
         f.graph.clone(),
-        Arc::new(crate::config::RecalldConfig::default()),
+        disabled_aux_config(),
         chrono_tz::UTC,
     )
     .with_clock(clock);
@@ -802,4 +825,283 @@ async fn native_batch_root_before_provider_drains_descendants_during_close() {
             .is_empty()
     );
     drop(freeze);
+}
+
+// Independent review probes. Keep these as end-to-end regressions: all the
+// individual receipts below are valid; the manifest's chronological claim is not.
+#[test]
+fn native_batch_review_reversed_error_generations_reject_unchanged_source() {
+    for middle_success in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let d = fixture(root.path());
+        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+        let mut s = open(&d, clock.clone());
+        let mut r = request(
+            &d,
+            s.metadata().control_state().unwrap().store_id,
+            "reverse-errors",
+        );
+        r.items.push(r.items[0].clone());
+        if middle_success {
+            r.items.push(r.items[0].clone());
+        }
+        let ps = plans(&r);
+        let p = s
+            .metadata()
+            .reserve_batch(&r.context(), r.kind, &ps)
+            .unwrap();
+        s.metadata()
+            .finalize_batch_error(
+                &p.child(0).unwrap(),
+                crate::storage::batch::BatchError::new("INVALID_INPUT"),
+            )
+            .unwrap();
+        if middle_success {
+            let BatchItemPlan::NativeInsert { input, .. } = &ps[1] else {
+                panic!()
+            };
+            let intent = s.capture_insert(scope(&d), input).unwrap();
+            let child = p.child(1).unwrap();
+            s.engine
+                .insert_native_record_reserved(
+                    &child.context(),
+                    &intent,
+                    &generated(),
+                    &s.policy,
+                    s.clock.as_ref(),
+                    None,
+                    Some(&child),
+                )
+                .unwrap();
+        }
+        let last = r.items.len() - 1;
+        let mut p = s
+            .metadata()
+            .finalize_batch_error(
+                &p.child(last).unwrap(),
+                crate::storage::batch::BatchError::new("INVALID_INPUT"),
+            )
+            .unwrap();
+        let state = s.metadata().control_state().unwrap();
+        crate::storage::metadata::batch::validate_existing(
+            &s.metadata().db.begin_read().unwrap(),
+            Some(&state),
+        )
+        .unwrap();
+        let tx = s.metadata().db.begin_write().unwrap();
+        for receipt in &mut p.bookkeeping_receipts {
+            let MutationOutcome::BatchItemRejected { index, .. } = &mut receipt.outcome else {
+                panic!()
+            };
+            *index = last as u32 - *index;
+            let hash = control::request_hash(
+                &r.context(),
+                "batch_item_error_v2",
+                &[
+                    p.reservation_receipt.operation_id.as_bytes(),
+                    &index.to_be_bytes(),
+                ],
+            );
+            let key = control::scoped_key(
+                receipt.store_id,
+                MutationScope::Catalog,
+                receipt.operation_id.as_bytes(),
+            );
+            let stored = control::StoredReceipt {
+                request_hash_version: 1,
+                request_hash: hash,
+                receipt: receipt.clone(),
+            };
+            tx.open_table(control::RECEIPTS)
+                .unwrap()
+                .insert(key.as_slice(), control::encode(&stored).unwrap().as_slice())
+                .unwrap();
+        }
+        tx.open_table(crate::storage::metadata::batch::BATCHES)
+            .unwrap()
+            .insert(
+                p.reservation_receipt.operation_id.as_bytes().as_slice(),
+                control::encode(&p).unwrap().as_slice(),
+            )
+            .unwrap();
+        tx.commit().unwrap();
+        drop(s);
+        let before = std::fs::read(d.path.join("meta.db")).unwrap();
+        assert!(
+            NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock).is_err(),
+            "impossible final-error history was admitted (middle success={middle_success})"
+        );
+        assert_eq!(before, std::fs::read(d.path.join("meta.db")).unwrap());
+    }
+}
+
+#[tokio::test]
+async fn native_batch_review_unknown_profile_forget_matches_single_and_preserves_offline() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("legacy");
+    let mut engine = RedbStorageEngine::open(&source).unwrap();
+    let mut config = NamespaceConfig::default_namespace(0);
+    config.name = "unknown".into();
+    config.embedding_dim = 4;
+    let ns = engine.create_namespace(&config).unwrap();
+    let original = crate::storage::insertion::InsertMemory {
+        id: None,
+        summary: "retained unknown provenance".into(),
+        full_text: None,
+        tags: vec![],
+        initial_stability: None,
+        created_at: Some(1000),
+        embedding: Some(vec![1., 0., 0., 0.]),
+        parent_id: None,
+        supersedes: None,
+    };
+    let mut ids = vec![];
+    for _ in 0..2 {
+        let receipt = engine
+            .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &original, &[], 1000)
+            .unwrap();
+        ids.push(crate::storage::insertion::inserted_id(&receipt).unwrap());
+    }
+    drop(engine);
+    let path = root.path().join("native");
+    migrate_schema(
+        &source,
+        &path,
+        &MigrationOptions {
+            migration_now: 2000,
+            expected_source: inspect_schema(&source).unwrap().control.generation_ref(),
+            attestations: vec![],
+        },
+    )
+    .unwrap();
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let mut s =
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock.clone()).unwrap();
+    let store_id = s.metadata().control_state().unwrap().store_id;
+    let context = MutationContext {
+        store_id: Some(store_id),
+        scope: MutationScope::Namespace(ns),
+        idempotency_key: Some("single-unknown-forget".into()),
+        expected_generation: None,
+        contract_version: 2,
+    };
+    let intent = s.capture_tombstone(ids[0], None).unwrap();
+    s.tombstone(&context, &intent).unwrap();
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).complete().await.unwrap();
+    let request = BatchInput {
+        mutation_version: 2,
+        result_version: 1,
+        kind: BatchKind::Forget,
+        items: vec![json!(ids[1].to_string())],
+        default_namespace: "irrelevant-by-id".into(),
+        store_id: Some(store_id),
+        idempotency_key: Some("batch-unknown-forget".into()),
+        batch_operation_id: None,
+    };
+    let response = crate::daemon::server::native_batch_test_rpc(
+        Arc::new(disabled_aux_adapter(&f, clock.clone())),
+        &request,
+    )
+    .await;
+    assert!(response.error.is_none(), "{response:?}");
+    let outcome: crate::storage::batch::BatchOutcome =
+        serde_json::from_value(response.result.unwrap()).unwrap();
+    assert!(
+        outcome.all_ready(),
+        "native batch forget rejected unknown provenance: {outcome:?}"
+    );
+    let p = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .lookup_batch(store_id, outcome.batch_operation_id)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        p.items[0]
+            .defaults
+            .as_ref()
+            .unwrap()
+            .native
+            .as_ref()
+            .unwrap()
+            .embedding_binding,
+        crate::model::schema::EmbeddingBinding::UnknownLegacy
+    ));
+    let root = f.close();
+    let stream = root.path().join("unknown.jsonl");
+    let imported = root.path().join("imported");
+    let exported = crate::storage::logical_export::export_store(&path, &stream).unwrap();
+    assert_eq!(
+        crate::storage::logical_export::import_store(&stream, &imported).unwrap(),
+        exported
+    );
+    let s = NativeLifecycleSession::open(&imported, NativePolicyInputs::default(), clock).unwrap();
+    let replay = s
+        .metadata()
+        .reserve_batch(&request.context(), request.kind, &plans(&request))
+        .unwrap();
+    assert!(replay.reservation_receipt.replayed);
+    assert_eq!(replay.items, p.items);
+}
+
+#[tokio::test]
+async fn native_batch_configured_auxiliary_work_is_pending_not_silently_skipped_and_replay_precedes_gate()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let mut r = request(
+        &d,
+        s.metadata().control_state().unwrap().store_id,
+        "auxiliary",
+    );
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let configured = f.storage_adapter().with_clock(clock.clone());
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let blocked = configured.mutate_batch(r.clone()).await.unwrap();
+    assert_eq!(blocked.items[0].status, BatchStatus::NotAttempted);
+    assert_eq!(
+        blocked.items[0].error.as_ref().unwrap().field.as_deref(),
+        Some("graph.autolinkEnabled")
+    );
+    assert_eq!(blocked.items[0].error.as_ref().unwrap().code, "UNAVAILABLE");
+    assert!(blocked.items[0].receipt.is_none());
+    assert!(!blocked.items[0].ready);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 1);
+    let disabled = disabled_aux_adapter(&f, clock);
+    let completed = disabled.mutate_batch(r.clone()).await.unwrap();
+    assert!(completed.all_ready(), "{completed:?}");
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let replay = configured.mutate_batch(r.clone()).await.unwrap();
+    assert!(replay.all_ready());
+    assert_eq!(
+        replay.items[0].receipt.as_ref().unwrap().operation_id,
+        completed.items[0].receipt.as_ref().unwrap().operation_id
+    );
+    assert_eq!(before, f.storage.read().unwrap().control_state().unwrap());
+    r.idempotency_key = Some("advisory".into());
+    r.items[0]["checkDuplicates"] = json!(true);
+    let blocked = disabled.mutate_batch(r).await.unwrap();
+    assert_eq!(blocked.items[0].status, BatchStatus::NotAttempted);
+    assert_eq!(
+        blocked.items[0].error.as_ref().unwrap().field.as_deref(),
+        Some("checkDuplicates")
+    );
+    assert!(blocked.items[0].receipt.is_none());
+    assert!(!blocked.all_ready());
+    assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 2);
 }

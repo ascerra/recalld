@@ -1,7 +1,8 @@
 # Native reserved batch children
 
-Work in progress on actual PR82 (6f56624), PR80 (ca205aa), and PR83
-(a6087ca), plus Pascal's frozen phase-time correction a69865b. No catalog,
+Implemented on actual PR82 (6f56624), PR80 (ca205aa), and PR83
+(a6087ca), plus Pascal's frozen phase-time correction a69865b and minimal
+startup recovery correction fb804a0. No catalog,
 maintenance, broad checkpoint or public-v2 activation parent is implied.
 
 The existing `batch_schema=1` container and `mutation_batches` table now also
@@ -47,8 +48,21 @@ native and legacy receipt hash formats are unchanged.
 Matching parent replay precedes mutable resolution. Child replay precedes
 capture/provider/staging; the final guard rechecks scope, policy and canonical
 capture/edges. Names never rebind a reserved child to a new namespace incarnation.
-The native runner uses PR82's explicit-link native writer; auxiliary legacy
-autolink writes are not enabled on a native handle. Native structured labels
+The native runner uses PR82's explicit-link native writer. Fresh children report
+pending `UNAVAILABLE` when semantic/entity/temporal autolinking is configured
+(`graph.autolinkEnabled`) or duplicate advisory is requested (`checkDuplicates`).
+This gate runs after completed receipt replay and before capture/provider/payload
+work. Parent reservation can already have committed; the child remains pending,
+without a success receipt. Positive fixtures explicitly disable these unsupported
+options. This does not establish complete native store semantics.
+
+A volatile accepted-work ticket cannot preserve required autolink intent across
+process exit. Removing the gate requires a frozen edge/peer plan in the same
+insert transaction/outbox with a new additive proof, or a durable child workflow
+with frozen outcomes. Keyed replay must not discover links from new neighbors.
+Historical NativeRecordWrite versions through2 retain their existing meaning.
+Hume owns graph core/proof, Feynman reviews history, and this producer owner owns
+later root and automatic-link integration. Native structured labels
 remain verbatim, while raw tags are validated without lossy conversion.
 
 ## Recovery and offline consumers
@@ -57,7 +71,9 @@ The shared history dispatcher consumes only exact GenerationRef/operation-ID
 references returned by strict version2 manifest validation. It does not allowlist
 bookkeeping variants or admit active post-schema version1 batch writes. Startup
 checks complete parent/child receipt, scope, hash, origin, order and outcome
-bindings. Private native startup permits strictly valid pending version2
+bindings, including monotonic generation order for runtime error outcomes as
+well as successful children. Native forget permits UnknownLegacy embedding
+provenance; only insertion requires a bound profile. Private native startup permits strictly valid pending version2
 manifests so callers can resubmit payload; offline snapshot/export still reject
 unfinished work. Existing raw-table export/restoration codecs preserve completed
 manifests; strict validators reject unknown versions/partial tables. Feynman owns
@@ -70,3 +86,10 @@ Pending final frozen-source results. Development logs include parent composition
 compile fixes, five initial focused passes, and a test-only wrong process-hook
 exit-code expectation (86 versus the existing hook's91). That failed log is
 retained. This is not a reproduced storage failure or a claimed red/green fix.
+
+The focused review/guard run passed15 native tests. Earlier full validation
+passed992 library tests and failed two stale operation-only receipt assertions;
+both now compare the exact committed receipt and each passed its focused run.
+Two independent review probes failed before the fixes (reversed final-error
+generations and UnknownLegacy forget), then passed. Final merged-source full
+results are recorded with the evidence seal, not inferred from focused runs.

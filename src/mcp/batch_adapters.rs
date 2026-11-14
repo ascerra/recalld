@@ -267,6 +267,10 @@ impl McpStorageAdapter {
                         } else {
                             "RECONCILIATION_REQUIRED"
                         }));
+                        if unavailable {
+                            outcome.items[index].error.as_mut().unwrap().field =
+                                self.native_store_blocker(prepared).map(str::to_owned);
+                        }
                         break;
                     }
                 }

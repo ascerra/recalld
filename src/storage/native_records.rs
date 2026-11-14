@@ -739,3 +739,19 @@ impl super::native_lifecycle::NativeLifecycleSession {
         )
     }
 }
+
+/// Transport admission for auxiliary store work that has no native canonical
+/// proof/workflow yet. Historical receipt replay must precede this check.
+/// The flag covers semantic, entity and temporal linking in the legacy producer.
+pub(crate) fn native_store_execution_blocker(
+    config: &crate::config::RecalldConfig,
+    check_duplicates: bool,
+) -> Option<&'static str> {
+    if config.graph.autolink_enabled {
+        Some("graph.autolinkEnabled")
+    } else if check_duplicates {
+        Some("checkDuplicates")
+    } else {
+        None
+    }
+}

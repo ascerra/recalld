@@ -11,6 +11,24 @@ use crate::storage::{
 };
 
 impl McpStorageAdapter {
+    pub(super) fn native_store_blocker(
+        &self,
+        prepared: &batches::PreparedItem,
+    ) -> Option<&'static str> {
+        if matches!(prepared.plan, BatchItemPlan::NativeInsert { .. }) {
+            crate::storage::native_records::native_store_execution_blocker(
+                &self.config,
+                prepared
+                    .store
+                    .as_ref()
+                    .and_then(|s| s.check_duplicates)
+                    .unwrap_or(true),
+            )
+        } else {
+            None
+        }
+    }
+
     pub(super) async fn run_native_batch_child(
         &self,
         prepared: &batches::PreparedItem,
@@ -45,6 +63,12 @@ impl McpStorageAdapter {
         let receipt = if let Some(receipt) = replay {
             receipt
         } else {
+            if let Some(field) = self.native_store_blocker(prepared) {
+                return Err(bridge::BridgeError::Unavailable(format!(
+                    "native store {field} requires a participating auxiliary writer"
+                ))
+                .into());
+            }
             let insert = match &prepared.plan {
                 BatchItemPlan::NativeInsert { input, .. } => {
                     let intent = {

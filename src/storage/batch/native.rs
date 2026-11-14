@@ -13,7 +13,7 @@ pub struct NativeBatchDefaults {
     pub embedding_binding: EmbeddingBinding,
 }
 impl NativeBatchDefaults {
-    pub(crate) fn validate(&self, dimension: u32) -> Result<(), StorageError> {
+    pub(crate) fn validate(&self, dimension: u32, kind: BatchKind) -> Result<(), StorageError> {
         let difficulty = f32::from_bits(self.default_difficulty_bits);
         if !difficulty.is_finite() || !(1.0..=10.0).contains(&difficulty) {
             return Err(StorageError::InvalidControl(
@@ -23,7 +23,9 @@ impl NativeBatchDefaults {
         self.embedding_binding
             .validate(dimension)
             .map_err(StorageError::InvalidControl)?;
-        self.profile_id()?;
+        if kind == BatchKind::Insert {
+            self.profile_id()?;
+        }
         Ok(())
     }
     pub(crate) fn profile_id(&self) -> Result<&str, StorageError> {

@@ -195,7 +195,9 @@ pub(crate) fn validate_existing(
             };
             if batch_operation_id != parent.operation_id
                 || index as usize >= p.items.len()
-                || rejections.insert(index, error).is_some()
+                || rejections
+                    .insert(index, (error, r.committed_generation))
+                    .is_some()
             {
                 return Err(invalid("duplicate or foreign rejection"));
             }
@@ -247,7 +249,7 @@ pub(crate) fn validate_existing(
                     return Err(invalid("defaults/version mismatch"));
                 }
                 if let Some(native) = &d.native {
-                    native.validate(d.embedding_dim)?;
+                    native.validate(d.embedding_dim, p.kind)?;
                 }
                 if d.namespace_id.is_unset()
                     || !(1..=8192).contains(&d.embedding_dim)
@@ -292,9 +294,20 @@ pub(crate) fn validate_existing(
                         || child.is_some()
                         || item.resolution_error.is_some() && rejections.contains_key(&item.index)
                         || !(item.resolution_error.as_ref() == Some(error)
-                            || rejections.get(&item.index).is_some_and(|e| *e == error))
+                            || rejections
+                                .get(&item.index)
+                                .is_some_and(|(e, _)| *e == error))
                     {
                         return Err(invalid("final error without matching bookkeeping"));
+                    }
+                    // Reservation-time invalid items have no child generation.
+                    // Every later final outcome, including errors, must follow
+                    // the input order in the same canonical generation stream.
+                    if let Some((_, generation)) = rejections.get(&item.index) {
+                        if *generation <= last_child_generation {
+                            return Err(invalid("final outcome generation order"));
+                        }
+                        last_child_generation = *generation;
                     }
                     validate_error(error)?;
                 }
@@ -584,7 +597,7 @@ impl MetadataStore {
                     policy_revision: schema.policy_revision,
                     embedding_binding: schema.embedding_binding.clone(),
                 };
-                if defaults.validate(config.embedding_dim).is_err() {
+                if defaults.validate(config.embedding_dim, kind).is_err() {
                     return Ok(Err(BatchError::new("INVALID_INPUT")));
                 }
                 Some(defaults)
