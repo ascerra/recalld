@@ -1,5 +1,5 @@
 //! Evaluator-only JSONL on caller-owned pipes, sharing the actor's actual core.
-//! This is a bounded v1 diagnostic control plane, not a snapshot/reset facility.
+//! Bounded v1 controls; checkpoint support requires the explicit owned track.
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

@@ -1,5 +1,5 @@
 //! Isolated legacy-v1 MCP actor with same-core evaluator-only inherited pipes.
-//! This launcher neither selects public v2 nor supplies deterministic reset.
+//! Supports bounded fresh-owner fixture replay; no public v2 or full A6 claim.
 use clap::Parser;
 use recalld::config::{EmbeddingProvider, RecalldConfig};
 use std::path::PathBuf;
