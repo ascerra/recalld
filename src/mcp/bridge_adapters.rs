@@ -10,6 +10,8 @@ mod batch_adapters;
 mod native_batch;
 #[path = "native_store_batch.rs"]
 mod native_store_batch;
+#[path = "native_store_single.rs"]
+mod native_store_single;
 
 use crate::decay::observation::Observed;
 use std::sync::Arc;
