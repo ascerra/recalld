@@ -1,7 +1,7 @@
 {
-  "seal": "08fbd464e858383dded8e083032a122c392cda0f",
+  "seal": "7a2a404e5d2c7dff08d874d3741a83e7ae50d7e4",
   "shippingDependency": false,
-  "archiveSha256": "5e45a0a7cacefc8e5ccb15e012174a67ba301b47906c5d36066481e08182fae7",
+  "archiveSha256": "2d2dc61bf4493141621054a35c7a9c298f41977a5ec5b603962c080683738eee",
   "members": {
     "benchmarks/checkpoint-hash-inputs/ARTIFACTS.json": "f4df4dd350866c1e10a17dd15d6eb540101e4e3a8dba8035efc6bb5a60e62088",
     "benchmarks/checkpoint-hash-inputs/REPORT.md": "39e459a7768d508fc8eb208e8d19853ddba38027c092a28896f1261bdfb7ffc8",
@@ -14,6 +14,7 @@
     "benchmarks/checkpoint-hash-inputs/changed-suffix-checkpoint-manifest.json": "78a966d3cfe149a51ea995fdff3cf63288f96d07f1b16e7e080defb417471dcf",
     "benchmarks/checkpoint-hash-inputs/changed-suffix.json": "2764d8d642e4cd536d32f9645ed1adecf8bda2e9834c8afaced62e226e108183",
     "benchmarks/checkpoint-hash-inputs/compare.py": "2673949d03c7d0ce7cbb616f5ca688f4a0c69dcd36eff86976a5a23bca10128f",
+    "benchmarks/checkpoint-hash-inputs/diagnostic-source.tar.gz": "79c510be3e76c78b69de6e2a4af0798ff85a3b15409799a104d6958f5799e56d",
     "benchmarks/checkpoint-hash-inputs/diagnostic.log": "17a3a1d9df9a665c44ecc318aafcf52dacbb4f27d7c9b4e2b90a7c27a9c0c3e3",
     "benchmarks/checkpoint-hash-inputs/driver.py": "d98338b1ac3735c0246d698e635edd9c00bf1a953c964f04c5123b94b3bcc5ee",
     "benchmarks/checkpoint-hash-inputs/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

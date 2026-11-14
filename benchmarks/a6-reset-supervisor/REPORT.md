@@ -135,8 +135,8 @@ request hash, operationID and every other encoded item (including excluded catal
 items) match. Provider endpoint/source-root differ in checkpoint configuration but
 are not hash inputs. This proves missing owned namespace-clock coverage, not a
 label leak, FTS failure or reset hash bug. No hash normalization or core fix is
-introduced here. Owner diagnostic seal `08fbd464e858383dded8e083032a122c392cda0f`, sources, compile failure and exact typed output
-are retained in `typed-hash-diagnosis-08fbd46.tar.gz`, with readable `owner-REPORT.md`
+introduced here. Owner diagnostic seal `7a2a404e5d2c7dff08d874d3741a83e7ae50d7e4`, sources, compile failure and exact typed output
+are retained in `typed-hash-diagnosis-7a2a404.tar.gz`, with readable `owner-REPORT.md`
 and `owner-typed-input-diff.json`, without adding a shipping dependency.
 
 The desired independent-startup hash equality gate is NOT dropped. Run
