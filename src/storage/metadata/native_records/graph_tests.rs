@@ -35,6 +35,7 @@ fn token(row: &DiskRecord) -> Generation {
 fn native_graph_rejects_real_foreign_endpoint_and_preserves_unknown_profile() {
     let root = tempfile::tempdir().unwrap();
     let mut foreign = MemoryId::nil();
+    let mut foreign_target = MemoryId::nil();
     let d = fixture_with_seed(root.path(), |engine| {
         let mut ns = NamespaceConfig::default_namespace(0);
         ns.name = "foreign".into();
@@ -57,9 +58,15 @@ fn native_graph_rejects_real_foreign_endpoint_and_preserves_unknown_profile() {
                 .unwrap(),
         )
         .unwrap();
+        foreign_target = crate::storage::insertion::inserted_id(
+            &engine
+                .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &input, &[], 1001)
+                .unwrap(),
+        )
+        .unwrap();
     });
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
-    let mut session = open(&d, clock);
+    let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
     let before = session.metadata().control_state().unwrap();
     assert!(matches!(
@@ -75,9 +82,33 @@ fn native_graph_rejects_real_foreign_endpoint_and_preserves_unknown_profile() {
         .unwrap()
         .unwrap();
     assert!(matches!(
-        cfg.schema.unwrap().embedding_binding,
+        cfg.schema.as_ref().unwrap().embedding_binding,
         crate::model::schema::EmbeddingBinding::UnknownLegacy
     ));
+    let receipt = session
+        .put_graph(
+            &MutationContext::unkeyed(cfg.id),
+            LifecycleScope {
+                namespace_id: cfg.id,
+                namespace_name: cfg.name.clone(),
+                source: None,
+            },
+            &plan(foreign, foreign_target),
+        )
+        .unwrap()
+        .unwrap();
+    let MutationOutcome::NativeGraphChanged { transition } = receipt.outcome else {
+        panic!()
+    };
+    assert!(
+        transition
+            .records
+            .iter()
+            .all(|r| r.after.content.profile_id.is_none())
+    );
+    drop(session);
+    inspect_schema(&d.path).unwrap();
+    let _session = open(&d, clock);
 }
 
 #[test]
@@ -324,6 +355,15 @@ fn native_graph_ghost_cannot_activate_but_retained_parent_can_gain_structural_ed
 
 #[tokio::test]
 async fn native_graph_review_rejects_malformed_foreign_profile_commitment() {
+    reject_foreign_profile_commitment("not-an-ep1-commitment".into(), false).await;
+}
+
+#[tokio::test]
+async fn native_graph_review_rejects_wrong_foreign_profile_binding() {
+    reject_foreign_profile_commitment(format!("ep1:{}", "0".repeat(64)), true).await;
+}
+
+async fn reject_foreign_profile_commitment(profile: String, well_formed: bool) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
@@ -383,8 +423,8 @@ async fn native_graph_review_rejects_malformed_foreign_profile_commitment() {
             .as_mut()
             .unwrap()
             .content
-            .profile_id = Some("not-an-ep1-commitment".into());
-        transition.records[0].after.content.profile_id = Some("not-an-ep1-commitment".into());
+            .profile_id = Some(profile.clone());
+        transition.records[0].after.content.profile_id = Some(profile.clone());
         tx.open_table(control::RECEIPTS)
             .unwrap()
             .insert(key.as_slice(), control::encode(&stored).unwrap().as_slice())
@@ -413,7 +453,7 @@ async fn native_graph_review_rejects_malformed_foreign_profile_commitment() {
     let before = bytes(&d.path);
     assert!(
         NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock).is_err(),
-        "foreign-origin graph receipt accepted malformed profile commitment"
+        "foreign-origin graph receipt accepted invalid profile commitment"
     );
     assert_eq!(bytes(&d.path), before);
     assert!(
@@ -424,7 +464,7 @@ async fn native_graph_review_rejects_malformed_foreign_profile_commitment() {
     let MutationOutcome::NativeGraphChanged { transition } = &malformed.receipt.outcome else {
         panic!()
     };
-    assert!(transition.validate(&malformed.receipt).is_err());
+    assert_eq!(transition.validate(&malformed.receipt).is_ok(), well_formed);
 }
 
 #[test]

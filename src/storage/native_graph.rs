@@ -116,6 +116,24 @@ pub(crate) fn endpoint_allowed(kind: EdgeType, source: bool, phase: DecayPhase) 
         || (kind == EdgeType::Supersedes && !source)
 }
 impl NativeGraphWrite {
+    pub(crate) fn validate_namespace_profiles(
+        &self,
+        namespace: &crate::model::NamespaceConfig,
+    ) -> Result<(), StorageError> {
+        if namespace.id != self.namespace_id {
+            return Err(invalid("native graph proof namespace mismatch"));
+        }
+        for change in &self.records {
+            change
+                .before
+                .as_ref()
+                .ok_or_else(|| invalid("native graph prior peer missing"))?
+                .content
+                .validate_namespace_profile(namespace)?;
+            change.after.content.validate_namespace_profile(namespace)?;
+        }
+        Ok(())
+    }
     pub(crate) fn validate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
         if self.namespace_id.is_unset()
             || self.edges.is_empty()

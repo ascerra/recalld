@@ -261,9 +261,25 @@ pub(crate) fn validate_policy_history(
     if expected != control.committed_generation {
         return Err(invalid("missing lifecycle receipt suffix"));
     }
+    let configs = read
+        .open_table(NAMESPACE_TABLE)?
+        .iter()?
+        .map(|row| {
+            let (_, value) = row?;
+            let ns = NamespaceConfig::decode(value.value())?;
+            Ok((ns.id.get(), ns))
+        })
+        .collect::<Result<HashMap<_, _>, StorageError>>()?;
     // Retained historical native operations still require an explicit policy
     // selection. Their record sets need not survive a deletion-aware restore.
     for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        if let MutationOutcome::NativeGraphChanged { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
+            )?;
+        }
         let version = if policy_revision == Generation::default() {
             LifecycleVersion::LegacyAccessV1
         } else {
@@ -291,15 +307,6 @@ pub(crate) fn validate_policy_history(
             }
         }
     }
-    let configs = read
-        .open_table(NAMESPACE_TABLE)?
-        .iter()?
-        .map(|row| {
-            let (_, value) = row?;
-            let ns = NamespaceConfig::decode(value.value())?;
-            Ok((ns.id.get(), ns))
-        })
-        .collect::<Result<HashMap<_, _>, StorageError>>()?;
     let creations = super::native_records::creation_proofs(read)?;
     let ledger = super::metadata::removal_ledger::read_export(read, Some(control))?;
     let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();

@@ -186,6 +186,20 @@ impl ContentProof {
         }
         Ok(())
     }
+    /// Bind retained proof content to the immutable, validated namespace profile.
+    /// Unknown legacy provenance requires None, including in foreign history.
+    pub(crate) fn validate_namespace_profile(
+        &self,
+        namespace: &NamespaceConfig,
+    ) -> Result<(), StorageError> {
+        self.validate_profile_commitment()?;
+        if namespace.schema.is_none() || self.profile_id != profile_id(namespace) {
+            return Err(invalid(
+                "native profile commitment differs from namespace binding",
+            ));
+        }
+        Ok(())
+    }
     pub(crate) fn capture(
         record: &DiskRecord,
         namespace: &NamespaceConfig,
