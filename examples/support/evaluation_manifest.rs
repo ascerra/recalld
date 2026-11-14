@@ -45,6 +45,7 @@ pub struct Manifest {
     pub trace_schema_version: u32,
     pub track: String,
     pub source_commit: String,
+    pub source_tree_sha256: String,
     pub dirty_patch_sha256: String,
     pub source_files_sha256: BTreeMap<String, String>,
     pub lockfile_sha256: String,
@@ -108,7 +109,7 @@ pub fn versions() -> Value {
 }
 
 pub fn capabilities() -> Value {
-    json!({"publicApi":false,"publicV2":false,"coherentReadView":false,"barrier":false,
+    json!({"publicApi":false,"publicV2":false,"nativeV2":false,"fullA6":false,"coherentReadView":false,"barrier":false,
         "snapshot":false,"reset":false,"deterministicIds":false,"deterministicRng":false,
         "clock":"fixed-lifecycle-only","clockAdvance":false,"sweeps":false,
         "initialTimeMs":TIME,"recordAccess":false,"graphDepth":0})
@@ -146,6 +147,31 @@ fn artifact(root: &Path, entry: &Artifact, expected_name: &str) -> Result<Vec<u8
     Ok(bytes)
 }
 
+fn require_rust_pins(root: &Path, directory: &Path, pins: &BTreeMap<String, String>) -> Result<()> {
+    if !directory.exists() {
+        return Ok(());
+    }
+    for item in fs::read_dir(directory)? {
+        let item = item?;
+        let kind = item.file_type()?;
+        ensure!(!kind.is_symlink(), "symlink in source tree");
+        if kind.is_dir() {
+            require_rust_pins(root, &item.path(), pins)?;
+        } else if item.path().extension().is_some_and(|ext| ext == "rs") {
+            let path = item.path();
+            let name = path
+                .strip_prefix(root)?
+                .to_str()
+                .context("non-UTF8 source input")?;
+            ensure!(
+                pins.contains_key(name),
+                "omitted runtime source pin: {name}"
+            );
+        }
+    }
+    Ok(())
+}
+
 impl Validated {
     /// No output directory, store, provider or mutation exists during validation.
     pub fn load(path: &Path) -> Result<Self> {
@@ -180,6 +206,20 @@ impl Validated {
                     .is_some_and(|s| hexadecimal(s, 64)),
             "unresolved source/image identity"
         );
+        ensure!(
+            option_env!("RECALLD_A6_SOURCE_COMMIT") == Some(m.source_commit.as_str())
+                && option_env!("RECALLD_A6_DIRTY_PATCH_SHA256")
+                    == Some(m.dirty_patch_sha256.as_str())
+                && option_env!("RECALLD_A6_IMAGE_ID") == Some(m.container_image_id.as_str()),
+            "manifest differs from compiled supervisor build identity"
+        );
+        ensure!(
+            hexadecimal(&m.source_tree_sha256, 64)
+                && hash(&serde_json::to_vec(&m.source_files_sha256)?) == m.source_tree_sha256
+                && option_env!("RECALLD_A6_SOURCE_TREE_SHA256")
+                    == Some(m.source_tree_sha256.as_str()),
+            "manifest source tree differs from compiled source pins"
+        );
         let p = &m.execution;
         ensure!(
             (100..=100_000).contains(&p.records)
@@ -204,7 +244,16 @@ impl Validated {
             "unresolved/external dataset, license or split"
         );
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for directory in ["src", "tests", "examples", "benches"] {
+            require_rust_pins(
+                source_root,
+                &source_root.join(directory),
+                &m.source_files_sha256,
+            )?;
+        }
         for required in [
+            "Cargo.toml",
+            "rust-toolchain.toml",
             "Cargo.lock",
             "examples/offline_eval.rs",
             "examples/support/evaluation_manifest.rs",
@@ -329,14 +378,55 @@ impl Validated {
             "snapshot":null,"model":null,"tokens":null,"reward":null})
     }
 
-    pub fn replay_key(&self, namespace: &str, text: &str) -> String {
-        // All scoped inputs are hashed together; evaluator labels never enter a cache entry.
+    pub fn replay_context(&self) -> ReplayContext {
+        ReplayContext {
+            profile: self.manifest.embedding.clone(),
+            environment_hash: self.environment_hash.clone(),
+        }
+    }
+}
+
+/// Actor provider receives this projection, never the evaluator-bearing manifest object.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayContext {
+    profile: Value,
+    environment_hash: String,
+}
+
+impl ReplayContext {
+    pub fn key(&self, namespace: &str, text: &str) -> String {
         hash(
             &serde_json::to_vec(
                 &json!({"namespace":namespace,"text":text,"role":"actor-query",
-            "profile":self.manifest.embedding,"environmentHash":self.environment_hash}),
+            "profile":self.profile,"environmentHash":self.environment_hash}),
             )
             .unwrap(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_keys_bind_complete_actor_inputs_and_environment() {
+        let base = ReplayContext {
+            profile: embedding(16),
+            environment_hash: hash(b"synthetic-environment-a"),
+        };
+        let key = base.key("fixture", "query0");
+        assert_ne!(key, base.key("foreign", "query0"));
+        assert_ne!(key, base.key("fixture", "query0 "));
+        let mut changed = base.clone();
+        changed.environment_hash = hash(b"synthetic-environment-b");
+        assert_ne!(key, changed.key("fixture", "query0"));
+        changed = base.clone();
+        changed.profile = embedding(32);
+        assert_ne!(key, changed.key("fixture", "query0"));
+        let actor = serde_json::to_value(base).unwrap();
+        assert_eq!(actor.as_object().unwrap().len(), 2);
+        assert!(actor.get("evaluator").is_none());
     }
 }

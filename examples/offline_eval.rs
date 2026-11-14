@@ -127,7 +127,7 @@ fn evidence_metrics(relevant: &[usize], retained: &[usize], retrieved: &[usize])
 }
 
 struct ReplayEmbeddings {
-    contract: Arc<evaluation_manifest::Validated>,
+    context: evaluation_manifest::ReplayContext,
     entries: BTreeMap<String, Vec<f32>>,
 }
 #[async_trait::async_trait]
@@ -137,7 +137,7 @@ impl EmbeddingProviderRegistry for ReplayEmbeddings {
             return Err(SearchError::NamespaceNotFound(namespace.into()));
         }
         self.entries
-            .get(&self.contract.replay_key(namespace, text))
+            .get(&self.context.key(namespace, text))
             .cloned()
             .ok_or_else(|| SearchError::EmbeddingFailed("offline replay miss".into()))
     }
@@ -186,14 +186,7 @@ async fn main() -> Result<()> {
             "ingestPlan": "store_raw_unit"})).collect::<Vec<_>>()}),
     )?;
 
-    let mappings: Vec<_> = (0..args.records)
-        .map(|i| contract.mapping(i, id(i)))
-        .collect();
-    write_json(
-        out.join("source-mappings.json"),
-        &json!({"sourceMappingVersion":1,
-        "datasetRevision":contract.manifest.actor_inputs.sha256,"mappings":mappings}),
-    )?;
+    let mut mappings = File::create(out.join("source-mappings.jsonl"))?;
     let source_lookup: BTreeMap<_, _> = (0..args.records).map(|i| (id(i), i)).collect();
     write_json(
         out.join("actor-inputs.json"),
@@ -323,6 +316,7 @@ async fn main() -> Result<()> {
                 return Err(error);
             }
         };
+        writeln!(mappings, "{}", contract.mapping(i, id(i)))?;
         writeln!(
             source_events,
             "{}",
@@ -372,11 +366,12 @@ async fn main() -> Result<()> {
         out.join("control-before.json"),
         &serde_json::to_value(&control_before)?,
     )?;
+    let context = contract.replay_context();
     let entries: BTreeMap<_, _> = (0..args.records)
         .step_by(10)
         .map(|i| {
             (
-                contract.replay_key("fixture", &format!("query{i}")),
+                context.key("fixture", &format!("query{i}")),
                 fixture[i].clone(),
             )
         })
@@ -387,7 +382,7 @@ async fn main() -> Result<()> {
         "environmentHash":contract.environment_hash,"profile":contract.manifest.embedding,"entries":entries}),
     )?;
     let embeddings = Arc::new(ReplayEmbeddings {
-        contract: contract.clone(),
+        context: context.clone(),
         entries,
     });
     let engine = QueryEngine::new(
@@ -419,6 +414,8 @@ async fn main() -> Result<()> {
     let missing: SearchQuery =
         serde_json::from_value(json!({"text":"unrecorded input","namespace":"fixture",
         "recordAccess":false,"graphDepth":0,"limit":args.k}))?;
+    let miss_action = json!({"kind":"internal-query","request":serde_json::to_value(&missing)?,
+        "replayCacheKey":context.key("fixture","unrecorded input")});
     let miss = engine.search(missing).await;
     let miss_error = match miss {
         Err(error) => error.to_string(),
@@ -428,9 +425,16 @@ async fn main() -> Result<()> {
         miss_error.contains("offline replay miss"),
         "unexpected replay-miss error: {miss_error}"
     );
-    writeln!(actor_trace,"{}",contract.trace(&episode,"replay-miss",
-        json!({"kind":"internal-query","text":"unrecorded input","namespace":"fixture","recordAccess":false}),
-        json!({"status":"expected_error","error":miss_error})))?;
+    writeln!(
+        actor_trace,
+        "{}",
+        contract.trace(
+            &episode,
+            "replay-miss",
+            miss_action,
+            json!({"status":"expected_error","error":miss_error})
+        )
+    )?;
     write_json(
         out.join("replay-miss.json"),
         &json!({"actualQueryEngine":true,"expectedFailure":true,
@@ -451,8 +455,8 @@ async fn main() -> Result<()> {
                 "ftsQuery": if hybrid { format!("token{q}") } else { "unmatchedfixtureterm".into() },
                 "namespace": "fixture", "limit": args.k, "graphDepth": 0, "recordAccess": false}))?;
             let start = Instant::now();
-            let action = json!({"kind":"internal-query","text":format!("query{q}"),"namespace":"fixture",
-                "recordAccess":false,"limit":args.k,"graphDepth":0,"cell":cell});
+            let action = json!({"kind":"internal-query","request":serde_json::to_value(&query)?,"cell":cell,
+                "replayCacheKey":context.key("fixture",&format!("query{q}"))});
             let response = match engine.search(query).await {
                 Ok(response) => response,
                 Err(error) => {

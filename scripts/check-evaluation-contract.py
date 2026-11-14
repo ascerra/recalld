@@ -16,12 +16,13 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     baseline = json.loads(args.manifest.read_text())
+    binary_sha256 = hashlib.sha256(args.binary.read_bytes()).hexdigest()
     cases = []
     for field in ('manifestVersion', 'sourceMappingVersion', 'traceSchemaVersion'):
         cases.append((field, lambda m, a, e, field=field: m.update({field: 2})))
     for field in ('contractVersion', 'canonicalSchemaVersion', 'recordSchemaVersion', 'receiptVersion'):
         cases.append((field, lambda m, a, e, field=field: m['versions'].update({field: 2 if field != 'receiptVersion' else 99})))
-    for field in ('publicV2', 'barrier', 'snapshot', 'reset', 'deterministicIds', 'deterministicRng', 'clockAdvance'):
+    for field in ('publicV2', 'nativeV2', 'fullA6', 'barrier', 'snapshot', 'reset', 'deterministicIds', 'deterministicRng', 'clockAdvance'):
         cases.append((field, lambda m, a, e, field=field: m['capabilities'].update({field: True})))
     cases += [
         ('unused-backup-requirement', lambda m, a, e: m['versions'].update({'backupFormatVersion': 2})),
@@ -31,11 +32,15 @@ def main():
         ('native-representation', lambda m, a, e: m['versions'].update({'canonicalRepresentation': 'native-v2'})),
         ('missing-version', lambda m, a, e: m.pop('traceSchemaVersion')),
         ('unknown-field', lambda m, a, e: m.update({'futureCapability': True})),
+        ('forged-resolved-revision', lambda m, a, e: m.update({'sourceCommit': '0' * 40})),
+        ('forged-image', lambda m, a, e: m.update({'containerImageId': 'sha256:' + '0' * 64})),
+        ('forged-dirty-patch', lambda m, a, e: m.update({'dirtyPatchSha256': '0' * 64})),
         ('unresolved-revision', lambda m, a, e: m.update({'sourceCommit': 'unresolved'})),
         ('external-dataset', lambda m, a, e: m['dataset'].update({'kind': 'upstream'})),
         ('unverified-license', lambda m, a, e: m['dataset'].update({'thirdPartyLicense': 'invented'})),
         ('artifact-traversal', lambda m, a, e: m['actorInputs'].update({'file': '../actor-inputs.json'})),
         ('actor-hash', lambda m, a, e: m['actorInputs'].update({'sha256': '0' * 64})),
+        ('omitted-runtime-source', lambda m, a, e: m['sourceFilesSha256'].pop('src/lib.rs')),
         ('source-hash', lambda m, a, e: m['sourceFilesSha256'].update({'Cargo.lock': '0' * 64})),
         ('actor-label-injection', lambda m, a, e: a['sources'][0].update({'answer': e['labelCanary']})),
         ('duplicate-source', lambda m, a, e: a['sources'].__setitem__(1, copy.deepcopy(a['sources'][0]))),
@@ -66,7 +71,11 @@ def main():
             run = subprocess.run([str(args.binary), '--manifest', str(root / 'manifest.json'), '--out', str(output)],
                                  capture_output=True, text=True)
             result = {'case': name, 'exitCode': run.returncode, 'stdout': run.stdout, 'stderr': run.stderr,
-                      'outputCreated': output.exists(), 'manifestSha256': hashlib.sha256((root / 'manifest.json').read_bytes()).hexdigest()}
+                      'outputCreated': output.exists(), 'binarySha256': binary_sha256,
+                      'manifestJson': (root / 'manifest.json').read_text(),
+                      'actorInputsJson': (root / 'actor-inputs.json').read_text(),
+                      'evaluatorLabelsJson': (root / 'evaluator-labels.json').read_text(),
+                      'manifestSha256': hashlib.sha256((root / 'manifest.json').read_bytes()).hexdigest()}
             results.append(result)
             # Retain partial results even if an assertion fails.
             args.output.write_text(json.dumps(results, indent=2) + '\n')

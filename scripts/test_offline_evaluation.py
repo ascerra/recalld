@@ -5,6 +5,7 @@ import runpy
 import subprocess
 import tempfile
 import unittest
+import sys
 from types import SimpleNamespace
 
 runner = runpy.run_path(str(Path(__file__).with_name("offline-evaluation.py")))
@@ -142,6 +143,13 @@ class ManifestInputTests(unittest.TestCase):
         self.assertIsNone(manifest["versions"]["canonicalSchemaVersion"])
         self.assertEqual(manifest["versions"]["canonicalRepresentation"], "legacy-schema-none")
         self.assertIsNone(manifest["dataset"]["thirdPartyLicense"])
+
+    def test_old_supervisor_invocation_cannot_silently_select_new_track(self):
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("offline-evaluation.py")),
+                                 "--cache", "/does-not-exist"], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--track", result.stderr)
+        self.assertNotIn("Artifacts:", result.stdout)
 
     def test_bad_plan_rejected_before_any_runner_side_effect(self):
         args = SimpleNamespace(records=99, dimensions=16, k=5, warmup=1, samples=3, seed=7)

@@ -129,13 +129,17 @@ def verify_replays(output, runs):
     return stable
 
 
-def evaluation_inputs(args, diagnostic):
-    """Generated synthetic adapter only; no external dataset/license/model claims."""
+def validate_execution_plan(args):
     if not (100 <= args.records <= 100_000 and args.records % 10 == 0
             and 4 <= args.dimensions <= 8192 and 1 <= args.k <= min(200, args.records // 10)
             and 1 <= args.samples <= 100_000 and 0 <= args.warmup <= 100_000
             and 0 <= args.seed <= 2**64 - 1):
         raise ValueError("unsupported execution plan")
+
+
+def evaluation_inputs(args, diagnostic):
+    """Generated synthetic adapter only; no external dataset/license/model claims."""
+    validate_execution_plan(args)
     actor = {"adapterVersion": 1, "sources": [
         {"sourceId": f"unit-{i:06}", "turnId": f"unit-{i:06}", "ordinal": i,
          "groupId": "synthetic-regression", "conversationId": "synthetic-conversation",
@@ -152,6 +156,8 @@ def evaluation_inputs(args, diagnostic):
         "track": "manifest-internal-diagnostic-v1",
         **{key: diagnostic[key] for key in ("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
                                            "lockfileSha256", "containerImageId", "limits")},
+        "sourceTreeSha256": hashlib.sha256(json.dumps(diagnostic["sourceFilesSha256"], sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
         "versions": {"contractVersion": 1, "retrievalSemanticsVersion": 1, "rankingProfile": "baseline-v1",
             "lifecycleVersion": "legacy_access_v1", "rifMode": "off", "canonicalSchemaVersion": None,
             "canonicalRepresentation": "legacy-schema-none", "controlSchemaVersion": 1,
@@ -159,7 +165,7 @@ def evaluation_inputs(args, diagnostic):
             "offlineFormats": "not-used-or-advertised-by-this-track",
             "receiptVersion": 1, "requestHashVersion": 1,
             "derivedIndexFormats": "sourceFilesSha256; no independent format version advertised"},
-        "capabilities": {"publicApi": False, "publicV2": False, "coherentReadView": False,
+        "capabilities": {"publicApi": False, "publicV2": False, "nativeV2": False, "fullA6": False, "coherentReadView": False,
             "barrier": False, "snapshot": False, "reset": False, "deterministicIds": False,
             "deterministicRng": False, "clock": "fixed-lifecycle-only", "clockAdvance": False,
             "sweeps": False, "initialTimeMs": 1767225600000, "recordAccess": False, "graphDepth": 0},
@@ -183,13 +189,12 @@ def verify_manifest_outputs(output, runs):
     count = contract["execution"]["records"]
     for run in range(runs):
         directory = output / f"run-{run}"
-        for name in ("actor-inputs.json", "actor-replay-cache.json", "trace.jsonl", "source-mappings.json", "replay.json"):
+        for name in ("actor-inputs.json", "actor-replay-cache.json", "trace.jsonl", "source-mappings.jsonl", "replay.json"):
             if canary in (directory / name).read_bytes():
                 raise RuntimeError(f"evaluator canary leaked: {name}")
-        mappings = json.loads((directory / "source-mappings.json").read_text())
-        sources = mappings["mappings"]
-        if (mappings["sourceMappingVersion"] != 1 or len(sources) != count
-                or mappings["datasetRevision"] != contract["actorInputs"]["sha256"]):
+        sources = [json.loads(line) for line in (directory / "source-mappings.jsonl").read_text().splitlines()]
+        if (len(sources) != count or any(s["sourceMappingVersion"] != 1
+                or s["datasetRevision"] != contract["actorInputs"]["sha256"] for s in sources)):
             raise RuntimeError("provenance version/revision/count mismatch")
         records = json.loads((directory / "state-before.json").read_text())
         if {s["memoryId"] for s in sources} != set(records):
@@ -217,6 +222,8 @@ def verify_manifest_outputs(output, runs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--track", required=True, choices=["manifest-internal-diagnostic-v1"],
+                        help="explicit opt-in; old frozen studies must use their pinned checkout")
     parser.add_argument("--cache", required=True, type=Path, help="Prior scratch Cargo home; only registry/ is copied")
     parser.add_argument("--build-cache", type=Path, help="Optional prior scratch target to copy, never share")
     parser.add_argument("--image", default=IMAGE)
@@ -231,8 +238,7 @@ def main():
     args = parser.parse_args()
     if args.runs < 3:
         parser.error("at least three processes are required for the replay check")
-    evaluation_inputs(args, dict.fromkeys(("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
-        "lockfileSha256", "containerImageId", "limits")))  # parameter preflight, no side effects
+    validate_execution_plan(args)  # before scratch/output creation
     cache = args.cache.resolve()
     if not str(cache).startswith(("/tmp/recalld-", "/private/tmp/recalld-")) or not (cache / "registry").is_dir():
         parser.error("cache must be a previous recalld scratch directory with registry/")
@@ -323,7 +329,11 @@ python3 scripts/check-evaluation-contract.py --binary /work/target/release/examp
               "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev", "--mount", f"type=bind,src={scratch},dst=/work",
               "--workdir", "/work/source", "--env", "HOME=/tmp/home", "--env", "CARGO_HOME=/work/cargo",
               "--env", "CARGO_TARGET_DIR=/work/target", "--env", "CARGO_BUILD_JOBS=2",
-              "--env", f"RUSTUP_TOOLCHAIN={args.toolchain}", image["Id"]]
+              "--env", f"RUSTUP_TOOLCHAIN={args.toolchain}",
+              "--env", f"RECALLD_A6_SOURCE_COMMIT={contract['sourceCommit']}",
+              "--env", f"RECALLD_A6_DIRTY_PATCH_SHA256={contract['dirtyPatchSha256']}",
+              "--env", f"RECALLD_A6_IMAGE_ID={contract['containerImageId']}",
+              "--env", f"RECALLD_A6_SOURCE_TREE_SHA256={contract['sourceTreeSha256']}", image["Id"]]
     try:
         subprocess.run(docker + ["bash", "/work/build.sh"], check=True)
         manifest["executableSha256"] = sha(scratch / "target/release/examples/offline_eval")
