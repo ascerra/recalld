@@ -36,6 +36,9 @@ struct Data {
     profile: crate::model::schema::EmbeddingProfile,
 }
 fn fixture(root: &Path) -> Data {
+    fixture_with_seed(root, |_| {})
+}
+fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
     let mut config = NamespaceConfig::default_namespace(0);
@@ -57,6 +60,7 @@ fn fixture(root: &Path) -> Data {
         .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &input, &[], 1000)
         .unwrap();
     let parent = crate::storage::insertion::inserted_id(&receipt).unwrap();
+    seed(&mut engine);
     engine.sync().unwrap();
     drop(engine);
     let profile = crate::embedding::runtime::tests::profile();
@@ -740,3 +744,6 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
     assert_eq!(tracker.status().pending, 0);
     assert_eq!(tracker.status().unresolved, 0);
 }
+
+#[path = "graph_tests.rs"]
+mod graph;

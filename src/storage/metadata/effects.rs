@@ -15,6 +15,7 @@ thread_local! {
 /// Ephemeral inputs only; receipts and effects never retain stripped content.
 pub(super) enum RecordMutation<'a> {
     GraphOnly,
+    NativeGraph(crate::storage::native_graph::NativeGraphWrite),
     PurgeChunk(&'a crate::storage::purge::PurgeProgress),
     Inserted(&'a DiskRecord, u32),
     NativeInserted(
@@ -101,6 +102,7 @@ pub(crate) fn validate_existing(
                         | MutationOutcome::MemoryTombstoned { .. }
                         | MutationOutcome::NativeMemoryInserted { .. }
                         | MutationOutcome::NativeMemoryTombstoned { .. }
+                        | MutationOutcome::NativeGraphChanged { .. }
                         | MutationOutcome::NamespacePurgeStarted { .. }
                         | MutationOutcome::NamespacePurgeAdvanced { .. }
                 ) {
@@ -159,6 +161,9 @@ pub(crate) fn validate_existing(
             ));
         }
         match &effect.receipt.outcome {
+            MutationOutcome::NativeGraphChanged { transition } => {
+                validate_native_graph_effect(&effect, transition)?
+            }
             MutationOutcome::NativeMemoryInserted { .. } => validate_native_effect(&effect, true)?,
             MutationOutcome::NativeMemoryTombstoned { .. } => {
                 validate_native_effect(&effect, false)?
@@ -167,7 +172,8 @@ pub(crate) fn validate_existing(
         }
         match effect.receipt.outcome {
             MutationOutcome::NativeMemoryInserted { .. }
-            | MutationOutcome::NativeMemoryTombstoned { .. } => {}
+            | MutationOutcome::NativeMemoryTombstoned { .. }
+            | MutationOutcome::NativeGraphChanged { .. } => {}
             MutationOutcome::MemoryTombstoned { memory_id, status }
                 if matches!(effect.scope, MutationScope::Namespace(_))
                     && effect.puts.is_empty()
@@ -368,7 +374,9 @@ impl MetadataStore {
             | RecordMutation::NativeTombstoned { record, .. } => {
                 invalidated.insert(MemoryId::from_bytes(record.id));
             }
-            RecordMutation::GraphOnly | RecordMutation::PurgeChunk(_) => {}
+            RecordMutation::GraphOnly
+            | RecordMutation::PurgeChunk(_)
+            | RecordMutation::NativeGraph(_) => {}
         }
         if let RecordMutation::Tombstoned { record, old_phase }
         | RecordMutation::NativeTombstoned {
@@ -460,7 +468,15 @@ impl MetadataStore {
                     }
                 }
                 if let Some(old) = final_edges.iter_mut().find(|old| same_edge(old, edge)) {
-                    if old == edge {
+                    // Native receipt identity preserves f32 bits, including
+                    // signed zero. Keep legacy numeric equality unchanged.
+                    let unchanged = if matches!(&mutation, RecordMutation::NativeGraph(_)) {
+                        crate::storage::native_records::NativeEdgeProof::from(&*old)
+                            == crate::storage::native_records::NativeEdgeProof::from(edge)
+                    } else {
+                        old == edge
+                    };
+                    if unchanged {
                         continue;
                     }
                     *old = edge.clone();
@@ -541,6 +557,29 @@ impl MetadataStore {
                     }
                     change.after.edge_count = count;
                 }
+                if let RecordMutation::NativeGraph(proof) = &mut mutation {
+                    let change = proof
+                        .records
+                        .iter_mut()
+                        .find(|r| r.memory_id == id)
+                        .ok_or_else(|| {
+                            StorageError::InvalidControl("native graph source proof missing".into())
+                        })?;
+                    let before = change.before.as_ref().ok_or_else(|| {
+                        StorageError::InvalidControl(
+                            "native graph source prior state missing".into(),
+                        )
+                    })?;
+                    if !before.matches_record(&record)? {
+                        return Err(StorageError::InvalidControl(
+                            "native graph source changed within transaction".into(),
+                        ));
+                    }
+                    let token = before.lifecycle.lifecycle.record_generation.next()?;
+                    record.schema.as_mut().unwrap().lifecycle.record_generation = token;
+                    change.after.lifecycle.lifecycle.record_generation = token;
+                    change.after.edge_count = count;
+                }
                 record.edge_count = count;
                 records.insert(id.as_bytes().as_slice(), record.to_bytes().as_slice())?;
                 peer_counts.push((id, count));
@@ -557,6 +596,9 @@ impl MetadataStore {
                 .collect();
         }
         let outcome = match &mutation {
+            RecordMutation::NativeGraph(transition) => MutationOutcome::NativeGraphChanged {
+                transition: transition.clone(),
+            },
             RecordMutation::NativeInserted(_, transition) => {
                 MutationOutcome::NativeMemoryInserted {
                     transition: transition.clone(),
@@ -622,6 +664,7 @@ impl MetadataStore {
             }
         }
         match &receipt.outcome {
+            MutationOutcome::NativeGraphChanged { transition } => transition.validate(&receipt)?,
             MutationOutcome::NativeMemoryInserted { transition } => {
                 transition.validate(&receipt, true)?
             }
@@ -814,6 +857,25 @@ pub(crate) fn validate_plan(
     effect: &PendingEffects,
     records: &[(MemoryId, DiskRecord)],
 ) -> Result<(), StorageError> {
+    if let MutationOutcome::NativeGraphChanged { transition } = &effect.receipt.outcome {
+        validate_native_graph_effect(effect, transition)?;
+        for change in &transition.records {
+            let record = records
+                .iter()
+                .find(|(id, _)| *id == change.memory_id)
+                .map(|(_, r)| r)
+                .ok_or_else(|| {
+                    StorageError::InvalidControl("native graph pending endpoint missing".into())
+                })?;
+            if record.namespace_id != transition.namespace_id.get()
+                || !change.after.matches_record(record)?
+            {
+                return Err(StorageError::InvalidControl(
+                    "native graph pending peer differs from canonical state".into(),
+                ));
+            }
+        }
+    }
     if effect
         .removed_ids
         .iter()
@@ -933,6 +995,41 @@ fn native_proof(
         | MutationOutcome::NativeMemoryTombstoned { transition } => Some(transition),
         _ => None,
     }
+}
+fn validate_native_graph_effect(
+    effect: &PendingEffects,
+    proof: &crate::storage::native_graph::NativeGraphWrite,
+) -> Result<(), StorageError> {
+    proof.validate(&effect.receipt)?;
+    let mut invalidated: Vec<_> = proof
+        .edges
+        .iter()
+        .flat_map(|e| [e.after.source, e.after.target])
+        .collect();
+    invalidated.sort();
+    invalidated.dedup();
+    if effect.scope != MutationScope::Namespace(proof.namespace_id)
+        || !effect.deletes.is_empty()
+        || !effect.removed_ids.is_empty()
+        || !effect.releases.is_empty()
+        || effect
+            .puts
+            .iter()
+            .map(crate::storage::native_records::NativeEdgeProof::from)
+            .collect::<Vec<_>>()
+            != proof
+                .edges
+                .iter()
+                .map(|e| e.after.clone())
+                .collect::<Vec<_>>()
+        || effect.peer_counts != proof.peer_counts()
+        || effect.invalidated_ids != invalidated
+    {
+        return Err(StorageError::InvalidControl(
+            "native graph effects disagree with receipt".into(),
+        ));
+    }
+    Ok(())
 }
 fn terminal_effect(effect: &PendingEffects, id: MemoryId) -> bool {
     matches!(effect.receipt.outcome,MutationOutcome::MemoryTombstoned {memory_id,..} if memory_id==id)

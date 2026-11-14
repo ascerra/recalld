@@ -6,7 +6,7 @@ use crate::storage::work::WorkTicket;
 use crate::time::Clock;
 
 impl RedbStorageEngine {
-    fn native_text_hash(&self, id: MemoryId) -> Result<Option<[u8; 32]>, StorageError> {
+    pub(super) fn native_text_hash(&self, id: MemoryId) -> Result<Option<[u8; 32]>, StorageError> {
         let record = self
             .meta_store
             .get(id)?

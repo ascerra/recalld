@@ -12,6 +12,7 @@ pub(crate) mod effects;
 mod insertion;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
+pub(crate) mod native_graph;
 mod native_lifecycle;
 mod native_records;
 mod observation;

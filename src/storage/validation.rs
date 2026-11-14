@@ -197,6 +197,7 @@ fn validate_snapshot(
                     e.receipt.outcome,
                     super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
+                        | super::control::MutationOutcome::NativeGraphChanged { .. }
                 ))
     }) {
         return Err(StorageError::RecoveryRequired(
@@ -336,6 +337,7 @@ fn validate_snapshot(
             "edge index counts disagree".into(),
         ));
     }
+    let mut decoded_edges = Vec::new();
     for item in forward.iter()? {
         let (key, value) = item?;
         let edge = PersistedEdge::from_forward(key.value(), value.value())?;
@@ -351,6 +353,21 @@ fn validate_snapshot(
                 "dangling or inconsistent edge".into(),
             ));
         }
+        decoded_edges.push(edge);
+    }
+    if let (Some(state), Some(schema)) = (control.as_ref(), schema_state.as_ref()) {
+        let baseline = if schema.source.store_id == state.store_id {
+            schema.publication_generation
+        } else {
+            super::control::Generation::default().next()?
+        };
+        super::native_graph::validate_edge_history(
+            &meta.begin_read()?,
+            state,
+            baseline,
+            &decoded_edges,
+            &effects,
+        )?;
     }
     Ok(inventory)
 }
