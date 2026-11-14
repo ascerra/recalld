@@ -38,4 +38,8 @@ hashes, exact commands and integration diff are retained in
 new regressions; earlier development logs are not substitutes for its provenance.
 Scope and integration seams are in `docs/implementation/accepted-producers.md`.
 No whole-core readiness, public CAS, native-v2 activation, OS deadline or power-loss
-conclusion follows. Main owns publication; this agent commits locally only.
+conclusion follows. No deploy or main-branch merge is authorized.
+
+Frozen runtime: `209ce38ab6949c1231d54c099a98f48c9239c4b5`. See the evidence manifest for exact source and
+test-executable hashes. Publication is now explicitly authorized as a minimal PR
+against `impl/canonical-writer-guards` (PR70), with PR78 as an additional prerequisite.
