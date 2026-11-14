@@ -275,10 +275,13 @@ struct RecoveringProvider {
     profile: crate::model::schema::EmbeddingProfile,
     unavailable: std::sync::atomic::AtomicBool,
     calls: AtomicUsize,
+    profiles: AtomicUsize,
+    corrupt: std::sync::Mutex<Option<Arc<tokio::sync::RwLock<crate::search::FlatVectorIndex>>>>,
 }
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for RecoveringProvider {
     fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+        self.profiles.fetch_add(1, Ordering::SeqCst);
         Some(self.profile.clone())
     }
     fn dimensions(&self) -> usize {
@@ -294,6 +297,10 @@ impl crate::embedding::EmbeddingProvider for RecoveringProvider {
                 "synthetic offline failure".into(),
             ))
         } else {
+            let corrupt = self.corrupt.lock().unwrap().take();
+            if let Some(index) = corrupt {
+                *index.write().await = crate::search::FlatVectorIndex::new(8);
+            }
             Ok(vec![1., 0., 0., 0.])
         }
     }
@@ -311,6 +318,8 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
         profile: d.profile.clone(),
         unavailable: true.into(),
         calls: AtomicUsize::new(0),
+        profiles: AtomicUsize::new(0),
+        corrupt: std::sync::Mutex::new(None),
     });
     let a = Arc::new(adapter(
         &f,
@@ -367,7 +376,9 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
     assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
     r.idempotency_key = Some("commit-unready".into());
     r.items[0]["summary"] = json!("actual publication failure");
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    // Corrupt only after reservation publication and the real provider call;
+    // corrupting before reservation correctly prevents any child commitment.
+    *provider.corrupt.lock().unwrap() = Some(f.vector_index.clone());
     let (status, unready) = http(&a, &body(&r)).await;
     assert_eq!(status, 207, "{unready}");
     assert_eq!(unready["data"]["succeeded"], "1");
@@ -454,10 +465,12 @@ async fn batch_wire_final_barrier_failure_after_children_preserves_receipts_and_
         let mut r = request(&d, session.metadata().control_state().unwrap().store_id);
         r.items = vec![json!({"summary":"final publication boundary","checkDuplicates":false})];
         let f = Fixture::from_open_engine(root, session.engine);
-        let provider = Arc::new(Provider {
+        let provider = Arc::new(RecoveringProvider {
             profile: d.profile.clone(),
             calls: AtomicUsize::new(0),
-            fail_if_called: false,
+            profiles: AtomicUsize::new(0),
+            unavailable: false.into(),
+            corrupt: std::sync::Mutex::new(None),
         });
         let a = Arc::new(adapter(
             &f,
@@ -511,6 +524,7 @@ async fn batch_wire_final_barrier_failure_after_children_preserves_receipts_and_
             assert_eq!(failed["warnings"], json!(["READINESS_UNKNOWN"]));
         }
         let calls = provider.calls.load(Ordering::SeqCst);
+        let profiles = provider.profiles.load(Ordering::SeqCst);
         let ticks = clock.0.load(Ordering::SeqCst);
         assert_eq!(calls, 1);
         drop(a);
@@ -535,6 +549,7 @@ async fn batch_wire_final_barrier_failure_after_children_preserves_receipts_and_
             canonical(&expected)
         );
         assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
+        assert_eq!(provider.profiles.load(Ordering::SeqCst), profiles);
         assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
         assert_eq!(readers::bytes(&d.path), before);
     }
