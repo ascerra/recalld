@@ -662,6 +662,11 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         }
         MutationOutcome::MemoryInserted { .. }
         | MutationOutcome::MemoryTombstoned { .. }
+        | MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::BatchReserved { .. }
+        | MutationOutcome::BatchItemRejected { .. }
+        | MutationOutcome::ExposuresRecorded { .. }
+        | MutationOutcome::LegacyFeedbackRecorded { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
@@ -781,6 +786,10 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
             }
         }
         MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::NativeMemoryInserted { .. }
+        | MutationOutcome::NativeMemoryTombstoned { .. }
+        | MutationOutcome::LifecycleExposureRecorded { .. }
+        | MutationOutcome::LifecycleFeedbackApplied { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }

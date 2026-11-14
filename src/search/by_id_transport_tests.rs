@@ -14,7 +14,7 @@ impl crate::api::StorageEngine for OfflineHttpStorage {
         &self,
         _: NamespaceId,
         _: crate::storage::insertion::InsertMemory,
-        _: Vec<f32>,
+        _: crate::embedding::runtime::GeneratedEmbedding,
     ) -> std::result::Result<crate::storage::insertion::InsertResult, StorageError> {
         panic!("unexpected offline HTTP insertion")
     }

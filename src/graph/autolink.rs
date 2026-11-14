@@ -467,7 +467,7 @@ pub async fn perform_entity_link(
 ) -> Result<usize, AutoLinkError> {
     perform_entity_link_with_work(
         new_memory_id,
-        _namespace_id,
+        namespace_id,
         entities,
         max_entity_links,
         entity_index,
@@ -481,7 +481,7 @@ pub async fn perform_entity_link(
 
 pub(crate) async fn perform_entity_link_with_work(
     new_memory_id: MemoryId,
-    _namespace_id: NamespaceId,
+    namespace_id: NamespaceId,
     entities: &[String],
     max_entity_links: usize,
     entity_index: &tokio::sync::RwLock<EntityIndex>,
