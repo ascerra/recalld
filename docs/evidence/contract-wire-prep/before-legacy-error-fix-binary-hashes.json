@@ -1,0 +1,93 @@
+{
+  "source_root": "/tmp/recalld-implementation/contract-wire-prep",
+  "base_commit": "10986fec764902855846c947000ff230e74033a1",
+  "source_switch_audit": "Own cargo clean -p recalld before source-root transition; all subsequent corrections/builds stay at contract-wire-prep. No before/after/switch-back comparison.",
+  "logs": [
+    "focused.log",
+    "full-initial.log"
+  ],
+  "source_files": [
+    {
+      "path": "docs/implementation/contract-wire-prep.md",
+      "sha256": "5dacae647cc8df48a364734604972db308bd1e9eb68dbcfc8c8f30532da62e12"
+    },
+    {
+      "path": "docs/mcp.md",
+      "sha256": "b7280cb5fe297badd61babcfecb1447e18dc7ff63c3f0b49c27e619bb91044d3"
+    },
+    {
+      "path": "src/api/contract_wire_tests.rs",
+      "sha256": "c67d47b816cb94b744cc40187cc173b9977ab7477b9918b54256e83bdb206c5c"
+    },
+    {
+      "path": "src/api/legacy_label_tests.rs",
+      "sha256": "d67c54759ebf6e8dfbad693bb810f0ec3c6734e0fae7b5284eaca00a0d8c35ab"
+    },
+    {
+      "path": "src/api/middleware.rs",
+      "sha256": "f91d94c81bcc0df51da04b7b2f1ce80bd599ad53add1e42e0387c52252b24650"
+    },
+    {
+      "path": "src/api/routes.rs",
+      "sha256": "27ef84595e0c703da81075c4ba4589324ef5fe94b77304983c0b728ec4978f80"
+    },
+    {
+      "path": "src/mcp/server.rs",
+      "sha256": "3c0670c63db55b13c4616eb30d80480f5d446ef0f9ced66a0909fca22c7794d5"
+    },
+    {
+      "path": "src/mcp/tools.rs",
+      "sha256": "d002c8e4743e4a175d60f9754a7c5db178b037ad94f5ceed7908d09e60f03198"
+    },
+    {
+      "path": "src/serialization/contract.rs",
+      "sha256": "d79c472da13ed455c22db0ba899174fe0a0d87c6fcfd477a9b9930c2fa435d52"
+    },
+    {
+      "path": "src/serialization/contract_tests.rs",
+      "sha256": "4f13d90dd18a60bf577aa8c30b8b17b198f45bab016e5cddc690eda83b923043"
+    },
+    {
+      "path": "src/serialization/mod.rs",
+      "sha256": "ea2ed65dfc6fa0c1b7d285848d30f3277e653cc0997c8cca541c3b7d6f2eb617"
+    }
+  ],
+  "executables": [
+    {
+      "container_path": "/target/debug/deps/lifecycle_cli-ef7aa35bda05dfab",
+      "bytes": 253789992,
+      "sha256": "ddcfa190ce7e1bb80570d893f644230177cc77587872f34d4029853ac44c3c1a",
+      "mtime_ns": 1794666418673513720
+    },
+    {
+      "container_path": "/target/debug/deps/recalld-27bbb81e23f12ff5",
+      "bytes": 6908664,
+      "sha256": "9b582c32ca5a36e46392584346e2bd238c4da72c71c6848c51709c62192e55b8",
+      "mtime_ns": 1794666399668068340
+    },
+    {
+      "container_path": "/target/debug/deps/recalld-7025a4141187b374",
+      "bytes": 358276480,
+      "sha256": "fbe8caaa8ee3f317df925ad54e44a4b3d79fbc284f436bc2bc51ed2d82e2aef6",
+      "mtime_ns": 1794666497746659429
+    },
+    {
+      "container_path": "/target/debug/deps/recalld_cli-16a6b9f5f1a3f682",
+      "bytes": 6357936,
+      "sha256": "cd54291dbc43bf0933db0f91e2778f6d761f59b19001aaa1e7f370636c833176",
+      "mtime_ns": 1794666414821618982
+    },
+    {
+      "container_path": "/target/debug/deps/recalld_text_migrate-b3ddbfaa472dba30",
+      "bytes": 6358016,
+      "sha256": "cc3a30679a3bccdf954e467e46ad603341622e14941d3d6a5fc329fad62061ac",
+      "mtime_ns": 1794666418956293382
+    },
+    {
+      "container_path": "/target/debug/deps/text_migration_cli-c242142a48e76014",
+      "bytes": 253303648,
+      "sha256": "996165a94d3678f534a89dfe0831737f5665e9317a3649dc6a8c74be17f68196",
+      "mtime_ns": 1794666422748391201
+    }
+  ]
+}
