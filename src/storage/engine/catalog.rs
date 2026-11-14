@@ -330,15 +330,26 @@ mod tests {
             engine.create_namespace(&config("recover"))
         })
         .unwrap_err();
-        assert!(matches!(
-            error,
-            StorageError::CommittedEffectsPending { .. }
-        ));
+        let StorageError::CommittedMutation { receipt, .. } = error else {
+            panic!("known catalog commit lost its full receipt: {error:?}");
+        };
         assert!(tracker.status().unresolved > 0);
         drop(engine);
         let engine = RedbStorageEngine::open(root.path()).unwrap();
         let id = engine.get_namespace_by_name("recover").unwrap().unwrap().id;
         assert!(engine.vector_manager.get(id).is_some());
+        assert_eq!(
+            engine
+                .meta_store()
+                .lookup_operation(
+                    receipt.store_id,
+                    MutationScope::Catalog,
+                    receipt.operation_id
+                )
+                .unwrap()
+                .unwrap(),
+            *receipt
+        );
         assert_eq!(engine.meta_store().work_tracker().status().pending, 0);
     }
 
