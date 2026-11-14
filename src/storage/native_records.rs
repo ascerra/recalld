@@ -403,6 +403,46 @@ where
     PhaseTimeRule::deserialize(deserializer).map(Some)
 }
 
+pub(crate) fn validate_creation_primary(
+    change: &NativeRecordChange,
+    sampled_at: i64,
+    committed_generation: Generation,
+) -> Result<(), StorageError> {
+    let after = &change.after;
+    let fields = &after.lifecycle.lifecycle;
+    let n = &after.lifecycle;
+    if change.before.is_some()
+        || fields.record_generation != Generation::default().next()?
+        || fields.timestamp_origin != TimestampOrigin::Native
+        || fields.retrieved_at.is_some()
+        || fields.reinforced_at.is_some()
+        || fields.decay_anchor_at != n.created_at
+        || fields.phase_changed_at != n.created_at
+        || fields.lifecycle_updated_at != sampled_at.max(n.created_at)
+        || n.last_accessed_at != n.created_at
+        || n.phase != DecayPhase::Full
+        || !n.has_summary
+        || n.is_permastore
+        || n.strength.get() != 1.
+        || n.decay_strength.get() != 1.
+        || after.history_sha256 != history_hash(&[])?
+        || after.content.label_provenance != LabelProvenance::NativeV2
+        || after.content.profile_id.is_none()
+        || after.content.vector.is_none()
+        || after.content.extensions_sha256
+            != hash_value(&BTreeMap::<String, serde_json::Value>::new())?
+        || (n.has_text != after.content.text_sha256.is_some())
+    {
+        return Err(invalid("invalid native creation evidence"));
+    }
+    if after.content.vector.as_ref().unwrap().allocation_epoch != committed_generation {
+        return Err(invalid(
+            "native allocation epoch disagrees with its origin transaction",
+        ));
+    }
+    Ok(())
+}
+
 impl NativeRecordWrite {
     pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
         self.records
@@ -462,38 +502,11 @@ impl NativeRecordWrite {
             }
             if change.memory_id == self.memory_id {
                 if insertion {
-                    let n = &after.lifecycle;
-                    if change.before.is_some()
-                        || fields.record_generation != Generation::default().next()?
-                        || fields.timestamp_origin != TimestampOrigin::Native
-                        || fields.retrieved_at.is_some()
-                        || fields.reinforced_at.is_some()
-                        || fields.decay_anchor_at != n.created_at
-                        || fields.phase_changed_at != n.created_at
-                        || fields.lifecycle_updated_at != self.sampled_at.max(n.created_at)
-                        || n.last_accessed_at != n.created_at
-                        || n.phase != DecayPhase::Full
-                        || !n.has_summary
-                        || n.is_permastore
-                        || n.strength.get() != 1.
-                        || n.decay_strength.get() != 1.
-                        || after.history_sha256 != history_hash(&[])?
-                        || after.content.label_provenance != LabelProvenance::NativeV2
-                        || after.content.profile_id.is_none()
-                        || after.content.vector.is_none()
-                        || after.content.extensions_sha256
-                            != hash_value(&BTreeMap::<String, serde_json::Value>::new())?
-                        || (n.has_text != after.content.text_sha256.is_some())
-                    {
-                        return Err(invalid("invalid native creation evidence"));
-                    }
-                    if after.content.vector.as_ref().unwrap().allocation_epoch
-                        != receipt.committed_generation
-                    {
-                        return Err(invalid(
-                            "native allocation epoch disagrees with its origin transaction",
-                        ));
-                    }
+                    validate_creation_primary(
+                        change,
+                        self.sampled_at,
+                        receipt.committed_generation,
+                    )?;
                 } else {
                     let before = change
                         .before
@@ -572,18 +585,46 @@ impl NativeRecordWrite {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CreationCommitment {
+    pub namespace_id: crate::model::NamespaceId,
+    pub primary: NativeRecordChange,
+}
+impl CreationCommitment {
+    pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
+        Ok(&self.primary)
+    }
+}
+
 /// Creation commitments survive a fork. Actual retained text is checked by the
 /// canonical inventory consumer, not trusted merely because the receipt hashes it.
 pub(crate) fn creation_proofs(
     read: &redb::ReadTransaction,
-) -> Result<HashMap<MemoryId, NativeRecordWrite>, StorageError> {
+) -> Result<HashMap<MemoryId, CreationCommitment>, StorageError> {
     use redb::ReadableTable;
     let mut result = HashMap::new();
     for row in read.open_table(super::control::RECEIPTS)?.iter()? {
         let (_, value) = row?;
         let receipt = super::control::validate_receipt(value.value())?.receipt;
-        if let MutationOutcome::NativeMemoryInserted { transition } = receipt.outcome {
-            if result.insert(transition.memory_id, transition).is_some() {
+        let creation = match &receipt.outcome {
+            MutationOutcome::NativeMemoryInserted { transition } => Some((
+                transition.memory_id,
+                CreationCommitment {
+                    namespace_id: transition.namespace_id,
+                    primary: transition.primary()?.clone(),
+                },
+            )),
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => Some((
+                transition.memory_id,
+                CreationCommitment {
+                    namespace_id: transition.namespace_id,
+                    primary: transition.primary()?.clone(),
+                },
+            )),
+            _ => None,
+        };
+        if let Some((id, proof)) = creation {
+            if result.insert(id, proof).is_some() {
                 return Err(invalid("duplicate native creation identity"));
             }
         }
@@ -594,7 +635,7 @@ pub(crate) fn creation_proofs(
 pub(crate) fn validate_retained_creation(
     record: &DiskRecord,
     namespace: &NamespaceConfig,
-    creation: Option<&NativeRecordWrite>,
+    creation: Option<&CreationCommitment>,
     ledger: Option<&super::metadata::removal_ledger::LedgerExport>,
 ) -> Result<(), StorageError> {
     let schema = record
@@ -642,7 +683,7 @@ pub(crate) fn validate_retained_creation(
 }
 pub(crate) fn validate_retained_text(
     record: &DiskRecord,
-    creation: Option<&NativeRecordWrite>,
+    creation: Option<&CreationCommitment>,
     text: &str,
 ) -> Result<(), StorageError> {
     if let Some(creation) = creation {

@@ -330,10 +330,13 @@ pub(crate) fn validate_edge_history(
     }
     // Historical foreign-origin receipts were already ancestry/policy checked;
     // deletion-aware restore may have removed their edges. Never replay them.
-    if !suffix
-        .values()
-        .any(|r| matches!(r.outcome, MutationOutcome::NativeGraphChanged { .. }))
-    {
+    if !suffix.values().any(|r| {
+        matches!(
+            r.outcome,
+            MutationOutcome::NativeGraphChanged { .. }
+                | MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+        )
+    }) {
         return Ok(());
     }
     let mut current: BTreeMap<_, _> = edges
@@ -374,6 +377,15 @@ pub(crate) fn validate_edge_history(
                         current.insert(key, before.clone());
                     } else {
                         current.remove(&key);
+                    }
+                }
+            }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
+                for e in &transition.edges {
+                    if current.remove(&edge_key(e)).as_ref() != Some(e) {
+                        return Err(invalid(
+                            "linked creation differs after graph history rewind",
+                        ));
                     }
                 }
             }

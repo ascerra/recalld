@@ -234,6 +234,9 @@ pub enum MutationOutcome {
     NativeGraphChanged {
         transition: super::native_graph::NativeGraphWrite,
     },
+    NativeMemoryInsertedWithLinks {
+        transition: super::native_store::NativeStoreWrite,
+    },
     NativeMemoryInserted {
         transition: super::native_records::NativeRecordWrite,
     },
@@ -452,6 +455,7 @@ pub(crate) fn validate_existing(
             MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
                 | MutationOutcome::LifecycleFeedbackApplied { .. }
+                | MutationOutcome::NativeMemoryInsertedWithLinks { .. }
                 | MutationOutcome::NativeMemoryInserted { .. }
                 | MutationOutcome::NativeMemoryTombstoned { .. }
                 | MutationOutcome::NativeGraphChanged { .. }
@@ -624,6 +628,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::NativeGraphChanged { transition } => {
             transition.validate(&stored.receipt)?
         }
+        MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeMemoryInserted { transition } => {
             transition.validate(&stored.receipt, true)?
         }
@@ -728,7 +735,8 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::NativeMemoryInserted { .. }
+        MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+        | MutationOutcome::NativeMemoryInserted { .. }
         | MutationOutcome::NativeMemoryTombstoned { .. }
         | MutationOutcome::NativeGraphChanged { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }

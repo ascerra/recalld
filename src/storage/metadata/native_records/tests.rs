@@ -747,3 +747,6 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
 
 #[path = "graph_tests.rs"]
 mod graph;
+
+#[path = "store_tests.rs"]
+mod store;

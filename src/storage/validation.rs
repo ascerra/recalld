@@ -195,7 +195,8 @@ fn validate_snapshot(
             && (!native_recovery
                 || !matches!(
                     e.receipt.outcome,
-                    super::control::MutationOutcome::NativeMemoryInserted { .. }
+                    super::control::MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+                        | super::control::MutationOutcome::NativeMemoryInserted { .. }
                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
                         | super::control::MutationOutcome::NativeGraphChanged { .. }
                 ))

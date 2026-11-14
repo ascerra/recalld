@@ -15,6 +15,7 @@ pub(crate) mod namespace_state;
 pub(crate) mod native_graph;
 mod native_lifecycle;
 mod native_records;
+mod native_store;
 mod observation;
 pub(crate) mod purge;
 pub(crate) mod removal_ledger;

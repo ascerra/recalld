@@ -191,6 +191,15 @@ pub(crate) fn validate_policy_history(
                 ));
                 Some(t.namespace_id)
             }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
             MutationOutcome::NativeGraphChanged { transition: t } => {
                 native_history.push((
                     receipt.clone(),
@@ -255,6 +264,13 @@ pub(crate) fn validate_policy_history(
     // Retained historical native operations still require an explicit policy
     // selection. Their record sets need not survive a deletion-aware restore.
     for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        if let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("linked creation namespace binding missing"))?,
+            )?;
+        }
         if let MutationOutcome::NativeGraphChanged { transition } = &receipt.outcome {
             transition.validate_namespace_profiles(
                 configs
@@ -397,6 +413,18 @@ pub(crate) fn validate_policy_history(
                     records
                         .get_mut(&t.namespace_id.get())
                         .ok_or_else(|| invalid("native receipt namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("linked creation out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("linked creation namespace absent"))?,
                 )?;
             }
             MutationOutcome::NativeGraphChanged { transition: t } => {
