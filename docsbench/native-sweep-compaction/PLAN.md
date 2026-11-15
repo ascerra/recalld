@@ -79,8 +79,15 @@ origin/compaction/control tests → real v2 consumer and compatibility negatives
 appropriate same-source full checks and existing-track regressions. Reuse the
 one private `/tmp/recalld-owned-native-controls-validation/{cargo,target}` cache;
 new uniquely named immutable source/output roots only. Offline pinned Docker,
-2CPU/4GiB/-j1, source and executed-binary hashes, no personal stores/config/sockets,
+2CPU/4GiB/-j1 initially, source and executed-binary hashes, no personal stores/config/sockets,
 datasets or paid calls. Completed PR149 raw roots have been centrally deleted;
 never recreate them. Preserve code/Git/reports and clean new disposable runs
 after publication/results. Broader A6 scorer/grouping/token/trace and public
 native-writer implementation remain owned work outside this bounded PR.
+
+Validation resource amendment: the first library link at 4 GiB was OOM-killed,
+confirmed by the exact Docker container event. The user approved one retry at
+6 GiB with unchanged source/flags/profile and the same private cache. It passed
+the focused and actual-consumer checks with cgroup peak5.59 GiB and zero OOM
+events. The required full correctness run uses the same approved6 GiB cap.
+Retain the initial failure separately; no performance comparison is claimed.

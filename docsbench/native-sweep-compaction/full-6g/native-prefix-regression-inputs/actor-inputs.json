@@ -1,0 +1,85 @@
+{
+  "adapterVersion": 1,
+  "sources": [
+    {
+      "contentSha256": "49ec476cea2b49f4ea1308c54b61fc858efc50379892cc10ce328fb2720b17a7",
+      "conversationId": "synthetic-conversation",
+      "embedding": [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "fullText": "alpha filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler ",
+      "fullTextSha256": "c77f07db4b0ef644d9635c2d95012e40647798a00ee092b14e5c20a6b21eb4d9",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 0,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "turn-0",
+      "sourceTimestamp": 1767225600000,
+      "summary": "alpha document",
+      "turnId": "turn-0"
+    },
+    {
+      "contentSha256": "41950e50e68c00bfd60fb7547caa4026b25a5755062f0fce6cba81bd90e55063",
+      "conversationId": "synthetic-conversation",
+      "embedding": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 1,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "turn-1",
+      "sourceTimestamp": 1767225600000,
+      "summary": "beta beta beta",
+      "turnId": "turn-1"
+    },
+    {
+      "contentSha256": "f44e64e75f3948e9f73f8dfa94721c4ce8cbb4f265c4790c702b2d41cfbf2753",
+      "conversationId": "synthetic-conversation",
+      "embedding": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 2,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "turn-2",
+      "sourceTimestamp": 1767225600000,
+      "summary": "beta",
+      "turnId": "turn-2"
+    },
+    {
+      "contentSha256": "9a1c4ed96f21d7951f92532ddca0ff821aa92b1523b055d0038a4b2f95b08afa",
+      "conversationId": "synthetic-conversation",
+      "embedding": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "fullText": "foreign payload",
+      "fullTextSha256": "2b4efa5daf8605a6e9c80c7800c0db3d55f3d494875a75c26c4470f434dbfcdc",
+      "groupId": "synthetic-regression",
+      "namespace": "foreign",
+      "ordinal": 3,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "turn-3",
+      "sourceTimestamp": 1767225600000,
+      "summary": "foreign beta",
+      "turnId": "turn-3"
+    }
+  ]
+}
