@@ -199,7 +199,8 @@ fn linked_batch_hash_domains_fixed_defaults_original_bits_and_unknown_versions()
         plans(&changed)[0].request_hash(),
         original[0].request_hash()
     );
-    for version in [0, 4, u32::MAX] {
+    // Format4 is legacy API2, not another native writer or public API version.
+    for version in [0, 5, u32::MAX] {
         assert!(batch::caller_hash_version(version, BatchKind::Insert, &[]).is_err());
         assert!(batch::resolution_hash_version(version, &p.items).is_err());
         assert!(batch::contract_version(version).is_err());
@@ -208,8 +209,28 @@ fn linked_batch_hash_domains_fixed_defaults_original_bits_and_unknown_versions()
     let one = batch::caller_hash_version(1, BatchKind::Insert, &hashes).unwrap();
     let two = batch::caller_hash_version(2, BatchKind::Insert, &hashes).unwrap();
     let three = batch::caller_hash_version(3, BatchKind::Insert, &hashes).unwrap();
+    let four = batch::caller_hash_version(4, BatchKind::Insert, &hashes).unwrap();
     assert_ne!(one, two);
     assert_ne!(two, three);
+    for prior in [one, two, three] {
+        assert_ne!(four, prior);
+    }
+    assert_eq!(batch::contract_version(4).unwrap(), 2);
+    let mut legacy = r.clone();
+    legacy.mutation_version = 4;
+    assert!(crate::mcp::batches::prepare_native_store(&legacy).is_err());
+    assert!(matches!(
+        s.metadata().reserve_batch_version_with_work(
+            &legacy.context(),
+            4,
+            BatchKind::Insert,
+            &original,
+            None,
+            None,
+            || panic!("legacy format reached native owner's fresh settings")
+        ),
+        Err(StorageError::RecoveryRequired(_))
+    ));
     assert_eq!(s.metadata().control_state().unwrap(), before);
     assert!(
         crate::mcp::batches::prepare(&r).is_err(),
