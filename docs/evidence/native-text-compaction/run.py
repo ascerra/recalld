@@ -2,7 +2,7 @@
 import hashlib, json, pathlib, shutil, subprocess, sys
 source = pathlib.Path(__file__).resolve().parents[3]
 mode = sys.argv[1]
-assert mode in ('before', 'focused', 'full')
+assert mode in ('before', 'focused', 'full', 'fixture')
 label = sys.argv[2] if len(sys.argv) > 2 else mode
 assert label.replace('-', '').isalnum()
 root = pathlib.Path('/tmp/recalld-native-text-compaction-validation') / label
@@ -24,7 +24,7 @@ target=pathlib.Path('/tmp/recalld-owned-native-catalog-ids-full-xk182ybj/target'
 cmd=['docker','run','--rm','--name','recalld-feynman-native-compaction','--network','none','--cpus','2','--memory','4g','--memory-swap','4g','--cap-drop','ALL','--security-opt','no-new-privileges','--read-only','--tmpfs','/tmp:rw,nosuid,nodev','-w','/work/source','-e','HOME=/tmp/home','-e','RUSTUP_TOOLCHAIN=1.94.1','-e','CARGO_HOME=/work/cargo','-e','CARGO_TARGET_DIR=/work/target','-e','CARGO_BUILD_JOBS=2','-e','CARGO_NET_OFFLINE=true','-e','RUST_TEST_THREADS=2','-e','CARGO_PROFILE_DEV_DEBUG=0','-e','CARGO_PROFILE_TEST_DEBUG=0']
 for host,guest,ro in [(root,'/work',False),(root/'source','/work/source',True),(target,'/work/target',False),(pathlib.Path('/tmp/recalld-unit-tests-l__ja1yo/cargo/registry'),'/work/cargo/registry',True)]:
     cmd+=['--mount',f'type=bind,src={host},dst={guest}'+(',readonly' if ro else '')]
-if mode != 'before':
+if mode not in ('before', 'fixture'):
     cmd += ['--mount','type=bind,src=/tmp/recalld-native-text-compaction-validation/before-corrected/output/legacy-before,dst=/before-compaction,readonly','-e','RECALLD_COMPACTION_BEFORE_INPUT=/before-compaction']
 script='''set -eu
 mkdir -p /tmp/home
@@ -51,7 +51,9 @@ RECALLD_COMPACTION_BEFORE_OUTPUT=/work/output/legacy-before /work/output/recalld
 sha256sum -c /work/output/source.sha256 --quiet > /work/output/source-after.txt
 cat /sys/fs/cgroup/memory.peak > /work/output/memory-peak.txt
 '''
-if mode != 'before':
+if mode == 'fixture':
+    script = script[:script.index('set +e')] + 'cargo fmt --all --check > /work/output/fmt.log 2>&1\n/work/output/recalld-test --exact storage::engine::text_compaction::tests::compaction_genuine_legacy_before_receipt_bytes_survive_open_and_new_selection --nocapture > /work/output/fixture-ci.log 2>&1\n'
+if mode not in ('before', 'fixture'):
     script += 'test "$result" -eq 0\n'
     script += '/work/output/recalld-test --exact producer_work_tests::sweep_publication_failure_preserves_receipt_and_can_repair_without_reopen --nocapture > /work/output/prior-deletion.log 2>&1\n'
     script += '/work/output/recalld-test --exact storage::maintenance_tests::actual_manual_sweep_awaits_publication_and_keeps_receipt_on_failure --nocapture > /work/output/prior-phase.log 2>&1\n'
