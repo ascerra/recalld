@@ -330,6 +330,14 @@ fn file_hashes(root: &std::path::Path) -> Vec<(String, String)> {
         .map(|(path, bytes)| (path, format!("{:02x?}", Sha256::digest(bytes).as_slice())))
         .collect()
 }
+// Restored owners may rebuild disposable FTS/WAL on first completion. Keep
+// every canonical DB, vector/text payload and retained history byte invariant.
+fn canonical_hashes(root: &std::path::Path) -> Vec<(String, String)> {
+    file_hashes(root)
+        .into_iter()
+        .filter(|(path, _)| !path.starts_with("fts.db"))
+        .collect()
+}
 pub(super) fn history() -> Value {
     serde_json::from_slice(include_bytes!(
         "fixtures/legacy-semantic-before/history.json"
@@ -383,7 +391,7 @@ async fn legacy_semantic_genuine_single_replay_precedes_profile_clock_and_cas() 
         h["single"]["input"]
     );
     let before = current(&f);
-    let bytes = file_hashes(f.path());
+    let bytes = canonical_hashes(f.path());
     let owner = f.storage_adapter().batch_completion();
     let replay = owner
         .insert(ctx.clone(), canonical(), vec![f32::NAN].into(), i64::MAX)
@@ -414,14 +422,14 @@ async fn legacy_semantic_genuine_single_replay_precedes_profile_clock_and_cas() 
         Err(crate::storage::StorageError::StoreLineageMismatch)
     ));
     assert_eq!(current(&f), before);
-    assert_eq!(file_hashes(f.path()), bytes);
+    assert_eq!(canonical_hashes(f.path()), bytes);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_semantic_genuine_completed_rpc_replays_all_receipts_no_work() {
     let (f, h) = completed();
     let before = current(&f);
-    let bytes = file_hashes(f.path());
+    let bytes = canonical_hashes(f.path());
     let spy = Arc::new(SpyProvider(Default::default()));
     let clock = Arc::new(SpyClock(Default::default()));
     let mut adapter = f.storage_adapter().with_clock(clock.clone());
@@ -451,7 +459,7 @@ async fn legacy_semantic_genuine_completed_rpc_replays_all_receipts_no_work() {
         }
     }
     assert_eq!(current(&f), before);
-    assert_eq!(file_hashes(f.path()), bytes);
+    assert_eq!(canonical_hashes(f.path()), bytes);
     assert_eq!(spy.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     drop(adapter);
@@ -466,7 +474,7 @@ async fn legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_comp
     ));
     let h = history();
     let before = current(&f);
-    let bytes = file_hashes(f.path());
+    let bytes = canonical_hashes(f.path());
     let spy = Arc::new(SpyProvider(Default::default()));
     let clock = Arc::new(SpyClock(Default::default()));
     let mut adapter = f.storage_adapter().with_clock(clock.clone());
@@ -527,7 +535,7 @@ async fn legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_comp
     assert_eq!(spy.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     assert_eq!(current(&f), before);
-    assert_eq!(file_hashes(f.path()), bytes);
+    assert_eq!(canonical_hashes(f.path()), bytes);
     drop(adapter);
     let root = f.close();
     assert_eq!(historical_rows(root.path()), h["pendingRows"]);
@@ -568,4 +576,126 @@ async fn legacy_semantic_historical_fault_rpc_keeps_exact_current_child() {
         assert_eq!(spy.0.load(Ordering::SeqCst), 0);
         assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     }
+}
+
+#[test]
+fn legacy_semantic_core_generated_and_reserved_bypass_are_final_guarded() {
+    let f = Fixture::new();
+    let mut input = canonical();
+    input.embedding = None;
+    let before = current(&f);
+    let bytes = file_hashes(f.path());
+    let ctx = context(&f);
+    let result =
+        f.storage
+            .write()
+            .unwrap()
+            .insert_memory_with_receipt(&ctx, &input, &[1., 0., 0., 0.], 100);
+    assert!(matches!(
+        result,
+        Err(crate::storage::StorageError::UnsupportedMutation(_))
+    ));
+    assert_eq!(current(&f), before);
+    assert_eq!(file_hashes(f.path()), bytes);
+    // A real retained reservation is not an authority to create fresh vectors.
+    let f = restored(include_bytes!(
+        "fixtures/legacy-semantic-before/pending.zip"
+    ));
+    let h = history();
+    let case = &h["pending"][0];
+    let mut request: BatchInput = serde_json::from_value(case["input"].clone()).unwrap();
+    let original: BatchOutcome = serde_json::from_value(case["outcome"].clone()).unwrap();
+    request.batch_operation_id = Some(original.batch_operation_id);
+    let plans: Vec<_> = crate::mcp::batches::prepare(&request)
+        .unwrap()
+        .into_iter()
+        .map(|i| i.plan)
+        .collect();
+    let before = current(&f);
+    let bytes = canonical_hashes(f.path());
+    let p = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .reserve_batch_version_with_work(
+            &request.context(),
+            4,
+            request.kind,
+            &plans,
+            request.batch_operation_id,
+            None,
+            || panic!("retained work consulted fresh settings"),
+        )
+        .unwrap();
+    let child = p.child(0).unwrap();
+    let crate::storage::batch::BatchItemPlan::Insert { input, .. } = &plans[0] else {
+        panic!()
+    };
+    let result = f.storage.write().unwrap().insert_memory_reserved(
+        &child.context(),
+        input,
+        &[1., 0., 0., 0.],
+        100,
+        Some(&child),
+    );
+    assert!(matches!(
+        result,
+        Err(crate::storage::StorageError::UnsupportedMutation(_))
+    ));
+    assert_eq!(current(&f), before);
+    assert_eq!(canonical_hashes(f.path()), bytes);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_batch_items()
+            .unwrap(),
+        2
+    );
+}
+
+// The actual prepared API2 consumers already reject the legacy owner; they must
+// not fall back to the API1 producer. Public activation remains separately gated.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy() {
+    let f = Fixture::new();
+    let before = current(&f);
+    let bytes = file_hashes(f.path());
+    let spy = Arc::new(SpyProvider(Default::default()));
+    let clock = Arc::new(SpyClock(Default::default()));
+    let mut adapter = f.storage_adapter().with_clock(clock.clone());
+    adapter.embedding = spy.clone();
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+    let adapter = Arc::new(adapter);
+    let body = json!({"summary":"unknown legacy profile","namespace":"default","storeId":before.store_id,"checkDuplicates":false});
+    let response = crate::api::single_store_v2(adapter.as_ref(), "default", &body, None).await;
+    assert_ne!(response.status().as_u16(), 200);
+    let value: Value = serde_json::from_slice(
+        &axum::body::to_bytes(
+            response.into_body(),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(value["commitState"], "notCommitted", "{value}");
+    assert!(value.get("receipt").is_none());
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = adapter;
+    let mut body = body;
+    body["contractVersion"] = json!(2);
+    let result = crate::mcp::tools::dispatch_v2(&bridge, "store_memory", body).await;
+    assert_eq!(result.is_error, Some(true));
+    let packet = serde_json::to_value(result).unwrap();
+    let text: Value = serde_json::from_str(packet["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(packet["structuredContent"], text);
+    assert_eq!(text["commitState"], "notCommitted", "{text}");
+    assert!(text.get("receipt").is_none());
+    assert_eq!(spy.0.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    assert_eq!(current(&f), before);
+    assert_eq!(file_hashes(f.path()), bytes);
 }
