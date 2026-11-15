@@ -57,9 +57,10 @@ controlled clock/reset feature or a performance claim.
 
 The supervisor reads the actor's event stream as it arrives, appends the original
 wire event and a versioned trace event, then reconciles completion. Each attempt
-must be durable in the trace file before its matching outcome is consumed; an
+must be written and flushed to the trace file before its matching outcome is consumed; an
 interrupted child leaves the attempt and an explicit incomplete classification.
 Use append-only writes/flushes, not post-hoc rewriting into a success-only trace.
+This is process-level evidence retention, not an fsync/power-loss durability claim.
 The supervisor supplies run/episode/source-group/provenance context; no evaluator
 labels, future questions or private control information enter actor projections,
 code, environment or inherited descriptors. Maintain the same production MCP
