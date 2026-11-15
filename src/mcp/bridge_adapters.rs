@@ -245,6 +245,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?
             {
+                let hydration = crate::performance::Timer::new("mcp.hydration");
                 let payload = prepared.payload.ok_or_else(|| {
                     bridge::BridgeError::Internal("coherent payload missing".into())
                 })?;
@@ -334,6 +335,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         connected_to: neighbor.connected_to.to_string(),
                     });
                 }
+                hydration.complete();
                 check_read_admission(&self.storage, stamp).await?;
                 let receipts = if query.record_access {
                     self.query_engine
@@ -364,6 +366,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?;
 
+            let hydration = crate::performance::Timer::new("mcp.hydration");
             let mut exposures: Vec<_> = response
                 .results
                 .iter()
@@ -595,6 +598,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 })??
             };
 
+            hydration.complete();
             let receipts = if query.record_access {
                 for neighbor in &neighbors {
                     let id = neighbor
@@ -949,11 +953,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             })
         }
         .await;
-        if effects_stamp(&self.storage).await? != stamp {
-            return Err(bridge::BridgeError::Storage(
-                "unavailable: effects changed during read".into(),
-            ));
-        }
+        check_read_admission(&self.storage, stamp).await?;
         result
     }
 }

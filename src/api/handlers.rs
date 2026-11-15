@@ -947,6 +947,7 @@ async fn search_memories_admitted(
     let hydration = crate::performance::Timer::new("rest.hydration");
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
+            let hydration = crate::performance::Timer::new("rest.hydration");
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -999,6 +1000,7 @@ async fn search_memories_admitted(
                     score: selected.score.unwrap_or(0.0),
                 });
             }
+            hydration.complete();
             (hits, exposures, Some(prepared.evaluated_at))
         } else {
             let results = state
@@ -1006,6 +1008,7 @@ async fn search_memories_admitted(
                 .prepare_search_with_work(search_query, parent)
                 .await?;
 
+            let hydration = crate::performance::Timer::new("rest.hydration");
             // Batch-load embeddings with a single lock acquisition if requested.
             let embeddings = if req.include_embeddings {
                 let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
@@ -1053,10 +1056,10 @@ async fn search_memories_admitted(
                 });
             }
 
+            hydration.complete();
             (hits, exposures, None)
         };
 
-    hydration.complete();
     check_read_admission(&state, admitted_stamp).await?;
     let receipts = if req.record_access {
         let scope = crate::storage::control::ExposureScope {

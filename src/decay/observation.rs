@@ -193,8 +193,8 @@ pub(crate) async fn record_exposures_scoped_with_work(
                 Err(e) => &e.receipts,
             };
             crate::performance::receipts(receipts);
-            let publication = crate::performance::Timer::new("exposure.cache_publication");
             let ids: Vec<_> = accesses.iter().map(|(id, _)| *id).collect();
+            let publication = crate::performance::Timer::new("exposure.cache_publication");
             // Publish even preceding successful batches when a later batch fails.
             if let Err(mut publication) = publish(&storage, receipts, || {
                 tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&ids));

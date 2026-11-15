@@ -1087,6 +1087,7 @@ impl MetadataStore {
         &self,
         namespace_id: NamespaceId,
     ) -> Result<Vec<DiskRecord>, StorageError> {
+        self.ensure_available()?;
         let timer = crate::performance::Timer::new("canonical.namespace_read");
         let instrumented = crate::performance::enabled();
         let mut encoded_bytes = 0usize;
