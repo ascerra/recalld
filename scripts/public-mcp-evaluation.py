@@ -621,7 +621,13 @@ warm_file_enabled = false
                         mappings[memory] = [source_id]
                         events.append(dict(sourceId=source_id, status="accepted", reason="public-success-no-readiness-claim", memoryId=memory))
             elif row["tag"].startswith("query:") and row["event"] == "outcome":
-                value = json.loads(row["response"]["result"]["content"][0]["text"])
+                response = row["response"]
+                if response.get("error") is not None or response.get("result", {}).get("isError"):
+                    # Retain the primary public error and finish writing raw evidence.
+                    # The final failure below prevents this page from being scored.
+                    runtime_failure = f"public {row['tag']} failed: {json.dumps(response)}"
+                    continue
+                value = json.loads(response["result"]["content"][0]["text"])
                 returned = value["memories"] + (value.get("graphContext", {}).get("neighbors", []) if owned else [])
                 queries.append(dict(queryId=row["tag"][6:], memoryIds=[r["id"] for r in returned]))
         event_text = "".join(json.dumps(e) + "\n" for e in events)
