@@ -115,18 +115,21 @@ struct ClientState {
     frame_limit: usize,
     api1_lifecycle: Option<bool>,
     api1_store: Option<bool>,
+    api1_store_batch: Option<bool>,
 }
 
 #[derive(Clone, Copy)]
 enum Api1Capability {
     Lifecycle,
     Store,
+    StoreBatch,
 }
 impl Api1Capability {
     fn supported(self, state: &ClientState) -> Option<bool> {
         match self {
             Self::Lifecycle => state.api1_lifecycle,
             Self::Store => state.api1_store,
+            Self::StoreBatch => state.api1_store_batch,
         }
     }
 }
@@ -182,6 +185,7 @@ impl DaemonClient {
                 frame_limit: LEGACY_MAX_MESSAGE_SIZE,
                 api1_lifecycle: None,
                 api1_store: None,
+                api1_store_batch: None,
             }),
             connected: AtomicBool::new(true),
         })
@@ -244,6 +248,20 @@ impl DaemonClient {
             "store_api1_v1",
             params,
             legacy_params.map(|p| ("store_memory", p)),
+        )
+        .await
+    }
+
+    pub(crate) async fn call_api1_store_batch(
+        &self,
+        params: serde_json::Value,
+        legacy_params: Option<serde_json::Value>,
+    ) -> Result<(bool, serde_json::Value), BridgeError> {
+        self.call_api1_mutation(
+            Api1Capability::StoreBatch,
+            "store_batch_api1_v1",
+            params,
+            legacy_params.map(|v| ("mutate_batch", v)),
         )
         .await
     }
@@ -388,6 +406,12 @@ impl DaemonClient {
                 .and_then(serde_json::Value::as_bool)
                 == Some(true),
         );
+        state.api1_store_batch = Some(
+            outcome
+                .get("api1StoreBatchV1")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        );
         state.api1_store = Some(
             outcome
                 .get("api1StoreV1")
@@ -406,6 +430,7 @@ impl DaemonClient {
         state.frame_limit = LEGACY_MAX_MESSAGE_SIZE;
         state.api1_lifecycle = None;
         state.api1_store = None;
+        state.api1_store_batch = None;
         let mut last: Option<String> = None;
 
         for (attempt, backoff_ms) in RECONNECT_BACKOFF_MS.iter().enumerate() {
@@ -415,6 +440,7 @@ impl DaemonClient {
                     state.frame_limit = LEGACY_MAX_MESSAGE_SIZE;
                     state.api1_lifecycle = None;
                     state.api1_store = None;
+                    state.api1_store_batch = None;
                     match state.negotiate().await {
                         Ok(()) => return Ok(()),
                         Err(e) => {
@@ -465,6 +491,12 @@ impl ClientState {
                 .get("api1LifecycleV1")
                 .and_then(serde_json::Value::as_bool)
                 == Some(true),
+        );
+        self.api1_store_batch = Some(
+            result
+                .get("api1StoreBatchV1")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
         );
         self.api1_store = Some(
             result

@@ -203,3 +203,89 @@ async fn api1_store_remote_malformed_reply_is_unknown_without_same_connection_fa
     client.ping().await.unwrap();
     task.await.unwrap();
 }
+
+#[tokio::test]
+async fn api1_batch_capability_independent_selection_and_no_fallback() {
+    for (batch, store, lifecycle) in [
+        (false, true, true),
+        (true, false, false),
+        (true, true, true),
+        (false, false, false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("batch.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let ping = receive(&mut stream).await;
+            assert_eq!(ping.method, "ping");
+            answer(&mut stream,&ping,json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"api1StoreBatchV1":batch,"api1StoreV1":store,"api1LifecycleV1":lifecycle})).await;
+            let request = receive(&mut stream).await;
+            assert_eq!(
+                request.method,
+                if batch {
+                    "store_batch_api1_v1"
+                } else {
+                    "mutate_batch"
+                }
+            );
+            assert_eq!(request.params, json!({"route":if batch{"new"}else{"old"}}));
+            // A malformed reply is not permission to send a second mutation.
+            answer(&mut stream, &request, json!({"malformed":true})).await;
+            let next = receive(&mut stream).await;
+            assert_eq!(next.method, "ping");
+            answer(&mut stream, &next, json!({})).await;
+        });
+        let client = DaemonClient::connect(&path).await.unwrap();
+        let (selected, value) = client
+            .call_api1_store_batch(json!({"route":"new"}), Some(json!({"route":"old"})))
+            .await
+            .unwrap();
+        assert_eq!(selected, batch);
+        assert_eq!(value, json!({"malformed":true}));
+        client.ping().await.unwrap();
+        task.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn api1_batch_lost_reply_reconnect_clears_independent_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("batch.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let task = tokio::spawn(async move {
+        let (mut one, _) = listener.accept().await.unwrap();
+        let ping = receive(&mut one).await;
+        answer(
+            &mut one,
+            &ping,
+            json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"api1StoreBatchV1":true}),
+        )
+        .await;
+        assert_eq!(receive(&mut one).await.method, "store_batch_api1_v1");
+        drop(one);
+        let (mut two, _) = listener.accept().await.unwrap();
+        let ping = receive(&mut two).await;
+        assert_eq!(ping.method, "ping");
+        answer(&mut two, &ping, json!({})).await;
+        let req = receive(&mut two).await;
+        assert_eq!(req.method, "mutate_batch");
+        assert_eq!(req.params, json!({"explicitSecond":true}));
+        answer(&mut two, &req, json!({})).await;
+    });
+    let client = DaemonClient::connect(&path).await.unwrap();
+    assert!(
+        client
+            .call_api1_store_batch(json!({}), Some(json!({})))
+            .await
+            .is_err()
+    );
+    assert!(
+        !client
+            .call_api1_store_batch(json!({}), Some(json!({"explicitSecond":true})))
+            .await
+            .unwrap()
+            .0
+    );
+    task.await.unwrap();
+}

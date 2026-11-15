@@ -1,7 +1,7 @@
 # Native API1 batch consumer: source plan
 
-Status: source audit only, pending coordinator/Curie review. No runtime changes,
-new tests or public activation in this plan. Parent is published PR158
+Status: implementation approved by coordinator; Curie reviewed the shared
+hash-first/ephemeral-surface seam. Validation in progress, no public activation. Parent is published PR158
 `9c90f8201d476918077d3d08920fdb989269c205` only. It already includes actual148
 (original1 native insertion/compound producer) and153 (same-connection capability
 selection). No157 legacy-format4, query, catalog or startup convenience parent.

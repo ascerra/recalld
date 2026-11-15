@@ -20,3 +20,5 @@ pub use json::{
 pub(crate) mod native_lifecycle;
 
 pub(crate) mod lifecycle_api1;
+
+pub mod batch_api1;

@@ -108,6 +108,23 @@ pub trait StorageEngine: Send + Sync {
             ),
         )
     }
+    fn supports_api1_store_batch(&self) -> bool {
+        false
+    }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::batch_api1::Reply;
+        if let Err(e) = request.legacy() {
+            return Reply::invalid(e);
+        }
+        Reply::Legacy(
+            self.mutate_batch(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
     async fn mutate_native_batch(
         &self,
         _input: crate::storage::batch::BatchInput,

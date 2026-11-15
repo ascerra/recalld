@@ -101,6 +101,88 @@ pub(crate) fn prepare_native_store(
     Ok(items)
 }
 
+/// API1 execution admission is ephemeral. Compute the exact historical hashes
+/// first; existing final rejections must replay even when REST now admits a field.
+pub(crate) fn prepare_api1_store(
+    input: &BatchInput,
+    surface: crate::serialization::batch_api1::Surface,
+) -> Result<Vec<PreparedItem>, bridge::BridgeError> {
+    use crate::serialization::{batch_api1::Surface, store_api1};
+    if input.context().contract_version != 1 {
+        return Err(bridge::BridgeError::InvalidInput(
+            "API1 batch origin mismatch".into(),
+        ));
+    }
+    let mut items = prepare_native_store(input)?;
+    for (index, item) in items.iter_mut().enumerate() {
+        let raw = &input.items[index];
+        let hash = item.plan.request_hash();
+        let prepared = (|| {
+            let mut executable = raw.clone();
+            let object = executable.as_object_mut().ok_or_else(|| {
+                bridge::BridgeError::InvalidInput("memory must be an object".into())
+            })?;
+            let created_at = if surface == Surface::Rest {
+                object
+                    .remove("createdAt")
+                    .map(serde_json::from_value::<Option<i64>>)
+                    .transpose()
+                    .map_err(|_| bridge::BridgeError::InvalidInput("invalid createdAt".into()))?
+                    .flatten()
+            } else {
+                None
+            };
+            // Public input never supplies an entire descriptor or private event time.
+            if object.contains_key("embeddingProfile") || object.contains_key("observedAt") {
+                return Err(bridge::BridgeError::InvalidInput(
+                    "private profile/time fields are unsupported".into(),
+                ));
+            }
+            let store = parse_store(&executable, index, &input.default_namespace)
+                .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
+            let profile_id = executable
+                .get("embeddingProfileId")
+                .map(|v| {
+                    v.as_str().map(str::to_owned).ok_or_else(|| {
+                        bridge::BridgeError::InvalidInput("invalid embeddingProfileId".into())
+                    })
+                })
+                .transpose()?;
+            let r = store_api1::Request {
+                input: store.clone(),
+                profile_id,
+                created_at,
+                require_native: true,
+            };
+            let parsed = r
+                .prepare_native()
+                .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
+            Ok::<_, bridge::BridgeError>((store, parsed))
+        })();
+        match prepared {
+            Ok((store, parsed)) => {
+                item.store = Some(store);
+                item.plan = BatchItemPlan::NativeStore {
+                    request_hash: hash,
+                    namespace: item.store.as_ref().unwrap().namespace.clone(),
+                    supplied_profile_id: parsed.profile_id,
+                    input: parsed.input,
+                };
+            }
+            Err(_) => {
+                item.plan = BatchItemPlan::Invalid {
+                    request_hash: hash,
+                    error: BatchError {
+                        code: "INVALID_INPUT".into(),
+                        field: Some(format!("memories[{index}]")),
+                    },
+                }
+            }
+        }
+    }
+    Ok(items)
+}
+
 pub(crate) fn prepare(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::BridgeError> {
     if !matches!(input.mutation_version, 1 | 2)
         || input.result_version != 1

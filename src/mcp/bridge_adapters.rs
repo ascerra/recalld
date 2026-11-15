@@ -1621,6 +1621,65 @@ impl bridge::StorageEngine for McpStorageAdapter {
             }
         }
     }
+    fn supports_api1_store_batch(&self) -> bool {
+        true
+    }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::{
+            batch_api1::{Reply, Surface},
+            native_batch::BatchFailure,
+        };
+        if let Err(e) = request.validate() {
+            return Reply::invalid(e);
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))
+            .and_then(|s| s.control_state())
+            .map(|c| c.control_schema_version == 2);
+        match native {
+            Err(e) => Reply::Owned(Err(BatchFailure::from_storage(e))),
+            Ok(false) => {
+                if let Err(e) = request.legacy() {
+                    return Reply::invalid(e);
+                }
+                Reply::Legacy(
+                    self.run_batch(request.input)
+                        .await
+                        .map_err(|e| e.to_string()),
+                )
+            }
+            Ok(true) => {
+                if request.surface == Surface::Mcp
+                    && request.input.items.iter().any(|v| {
+                        ["createdAt", "observedAt", "embeddingProfile"]
+                            .iter()
+                            .any(|k| v.get(k).is_some())
+                    })
+                {
+                    return Reply::invalid(bridge::BridgeError::InvalidInput("REST-only timestamp/private profile controls are not MCP API1 batch fields".into()));
+                }
+                let mut input = request.input;
+                input.mutation_version = 3;
+                input.request_context =
+                    crate::storage::request_context::RetainedRequestContext::from_contract(1)
+                        .expect("supported origin");
+                let budget = crate::mcp::batch_budget::BatchBudget::api1(input.items.len());
+                let result = self
+                    .run_batch_with_surface(input, Some(budget), Some(request.surface))
+                    .await
+                    .map_err(|e| match e {
+                        StoreWriteError::Canonical(e) => BatchFailure::from_storage(e),
+                        StoreWriteError::Bridge(e) => BatchFailure::from_bridge(e),
+                    });
+                Reply::owned(self.native_batch_readiness(result).await)
+            }
+        }
+    }
     async fn mutate_native_batch(
         &self,
         input: crate::storage::batch::BatchInput,
@@ -1738,6 +1797,19 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: crate::storage::batch::BatchInput,
     ) -> Result<crate::storage::batch::BatchOutcome, bridge::BridgeError> {
+        if input.mutation_version == 1
+            && input.kind == crate::storage::batch::BatchKind::Insert
+            && self
+                .storage
+                .read()
+                .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?
+                .control_state()
+                .map_err(bridge::BridgeError::from)?
+                .control_schema_version
+                == 2
+        {
+            return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreBatchV1/store_batch_api1_v1 before inserting a batch".into()));
+        }
         if input.mutation_version == 3 || input.expected_generation.is_some() {
             return Err(bridge::BridgeError::Unavailable(
                 "linked native batch consumer remains gated pending transport validation".into(),

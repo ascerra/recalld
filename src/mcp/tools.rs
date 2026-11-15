@@ -433,7 +433,7 @@ async fn handle_durable_batch(
     kind: crate::storage::batch::BatchKind,
     items: &[serde_json::Value],
 ) -> ToolCallResult {
-    use crate::storage::batch::{BatchInput, BatchKind, BatchStatus};
+    use crate::storage::batch::{BatchInput, BatchKind};
     if arguments.get("expectedGeneration").is_some() {
         return ToolCallResult::error("public whole-store expectedGeneration is not enabled");
     }
@@ -448,10 +448,29 @@ async fn handle_durable_batch(
         Ok(input) => input,
         Err(e) => return ToolCallResult::error(format!("Invalid batch parameters: {e}")),
     };
+    if kind == BatchKind::Insert {
+        return bridge
+            .storage
+            .store_batch_api1(crate::serialization::batch_api1::Request {
+                input,
+                surface: crate::serialization::batch_api1::Surface::Mcp,
+            })
+            .await
+            .mcp();
+    }
     let outcome = match bridge.storage.mutate_batch(input).await {
         Ok(outcome) => outcome,
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
+    durable_batch_result(outcome, kind, items)
+}
+
+pub(crate) fn durable_batch_result(
+    outcome: crate::storage::batch::BatchOutcome,
+    kind: crate::storage::batch::BatchKind,
+    items: &[serde_json::Value],
+) -> ToolCallResult {
+    use crate::storage::batch::{BatchKind, BatchStatus};
     let results: Vec<_> = outcome
         .items
         .iter()

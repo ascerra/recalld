@@ -116,9 +116,18 @@ impl McpStorageAdapter {
         input: BatchInput,
         budget: Option<crate::mcp::batch_budget::BatchBudget>,
     ) -> Result<BatchOutcome, StoreWriteError> {
+        self.run_batch_with_surface(input, budget, None).await
+    }
+
+    pub(crate) async fn run_batch_with_surface(
+        &self,
+        input: BatchInput,
+        budget: Option<crate::mcp::batch_budget::BatchBudget>,
+        surface: Option<crate::serialization::batch_api1::Surface>,
+    ) -> Result<BatchOutcome, StoreWriteError> {
         let completion = self.batch_completion();
         let work = completion.accept_work(None)?;
-        let result = self.run_batch_accepted(input, &work, budget).await;
+        let result = self.run_batch_accepted(input, &work, budget, surface).await;
         completion.finish_known_work(work);
         result
     }
@@ -128,15 +137,18 @@ impl McpStorageAdapter {
         input: BatchInput,
         work: &crate::storage::work::WorkTicket,
         budget: Option<crate::mcp::batch_budget::BatchBudget>,
+        surface: Option<crate::serialization::batch_api1::Surface>,
     ) -> Result<BatchOutcome, StoreWriteError> {
         // Prepare the entire ordered caller intent before policy/default reads.
-        let mut prepared = if input.mutation_version == 3 {
+        let mut prepared = if let Some(surface) = surface {
+            batches::prepare_api1_store(&input, surface)?
+        } else if input.mutation_version == 3 {
             batches::prepare_native_store(&input)?
         } else {
             batches::prepare(&input)?
         };
         let budget_plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
-        if budget.is_some() {
+        if budget.is_some() && surface.is_none() {
             for (index, (item, value)) in prepared.iter_mut().zip(&input.items).enumerate() {
                 if let Some(error) = crate::serialization::native_batch::item_error(value, index) {
                     item.plan = BatchItemPlan::Invalid {
@@ -927,7 +939,7 @@ mod tests {
         let drain = tokio::task::spawn_blocking(move || closing.close_and_drain(deadline()));
         tracker.wait_until_closed();
         let result = adapter
-            .run_batch_accepted(input, &work, None)
+            .run_batch_accepted(input, &work, None, None)
             .await
             .unwrap();
         assert!(result.all_ready(), "{result:?}");
