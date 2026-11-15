@@ -133,8 +133,16 @@ owner before a runtime correction; do not bless unknown fixtures to pass.
 | Overrides, phase boundaries, permastore, terminal validation | Existing156 matrix/166 adoption and earlier native lifecycle/maintenance proofs remain separately cited. No repeated phase/quality/extreme-clock matrix or new phase writer. |
 | No resurrection, deletion races, stale sweep | Existing atomic/ledger/native maintenance and sweep proofs remain separate. This query/feedback join cannot prove all restart/cache/backup loss invariants or replace concurrent sweep guards. |
 | Retry/crash, migration, restore |166 preserves genuine historic replay, actual adoption and original receipts. Native fault/restore/rollback proofs retain their owners; this unkeyed query/public feedback test adds no retry protocol. |
-| RIF boundary/permutation |151's actual ranked baseline is RIF Off. This plan makes no off/shadow/all-mode persistent-no-write or permutation claim. Coordinate Hume's actual A2 evidence before selecting another gap; do not duplicate its harness. |
+| RIF boundary/permutation |151's actual ranked baseline is RIF Off. Hume confirms frozen150 provides actual Off/Shadow/Experimental false-only operator byte identity and Off/Shadow explanation identity, not true-observation/public-toggle proof.150 is not an ancestor here; cite its separate evidence, add no unused parent or duplicate harness. This plan makes no all-mode/permutation claim. |
 | Promotion/quality/performance | No A3 completeness, ordinary native/public2 activation, default promotion, RL quality or A5 performance claim. Normative acceptance remains broader than a passing unit suite. |
+
+Hume's precise separate RIF evidence is PR150
+`d2e04cce5bdf62dab464cadafaa435c4c577806e` (actual146+102), runtime
+`2e32a81b5f8fdc2c76864791dff6af75c5bb237a`; report
+`/tmp/recalld-implementation/rif-score-explanations/docs/implementation/rif-score-explanations-report.md`.
+Its21 focused /1064 library+2 CLI results are owner-reported here, not rerun by
+this plan. Huygens retains the later actual experimental consumer join. There is
+no justification to import150 merely to name the remaining RIF scope.
 
 ## Execution gate and resources
 
