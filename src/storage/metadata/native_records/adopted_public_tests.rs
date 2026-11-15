@@ -381,13 +381,16 @@ async fn adopted_public_explicit_override_ignores_unused_global_without_adoption
         let after = f.record(d.parent).unwrap();
         assert_eq!(after.stability, plan.stability);
         assert_eq!(
-            f.storage
-                .read()
-                .unwrap()
-                .get_namespace(d.ns)
-                .unwrap()
-                .unwrap(),
-            ns
+            control::encode(
+                &f.storage
+                    .read()
+                    .unwrap()
+                    .get_namespace(d.ns)
+                    .unwrap()
+                    .unwrap()
+            )
+            .unwrap(),
+            control::encode(&ns).unwrap()
         );
         assert!(ns.schema.unwrap().inherited_decay.is_none());
         original_one(&f, &d, Operation::Feedback);
