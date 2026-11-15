@@ -124,6 +124,8 @@ mod tests {
     use super::*;
     use std::io::{Seek, SeekFrom, Write};
 
+    include!("text_compaction_native_tests.rs");
+
     fn generation_fixture(path: &Path) -> (RedbStorageEngine, Vec<(MemoryId, String)>) {
         let mut engine = RedbStorageEngine::open(path).unwrap();
         let mut config = NamespaceConfig::default_namespace(0);
