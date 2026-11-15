@@ -39,6 +39,8 @@ pub enum OutputFormat {
 /// Top-level CLI commands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Explicit offline vector re-embedding into a fresh destination (no daemon).
+    ReembedVectors(ReembedVectorsArgs),
     /// Explicit offline inherited-policy preview/adoption (no daemon).
     Policy(PolicyArgs),
     /// Store a new memory
@@ -79,6 +81,20 @@ pub enum Command {
 
     /// Comprehensive health report: decay forecast, at-risk memories, storage breakdown
     Health(HealthArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ReembedVectorsArgs {
+    #[arg(long)]
+    pub source: std::path::PathBuf,
+    #[arg(long)]
+    pub destination: std::path::PathBuf,
+    /// JSON ReembedVectors request with original namespace/profile and full CAS.
+    #[arg(long)]
+    pub request: std::path::PathBuf,
+    /// Explicit JSON provider configuration and document/query prefixes.
+    #[arg(long)]
+    pub provider: std::path::PathBuf,
 }
 
 // ── Store ──────────────────────────────────────────────────────────

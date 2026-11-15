@@ -43,6 +43,9 @@ struct Data {
     parent: MemoryId,
     profile: crate::model::schema::EmbeddingProfile,
 }
+#[path = "certified_positive_fixture.rs"]
+mod certified_positive_fixture;
+use certified_positive_fixture::{certified_fixture, certified_fixture_with_seed};
 fn fixture(root: &Path) -> Data {
     fixture_with_seed(root, |_| {})
 }
@@ -190,10 +193,7 @@ fn ctx(session: &NativeLifecycleSession, d: &Data, key: &str) -> MutationContext
     }
 }
 fn generated() -> GeneratedEmbedding {
-    GeneratedEmbedding {
-        values: vec![],
-        profile: None,
-    }
+    GeneratedEmbedding::unverified(vec![], None)
 }
 fn open(d: &Data, clock: Arc<FixedClock>) -> NativeLifecycleSession {
     NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock).unwrap()
@@ -208,7 +208,7 @@ fn inserted(receipt: &WriteReceipt) -> MemoryId {
 #[test]
 fn actual_native_insert_feedback_tombstone_replay_and_reopen_preserve_proof() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let original = input(&d);
@@ -269,10 +269,7 @@ fn actual_native_insert_feedback_tombstone_replay_and_reopen_preserve_proof() {
             .insert_prepared(
                 &key,
                 &intent,
-                &GeneratedEmbedding {
-                    values: vec![f32::NAN],
-                    profile: None
-                }
+                &GeneratedEmbedding::unverified(vec![f32::NAN], None)
             )
             .unwrap()
             .replayed
@@ -325,7 +322,7 @@ impl crate::embedding::EmbeddingProvider for Provider {
 async fn original_expansion_replay_precedes_aborted_default_changes_and_real_policy_migration_provider()
  {
     let root = tempfile::tempdir().unwrap();
-    let mut d = fixture(root.path());
+    let mut d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let mut original = input(&d);
@@ -414,7 +411,7 @@ async fn original_expansion_replay_precedes_aborted_default_changes_and_real_pol
 #[test]
 fn invalid_native_vectors_profiles_labels_and_stale_intents_never_allocate() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let state = session.metadata().control_state().unwrap();
@@ -470,7 +467,7 @@ fn invalid_native_vectors_profiles_labels_and_stale_intents_never_allocate() {
 fn real_precommit_abandonment_and_ambiguous_commit_recover_records_edges_and_receipts() {
     for after in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let mut original = input(&d);
@@ -562,7 +559,7 @@ fn real_precommit_abandonment_and_ambiguous_commit_recover_records_edges_and_rec
 #[test]
 fn native_terminal_uuid_reuse_and_retained_payload_corruption_fail_closed() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let original = input(&d);
@@ -643,7 +640,7 @@ async fn native_records_survive_export_and_restore_without_replaying_foreign_rec
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let original = input(&d);
@@ -769,7 +766,7 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
     use crate::storage::work::{WorkError, WorkTracker};
     use std::time::{Duration, Instant};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
@@ -812,7 +809,7 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
 fn owned_ids_actual_native_insert_uses_single_clock_sample_and_replay_allocates_nothing() {
     use crate::storage::ids::{IdKind, IdSource, SeededIds};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let engine =
         RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([7; 32]))).unwrap();

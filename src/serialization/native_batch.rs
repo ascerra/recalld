@@ -194,6 +194,12 @@ impl BatchFailure {
     }
     pub(crate) fn from_storage(error: StorageError) -> Self {
         match error {
+            error @ StorageError::VectorCertificationRequired { .. } => Self::new(
+                ErrorCategory::Unavailable,
+                "UNAVAILABLE",
+                Some("/namespace".into()),
+                error.to_string(),
+            ),
             StorageError::BatchResponseTooLarge {
                 reservation_receipt,
             } => {

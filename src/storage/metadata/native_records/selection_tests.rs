@@ -35,7 +35,7 @@ fn probe(s: &NativeLifecycleSession, d: &Data) -> NativeInsertIntent {
 fn native_selection_canonical_scope_phase_labels_and_deterministic_caps() {
     let root = tempfile::tempdir().unwrap();
     let mut foreign = MemoryId::nil();
-    let d = fixture_with_seed(root.path(), |engine| {
+    let d = certified_fixture_with_seed(root.path(), |engine| {
         let mut namespace = NamespaceConfig::default_namespace(0);
         namespace.name = "other".into();
         namespace.embedding_dim = 4;
@@ -153,7 +153,7 @@ fn native_selection_canonical_scope_phase_labels_and_deterministic_caps() {
 #[test]
 fn native_selection_invalid_vectors_and_temporal_extremes_do_not_mutate_or_sample_clock() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let mut intent = probe(&s, &d);
@@ -166,28 +166,19 @@ fn native_selection_invalid_vectors_and_temporal_extremes_do_not_mutate_or_sampl
     ));
     intent.original.memory.embedding = None;
     intent.original.embedding_profile = None;
-    let bad = GeneratedEmbedding {
-        values: vec![f32::NAN; 4],
-        profile: Some(d.profile.clone()),
-    };
+    let bad = GeneratedEmbedding::unverified(vec![f32::NAN; 4], Some(d.profile.clone()));
     assert!(matches!(
         capture(&s.engine, &intent, &bad),
         Err(StorageError::ProviderVectorUnavailable(_))
     ));
-    let missing_profile = GeneratedEmbedding {
-        values: vec![1., 0., 0., 0.],
-        profile: None,
-    };
+    let missing_profile = GeneratedEmbedding::unverified(vec![1., 0., 0., 0.], None);
     assert!(matches!(
         capture(&s.engine, &intent, &missing_profile),
         Err(StorageError::ProviderVectorUnavailable(_))
     ));
     let mut wrong_profile = d.profile.clone();
     wrong_profile.dimension = 2;
-    let wrong_profile = GeneratedEmbedding {
-        values: vec![1., 0., 0., 0.],
-        profile: Some(wrong_profile),
-    };
+    let wrong_profile = GeneratedEmbedding::unverified(vec![1., 0., 0., 0.], Some(wrong_profile));
     assert!(matches!(
         capture(&s.engine, &intent, &wrong_profile),
         Err(StorageError::ProviderVectorUnavailable(_))
@@ -212,7 +203,7 @@ fn native_selection_invalid_vectors_and_temporal_extremes_do_not_mutate_or_sampl
 #[test]
 fn native_selection_advisory_hydrates_frozen_ids_at_current_visibility_without_rediscovery() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let original = add(&mut s, &d, "frozen-candidate", 0.99, vec![], 1000);
@@ -250,7 +241,7 @@ fn native_selection_advisory_hydrates_frozen_ids_at_current_visibility_without_r
 #[test]
 fn native_selection_equal_scores_entities_and_times_use_uuid_ties_before_caps() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock);
     let a = add(&mut s, &d, "tie-a", 1., vec!["John Smith".into()], 1000);
@@ -298,7 +289,7 @@ fn native_selection_equal_scores_entities_and_times_use_uuid_ties_before_caps() 
 #[test]
 fn native_selection_frozen_core_plan_preserves_settings_scope_and_requested_advisory() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock);
     let insert = probe(&s, &d);

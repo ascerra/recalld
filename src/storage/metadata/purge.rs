@@ -704,6 +704,7 @@ impl MetadataStore {
         tx: redb::WriteTransaction,
         receipt: &WriteReceipt,
     ) -> Result<(), StorageError> {
+        let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
         super::effects::crash_point("before_purge_commit");
         let result = tx.commit();
         #[cfg(test)]
@@ -723,6 +724,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.publish_vector_validation_commit(certification, receipt)?;
         self.view_publication.canonical_committed();
         super::effects::crash_point("after_purge_commit");
         Ok(())

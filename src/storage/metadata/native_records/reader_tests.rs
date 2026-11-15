@@ -226,7 +226,7 @@ fn assert_labels(record: &Value, id: MemoryId, labels: &crate::model::schema::St
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_read_only_bytes() {
     let mut root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let full = input(&d);
@@ -458,7 +458,7 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_forget_failed_publication_stays_blocked_until_real_retry_without_resurrection() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
@@ -598,7 +598,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
 {
     use crate::storage::native_maintenance::NativeDecayResult;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
@@ -740,7 +740,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
 async fn native_decay_cancelled_waiter_keeps_worker_publication_lease() {
     use std::time::Duration;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock);
     let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();

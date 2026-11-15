@@ -30,7 +30,7 @@ async fn setup() -> (
     Arc<FixedClock>,
 ) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, session.engine);

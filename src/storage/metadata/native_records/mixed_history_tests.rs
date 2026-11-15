@@ -121,7 +121,7 @@ fn purge(s: &mut NativeLifecycleSession, d: &Data) {
 #[test]
 fn mixed_history_harddelete_reverses_removed_edges_before_graph_noop_and_store() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let id = linked(&mut s, &d, "linked");
     graph(&mut s, &d, id);
@@ -133,7 +133,7 @@ fn mixed_history_harddelete_reverses_removed_edges_before_graph_noop_and_store()
 #[test]
 fn mixed_history_purge_binds_retired_namespace_before_graph_and_store_validation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let id = linked(&mut s, &d, "linked");
     graph(&mut s, &d, id);
@@ -279,7 +279,7 @@ async fn export_import_fork(root: &Path, d: &Data) -> PathBuf {
 #[tokio::test]
 async fn mixed_history_policy_graph_maintenance_purge_export_import_fork_preserves_payload() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let deleted = linked(&mut s, &d, "deleted");
@@ -375,7 +375,7 @@ async fn mixed_history_policy_graph_maintenance_purge_export_import_fork_preserv
 async fn mixed_history_foreign_purged_bindings_and_noop_key_reject_immutably() {
     use redb::ReadableTable;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let id = linked(&mut s, &d, "linked");
     graph(&mut s, &d, id);
@@ -483,7 +483,7 @@ async fn mixed_history_foreign_purged_bindings_and_noop_key_reject_immutably() {
 #[test]
 fn mixed_history_pending_purge_outbox_reopens_against_prior_graph_proofs() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let id = linked(&mut s, &d, "linked");

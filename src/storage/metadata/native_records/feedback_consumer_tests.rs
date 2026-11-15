@@ -19,7 +19,7 @@ fn setup_with_multiplier(
     multiplier: f64,
 ) -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(CountingClock {
         now: AtomicI64::new(5000),
         calls: AtomicUsize::new(0),

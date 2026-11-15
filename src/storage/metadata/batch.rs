@@ -15,7 +15,7 @@ pub(crate) const BATCHES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("
 fn invalid(message: &str) -> StorageError {
     StorageError::InvalidControl(format!("batch manifest: {message}"))
 }
-fn policy_hash(config: &NamespaceConfig) -> Result<[u8; 32], StorageError> {
+pub(crate) fn policy_hash(config: &NamespaceConfig) -> Result<[u8; 32], StorageError> {
     Ok(Sha256::digest(control::encode(config)?).into())
 }
 fn catalog_context() -> MutationContext {
@@ -547,8 +547,41 @@ impl MetadataStore {
         if let Some(settings) = &settings {
             settings.validate()?;
         }
+        // Resolve every item and admit semantic work before consuming any
+        // reserved identity. A pending parent must not block its own remedy.
+        // Original parent replay above remains independent of today's admission.
+        let resolutions = plans
+            .iter()
+            .map(|plan| {
+                self.resolve_batch_item(
+                    &tx,
+                    version,
+                    ctx.contract_version,
+                    kind,
+                    plan,
+                    settings.as_ref(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if matches!(version, 2 | 3) {
+            let at = control::read_control(&tx)?.generation_ref();
+            for (plan, resolution) in plans.iter().zip(&resolutions) {
+                if matches!(
+                    plan,
+                    BatchItemPlan::NativeInsert { .. } | BatchItemPlan::NativeStore { .. }
+                ) {
+                    if let Ok((defaults, _)) = resolution {
+                        let namespace = super::namespace_state::require_namespace_active(
+                            &tx,
+                            defaults.namespace_id,
+                        )?;
+                        self.require_certified_namespace(at, &namespace)?;
+                    }
+                }
+            }
+        }
         let mut items = Vec::with_capacity(plans.len());
-        for (index, plan) in plans.iter().enumerate() {
+        for (index, (plan, resolution)) in plans.iter().zip(resolutions).enumerate() {
             let mut item = BatchItem {
                 index: index as u32,
                 request_hash: plan.request_hash(),
@@ -558,14 +591,7 @@ impl MetadataStore {
                 resolution_error: None,
                 state: BatchItemState::NotAttempted {},
             };
-            match self.resolve_batch_item(
-                &tx,
-                version,
-                ctx.contract_version,
-                kind,
-                plan,
-                settings.as_ref(),
-            )? {
+            match resolution {
                 Ok((defaults, hash)) => {
                     item.defaults = Some(defaults);
                     item.canonical_hash = Some(hash);
@@ -766,6 +792,7 @@ impl MetadataStore {
         tx: redb::WriteTransaction,
         receipt: &WriteReceipt,
     ) -> Result<(), StorageError> {
+        let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
         super::effects::crash_point("before_batch_commit");
         let result = tx.commit();
         #[cfg(test)]
@@ -799,6 +826,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.publish_vector_validation_commit(certification, receipt)?;
         self.view_publication.canonical_committed();
         super::effects::crash_point("after_batch_commit");
         Ok(())
@@ -950,18 +978,36 @@ fn require_turn(p: &BatchProgress, index: u32) -> Result<(), StorageError> {
 }
 
 pub(super) fn check_policy(
+    owner: &MetadataStore,
     tx: &redb::WriteTransaction,
     child: &BatchChild,
 ) -> Result<(), StorageError> {
     let current = super::namespace_state::require_namespace_active(tx, child.namespace())?;
-    if current.id != child.namespace()
-        || policy_hash(&current)? != child.defaults.namespace_policy_hash
+    let current_hash = policy_hash(&current)?;
+    if current.id == child.namespace() && current_hash == child.defaults.namespace_policy_hash {
+        return Ok(());
+    }
+    if matches!(child.version, 2 | 3) {
+        let state = control::read_control(tx)?;
+        let parent = load(tx, child.batch_operation_id)?.reservation_receipt;
+        if owner.permits_pending_certification(
+            state.generation_ref(),
+            &current,
+            child.defaults.namespace_policy_hash,
+            current_hash,
+            control::GenerationRef {
+                store_id: parent.store_id,
+                generation: parent.committed_generation,
+            },
+        )? {
+            return Ok(());
+        }
+    }
     {
         return Err(StorageError::InvalidMutation(
             "batch namespace policy changed since reservation".into(),
         ));
     }
-    Ok(())
 }
 
 /// Called only from the ordinary record/effects tail before its one commit.

@@ -90,7 +90,7 @@ async fn single_mcp(a: Arc<McpStorageAdapter>, mut value: Value) -> (bool, Value
 #[tokio::test]
 async fn native_single_wire_actual_mcp_http_rpc_profile_cas_and_canonical_labels() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
     let state = session.metadata().control_state().unwrap();
@@ -225,7 +225,7 @@ async fn native_single_wire_fresh_budget_scope_and_profile_fail_before_provider_
 #[tokio::test]
 async fn native_origin_single_wire_wrong_vector_width_is_caller_422_without_mutation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let store_id = s.metadata().control_state().unwrap().store_id;
@@ -265,7 +265,7 @@ async fn native_origin_single_wire_wrong_vector_width_is_caller_422_without_muta
 #[tokio::test]
 async fn native_single_and_batch_rpc_require_full_frame_before_any_work() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
     let store_id = session.metadata().control_state().unwrap().store_id;
@@ -372,7 +372,7 @@ async fn native_single_and_batch_rpc_require_full_frame_before_any_work() {
 #[tokio::test]
 async fn native_single_wire_retired_namespace_id_replays_original_binding_after_recreation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let store_id = s.metadata().control_state().unwrap().store_id;
@@ -521,7 +521,7 @@ async fn native_single_wire_retired_namespace_id_replays_original_binding_after_
 #[tokio::test]
 async fn native_single_wire_known_publication_failure_retains_full_receipt_and_repairs_key() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let store_id = s.metadata().control_state().unwrap().store_id;
@@ -842,7 +842,7 @@ async fn batch_wire_fresh_budget_rejects_before_reservation_provider_and_clock()
 #[tokio::test]
 async fn batch_wire_native_partial_full_receipts_replay_and_cas() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
     let mut r = request(&d, session.metadata().control_state().unwrap().store_id);
@@ -940,7 +940,7 @@ impl crate::embedding::EmbeddingProvider for RecoveringProvider {
 #[tokio::test]
 async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_failure() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
     let mut r = request(&d, session.metadata().control_state().unwrap().store_id);
@@ -1091,7 +1091,7 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
 async fn batch_wire_final_barrier_failure_after_children_preserves_receipts_and_repairs_same_key() {
     for fault in [1, 2] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let session = open(&d, clock.clone());
         let mut r = request(&d, session.metadata().control_state().unwrap().store_id);

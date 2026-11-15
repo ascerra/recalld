@@ -228,6 +228,7 @@ impl MetadataStore {
                 entries_kept: refs.len() as u64,
             },
         )?;
+        let certification = self.prepare_vector_validation_commit(&tx, &receipt)?;
         let committed = tx.commit();
         // Model an I/O error whose commit actually became durable. Tests must
         // reconcile the receipt after reopen, not reclaim its selected payload.
@@ -248,6 +249,7 @@ impl MetadataStore {
                 source: e,
             }
         })?;
+        self.publish_vector_validation_commit(certification, &receipt)?;
         self.view_publication.canonical_committed();
         Ok(receipt)
     }

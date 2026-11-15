@@ -55,7 +55,7 @@ fn setup() -> (Fixture, Data, MemoryId, Arc<CountingClock>) {
 }
 fn setup_with_multiplier(multiplier: f64) -> (Fixture, Data, MemoryId, Arc<CountingClock>) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let c = Arc::new(CountingClock::new(3000));
     let mut session =
         NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone()).unwrap();
@@ -317,7 +317,7 @@ async fn native_sweep_partial_publication_failure_keeps_original_receipt_until_a
 async fn native_sweep_rechecks_donor_and_fan_after_capture_without_resampling_clock() {
     for days in [2., 4.5] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let created = 10_000 * DAY;
         let c = Arc::new(CountingClock::new(created));
         let mut s = NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone())

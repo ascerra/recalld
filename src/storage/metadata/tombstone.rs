@@ -47,7 +47,7 @@ impl MetadataStore {
             if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
                 return Ok(receipt);
             }
-            super::batch::check_policy(&tx, child)?;
+            super::batch::check_policy(self, &tx, child)?;
         } else if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }

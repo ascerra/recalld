@@ -114,10 +114,7 @@ impl DerivedCompletion {
                 )?
             };
             let generated = if input.insert.memory.embedding.is_some() {
-                GeneratedEmbedding {
-                    values: vec![],
-                    profile: None,
-                }
+                GeneratedEmbedding::unverified(vec![], None)
             } else {
                 crate::embedding::runtime::generate_native(
                     provider.as_ref(),

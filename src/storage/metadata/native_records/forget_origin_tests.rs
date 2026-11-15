@@ -95,7 +95,7 @@ async fn forget_origin_socket_one_two_replay_scope_cas_and_strict_reopen() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn forget_origin_known_publication_failure_keeps_full_receipt_and_replays_after_repair() {
-    let (f, d, clock, bridge, _state) = setup().await;
+    let (f, d, clock, bridge, _state) = setup_certified().await;
     // Keep a real live vector after forgetting the target; an empty vector view
     // does not exercise dimension validation during publication.
     let survivor = {

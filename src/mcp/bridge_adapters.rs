@@ -39,7 +39,8 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         | crate::storage::StorageError::RecoveryRequired(_) => {
             bridge::BridgeError::PartiallyApplied(error.to_string())
         }
-        crate::storage::StorageError::ProviderVectorUnavailable(_) => {
+        crate::storage::StorageError::ProviderVectorUnavailable(_)
+        | crate::storage::StorageError::VectorCertificationRequired { .. } => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
         crate::storage::StorageError::NamespaceMismatch { .. } => {

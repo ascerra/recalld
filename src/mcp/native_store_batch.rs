@@ -57,10 +57,7 @@ impl McpStorageAdapter {
                     &policy,
                 )?;
             let generated = if input.insert.memory.embedding.is_some() {
-                crate::embedding::runtime::GeneratedEmbedding {
-                    values: vec![],
-                    profile: None,
-                }
+                crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
             } else {
                 crate::embedding::runtime::generate_native(
                     self.embedding.as_ref(),

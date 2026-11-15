@@ -117,7 +117,11 @@ async fn public_http(state: crate::api::AppState, id: MemoryId, op: Operation) -
 async fn api1_public_native_failures_keep_receipts_and_unknown_identity() {
     for operation in [Operation::Feedback, Operation::Forget] {
         for http in [false, true] {
-            let (f, d, clock, bridge, state) = setup().await;
+            let (f, d, clock, bridge, state) = if operation == Operation::Forget {
+                setup_certified().await
+            } else {
+                setup().await
+            };
             if operation == Operation::Forget {
                 let mut engine = f.storage.write().unwrap();
                 let policy = NativePolicyInputs::default();
@@ -245,7 +249,7 @@ async fn api1_public_native_failures_keep_receipts_and_unknown_identity() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn api1_public_native_remote_decode_and_terminal_no_resurrection() {
     use crate::serialization::lifecycle_api1 as api1;
-    let (f, d, clock, bridge, state) = setup().await;
+    let (f, d, clock, bridge, state) = setup_certified().await;
     // Actual canonical insertions build a retained fan of edges. Forget must
     // leave that graph intact without growing the tombstone receipt by degree.
     {
@@ -432,7 +436,20 @@ async fn api1_public_native_legacy_policy_keeps_original1_and_configured_clock()
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn api1_public_native_feedback_uses_configured_policy_and_original1_hash() {
     use redb::ReadableTable as _;
-    let (f, d, clock, mut bridge, state) = setup().await;
+    let (f, d, clock, bridge, state) = setup().await;
+    // This positive multiplier2 assertion now requires its real offline adoption.
+    // Close every adapter/owner first; never rewrite a binding or receipt in place.
+    drop((bridge, state));
+    let root = f.close();
+    crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 2., 2000);
+    let policy = NativePolicyInputs {
+        multiplier: 2.,
+        ..Default::default()
+    };
+    let session = NativeLifecycleSession::open(&d.path, policy.clone(), clock.clone()).unwrap();
+    let f = Fixture::from_open_engine(root, session.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let (mut bridge, state) = configured_public_adapters(&f, clock.clone(), policy);
     bridge.storage = Arc::new(
         f.storage_adapter()
             .with_clock(clock.clone())

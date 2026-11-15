@@ -21,6 +21,7 @@ pub struct OfflineRecord {
 /// validated copy; payload reads hold their file handles and source ownership.
 /// Drop the snapshot before opening a writer. No provider calls or effects replay.
 pub struct OfflineSnapshot {
+    pub(crate) canonical_files: Vec<std::path::PathBuf>,
     pub(crate) metadata: redb::Database,
     pub(crate) edges: redb::Database,
     control: ControlState,
@@ -31,6 +32,13 @@ pub struct OfflineSnapshot {
     _edges_copy: tempfile::TempDir,
     _source_lock: super::ownership::OwnedFileLock,
     _owner: StoreOwnership,
+}
+
+#[derive(Clone, Copy)]
+enum SnapshotPurpose {
+    Ordinary,
+    Import,
+    VectorRemedy,
 }
 
 impl OfflineSnapshot {
@@ -45,19 +53,36 @@ impl OfflineSnapshot {
             return Err(StorageError::InvalidPath);
         }
         let owner = StoreOwnership::acquire(source)?;
-        Self::from_owner(owner, importing)
+        Self::from_owner(
+            owner,
+            if importing {
+                SnapshotPurpose::Import
+            } else {
+                SnapshotPurpose::Ordinary
+            },
+        )
     }
     pub(crate) fn open_owned(owner: StoreOwnership) -> Result<Self, StorageError> {
-        Self::from_owner(owner, false)
+        Self::from_owner(owner, SnapshotPurpose::Ordinary)
     }
-    fn from_owner(owner: StoreOwnership, importing: bool) -> Result<Self, StorageError> {
+    pub(crate) fn open_vector_remedy(owner: StoreOwnership) -> Result<Self, StorageError> {
+        Self::from_owner(owner, SnapshotPurpose::VectorRemedy)
+    }
+    fn from_owner(owner: StoreOwnership, purpose: SnapshotPurpose) -> Result<Self, StorageError> {
         let source = &owner.path;
         let source_lock = lock_directory(source)?;
-        if importing {
-            super::validation::validate_import_stage(source)?;
-        } else {
-            super::validation::canonical_files(source)?;
-        }
+        let canonical_files = match purpose {
+            SnapshotPurpose::Import => {
+                let mut files: Vec<_> = super::validation::validate_import_stage(source)?
+                    .into_iter()
+                    .map(|name| source.join(name))
+                    .collect();
+                files.sort();
+                files
+            }
+            SnapshotPurpose::Ordinary => super::validation::canonical_files(source)?,
+            SnapshotPurpose::VectorRemedy => super::validation::vector_remedy_files(source)?,
+        };
         let (meta_copy, metadata) = super::validation::inspect_database(&source.join("meta.db"))?;
         let (edges_copy, edges) = super::validation::inspect_database(&source.join("edges.db"))?;
         let read = metadata.begin_read()?;
@@ -83,6 +108,7 @@ impl OfflineSnapshot {
         };
         drop(read);
         Ok(Self {
+            canonical_files,
             metadata,
             edges,
             control,

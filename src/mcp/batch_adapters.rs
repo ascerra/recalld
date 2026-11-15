@@ -362,8 +362,15 @@ impl McpStorageAdapter {
                             }
                         }
                     } else {
-                        // Provider failure happened before canonical work; keep
-                        // its reserved child pending. No provider detail is stored.
+                        // Known precommit failures keep the reserved child
+                        // pending. Certification absence has no automatic retry
+                        // remedy for retained parents; provider outages may heal.
+                        let certification_required = matches!(
+                            error,
+                            StoreWriteError::Canonical(
+                                StorageError::VectorCertificationRequired { .. }
+                            )
+                        );
                         let unavailable = matches!(
                             error,
                             StoreWriteError::Bridge(bridge::BridgeError::Unavailable(_))
@@ -371,17 +378,18 @@ impl McpStorageAdapter {
                                     StorageError::ProviderVectorUnavailable(_)
                                 )
                         );
-                        outcome.items[index].status = if unavailable {
+                        outcome.items[index].status = if unavailable || certification_required {
                             BatchStatus::NotAttempted
                         } else {
                             BatchStatus::Unknown
                         };
                         outcome.items[index].retryable = unavailable;
-                        outcome.items[index].error = Some(BatchError::new(if unavailable {
-                            "UNAVAILABLE"
-                        } else {
-                            "RECONCILIATION_REQUIRED"
-                        }));
+                        outcome.items[index].error =
+                            Some(BatchError::new(if unavailable || certification_required {
+                                "UNAVAILABLE"
+                            } else {
+                                "RECONCILIATION_REQUIRED"
+                            }));
                         if unavailable {
                             outcome.items[index].error.as_mut().unwrap().field =
                                 self.native_store_blocker(prepared).map(str::to_owned);

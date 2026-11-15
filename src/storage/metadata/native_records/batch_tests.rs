@@ -89,7 +89,7 @@ fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompletion {
 #[test]
 fn native_batch_pending_reopen_same_tx_child_and_immutable_replay() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let state = s.metadata().control_state().unwrap();
@@ -154,7 +154,7 @@ fn native_batch_pending_reopen_same_tx_child_and_immutable_replay() {
 #[test]
 fn native_batch_hash_expands_numeric_once_preserves_vectors_and_rejects_foreign_child() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock);
     let r = request(
@@ -224,7 +224,7 @@ fn native_batch_hash_expands_numeric_once_preserves_vectors_and_rejects_foreign_
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_batch_actual_adapter_commits_labels_and_replays_then_forgets() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let r = request(
@@ -274,7 +274,7 @@ async fn native_batch_actual_adapter_commits_labels_and_replays_then_forgets() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_batch_unknown_child_reconciles_original_id_after_strict_reopen() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let r = request(
@@ -314,7 +314,7 @@ async fn native_batch_unknown_child_reconciles_original_id_after_strict_reopen()
 fn native_batch_forged_version_defaults_or_child_identity_fail_closed() {
     for corruption in [0, 1, 2, 3] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let r = request(&d, s.metadata().control_state().unwrap().store_id, "forged");
@@ -349,7 +349,7 @@ fn native_batch_forged_version_defaults_or_child_identity_fail_closed() {
 async fn native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publication_receipt() {
     for socket in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let mut r = request(
@@ -608,7 +608,7 @@ fn native_batch_crash_child() {
 fn native_batch_process_crash_before_and_after_child_commit_keeps_reserved_identity() {
     for point in ["before_metadata_commit", "after_metadata_commit"] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let r = request(&d, s.metadata().control_state().unwrap().store_id, "crash");
@@ -656,7 +656,7 @@ async fn native_batch_complete_export_import_restore_preserves_receipts_pending_
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let r = request(
@@ -734,7 +734,7 @@ async fn native_batch_complete_export_import_restore_preserves_receipts_pending_
 #[test]
 fn native_batch_caller_fixed_defaults_equivalent_arrays_and_original_bits_conflict() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let mut r = request(&d, uuid::Uuid::new_v4(), "hash");
     r.items[0]
         .as_object_mut()
@@ -792,7 +792,7 @@ async fn native_batch_generated_invalid_output_stays_pending_without_payload_the
         }
     }
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let mut r = request(
@@ -885,7 +885,7 @@ async fn native_batch_root_before_provider_drains_descendants_during_close() {
         }
     }
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let mut r = request(
@@ -980,7 +980,7 @@ async fn native_batch_root_before_provider_drains_descendants_during_close() {
 fn native_batch_review_reversed_error_generations_reject_unchanged_source() {
     for middle_success in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut s = open(&d, clock.clone());
         let mut r = request(
@@ -1200,7 +1200,7 @@ async fn native_batch_review_unknown_profile_forget_matches_single_and_preserves
 async fn native_batch_configured_auxiliary_work_is_pending_not_silently_skipped_and_replay_precedes_gate()
  {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let mut r = request(

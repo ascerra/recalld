@@ -5,7 +5,7 @@ use crate::storage::ids::{IdKind, IdSource, IdState, SeededIds};
 
 async fn seeded() -> (Fixture, Data, Arc<FixedClock>) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let engine =
         RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([7; 32]))).unwrap();

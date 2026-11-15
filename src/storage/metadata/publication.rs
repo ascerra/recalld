@@ -2,6 +2,7 @@
 use super::*;
 use crate::model::CachedRecord;
 use crate::storage::publication::{DerivedView, PublicationState};
+use std::sync::{Arc, RwLock};
 
 impl MetadataStore {
     pub(crate) fn publication_state(&self) -> Result<PublicationState, StorageError> {
@@ -125,6 +126,7 @@ pub(crate) struct CanonicalReadView {
     read: redb::ReadTransaction,
     pub at: control::GenerationRef,
     native_owned: bool,
+    vector_validation: Arc<RwLock<Option<super::certification::OwnedVectorValidation>>>,
 }
 
 impl MetadataStore {
@@ -165,6 +167,7 @@ impl MetadataStore {
             read,
             at: state.generation_ref(),
             native_owned: self.native_lifecycle_only,
+            vector_validation: self.vector_validation.clone(),
         })
     }
 
@@ -217,6 +220,14 @@ impl CanonicalReadView {
                 "native query canonical scope mismatch".into(),
             ));
         }
+        self.vector_validation
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?
+            .as_ref()
+            .ok_or_else(|| {
+                StorageError::RecoveryRequired("owned vector validation missing".into())
+            })?
+            .require_namespace(self.at, &actual)?;
         let active = active.ok_or_else(|| {
             StorageError::RecoveryRequired("native query provider identity missing".into())
         })?;

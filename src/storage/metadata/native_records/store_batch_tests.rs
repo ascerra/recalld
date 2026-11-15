@@ -93,7 +93,7 @@ fn commit(
 #[test]
 fn linked_batch_same_tx_reserved_child_reopen_replay_before_mutable_settings() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -160,7 +160,7 @@ fn linked_batch_same_tx_reserved_child_reopen_replay_before_mutable_settings() {
 #[test]
 fn linked_batch_hash_domains_fixed_defaults_original_bits_and_unknown_versions() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock);
     let r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -221,7 +221,7 @@ fn linked_batch_hash_domains_fixed_defaults_original_bits_and_unknown_versions()
 fn linked_batch_forged_version_settings_or_outcome_rejects_on_reopen() {
     for corruption in [0, 1, 2] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut s = open(&d, clock.clone());
         let r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -280,7 +280,7 @@ async fn export_import_and_restore(cas: bool, contract: u32) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let mut r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -454,7 +454,7 @@ fn process_child_boundaries(cas: bool, contract: u32) {
         "after_canonical_ack",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let mut r = request(&d, s.metadata().control_state().unwrap().store_id);

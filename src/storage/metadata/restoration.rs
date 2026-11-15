@@ -29,6 +29,9 @@ pub(crate) struct CapturedSnapshot {
     /// Completed immutable manifests, including reserved IDs and final errors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch_progress: Option<Rows>,
+    /// Inspection result, never authority to certify a different selected store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_certification: Option<crate::storage::vector_certification::CertificationSummary>,
 }
 
 /// Layouts whose canonical tables have explicit consumers. Native owned open
@@ -110,7 +113,9 @@ pub(crate) fn capture(path: &Path) -> Result<CapturedSnapshot, StorageError> {
             })
             .collect()
     };
+    let certification = crate::storage::vector_certification::validate_current(&read, &control)?;
     Ok(CapturedSnapshot {
+        vector_certification: (!certification.selected.is_empty()).then_some(certification),
         control,
         lineage,
         ledger,
@@ -175,6 +180,39 @@ pub(crate) fn reconcile(
     new_store_id: Uuid,
     archive_sha256: [u8; 32],
 ) -> Result<LineageState, StorageError> {
+    for captured in std::iter::once(snapshot).chain(target) {
+        let mut required = crate::storage::vector_certification::CertificationSummary::default();
+        for (_, bytes) in &captured.receipts {
+            let receipt = control::validate_receipt(bytes)?.receipt;
+            let binding = match receipt.outcome {
+                MutationOutcome::VectorsReembedded { transition } => Some((
+                    transition.before_namespace.namespace_id.get(),
+                    transition.certification,
+                )),
+                MutationOutcome::NativeNamespaceCreated { transition } => transition
+                    .vector_certification
+                    .map(|binding| (transition.namespace_id.get(), binding)),
+                _ => None,
+            };
+            if let Some((namespace, binding)) = binding {
+                if required.selected.insert(namespace, binding).is_some() {
+                    return Err(StorageError::InvalidControl(
+                        "restore capture has conflicting certification anchors".into(),
+                    ));
+                }
+            }
+        }
+        let required = (!required.selected.is_empty()).then_some(required);
+        if captured.vector_certification != required {
+            return Err(StorageError::InvalidControl(
+                "restore capture lost or changed required vector certification".into(),
+            ));
+        }
+    }
+    crate::storage::vector_certification::validate_restore_pair(
+        snapshot.vector_certification.as_ref(),
+        target.and_then(|t| t.vector_certification.as_ref()),
+    )?;
     if target.is_some_and(|t| !compatible(snapshot, t))
         || (mode == RestoreMode::Serving && target.is_none())
     {

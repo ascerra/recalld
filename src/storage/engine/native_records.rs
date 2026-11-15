@@ -160,6 +160,7 @@ impl RedbStorageEngine {
             policy,
             clock,
             embedding,
+            generated,
             profile,
             &edges,
             &hashes,

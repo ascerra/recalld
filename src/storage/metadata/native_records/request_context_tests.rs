@@ -52,7 +52,7 @@ fn key(s: &NativeLifecycleSession, d: &Data, name: &str, api: u32) -> MutationCo
 async fn native_record_api1_insert_original_contract_replay_and_admission() {
     for api in [1, 2] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut s = open(&d, clock.clone());
         let mut original = input(&d);
@@ -217,7 +217,7 @@ fn native_record_api1_forget_original_contract_replay_and_roundtrip() {
 #[test]
 fn native_record_api1_preserves_scope_and_native_owner_guards() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();
@@ -299,8 +299,8 @@ fn native_record_context_before_fixture() {
     std::fs::write(output.join("manifest.json"),serde_json::to_vec(&serde_json::json!({"namespace":d.ns.get(),"parent":d.parent,"profile":d.profile,"insert":insertion,"forget":forget,"insertExpected":insert_key.expected_generation,"forgetExpected":forget_key.expected_generation,"rows":rows})).unwrap()).unwrap();
 }
 
-#[test]
-fn native_record_context_replays_genuine_before_api2_bytes() {
+#[tokio::test]
+async fn native_record_context_replays_genuine_before_api2_bytes() {
     let root = tempfile::tempdir().unwrap();
     let source = match std::env::var("RECALLD_READ_RECORD_CONTEXT_BEFORE") {
         Ok(source) => PathBuf::from(source),
@@ -343,9 +343,26 @@ fn native_record_context_replays_genuine_before_api2_bytes() {
     let state = s.metadata().control_state().unwrap();
     let mut insert_key = ctx(&s, &d, "old2-insert");
     insert_key.expected_generation = serde_json::from_value(m["insertExpected"].clone()).unwrap();
-    let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();
+    // Genuine old history remains unadopted. Replay uses the actual accepted
+    // consumer before any fresh-policy capture or provider call.
+    assert!(
+        s.engine
+            .get_namespace(d.ns)
+            .unwrap()
+            .unwrap()
+            .schema
+            .unwrap()
+            .inherited_decay
+            .is_none()
+    );
+    let provider = Provider {
+        profile: d.profile.clone(),
+        calls: AtomicUsize::new(0),
+        fail_if_called: true,
+    };
     assert_eq!(
-        s.insert_prepared(&insert_key, &intent, &generated())
+        s.insert_generated(&insert_key, scope(&d), &input(&d), &provider)
+            .await
             .unwrap(),
         replay(&insertion)
     );
@@ -359,7 +376,8 @@ fn native_record_context_replays_genuine_before_api2_bytes() {
     insert_key.contract_version = 1;
     forget_key.contract_version = 1;
     assert!(matches!(
-        s.insert_prepared(&insert_key, &intent, &generated()),
+        s.insert_generated(&insert_key, scope(&d), &input(&d), &provider)
+            .await,
         Err(StorageError::IdempotencyConflict)
     ));
     assert!(matches!(
@@ -370,4 +388,15 @@ fn native_record_context_replays_genuine_before_api2_bytes() {
     assert_eq!(s.metadata().control_state().unwrap(), state);
     assert_eq!(files(&d.path), before);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        s.engine
+            .get_namespace(d.ns)
+            .unwrap()
+            .unwrap()
+            .schema
+            .unwrap()
+            .inherited_decay
+            .is_none()
+    );
 }

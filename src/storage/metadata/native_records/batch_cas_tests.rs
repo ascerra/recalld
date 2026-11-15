@@ -89,7 +89,7 @@ fn cas_request(s: &NativeLifecycleSession, d: &Data) -> BatchInput {
 #[test]
 fn batch_cas_reservation_replay_resume_and_conflict_preserve_original_precondition() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let r = cas_request(&s, &d);
@@ -173,7 +173,7 @@ fn batch_cas_reservation_replay_resume_and_conflict_preserve_original_preconditi
 #[test]
 fn batch_cas_competing_fresh_reservations_commit_once() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let r = cas_request(&s, &d);
     let start = std::sync::Barrier::new(2);
@@ -219,7 +219,7 @@ fn batch_cas_competing_fresh_reservations_commit_once() {
 fn batch_cas_corrupt_or_stripped_proof_fails_open_without_source_mutation() {
     for corruption in 0..7 {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let r = cas_request(&s, &d);
@@ -265,7 +265,7 @@ fn batch_cas_corrupt_or_stripped_proof_fails_open_without_source_mutation() {
 fn batch_cas_process_exit_reservation_reconciles_original_proof_once() {
     for point in ["before_batch_commit", "after_batch_commit"] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let r = cas_request(&s, &d);
