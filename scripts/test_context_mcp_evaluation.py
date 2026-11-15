@@ -92,9 +92,10 @@ class ContextPreflight(unittest.TestCase):
         for change in (lambda v:v['contextPolicy'].update(contextVersion=True),lambda v:v['contextPolicy'].update(evidenceTokenCap=129),lambda v:v['contextPolicy']['tokenizer'].update(version='unknown'),lambda v:v['contextPolicy']['tokenizer'].update(rankSha256='0'*64),lambda v:v.update(contextFixture='unknown')):
             self.m=copy.deepcopy(original);change(self.m)
             with self.assertRaises(ValueError):self.validate()
-        self.assertEqual(self.old.validate()[0]['track'],h['TRACK'])
-        old=copy.deepcopy(self.old.manifest);old['contextPolicy']=t.policy('default')
-        with self.assertRaises(ValueError):self.old.validate(old)
+        fresh=legacy.Preflight();fresh.setUp();self.addCleanup(fresh.doCleanups)
+        self.assertEqual(fresh.validate()[0]['track'],h['TRACK'])
+        old=copy.deepcopy(fresh.manifest);old['contextPolicy']=t.policy('default')
+        with self.assertRaises(ValueError):fresh.validate(old)
 
     def test_label_change_cannot_change_current_actor_or_cache(self):
         before=self.validate();labels=json.loads((self.root/'evaluator-labels.json').read_text());labels['relevant']={'q0':['turn-3']};labels['labelCanary']='CHANGED_CONTEXT_LABEL_CANARY';h['save'](self.root/'evaluator-labels.json',labels);self.m['evaluatorLabels']['sha256']=h['digest']((self.root/'evaluator-labels.json').read_bytes());after=self.validate()
