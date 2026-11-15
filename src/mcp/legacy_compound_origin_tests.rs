@@ -242,7 +242,7 @@ async fn legacy_compound_origin_actual_rpc_publication_and_unknown_keep_current_
         Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Notify::new());
-        let calls = Arc::new(Default::default());
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         adapter.embedding = Arc::new(BlockedProvider {
             entered: entered.clone(),
             release: release.clone(),
@@ -327,7 +327,11 @@ async fn legacy_compound_origin_actual_rpc_publication_and_unknown_keep_current_
             f.storage
                 .read()
                 .unwrap()
-                .lookup_operation(receipt.store_id, receipt.scope, child_id)
+                .lookup_operation(
+                    receipt.store_id,
+                    MutationScope::Namespace(NamespaceId::new(1)),
+                    child_id
+                )
                 .unwrap(),
             Some(receipt)
         );
@@ -599,7 +603,11 @@ async fn legacy_compound_origin_exact_hash_conflicts_and_forget_rpc() {
     assert_eq!(
         engine
             .meta_store()
-            .lookup_operation(receipt.store_id, receipt.scope, receipt.operation_id)
+            .lookup_operation(
+                receipt.store_id,
+                MutationScope::Namespace(NamespaceId::new(1)),
+                receipt.operation_id
+            )
             .unwrap(),
         Some(receipt)
     );
@@ -607,11 +615,7 @@ async fn legacy_compound_origin_exact_hash_conflicts_and_forget_rpc() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_history() {
-    use crate::backup::{
-        archive::create_archive,
-        manifest::generate_manifest,
-        restore::{RestoreOptions, restore_from_backup},
-    };
+    use crate::backup::restore::{RestoreOptions, restore_from_backup};
     use crate::storage::metadata::restoration::capture;
     use crate::storage::{logical_export, schema_migration, text_migration};
     let all = tempfile::tempdir().unwrap();
@@ -649,9 +653,9 @@ async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_h
     text_migration::migrate_legacy_text(source.path(), &gated).unwrap();
     assert_eq!(std::fs::read(source.path().join("meta.db")).unwrap(), bytes);
     let backup = all.path().join("complete.zip");
-    let inventory = crate::storage::validation::canonical_files(&gated).unwrap();
-    let manifest = generate_manifest(&gated, &inventory).unwrap();
-    create_archive(&gated, &inventory, &manifest, &backup).unwrap();
+    crate::backup::run_backup(&Default::default(), &backup, Some(&gated), false)
+        .await
+        .unwrap();
     restore_from_backup(RestoreOptions {
         backup_path: backup,
         data_dir: gated.clone(),
@@ -718,10 +722,10 @@ async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_h
             .iter()
             .all(|r| copied.receipts.contains(r))
     );
-    let inventory = crate::storage::validation::canonical_files(&imported).unwrap();
-    let manifest = generate_manifest(&imported, &inventory).unwrap();
     let backup = all.path().join("native.zip");
-    create_archive(&imported, &inventory, &manifest, &backup).unwrap();
+    crate::backup::run_backup(&Default::default(), &backup, Some(&imported), false)
+        .await
+        .unwrap();
     let historical = all.path().join("historical");
     restore_from_backup(RestoreOptions {
         backup_path: backup,
