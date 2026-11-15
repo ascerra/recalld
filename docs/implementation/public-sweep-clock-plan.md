@@ -1,7 +1,7 @@
 # Public sweep clock boundary: compatibility plan and HTTP RED
 
-Status: actual HTTP RED retained; runtime correction approved and implemented,
-validation pending. The existing endpoint behavior is intentional old API1
+Status: actual HTTP RED retained; correction validated on `07681e18` (1205lib +2CLI,
+13focused, fmt/clippy exit0 with warnings). See `work-notes/public-sweep-clock/REPORT.md`. The existing endpoint behavior is intentional old API1
 historical-seeding support, conflicting with the agreed A3 §3 clock boundary.
 This is not an exploit or evidence of an unintended historical implementation bug.
 
@@ -11,7 +11,7 @@ contains135's manual origin and145's native physical compaction. Worktree
 No153,156,owned-core,adoption or general integration parent is needed for the HTTP
 probe. None of those frozen branches or published studies is modified.
 
-## Actual caller map and compatibility impact
+## Pre-correction caller map and compatibility impact
 
 - `api/routes.rs` exposes POST `/decay/sweep` on the ordinary HTTP router.
   `TriggerSweepRequest` is camelCase serde, so the accepted wire key is `asOf`.
@@ -41,7 +41,7 @@ probe. None of those frozen branches or published studies is modified.
   seam. Huygens retains future public2 selection/schema and separate unknown-error
   envelope work. Feynman retains inherited-policy adoption and compaction proof.
 
-## Proposed correction for review, after actual RED
+## Approved and validated correction
 
 Reject supplied public time overrides before calling any decay adapter, sampling
 clock, registering accepted work, reserving IDs or creating transactions. Reuse
@@ -49,7 +49,7 @@ existing `AppError::BadRequest`: HTTP400, code BAD_REQUEST, field asOf, concise
 message `Public sweeps use the configured clock; remove asOf/as_of`. Isolated
 control and historical-evaluation instructions stay in documentation. Do not silently ignore a supplied override.
 
-Proposed presence semantics: reject both `asOf` and `as_of` whenever present,
+Validated presence semantics: reject both `asOf` and `as_of` whenever present,
 including null and nonnumeric values. This intentionally also changes old null
 and ignored snake_case behavior; make that compatibility impact explicit. Preserve
 omission `{}` and unrelated API1 unknown-field compatibility. A small request-local
@@ -63,14 +63,14 @@ After prevalidation, ordinary HTTP calls `trigger_sweep(None)` and captures the
 same configured clock exactly once. The internal sampled-time runner remains
 available to the isolated owned-control consumer. Do not add a parallel clock,
 new public time endpoint, mutation retry, synthetic receipt, durable skipped noop
-or a second scheduler. No change to original request hash domains is proposed.
+or a second scheduler. No change to original request hash domains is made.
 
 This is an intentional compatibility restriction for API1 clients using explicit
 asOf; they must use ordinary now-based sweeps, or the existing isolated evaluation
 control for historical work. Published studies keep their frozen code/inputs.
 No claim that the old endpoint violated its own prior advertised contract.
 
-## Probe and later validation scope
+## Probe and validation scope
 
 The test-only RED uses the actual full HTTP router, real legacy insertion and
 real native schema migration/attestation, configured clock and publication owner.
@@ -85,12 +85,12 @@ and preserve RED logs. Offline Rust1.94.1 Docker only,2CPU/4GiB/jobs2/networknon
 no home/credentials/socket mounts. Reuse one private Cargo cache and the protected
 `/tmp/recalld-a3-matrix-target`; do not clone caches or recreate released paths.
 
-After runtime design approval, add rejection/no-work tests for both spellings,
+Following runtime design approval, validation added rejection/no-work tests for both spellings,
 null/types/representable extremes, actual failure-shaped body, unchanged records/
 receipts/ledger/generation/tracker and no clock call; retain omitted-time comparator
 and existing manual/autonomous origin/compaction/reopen tests. Relevant full checks
-are warranted for a real runtime change. The current task stops at reviewed plan
-and actual RED; it does not claim the correction or compatibility decision landed.
+passed for this runtime change. The correction and these checks are now complete on the frozen candidate;
+publication review and exact-head CI remain separate gates.
 
 
 ## Actual retained RED
