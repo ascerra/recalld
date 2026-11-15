@@ -225,11 +225,27 @@ warm_file_enabled = false
                 assert failure["retryable"] is False
             else:
                 raise AssertionError("unknown inherited policy sweep succeeded")
-            assert unknown_owner.control.call("inspect",{}) == before_state
+            unavailable=unknown_owner.control.call("inspect",{},error="CONTROL_UNAVAILABLE")
+            assert "sweep episode invalid" in unavailable["message"]
+            status=unknown_owner.control.call("sweepStatus",{})
+            assert status["episodeInvalidated"] is True
+            assert status["lastSweep"]["phase"] == "failed"
+            assert status["lastSweep"]["result"] == failure["sweep"]["result"]
+            assert status["lastSweep"]["error"]["code"] == "SWEEP_FAILED"
             assert len(provider_rows()) == provider_count
-            save(evaluator/"unknown-inherited-sweep.json",dict(failure=failure,stateUnchanged=True,providerCalls=0))
             unknown_owner.close()
             unchanged(unknown_root,before_unknown)
+            reopened=child("unknown-inherited-reopened",root=unknown_root,native=True)
+            assert reopened.control.call("capabilities",{}) == expected_capabilities
+            after_state=reopened.control.call("inspect",{})
+            assert after_state == before_state
+            assert len(provider_rows()) == provider_count
+            reopened.close()
+            unchanged(unknown_root,before_unknown)
+            save(evaluator/"unknown-inherited-sweep.json",dict(failure=failure,
+                invalidatedOwnerInspect=unavailable,sweepStatus=status,
+                beforeState=before_state,freshOwnerState=after_state,
+                sourceFilesSha256=before_unknown,stateUnchanged=True,providerCalls=0))
             negatives.append(dict(case="unknown-inherited-prefix-sweep",code="SWEEP_FAILED",providerCalls=0))
         root,provenance=build_prefix("original",seed); mappings=provenance["mappings"]
         if sweep:
