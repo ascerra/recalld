@@ -394,18 +394,13 @@ impl McpStorageAdapter {
                             "RECONCILIATION_REQUIRED"
                         }));
                         if unavailable {
-                            outcome.items[index].error.as_mut().unwrap().field =
-                                self.native_store_blocker(prepared)
-                                    .or_else(|| {
-                                        (input.mutation_version == 4)
-                                            .then(|| {
-                                                prepared.store.as_ref().and_then(|p| {
-                                                    self.legacy_api2_selection_blocker(p)
-                                                })
-                                            })
-                                            .flatten()
-                                    })
-                                    .map(str::to_owned);
+                            outcome.items[index].error.as_mut().unwrap().field = self
+                                .native_store_blocker(prepared)
+                                .or_else(|| {
+                                    (input.mutation_version == 4 && prepared.store.is_some())
+                                        .then_some("embeddingProfileId")
+                                })
+                                .map(str::to_owned);
                         }
                         break;
                     }
