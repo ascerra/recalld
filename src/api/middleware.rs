@@ -43,3 +43,34 @@ pub async fn request_id_middleware(req: Request<Body>, next: Next) -> Response {
 
     response
 }
+
+pub(crate) fn request_contract_version(
+    headers: &axum::http::HeaderMap,
+) -> Result<crate::serialization::contract::ContractVersion, String> {
+    use crate::serialization::contract::{ContractVersion, VERSION_HEADER};
+    let mut values = headers.get_all(VERSION_HEADER).iter();
+    let first = values.next();
+    if values.next().is_some() {
+        return Err("only one Recalld-Contract-Version header is allowed".into());
+    }
+    first
+        .map(|value| value.to_str())
+        .transpose()
+        .map_err(|_| "contract version header must be ASCII".to_owned())
+        .and_then(|value| ContractVersion::from_http(value).map_err(|e| e.to_string()))
+}
+
+/// Admit application contract selection before any REST handler/backend work.
+pub async fn contract_version_middleware(req: Request<Body>, next: Next) -> Response {
+    use axum::response::IntoResponse;
+    match request_contract_version(req.headers())
+        .and_then(|version| version.require_supported().map_err(|e| e.to_string()))
+    {
+        Ok(()) => next.run(req).await,
+        Err(message) => super::AppError::BadRequest {
+            message,
+            field: Some("contractVersion".into()),
+        }
+        .into_response(),
+    }
+}

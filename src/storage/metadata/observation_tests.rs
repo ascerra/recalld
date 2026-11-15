@@ -317,7 +317,7 @@ fn namespace_keys_are_independent_and_shared_across_operation_kinds() {
     r.id = *c.as_bytes();
     r.namespace_id = other.get();
     store.insert(c, &r).unwrap();
-    let before = counts(&store);
+    let before = counts(&store); // Includes the actual catalog creation receipts.
     let first = context(&store, ns, "shared");
     store
         .update_access_with_receipt(&first, a, 100, AccessKind::DirectRetrieval)

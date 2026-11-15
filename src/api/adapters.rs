@@ -196,6 +196,12 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+    }
     async fn embed_text(
         &self,
         text: &str,
@@ -437,6 +443,27 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn store_identity(&self) -> Result<uuid::Uuid, crate::storage::StorageError> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+            })?;
+            Ok(engine.control_state()?.store_id)
+        })
+        .await
+        .map_err(|_| {
+            crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+        })?
+    }
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn publication_lease(
         &self,
     ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, crate::storage::StorageError> {

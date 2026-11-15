@@ -142,6 +142,13 @@ pub trait SearchPipeline: Send + Sync {
         self.record_exposures(accesses, scope).await
     }
 
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
+        Err(EmbeddingError::Unavailable(
+            "active embedding identity unavailable".into(),
+        ))
+    }
     /// Generate an embedding for the given text within a namespace.
     async fn embed_text(
         &self,
@@ -304,6 +311,19 @@ pub trait StorageEngine: Send + Sync {
             ));
         }
         self.delete_memory(id, namespace).await
+    }
+    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "store identity unavailable".into(),
+        ))
+    }
+    /// Concrete canonical/vector capture; no legacy backend fallback.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
     }
 
     /// Drain in-flight create/index publication before online derived repair.

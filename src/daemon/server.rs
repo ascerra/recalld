@@ -440,6 +440,20 @@ async fn dispatch(
 
         "shutdown" => Ok(serde_json::json!({})),
 
+        "session_context_v1" => {
+            if !params.as_object().is_some_and(|object| object.is_empty()) {
+                return Err(BridgeError::InvalidInput(
+                    "session context requires an empty object".into(),
+                ));
+            }
+            let context = storage.backend_context().await?;
+            context
+                .validate()
+                .map_err(|e| BridgeError::Unavailable(e.into()))?;
+            serde_json::to_value(context)
+                .map_err(|_| BridgeError::Internal("context serialization failed".into()))
+        }
+
         "search" | "search_read_only" => {
             let mut input: SearchInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
@@ -470,10 +484,17 @@ async fn dispatch(
         "scan_duplicates" => {
             let p: ScanDuplicatesParams = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
-            let results = search
-                .scan_duplicates(&p.namespace, p.threshold, p.max_memories)
-                .await?;
-            serde_json::to_value(results).map_err(|e| BridgeError::Internal(e.to_string()))
+            if p.include_coverage {
+                let report = search
+                    .scan_duplicates_with_coverage(&p.namespace, p.threshold, p.max_memories)
+                    .await?;
+                serde_json::to_value(report).map_err(|e| BridgeError::Internal(e.to_string()))
+            } else {
+                let clusters = search
+                    .scan_duplicates(&p.namespace, p.threshold, p.max_memories)
+                    .await?;
+                serde_json::to_value(clusters).map_err(|e| BridgeError::Internal(e.to_string()))
+            }
         }
 
         "mutate_batch" => {
@@ -1266,3 +1287,7 @@ mod scope_tests;
 #[cfg(test)]
 #[path = "batch_label_tests.rs"]
 mod batch_label_tests;
+
+#[cfg(test)]
+#[path = "coverage_tests.rs"]
+mod coverage_tests;
