@@ -2,10 +2,10 @@
 use super::*;
 use crate::storage::batch::{BatchOutcome, BatchReservationState, BatchStatus};
 
-fn batch_request() -> String {
+fn batch_request(store_id: uuid::Uuid) -> String {
     serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
         "_meta":{META_PROTOCOL_VERSION:PROTOCOL_VERSION, META_CLIENT_CAPABILITIES:{}},
-        "name":"store_memories","arguments":{"batchResultVersion":1,
+        "name":"store_memories","arguments":{"batchResultVersion":1,"storeId":store_id,
             "idempotencyKey":"private-batch-key-canary","memories":[
                 {"summary":"private-batch-input-canary","fullText":"private-batch-body-canary","checkDuplicates":false},
                 {"summary":""}
@@ -22,7 +22,7 @@ async fn legacy_batch_actual_partial_stdio_requires_parent_and_child_facts() {
     let output = Output::default();
     let captured = output.clone();
     let capture = Capture::default();
-    let input = format!("{}\n", batch_request());
+    let input = format!("{}\n", batch_request(before.store_id));
     crate::mcp::transport::serve_io(server, input.as_bytes(), output)
         .with_subscriber(subscriber(capture.clone()))
         .await
