@@ -1,6 +1,6 @@
 //! Payload-free catalog batch manifests. Canonical child receipts remain in the
 //! ordinary receipt table; a manifest reserves identities, never another journal.
-use super::control::{MutationContext, MutationScope, WriteReceipt};
+use super::control::{Generation, MutationContext, MutationScope, WriteReceipt};
 use crate::model::{MemoryId, NamespaceId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -65,6 +65,14 @@ pub struct BatchItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BatchProgress {
+    /// Original reservation CAS, never a child precondition or current-fork G.
+    /// Absence preserves every pre-extension manifest encoding and hash.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_precondition"
+    )]
+    pub reservation_precondition: Option<BatchReservationPrecondition>,
     pub version: u32,
     pub kind: BatchKind,
     pub caller_hash: [u8; 32],
@@ -74,6 +82,38 @@ pub struct BatchProgress {
     /// Later final-error bookkeeping also advances canonical generation.
     pub bookkeeping_receipts: Vec<WriteReceipt>,
     pub items: Vec<BatchItem>,
+}
+
+/// Additive proof for private writer version 3. No public API version change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct BatchReservationPrecondition {
+    pub proof_version: u32,
+    pub expected_generation: Generation,
+}
+fn present_precondition<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<BatchReservationPrecondition>, D::Error> {
+    BatchReservationPrecondition::deserialize(d).map(Some)
+}
+impl BatchProgress {
+    pub(crate) fn reservation_expected_generation(
+        &self,
+    ) -> Result<Option<Generation>, super::StorageError> {
+        let Some(proof) = &self.reservation_precondition else {
+            return Ok(None);
+        };
+        if self.version != 3
+            || proof.proof_version != 1
+            || proof.expected_generation.next().ok()
+                != Some(self.reservation_receipt.committed_generation)
+        {
+            return Err(super::StorageError::InvalidControl(
+                "batch reservation precondition proof mismatch".into(),
+            ));
+        }
+        Ok(Some(proof.expected_generation))
+    }
 }
 
 /// Only trusted adapter preparation creates these ephemeral plans. Payloads
@@ -94,6 +134,9 @@ pub(crate) enum BatchItemPlan {
         request_hash: [u8; 32],
         namespace: String,
         input: super::native_store::NativeStoreInput,
+        /// Wire-only selector, resolved from canonical/retained defaults. Never
+        /// persisted or substituted into the original caller hash.
+        supplied_profile_id: Option<String>,
     },
     Forget {
         request_hash: [u8; 32],
@@ -130,6 +173,14 @@ pub(crate) struct BatchChild {
     pub(super) canonical_hash: [u8; 32],
 }
 impl BatchChild {
+    pub(crate) fn resolve_store_profile(
+        &self,
+        input: &super::native_store::NativeStoreInput,
+        supplied_profile_id: Option<&str>,
+    ) -> Result<super::native_store::NativeStoreInput, super::StorageError> {
+        native::resolve_store_profile(input, supplied_profile_id, &self.defaults)
+    }
+
     pub(crate) fn context(&self) -> MutationContext {
         MutationContext {
             store_id: Some(self.store_id),
@@ -263,6 +314,8 @@ impl BatchOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BatchInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_generation: Option<Generation>,
     /// This negotiates only the additive batch envelope, not lifecycle/API v2.
     pub result_version: u32,
     /// Internal writer contract selector; ordinary schema-2 serving remains gated.
@@ -295,7 +348,7 @@ impl BatchInput {
             store_id: self.store_id,
             scope: MutationScope::Catalog,
             idempotency_key: self.idempotency_key.clone(),
-            expected_generation: None,
+            expected_generation: self.expected_generation,
             contract_version: contract_version(self.mutation_version).unwrap_or(0),
         }
     }

@@ -29,7 +29,9 @@ fn load(tx: &redb::WriteTransaction, id: Uuid) -> Result<BatchProgress, StorageE
     let bytes = table
         .get(id.as_bytes().as_slice())?
         .ok_or_else(|| invalid("unknown reservation"))?;
-    control::decode(bytes.value())
+    let progress: BatchProgress = control::decode(bytes.value())?;
+    progress.reservation_expected_generation()?;
+    Ok(progress)
 }
 fn save(tx: &redb::WriteTransaction, p: &BatchProgress) -> Result<(), StorageError> {
     tx.open_table(BATCHES)?.insert(
@@ -102,6 +104,7 @@ pub(crate) fn validate_existing(
     for row in tx.open_table(BATCHES)?.iter()? {
         let (key, bytes) = row?;
         let p: BatchProgress = control::decode(bytes.value())?;
+        let expected_generation = p.reservation_expected_generation()?;
         let parent = &p.reservation_receipt;
         let latest = p
             .bookkeeping_receipts
@@ -163,6 +166,7 @@ pub(crate) fn validate_existing(
         if matches!(p.version, 2 | 3) {
             let ctx = MutationContext {
                 contract_version: 2,
+                expected_generation,
                 ..catalog_context()
             };
             let stored = receipts.get(&parent_key).unwrap();
@@ -376,6 +380,14 @@ impl MetadataStore {
     ) -> Result<usize, StorageError> {
         check()?;
         let tx = self.db.begin_read()?;
+        Self::pending_batch_items_at(&tx, check)
+    }
+
+    pub(super) fn pending_batch_items_at(
+        tx: &redb::ReadTransaction,
+        mut check: impl FnMut() -> Result<(), StorageError>,
+    ) -> Result<usize, StorageError> {
+        check()?;
         if !tx.list_tables()?.any(|t| t.name() == BATCHES.name()) {
             return Ok(0);
         }
@@ -459,7 +471,7 @@ impl MetadataStore {
         if ctx.scope != MutationScope::Catalog
             || ctx.contract_version != batch::contract_version(version)?
             || version == 3 && kind != BatchKind::Insert
-            || ctx.contract_version == 2 && ctx.expected_generation.is_some()
+            || ctx.contract_version == 2 && version != 3 && ctx.expected_generation.is_some()
             || plans.is_empty()
             || plans.len() > crate::model::constants::MAX_BATCH_MEMORIES
         {
@@ -562,6 +574,16 @@ impl MetadataStore {
         )?;
         tx.open_table(SCHEMA)?.insert("version", 1)?;
         let p = BatchProgress {
+            reservation_precondition: if version == 3 {
+                ctx.expected_generation.map(|expected_generation| {
+                    batch::BatchReservationPrecondition {
+                        proof_version: 1,
+                        expected_generation,
+                    }
+                })
+            } else {
+                None
+            },
             version,
             kind,
             caller_hash,
@@ -677,11 +699,32 @@ impl MetadataStore {
                     }
                     batch::native::insert_hash(&ctx, input, &defaults)?
                 }
-                (3, BatchItemPlan::NativeStore { input, .. }) => {
-                    if input.insert.validate().is_err() {
-                        return Ok(Err(BatchError::new("INVALID_INPUT")));
-                    }
-                    batch::native::store_hash(&ctx, input, &defaults)?
+                (
+                    3,
+                    BatchItemPlan::NativeStore {
+                        input,
+                        supplied_profile_id,
+                        ..
+                    },
+                ) => {
+                    let resolved = match batch::native::resolve_store_profile(
+                        input,
+                        supplied_profile_id.as_deref(),
+                        &defaults,
+                    ) {
+                        Ok(resolved) => resolved,
+                        Err(StorageError::EmbeddingProfileMismatch) => {
+                            return Ok(Err(BatchError {
+                                code: "CONFLICT".into(),
+                                field: Some("embeddingProfileId".into()),
+                            }));
+                        }
+                        Err(StorageError::InvalidMutation(_)) => {
+                            return Ok(Err(BatchError::new("INVALID_INPUT")));
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    batch::native::store_hash(&ctx, &resolved, &defaults)?
                 }
                 (1, BatchItemPlan::Forget { id, .. }) => {
                     crate::storage::tombstone::request_hash(&ctx, *id)

@@ -80,11 +80,39 @@ impl SearchPipeline for RemoteSearchAdapter {
             namespace: namespace.to_string(),
             threshold,
             max_memories,
+            include_coverage: false,
         })
         .map_err(|e| BridgeError::Internal(e.to_string()))?;
         let result = self.client.call("scan_duplicates", params).await?;
         serde_json::from_value(result)
             .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
+    }
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<bridge::DuplicateScanReport, BridgeError> {
+        let params = serde_json::to_value(protocol::ScanDuplicatesParams {
+            namespace: namespace.to_string(),
+            threshold,
+            max_memories,
+            include_coverage: true,
+        })
+        .map_err(|e| BridgeError::Internal(e.to_string()))?;
+        let result = self.client.call("scan_duplicates", params).await?;
+        // Old daemons ignore the new flag and still return just clusters.
+        if result.is_array() {
+            let clusters = serde_json::from_value(result)
+                .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))?;
+            Ok(bridge::DuplicateScanReport {
+                clusters,
+                coverage: None,
+            })
+        } else {
+            serde_json::from_value(result)
+                .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
+        }
     }
 }
 
@@ -106,6 +134,48 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn store_native_wire(
+        &self,
+        request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        use crate::serialization::native_single::Reply;
+        let params = match serde_json::to_value(request) {
+            Ok(v) => v,
+            Err(_) => {
+                return Reply::failure(crate::storage::StorageError::InvalidMutation(
+                    "invalid native single request".into(),
+                ));
+            }
+        };
+        match self
+            .client
+            .call("store_native_single_observed_v1", params)
+            .await
+        {
+            Ok(value) => serde_json::from_value(value).unwrap_or_else(|_| Reply::uncertain()),
+            Err(_) => Reply::uncertain(),
+        }
+    }
+    async fn mutate_native_batch(
+        &self,
+        input: crate::storage::batch::BatchInput,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};
+        let params = serde_json::to_value(input).map_err(|_| BatchFailure::unavailable())?;
+        // Dedicated non-retrying RPC. Never fall back to the legacy writer.
+        let value = self
+            .client
+            .call("mutate_native_batch_observed_v1", params)
+            .await
+            .map_err(|_| BatchFailure::uncertain())?;
+        serde_json::from_value::<NativeBatchReply>(value)
+            .map_err(|_| BatchFailure::uncertain())?
+            .result()
+    }
+
     fn supports_durable_batches(&self) -> bool {
         true
     }
@@ -126,6 +196,21 @@ impl bridge::StorageEngine for RemoteStorageAdapter {
         })
     }
 
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        // Dedicated RPC: an old daemon cannot silently ignore new context fields.
+        let value = self
+            .client
+            .call("session_context_v1", serde_json::json!({}))
+            .await?;
+        let context: crate::serialization::session::BackendContext = serde_json::from_value(value)
+            .map_err(|_| BridgeError::Unavailable("invalid backend context response".into()))?;
+        context
+            .validate()
+            .map_err(|e| BridgeError::Unavailable(e.into()))?;
+        Ok(context)
+    }
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError> {
         let params =
             serde_json::to_value(&input).map_err(|e| BridgeError::Internal(e.to_string()))?;

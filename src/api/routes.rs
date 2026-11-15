@@ -16,7 +16,7 @@ use tracing::warn;
 
 use super::ApiConfig;
 use super::handlers;
-use super::middleware::request_id_middleware;
+use super::middleware::{contract_version_middleware, request_id_middleware};
 use super::state::AppState;
 
 /// Constructs the complete axum Router with all routes and middleware.
@@ -49,8 +49,8 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
 
     let memory_routes = Router::new()
         .route("/", get(handlers::list_memories))
-        .route("/", post(handlers::create_memory))
-        .route("/batch", post(handlers::batch_store))
+        .route("/", post(handlers::single_store_versioned))
+        .route("/batch", post(handlers::batch_store_versioned))
         .route("/{id}", get(handlers::get_memory))
         .route("/{id}", delete(handlers::delete_memory))
         .route("/{id}/reinforce", post(handlers::reinforce_memory));
@@ -63,9 +63,10 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
         .route("/", get(handlers::list_namespaces))
         .route("/", post(handlers::create_namespace))
         .route("/{id}/stats", get(handlers::namespace_stats))
-        .route("/{name}/duplicates", post(handlers::scan_duplicates));
+        .route("/{name}/duplicates", post(handlers::dispatch_duplicates));
 
     let ops_routes = Router::new()
+        .route("/capabilities", get(handlers::capabilities))
         .route("/health", get(handlers::health_check))
         .route("/health/report", get(handlers::health_report))
         .route("/metrics", get(handlers::metrics))
@@ -84,6 +85,7 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
         .merge(ops_routes)
         .layer(
             ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(contract_version_middleware))
                 .layer(axum::middleware::from_fn(request_id_middleware))
                 .layer(TraceLayer::new_for_http())
                 .layer(TimeoutLayer::with_status_code(

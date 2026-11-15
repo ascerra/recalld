@@ -8,6 +8,7 @@
 //! See CS-07 for the full specification.
 
 pub(crate) mod batch;
+mod canonical_vector_snapshot;
 mod catalog;
 pub(crate) mod effects;
 mod insertion;

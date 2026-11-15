@@ -205,10 +205,22 @@ async fn handle_connection(
                             peer_limit = peer_frame_limit(&request.params);
                         }
 
-                        let response = dispatch(
-                            &*search, &*storage, &*namespaces, &*health,
-                            &request.method, request.params,
-                        ).await;
+                        // These aliases carry complete canonical receipts. Reject
+                        // an undersized peer BEFORE admitting any mutation; a
+                        // post-commit framing error cannot replace that evidence.
+                        let response = if matches!(method.as_str(),
+                            "store_native_single_observed_v1" | "mutate_native_batch_observed_v1")
+                            && peer_limit < MAX_MESSAGE_SIZE
+                        {
+                            Err(BridgeError::InvalidInput(
+                                format!("native observed writes require ping negotiation with protocolVersion {PROTOCOL_VERSION} and maxMessageSize {MAX_MESSAGE_SIZE} before execution"),
+                            ))
+                        } else {
+                            dispatch(
+                                &*search, &*storage, &*namespaces, &*health,
+                                &request.method, request.params,
+                            ).await
+                        };
 
                         let resp = match response {
                             Ok(result) => DaemonResponse::success(request.id, result),
@@ -439,6 +451,20 @@ async fn dispatch(
 
         "shutdown" => Ok(serde_json::json!({})),
 
+        "session_context_v1" => {
+            if !params.as_object().is_some_and(|object| object.is_empty()) {
+                return Err(BridgeError::InvalidInput(
+                    "session context requires an empty object".into(),
+                ));
+            }
+            let context = storage.backend_context().await?;
+            context
+                .validate()
+                .map_err(|e| BridgeError::Unavailable(e.into()))?;
+            serde_json::to_value(context)
+                .map_err(|_| BridgeError::Internal("context serialization failed".into()))
+        }
+
         "search" | "search_read_only" => {
             let mut input: SearchInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
@@ -469,10 +495,54 @@ async fn dispatch(
         "scan_duplicates" => {
             let p: ScanDuplicatesParams = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
-            let results = search
-                .scan_duplicates(&p.namespace, p.threshold, p.max_memories)
-                .await?;
-            serde_json::to_value(results).map_err(|e| BridgeError::Internal(e.to_string()))
+            if p.include_coverage {
+                let report = search
+                    .scan_duplicates_with_coverage(&p.namespace, p.threshold, p.max_memories)
+                    .await?;
+                serde_json::to_value(report).map_err(|e| BridgeError::Internal(e.to_string()))
+            } else {
+                let clusters = search
+                    .scan_duplicates(&p.namespace, p.threshold, p.max_memories)
+                    .await?;
+                serde_json::to_value(clusters).map_err(|e| BridgeError::Internal(e.to_string()))
+            }
+        }
+
+        "store_native_single_observed_v1" => {
+            use crate::serialization::native_single::{Reply, Request};
+            let reply = match serde_json::from_value::<Request>(params) {
+                Ok(request) => storage.store_native_wire(request).await,
+                Err(_) => Reply::invalid(crate::serialization::contract::InputError {
+                    code: "INVALID_TYPE",
+                    field: String::new(),
+                    message: "invalid native single parameters",
+                }),
+            };
+            // Preserve the canonical typed f32 JSON representation on this RPC.
+            serde_json::to_vec(&reply)
+                .and_then(|bytes| serde_json::from_slice(&bytes))
+                .map_err(|_| {
+                    BridgeError::PartiallyApplied(
+                        "single reply serialization failed; reconcile original identity".into(),
+                    )
+                })
+        }
+        "mutate_native_batch_v1" | "mutate_native_batch_observed_v1" => {
+            use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};
+            let reply = match serde_json::from_value::<crate::storage::batch::BatchInput>(params) {
+                Ok(input) => match storage.mutate_native_batch(input).await {
+                    Ok(out) => NativeBatchReply::Outcome(out),
+                    Err(e) => NativeBatchReply::Failure(e),
+                },
+                Err(_) => NativeBatchReply::Failure(BatchFailure::from_bridge(
+                    BridgeError::InvalidInput("invalid native batch parameters".into()),
+                )),
+            };
+            serde_json::to_value(reply).map_err(|_| {
+                BridgeError::PartiallyApplied(
+                    "native batch reply serialization failed; reconcile original identity".into(),
+                )
+            })
         }
 
         "mutate_batch" => {
@@ -637,6 +707,7 @@ mod tests {
             tx.clone(),
         ));
         let mut input = BatchInput {
+            expected_generation: None,
             mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
@@ -722,6 +793,7 @@ mod tests {
         let adapter = fx.storage_adapter();
         let store_id = fx.storage.read().unwrap().control_state().unwrap().store_id;
         let mut input = BatchInput {
+            expected_generation: None,
             mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
@@ -809,6 +881,7 @@ mod tests {
             .fail_batch_commit
             .store(3, std::sync::atomic::Ordering::SeqCst);
         let input = BatchInput {
+            expected_generation: None,
             mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
@@ -1271,6 +1344,31 @@ pub(crate) async fn native_batch_test_rpc(
     storage: Arc<dyn BridgeStorageEngine>,
     input: &crate::storage::batch::BatchInput,
 ) -> DaemonResponse {
+    native_batch_method_test_rpc(storage, input, "mutate_batch").await
+}
+#[cfg(test)]
+pub(crate) async fn native_batch_method_test_rpc(
+    storage: Arc<dyn BridgeStorageEngine>,
+    input: &crate::storage::batch::BatchInput,
+    method: &str,
+) -> DaemonResponse {
+    native_method_test_rpc(storage, serde_json::to_value(input).unwrap(), method).await
+}
+#[cfg(test)]
+pub(crate) async fn native_method_test_rpc(
+    storage: Arc<dyn BridgeStorageEngine>,
+    params: serde_json::Value,
+    method: &str,
+) -> DaemonResponse {
+    native_method_test_rpc_with_limit(storage, params, method, Some(MAX_MESSAGE_SIZE)).await
+}
+#[cfg(test)]
+pub(crate) async fn native_method_test_rpc_with_limit(
+    storage: Arc<dyn BridgeStorageEngine>,
+    params: serde_json::Value,
+    method: &str,
+    negotiated_limit: Option<usize>,
+) -> DaemonResponse {
     let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
     let stub = Arc::new(crate::test_support::StubBridge::default());
     let (tx, rx) = watch::channel(false);
@@ -1285,19 +1383,43 @@ pub(crate) async fn native_batch_test_rpc(
         rx,
         tx.clone(),
     ));
+    // Match the real client's handshake before testing a large native reply.
+    // An unannounced peer is correctly limited to the legacy 1 MiB frame.
+    if let Some(limit) = negotiated_limit {
+        write_framed_request(
+            &mut client,
+            &DaemonRequest {
+                jsonrpc: "2.0".into(),
+                id: 0,
+                method: "ping".into(),
+                params: serde_json::json!({
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "maxMessageSize": limit,
+                }),
+            },
+            LEGACY_MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        let hello = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert!(hello.error.is_none());
+        assert_eq!(hello.result.unwrap()["maxMessageSize"], MAX_MESSAGE_SIZE);
+    }
     write_framed_request(
         &mut client,
         &DaemonRequest {
             jsonrpc: "2.0".into(),
             id: 1,
-            method: "mutate_batch".into(),
-            params: serde_json::to_value(input).unwrap(),
+            method: method.into(),
+            params,
         },
-        LEGACY_MAX_MESSAGE_SIZE,
+        MAX_MESSAGE_SIZE,
     )
     .await
     .unwrap();
-    let response = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+    let response = read_framed_response(&mut client, MAX_MESSAGE_SIZE)
         .await
         .unwrap();
     tx.send(true).unwrap();
@@ -1308,3 +1430,6 @@ pub(crate) async fn native_batch_test_rpc(
 #[cfg(test)]
 #[path = "batch_label_tests.rs"]
 mod batch_label_tests;
+#[cfg(test)]
+#[path = "coverage_tests.rs"]
+mod coverage_tests;

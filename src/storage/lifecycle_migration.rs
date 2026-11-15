@@ -312,6 +312,11 @@ pub(crate) fn validate_policy_history(
                 ));
                 Some(t.namespace_id)
             }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(&receipt) =>
+            {
+                None
+            }
             MutationOutcome::NativePhaseMaterialized { transition: t } => {
                 native_history.push((
                     receipt.clone(),
@@ -329,11 +334,6 @@ pub(crate) fn validate_policy_history(
                     t.policy_revision,
                 ));
                 Some(t.namespace_id)
-            }
-            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
-                if is_native_bookkeeping(&receipt) =>
-            {
-                None
             }
             _ if active => return Err(invalid("unrecognized operation after schema publication")),
             _ => None,
@@ -875,6 +875,8 @@ pub(crate) fn validate_policy_history(
                         .ok_or_else(|| invalid("native record namespace absent"))?,
                 )?;
             }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(receipt) => {}
             MutationOutcome::NativePhaseMaterialized { transition: t } => {
                 if current_policy.get(&t.namespace_id.get())
                     != Some(&(t.lifecycle_version, t.policy_revision))
@@ -901,8 +903,6 @@ pub(crate) fn validate_policy_history(
                 }
                 t.rewind(&mut records)?;
             }
-            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
-                if is_native_bookkeeping(receipt) => {}
             _ => return Err(invalid("unrecognized operation in lifecycle proof")),
         }
     }
