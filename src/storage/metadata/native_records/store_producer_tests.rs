@@ -4,6 +4,9 @@ use crate::storage::batch::{BatchInput, BatchKind, BatchStatus};
 use crate::test_support::Fixture;
 use serde_json::json;
 
+#[path = "insertion_origin_tests.rs"]
+mod insertion_origin_tests;
+
 struct Provider {
     texts: std::sync::Mutex<Vec<String>>,
     profile: Option<crate::model::schema::EmbeddingProfile>,

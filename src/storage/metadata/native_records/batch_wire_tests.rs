@@ -220,6 +220,37 @@ async fn native_single_wire_fresh_budget_scope_and_profile_fail_before_provider_
 }
 
 #[tokio::test]
+async fn native_origin_single_wire_wrong_vector_width_is_caller_422_without_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let store_id = s.metadata().control_state().unwrap().store_id;
+    let f = Fixture::from_open_engine(root, s.engine);
+    let provider = Arc::new(RecoveringProvider {
+        profile: d.profile.clone(), unavailable: false.into(), calls: AtomicUsize::new(0), profiles: AtomicUsize::new(0), corrupt: Default::default(),
+    });
+    let a = Arc::new(adapter(&f, provider.clone(), clock.clone(), Default::default()));
+    let request = json!({"namespaceId":d.ns,"storeId":store_id,"idempotencyKey":"width","summary":"caller width","embedding":[1.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap()});
+    let before = readers::bytes(&d.path);
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    let (status, out) = single_http(&a, &request).await;
+    assert_eq!(status, 422, "{out}");
+    assert_eq!(out["error"]["code"], "OUT_OF_RANGE");
+    assert_eq!(out["error"]["field"], "/embedding");
+    assert!(out.get("receipt").is_none());
+    let (is_error, out) = single_mcp(a, request).await;
+    assert!(is_error);
+    assert_eq!(out["error"]["code"], "OUT_OF_RANGE");
+    assert_eq!(out["error"]["field"], "/embedding");
+    assert_eq!(readers::bytes(&d.path), before);
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), state);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn native_single_and_batch_rpc_require_full_frame_before_any_work() {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
