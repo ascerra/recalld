@@ -213,10 +213,12 @@ impl From<StorageError> for AppError {
                     message: err.to_string(),
                 }
             }
-            StorageError::InvalidMutation(_) => AppError::UnprocessableEntity {
-                message: err.to_string(),
-                field: None,
-            },
+            StorageError::InvalidMutation(_) | StorageError::CallerVectorInvalid(_) => {
+                AppError::UnprocessableEntity {
+                    message: err.to_string(),
+                    field: None,
+                }
+            }
             StorageError::DuplicateId(uuid) => AppError::Conflict {
                 message: format!("memory {} already exists", uuid),
             },
@@ -349,6 +351,40 @@ impl From<GraphError> for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caller_vector_numeric_errors_preserve_422_provider_503_and_corruption_500() {
+        for values in [vec![0.; 4], vec![1.; 3], vec![f32::NAN; 4]] {
+            let caller =
+                crate::storage::insertion::normalize_embedding(&mut values.clone(), 4, true)
+                    .unwrap_err();
+            assert!(matches!(caller, StorageError::CallerVectorInvalid(_)));
+            assert_eq!(
+                AppError::from(caller).into_response().status(),
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
+            let provider =
+                crate::storage::insertion::normalize_embedding(&mut values.clone(), 4, false)
+                    .unwrap_err();
+            assert!(matches!(
+                provider,
+                StorageError::ProviderVectorUnavailable(_)
+            ));
+            assert_eq!(
+                AppError::from(provider).into_response().status(),
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+        }
+        for corruption in [
+            StorageError::OwnershipMismatch("canonical vector".into()),
+            StorageError::InvalidControl("record proof".into()),
+        ] {
+            assert_eq!(
+                AppError::from(corruption).into_response().status(),
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+        }
+    }
 
     #[test]
     fn validation_error_becomes_bad_request_with_field() {

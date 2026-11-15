@@ -45,7 +45,8 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         crate::storage::StorageError::NamespaceMismatch { .. } => {
             bridge::BridgeError::NamespaceMismatch(error.to_string())
         }
-        crate::storage::StorageError::InvalidMutation(_)
+        crate::storage::StorageError::CallerVectorInvalid(_)
+        | crate::storage::StorageError::InvalidMutation(_)
         | crate::storage::StorageError::EdgeConflict(_)
         | crate::storage::StorageError::MutationNamespaceMismatch => {
             bridge::BridgeError::InvalidInput(error.to_string())

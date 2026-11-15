@@ -94,6 +94,11 @@ pub enum StorageError {
     #[error("EMBEDDING_UNAVAILABLE: invalid provider vector: {0}")]
     ProviderVectorUnavailable(String),
 
+    /// Caller-supplied vector failed the shared numeric boundary. Keep the
+    /// legacy diagnostic text while allowing typed transport classification.
+    #[error("invalid storage mutation: {0}")]
+    CallerVectorInvalid(String),
+
     #[error("EDGE_CONFLICT: {0}")]
     EdgeConflict(String),
 

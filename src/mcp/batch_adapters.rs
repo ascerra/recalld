@@ -447,7 +447,8 @@ pub(super) fn forget_result(
 fn final_error(error: &StoreWriteError) -> Option<BatchError> {
     let code = match error {
         StoreWriteError::Bridge(bridge::BridgeError::InvalidInput(_))
-        | StoreWriteError::Canonical(StorageError::InvalidMutation(_)) => "INVALID_INPUT",
+        | StoreWriteError::Canonical(StorageError::InvalidMutation(_))
+        | StoreWriteError::Canonical(StorageError::CallerVectorInvalid(_)) => "INVALID_INPUT",
         StoreWriteError::Bridge(bridge::BridgeError::NotFound(_))
         | StoreWriteError::Canonical(StorageError::NotFound(_)) => "NOT_FOUND",
         StoreWriteError::Canonical(StorageError::NamespaceNotFound(_)) => "NAMESPACE_NOT_FOUND",
