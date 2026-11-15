@@ -50,7 +50,7 @@ async fn actual(batch: bool, generate: bool) {
         input.insert.emotions.clear();
         input.insert.memory.summary = "native demand".into();
         input.insert.memory.full_text = Some("original body".into());
-        input.insert.memory.tags = vec!["raw".into()];
+        input.insert.memory.tags = vec![crate::model::Tag::new("raw").unwrap()];
         input.check_duplicates = mode == "advisory";
         let key = single_context(&f, &d, mode);
         let mut request = request(&f, mode);
