@@ -151,19 +151,10 @@ impl McpStorageAdapter {
         let kind = input.kind;
         let parent = input.batch_operation_id;
         let version = input.mutation_version;
-        let legacy_selection_blocker = (version == 4)
-            .then(|| {
-                prepared.iter().find_map(|item| {
-                    if matches!(item.plan, BatchItemPlan::Insert { .. }) {
-                        item.store
-                            .as_ref()
-                            .and_then(|input| self.legacy_api2_selection_blocker(input))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .flatten();
+        let legacy_semantic_write = version == 4
+            && prepared
+                .iter()
+                .any(|item| matches!(item.plan, BatchItemPlan::Insert { .. }));
         let config = self.config.clone();
         let storage = self.storage.clone();
         let worker = work.child().map_err(StorageError::from)?;
@@ -178,8 +169,8 @@ impl McpStorageAdapter {
                 })}else{storage.meta_store().reserve_batch_version_with_work(&ctx,version,kind,&plans,parent,Some(&worker),|| {
                     // The closure runs only AFTER matching replay and BEFORE
                     // reservation/child IDs. Old API1 selection is unchanged.
-                    if let Some(field) = legacy_selection_blocker {
-                        return Err(StorageError::UnsupportedMutation(format!("legacy API2 {field} requires durable selection intent")));
+                    if legacy_semantic_write {
+                        return Err(StorageError::UnsupportedMutation(crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into()));
                     }
                     Ok(None)
                 })};

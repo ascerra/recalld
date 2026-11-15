@@ -3,6 +3,10 @@
 use crate::model::{MemoryId, Tag};
 use crate::storage::{StorageError, control};
 
+/// Schema-less legacy vectors have no canonical profile evidence for API2.
+/// API1 retains its unverified compatibility lane; matching history replays first.
+pub(crate) const LEGACY_API2_SEMANTIC_UNSUPPORTED: &str = "legacy API2 vector insertion requires a canonical Bound embedding profile; migrate with justified profile attestation or re-embed before semantic writes";
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct InsertMemory {
     /// None requests a generated UUID; Some is a caller-supplied identity.

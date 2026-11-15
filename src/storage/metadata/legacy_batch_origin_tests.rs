@@ -34,7 +34,7 @@ fn reserve(f: &Fixture, input: &BatchInput) -> BatchProgress {
         .meta_store()
         .reserve_batch_version_with_work(
             &input.context(),
-            4,
+            input.mutation_version,
             input.kind,
             &plans(input),
             None,
@@ -258,7 +258,7 @@ fn legacy_compound_origin_process_child() {
         .meta_store()
         .reserve_batch_version_with_work(
             &input.context(),
-            4,
+            input.mutation_version,
             input.kind,
             &plans,
             None,
@@ -277,43 +277,63 @@ fn legacy_compound_origin_process_child() {
 }
 
 #[test]
-fn legacy_compound_origin_process_exit_reconciles_original_cas_and_child() {
-    for point in [
-        "before_batch_commit",
-        "after_batch_commit",
-        "after_insert_payload_sync",
-        "before_metadata_commit",
-        "after_metadata_commit",
-        "after_edge_commit",
-        "after_canonical_ack",
-    ] {
-        let f = Fixture::new();
-        let before = f.storage.read().unwrap().control_state().unwrap();
-        let root = f.close();
-        let result=std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact","storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_process_child","--nocapture"])
-            .env("RECALLD_LEGACY_ORIGIN_STORE",root.path()).env("RECALLD_LEGACY_ORIGIN_CAS",before.committed_generation.get().to_string())
-            .env("RECALLD_TEST_EFFECT_CRASH",point).output().unwrap();
-        assert_eq!(
-            result.status.code(),
-            Some(91),
-            "{point}: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+fn legacy_compound_origin_genuine_process_exit_preserves_replay_or_pending() {
+    let cases: Value = serde_json::from_slice(include_bytes!(
+        "../../mcp/fixtures/legacy-semantic-before/process.json"
+    ))
+    .unwrap();
+    let archives: [&[u8]; 7] = [
+        include_bytes!("../../mcp/fixtures/legacy-semantic-before/process-before_batch_commit.zip"),
+        include_bytes!("../../mcp/fixtures/legacy-semantic-before/process-after_batch_commit.zip"),
+        include_bytes!(
+            "../../mcp/fixtures/legacy-semantic-before/process-after_insert_payload_sync.zip"
+        ),
+        include_bytes!(
+            "../../mcp/fixtures/legacy-semantic-before/process-before_metadata_commit.zip"
+        ),
+        include_bytes!(
+            "../../mcp/fixtures/legacy-semantic-before/process-after_metadata_commit.zip"
+        ),
+        include_bytes!("../../mcp/fixtures/legacy-semantic-before/process-after_edge_commit.zip"),
+        include_bytes!("../../mcp/fixtures/legacy-semantic-before/process-after_canonical_ack.zip"),
+    ];
+    for (case, archive) in cases.as_array().unwrap().iter().zip(archives) {
+        let point = case["point"].as_str().unwrap();
+        let before: ControlState = serde_json::from_value(case["before"].clone()).unwrap();
+        assert_eq!(case["exit"], json!(91));
+        let root = tempfile::tempdir().unwrap();
+        zip::ZipArchive::new(std::io::Cursor::new(archive))
+            .unwrap()
+            .extract(root.path())
+            .unwrap();
         let parent_committed = point != "before_batch_commit";
         let child_committed = matches!(
             point,
             "after_metadata_commit" | "after_edge_commit" | "after_canonical_ack"
         );
         let mut engine = crate::storage::RedbStorageEngine::open(root.path()).unwrap();
+        let now = engine.control_state().unwrap();
         assert_eq!(
-            engine.control_state().unwrap().committed_generation.get(),
+            now.committed_generation.get(),
             before.committed_generation.get()
                 + u64::from(parent_committed)
                 + u64::from(child_committed)
         );
         let input = process_request(&engine, before.committed_generation);
         let plans = plans(&input);
+        let BatchItemPlan::Insert { input: insert, .. } = &plans[0] else {
+            panic!()
+        };
+        if !parent_committed {
+            let mut ctx = MutationContext::unkeyed(NamespaceId::new(1));
+            ctx.contract_version = 2;
+            assert!(matches!(
+                engine.insert_memory_with_receipt(&ctx, insert, &[], 100),
+                Err(StorageError::UnsupportedMutation(_))
+            ));
+            assert_eq!(engine.control_state().unwrap(), now);
+            continue;
+        }
         let p = engine
             .meta_store()
             .reserve_batch_version_with_work(
@@ -323,37 +343,52 @@ fn legacy_compound_origin_process_exit_reconciles_original_cas_and_child() {
                 &plans,
                 None,
                 None,
-                || Ok(None),
+                || panic!("historical replay consulted fresh settings"),
             )
             .unwrap();
-        assert_eq!(p.reservation_receipt.replayed, parent_committed);
+        assert!(p.reservation_receipt.replayed);
         let child = p.child(0).unwrap();
-        let BatchItemPlan::Insert { input, .. } = &plans[0] else {
-            panic!()
-        };
-        let receipt = engine
-            .insert_memory_reserved(&child.context(), input, &[], 100, Some(&child))
-            .unwrap();
-        assert_eq!(receipt.replayed, child_committed);
-        assert_eq!(receipt.operation_id, p.items[0].operation_id);
-        assert_eq!(engine.scan_all().unwrap().len(), 1);
-        assert_eq!(engine.meta_store().pending_batch_items().unwrap(), 0);
-        drop(engine);
-        let mut engine = crate::storage::RedbStorageEngine::open(root.path()).unwrap();
-        let mut replay = engine
-            .insert_memory_reserved(&child.context(), input, &[f32::NAN], i64::MAX, Some(&child))
-            .unwrap();
-        replay.replayed = receipt.replayed;
-        assert_eq!(replay, receipt);
-        assert_eq!(
-            engine.control_state().unwrap().committed_generation.get(),
-            before.committed_generation.get() + 2
+        let result = engine.insert_memory_reserved(
+            &child.context(),
+            insert,
+            &[f32::NAN],
+            i64::MAX,
+            Some(&child),
         );
+        if child_committed {
+            let mut receipt = result.unwrap();
+            assert!(receipt.replayed);
+            assert_eq!(receipt.operation_id, p.items[0].operation_id);
+            receipt.replayed = false;
+            assert_eq!(
+                engine
+                    .lookup_operation(receipt.store_id, receipt_scope(), receipt.operation_id)
+                    .unwrap(),
+                Some(receipt)
+            );
+        } else {
+            assert!(
+                matches!(result, Err(StorageError::UnsupportedMutation(_))),
+                "{point}: {result:?}"
+            );
+        }
+        assert_eq!(
+            engine.scan_all().unwrap().len(),
+            usize::from(child_committed)
+        );
+        assert_eq!(
+            engine.meta_store().pending_batch_items().unwrap(),
+            usize::from(!child_committed)
+        );
+        assert_eq!(engine.control_state().unwrap(), now);
     }
+}
+fn receipt_scope() -> MutationScope {
+    MutationScope::Namespace(NamespaceId::new(1))
 }
 
 #[tokio::test]
-async fn legacy_compound_origin_explicit_endpoints_rechecked_after_reservation() {
+async fn legacy_compound_origin_api1_explicit_endpoints_rechecked_after_reservation() {
     let f = Fixture::new();
     let parent = f.insert_memory().await;
     let old = f.insert_memory().await;
@@ -362,7 +397,9 @@ async fn legacy_compound_origin_explicit_endpoints_rechecked_after_reservation()
     let mut value = item();
     value["parentId"] = json!(parent);
     value["supersedes"] = json!(old);
-    let request = request(&f, vec![value], false);
+    let mut request = request(&f, vec![value], false);
+    // API1 structural proof remains supported; fresh API2 vectors are gated.
+    request.mutation_version = 1;
     let p = reserve(&f, &request);
     let child = p.child(0).unwrap();
     let prepared = plans(&request);
@@ -402,8 +439,7 @@ async fn legacy_compound_origin_explicit_endpoints_rechecked_after_reservation()
             }
             _ => unreachable!(),
         }
-        let mut ctx = MutationContext::unkeyed(NamespaceId::new(1));
-        ctx.contract_version = 2;
+        let ctx = MutationContext::unkeyed(NamespaceId::new(1));
         assert!(
             engine
                 .insert_memory_with_receipt(&ctx, &input, &[], 100)

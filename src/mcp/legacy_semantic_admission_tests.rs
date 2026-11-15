@@ -322,3 +322,243 @@ async fn legacy_semantic_export_genuine157_faults() {
     )
     .unwrap();
 }
+
+pub(super) fn history() -> Value {
+    serde_json::from_slice(include_bytes!(
+        "fixtures/legacy-semantic-before/history.json"
+    ))
+    .unwrap()
+}
+pub(super) fn restored(bytes: &[u8]) -> Fixture {
+    let root = tempfile::tempdir().unwrap();
+    zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .unwrap()
+        .extract(root.path())
+        .unwrap();
+    let engine = RedbStorageEngine::open(root.path()).unwrap();
+    Fixture::from_open_engine(root, engine)
+}
+pub(super) fn completed() -> (Fixture, Value) {
+    (
+        restored(include_bytes!(
+            "fixtures/legacy-semantic-before/completed.zip"
+        )),
+        history(),
+    )
+}
+pub(super) fn completed_case(h: &Value, index: usize) -> (BatchInput, BatchOutcome) {
+    let case = &h["completed"][index];
+    (
+        serde_json::from_value(case["input"].clone()).unwrap(),
+        serde_json::from_value(case["outcome"].clone()).unwrap(),
+    )
+}
+fn same_receipt(
+    actual: &crate::storage::control::WriteReceipt,
+    original: &crate::storage::control::WriteReceipt,
+) {
+    let mut actual = actual.clone();
+    actual.replayed = original.replayed;
+    assert_eq!(&actual, original);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_semantic_genuine_single_replay_precedes_profile_clock_and_cas() {
+    let (f, h) = completed();
+    let original: crate::storage::control::WriteReceipt =
+        serde_json::from_value(h["single"]["receipt"].clone()).unwrap();
+    let mut ctx = context(&f);
+    ctx.store_id = Some(original.store_id);
+    ctx.expected_generation =
+        serde_json::from_value(h["single"]["expectedGeneration"].clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(canonical()).unwrap(),
+        h["single"]["input"]
+    );
+    let before = current(&f);
+    let bytes = files(f.path());
+    let owner = f.storage_adapter().batch_completion();
+    let replay = owner
+        .insert(ctx.clone(), canonical(), vec![f32::NAN].into(), i64::MAX)
+        .await
+        .unwrap()
+        .receipt;
+    assert!(replay.replayed);
+    same_receipt(&replay, &original);
+    for mode in 0..4 {
+        let mut other = ctx.clone();
+        let mut input = canonical();
+        match mode {
+            0 => other.contract_version = 1,
+            1 => input.embedding = Some(vec![2., 0., 0., 0.]),
+            2 => input.embedding = Some(vec![1., -0., 0., 0.]),
+            3 => other.expected_generation = None,
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            owner.insert(other, input, vec![].into(), 100).await,
+            Err(crate::storage::StorageError::IdempotencyConflict)
+        ));
+    }
+    let mut foreign = ctx;
+    foreign.store_id = Some(uuid::Uuid::new_v4());
+    assert!(matches!(
+        owner.insert(foreign, canonical(), vec![].into(), 100).await,
+        Err(crate::storage::StorageError::StoreLineageMismatch)
+    ));
+    assert_eq!(current(&f), before);
+    assert_eq!(files(f.path()), bytes);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_semantic_genuine_completed_rpc_replays_all_receipts_no_work() {
+    let (f, h) = completed();
+    let before = current(&f);
+    let bytes = files(f.path());
+    let spy = Arc::new(SpyProvider(Default::default()));
+    let clock = Arc::new(SpyClock(Default::default()));
+    let mut adapter = f.storage_adapter().with_clock(clock.clone());
+    adapter.embedding = spy.clone();
+    assert!(adapter.config.graph.autolink_enabled);
+    let adapter = Arc::new(adapter);
+    for index in 0..4 {
+        let (input, original) = completed_case(&h, index);
+        let reply = crate::daemon::server::native_batch_test_rpc(adapter.clone(), &input).await;
+        assert!(reply.error.is_none(), "{:?}", reply.error);
+        let replay: BatchOutcome = serde_json::from_value(reply.result.unwrap()).unwrap();
+        assert_eq!(replay.batch_operation_id, original.batch_operation_id);
+        same_receipt(
+            replay.reservation_receipt.as_ref().unwrap(),
+            original.reservation_receipt.as_ref().unwrap(),
+        );
+        assert_eq!(replay.bookkeeping_receipts, original.bookkeeping_receipts);
+        assert_eq!(replay.unresolved, 0);
+        for (a, b) in replay.items.iter().zip(&original.items) {
+            assert_eq!(a.operation_id, b.operation_id);
+            assert_eq!(a.status, b.status);
+            match (&a.receipt, &b.receipt) {
+                (Some(a), Some(b)) => same_receipt(a, b),
+                (None, None) => {}
+                _ => panic!("receipt lost"),
+            }
+        }
+    }
+    assert_eq!(current(&f), before);
+    assert_eq!(files(f.path()), bytes);
+    assert_eq!(spy.0.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    drop(adapter);
+    let root = f.close();
+    assert_eq!(historical_rows(root.path()), h["completeRows"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_completion() {
+    let f = restored(include_bytes!(
+        "fixtures/legacy-semantic-before/pending.zip"
+    ));
+    let h = history();
+    let before = current(&f);
+    let bytes = files(f.path());
+    let spy = Arc::new(SpyProvider(Default::default()));
+    let clock = Arc::new(SpyClock(Default::default()));
+    let mut adapter = f.storage_adapter().with_clock(clock.clone());
+    adapter.embedding = spy.clone();
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+    let adapter = Arc::new(adapter);
+    for case in h["pending"].as_array().unwrap() {
+        let original: BatchOutcome = serde_json::from_value(case["outcome"].clone()).unwrap();
+        let mut input: BatchInput = serde_json::from_value(case["input"].clone()).unwrap();
+        if input.idempotency_key.is_none() {
+            input.batch_operation_id = Some(original.batch_operation_id);
+        }
+        let reply = crate::daemon::server::native_batch_test_rpc(adapter.clone(), &input).await;
+        assert!(reply.error.is_none(), "{:?}", reply.error);
+        let result: BatchOutcome = serde_json::from_value(reply.result.unwrap()).unwrap();
+        assert_eq!(result.batch_operation_id, original.batch_operation_id);
+        same_receipt(
+            result.reservation_receipt.as_ref().unwrap(),
+            original.reservation_receipt.as_ref().unwrap(),
+        );
+        assert_eq!(result.bookkeeping_receipts, original.bookkeeping_receipts);
+        assert_eq!(result.unresolved, 1);
+        assert_eq!(result.succeeded, original.succeeded);
+        for (a, b) in result.items.iter().zip(&original.items) {
+            assert_eq!(a.operation_id, b.operation_id);
+            assert_eq!(a.status, b.status);
+            if let Some(original) = &b.receipt {
+                same_receipt(a.receipt.as_ref().unwrap(), original);
+            } else {
+                assert!(a.receipt.is_none());
+                assert!(a.result.is_none());
+                assert!(!a.ready);
+                assert_eq!(a.error.as_ref().unwrap().code, "UNAVAILABLE");
+            }
+        }
+        // Resubmission cannot reinterpret an accepted request or foreign lineage.
+        for foreign in [false, true] {
+            let mut other = input.clone();
+            if foreign {
+                other.store_id = Some(uuid::Uuid::new_v4());
+            } else {
+                other.items[0]["summary"] = json!("changed");
+            }
+            let reply = crate::daemon::server::native_batch_test_rpc(adapter.clone(), &other).await;
+            assert!(reply.error.is_some());
+            assert!(reply.result.is_none());
+        }
+    }
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_batch_items()
+            .unwrap(),
+        2
+    );
+    assert_eq!(spy.0.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    assert_eq!(current(&f), before);
+    assert_eq!(files(f.path()), bytes);
+    drop(adapter);
+    let root = f.close();
+    assert_eq!(historical_rows(root.path()), h["pendingRows"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_semantic_historical_fault_rpc_keeps_exact_current_child() {
+    let cases: Value = serde_json::from_slice(include_bytes!(
+        "fixtures/legacy-semantic-before/faults.json"
+    ))
+    .unwrap();
+    for (case, zip) in cases.as_array().unwrap().iter().zip([
+        include_bytes!("fixtures/legacy-semantic-before/fault-false.zip").as_slice(),
+        include_bytes!("fixtures/legacy-semantic-before/fault-true.zip").as_slice(),
+    ]) {
+        let f = restored(zip);
+        let before = current(&f);
+        let input: BatchInput = serde_json::from_value(case["input"].clone()).unwrap();
+        let original: crate::storage::control::WriteReceipt =
+            serde_json::from_value(case["receipt"].clone()).unwrap();
+        let failed: BatchOutcome = serde_json::from_value(case["outcome"].clone()).unwrap();
+        assert_eq!(failed.items[0].operation_id, Some(original.operation_id));
+        assert_ne!(failed.batch_operation_id, original.operation_id);
+        let spy = Arc::new(SpyProvider(Default::default()));
+        let clock = Arc::new(SpyClock(Default::default()));
+        let mut adapter = f.storage_adapter().with_clock(clock.clone());
+        adapter.embedding = spy.clone();
+        let reply = crate::daemon::server::native_batch_test_rpc(Arc::new(adapter), &input).await;
+        assert!(reply.error.is_none(), "{:?}", reply.error);
+        let replay: BatchOutcome = serde_json::from_value(reply.result.unwrap()).unwrap();
+        assert!(replay.all_ready());
+        same_receipt(replay.items[0].receipt.as_ref().unwrap(), &original);
+        same_receipt(
+            replay.reservation_receipt.as_ref().unwrap(),
+            failed.reservation_receipt.as_ref().unwrap(),
+        );
+        assert_eq!(current(&f), before);
+        assert_eq!(spy.0.load(Ordering::SeqCst), 0);
+        assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    }
+}

@@ -1231,19 +1231,6 @@ impl McpStorageAdapter {
             .await
     }
 
-    pub(super) fn legacy_api2_selection_blocker(
-        &self,
-        input: &bridge::StoreInput,
-    ) -> Option<&'static str> {
-        if self.config.graph.autolink_enabled {
-            Some("graph.autolinkEnabled")
-        } else if input.check_duplicates.unwrap_or(true) {
-            Some("checkDuplicates")
-        } else {
-            None
-        }
-    }
-
     pub(crate) async fn store_memory_reserved_with_work(
         &self,
         input: bridge::StoreInput,
@@ -1290,12 +1277,12 @@ impl McpStorageAdapter {
             }
 
             if child.as_ref().is_some_and(|c| c.is_legacy_api2()) {
-                if let Some(field) = self.legacy_api2_selection_blocker(&input) {
-                    return Err(bridge::BridgeError::Unavailable(format!(
-                        "legacy API2 {field} requires durable selection intent"
-                    ))
-                    .into());
-                }
+                // Existing child lookup above keeps the original receipt/kind.
+                // A blocked pending child is never finalized or reallocated.
+                return Err(bridge::BridgeError::Unavailable(
+                    crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into(),
+                )
+                .into());
             }
 
             effects_stamp(&self.storage).await?;
