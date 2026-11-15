@@ -110,7 +110,7 @@ Formatting passed; all-target/all-feature clippy passed with warnings, 42.04s.
 Cargo stopped at the library failure, so no CLI/doc pass is inferred from that
 command.
 
-The user approved replacing only the unknown4 case with5, adding distinct
+The coordinator approved replacing only the unknown4 case with5, adding distinct
 format4 hash-domain/API2 mapping and actual native-owner rejection assertions,
 and rerunning the affected module plus focused/CLI/doc/fmt/clippy checks. The
 separate forged native3→legacy4 startup rejection remains unchanged and passed.
@@ -134,8 +134,9 @@ verified unchanged after execution. Final library test executable SHA256:
 [executed-binaries.json](runs/final-b6fcb6b7/executed-binaries.json) retain exact
 statuses, source attribution and the actual CLI/test executable hashes.
 
-Per user direction there was no redundant local full run for this test-only
-delta. **Exact-head full CI remains required before merge; there is no final
+Under the user's authorized implementation scope, the coordinator chose no
+redundant local full run for this test-only delta. **Exact-head full CI remains
+required before merge; there is no final
 local full-pass claim.**
 
 ## Limits and resource evidence

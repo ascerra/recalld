@@ -9,7 +9,7 @@ Full af76d557cc74fc7e041c77e77526721184e8dde3:1318PASS/1obsolete unknown-format4
 Docker recalld-ci:1.94/Rust1.94.1, networknone,2CPU/4GiB/jobs2, one privatecache/target. Final peak4294967296,max12,oom0,kill0; no capincrease/retry/cacheclone. Test executable SHA256 b1fb780c5eac617b002be232cc8d4725b801959d91147fa41d9ec96c8864c116. No personal data/daemon or deployment. No raw HOME archive. After resultingPR+recordedresults centralcleanup may remove worktree .validation; code/reports/genuinefixture/.git remain, solecache retained for next approved durablelegacylinkedconsumer.
 
 Report: /tmp/recalld-implementation/legacy-compound-origin/docs/evidence/legacy-compound-origin/REPORT.md
-REPORT SHA256: 65783fcb51be47f3a5ba3906be932fdc20811626984f6184f1ba257bd3553a52
+REPORT SHA256: 56f88563204bffddb5ad625efe190c4eca04b64277776df37d556915752837d6
 VALIDATION SHA256: a98739c7f467bb5ffeebb3cd3a906abfe30d2d11b918174afaeb76186f969785
 
 No public activation/whole-storeCAS/native recipe certification/fullA1 claim. Next owned boundary is durable legacy API2 automatic/advisory selection; shared historical-native-vector admission proposal remains coordinated with Feynman/A4.

@@ -2,7 +2,8 @@
   "tested_source": "b6fcb6b75a71e8afc2fedd1eb16edf655771b533",
   "files": {
     "docs/evidence/legacy-compound-origin/FIXTURE.json": "921a69159a775991b915bde96a413abc189dee21da9a79b2ba0e3d299f0d1b93",
-    "docs/evidence/legacy-compound-origin/REPORT.md": "65783fcb51be47f3a5ba3906be932fdc20811626984f6184f1ba257bd3553a52",
+    "docs/evidence/legacy-compound-origin/HOME-COPY.json": "cea2064eca8fdd3078c9a76076f167513e85885017d762d3fdf150c3fd60ad48",
+    "docs/evidence/legacy-compound-origin/REPORT.md": "56f88563204bffddb5ad625efe190c4eca04b64277776df37d556915752837d6",
     "docs/evidence/legacy-compound-origin/RUNS.json": "e879e41290c7d711e5df96c0d8c82e3006601c538ceb81d42d483d9572b1e8b2",
     "docs/evidence/legacy-compound-origin/VALIDATION.json": "a98739c7f467bb5ffeebb3cd3a906abfe30d2d11b918174afaeb76186f969785",
     "docs/evidence/legacy-compound-origin/before-runtime.sh": "6ae68f6fc3e3ec6c2924b6e35647bf236e60a97fb2f2f0711c08763e5ced4605",
@@ -81,6 +82,6 @@
     "docs/evidence/legacy-compound-origin/runs/full-af76d55/memory.peak": "e13f514c0a972a9a19cba41912e25e902f279d47e85cc33e067111108ed3cf33",
     "docs/evidence/legacy-compound-origin/runs/full-af76d55/source.json": "9ed4380bd4577ccd24741f8a7e0060b98f5d0649e3d95bce6e3bcb18cb6af73e",
     "docs/implementation/legacy-compound-origin.md": "a28d2957d4f4a93040e960523c1f873ff9446b22c32191bc26dfc196b6a7940a",
-    "docs/work-notes/2026-11-14-legacy-compound-origin.md": "69280feab904203ab9763cc513e620c0a612c6bdf30705458cc6f53cfd572b93"
+    "docs/work-notes/2026-11-14-legacy-compound-origin.md": "d01454eefaf00f6e2a52451c5a14f60e4e6a2e7d6427ef95111265af8bf6eabd"
   }
 }
