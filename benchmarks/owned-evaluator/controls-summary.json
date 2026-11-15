@@ -1,0 +1,219 @@
+{
+  "binarySha256": "44ec62dc1d64c27b2499accb5fd5089df4f420ec402563d74d0718bf8f326c57",
+  "claim": "same-core private barrier diagnostic; no reset/v2/A6 completion",
+  "constructorNegatives": [
+    {
+      "case": "duplicate-fd",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/duplicate-fd/config.toml",
+        "--data-root",
+        "/work/output/controls/duplicate-fd/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "4"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "actor-stdin-fd",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/actor-stdin-fd/config.toml",
+        "--data-root",
+        "/work/output/controls/actor-stdin-fd/data",
+        "--control-read-fd",
+        "0",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "wrong-direction",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/wrong-direction/config.toml",
+        "--data-root",
+        "/work/output/controls/wrong-direction/data",
+        "--control-read-fd",
+        "5",
+        "--control-write-fd",
+        "6"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "non-fifo",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/non-fifo/config.toml",
+        "--data-root",
+        "/work/output/controls/non-fifo/data",
+        "--control-read-fd",
+        "8",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "existing-root",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/existing-root/config.toml",
+        "--data-root",
+        "/work/output/controls/existing-root/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "oversized-frame",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/oversized-frame/config.toml",
+        "--data-root",
+        "/work/output/controls/oversized-frame/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 0,
+      "passed": true
+    },
+    {
+      "case": "unterminated-eof",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/unterminated-eof/config.toml",
+        "--data-root",
+        "/work/output/controls/unterminated-eof/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 0,
+      "passed": true
+    }
+  ],
+  "episodes": [
+    {
+      "acceptedBarrierWaitedForStore": true,
+      "afterExposure": {
+        "generation": "4",
+        "storeId": "3c6b84e1-65e9-4037-8b2e-6e8524459c1a"
+      },
+      "afterFeedback": {
+        "generation": "5",
+        "storeId": "3c6b84e1-65e9-4037-8b2e-6e8524459c1a"
+      },
+      "afterStore": {
+        "generation": "3",
+        "storeId": "3c6b84e1-65e9-4037-8b2e-6e8524459c1a"
+      },
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/replay-1/config.toml",
+        "--data-root",
+        "/work/output/controls/replay-1/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "controlEofExitSeconds": 1.1286727149999933,
+      "initial": {
+        "generation": "2",
+        "storeId": "3c6b84e1-65e9-4037-8b2e-6e8524459c1a"
+      },
+      "passed": true,
+      "replay": 1
+    },
+    {
+      "acceptedBarrierWaitedForStore": true,
+      "afterExposure": {
+        "generation": "4",
+        "storeId": "c4d3f509-8ea4-4846-8f66-7bac4bc8ac45"
+      },
+      "afterFeedback": {
+        "generation": "5",
+        "storeId": "c4d3f509-8ea4-4846-8f66-7bac4bc8ac45"
+      },
+      "afterStore": {
+        "generation": "3",
+        "storeId": "c4d3f509-8ea4-4846-8f66-7bac4bc8ac45"
+      },
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/replay-2/config.toml",
+        "--data-root",
+        "/work/output/controls/replay-2/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "controlEofExitSeconds": 1.1338549659994897,
+      "initial": {
+        "generation": "2",
+        "storeId": "c4d3f509-8ea4-4846-8f66-7bac4bc8ac45"
+      },
+      "passed": true,
+      "replay": 2
+    },
+    {
+      "acceptedBarrierWaitedForStore": true,
+      "afterExposure": {
+        "generation": "4",
+        "storeId": "2eca635b-0ea5-4026-907e-5cbf5ea8c8b6"
+      },
+      "afterFeedback": {
+        "generation": "5",
+        "storeId": "2eca635b-0ea5-4026-907e-5cbf5ea8c8b6"
+      },
+      "afterStore": {
+        "generation": "3",
+        "storeId": "2eca635b-0ea5-4026-907e-5cbf5ea8c8b6"
+      },
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/replay-3/config.toml",
+        "--data-root",
+        "/work/output/controls/replay-3/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "controlEofExitSeconds": 1.1691985370125622,
+      "initial": {
+        "generation": "2",
+        "storeId": "2eca635b-0ea5-4026-907e-5cbf5ea8c8b6"
+      },
+      "passed": true,
+      "replay": 3
+    }
+  ]
+}

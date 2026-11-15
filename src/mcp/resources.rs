@@ -16,7 +16,7 @@ pub fn resource_definitions() -> Vec<ResourceInfo> {
         ResourceInfo {
             uri: "recalld://session".to_string(),
             name: "Session Context".to_string(),
-            description: Some("Resolved connection default and current v1 limits; namespaces are organizational, not access controls.".to_string()),
+            description: Some("Resolved connection default, current v1 limits, and backend store/configuration identity when available; namespaces are organizational, not access controls.".to_string()),
             mime_type: Some("application/json".to_string()),
         },
         ResourceInfo {
@@ -88,9 +88,6 @@ pub async fn dispatch_resource(
 /// Resolve the frozen bridge default without creating a missing namespace.
 /// Resource reads are private and immediately stale at the server boundary.
 async fn read_session(bridge: &McpBridge) -> Result<ResourceReadResult, String> {
-    use crate::mcp::bridge::{DUPLICATE_NEIGHBOR_CAP, DUPLICATE_SAMPLE_CAP};
-    use crate::model::constants::{MAX_BATCH_MEMORIES, MAX_LIST_LIMIT, MAX_TAG_LIMIT};
-
     let requested = bridge.default_namespace();
     let namespaces = bridge
         .namespaces
@@ -100,26 +97,19 @@ async fn read_session(bridge: &McpBridge) -> Result<ResourceReadResult, String> 
     let namespace = namespaces
         .iter()
         .find(|ns| ns.name.eq_ignore_ascii_case(requested));
-    let context = serde_json::json!({
-        "supportedContractVersions": [1],
-        "defaultNamespace": {
-            "requestedName": requested,
-            // The bridge does not retain whether the value came from a file or fallback.
-            "source": "bridge",
-            "exists": namespace.is_some(),
-            "resolved": namespace.map(|ns| serde_json::json!({
-                "name": ns.name, "id": ns.id, "embeddingDim": ns.embedding_dim
-            }))
-        },
-        "namespacesAreAccessControls": false,
-        "limits": { "batchMemories": MAX_BATCH_MEMORIES, "listMemories": MAX_LIST_LIMIT, "tagsPerBucket": MAX_TAG_LIMIT },
-        "duplicateScan": {
-            "algorithm": "sampledNearestNeighbors",
-            "sampleCap": DUPLICATE_SAMPLE_CAP,
-            "neighborCap": DUPLICATE_NEIGHBOR_CAP,
-            "complete": false
-        }
-    });
+    let backend = bridge
+        .storage
+        .backend_context()
+        .await
+        .ok()
+        .filter(|context| context.validate().is_ok());
+    let context = crate::serialization::session::document(
+        requested,
+        // The bridge does not retain whether this came from a file or fallback.
+        "bridge",
+        namespace.map(|ns| (ns.name.clone(), ns.id, u32::from(ns.embedding_dim))),
+        backend,
+    );
     Ok(ResourceReadResult {
         contents: vec![ResourceContent {
             uri: "recalld://session".into(),

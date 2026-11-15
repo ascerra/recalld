@@ -758,10 +758,8 @@ impl GraphReader for SharedGraphReader {
 
 /// Adapts a shared `EntityIndex` to `EntityIndexReader`.
 ///
-/// Canonical eligible IDs are scoped to the resolved namespace by the pipeline.
-/// Apply them before the result cap, so foreign or filtered postings cannot
-/// crowd out eligible records. Namespace-partitioned postings can later avoid
-/// scanning those foreign postings without changing this admission contract.
+/// Namespace postings and canonical eligible IDs are selected before the
+/// adapter's candidate cap, so foreign or filtered records cannot crowd out hits.
 pub struct SharedEntityIndexReader {
     entity_index: ReadHandle<EntityIndex>,
 }
@@ -930,21 +928,27 @@ mod entity_namespace_tests {
         let other = NamespaceId::new(2);
         let mut index = EntityIndex::new();
         let entities = vec!["John Smith".into(), "José".into()];
+        let mut eligible = HashSet::new();
         for _ in 0..100 {
-            index.add(other, MemoryId::new(), &entities);
+            let foreign = MemoryId::new();
+            index.add(other, foreign, &entities);
+            eligible.insert(foreign);
         }
+        // Higher-count local postings must also be filtered before the cap.
+        index.add(ns, MemoryId::new(), &entities);
         let local = MemoryId::new();
         index.add(ns, local, &["José".into()]);
+        eligible.insert(local);
         let reader = SharedEntityIndexReader::new(Arc::new(tokio::sync::RwLock::new(index)));
         let hits = reader
-            .find_by_entities(ns, &entities, MemoryId::new(), 1, &HashSet::from([local]))
+            .find_by_entities(ns, &entities, MemoryId::new(), 1, &eligible)
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].memory_id, local);
         assert_eq!(hits[0].shared_count, 1);
         assert!(
             reader
-                .find_by_entities(ns, &entities, local, 1, &HashSet::from([local]))
+                .find_by_entities(ns, &entities, local, 1, &eligible)
                 .unwrap()
                 .is_empty()
         );

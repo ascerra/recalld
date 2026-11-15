@@ -8,13 +8,21 @@
 //! See CS-07 for the full specification.
 
 pub(crate) mod batch;
+mod canonical_vector_snapshot;
 mod catalog;
 pub(crate) mod effects;
+mod inherited_policy;
 mod insertion;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
+mod native_catalog;
+pub(crate) mod native_graph;
 mod native_lifecycle;
-mod native_records;
+mod native_maintenance;
+mod native_namespace_binding;
+mod native_policy;
+pub(crate) mod native_records;
+mod native_store;
 mod observation;
 mod publication;
 pub(crate) use publication::CanonicalReadView;
@@ -88,6 +96,7 @@ const NAMESPACE_INDEX: MultimapTableDefinition<u32, &[u8]> =
 /// concurrent read transactions and exclusive write transactions.
 pub struct MetadataStore {
     db: Database,
+    ids: Box<dyn super::ids::IdSource>,
     native_lifecycle_only: bool,
     work_tracker: WorkTracker,
     view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
@@ -119,21 +128,39 @@ pub struct MetadataStore {
 // ── Constructor ─────────────────────────────────────────────────────
 
 impl MetadataStore {
+    pub(crate) fn id_source(&self) -> &dyn super::ids::IdSource {
+        self.ids.as_ref()
+    }
+
+    fn record_receipt(
+        &self,
+        tx: &redb::WriteTransaction,
+        ctx: &MutationContext,
+        hash: [u8; 32],
+        outcome: control::MutationOutcome,
+    ) -> Result<WriteReceipt, StorageError> {
+        control::record_receipt_with_ids(tx, ctx, hash, outcome, self.ids.as_ref())
+    }
+
     /// Open or create meta.db at the given path.
     ///
     /// - Sets a 16 MB read cache (covers top B+tree levels).
     /// - Creates all tables on first open.
     /// - Loads or rebuilds the phase index from persisted bitmaps.
     pub(crate) fn open(path: &Path) -> Result<Self, StorageError> {
-        Self::open_mode(path, false)
+        Self::open_with_ids(path, false, Box::new(super::ids::SystemIds))
     }
 
     // Caller must already own the store and validate its complete inventory.
     pub(crate) fn open_native_lifecycle(path: &Path) -> Result<Self, StorageError> {
-        Self::open_mode(path, true)
+        Self::open_with_ids(path, true, Box::new(super::ids::SystemIds))
     }
 
-    fn open_mode(path: &Path, native_lifecycle_only: bool) -> Result<Self, StorageError> {
+    pub(crate) fn open_with_ids(
+        path: &Path,
+        native_lifecycle_only: bool,
+        ids: Box<dyn super::ids::IdSource>,
+    ) -> Result<Self, StorageError> {
         if native_lifecycle_only && (!path.is_file() || path.metadata()?.len() == 0) {
             return Err(StorageError::InvalidPath);
         }
@@ -216,7 +243,7 @@ impl MetadataStore {
             .store_id
         } else {
             let write_txn = db.begin_write()?;
-            control::initialize(&write_txn)?;
+            control::initialize_with_ids(&write_txn, ids.as_ref())?;
             effects::initialize(&write_txn)?;
             let _ = write_txn.open_table(META_TABLE)?;
             let _ = write_txn.open_table(NAMESPACE_TABLE)?;
@@ -233,6 +260,7 @@ impl MetadataStore {
         // from canonical records, even for direct MetadataStore callers.
         let store = Self {
             db,
+            ids,
             native_lifecycle_only,
             work_tracker: WorkTracker::new(store_id),
             view_publication: std::sync::Arc::new(
@@ -294,6 +322,11 @@ impl MetadataStore {
     pub(crate) fn ensure_available(&self) -> Result<(), StorageError> {
         self.ensure_handle_available()?;
         self.require_no_active_purge()
+    }
+
+    /// The mode was established by strict owned-open validation, not a caller flag.
+    pub(crate) fn uses_native_lifecycle(&self) -> bool {
+        self.native_lifecycle_only
     }
 
     pub(crate) fn ensure_handle_available(&self) -> Result<(), StorageError> {
@@ -373,7 +406,7 @@ impl MetadataStore {
             state.generation_ref(),
             &before,
             &record,
-            uuid::Uuid::new_v4(),
+            self.ids.uuid(super::ids::IdKind::Operation)?,
         )?;
         self.commit(write_txn)?;
 
@@ -664,7 +697,7 @@ impl MetadataStore {
             record.access_history.push(AccessEvent { timestamp, kind });
             table.insert(id.as_bytes().as_slice(), record.encode()?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -722,7 +755,7 @@ impl MetadataStore {
             id,
             Some(removal_ledger::TerminalKind::HardDelete),
             removal_ledger::ALL,
-            uuid::Uuid::new_v4(),
+            self.ids.uuid(super::ids::IdKind::Operation)?,
         )?;
         self.commit(write_txn)?;
 
@@ -804,7 +837,7 @@ impl MetadataStore {
             id,
             Some(removal_ledger::TerminalKind::Tombstone),
             removal_ledger::ALL,
-            uuid::Uuid::new_v4(),
+            self.ids.uuid(super::ids::IdKind::Operation)?,
         )?;
         self.commit(write_txn)?;
 
@@ -1301,7 +1334,7 @@ impl MetadataStore {
         let write_txn = self.db.begin_write()?;
         let mut transitions = Vec::new();
         let state = control::advance_generation(&write_txn)?;
-        let operation_id = uuid::Uuid::new_v4();
+        let operation_id = self.ids.uuid(super::ids::IdKind::Operation)?;
         {
             let mut table = write_txn.open_table(META_TABLE)?;
             let mut tags = write_txn.open_multimap_table(TAG_INDEX)?;
@@ -1723,7 +1756,7 @@ impl MetadataStore {
             }
         }
         let state = control::advance_generation(&write_txn)?;
-        let operation_id = uuid::Uuid::new_v4();
+        let operation_id = self.ids.uuid(super::ids::IdKind::Operation)?;
         for (id, record) in chunk {
             removal_ledger::record_removal(
                 &write_txn,
@@ -1864,7 +1897,7 @@ impl MetadataStore {
             }
         }
         let state = control::advance_generation(&write_txn)?;
-        let operation_id = uuid::Uuid::new_v4();
+        let operation_id = self.ids.uuid(super::ids::IdKind::Operation)?;
         for outcome in &outcomes {
             if let TombstoneOutcome::Tombstoned(record) = outcome {
                 removal_ledger::record_removal(

@@ -1,0 +1,84 @@
+{
+  "runtime": "9cf9a447d411f1937b645dfc4d5f7fb7b350b0c8",
+  "tree": "f63f56dca3da44206d8189f1b03372e348e0f09a",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "inputs_verified": 285,
+  "executable_verified_after_full_and_clippy": [
+    {
+      "path": "/tmp/recalld-owned-native-catalog-ids-full-xk182ybj/target/debug/deps/recalld-212d4a4f320696fe",
+      "sha256": "06eb747a5f140e4f9d7fa92fad5511c27ed6f91b2b5a8972a1b7bc7f7379a345",
+      "bytes": 109724696
+    }
+  ],
+  "source_manifest_sha256": "764c5a679c6c8de1bbec89e5cfff1f5e2ec334a4c88a5752bcb495c9ba8e7c0e",
+  "logs": {
+    "full.log": {
+      "sha256": "c469c3680cc7475c49f365be62aaf3ca4772c1a5c36e3de695963ded8b0b9fe5",
+      "bytes": 142546,
+      "results": [
+        "warning: `recalld` (lib test) generated 13 warnings (run `cargo fix --lib -p recalld --tests` to apply 2 suggestions)",
+        "warning: `recalld` (lib) generated 46 warnings (10 duplicates) (run `cargo fix --lib -p recalld` to apply 2 suggestions)",
+        "    Finished `test` profile [unoptimized] target(s) in 27.82s",
+        "test result: ok. 1200 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 401.70s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.39s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "clippy.log": {
+      "sha256": "b04f5cb3451acec06fe1f21a5395d9ab4592be1607153a5dbac4a3427e31a243",
+      "bytes": 912006,
+      "results": [
+        "warning: `recalld` (lib) generated 975 warnings (run `cargo clippy --fix --lib -p recalld` to apply 106 suggestions)",
+        "warning: `recalld` (bin \"recalld\" test) generated 1 warning",
+        "warning: `recalld` (bin \"recalld\") generated 1 warning (1 duplicate)",
+        "warning: `recalld` (lib test) generated 1043 warnings (941 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 9 suggestions)",
+        "    Finished `dev` profile [unoptimized] target(s) in 18.23s"
+      ]
+    },
+    "fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "results": []
+    },
+    "build.log": {
+      "sha256": "0df05ba564b862ab1c98660c779f4408bc03f8cc7f8532e7175b758cd18f9a28",
+      "bytes": 105,
+      "results": [
+        "    Finished `test` profile [unoptimized] target(s) in 35.33s"
+      ]
+    },
+    "focused.log": {
+      "sha256": "6e54025a02aea2dbd874ded6021817f15379e320953099ad132236361abd484e",
+      "bytes": 269,
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1199 filtered out; finished in 2.40s"
+      ]
+    },
+    "sweep.log": {
+      "sha256": "1ae313bbbf3c3e256a8b187bc7cc0863e0bdd3d30bdbc586e9cd01a746d688cf",
+      "bytes": 1229,
+      "results": [
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1192 filtered out; finished in 7.34s"
+      ]
+    },
+    "origin.log": {
+      "sha256": "99f4820e94a530343651850a76e7b5fdccbf058983c1385db19b533f713aa496",
+      "bytes": 696,
+      "results": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1196 filtered out; finished in 2.57s"
+      ]
+    },
+    "compaction.log": {
+      "sha256": "f59fd1ac284c59f1505ae7e2b6fc123c4abbd022fd478d500d21dbaf556986c9",
+      "bytes": 4857,
+      "results": [
+        "test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 1168 filtered out; finished in 25.38s"
+      ]
+    }
+  },
+  "driver_exit": 0
+}

@@ -268,3 +268,134 @@ async fn daemon_scan_coverage_round_trip_and_old_peer_compatibility() {
         server.await.unwrap();
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_context_actual_rpc_and_old_or_malformed_peers_never_invent_identity() {
+    use crate::daemon::bridge_adapters::RemoteStorageAdapter;
+    for mode in [
+        "actual",
+        "old",
+        "future",
+        "badProfile",
+        "nilStore",
+        "unknownField",
+    ] {
+        let f = Arc::new(Fixture::new());
+        let original = f.storage.read().unwrap().control_state().unwrap();
+        let before = std::fs::read(f.path().join("meta.db")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("context.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let remote_fixture = f.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let unused = StubBridge::default();
+            let storage = remote_fixture.storage_adapter();
+            let mut methods = Vec::new();
+            for _ in 0..2 {
+                let request = read_framed_message(&mut socket, MAX_MESSAGE_SIZE)
+                    .await
+                    .unwrap();
+                methods.push(request.method.clone());
+                let mut result = if mode == "old" && request.method == "session_context_v1" {
+                    Err(BridgeError::InvalidInput("unknown method".into()))
+                } else {
+                    dispatch(
+                        &unused,
+                        &storage,
+                        &unused,
+                        &unused,
+                        &request.method,
+                        request.params,
+                    )
+                    .await
+                };
+                if request.method == "session_context_v1" {
+                    if let Ok(value) = &mut result {
+                        match mode {
+                            "future" => value["contextVersion"] = json!(2),
+                            "badProfile" => {
+                                value["activeEmbedding"] = json!({"identity":"configuration","dimension":4,"profileId":"ep1:BAD"})
+                            }
+                            "nilStore" => value["storeId"] = json!(uuid::Uuid::nil()),
+                            "unknownField" => value["ready"] = json!(true),
+                            _ => {}
+                        }
+                    }
+                }
+                let response = match result {
+                    Ok(value) => DaemonResponse::success(request.id, value),
+                    Err(error) => DaemonResponse::error(request.id, DaemonRpcError::from(&error)),
+                };
+                write_framed_message(&mut socket, &response, MAX_MESSAGE_SIZE)
+                    .await
+                    .unwrap();
+            }
+            methods
+        });
+        let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+        client.ping().await.unwrap();
+        let mut bridge = StubBridge::default().into_bridge();
+        bridge.storage = Arc::new(RemoteStorageAdapter::new(client));
+        bridge.namespaces = Arc::new(f.namespace_adapter());
+        let resource = crate::mcp::resources::dispatch_resource(&bridge, "recalld://session")
+            .await
+            .unwrap();
+        let context: Value =
+            serde_json::from_str(resource.contents[0].text.as_ref().unwrap()).unwrap();
+        assert_eq!(context["supportedContractVersions"], json!([1]));
+        assert_eq!(context["duplicateScan"]["complete"], false);
+        if mode == "actual" {
+            assert_eq!(
+                context["backendContext"]["storeId"],
+                json!(original.store_id)
+            );
+            assert_eq!(
+                context["backendContext"]["activeEmbedding"]["identity"],
+                "unknown"
+            );
+            assert!(
+                context["backendContext"]["activeEmbedding"]
+                    .get("profileId")
+                    .is_none()
+            );
+        } else {
+            assert!(context.get("backendContext").is_none(), "{mode}: {context}");
+            assert_eq!(context["backendContextUnavailable"], true);
+        }
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(10), server)
+                .await
+                .unwrap()
+                .unwrap(),
+            vec!["ping", "session_context_v1"]
+        );
+        assert_eq!(std::fs::read(f.path().join("meta.db")).unwrap(), before);
+    }
+}
+
+#[tokio::test]
+async fn session_context_rpc_rejects_nonempty_or_nonobject_params() {
+    let f = Fixture::new();
+    let unused = StubBridge::default();
+    let storage = f.storage_adapter();
+    for params in [
+        Value::Null,
+        json!([]),
+        json!({"namespace":"default"}),
+        json!({"contractVersion":2}),
+    ] {
+        assert!(matches!(
+            dispatch(
+                &unused,
+                &storage,
+                &unused,
+                &unused,
+                "session_context_v1",
+                params
+            )
+            .await,
+            Err(BridgeError::InvalidInput(_))
+        ));
+    }
+}

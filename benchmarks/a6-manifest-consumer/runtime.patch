@@ -1,0 +1,1178 @@
+diff --git a/examples/offline_eval.rs b/examples/offline_eval.rs
+index a973105..df96f83 100644
+--- a/examples/offline_eval.rs
++++ b/examples/offline_eval.rs
+@@ -1,4 +1,6 @@
+ //! Internal production-engine diagnostic; NOT the A6 public-action harness.
++#[path = "support/evaluation_manifest.rs"]
++mod evaluation_manifest;
+ mod support;
+ 
+ use std::{
+@@ -26,18 +28,9 @@ const TIME: i64 = 1_767_225_600_000;
+ struct Args {
+     #[arg(long)]
+     out: PathBuf,
+-    #[arg(long, default_value_t = 1000)]
+-    records: usize,
+-    #[arg(long, default_value_t = 384)]
+-    dimensions: usize,
+-    #[arg(long, default_value_t = 20)]
+-    k: usize,
+-    #[arg(long, default_value_t = 20)]
+-    warmup: usize,
+-    #[arg(long, default_value_t = 100)]
+-    samples: usize,
+-    #[arg(long, default_value_t = 7)]
+-    seed: u64,
++    /// Required frozen inputs; old invocation flags intentionally fail closed.
++    #[arg(long)]
++    manifest: PathBuf,
+ }
+ 
+ // SplitMix64, with explicitly defined integer -> f32 conversion. No RNG-version drift.
+@@ -133,15 +126,18 @@ fn evidence_metrics(relevant: &[usize], retained: &[usize], retrieved: &[usize])
+         "propositionPreservation": "not measured", "answerQuality": "not measured"})
+ }
+ 
+-struct ReplayEmbeddings(BTreeMap<String, Vec<f32>>);
++struct ReplayEmbeddings {
++    context: evaluation_manifest::ReplayContext,
++    entries: BTreeMap<String, Vec<f32>>,
++}
+ #[async_trait::async_trait]
+ impl EmbeddingProviderRegistry for ReplayEmbeddings {
+     async fn embed(&self, namespace: &str, text: &str) -> Result<Vec<f32>, SearchError> {
+         if namespace != "fixture" {
+             return Err(SearchError::NamespaceNotFound(namespace.into()));
+         }
+-        self.0
+-            .get(text)
++        self.entries
++            .get(&self.context.key(namespace, text))
+             .cloned()
+             .ok_or_else(|| SearchError::EmbeddingFailed("offline replay miss".into()))
+     }
+@@ -164,28 +160,25 @@ fn record_state(storage: &RedbStorageEngine) -> Result<Value> {
+ 
+ #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+ async fn main() -> Result<()> {
+-    let args = Args::parse();
+-    ensure!(
+-        (100..=100_000).contains(&args.records) && args.records % 10 == 0,
+-        "records must be a multiple of 10 in 100..=100000"
+-    );
+-    ensure!(
+-        (4..=8192).contains(&args.dimensions),
+-        "dimensions must be in 4..=8192"
+-    );
+-    ensure!(
+-        (1..=200).contains(&args.k) && args.k <= args.records / 10,
+-        "k must fit the eligible corpus and 1..=200"
+-    );
+-    ensure!(
+-        (1..=100_000).contains(&args.samples) && args.warmup <= 100_000,
+-        "invalid sample count"
+-    );
+-    fs::create_dir(&args.out).context("output must be a fresh directory")?;
+-    let mut trace = File::create(args.out.join("trace.jsonl"))?;
++    let cli = Args::parse();
++    let contract = Arc::new(evaluation_manifest::Validated::load(&cli.manifest)?);
++    let args = contract.manifest.execution.clone();
++    let out = cli.out;
++    let episode = out
++        .file_name()
++        .context("missing episode directory")?
++        .to_string_lossy()
++        .into_owned();
++    fs::create_dir(&out).context("output must be a fresh directory")?;
++    fs::create_dir(out.join("evaluator"))?;
++    // Historical diagnostics contain oracle metrics and stay evaluator-only.
++    let mut trace = File::create(out.join("evaluator/diagnostic-trace.jsonl"))?;
++    let mut actor_trace = File::create(out.join("trace.jsonl"))?;
++    let mut evaluator_trace = File::create(out.join("evaluator/trace.jsonl"))?;
++    let mut source_events = File::create(out.join("evaluator/source-events.jsonl"))?;
+     let fixture = vectors(args.seed, args.records, args.dimensions);
+     write_json(
+-        args.out.join("fixture.json"),
++        out.join("fixture.json"),
+         &json!({"generator": "splitmix64-f32-l2-v1", "seed": args.seed,
+         "time": TIME, "vectors": fixture, "sourceMappingVersion": 1,
+         "sources": (0..args.records).map(|i| json!({"sourceId": i, "memoryId": id(i),
+@@ -193,6 +186,13 @@ async fn main() -> Result<()> {
+             "ingestPlan": "store_raw_unit"})).collect::<Vec<_>>()}),
+     )?;
+ 
++    let mut mappings = File::create(out.join("source-mappings.jsonl"))?;
++    let source_lookup: BTreeMap<_, _> = (0..args.records).map(|i| (id(i), i)).collect();
++    write_json(
++        out.join("actor-inputs.json"),
++        &json!({"sources":contract.sources}),
++    )?;
++
+     let mut index = FlatVectorIndex::new(args.dimensions);
+     for (i, v) in fixture.iter().enumerate() {
+         index.add(
+@@ -236,6 +236,10 @@ async fn main() -> Result<()> {
+                     "scalar exact oracle mismatch in {cell}"
+                 );
+             }
++            writeln!(actor_trace, "{}", contract.trace(&episode, &format!("{cell}:{step}"),
++                json!({"kind":"exact-index-query","queryId":format!("query{q}"),"k":args.k,
++                    "warmup":step < args.warmup}),
++                json!({"status":"ok","resultIds":result.iter().map(|r|r.id).collect::<Vec<_>>(),"latencyUs":elapsed})))?;
+             if step >= args.warmup {
+                 times.push(elapsed);
+                 let ids: Vec<_> = result.iter().map(|r| r.id).collect();
+@@ -245,6 +249,12 @@ async fn main() -> Result<()> {
+                     json!({"diagnosticTraceVersion": 1, "cell": cell, "step": step - args.warmup,
+                     "querySource": q, "latencyUs": elapsed, "resultIds": ids, "oracleRecallAtK": 1.0})
+                 )?;
++                writeln!(
++                    evaluator_trace,
++                    "{}",
++                    json!({"traceSchemaVersion":1,"episodeId":episode,
++                    "stepId":format!("{cell}:{step}"),"oracleRecallAtK":1.0})
++                )?;
+                 replay.push(json!({"cell": cell, "query": q, "ids": ids}));
+             }
+         }
+@@ -268,20 +278,60 @@ async fn main() -> Result<()> {
+             "unexpected namespace identity"
+         );
+     }
+-    let mut ledger = File::create(args.out.join("turn-ledger.jsonl"))?;
++    let mut ledger = File::create(out.join("turn-ledger.jsonl"))?;
+     for (i, v) in fixture.iter().enumerate() {
++        for status in ["seen", "attempted"] {
++            writeln!(
++                source_events,
++                "{}",
++                json!({"sourceMappingVersion":1,"sourceId":contract.sources[i].source_id,
++                "status":status,"reason":"raw_synthetic_unit","ordinal":i.to_string()})
++            )?;
++        }
+         writeln!(
+             ledger,
+             "{}",
+             json!({"sourceId": i, "memoryId": id(i), "status": "attempted"})
+         )?;
+-        let receipt = support::insert(
++        let receipt_result = support::insert(
+             &mut storage,
+             id(i),
+             namespace(i),
+-            format!("fixture token{i}"),
++            contract.sources[i].summary.clone(),
+             v,
+             TIME,
++        );
++        let receipt = match receipt_result {
++            Ok(receipt) => receipt,
++            Err(error) => {
++                writeln!(
++                    source_events,
++                    "{}",
++                    json!({"sourceMappingVersion":1,"sourceId":contract.sources[i].source_id,
++                    "status":"rejected","reason":error.to_string(),"ordinal":i.to_string()})
++                )?;
++                writeln!(actor_trace,"{}",contract.trace(&episode,&format!("insert:{i}"),
++                    json!({"kind":"canonical-internal-insert","summary":contract.sources[i].summary}),
++                    json!({"status":"error","error":error.to_string()})))?;
++                return Err(error);
++            }
++        };
++        writeln!(mappings, "{}", contract.mapping(i, id(i)))?;
++        writeln!(
++            source_events,
++            "{}",
++            json!({"sourceMappingVersion":1,"sourceId":contract.sources[i].source_id,
++            "status":"accepted","reason":"canonical_commit","memoryId":id(i),"ordinal":i.to_string()})
++        )?;
++        writeln!(
++            actor_trace,
++            "{}",
++            contract.trace(
++                &episode,
++                &format!("insert:{i}"),
++                json!({"kind":"canonical-internal-insert","summary":contract.sources[i].summary}),
++                json!({"status":"committed","receipt":receipt})
++            )
+         )?;
+         writeln!(
+             ledger,
+@@ -298,24 +348,43 @@ async fn main() -> Result<()> {
+     let graph = system.graph().clone();
+     let before = record_state(&storage.read().unwrap())?;
+     let control_before = storage.read().unwrap().control_state()?;
+-    write_json(args.out.join("state-before.json"), &before)?;
++    ensure!(
++        control_before.control_schema_version == 1,
++        "manifest control representation mismatch"
++    );
++    ensure!(
++        storage
++            .read()
++            .unwrap()
++            .scan_all()?
++            .iter()
++            .all(|(_, r)| r.version == 1 && r.schema.is_none()),
++        "manifest legacy schema-absence/record representation mismatch"
++    );
++    write_json(out.join("state-before.json"), &before)?;
+     write_json(
+-        args.out.join("control-before.json"),
++        out.join("control-before.json"),
+         &serde_json::to_value(&control_before)?,
+     )?;
+-    let embeddings = Arc::new(ReplayEmbeddings(
+-        (0..args.records)
+-            .step_by(10)
+-            .map(|i| (format!("query{i}"), fixture[i].clone()))
+-            .collect(),
+-    ));
+-    ensure!(
+-        embeddings
+-            .embed("fixture", "unrecorded input")
+-            .await
+-            .is_err(),
+-        "replay misses must fail closed"
+-    );
++    let context = contract.replay_context();
++    let entries: BTreeMap<_, _> = (0..args.records)
++        .step_by(10)
++        .map(|i| {
++            (
++                context.key("fixture", &format!("query{i}")),
++                fixture[i].clone(),
++            )
++        })
++        .collect();
++    write_json(
++        out.join("actor-replay-cache.json"),
++        &json!({"cacheVersion":1,"role":"actor-query",
++        "environmentHash":contract.environment_hash,"profile":contract.manifest.embedding,"entries":entries}),
++    )?;
++    let embeddings = Arc::new(ReplayEmbeddings {
++        context: context.clone(),
++        entries,
++    });
+     let engine = QueryEngine::new(
+         Arc::new(StorageNamespaceResolver::new(storage.clone())),
+         embeddings,
+@@ -341,6 +410,37 @@ async fn main() -> Result<()> {
+     )
+     .with_lifecycle_inputs(system.clock().clone(), Default::default(), 1.0);
+ 
++    // This must traverse the real QueryEngine/provider adapter, never a generated fallback.
++    let missing: SearchQuery =
++        serde_json::from_value(json!({"text":"unrecorded input","namespace":"fixture",
++        "recordAccess":false,"graphDepth":0,"limit":args.k}))?;
++    let miss_action = json!({"kind":"internal-query","request":serde_json::to_value(&missing)?,
++        "replayCacheKey":context.key("fixture","unrecorded input")});
++    let miss = engine.search(missing).await;
++    let miss_error = match miss {
++        Err(error) => error.to_string(),
++        Ok(_) => anyhow::bail!("actual QueryEngine accepted an offline replay miss"),
++    };
++    ensure!(
++        miss_error.contains("offline replay miss"),
++        "unexpected replay-miss error: {miss_error}"
++    );
++    writeln!(
++        actor_trace,
++        "{}",
++        contract.trace(
++            &episode,
++            "replay-miss",
++            miss_action,
++            json!({"status":"expected_error","error":miss_error})
++        )
++    )?;
++    write_json(
++        out.join("replay-miss.json"),
++        &json!({"actualQueryEngine":true,"expectedFailure":true,
++        "error":miss_error,"fallback":false}),
++    )?;
++
+     let retained: Vec<_> = (0..args.records).collect();
+     for hybrid in [false, true] {
+         let cell = if hybrid {
+@@ -355,7 +455,24 @@ async fn main() -> Result<()> {
+                 "ftsQuery": if hybrid { format!("token{q}") } else { "unmatchedfixtureterm".into() },
+                 "namespace": "fixture", "limit": args.k, "graphDepth": 0, "recordAccess": false}))?;
+             let start = Instant::now();
+-            let response = engine.search(query).await?;
++            let action = json!({"kind":"internal-query","request":serde_json::to_value(&query)?,"cell":cell,
++                "replayCacheKey":context.key("fixture",&format!("query{q}"))});
++            let response = match engine.search(query).await {
++                Ok(response) => response,
++                Err(error) => {
++                    writeln!(
++                        actor_trace,
++                        "{}",
++                        contract.trace(
++                            &episode,
++                            &format!("{cell}:{step}"),
++                            action,
++                            json!({"status":"error","error":error.to_string()})
++                        )
++                    )?;
++                    return Err(error.into());
++                }
++            };
+             let call_us = start.elapsed().as_secs_f64() * 1e6;
+             ensure!(!response.results.is_empty(), "empty fixture response");
+             let encode_start = Instant::now();
+@@ -400,12 +517,28 @@ async fn main() -> Result<()> {
+                     "vector engine versus eligible scalar oracle mismatch"
+                 );
+             }
++            writeln!(
++                actor_trace,
++                "{}",
++                contract.trace(
++                    &episode,
++                    &format!("{cell}:{step}"),
++                    action,
++                    json!({"status":"ok","results":response.results,"latencyUs":call_us,
++                    "warmup":step < args.warmup,"responseBytes":encoded.len().to_string()})
++                )
++            )?;
+             if step >= args.warmup {
+                 let ids: Vec<_> = response.results.iter().map(|r| r.memory_id).collect();
+                 let sources: Vec<_> = ids
+                     .iter()
+-                    .map(|id| (id.into_inner().as_u128() - 1) as usize)
+-                    .collect();
++                    .map(|id| {
++                        source_lookup
++                            .get(id)
++                            .copied()
++                            .context("unmapped returned memory")
++                    })
++                    .collect::<Result<_>>()?;
+                 let mut timing = serde_json::to_value(
+                     response.timings.as_ref().context("missing stage timings")?,
+                 )?;
+@@ -423,7 +556,14 @@ async fn main() -> Result<()> {
+                     json!({"diagnosticTraceVersion": 1, "cell": cell, "step": step - args.warmup,
+                     "querySource": q, "resultIds": ids, "stageUs": timing, "responseBytes": encoded.len(),
+                     "totalMatchesCandidateCount": response.total_matches,
+-                    "metrics": evidence_metrics(&[q], &retained, &sources)})
++                    "metrics": evidence_metrics(&contract.relevant_ordinals(&format!("query{q}"))?, &retained, &sources)})
++                )?;
++                writeln!(
++                    evaluator_trace,
++                    "{}",
++                    json!({"traceSchemaVersion":1,"episodeId":episode,
++                    "stepId":format!("{cell}:{step}"),"metrics":evidence_metrics(
++                        &contract.relevant_ordinals(&format!("query{q}"))?,&retained,&sources)})
+                 )?;
+                 replay.push(json!({"cell": cell, "query": q, "results": response.results}));
+             }
+@@ -433,21 +573,22 @@ async fn main() -> Result<()> {
+     }
+     let after = record_state(&storage.read().unwrap())?;
+     ensure!(before == after, "diagnostic queries mutated stored records");
+-    write_json(args.out.join("state-after.json"), &after)?;
++    write_json(out.join("state-after.json"), &after)?;
+     let control_after = storage.read().unwrap().control_state()?;
+     ensure!(
+         control_before == control_after,
+         "false queries changed canonical control"
+     );
+     write_json(
+-        args.out.join("control-after.json"),
++        out.join("control-after.json"),
+         &serde_json::to_value(control_after)?,
+     )?;
+-    write_json(args.out.join("replay.json"), &json!(replay))?;
++    write_json(out.join("replay.json"), &json!(replay))?;
+     write_json(
+-        args.out.join("summary.json"),
++        out.join("summary.json"),
+         &json!({"diagnosticManifestVersion": 1,
+-        "track": "canonical-internal-offline-v2", "publicApiConformance": false,
++        "track": evaluation_manifest::TRACK,"manifestVersion":1,"sourceMappingVersion":1,"traceSchemaVersion":1,
++        "environmentHash":contract.environment_hash,"expectedReplayMisses":1, "publicApiConformance": false,
+         "syntheticSemanticQualityClaim": false, "records": args.records, "dimensions": args.dimensions,
+         "k": args.k, "seed": args.seed, "warmupPerCell": args.warmup, "samplesPerCell": args.samples,
+         "fixtureIngestUs": build_us, "canonicalRecordsUnchanged": true, "canonicalControlUnchanged": true,
+diff --git a/examples/support/evaluation_manifest.rs b/examples/support/evaluation_manifest.rs
+new file mode 100644
+index 0000000..feaef17
+--- /dev/null
++++ b/examples/support/evaluation_manifest.rs
+@@ -0,0 +1,432 @@
++//! Consumed only by the internal offline diagnostic, never a production API.
++use anyhow::{Context, Result, ensure};
++use serde::{Deserialize, Serialize};
++use serde_json::{Value, json};
++use sha2::{Digest, Sha256};
++use std::{
++    collections::{BTreeMap, BTreeSet},
++    fs,
++    path::Path,
++};
++
++pub const TRACK: &str = "manifest-internal-diagnostic-v1";
++pub const TIME: i64 = 1_767_225_600_000;
++
++pub fn hash(bytes: &[u8]) -> String {
++    Sha256::digest(bytes)
++        .iter()
++        .map(|b| format!("{b:02x}"))
++        .collect()
++}
++
++#[derive(Clone, Debug, Deserialize, Serialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct Plan {
++    pub records: usize,
++    pub dimensions: usize,
++    pub k: usize,
++    pub warmup: usize,
++    pub samples: usize,
++    pub seed: u64,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct Artifact {
++    pub file: String,
++    pub sha256: String,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct Manifest {
++    pub manifest_version: u32,
++    pub source_mapping_version: u32,
++    pub trace_schema_version: u32,
++    pub track: String,
++    pub source_commit: String,
++    pub source_tree_sha256: String,
++    pub dirty_patch_sha256: String,
++    pub source_files_sha256: BTreeMap<String, String>,
++    pub lockfile_sha256: String,
++    pub container_image_id: String,
++    pub limits: Value,
++    pub versions: Value,
++    pub capabilities: Value,
++    pub dataset: Value,
++    pub embedding: Value,
++    pub execution: Plan,
++    pub actor_inputs: Artifact,
++    pub evaluator_labels: Artifact,
++}
++
++#[derive(Clone, Deserialize, Serialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct Source {
++    pub source_id: String,
++    pub group_id: String,
++    pub conversation_id: String,
++    pub session_id: String,
++    pub turn_id: String,
++    pub role: String,
++    pub source_timestamp: i64,
++    pub ordinal: usize,
++    pub summary: String,
++    pub content_sha256: String,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct ActorInputs {
++    adapter_version: u32,
++    sources: Vec<Source>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct EvaluatorLabels {
++    adapter_version: u32,
++    annotation_unit: String,
++    relevant: BTreeMap<String, Vec<String>>,
++    // Deliberately never available through an actor-facing accessor.
++    label_canary: String,
++}
++
++pub struct Validated {
++    pub manifest: Manifest,
++    pub environment_hash: String,
++    pub sources: Vec<Source>,
++    evaluator: EvaluatorLabels,
++}
++
++pub fn versions() -> Value {
++    json!({"contractVersion":1,"retrievalSemanticsVersion":1,"rankingProfile":"baseline-v1",
++        "lifecycleVersion":"legacy_access_v1","rifMode":"off","canonicalSchemaVersion":null,"canonicalRepresentation":"legacy-schema-none","controlSchemaVersion":1,
++        "recordSchemaVersion":1,"backupFormatVersion":null,"exportFormatVersion":null,
++        "offlineFormats":"not-used-or-advertised-by-this-track",
++        "receiptVersion":1,"requestHashVersion":1,
++        "derivedIndexFormats":"sourceFilesSha256; no independent format version advertised"})
++}
++
++pub fn capabilities() -> Value {
++    json!({"publicApi":false,"publicV2":false,"nativeV2":false,"fullA6":false,"coherentReadView":false,"barrier":false,
++        "snapshot":false,"reset":false,"deterministicIds":false,"deterministicRng":false,
++        "clock":"fixed-lifecycle-only","clockAdvance":false,"sweeps":false,
++        "initialTimeMs":TIME,"recordAccess":false,"graphDepth":0})
++}
++
++pub fn embedding(dimensions: usize) -> Value {
++    json!({"generator":"splitmix64-f32-l2-v1","dimensions":dimensions,"modelRevision":null,
++        "promptSha256":null,"tokenizerRevision":null,"role":"actor-query",
++        "cacheMiss":"error","externalCalls":false})
++}
++
++fn hexadecimal(value: &str, len: usize) -> bool {
++    value.len() == len
++        && value
++            .bytes()
++            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
++}
++
++fn artifact(root: &Path, entry: &Artifact, expected_name: &str) -> Result<Vec<u8>> {
++    ensure!(
++        entry.file == expected_name && hexadecimal(&entry.sha256, 64),
++        "invalid artifact reference"
++    );
++    let path = root.join(&entry.file);
++    ensure!(
++        fs::symlink_metadata(&path)?.file_type().is_file(),
++        "artifact must be a regular file"
++    );
++    let bytes = fs::read(path)?;
++    ensure!(
++        hash(&bytes) == entry.sha256,
++        "artifact hash mismatch: {}",
++        entry.file
++    );
++    Ok(bytes)
++}
++
++fn require_rust_pins(root: &Path, directory: &Path, pins: &BTreeMap<String, String>) -> Result<()> {
++    if !directory.exists() {
++        return Ok(());
++    }
++    for item in fs::read_dir(directory)? {
++        let item = item?;
++        let kind = item.file_type()?;
++        ensure!(!kind.is_symlink(), "symlink in source tree");
++        if kind.is_dir() {
++            require_rust_pins(root, &item.path(), pins)?;
++        } else if item.path().extension().is_some_and(|ext| ext == "rs") {
++            let path = item.path();
++            let name = path
++                .strip_prefix(root)?
++                .to_str()
++                .context("non-UTF8 source input")?;
++            ensure!(
++                pins.contains_key(name),
++                "omitted runtime source pin: {name}"
++            );
++        }
++    }
++    Ok(())
++}
++
++impl Validated {
++    /// No output directory, store, provider or mutation exists during validation.
++    pub fn load(path: &Path) -> Result<Self> {
++        ensure!(
++            fs::symlink_metadata(path)?.file_type().is_file(),
++            "manifest must be a regular file"
++        );
++        let bytes = fs::read(path)?;
++        let m: Manifest = serde_json::from_slice(&bytes).context("invalid manifest")?;
++        ensure!(
++            m.manifest_version == 1 && m.source_mapping_version == 1 && m.trace_schema_version == 1,
++            "unsupported independent harness version"
++        );
++        ensure!(
++            m.track == TRACK && m.versions == versions(),
++            "unsupported track/runtime versions"
++        );
++        ensure!(
++            m.capabilities == capabilities(),
++            "unsupported runtime capability/clock/RNG request"
++        );
++        ensure!(
++            m.limits
++                == json!({"cpus":2,"memoryBytes":4294967296u64,"cargoJobs":2,"tokioWorkers":2}),
++            "unsupported resource limits"
++        );
++        ensure!(
++            hexadecimal(&m.source_commit, 40)
++                && hexadecimal(&m.dirty_patch_sha256, 64)
++                && m.container_image_id
++                    .strip_prefix("sha256:")
++                    .is_some_and(|s| hexadecimal(s, 64)),
++            "unresolved source/image identity"
++        );
++        ensure!(
++            option_env!("RECALLD_A6_SOURCE_COMMIT") == Some(m.source_commit.as_str())
++                && option_env!("RECALLD_A6_DIRTY_PATCH_SHA256")
++                    == Some(m.dirty_patch_sha256.as_str())
++                && option_env!("RECALLD_A6_IMAGE_ID") == Some(m.container_image_id.as_str()),
++            "manifest differs from compiled supervisor build identity"
++        );
++        ensure!(
++            hexadecimal(&m.source_tree_sha256, 64)
++                && hash(&serde_json::to_vec(&m.source_files_sha256)?) == m.source_tree_sha256
++                && option_env!("RECALLD_A6_SOURCE_TREE_SHA256")
++                    == Some(m.source_tree_sha256.as_str()),
++            "manifest source tree differs from compiled source pins"
++        );
++        let p = &m.execution;
++        ensure!(
++            (100..=100_000).contains(&p.records)
++                && p.records.is_multiple_of(10)
++                && (4..=8192).contains(&p.dimensions)
++                && (1..=200).contains(&p.k)
++                && p.k <= p.records / 10
++                && (1..=100_000).contains(&p.samples)
++                && p.warmup <= 100_000,
++            "unsupported execution plan"
++        );
++        ensure!(
++            m.embedding == embedding(p.dimensions),
++            "unsupported embedding/cache profile"
++        );
++        ensure!(
++            m.dataset
++                == json!({"kind":"generated-synthetic","upstreamUrl":null,
++            "upstreamRevision":null,"thirdPartyLicense":null,"intendedUse":"contract-diagnostic-only",
++            "adapterVersion":1,"groupSplit":"one-synthetic-regression-group; no training",
++            "datasetRevision":m.actor_inputs.sha256}),
++            "unresolved/external dataset, license or split"
++        );
++        let source_root = Path::new(env!("CARGO_MANIFEST_DIR"));
++        for directory in ["src", "tests", "examples", "benches"] {
++            require_rust_pins(
++                source_root,
++                &source_root.join(directory),
++                &m.source_files_sha256,
++            )?;
++        }
++        for required in [
++            "Cargo.toml",
++            "rust-toolchain.toml",
++            "Cargo.lock",
++            "examples/offline_eval.rs",
++            "examples/support/evaluation_manifest.rs",
++            "scripts/offline-evaluation.py",
++        ] {
++            ensure!(
++                m.source_files_sha256.contains_key(required),
++                "missing required source pin: {required}"
++            );
++        }
++        ensure!(
++            m.source_files_sha256.get("Cargo.lock") == Some(&m.lockfile_sha256),
++            "lockfile pin mismatch"
++        );
++        for (name, expected) in &m.source_files_sha256 {
++            ensure!(
++                !name.is_empty()
++                    && Path::new(name)
++                        .components()
++                        .all(|p| matches!(p, std::path::Component::Normal(_)))
++                    && hexadecimal(expected, 64),
++                "invalid source pin"
++            );
++            let mut current = source_root.to_path_buf();
++            for part in Path::new(name) {
++                current.push(part);
++                ensure!(
++                    !fs::symlink_metadata(&current)?.file_type().is_symlink(),
++                    "symlink source input"
++                );
++            }
++            ensure!(
++                hash(&fs::read(current)?) == *expected,
++                "source hash mismatch: {name}"
++            );
++        }
++        let root = path.parent().context("manifest parent missing")?;
++        let actor: ActorInputs =
++            serde_json::from_slice(&artifact(root, &m.actor_inputs, "actor-inputs.json")?)?;
++        let evaluator: EvaluatorLabels = serde_json::from_slice(&artifact(
++            root,
++            &m.evaluator_labels,
++            "evaluator-labels.json",
++        )?)?;
++        ensure!(
++            actor.adapter_version == 1
++                && evaluator.adapter_version == 1
++                && evaluator.annotation_unit == "synthetic-unit",
++            "unsupported adapter/scorer unit"
++        );
++        ensure!(actor.sources.len() == p.records, "source count mismatch");
++        for (i, s) in actor.sources.iter().enumerate() {
++            ensure!(
++                s.ordinal == i
++                    && s.source_id == format!("unit-{i:06}")
++                    && s.turn_id == s.source_id
++                    && s.group_id == "synthetic-regression"
++                    && s.conversation_id == "synthetic-conversation"
++                    && s.session_id == "synthetic-session"
++                    && s.role == "user"
++                    && s.source_timestamp == TIME
++                    && s.summary == format!("fixture token{i}")
++                    && s.content_sha256 == hash(s.summary.as_bytes()),
++                "source provenance/ordinal/content mismatch"
++            );
++        }
++        let queries: BTreeSet<_> = (0..p.records)
++            .step_by(10)
++            .map(|i| format!("query{i}"))
++            .collect();
++        ensure!(
++            evaluator.relevant.keys().cloned().collect::<BTreeSet<_>>() == queries,
++            "evaluator query coverage mismatch"
++        );
++        let ids: BTreeSet<_> = actor.sources.iter().map(|s| s.source_id.as_str()).collect();
++        for labels in evaluator.relevant.values() {
++            ensure!(
++                labels.iter().all(|s| ids.contains(s.as_str()))
++                    && labels.iter().collect::<BTreeSet<_>>().len() == labels.len(),
++                "unknown/duplicate evaluator source reference"
++            );
++        }
++        ensure!(
++            !evaluator.label_canary.is_empty(),
++            "missing evaluator separation canary"
++        );
++        Ok(Self {
++            manifest: m,
++            environment_hash: hash(&bytes),
++            sources: actor.sources,
++            evaluator,
++        })
++    }
++
++    pub fn relevant_ordinals(&self, query: &str) -> Result<Vec<usize>> {
++        let labels = self
++            .evaluator
++            .relevant
++            .get(query)
++            .context("unknown evaluator query")?;
++        Ok(self
++            .sources
++            .iter()
++            .filter(|s| labels.contains(&s.source_id))
++            .map(|s| s.ordinal)
++            .collect())
++    }
++
++    pub fn mapping(&self, ordinal: usize, memory: recalld::model::MemoryId) -> Value {
++        let source = &self.sources[ordinal];
++        json!({"sourceMappingVersion":1,"memoryId":memory,"sourceIds":[source.source_id],
++            "datasetRevision":self.manifest.actor_inputs.sha256,"source":source,
++            "transformation":"raw_synthetic_unit","characterSpans":null,"extractor":null,
++            "promptSha256":null,"outputSha256":source.content_sha256})
++    }
++
++    pub fn trace(&self, episode: &str, step: &str, action: Value, outcome: Value) -> Value {
++        json!({"traceSchemaVersion":1,"runId":self.environment_hash,"episodeId":episode,
++            "groupId":"synthetic-regression","stepId":step,"environmentHash":self.environment_hash,
++            "track":TRACK,"simulatedTimeMs":TIME.to_string(),"action":action,"outcome":outcome,
++            "readGeneration":null,"readiness":{"available":false,"reason":"coherent core/barrier not joined"},
++            "snapshot":null,"model":null,"tokens":null,"reward":null})
++    }
++
++    pub fn replay_context(&self) -> ReplayContext {
++        ReplayContext {
++            profile: self.manifest.embedding.clone(),
++            environment_hash: self.environment_hash.clone(),
++        }
++    }
++}
++
++/// Actor provider receives this projection, never the evaluator-bearing manifest object.
++#[derive(Clone, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct ReplayContext {
++    profile: Value,
++    environment_hash: String,
++}
++
++impl ReplayContext {
++    pub fn key(&self, namespace: &str, text: &str) -> String {
++        hash(
++            &serde_json::to_vec(
++                &json!({"namespace":namespace,"text":text,"role":"actor-query",
++            "profile":self.profile,"environmentHash":self.environment_hash}),
++            )
++            .unwrap(),
++        )
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn replay_keys_bind_complete_actor_inputs_and_environment() {
++        let base = ReplayContext {
++            profile: embedding(16),
++            environment_hash: hash(b"synthetic-environment-a"),
++        };
++        let key = base.key("fixture", "query0");
++        assert_ne!(key, base.key("foreign", "query0"));
++        assert_ne!(key, base.key("fixture", "query0 "));
++        let mut changed = base.clone();
++        changed.environment_hash = hash(b"synthetic-environment-b");
++        assert_ne!(key, changed.key("fixture", "query0"));
++        changed = base.clone();
++        changed.profile = embedding(32);
++        assert_ne!(key, changed.key("fixture", "query0"));
++        let actor = serde_json::to_value(base).unwrap();
++        assert_eq!(actor.as_object().unwrap().len(), 2);
++        assert!(actor.get("evaluator").is_none());
++    }
++}
+diff --git a/scripts/check-evaluation-contract.py b/scripts/check-evaluation-contract.py
+new file mode 100644
+index 0000000..83d314c
+--- /dev/null
++++ b/scripts/check-evaluation-contract.py
+@@ -0,0 +1,88 @@
++#!/usr/bin/env python3
++"""Run frozen-manifest rejection goldens through the actual compiled consumer."""
++import argparse
++import copy
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--binary', type=Path, required=True)
++    parser.add_argument('--manifest', type=Path, required=True)
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    baseline = json.loads(args.manifest.read_text())
++    binary_sha256 = hashlib.sha256(args.binary.read_bytes()).hexdigest()
++    cases = []
++    for field in ('manifestVersion', 'sourceMappingVersion', 'traceSchemaVersion'):
++        cases.append((field, lambda m, a, e, field=field: m.update({field: 2})))
++    for field in ('contractVersion', 'canonicalSchemaVersion', 'recordSchemaVersion', 'receiptVersion'):
++        cases.append((field, lambda m, a, e, field=field: m['versions'].update({field: 2 if field != 'receiptVersion' else 99})))
++    for field in ('publicV2', 'nativeV2', 'fullA6', 'barrier', 'snapshot', 'reset', 'deterministicIds', 'deterministicRng', 'clockAdvance'):
++        cases.append((field, lambda m, a, e, field=field: m['capabilities'].update({field: True})))
++    cases += [
++        ('unused-backup-requirement', lambda m, a, e: m['versions'].update({'backupFormatVersion': 2})),
++        ('unused-export-requirement', lambda m, a, e: m['versions'].update({'exportFormatVersion': 1})),
++        ('invented-canonical-zero', lambda m, a, e: m['versions'].update({'canonicalSchemaVersion': 0})),
++        ('invented-canonical-one', lambda m, a, e: m['versions'].update({'canonicalSchemaVersion': 1})),
++        ('native-representation', lambda m, a, e: m['versions'].update({'canonicalRepresentation': 'native-v2'})),
++        ('missing-version', lambda m, a, e: m.pop('traceSchemaVersion')),
++        ('unknown-field', lambda m, a, e: m.update({'futureCapability': True})),
++        ('forged-resolved-revision', lambda m, a, e: m.update({'sourceCommit': '0' * 40})),
++        ('forged-image', lambda m, a, e: m.update({'containerImageId': 'sha256:' + '0' * 64})),
++        ('forged-dirty-patch', lambda m, a, e: m.update({'dirtyPatchSha256': '0' * 64})),
++        ('unresolved-revision', lambda m, a, e: m.update({'sourceCommit': 'unresolved'})),
++        ('external-dataset', lambda m, a, e: m['dataset'].update({'kind': 'upstream'})),
++        ('unverified-license', lambda m, a, e: m['dataset'].update({'thirdPartyLicense': 'invented'})),
++        ('artifact-traversal', lambda m, a, e: m['actorInputs'].update({'file': '../actor-inputs.json'})),
++        ('actor-hash', lambda m, a, e: m['actorInputs'].update({'sha256': '0' * 64})),
++        ('omitted-runtime-source', lambda m, a, e: m['sourceFilesSha256'].pop('src/lib.rs')),
++        ('source-hash', lambda m, a, e: m['sourceFilesSha256'].update({'Cargo.lock': '0' * 64})),
++        ('actor-label-injection', lambda m, a, e: a['sources'][0].update({'answer': e['labelCanary']})),
++        ('duplicate-source', lambda m, a, e: a['sources'].__setitem__(1, copy.deepcopy(a['sources'][0]))),
++        ('content-hash', lambda m, a, e: a['sources'][0].update({'contentSha256': '0' * 64})),
++        ('unknown-evidence', lambda m, a, e: e['relevant'].update({'query0': ['absent']})),
++        ('missing-query', lambda m, a, e: e['relevant'].pop('query0')),
++        ('live-fallback', lambda m, a, e: m['embedding'].update({'cacheMiss': 'generate'})),
++        ('wrong-role', lambda m, a, e: m['embedding'].update({'role': 'judge'})),
++        ('bad-resource-pin', lambda m, a, e: m['limits'].update({'cpus': 4})),
++    ]
++    results = []
++    for name, change in cases:
++        with tempfile.TemporaryDirectory(prefix='manifest-rejection-') as temporary:
++            root = Path(temporary)
++            m = copy.deepcopy(baseline)
++            a = json.loads((args.manifest.parent / 'actor-inputs.json').read_text())
++            e = json.loads((args.manifest.parent / 'evaluator-labels.json').read_text())
++            change(m, a, e)
++            # Content mutations have correct outer hashes, so the semantic boundary is exercised.
++            for field, filename, value in [('actorInputs', 'actor-inputs.json', a), ('evaluatorLabels', 'evaluator-labels.json', e)]:
++                data = (json.dumps(value, indent=2, sort_keys=True) + '\n').encode()
++                (root / filename).write_bytes(data)
++                if name != 'actor-hash':
++                    m[field]['sha256'] = hashlib.sha256(data).hexdigest()
++            m['dataset']['datasetRevision'] = m['actorInputs']['sha256']
++            (root / 'manifest.json').write_text(json.dumps(m))
++            output = root / 'must-not-exist'
++            run = subprocess.run([str(args.binary), '--manifest', str(root / 'manifest.json'), '--out', str(output)],
++                                 capture_output=True, text=True)
++            result = {'case': name, 'exitCode': run.returncode, 'stdout': run.stdout, 'stderr': run.stderr,
++                      'outputCreated': output.exists(), 'binarySha256': binary_sha256,
++                      'manifestJson': (root / 'manifest.json').read_text(),
++                      'actorInputsJson': (root / 'actor-inputs.json').read_text(),
++                      'evaluatorLabelsJson': (root / 'evaluator-labels.json').read_text(),
++                      'manifestSha256': hashlib.sha256((root / 'manifest.json').read_bytes()).hexdigest()}
++            results.append(result)
++            # Retain partial results even if an assertion fails.
++            args.output.write_text(json.dumps(results, indent=2) + '\n')
++            if run.returncode == 0 or output.exists():
++                raise RuntimeError(f'failed closed preflight golden: {name}: {result}')
++    print(f'{len(results)} actual-consumer preflight rejections; no episode output/store created')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/offline-evaluation.py b/scripts/offline-evaluation.py
+index 618d022..13c1651 100644
+--- a/scripts/offline-evaluation.py
++++ b/scripts/offline-evaluation.py
+@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
+ FIXED_INPUTS = (
+     "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "examples/offline_eval.rs",
+     "scripts/offline-evaluation.py", "scripts/offline-evaluation.Dockerfile",
+-    "scripts/test_offline_evaluation.py",
++    "scripts/test_offline_evaluation.py", "scripts/check-evaluation-contract.py",
+ )
+ 
+ 
+@@ -129,8 +129,101 @@ def verify_replays(output, runs):
+     return stable
+ 
+ 
++def validate_execution_plan(args):
++    if not (100 <= args.records <= 100_000 and args.records % 10 == 0
++            and 4 <= args.dimensions <= 8192 and 1 <= args.k <= min(200, args.records // 10)
++            and 1 <= args.samples <= 100_000 and 0 <= args.warmup <= 100_000
++            and 0 <= args.seed <= 2**64 - 1):
++        raise ValueError("unsupported execution plan")
++
++
++def evaluation_inputs(args, diagnostic):
++    """Generated synthetic adapter only; no external dataset/license/model claims."""
++    validate_execution_plan(args)
++    actor = {"adapterVersion": 1, "sources": [
++        {"sourceId": f"unit-{i:06}", "turnId": f"unit-{i:06}", "ordinal": i,
++         "groupId": "synthetic-regression", "conversationId": "synthetic-conversation",
++         "sessionId": "synthetic-session", "role": "user", "sourceTimestamp": 1767225600000,
++         "summary": f"fixture token{i}", "contentSha256": hashlib.sha256(f"fixture token{i}".encode()).hexdigest()}
++        for i in range(args.records)]}
++    evaluator = {"adapterVersion": 1, "annotationUnit": "synthetic-unit",
++                 "relevant": {f"query{i}": [f"unit-{i:06}"] for i in range(0, args.records, 10)},
++                 "labelCanary": "EVALUATOR_ONLY_CANARY_NOT_ACTOR_INPUT"}
++    encode = lambda v: (json.dumps(v, indent=2, sort_keys=True) + "\n").encode()
++    actor_bytes, evaluator_bytes = encode(actor), encode(evaluator)
++    actor_hash = hashlib.sha256(actor_bytes).hexdigest()
++    manifest = {"manifestVersion": 1, "sourceMappingVersion": 1, "traceSchemaVersion": 1,
++        "track": "manifest-internal-diagnostic-v1",
++        **{key: diagnostic[key] for key in ("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
++                                           "lockfileSha256", "containerImageId", "limits")},
++        "sourceTreeSha256": hashlib.sha256(json.dumps(diagnostic["sourceFilesSha256"], sort_keys=True,
++            separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
++        "versions": {"contractVersion": 1, "retrievalSemanticsVersion": 1, "rankingProfile": "baseline-v1",
++            "lifecycleVersion": "legacy_access_v1", "rifMode": "off", "canonicalSchemaVersion": None,
++            "canonicalRepresentation": "legacy-schema-none", "controlSchemaVersion": 1,
++            "recordSchemaVersion": 1, "backupFormatVersion": None, "exportFormatVersion": None,
++            "offlineFormats": "not-used-or-advertised-by-this-track",
++            "receiptVersion": 1, "requestHashVersion": 1,
++            "derivedIndexFormats": "sourceFilesSha256; no independent format version advertised"},
++        "capabilities": {"publicApi": False, "publicV2": False, "nativeV2": False, "fullA6": False, "coherentReadView": False,
++            "barrier": False, "snapshot": False, "reset": False, "deterministicIds": False,
++            "deterministicRng": False, "clock": "fixed-lifecycle-only", "clockAdvance": False,
++            "sweeps": False, "initialTimeMs": 1767225600000, "recordAccess": False, "graphDepth": 0},
++        "dataset": {"kind": "generated-synthetic", "upstreamUrl": None, "upstreamRevision": None,
++            "thirdPartyLicense": None, "intendedUse": "contract-diagnostic-only", "adapterVersion": 1,
++            "groupSplit": "one-synthetic-regression-group; no training", "datasetRevision": actor_hash},
++        "embedding": {"generator": "splitmix64-f32-l2-v1", "dimensions": args.dimensions,
++            "modelRevision": None, "promptSha256": None, "tokenizerRevision": None,
++            "role": "actor-query", "cacheMiss": "error", "externalCalls": False},
++        "execution": {k: getattr(args, k) for k in ("records", "dimensions", "k", "warmup", "samples", "seed")},
++        "actorInputs": {"file": "actor-inputs.json", "sha256": actor_hash},
++        "evaluatorLabels": {"file": "evaluator-labels.json", "sha256": hashlib.sha256(evaluator_bytes).hexdigest()}}
++    return manifest, actor_bytes, evaluator_bytes
++
++
++def verify_manifest_outputs(output, runs):
++    contract = json.loads((output / "manifest.json").read_text())
++    evaluator = json.loads((output / "evaluator-labels.json").read_text())
++    actor = json.loads((output / "actor-inputs.json").read_text())
++    canary = evaluator["labelCanary"].encode()
++    count = contract["execution"]["records"]
++    for run in range(runs):
++        directory = output / f"run-{run}"
++        for name in ("actor-inputs.json", "actor-replay-cache.json", "trace.jsonl", "source-mappings.jsonl", "replay.json"):
++            if canary in (directory / name).read_bytes():
++                raise RuntimeError(f"evaluator canary leaked: {name}")
++        sources = [json.loads(line) for line in (directory / "source-mappings.jsonl").read_text().splitlines()]
++        if (len(sources) != count or any(s["sourceMappingVersion"] != 1
++                or s["datasetRevision"] != contract["actorInputs"]["sha256"] for s in sources)):
++            raise RuntimeError("provenance version/revision/count mismatch")
++        records = json.loads((directory / "state-before.json").read_text())
++        if {s["memoryId"] for s in sources} != set(records):
++            raise RuntimeError("mapping UUIDs do not match actual canonical records")
++        for expected, mapping in zip(actor["sources"], sources):
++            if (mapping["source"] != expected or mapping["sourceIds"] != [expected["sourceId"]]
++                    or mapping["outputSha256"] != expected["contentSha256"]):
++                raise RuntimeError("source mapping golden mismatch")
++        events = [json.loads(line) for line in (directory / "evaluator/source-events.jsonl").read_text().splitlines()]
++        if len(events) != count * 3 or [e["status"] for e in events] != ["seen", "attempted", "accepted"] * count:
++            raise RuntimeError("turn accounting mismatch")
++        trace = [json.loads(line) for line in (directory / "trace.jsonl").read_text().splitlines()]
++        if len(trace) != count + 1 + 4 * (contract["execution"]["warmup"] + contract["execution"]["samples"]):
++            raise RuntimeError("actor action/warmup/expected-failure count mismatch")
++        if any(t["traceSchemaVersion"] != 1 or t["readiness"]["available"] is not False
++               or t["readGeneration"] is not None for t in trace):
++            raise RuntimeError("trace claimed unavailable coherent controls")
++        if any("metrics" in t["outcome"] or "oracleRecallAtK" in t["outcome"] for t in trace):
++            raise RuntimeError("evaluator metric in actor observation")
++        misses = [t for t in trace if t["stepId"] == "replay-miss"]
++        if len(misses) != 1 or misses[0]["outcome"]["status"] != "expected_error":
++            raise RuntimeError("actual QueryEngine replay miss was not retained")
++    return True
++
++
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--track", required=True, choices=["manifest-internal-diagnostic-v1"],
++                        help="explicit opt-in; old frozen studies must use their pinned checkout")
+     parser.add_argument("--cache", required=True, type=Path, help="Prior scratch Cargo home; only registry/ is copied")
+     parser.add_argument("--build-cache", type=Path, help="Optional prior scratch target to copy, never share")
+     parser.add_argument("--image", default=IMAGE)
+@@ -145,6 +238,7 @@ def main():
+     args = parser.parse_args()
+     if args.runs < 3:
+         parser.error("at least three processes are required for the replay check")
++    validate_execution_plan(args)  # before scratch/output creation
+     cache = args.cache.resolve()
+     if not str(cache).startswith(("/tmp/recalld-", "/private/tmp/recalld-")) or not (cache / "registry").is_dir():
+         parser.error("cache must be a previous recalld scratch directory with registry/")
+@@ -160,8 +254,10 @@ def main():
+     shutil.copytree(cache / "registry", scratch / "cargo" / "registry")
+     if args.build_cache:
+         build_cache = args.build_cache.resolve()
+-        if build_cache.name != "target" or not build_cache.parent.name.startswith("recalld-evaluation-"):
+-            parser.error("build cache must be target/ in a prior recalld-evaluation scratch")
++        if build_cache.name != "target" or not (str(build_cache.parent).startswith(("/tmp/recalld-", "/private/tmp/recalld-"))
++                or (build_cache.parent.name.startswith("recalld-evaluation-")
++                    and build_cache.parent.parent == Path(tempfile.gettempdir()).resolve())):
++            parser.error("build cache must be target/ in a prior recalld scratch; copied privately")
+         shutil.copytree(build_cache, scratch / "target")
+     else:
+         (scratch / "target").mkdir()
+@@ -201,7 +297,11 @@ def main():
+         "performanceGate": {"established": False, "absoluteBudgets": None,
+                             "reason": "baseline characterization; no paired candidate, five-seed run or promotion gate"},
+     }
+-    save(output / "manifest.json", manifest)
++    save(output / "diagnostic-run.json", manifest)
++    contract, actor_bytes, evaluator_bytes = evaluation_inputs(args, manifest)
++    save(output / "manifest.json", contract)  # immutable input, never amended with result hashes
++    (output / "actor-inputs.json").write_bytes(actor_bytes)
++    (output / "evaluator-labels.json").write_bytes(evaluator_bytes)
+     # Execute the exact snapshotted script. No shell interpolation of host input.
+     inner = r'''set -eu
+ mkdir -p /tmp/home
+@@ -221,6 +321,7 @@ cargo test --locked --offline --all-features --lib --bins --tests --examples -j1
+ cargo test --locked --offline --example offline_eval > /work/output/harness-tests.log 2>&1
+ cargo clippy --locked --offline --all-features --all-targets > /work/output/clippy.log 2>&1
+ cargo build --locked --offline --release --example offline_eval -j1 > /work/output/build.log 2>&1
++python3 scripts/check-evaluation-contract.py --binary /work/target/release/examples/offline_eval --manifest /work/output/manifest.json --output /work/output/manifest-rejections.json > /work/output/manifest-tests.log 2>&1
+ '''
+     (scratch / "build.sh").write_text(inner)
+     docker = ["docker", "run", "--rm", "--network", "none", "--cpus", "2", "--memory", "4g",
+@@ -228,17 +329,21 @@ cargo build --locked --offline --release --example offline_eval -j1 > /work/outp
+               "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev", "--mount", f"type=bind,src={scratch},dst=/work",
+               "--workdir", "/work/source", "--env", "HOME=/tmp/home", "--env", "CARGO_HOME=/work/cargo",
+               "--env", "CARGO_TARGET_DIR=/work/target", "--env", "CARGO_BUILD_JOBS=2",
+-              "--env", f"RUSTUP_TOOLCHAIN={args.toolchain}", image["Id"]]
++              "--env", f"RUSTUP_TOOLCHAIN={args.toolchain}",
++              "--env", f"RECALLD_A6_SOURCE_COMMIT={contract['sourceCommit']}",
++              "--env", f"RECALLD_A6_DIRTY_PATCH_SHA256={contract['dirtyPatchSha256']}",
++              "--env", f"RECALLD_A6_IMAGE_ID={contract['containerImageId']}",
++              "--env", f"RECALLD_A6_SOURCE_TREE_SHA256={contract['sourceTreeSha256']}", image["Id"]]
+     try:
+         subprocess.run(docker + ["bash", "/work/build.sh"], check=True)
+         manifest["executableSha256"] = sha(scratch / "target/release/examples/offline_eval")
+         for run in range(args.runs):
+-            cmd = docker + ["/work/target/release/examples/offline_eval", "--out", f"/work/output/run-{run}"]
+-            for key in ["records", "dimensions", "k", "warmup", "samples", "seed"]:
+-                cmd += [f"--{key}", str(getattr(args, key))]
++            cmd = docker + ["/work/target/release/examples/offline_eval", "--manifest", "/work/output/manifest.json",
++                            "--out", f"/work/output/run-{run}"]
+             with (output / f"run-{run}.log").open("w") as log:
+                 subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, check=True)
+         stable = verify_replays(output, args.runs)
++        verify_manifest_outputs(output, args.runs)
+         manifest["status"] = "passed"
+         manifest["replay"] = {"processes": args.runs, "identicalArtifacts": stable}
+     except BaseException as exc:
+@@ -247,8 +352,8 @@ cargo build --locked --offline --release --example offline_eval -j1 > /work/outp
+         raise
+     finally:
+         manifest["artifactsSha256"] = {str(p.relative_to(output)): sha(p) for p in sorted(output.rglob("*"))
+-                                       if p.is_file() and p.name != "manifest.json"}
+-        save(output / "manifest.json", manifest)
++                                       if p.is_file() and p.name != "diagnostic-run.json"}
++        save(output / "diagnostic-run.json", manifest)
+         print(f"{manifest['status']}: {output}", flush=True)
+ 
+ 
+diff --git a/scripts/test_offline_evaluation.py b/scripts/test_offline_evaluation.py
+index 31f0134..82c35ca 100644
+--- a/scripts/test_offline_evaluation.py
++++ b/scripts/test_offline_evaluation.py
+@@ -5,6 +5,8 @@ import runpy
+ import subprocess
+ import tempfile
+ import unittest
++import sys
++from types import SimpleNamespace
+ 
+ runner = runpy.run_path(str(Path(__file__).with_name("offline-evaluation.py")))
+ 
+@@ -123,5 +125,37 @@ class SourceSnapshotTests(unittest.TestCase):
+             runner["verify_replays"](self.output, 3)
+ 
+ 
++class ManifestInputTests(unittest.TestCase):
++    def test_synthetic_actor_evaluator_separation_and_nonrecursive_hashes(self):
++        args = SimpleNamespace(records=100, dimensions=16, k=5, warmup=1, samples=3, seed=7)
++        # Metadata values here are not executed; full validation is through the compiled consumer.
++        diagnostic = dict.fromkeys(("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
++                                    "lockfileSha256", "containerImageId", "limits"))
++        manifest, actor, evaluator = runner["evaluation_inputs"](args, diagnostic)
++        labels = json.loads(evaluator)
++        self.assertNotIn(labels["labelCanary"].encode(), actor)
++        self.assertEqual(manifest["actorInputs"]["sha256"], runner["hashlib"].sha256(actor).hexdigest())
++        self.assertEqual(manifest["evaluatorLabels"]["sha256"], runner["hashlib"].sha256(evaluator).hexdigest())
++        self.assertEqual(manifest["dataset"]["datasetRevision"], manifest["actorInputs"]["sha256"])
++        self.assertEqual(len(json.loads(actor)["sources"]), 100)
++        self.assertNotIn("manifestSha256", manifest)
++        self.assertFalse(manifest["capabilities"]["reset"])
++        self.assertIsNone(manifest["versions"]["canonicalSchemaVersion"])
++        self.assertEqual(manifest["versions"]["canonicalRepresentation"], "legacy-schema-none")
++        self.assertIsNone(manifest["dataset"]["thirdPartyLicense"])
++
++    def test_old_supervisor_invocation_cannot_silently_select_new_track(self):
++        result = subprocess.run([sys.executable, str(Path(__file__).with_name("offline-evaluation.py")),
++                                 "--cache", "/does-not-exist"], capture_output=True, text=True)
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn("--track", result.stderr)
++        self.assertNotIn("Artifacts:", result.stdout)
++
++    def test_bad_plan_rejected_before_any_runner_side_effect(self):
++        args = SimpleNamespace(records=99, dimensions=16, k=5, warmup=1, samples=3, seed=7)
++        with self.assertRaises(ValueError):
++            runner["evaluation_inputs"](args, {})
++
++
+ if __name__ == "__main__":
+     unittest.main()

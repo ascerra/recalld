@@ -1,0 +1,25 @@
+diff --git a/src/storage/native_purge.rs b/src/storage/native_purge.rs
+index 6fb6ec3..046e641 100644
+--- a/src/storage/native_purge.rs
++++ b/src/storage/native_purge.rs
+@@ -146,19 +146,7 @@ impl NativePurgeStarted {
+             }
+             return Ok(contract);
+         }
+-        // ponytail: four known historical choices, not general provenance inference.
+-        let matches = [false, true]
+-            .into_iter()
+-            .flat_map(|force| {
+-                [None, Some(self.previous_generation)]
+-                    .into_iter()
+-                    .map(move |expected| (force, expected))
+-            })
+-            .filter(|&(force, expected)| hash(2, force, expected) == stored.request_hash)
+-            .count();
+-        if matches != 1 {
+-            return Err(invalid("historical native purge request hash differs"));
+-        }
++        // Deliberately vulnerable new API1 candidate for the stripping RED probe.
+         Ok(2)
+     }
+ }
