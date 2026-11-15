@@ -271,6 +271,48 @@ impl MetadataStore {
         Ok(receipt)
     }
 
+    /// Fresh API1 projection captured from the same transaction, never a replay view.
+    pub(crate) fn record_legacy_feedback_projected_with_work(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        quality: u8,
+        clock: &dyn crate::time::Clock,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        asserted_namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(WriteReceipt, crate::decay::lifecycle::FeedbackPlan), StorageError> {
+        if ctx.contract_version != 1 || ctx.idempotency_key.is_some() {
+            return Err(StorageError::InvalidMutationContext(
+                "fresh API1 projection requires unkeyed original1".into(),
+            ));
+        }
+        let publication = self.mutation_guard_with_work(parent)?;
+        let (tx, receipt) = self.prepare_feedback_scoped(
+            &publication,
+            ctx,
+            id,
+            quality,
+            || clock.now_millis(),
+            &policy.global,
+            policy.multiplier,
+            asserted_namespace,
+        )?;
+        let MutationScope::Namespace(namespace) = ctx.scope else {
+            return Err(StorageError::MutationNamespaceMismatch);
+        };
+        let record = read_record(&tx.open_table(META_TABLE)?, id, namespace)?;
+        let view = crate::decay::lifecycle::FeedbackPlan {
+            timestamp: record.last_accessed_at,
+            stability: record.stability,
+            strength: record.strength,
+            phase: record.phase,
+            is_permastore: record.is_permastore != 0,
+        };
+        self.commit_observation(tx, &receipt)?;
+        Ok((receipt, view))
+    }
+
     fn prepare_feedback_scoped(
         &self,
         publication: &MutationGuard<'_>,
@@ -302,7 +344,12 @@ impl MetadataStore {
         if expected_namespace.is_some_and(|name| name != policy.name) {
             return Err(StorageError::MutationNamespaceMismatch);
         }
-        super::removal_ledger::ensure_insertable(&tx, id)?;
+        super::removal_ledger::ensure_insertable(&tx, id).map_err(|error| match error {
+            // A retained terminal UUID is unavailable for feedback, not a
+            // duplicate insertion attempt. Keep every other ledger error strict.
+            StorageError::DuplicateId(_) => StorageError::LifecycleContentUnavailable,
+            other => other,
+        })?;
         let mut record = read_record(&tx.open_table(META_TABLE)?, id, namespace)?;
         let resolved = crate::decay::lifecycle::resolve_policy(&policy, global, global_multiplier)
             .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;

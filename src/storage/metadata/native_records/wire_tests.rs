@@ -15,8 +15,24 @@ async fn setup() -> (
     McpBridge,
     crate::api::AppState,
 ) {
+    setup_policy(LifecycleVersion::ExplicitFeedbackV2).await
+}
+async fn setup_policy(
+    version: LifecycleVersion,
+) -> (
+    Fixture,
+    Data,
+    Arc<FixedClock>,
+    McpBridge,
+    crate::api::AppState,
+) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let mut d = fixture(root.path());
+    if version == LifecycleVersion::LegacyAccessV1 {
+        // The real schema migration destination retains the legacy lifecycle.
+        // No raw policy edits or fabricated proof receipts.
+        d.path = root.path().join("schema");
+    }
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, session.engine);
@@ -710,3 +726,6 @@ async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocate
     assert_eq!(bytes(&f, d.parent), before);
     assert_eq!(clock.0.load(Ordering::SeqCst), calls);
 }
+
+#[path = "public_api1_tests.rs"]
+mod public_api1;

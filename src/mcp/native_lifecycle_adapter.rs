@@ -21,6 +21,17 @@ pub(crate) async fn execute(
     policy: &NativePolicyInputs,
     clock: Arc<dyn Clock>,
 ) -> Reply {
+    execute_with_projection(owner, request, operation, policy, clock, None).await
+}
+
+pub(crate) async fn execute_with_projection(
+    owner: &DerivedCompletion,
+    request: Request,
+    operation: Operation,
+    policy: &NativePolicyInputs,
+    clock: Arc<dyn Clock>,
+    legacy_projection: Option<&mut Option<crate::decay::lifecycle::FeedbackPlan>>,
+) -> Reply {
     let work = match owner.accept_work(None) {
         Ok(work) => work,
         Err(e) => return Reply::storage(e),
@@ -111,7 +122,7 @@ pub(crate) async fn execute(
     };
     let result = if !native {
         owner
-            .legacy_lifecycle_with_work(
+            .legacy_lifecycle_projected_with_work(
                 context,
                 request.id,
                 (operation == Operation::Feedback).then_some(request.quality),
@@ -119,39 +130,43 @@ pub(crate) async fn execute(
                 policy.clone(),
                 clock,
                 Some(&work),
+                legacy_projection.is_some(),
             )
             .await
     } else {
         match operation {
-            Operation::Forget => {
-                owner
-                    .forget_native_with_work(
-                        context,
-                        request.id,
-                        request.namespace,
-                        policy.clone(),
-                        clock,
-                        Some(&work),
-                    )
-                    .await
-            }
-            Operation::Feedback => {
-                owner
-                    .feedback_native_with_work(
-                        context,
-                        request.id,
-                        request.quality,
-                        request.namespace,
-                        policy.clone(),
-                        clock,
-                        Some(&work),
-                    )
-                    .await
-            }
+            Operation::Forget => owner
+                .forget_native_with_work(
+                    context,
+                    request.id,
+                    request.namespace,
+                    policy.clone(),
+                    clock,
+                    Some(&work),
+                )
+                .await
+                .map(|receipt| (receipt, None)),
+            Operation::Feedback => owner
+                .feedback_native_with_work(
+                    context,
+                    request.id,
+                    request.quality,
+                    request.namespace,
+                    policy.clone(),
+                    clock,
+                    Some(&work),
+                )
+                .await
+                .map(|receipt| (receipt, None)),
         }
     };
     let receipt = match result {
-        Ok(receipt) => receipt,
+        Ok((receipt, view)) => {
+            if let Some(output) = legacy_projection {
+                *output = view;
+            }
+            receipt
+        }
         Err(e) => {
             owner.finish_known_work(work);
             return Reply::storage(e);

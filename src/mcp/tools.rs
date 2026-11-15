@@ -907,17 +907,14 @@ async fn handle_reinforce_memory(
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge
+    bridge
         .storage
-        .reinforce_memory(id, quality, namespace)
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+        )
         .await
-    {
-        Ok(result) => match ToolCallResult::json(&result) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to reinforce memory: {e}")),
-    }
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -980,19 +977,14 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
     };
     let id = crate::model::MemoryId::from_uuid(uuid);
 
-    match bridge.storage.delete_memory(id, namespace).await {
-        Ok(deleted) => {
-            let response = json!({
-                "id": id_str,
-                "deleted": deleted,
-            });
-            match ToolCallResult::json(&response) {
-                Ok(r) => r,
-                Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-            }
-        }
-        Err(e) => ToolCallResult::error(format!("Failed to delete memory: {e}")),
-    }
+    bridge
+        .storage
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+        )
+        .await
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -206,10 +206,12 @@ async fn handle_connection(
                             peer_limit = peer_frame_limit(&request.params);
                         }
 
-                        let response = dispatch(
+                        let response = if matches!(method.as_str(),"feedback_api1_v1"|"forget_api1_v1") && peer_limit<MAX_MESSAGE_SIZE {
+                            Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
+                        } else { dispatch(
                             &*search, &*storage, &*namespaces, &*health,
                             &request.method, request.params,
-                        ).await;
+                        ).await };
 
                         let resp = match response {
                             Ok(result) => DaemonResponse::success(request.id, result),
@@ -436,7 +438,30 @@ async fn dispatch(
         "ping" => Ok(serde_json::json!({
             "protocolVersion": PROTOCOL_VERSION,
             "maxMessageSize": MAX_MESSAGE_SIZE,
+            "api1LifecycleV1": storage.supports_api1_lifecycle(),
         })),
+
+        "feedback_api1_v1" | "forget_api1_v1" => {
+            use crate::serialization::{
+                lifecycle_api1,
+                native_lifecycle::{self, Operation},
+            };
+            if !storage.supports_api1_lifecycle() {
+                return Err(BridgeError::InvalidInput(
+                    "API1 lifecycle capability unavailable".into(),
+                ));
+            }
+            let operation = if method == "feedback_api1_v1" {
+                Operation::Feedback
+            } else {
+                Operation::Forget
+            };
+            let reply = match lifecycle_api1::parse(&params, operation) {
+                Ok(request) => storage.api1_lifecycle(request, operation).await,
+                Err(error) => lifecycle_api1::Reply::failure(native_lifecycle::Reply::input(error)),
+            };
+            serde_json::to_value(reply).map_err(|e| BridgeError::Internal(e.to_string()))
+        }
 
         "shutdown" => Ok(serde_json::json!({})),
 

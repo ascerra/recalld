@@ -453,6 +453,30 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn forget_api1(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        };
+        crate::serialization::lifecycle_api1::execute(
+            &owner,
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+            self.native_policy.as_ref(),
+            Default::default(),
+            self.clock.clone(),
+        )
+        .await
+    }
+
     async fn forget_native(
         &self,
         request: crate::serialization::native_lifecycle::Request,
@@ -1360,6 +1384,47 @@ impl FsrsEngineAdapter {
 
 #[async_trait]
 impl state::FsrsEngine for FsrsEngineAdapter {
+    async fn feedback_api1(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        let Some(owner) = self.completion.as_ref() else {
+            // Existing Rust adapters without attached derived views retain the
+            // legacy entry. Native mode requires the actual canonical owner.
+            if self
+                .storage
+                .read()
+                .map(|s| s.meta_store().uses_native_lifecycle())
+                .unwrap_or(true)
+            {
+                return crate::serialization::lifecycle_api1::Reply::failure(
+                    crate::serialization::native_lifecycle::Reply::unavailable(
+                        "lifecycle completion unavailable",
+                    ),
+                );
+            }
+            return crate::serialization::lifecycle_api1::Reply::legacy_feedback(
+                self.reinforce(id, quality, namespace).await,
+                id,
+            );
+        };
+        let legacy = crate::storage::native_lifecycle::NativePolicyInputs {
+            global: Default::default(),
+            multiplier: self.config.decay.decay_rate_multiplier,
+        };
+        crate::serialization::lifecycle_api1::execute(
+            owner,
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+            self.native_policy.as_ref(),
+            legacy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
     async fn feedback_native(
         &self,
         request: crate::serialization::native_lifecycle::Request,

@@ -1156,3 +1156,258 @@ async fn legacy_api2_error_reply_cannot_claim_an_unrelated_or_future_receipt() {
     task.await.unwrap();
     assert_eq!(snapshot(&f, id), before);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api1_public_legacy_success_shapes() {
+    use tower::ServiceExt;
+    let f = Fixture::new();
+    let id = f.insert_memory().await;
+    let clock = Arc::new(CountingClock::default());
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = Arc::new(
+        f.storage_adapter()
+            .with_clock(clock.clone())
+            .with_native_lifecycle_policy(Default::default()),
+    );
+    let (state, _query) = state(&f, clock);
+    for name in ["reinforce_memory", "forget_memory"] {
+        let result = crate::mcp::tools::dispatch_tool(&bridge, name, json!({"id":id})).await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let result = serde_json::to_value(result).unwrap();
+        let data: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        let expected = if name == "reinforce_memory" {
+            vec!["id", "isPermastore", "phase", "stability", "strength"]
+        } else {
+            vec!["deleted", "id"]
+        };
+        assert_eq!(
+            data.as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        println!("legacy MCP {name}: {data}");
+    }
+    let id = f.insert_memory().await;
+    for (method, uri, body) in [
+        ("POST", format!("/memories/{id}/reinforce"), "{}"),
+        ("DELETE", format!("/memories/{id}"), ""),
+    ] {
+        let response = crate::api::router(state.clone(), &Default::default())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        let value: Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["data", "tookUs"]
+        );
+        let expected = if method == "POST" {
+            vec!["id", "isPermastore", "phase", "stability", "strength"]
+        } else {
+            vec!["deleted", "id"]
+        };
+        assert_eq!(
+            value["data"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        println!("legacy HTTP {method}: {value}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api1_public_legacy_projection_is_same_tx_under_later_accepted_write() {
+    use crate::serialization::lifecycle_api1 as api1;
+    let f = Fixture::new();
+    let id = f.insert_memory().await;
+    let owner = owner(&f);
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let held = owner.accept_work(None).unwrap();
+    let adapter = f
+        .storage_adapter()
+        .with_clock(Arc::new(CountingClock::default()));
+    let first = tokio::spawn(async move {
+        adapter
+            .api1_lifecycle(api1::request(id, 4, None), Operation::Feedback)
+            .await
+    });
+    let wait = tracker.clone();
+    tokio::task::spawn_blocking(move || wait.wait_until_closed())
+        .await
+        .unwrap();
+    let committed_first = f.record(id).unwrap();
+    assert_eq!(committed_first.access_history.len(), 1);
+    let ctx = MutationContext {
+        store_id: None,
+        scope: MutationScope::Namespace(NamespaceId::new(1)),
+        idempotency_key: None,
+        expected_generation: None,
+        contract_version: 1,
+    };
+    // This previously accepted producer may finish while the first response's
+    // real barrier drains. It commits a different numerical state before return.
+    owner
+        .legacy_lifecycle_with_work(
+            ctx.clone(),
+            id,
+            Some(1),
+            None,
+            Default::default(),
+            Arc::new(CountingClock::default()),
+            Some(&held),
+        )
+        .await
+        .unwrap();
+    assert_ne!(f.record(id).unwrap().stability, committed_first.stability);
+    owner.finish_known_work(held);
+    let first = first.await.unwrap();
+    let Some(api1::Value::Feedback { result }) = first.value else {
+        panic!("{first:?}")
+    };
+    assert_eq!(result.stability, committed_first.stability);
+    assert_eq!(result.strength, committed_first.strength);
+    assert_eq!(tracker.status().pending, 0);
+    let receipt = first.lifecycle.unwrap().receipt.unwrap();
+    drop(owner);
+    let root = f.close();
+    let stored = raw_receipts(root.path())
+        .into_iter()
+        .map(|(_, v)| crate::storage::control::validate_receipt(&v).unwrap())
+        .find(|r| r.receipt.operation_id == receipt.operation_id)
+        .unwrap();
+    assert_eq!(
+        stored.request_hash,
+        crate::storage::control::request_hash(
+            &ctx,
+            "record_legacy_feedback",
+            &[id.as_bytes(), &[4]]
+        ),
+        "unchanged original1 unscoped request identity"
+    );
+    drop(crate::storage::RedbStorageEngine::open(root.path()).unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api1_public_legacy_missing_scope_terminal_and_old_alias_new_server() {
+    use crate::serialization::lifecycle_api1 as api1;
+    let f = Fixture::new();
+    let id = f.insert_memory().await;
+    let clock = Arc::new(CountingClock::default());
+    let adapter = Arc::new(f.storage_adapter().with_clock(clock.clone()));
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        adapter.clone(),
+        &socket.path().join("new.sock"),
+    )
+    .await;
+    let client = remote.test_client();
+    let before = snapshot(&f, id);
+    // New alias without ping/frame negotiation rejects before touching metadata.
+    assert!(
+        client
+            .call(
+                "forget_api1_v1",
+                api1::request(id, 3, None).wire(Operation::Forget)
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(before, snapshot(&f, id));
+    assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    // Old client method on a new daemon retains its exact old scalar shape.
+    assert_eq!(
+        client
+            .call("delete_memory", json!({"id":id}))
+            .await
+            .unwrap(),
+        json!(true)
+    );
+    let terminal = f.record(id).unwrap();
+    assert_eq!(terminal.phase, crate::model::DecayPhase::Tombstone);
+    let repeated = adapter
+        .api1_lifecycle(api1::request(id, 3, None), Operation::Forget)
+        .await;
+    assert!(
+        matches!(repeated.value, Some(api1::Value::Forget { deleted: false })),
+        "{repeated:?}"
+    );
+    let missing = adapter
+        .api1_lifecycle(api1::request(MemoryId::nil(), 3, None), Operation::Forget)
+        .await;
+    assert!(
+        matches!(missing.value, Some(api1::Value::Forget { deleted: false })),
+        "{missing:?}"
+    );
+    let wrong = adapter
+        .api1_lifecycle(api1::request(id, 3, Some("wrong")), Operation::Forget)
+        .await;
+    assert!(wrong.value.is_none());
+    assert_eq!(
+        wrong.lifecycle.unwrap().error.unwrap().code,
+        "NAMESPACE_MISMATCH"
+    );
+    let denied = adapter
+        .api1_lifecycle(api1::request(id, 3, None), Operation::Feedback)
+        .await;
+    assert!(denied.value.is_none());
+    assert_eq!(
+        denied.lifecycle.unwrap().error.unwrap().code,
+        "CONTENT_UNAVAILABLE"
+    );
+    use tower::ServiceExt;
+    let (state, _query) = state(&f, clock.clone());
+    for hard_delete in [false, true] {
+        if hard_delete {
+            f.storage.write().unwrap().delete_memory(id).unwrap();
+            owner(&f).complete().await.unwrap();
+        }
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let calls = clock.0.load(std::sync::atomic::Ordering::SeqCst);
+        let response = crate::api::router(state.clone(), &Default::default())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/memories/{id}/reinforce"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            409,
+            "terminal feedback remains a conflict"
+        );
+        assert_eq!(before, f.storage.read().unwrap().control_state().unwrap());
+        assert_eq!(calls, clock.0.load(std::sync::atomic::Ordering::SeqCst));
+    }
+    task.abort();
+    let _ = task.await;
+}

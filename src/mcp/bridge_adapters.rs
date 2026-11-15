@@ -1565,6 +1565,29 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    fn supports_api1_lifecycle(&self) -> bool {
+        true
+    }
+    async fn api1_lifecycle(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+        operation: crate::serialization::native_lifecycle::Operation,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        let legacy = crate::storage::native_lifecycle::NativePolicyInputs {
+            global: Default::default(),
+            multiplier: self.config.decay.decay_rate_multiplier,
+        };
+        crate::serialization::lifecycle_api1::execute(
+            &self.completion(),
+            request,
+            operation,
+            self.native_policy.as_ref(),
+            legacy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
     async fn feedback_native(
         &self,
         request: crate::serialization::native_lifecycle::Request,
