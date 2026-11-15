@@ -133,3 +133,8 @@ strip = "symbols"
 [profile.bench]
 inherits = "release"
 debug = true
+
+[[example]]
+name = "owned_evaluator"
+path = "examples/owned_evaluator.rs"
+required-features = ["bench"]

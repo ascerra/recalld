@@ -1,0 +1,29 @@
+{
+  "actorArtifactSha256": "9a9cfb7222401d1d9186360b781c2b77118fd420de1f570173d4a67955614289",
+  "mappings": {
+    "019b76da-a800-7cbf-aa23-03b88d1bbdca": [
+      "turn-0"
+    ]
+  },
+  "sourceMappingVersion": 1,
+  "sources": [
+    {
+      "contentSha256": "5d730491df64dd2b0575014d45df60b20f946ec315ab16f577cf9f2c0a392cce",
+      "conversationId": "synthetic-conversation",
+      "fullText": "one retained payload",
+      "fullTextSha256": "ba446548f0a3cc24c6fee4961dafcc8cef09716148330cf5ffd6af3d9e012e04",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 0,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "turn-0",
+      "sourceTimestamp": 1767225600000,
+      "summary": "chronological-sweep",
+      "tags": [
+        "sweep-payload-canary"
+      ],
+      "turnId": "turn-0"
+    }
+  ]
+}

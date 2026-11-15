@@ -86,6 +86,82 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
+    fn accept_work(
+        &self,
+    ) -> Result<Option<crate::storage::work::WorkTicket>, crate::search::SearchError> {
+        self.query_engine.accept_work(None)
+    }
+    fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
+        self.query_engine.finish_work(work);
+    }
+    async fn prepare_coherent_search_with_work(
+        &self,
+        query: state::SearchQuery,
+        include_embeddings: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSearchResponse>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_coherent_payload(
+                Self::pipeline_query(query)?,
+                include_embeddings,
+                false,
+                parent,
+            )
+            .await
+    }
+
+    async fn prepare_search_with_work(
+        &self,
+        query: state::SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        self.search_inner(query, true, parent).await
+    }
+    async fn prepare_similar_with_work(
+        &self,
+        id: MemoryId,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::search::PipelineSearchResult>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_similar_filtered_with_work(id, limit, min_score, requested_access, parent)
+            .await
+    }
+    async fn record_similar_with_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_similar_accesses_with_work(ids, scope, parent)
+            .await
+    }
+    async fn record_coherent_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_exposures_at_with_work(accesses, scope, sampled_at, parent)
+            .await
+    }
+
+    async fn record_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine
+            .record_exposures_with_work(accesses, scope, parent)
+            .await
+    }
+
     fn active_embedding(
         &self,
     ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
@@ -113,13 +189,13 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         &self,
         query: state::SearchQuery,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        self.search_inner(query, false).await
+        self.search_inner(query, false, None).await
     }
     async fn prepare_search(
         &self,
         query: state::SearchQuery,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        self.search_inner(query, true).await
+        self.search_inner(query, true, None).await
     }
 
     async fn find_similar(
@@ -384,6 +460,17 @@ impl state::StorageEngine for StorageEngineAdapter {
         input: crate::storage::insertion::InsertMemory,
         generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
     ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
+        self.insert_memory_with_work(namespace_id, input, generated_embedding, None)
+            .await
+    }
+
+    async fn insert_memory_with_work(
+        &self,
+        namespace_id: NamespaceId,
+        input: crate::storage::insertion::InsertMemory,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -392,11 +479,13 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .insert(
+        .insert_reserved_with_work(
             crate::storage::control::MutationContext::unkeyed(namespace_id),
             input,
             generated_embedding,
             self.clock.now_millis(),
+            None,
+            parent,
         )
         .await
     }
@@ -404,6 +493,14 @@ impl state::StorageEngine for StorageEngineAdapter {
     async fn complete_insertion(
         &self,
         receipt: &crate::storage::control::WriteReceipt,
+    ) -> Result<(), crate::storage::StorageError> {
+        self.complete_insertion_with_work(receipt, None).await
+    }
+
+    async fn complete_insertion_with_work(
+        &self,
+        receipt: &crate::storage::control::WriteReceipt,
+        parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
@@ -413,7 +510,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .complete()
+        .complete_with_work(parent)
         .await
         .map_err(|source| crate::storage::StorageError::CommittedMutation {
             receipt: Box::new(receipt.clone()),
@@ -490,6 +587,15 @@ impl state::StorageEngine for StorageEngineAdapter {
         id: MemoryId,
         namespace: Option<&str>,
     ) -> Result<bool, crate::storage::StorageError> {
+        self.delete_memory_with_work(id, namespace, None).await
+    }
+
+    async fn delete_memory_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<bool, crate::storage::StorageError> {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -498,7 +604,7 @@ impl state::StorageEngine for StorageEngineAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .forget_scoped(id, namespace.map(str::to_owned))
+        .forget_with_work(id, namespace, parent)
         .await
     }
 
@@ -937,9 +1043,24 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
     }
 
     async fn tombstone_node(&self, id: MemoryId) -> Result<(), crate::graph::GraphError> {
-        let mut graph = self.graph.write().await;
-        graph.update_node_state(id, DecayPhase::Tombstone, 0.0)?;
-        Ok(())
+        self.tombstone_node_with_work(id, None).await
+    }
+
+    async fn tombstone_node_with_work(
+        &self,
+        id: MemoryId,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), crate::graph::GraphError> {
+        let work = crate::storage::work::accept_work(&self.storage, parent)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
+        let result = async {
+            let mut graph = self.graph.write().await;
+            graph.update_node_state(id, DecayPhase::Tombstone, 0.0)?;
+            Ok(())
+        }
+        .await;
+        crate::storage::work::finish_work(&self.storage, work);
+        result
     }
 
     async fn add_node(
@@ -950,9 +1071,16 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         strength: f32,
         vector_slot: u32,
     ) -> Result<(), crate::graph::GraphError> {
-        let mut graph = self.graph.write().await;
-        let _ = graph.add_node(id, namespace_id, phase, strength, vector_slot);
-        Ok(())
+        let work = crate::storage::work::accept_work(&self.storage, None)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
+        let result = async {
+            let mut graph = self.graph.write().await;
+            let _ = graph.add_node(id, namespace_id, phase, strength, vector_slot);
+            Ok(())
+        }
+        .await;
+        crate::storage::work::finish_work(&self.storage, work);
+        result
     }
 
     async fn perform_post_creation_links(
@@ -964,15 +1092,43 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         entities: &[String],
         created_at: i64,
     ) {
+        if let Err(error) = self
+            .post_creation_links_with_work(
+                memory_id,
+                namespace_id,
+                embedding,
+                tags,
+                entities,
+                created_at,
+                None,
+            )
+            .await
+        {
+            tracing::warn!(%error, "post-creation graph admission rejected");
+        }
+    }
+
+    async fn post_creation_links_with_work(
+        &self,
+        memory_id: MemoryId,
+        namespace_id: NamespaceId,
+        embedding: &[f32],
+        tags: &[String],
+        entities: &[String],
+        created_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), crate::graph::GraphError> {
         if !self.config.graph.autolink_enabled {
-            return;
+            return Ok(());
         }
 
+        let work = crate::storage::work::accept_work(&self.storage, parent)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let threshold = self.config.graph.auto_link_threshold as f32;
         let max_links = self.config.graph.max_auto_links;
 
         // Autolink: discover and create edges to similar existing memories.
-        if let Err(e) = crate::graph::perform_autolink(
+        if let Err(e) = crate::graph::perform_autolink_with_work(
             memory_id,
             namespace_id,
             embedding,
@@ -983,6 +1139,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
             &self.graph,
             &self.storage,
             &self.cache,
+            Some(&work),
         )
         .await
         {
@@ -996,7 +1153,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         // Entity linking: connect memories sharing named entities.
         if !entities.is_empty() {
             let max_entity_links = self.config.graph.max_entity_links;
-            let _ = crate::graph::perform_entity_link(
+            let _ = crate::graph::perform_entity_link_with_work(
                 memory_id,
                 namespace_id,
                 entities,
@@ -1005,6 +1162,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                 &self.graph,
                 &self.storage,
                 &self.cache,
+                Some(&work),
             )
             .await;
         }
@@ -1033,7 +1191,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                 .collect();
 
             if !recent_memories.is_empty() {
-                if let Err(e) = crate::graph::perform_temporal_link(
+                if let Err(e) = crate::graph::perform_temporal_link_with_work(
                     memory_id,
                     namespace_id,
                     created_at,
@@ -1043,6 +1201,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                     &self.graph,
                     &self.storage,
                     &self.cache,
+                    Some(&work),
                 )
                 .await
                 {
@@ -1054,6 +1213,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
                 }
             }
         }
+        crate::storage::work::finish_work(&self.storage, work);
+        Ok(())
     }
 }
 
@@ -1063,6 +1224,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
 
 /// Adapts the decay subsystem to the API `FsrsEngine` trait.
 pub struct FsrsEngineAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1073,6 +1235,89 @@ pub struct FsrsEngineAdapter {
 }
 
 impl FsrsEngineAdapter {
+    pub(crate) async fn trigger_sweep_with_origin(
+        &self,
+        as_of_millis: Option<i64>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
+        use crate::graph::ActivationConfig;
+
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(Box::new(
+                crate::storage::StorageError::InvalidMutationContext(
+                    "unsupported original application contract".into(),
+                ),
+            ));
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| e.to_string())?
+            .meta_store()
+            .uses_native_lifecycle();
+        let legacy = crate::storage::native_lifecycle::NativePolicyInputs {
+            global: crate::decay::DecayConfig::default(),
+            multiplier: self.config.decay.decay_rate_multiplier as f64,
+        };
+        let policy = if native {
+            self.native_policy.as_ref().ok_or_else(|| {
+                crate::storage::StorageError::InvalidMutationContext(
+                    "native manual sweep requires configured lifecycle policy".into(),
+                )
+            })?
+        } else {
+            &legacy
+        };
+        let sweep_config = SweepConfig::default();
+        let activation_config = ActivationConfig::default();
+
+        let result = DecaySweepRunner::execute_sweep_with_origin_work(
+            &sweep_config,
+            &policy.global,
+            &activation_config,
+            &self.storage,
+            &self.graph,
+            &self.cache,
+            policy.multiplier,
+            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
+            None,
+            self.completion.as_ref(),
+            original_contract_version,
+        )
+        .await;
+
+        // Do not let a subsequent unavailable-handle error hide the original
+        // canonical receipt or uncertain operation identity.
+        if let Some((receipt, message)) = &result.failed_commit {
+            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    message.clone(),
+                )),
+            }));
+        }
+        if let Some(operation_id) = result.uncertain_operation {
+            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
+                format!(
+                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
+                ),
+            )));
+        }
+        if let Some(error) = &result.publication_error {
+            return Err(error.clone().into());
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     /// Creates a new adapter with the storage engine, cache, and sweep-thread liveness flag.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1083,6 +1328,7 @@ impl FsrsEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -1141,7 +1387,17 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         quality: u8,
         namespace: Option<&str>,
     ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
-        let outcome = crate::decay::storage_adapter::reinforce(
+        self.reinforce_with_work(id, quality, namespace, None).await
+    }
+
+    async fn reinforce_with_work(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
+        let outcome = crate::decay::storage_adapter::reinforce_with_completion(
             self.storage.clone(),
             self.cache.clone(),
             id,
@@ -1149,6 +1405,8 @@ impl state::FsrsEngine for FsrsEngineAdapter {
             self.config.decay.decay_rate_multiplier,
             self.clock.now_millis(),
             namespace.map(str::to_owned),
+            parent,
+            self.completion.as_ref(),
         )
         .await;
         let plan = outcome?;
@@ -1172,55 +1430,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         &self,
         as_of_millis: Option<i64>,
     ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
-        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
-        use crate::graph::ActivationConfig;
-
-        let sweep_config = SweepConfig::default();
-        let decay_config = crate::decay::DecayConfig::default();
-        let activation_config = ActivationConfig::default();
-        let global_multiplier = self.config.decay.decay_rate_multiplier as f64;
-
-        let result = DecaySweepRunner::execute_sweep_at(
-            &sweep_config,
-            &decay_config,
-            &activation_config,
-            &self.storage,
-            &self.graph,
-            &self.cache,
-            global_multiplier,
-            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
-        )
-        .await;
-
-        // Do not let a subsequent unavailable-handle error hide the original
-        // canonical receipt or uncertain operation identity.
-        if let Some((receipt, message)) = &result.failed_commit {
-            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
-                receipt: Box::new(receipt.clone()),
-                source: Box::new(crate::storage::StorageError::RecoveryRequired(
-                    message.clone(),
-                )),
-            }));
-        }
-        if let Some(operation_id) = result.uncertain_operation {
-            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
-                format!(
-                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
-                ),
-            )));
-        }
-        if let Some(completion) = &self.completion {
-            completion.complete().await?;
-        } else if self
-            .storage
-            .read()
-            .map_err(|e| e.to_string())?
-            .meta_store()
-            .needs_effects_rebuild()
-        {
-            return Err("derived completion handles missing; reopen required".into());
-        }
-        Ok(result)
+        self.trigger_sweep_with_origin(as_of_millis, 1).await
     }
 }
 
@@ -1231,12 +1441,20 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl NamespaceRegistryAdapter {
     /// Creates a new adapter wrapping the storage engine for namespace operations.
     pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            clock: Arc::new(crate::time::SystemClock),
+        }
+    }
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -1320,54 +1538,61 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         desired_retention: f32,
         decay_rate_multiplier: Option<f32>,
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
-        let now = chrono::Utc::now().timestamp_millis();
+        let work = crate::storage::work::accept_work(&self.storage, None)?;
+        let worker = work.child()?;
+        let now = self.clock.now_millis();
         let storage = self.storage.clone();
         let name_owned = name.to_string();
 
-        tokio::task::spawn_blocking(move || {
-            // Resolve embedding_dim: use provided value, or inherit from
-            // the 'default' namespace, or fall back to 1536.
-            let dim = embedding_dim.unwrap_or_else(|| {
-                storage
-                    .read()
-                    .ok()
-                    .and_then(|s| s.get_namespace_by_name("default").ok().flatten())
-                    .map(|ns| ns.embedding_dim)
-                    .unwrap_or(1536)
-            });
+        let result = tokio::task::spawn_blocking(move || {
+            let result = (|| {
+                // Resolve embedding_dim: use provided value, or inherit from
+                // the 'default' namespace, or fall back to 1536.
+                let dim = embedding_dim.unwrap_or_else(|| {
+                    storage
+                        .read()
+                        .ok()
+                        .and_then(|s| s.get_namespace_by_name("default").ok().flatten())
+                        .map(|ns| ns.embedding_dim)
+                        .unwrap_or(1536)
+                });
 
-            let ns_config = NamespaceConfig {
-                schema: None,
-                id: NamespaceId::UNSET,
-                name: name_owned,
-                embedding_dim: dim,
-                initial_stability,
-                default_difficulty: 5.0,
-                phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
-                permastore_threshold: 1500.0,
-                created_at: now,
-                desired_retention,
-                decay_rate_multiplier,
-            };
+                let ns_config = NamespaceConfig {
+                    schema: None,
+                    id: NamespaceId::UNSET,
+                    name: name_owned,
+                    embedding_dim: dim,
+                    initial_stability,
+                    default_difficulty: 5.0,
+                    phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
+                    permastore_threshold: 1500.0,
+                    created_at: now,
+                    desired_retention,
+                    decay_rate_multiplier,
+                };
 
-            crate::decay::lifecycle::resolve_policy(
-                &ns_config,
-                &crate::decay::DecayConfig::default(),
-                1.0,
-            )?;
+                crate::decay::lifecycle::resolve_policy(
+                    &ns_config,
+                    &crate::decay::DecayConfig::default(),
+                    1.0,
+                )?;
 
-            let mut storage_w = storage.write().map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("storage lock poisoned: {e}"),
-                )) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-            let assigned_id = storage_w.create_namespace(&ns_config)?;
-            Ok(NamespaceConfig {
-                schema: None,
-                id: assigned_id,
-                ..ns_config
-            })
+                let mut storage_w = storage.write().map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("storage lock poisoned: {e}"),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })?;
+                let assigned_id =
+                    storage_w.create_namespace_with_work(&ns_config, Some(&worker))?;
+                Ok(NamespaceConfig {
+                    schema: None,
+                    id: assigned_id,
+                    ..ns_config
+                })
+            })();
+            crate::storage::work::finish_work(&storage, worker);
+            result
         })
         .await
         .map_err(|e| {
@@ -1375,7 +1600,9 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
                 std::io::ErrorKind::Other,
                 format!("blocking task join error: {e}"),
             )) as Box<dyn std::error::Error + Send + Sync>
-        })?
+        })?;
+        crate::storage::work::finish_work(&self.storage, work);
+        result
     }
 }
 
@@ -1715,11 +1942,9 @@ mod tests {
 }
 
 impl SearchPipelineAdapter {
-    async fn search_inner(
-        &self,
+    fn pipeline_query(
         query: state::SearchQuery,
-        defer_recording: bool,
-    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+    ) -> Result<crate::search::SearchQuery, crate::search::SearchError> {
         // Convert API-layer SearchQuery to the pipeline's SearchQuery.
         let (text, query_embedding) = match query.query {
             state::QueryInput::Text(t) => (Some(t), None),
@@ -1753,7 +1978,7 @@ impl SearchPipelineAdapter {
             })
             .unwrap_or_default();
 
-        let pipeline_query = crate::search::SearchQuery {
+        Ok(crate::search::SearchQuery {
             record_access: query.record_access,
             query_embedding,
             text,
@@ -1778,11 +2003,24 @@ impl SearchPipelineAdapter {
             time_range_start: query.time_range_start, // Issue 3: pass time range
             time_range_end: query.time_range_end,     // Issue 3: pass time range
             entities: query.entities.clone(),         // Issue 4: pass entities
-        };
+        })
+    }
+
+    async fn search_inner(
+        &self,
+        query: state::SearchQuery,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        let pipeline_query = Self::pipeline_query(query.clone())?;
         let response = if defer_recording {
-            self.query_engine.prepare_search(pipeline_query).await?
+            self.query_engine
+                .prepare_search_with_work(pipeline_query, parent)
+                .await?
         } else {
-            self.query_engine.search(pipeline_query).await?
+            self.query_engine
+                .search_with_work(pipeline_query, parent)
+                .await?
         };
         Ok(response
             .results

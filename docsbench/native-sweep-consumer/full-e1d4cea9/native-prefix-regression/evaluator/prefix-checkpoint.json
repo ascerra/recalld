@@ -1,0 +1,10 @@
+{
+  "committed": {
+    "generation": "8",
+    "storeId": "92269b45-87b1-4693-b5ea-8c85fae2aab5"
+  },
+  "logicalHash": "ea7adde15efce8c7c14b0eece6ad4f08fe06d28dd238ef3b8efa691e9b759a8b",
+  "manifest": "/output/native-prefix-regression/runtime/recalld-frozen-canonical-0q1CMU/manifest.json",
+  "sha256": "45d7beac48fecd460231903f4eb0f369e3dfaf99b40e95cfd8fdc141022cc33c",
+  "track": "isolated-native-prefix-checkpoint-v1"
+}

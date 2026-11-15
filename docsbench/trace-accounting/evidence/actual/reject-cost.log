@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/work/source/scripts/public-mcp-evaluation.py", line 618, in <module>
+    main()
+  File "/work/source/scripts/public-mcp-evaluation.py", line 614, in main
+    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+  File "/work/source/scripts/public-mcp-evaluation.py", line 366, in run_episode
+    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/public-mcp-evaluation.py", line 238, in validate
+    raise ValueError("unsupported accounting/token/context/cost policy")
+ValueError: unsupported accounting/token/context/cost policy

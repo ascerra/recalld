@@ -1,0 +1,115 @@
+{
+  "fixtureVersion": 1,
+  "mappings": {
+    "turn-0": "01a1dcc2-97df-7960-a1c9-e9ad2e4108cf",
+    "turn-1": "01a1dcc2-97e5-7a42-b4e6-f810ca8752cc",
+    "turn-2": "01a1dcc2-97e8-7dc3-b375-eb33fdda1568",
+    "turn-3": "01a1dcc2-97ec-7081-81ff-752131502597"
+  },
+  "migration": {
+    "receipt": {
+      "committedGeneration": "8",
+      "operationId": "6ef1fa94-6753-4215-9a03-c2cbfefe7ab8",
+      "outcome": {
+        "attestedNamespaces": 2,
+        "kind": "schemaMigrated",
+        "migrationId": "e2f3a404-ec5e-4fe9-bf1f-e30d7cdd3974",
+        "recordCount": 4
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "518bbc66-fca1-493f-8332-6e803726c10c"
+    },
+    "state": {
+      "canonicalSchemaVersion": 2,
+      "migrationId": "e2f3a404-ec5e-4fe9-bf1f-e30d7cdd3974",
+      "migrationNow": 1767225600000,
+      "publicationGeneration": "8",
+      "receiptOperationId": "6ef1fa94-6753-4215-9a03-c2cbfefe7ab8",
+      "servingMode": "offline",
+      "source": {
+        "generation": "7",
+        "storeId": "518bbc66-fca1-493f-8332-6e803726c10c"
+      }
+    }
+  },
+  "profile": {
+    "dimension": 4,
+    "documentPreprocessing": {
+      "prefix": "a6-document:",
+      "version": "recalld-document-v1"
+    },
+    "identityVersion": 1,
+    "modelId": "synthetic-wrong-profile",
+    "modelRevision": null,
+    "normalization": "l2_unit_v1",
+    "providerKind": "openai",
+    "queryPreprocessing": {
+      "prefix": "a6-query:",
+      "version": "recalld-query-v1"
+    }
+  },
+  "scope": "synthetic-migrated-prefix-not-independent-genesis",
+  "sourceReceipts": [
+    {
+      "committedGeneration": "3",
+      "operationId": "6cbbe3c8-c69c-430b-8518-40e704466e99",
+      "outcome": {
+        "createdAt": 1767225600000,
+        "edgesPut": 0,
+        "embeddingDim": 4,
+        "initialStabilityBits": 1080932958,
+        "kind": "memoryInserted",
+        "memoryId": "01a1dcc2-97df-7960-a1c9-e9ad2e4108cf"
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "518bbc66-fca1-493f-8332-6e803726c10c"
+    },
+    {
+      "committedGeneration": "4",
+      "operationId": "acaa69d5-10c3-4cfe-904c-5e2b0d022b44",
+      "outcome": {
+        "createdAt": 1767225600000,
+        "edgesPut": 0,
+        "embeddingDim": 4,
+        "initialStabilityBits": 1080932958,
+        "kind": "memoryInserted",
+        "memoryId": "01a1dcc2-97e5-7a42-b4e6-f810ca8752cc"
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "518bbc66-fca1-493f-8332-6e803726c10c"
+    },
+    {
+      "committedGeneration": "5",
+      "operationId": "2b5b0c7b-beae-4e00-9419-78e6a3ee79a3",
+      "outcome": {
+        "createdAt": 1767225600000,
+        "edgesPut": 0,
+        "embeddingDim": 4,
+        "initialStabilityBits": 1080932958,
+        "kind": "memoryInserted",
+        "memoryId": "01a1dcc2-97e8-7dc3-b375-eb33fdda1568"
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "518bbc66-fca1-493f-8332-6e803726c10c"
+    },
+    {
+      "committedGeneration": "7",
+      "operationId": "ccec1d52-67e6-435e-8bb3-a8260b002f11",
+      "outcome": {
+        "createdAt": 1767225600000,
+        "edgesPut": 0,
+        "embeddingDim": 4,
+        "initialStabilityBits": 1080932958,
+        "kind": "memoryInserted",
+        "memoryId": "01a1dcc2-97ec-7081-81ff-752131502597"
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "518bbc66-fca1-493f-8332-6e803726c10c"
+    }
+  ]
+}

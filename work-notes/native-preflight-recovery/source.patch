@@ -1,0 +1,468 @@
+diff --git a/docs/implementation/native-preflight-recovery.md b/docs/implementation/native-preflight-recovery.md
+new file mode 100644
+index 0000000..505ee34
+--- /dev/null
++++ b/docs/implementation/native-preflight-recovery.md
+@@ -0,0 +1,44 @@
++# Native startup validates repaired copies
++
++Native startup previously rejected a real unclean process exit with redb
++`RepairAborted` during strict preflight, before reaching its writable recovery
++path. This occurs without batch operations: an actual native insertion exiting
++before or after metadata commit reproduces it.
++
++Only native preflight now permits redb repair of disposable metadata and edge
++database copies. The existing complete validator still checks schema, lineage,
++receipt proofs, pending effects, text, vectors and edge indexes before opening
++the original databases for writing. Ordinary offline snapshot inspection and
++import validation retain their existing repair-disabled behavior. This does not
++apply effects during preflight or bypass malformed canonical-state rejection.
++
++The engine already acquires stable store ownership and the directory lock before
++preflight and holds both through writable recovery and engine lifetime. The
++regressions use a test-only callback at the actual post-preflight boundary to
++check both locks and compare every original file before writable open. A separate
++process also verifies the owned store cannot be opened concurrently.
++
++The immutable-rejection evidence covers crash startup without a pending restore
++journal. Ownership acquisition can first complete an existing restore journal;
++that separate recovery protocol is not claimed to leave all source bytes
++unchanged on every subsequent startup failure.
++
++## Regression coverage
++
++- Actual native insertion exits with code 91 at `before_metadata_commit` and
++  `after_metadata_commit`. Reopen recovers; retry commits once or replays the
++  existing receipt respectively, with the expected generation and one parent
++  edge. A second reopen passes strict schema inspection.
++- Five actual migrated/native stores are corrupted in schema, pending effects,
++  text, vector or edge state, then exited without closing redb. Copy repair
++  succeeds, full validation rejects each malformed store, and original bytes
++  remain identical. Test-only corruption is never used to create valid state.
++- Each scenario proves at least one database requires redb repair. A valid
++  allocator checkpoint can let the other database open without invoking repair;
++  requiring both would incorrectly constrain redb behavior.
++- The strict offline consumer rejects the unclean stores and leaves them intact.
++
++The implementation is a minimal child of PR82, with no batch or catalog ancestry.
++Ordinary schema-2 serving remains gated. The associated evidence report preserves
++the failing source and executable identity, corrected logs, and the initial
++test-construction failures separately from the reproduced runtime defect.
+diff --git a/src/storage/metadata/native_records/recovery_tests.rs b/src/storage/metadata/native_records/recovery_tests.rs
+new file mode 100644
+index 0000000..fa63b63
+--- /dev/null
++++ b/src/storage/metadata/native_records/recovery_tests.rs
+@@ -0,0 +1,352 @@
++//! Real nonbatch process exits. Test-only corruption is applied only after a
++//! valid native insertion, to prove repaired copies still undergo strict checks.
++use super::*;
++use crate::storage::{ownership, validation};
++use std::io::{Seek, SeekFrom, Write};
++
++fn files(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
++    fn walk(root: &Path, at: &Path, out: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
++        for item in std::fs::read_dir(at).unwrap() {
++            let path = item.unwrap().path();
++            if path.is_dir() {
++                walk(root, &path, out);
++            } else {
++                out.insert(
++                    path.strip_prefix(root).unwrap().into(),
++                    std::fs::read(path).unwrap(),
++                );
++            }
++        }
++    }
++    let mut out = Default::default();
++    walk(path, path, &mut out);
++    out
++}
++
++fn child(d: &Data, id: MemoryId, action: &str, crash: Option<&str>) -> std::process::Output {
++    let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
++    cmd.args([
++        "--exact",
++        "storage::metadata::native_records::tests::recovery::native_preflight_process_child",
++        "--nocapture",
++    ])
++    .env("RECALLD_NATIVE_RECOVERY_PATH", &d.path)
++    .env("RECALLD_NATIVE_RECOVERY_PARENT", d.parent.to_string())
++    .env("RECALLD_NATIVE_RECOVERY_NAMESPACE", d.ns.get().to_string())
++    .env("RECALLD_NATIVE_RECOVERY_ID", id.to_string())
++    .env("RECALLD_NATIVE_RECOVERY_ACTION", action)
++    .env_remove("RECALLD_TEST_EFFECT_CRASH");
++    if let Some(point) = crash {
++        cmd.env("RECALLD_TEST_EFFECT_CRASH", point);
++    }
++    cmd.output().unwrap()
++}
++
++#[test]
++fn native_preflight_process_child() {
++    let Ok(path) = std::env::var("RECALLD_NATIVE_RECOVERY_PATH") else {
++        return;
++    };
++    let d = Data {
++        path: path.into(),
++        parent: MemoryId::from_uuid(
++            std::env::var("RECALLD_NATIVE_RECOVERY_PARENT")
++                .unwrap()
++                .parse()
++                .unwrap(),
++        ),
++        ns: NamespaceId::new(
++            std::env::var("RECALLD_NATIVE_RECOVERY_NAMESPACE")
++                .unwrap()
++                .parse()
++                .unwrap(),
++        ),
++        profile: crate::embedding::runtime::tests::profile(),
++    };
++    let id = MemoryId::from_uuid(
++        std::env::var("RECALLD_NATIVE_RECOVERY_ID")
++            .unwrap()
++            .parse()
++            .unwrap(),
++    );
++    let action = std::env::var("RECALLD_NATIVE_RECOVERY_ACTION").unwrap();
++    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
++    if action == "locked" {
++        assert!(matches!(
++            NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock),
++            Err(StorageError::DatabaseLocked)
++        ));
++        return;
++    }
++    let mut session = open(&d, clock);
++    let mut original = input(&d);
++    original.memory.id = Some(id);
++    let intent = session.capture_insert(scope(&d), &original).unwrap();
++    let receipt = session
++        .insert_prepared(
++            &ctx(&session, &d, "native-crash-insert"),
++            &intent,
++            &generated(),
++        )
++        .unwrap();
++    assert_ne!(action, "crash", "requested crash hook did not exit");
++    let record = session.engine.get_record(id).unwrap().unwrap();
++    session.engine.sync().unwrap();
++    drop(session);
++
++    // Negative fixture corruption only, under actual store/directory ownership.
++    // Leave both redb handles open at exit so their copies need recovery.
++    let _owner = ownership::StoreOwnership::acquire(&d.path).unwrap();
++    let _directory = ownership::lock_directory(&d.path).unwrap();
++    let meta = redb::Database::open(d.path.join("meta.db")).unwrap();
++    let edges = redb::Database::open(d.path.join("edges.db")).unwrap();
++    meta.begin_write().unwrap().commit().unwrap();
++    edges.begin_write().unwrap().commit().unwrap();
++    match action.as_str() {
++        "schema" => {
++            let tx = meta.begin_write().unwrap();
++            {
++                let mut table = tx.open_table(NAMESPACE_TABLE).unwrap();
++                let mut ns =
++                    NamespaceConfig::decode(table.get(d.ns.get()).unwrap().unwrap().value())
++                        .unwrap();
++                ns.schema.as_mut().unwrap().namespace_schema_version = 99;
++                table
++                    .insert(d.ns.get(), control::encode(&ns).unwrap().as_slice())
++                    .unwrap();
++            }
++            tx.commit().unwrap();
++        }
++        "effects" => {
++            let tx = meta.begin_write().unwrap();
++            {
++                let mut table = tx.open_table(super::super::effects::EFFECTS).unwrap();
++                let key = receipt.operation_id.as_bytes().as_slice();
++                let mut effect: super::super::effects::PendingEffects =
++                    control::decode(table.get(key).unwrap().unwrap().value()).unwrap();
++                effect.version = 99;
++                table
++                    .insert(key, control::encode(&effect).unwrap().as_slice())
++                    .unwrap();
++            }
++            tx.commit().unwrap();
++        }
++        "text" => {
++            let selection = crate::storage::metadata::text_generation::read_selection(
++                &meta.begin_read().unwrap(),
++            )
++            .unwrap()
++            .unwrap();
++            let mut file = std::fs::OpenOptions::new()
++                .write(true)
++                .open(d.path.join(selection.filename))
++                .unwrap();
++            file.seek(SeekFrom::End(-1)).unwrap();
++            file.write_all(&[0xff]).unwrap();
++            file.sync_all().unwrap();
++        }
++        "vector" => {
++            let mut file = std::fs::OpenOptions::new()
++                .write(true)
++                .open(d.path.join("native/vectors.dat"))
++                .unwrap();
++            file.seek(SeekFrom::Start(
++                crate::storage::vectors::VectorFileHeader::data_offset(record.vector_slot, 16),
++            ))
++            .unwrap();
++            file.write_all(&f32::NAN.to_le_bytes()).unwrap();
++            file.sync_all().unwrap();
++        }
++        "edges" => {
++            let tx = edges.begin_write().unwrap();
++            {
++                let mut table = tx.open_table(crate::storage::edges::FORWARD_EDGES).unwrap();
++                let key = table
++                    .iter()
++                    .unwrap()
++                    .next()
++                    .unwrap()
++                    .unwrap()
++                    .0
++                    .value()
++                    .to_vec();
++                table.remove(key.as_slice()).unwrap();
++            }
++            tx.commit().unwrap();
++        }
++        _ => panic!("unknown corruption case"),
++    }
++    std::process::exit(94);
++}
++
++fn require_disposable_repair(path: &Path) {
++    let before = files(path);
++    let mut needs_repair = Vec::new();
++    for name in ["meta.db", "edges.db"] {
++        match validation::inspect_database(&path.join(name)) {
++            Err(StorageError::RedbDatabase(redb::DatabaseError::RepairAborted)) => {
++                needs_repair.push(name)
++            }
++            Ok(_) => {}
++            Err(error) => panic!("{name}: unexpected inspection error: {error:?}"),
++        }
++        let (_copy, _db) = validation::inspect_database_copy(&path.join(name), true).unwrap();
++    }
++    eprintln!("unclean redb files requiring copy repair: {needs_repair:?}");
++    assert!(
++        !needs_repair.is_empty(),
++        "process exit did not require redb repair"
++    );
++    assert_eq!(files(path), before, "copy repair changed source bytes");
++    assert!(crate::storage::offline_snapshot::OfflineSnapshot::open(path).is_err());
++    assert_eq!(
++        files(path),
++        before,
++        "offline inspection changed source bytes"
++    );
++}
++
++struct ProbeReset;
++impl Drop for ProbeReset {
++    fn drop(&mut self) {
++        validation::NATIVE_PREFLIGHT_PROBE.with(|probe| {
++            probe.borrow_mut().take();
++        });
++    }
++}
++fn pre_writable_probe(path: &Path) -> (ProbeReset, Arc<AtomicUsize>) {
++    let before = files(path);
++    let count = Arc::new(AtomicUsize::new(0));
++    let observed = count.clone();
++    validation::NATIVE_PREFLIGHT_PROBE.with(|probe| {
++        assert!(probe.borrow().is_none());
++        *probe.borrow_mut() = Some(Box::new(move |path| {
++            assert!(matches!(
++                ownership::StoreOwnership::acquire(path),
++                Err(StorageError::DatabaseLocked)
++            ));
++            assert!(ownership::lock_directory(path).is_err());
++            assert_eq!(files(path), before, "source changed before writable open");
++            observed.fetch_add(1, Ordering::SeqCst);
++        }));
++    });
++    (ProbeReset, count)
++}
++
++#[test]
++fn native_preflight_recovers_actual_nonbatch_process_exits_and_retries_once() {
++    for point in ["before_metadata_commit", "after_metadata_commit"] {
++        eprintln!("native recovery crash point: {point}");
++        let root = tempfile::tempdir().unwrap();
++        let d = fixture(root.path());
++        let id = MemoryId::new();
++        let initial = inspect_schema(&d.path).unwrap().control;
++        let output = child(&d, id, "crash", Some(point));
++        assert_eq!(
++            output.status.code(),
++            Some(91),
++            "{point}: {}",
++            String::from_utf8_lossy(&output.stderr)
++        );
++        require_disposable_repair(&d.path);
++        let before = files(&d.path);
++        {
++            let _owner = ownership::StoreOwnership::acquire(&d.path).unwrap();
++            let _directory = ownership::lock_directory(&d.path).unwrap();
++            let probe = child(&d, id, "locked", None);
++            assert!(
++                probe.status.success(),
++                "{}",
++                String::from_utf8_lossy(&probe.stderr)
++            );
++            assert_eq!(files(&d.path), before);
++        }
++        let (probe, checked) = pre_writable_probe(&d.path);
++        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
++        let mut session =
++            NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock.clone())
++                .unwrap_or_else(|e| panic!("{point}: actual native reopen failed: {e:?}"));
++        assert_eq!(checked.load(Ordering::SeqCst), 1);
++        drop(probe);
++        assert!(matches!(
++            ownership::StoreOwnership::acquire(&d.path),
++            Err(StorageError::DatabaseLocked)
++        ));
++        assert!(ownership::lock_directory(&d.path).is_err());
++        let committed = point == "after_metadata_commit";
++        assert_eq!(session.engine.get_record(id).unwrap().is_some(), committed);
++        let mut original = input(&d);
++        original.memory.id = Some(id);
++        let intent = session.capture_insert(scope(&d), &original).unwrap();
++        let key = ctx(&session, &d, "native-crash-insert");
++        let receipt = session
++            .insert_prepared(&key, &intent, &generated())
++            .unwrap();
++        assert_eq!(receipt.replayed, committed);
++        assert_eq!(
++            receipt.committed_generation,
++            initial.committed_generation.next().unwrap()
++        );
++        assert_eq!(clock.0.load(Ordering::SeqCst), usize::from(!committed));
++        let replay = session
++            .insert_prepared(&key, &intent, &generated())
++            .unwrap();
++        assert!(replay.replayed);
++        assert_eq!(replay.operation_id, receipt.operation_id);
++        assert_eq!(
++            session
++                .engine
++                .get_record(d.parent)
++                .unwrap()
++                .unwrap()
++                .edge_count,
++            1
++        );
++        assert_eq!(session.engine.scan_all().unwrap().len(), 2);
++        drop(session);
++        let reopened = open(&d, clock);
++        assert!(reopened.engine.get_record(id).unwrap().is_some());
++        drop(reopened);
++        inspect_schema(&d.path).unwrap();
++    }
++}
++
++#[test]
++fn native_preflight_rejects_malformed_repaired_copies_without_original_writes() {
++    // No restore journal is pending: journal recovery is a separate owned path.
++    for kind in ["schema", "effects", "text", "vector", "edges"] {
++        let root = tempfile::tempdir().unwrap();
++        let d = fixture(root.path());
++        let output = child(&d, MemoryId::new(), kind, None);
++        assert_eq!(
++            output.status.code(),
++            Some(94),
++            "{kind}: {}",
++            String::from_utf8_lossy(&output.stderr)
++        );
++        require_disposable_repair(&d.path);
++        let before = files(&d.path);
++        let (probe, checked) = pre_writable_probe(&d.path);
++        let result = NativeLifecycleSession::open(
++            &d.path,
++            NativePolicyInputs::default(),
++            Arc::new(FixedClock(AtomicUsize::new(0))),
++        );
++        let error = result.err().expect("malformed store opened");
++        eprintln!("rejected malformed {kind} after disposable repair: {error:?}");
++        assert!(
++            !matches!(
++                error,
++                StorageError::RedbDatabase(redb::DatabaseError::RepairAborted)
++            ),
++            "{kind}: copy repair was not reached"
++        );
++        assert_eq!(checked.load(Ordering::SeqCst), 1);
++        drop(probe);
++        assert_eq!(
++            files(&d.path),
++            before,
++            "{kind}: rejected open changed source"
++        );
++    }
++}
+diff --git a/src/storage/metadata/native_records/tests.rs b/src/storage/metadata/native_records/tests.rs
+index b6a4a95..ee41e7e 100644
+--- a/src/storage/metadata/native_records/tests.rs
++++ b/src/storage/metadata/native_records/tests.rs
+@@ -19,6 +19,9 @@ mod readers;
+ #[path = "phase_clock_tests.rs"]
+ mod phase_clock;
+ 
++#[path = "recovery_tests.rs"]
++mod recovery;
++
+ struct FixedClock(AtomicUsize);
+ impl Clock for FixedClock {
+     fn now_millis(&self) -> i64 {
+diff --git a/src/storage/validation.rs b/src/storage/validation.rs
+index 3ffc5d3..4ef2bec 100644
+--- a/src/storage/validation.rs
++++ b/src/storage/validation.rs
+@@ -114,7 +114,20 @@ pub(crate) fn validate_import_stage(path: &Path) -> Result<HashSet<String>, Stor
+ }
+ /// Strict private-native preflight admits only validated native recovery plans.
+ pub(crate) fn preflight_native(path: &Path) -> Result<(), StorageError> {
+-    validate_snapshot(path, false, true).map(|_| ())
++    let result = validate_snapshot(path, false, true).map(|_| ());
++    #[cfg(test)]
++    NATIVE_PREFLIGHT_PROBE.with(|probe| {
++        if let Some(check) = probe.borrow().as_ref() {
++            check(path);
++        }
++    });
++    result
++}
++
++#[cfg(test)]
++thread_local! {
++    pub(crate) static NATIVE_PREFLIGHT_PROBE:
++        std::cell::RefCell<Option<Box<dyn Fn(&Path)>>> = const { std::cell::RefCell::new(None) };
+ }
+ fn validate_snapshot(
+     path: &Path,
+@@ -130,7 +143,9 @@ fn validate_snapshot(
+     for name in ["meta.db", "edges.db", "fulltext.dat"] {
+         require_file(&path.join(name))?;
+     }
+-    let (_meta_copy, meta) = inspect_database(&path.join("meta.db"))?;
++    // Only native startup permits redb recovery, and only on disposable copies.
++    // All canonical validation still precedes writable opens of the originals.
++    let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
+     let read = meta.begin_read()?;
+     let control = super::control::validate_existing(&read)?;
+     if native_recovery {
+@@ -312,7 +327,7 @@ fn validate_snapshot(
+     for effect in effects.iter().filter(|e| !e.canonical_applied) {
+         super::metadata::effects::validate_plan(effect, &decoded)?;
+     }
+-    let (_edges_copy, edges) = inspect_database(&path.join("edges.db"))?;
++    let (_edges_copy, edges) = inspect_database_copy(&path.join("edges.db"), native_recovery)?;
+     let read = edges.begin_read()?;
+     let forward = read.open_table(FORWARD_EDGES)?;
+     let reverse = read.open_table(REVERSE_EDGES)?;
