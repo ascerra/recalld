@@ -170,29 +170,29 @@ impl Drop for Timeline {
 
 /// An outer request reports error explicitly; cancellation/unwind retains a
 /// duration with an honestly ambiguous outcome. Errors themselves are not logged.
-pub(crate) async fn measure<T, E>(
+pub(crate) fn measure<T, E>(
     operation: &'static str,
     record_access: bool,
     future: impl Future<Output = Result<T, E>>,
-) -> Result<T, E> {
-    measure_with_sampler(operation, record_access, future, None).await
+) -> impl Future<Output = Result<T, E>> {
+    measure_with_sampler(operation, record_access, future, None)
 }
 
-async fn measure_with_sampler<T, E>(
+fn measure_with_sampler<T, E>(
     operation: &'static str,
     record_access: bool,
     future: impl Future<Output = Result<T, E>>,
     sampler_override: Option<&Sampler>,
-) -> Result<T, E> {
-    measure_request(operation, Some(record_access), future, sampler_override).await
+) -> impl Future<Output = Result<T, E>> {
+    measure_request(operation, Some(record_access), future, sampler_override)
 }
 
 /// Transport intent is unknown before decoding, never implicitly read-only.
-pub(crate) async fn measure_transport<T, E>(
+pub(crate) fn measure_transport<T, E>(
     operation: &'static str,
     future: impl Future<Output = Result<T, E>>,
-) -> Result<T, E> {
-    measure_request(operation, None, future, None).await
+) -> impl Future<Output = Result<T, E>> {
+    measure_request(operation, None, future, None)
 }
 
 async fn measure_request<T, E>(
