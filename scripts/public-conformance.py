@@ -20,7 +20,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = 'benchmarks/public-conformance/fixture.json'
-FIXTURES = {1: FIXTURE, 2: 'benchmarks/public-conformance/fixture-v2.json'}
+FIXTURES = {1: FIXTURE, 2: 'benchmarks/public-conformance/fixture-v2.json', 3: 'benchmarks/public-conformance/fixture-v3.json'}
 HARNESS_INPUTS = [*FIXTURES.values(), 'scripts/public-conformance.py',
                   'scripts/public-conformance.Dockerfile', 'scripts/test_public_conformance.py']
 CARGO_INPUTS = ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml']
@@ -176,6 +176,7 @@ def host(args):
         'fixtureVersion': args.fixture_version, 'fixturePath': FIXTURES[args.fixture_version],
         'fixtureSha256': source['sourceFilesSha256'][FIXTURES[args.fixture_version]], 'protocolVersion': PROTOCOL, 'contractVersion': 'legacy-v1',
         'clock': 'actual wall clock; no public manual clock', 'snapshots': 'A1 interfaces unavailable',
+        'validationTestThreads': args.test_threads,
         'seed': 7, 'freshReplaysPerTransport': 3, 'transports': ['stdio', 'http-mcp', 'rest'],
         'limits': 'network none; 2 CPUs; 4 GiB; 2 build jobs', 'status': 'preparing'}
     command = ['docker', 'run', '--rm', '--network', 'none', '--cpus', '2', '--memory', '4g',
@@ -197,6 +198,8 @@ cargo clippy --offline --locked --all-targets --all-features > /work/output/clip
 cargo build --offline --locked --bin recalld > /work/output/build.log 2>&1
 python3 scripts/public-conformance.py --inside --fixture-version FIXTURE_VERSION
 '''.replace('FIXTURE_VERSION', str(args.fixture_version))]
+    if args.test_threads is not None:
+        command[command.index(image['Id']):command.index(image['Id'])] = ['--env', f'RUST_TEST_THREADS={args.test_threads}']
     manifest['containerCommand'] = command
     save(output / 'manifest.json', manifest)
     try:
@@ -457,6 +460,9 @@ def vector_window(client, fixture, ids, mappings, output, phase):
             assert ids['birch'] not in returned
         result = {'similarityRanks': [mappings[i][0] for i in returned],
             'similarityWireNamespaces': [h['memory']['namespace'] if client.mode == 'rest' else h['namespace'] for h in hits]}
+        if fixture['fixtureVersion'] >= 3:
+            result['similarityScoreThresholdPassed'] = all(h['score'] >= 0.1 for h in hits)
+            result['similarityNamespacesPassed'] = all(n == 'default' for n in result['similarityWireNamespaces'])
         if client.mode == 'rest':
             status, response, _ = client.http('POST', '/search', {'embedding': extension['vectorQuery'],
                 'namespace': 'default', 'recordAccess': False, 'limit': 20})
@@ -478,11 +484,21 @@ def vector_window(client, fixture, ids, mappings, output, phase):
                 'namespace': 'default', 'recordAccess': False, 'limit': 20})
             assert 400 <= status < 500, (status, response)
             rejected.append(name)
+    if fixture['fixtureVersion'] >= 3 and client.mode == 'rest':
+        strength_results = {}
+        for minimum in [0.5, 1.1]:
+            status, response, _ = client.http('POST', '/search', {'embedding': extension['vectorQuery'],
+                'namespace': 'default', 'recordAccess': False, 'limit': 20, 'minStrength': minimum})
+            assert status == 200, (status, response)
+            found = [h['memory']['id'] for h in response['hits']]
+            assert (source in found and neighbor in found) if minimum == 0.5 else found == []
+            strength_results[str(minimum)] = [mappings[i][0] for i in found]
+        save(client.out / f'strength-filter-{phase}.json', strength_results)
     time.sleep(.2)  # diagnostic quiet window; not A1 readiness
     after = {name: client.get(memory) for name, memory in ids.items()}
     files_after = files_at(client.directory / 'data')
     provider_after = (output / 'embedding-requests.jsonl').read_text().splitlines()
-    save(client.out / f'vector-window-{phase}.json', {'fixtureVersion': 2, 'before': before,
+    save(client.out / f'vector-window-{phase}.json', {'fixtureVersion': fixture['fixtureVersion'], 'before': before,
         'after': after, 'filesBefore': files_before, 'filesAfter': files_after,
         'excludedFromDurableComparison': ['fts.db-shm'], 'quietMs': 200,
         'providerRequestCountBefore': len(provider_before), 'providerRequestCountAfter': len(provider_after),
@@ -493,6 +509,71 @@ def vector_window(client, fixture, ids, mappings, output, phase):
     return {'similarityCalls': repeats, 'vectorOnlyCalls': repeats if client.mode == 'rest' else 0,
         'rejectedCases': rejected, 'publicAndDurableStateUnchanged': True, 'embeddingProviderCalls': 0,
         **results[0]}
+
+
+def exposure_window(client, fixture, ids, output):
+    """Declared true-mode arm; public observations, not A1 receipt inspection."""
+    cases, violations = [], []
+    for source_name, neighbor_name, namespace in fixture['exposureChecks']['scopePairs']:
+        source, neighbor = ids[source_name], ids[neighbor_name]
+        for case in fixture['exposureChecks']['cases']:
+            before = {name: client.get(i) for name, i in ids.items()}
+            files_before = files_at(client.directory / 'data')
+            time.sleep(1.1)  # public MCP timestamps can have second precision
+            args = {'id': source, 'recordAccess': True, 'limit': 20}
+            # Omitted namespace must use source scope, even for foreign records.
+            if case == 'threshold':
+                args['minScore'] = 0.1
+            elif case == 'limit':
+                args['limit'] = 1
+            else:
+                args['minScore'] = 0.99
+            response = client.good('find_similar_memories', args)
+            hits = response['hits'] if client.mode == 'rest' else response['memories']
+            returned = [h['memory']['id'] if client.mode == 'rest' else h['id'] for h in hits]
+            expected = [] if case == 'empty' else [neighbor]
+            deadline = time.monotonic() + 5
+            while True:
+                after = {name: client.get(i) for name, i in ids.items()}
+                changed = [ids[name] for name in ids if after[name] != before[name]]
+                if not expected or all(i in changed for i in expected) or time.monotonic() >= deadline:
+                    break
+                time.sleep(.02)
+            time.sleep(.2)  # bounded legacy async drain observation, not a barrier
+            after = {name: client.get(i) for name, i in ids.items()}
+            changed = [ids[name] for name in ids if after[name] != before[name]]
+            files_after = files_at(client.directory / 'data')
+            failures = []
+            if returned != expected:
+                failures.append('similarity-result-ids')
+            if any((h['memory'] if client.mode == 'rest' else h)['namespace'] != namespace for h in hits):
+                failures.append('canonical-namespace')
+            if set(changed) != set(expected):
+                failures.append('only-returned-ids-exposed')
+            if not expected and durable(files_before) != durable(files_after):
+                failures.append('empty-result-durable-write')
+            for name, memory in ids.items():
+                if memory in expected:
+                    if after[name]['lastAccessedAt'] == before[name]['lastAccessedAt']:
+                        failures.append('returned-anchor-not-updated')
+                    if after[name]['stability'] != before[name]['stability']:
+                        failures.append('exposure-changed-stability')
+            item = {'case': case, 'scope': namespace, 'request': args, 'response': response,
+                'expectedIds': expected, 'returnedIds': returned, 'changedIds': changed,
+                'before': before, 'after': after, 'filesBefore': files_before, 'filesAfter': files_after,
+                'failures': failures}
+            cases.append(item)
+            violations.extend({'case': case, 'scope': namespace, 'failure': f} for f in failures)
+    save(client.out / 'exposure-window.json', {'cases': cases, 'violations': violations,
+        'limitation': 'actual clock; bounded async observation; public anchors not full canonical event/receipt inspection'})
+    # Exposure state, including observed anchors, survives graceful restart.
+    before_restart = {name: client.get(i) for name, i in ids.items()}
+    client.stop()
+    client.start()
+    after_restart = {name: client.get(i) for name, i in ids.items()}
+    save(client.out / 'exposure-restart.json', {'before': before_restart, 'after': after_restart})
+    assert before_restart == after_restart
+    return {'cases': len(cases), 'violations': violations, 'restartPublicStateEqual': True}
 
 
 def episode(mode, repeat, fixture, stub_port, output):
@@ -536,7 +617,7 @@ def episode(mode, repeat, fixture, stub_port, output):
             'excludedFromDurableComparison': ['fts.db-shm']})
         assert before == after, 'false reads changed public records'
         assert durable(disk_before) == durable(disk_after), 'false reads changed durable files'
-        vector_initial = vector_window(client, fixture, ids, mappings, output, 'initial') if fixture['fixtureVersion'] == 2 else None
+        vector_initial = vector_window(client, fixture, ids, mappings, output, 'initial') if fixture['fixtureVersion'] >= 2 else None
         bad_inputs = [('store_memory', {'summary': 7}),
             ('store_memory', {'summary': 'fixture-miss'}),
             ('store_memory', {'summary': 'amber', 'tags': 'wrong-type'}),
@@ -558,7 +639,7 @@ def episode(mode, repeat, fixture, stub_port, output):
         changed = durable(files_before) != durable(files_after)
         save(out / 'malformed-quality.json', {'accepted': ok, 'response': result,
             'before': prior, 'after': updated, 'filesBefore': files_before, 'filesAfter': files_after})
-        if fixture['fixtureVersion'] == 2:
+        if fixture['fixtureVersion'] >= 2:
             assert not ok and not changed and prior == updated, 'fixture v2 requires strict quality rejection'
         if ok or changed or prior != updated:
             violations.append({'case': 'present-string-quality', 'accepted': ok, 'durableFilesChanged': changed})
@@ -582,7 +663,7 @@ def episode(mode, repeat, fixture, stub_port, output):
         assert before_restart == after_restart, 'public state changed across restart'
         assert client.recall() == ranks_before_restart
         assert ids['birch'] not in client.recall()
-        vector_restart = vector_window(client, fixture, ids, mappings, output, 'restart') if fixture['fixtureVersion'] == 2 else None
+        vector_restart = vector_window(client, fixture, ids, mappings, output, 'restart') if fixture['fixtureVersion'] >= 2 else None
         summary = {'transport': mode, 'replay': repeat, 'freshSources': len(ids),
             'falseReadPublicStateUnchanged': True, 'falseReadDurableFilesUnchanged': True,
             'defaultScopeMatchesExplicit': True, 'rejectedRequestsWithoutDurableFileChanges': len(bad_inputs),
@@ -592,9 +673,17 @@ def episode(mode, repeat, fixture, stub_port, output):
             'normalizedRanks': [mappings[i][0] for i in ranks],
             'normalizedRanksAfterDeleteAndRestart': [mappings[i][0] for i in ranks_before_restart], 'knownConformanceViolations': violations,
             'semanticQuality': 'not measured'}
-        if fixture['fixtureVersion'] == 2:
-            summary['fixtureVersion'] = 2
+        if fixture['fixtureVersion'] >= 2:
+            summary['fixtureVersion'] = fixture['fixtureVersion']
             summary['vectorWindows'] = {'initial': vector_initial, 'restart': vector_restart}
+        if fixture['fixtureVersion'] >= 3:
+            for phase, window in summary['vectorWindows'].items():
+                for check in ['similarityScoreThresholdPassed', 'similarityNamespacesPassed']:
+                    if not window[check]:
+                        violations.append({'case': phase, 'failure': check})
+            exposure = exposure_window(client, fixture, ids, output)
+            summary['exposure'] = exposure
+            violations.extend(exposure['violations'])
         save(out / 'summary.json', summary)
         return summary
     finally:
@@ -650,7 +739,10 @@ def main():
     parser.add_argument('--cache', type=Path)
     parser.add_argument('--build-cache', type=Path)
     parser.add_argument('--image', default='recalld-ci:1.94')
+    parser.add_argument('--test-threads', type=int, help='Rust test concurrency; recorded in manifest, does not alter replay count')
     args = parser.parse_args()
+    if args.test_threads is not None and args.test_threads < 1:
+        parser.error('--test-threads must be positive')
     if args.source_root and not args.source_commit:
         parser.error('--source-root requires --source-commit to freeze the runtime')
     inside(args.fixture_version) if args.inside else host(args)
