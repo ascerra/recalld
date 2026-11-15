@@ -181,7 +181,10 @@ async fn public_sweep_clock_without_override_uses_actual_clock_once() {
 fn canonical_snapshot(f: &Fixture) -> Vec<u8> {
     use redb::ReadableTable;
     let engine = f.storage.read().unwrap();
-    let read = engine.meta_store().db.begin_read().unwrap();
+    let (_copy, metadata) =
+        crate::storage::validation::inspect_database_copy(&engine.db_path().join("meta.db"), false)
+            .unwrap();
+    let read = metadata.begin_read().unwrap();
     let mut tables = Vec::new();
     for definition in [
         crate::storage::control::RECEIPTS,
