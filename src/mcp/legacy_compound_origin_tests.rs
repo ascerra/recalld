@@ -649,11 +649,14 @@ async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_h
     let source = f.close();
     let original = capture(source.path()).unwrap();
     let bytes = std::fs::read(source.path().join("meta.db")).unwrap();
-    let gated = all.path().join("gated");
+    let gated = source.path().to_path_buf();
     let backup = all.path().join("complete.zip");
     crate::backup::run_backup(&Default::default(), &backup, Some(source.path()), false)
         .await
         .unwrap();
+    assert_eq!(std::fs::read(source.path().join("meta.db")).unwrap(), bytes);
+    // Retained-state restore requires the actual existing target/ledger, even
+    // when restoring its own snapshot. Fresh destinations are historical only.
     restore_from_backup(RestoreOptions {
         backup_path: backup,
         data_dir: gated.clone(),
@@ -663,7 +666,6 @@ async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_h
     })
     .await
     .unwrap();
-    assert_eq!(std::fs::read(source.path().join("meta.db")).unwrap(), bytes);
     let fork = capture(&gated).unwrap();
     assert_eq!(fork.batch_progress, original.batch_progress);
     assert!(original.receipts.iter().all(|r| fork.receipts.contains(r)));
