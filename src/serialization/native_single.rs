@@ -213,6 +213,12 @@ impl Reply {
     }
     pub(crate) fn failure(error: crate::storage::StorageError) -> Self {
         let uncertain = matches!(&error, crate::storage::StorageError::RecoveryRequired(_));
+        // Only a typed known pre-work rejection carries this diagnostic. Keep
+        // RecoveryRequired uncertain and CommittedMutation receipt-bearing.
+        let unsupported = match &error {
+            crate::storage::StorageError::UnsupportedMutation(message) => Some(message.clone()),
+            _ => None,
+        };
         let source = match &error {
             crate::storage::StorageError::CommittedMutation { source, .. } => source.as_ref(),
             other => other,
@@ -256,6 +262,9 @@ impl Reply {
         let mut failure = super::native_batch::BatchFailure::from_storage(error);
         if failure.error.code == "STORAGE_UNAVAILABLE" {
             failure.error.message = "native single consumer unavailable".into();
+        }
+        if let Some(message) = unsupported {
+            failure.error.message = message;
         }
         if uncertain {
             failure.error.code = "COMMIT_OUTCOME_UNKNOWN".into();
@@ -490,6 +499,26 @@ mod tests {
         assert!(uncertain.receipt.is_none());
         assert!(uncertain.readiness.is_none());
         assert_eq!(uncertain.error.unwrap().commit_state, CommitState::Unknown);
+    }
+    #[test]
+    fn native_single_prework_unsupported_never_reclassifies_recovery_uncertainty() {
+        use crate::storage::StorageError;
+        let unsupported = Reply::failure(StorageError::UnsupportedMutation(
+            "canonical profile required".into(),
+        ));
+        let error = unsupported.error.unwrap();
+        assert_eq!(error.commit_state, CommitState::NotCommitted);
+        assert_eq!(error.code, "STORAGE_UNAVAILABLE");
+        assert_eq!(error.message, "canonical profile required");
+        assert!(error.operation_id.is_none());
+        assert!(unsupported.receipt.is_none());
+        let error = Reply::failure(StorageError::RecoveryRequired(
+            "postcommit outcome unavailable".into(),
+        ))
+        .error
+        .unwrap();
+        assert_eq!(error.commit_state, CommitState::Unknown);
+        assert_eq!(error.code, "COMMIT_OUTCOME_UNKNOWN");
     }
     #[test]
     fn native_single_strict_fields_and_original_vector_bits() {
