@@ -827,3 +827,55 @@ fn online_producer_aborted_root_keeps_queued_worker_context_and_owned_guards() {
         assert_eq!(&rebuild["spans"][0]["trace_id"], id);
     });
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn trace_provenance_actual_mcp_after_unsubscribed_first_callsite() {
+    // Run this one test in a fresh process. The only subscriber is the normal
+    // static-filter capture used by the existing production-path tests.
+    let capture = Capture::default();
+    let dispatch = tracing::Dispatch::new(subscriber(capture.clone()));
+    assert!(
+        !std::thread::spawn(crate::performance::enabled)
+            .join()
+            .unwrap()
+    );
+    let enabled_under_capture =
+        tracing::dispatcher::with_default(&dispatch, crate::performance::enabled);
+    let fx = Fixture::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let server = server(&fx, calls.clone());
+    let output = Output::default();
+    let captured = output.clone();
+    let input = format!("{}\n", request());
+    crate::mcp::transport::serve_io(server, input.as_bytes(), output)
+        .with_subscriber(dispatch)
+        .await
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(captured.flushes.load(Ordering::SeqCst), 1);
+    let response: serde_json::Value =
+        serde_json::from_slice(&captured.bytes.lock().unwrap()).unwrap();
+    assert!(response.get("error").is_none(), "{response}");
+    assert_ne!(response["result"]["isError"], true);
+    assert_eq!(fx.storage.read().unwrap().scan_all().unwrap().len(), 1);
+    assert!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    let rows = raw_events(&capture);
+    eprintln!(
+        "ACTUAL_MCP enabled_under_capture={enabled_under_capture} captured_rows={} rows={rows:?}",
+        rows.len()
+    );
+    // Required evidence is unchanged: a full-trace capture must include input.
+    assert!(
+        rows.iter()
+            .any(|e| e["fields"]["kind"] == "transport_input"),
+        "missing actual MCP transport input after unsubscribed callsite registration"
+    );
+}
