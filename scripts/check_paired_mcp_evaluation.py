@@ -48,7 +48,7 @@ def main():
                 assert [raw['mappings'][memory] for memory in query['memoryIds']]==[['turn-0'],['turn-1']][:limit]
             rows=copy.deepcopy([v for v in h['rows'](root/'actor-wire.jsonl') if v['event']=='attempt'])
             for row in rows:
-                if row['tag'].startswith('query:'):
+                if row['request'].get('params',{}).get('name')=='recall_memories':
                     assert row['request']['params']['arguments']['limit']==limit
                     row['request']['params']['arguments'].pop('limit')
             attempts.append(rows)
