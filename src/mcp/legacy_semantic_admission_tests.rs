@@ -1,6 +1,6 @@
 //! Actual legacy API2 semantic admission and immutable BEFORE157 histories.
 use super::*;
-use crate::storage::batch::{BatchItemPlan, BatchOutcome, BatchStatus};
+use crate::storage::batch::{BatchOutcome, BatchStatus};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn canonical() -> InsertMemory {
@@ -206,4 +206,119 @@ async fn legacy_semantic_export_genuine157() {
         "completed":completed,"completeRows":complete_rows,
         "pending":pending,"pendingRows":pending_rows,"pendingControl":pending_control,
     })).unwrap()).unwrap();
+}
+
+// Capture actual historical fault boundaries while the production writer is157.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "genuine157 fault exporter; pre-admission source only"]
+async fn legacy_semantic_export_genuine157_faults() {
+    let dest = std::path::PathBuf::from(std::env::var("RECALLD_LEGACY_SEMANTIC_BEFORE").unwrap());
+    std::fs::create_dir_all(&dest).unwrap();
+    let mut cases = vec![];
+    for unknown in [false, true] {
+        let f = Fixture::new();
+        let mut adapter = f.storage_adapter();
+        Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let calls = Arc::new(AtomicUsize::new(0));
+        adapter.embedding = Arc::new(BlockedProvider {
+            entered: entered.clone(),
+            release: release.clone(),
+            calls: calls.clone(),
+        });
+        let adapter = Arc::new(adapter);
+        let mut value = item();
+        value.as_object_mut().unwrap().remove("embedding");
+        let input = request(&f, "historical-fault", 4, vec![value]);
+        let task = {
+            let adapter = adapter.clone();
+            let input = input.clone();
+            tokio::spawn(async move {
+                crate::daemon::server::native_batch_test_rpc(adapter, &input).await
+            })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+            .await
+            .unwrap();
+        if unknown {
+            f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .fail_batch_commit
+                .store(3, Ordering::SeqCst);
+        } else {
+            *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+        }
+        release.notify_one();
+        let reply = task.await.unwrap();
+        assert!(reply.error.is_none(), "{:?}", reply.error);
+        let outcome: BatchOutcome = serde_json::from_value(reply.result.unwrap()).unwrap();
+        assert_eq!(
+            outcome.items[0].status,
+            if unknown {
+                BatchStatus::Unknown
+            } else {
+                BatchStatus::Ok
+            }
+        );
+        assert!(!outcome.items[0].ready);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        drop(adapter);
+        let root = f.close();
+        let name = format!("fault-{unknown}.zip");
+        snapshot(root.path(), &dest.join(&name));
+        // Resolve actual persisted receipt with the OLD recovery implementation;
+        // the later test compares this exact receipt, never just any success.
+        let engine = RedbStorageEngine::open(root.path()).unwrap();
+        let receipt = engine
+            .lookup_operation(
+                outcome.store_id,
+                MutationScope::Namespace(NamespaceId::new(1)),
+                outcome.items[0].operation_id.unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        cases.push(json!({"archive":name,"input":input,"outcome":outcome,"receipt":receipt}));
+    }
+    std::fs::write(
+        dest.join("faults.json"),
+        serde_json::to_vec_pretty(&cases).unwrap(),
+    )
+    .unwrap();
+    let mut cases = vec![];
+    for point in [
+        "before_batch_commit",
+        "after_batch_commit",
+        "after_insert_payload_sync",
+        "before_metadata_commit",
+        "after_metadata_commit",
+        "after_edge_commit",
+        "after_canonical_ack",
+    ] {
+        let f = Fixture::new();
+        let before = current(&f);
+        let root = f.close();
+        let result=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_process_child","--nocapture"])
+            .env("RECALLD_LEGACY_ORIGIN_STORE",root.path()).env("RECALLD_LEGACY_ORIGIN_CAS",before.committed_generation.get().to_string())
+            .env("RECALLD_TEST_EFFECT_CRASH",point).output().unwrap();
+        assert_eq!(
+            result.status.code(),
+            Some(91),
+            "{point}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let name = format!("process-{point}.zip");
+        snapshot(root.path(), &dest.join(&name));
+        cases.push(
+            json!({"archive":name,"point":point,"before":before,"exit":result.status.code()}),
+        );
+    }
+    std::fs::write(
+        dest.join("process.json"),
+        serde_json::to_vec_pretty(&cases).unwrap(),
+    )
+    .unwrap();
 }
