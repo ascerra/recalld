@@ -448,7 +448,8 @@ async fn handle_durable_batch(
         Ok(input) => input,
         Err(e) => return ToolCallResult::error(format!("Invalid batch parameters: {e}")),
     };
-    if kind == BatchKind::Insert {
+    // The existing explicit private writer selector keeps its original route.
+    if kind == BatchKind::Insert && input.mutation_version == 1 {
         return bridge
             .storage
             .store_batch_api1(crate::serialization::batch_api1::Request {
