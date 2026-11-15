@@ -1320,3 +1320,79 @@ async fn diagnostics_report_unknown_vector_exhaustion_and_measured_metadata_cap(
     }
     assert_score_provenance(&metadata);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_vector_coverage_distinguishes_exact_cap_from_truncation() {
+    for n in [99, 100, 101] {
+        let records = (1..=n).map(|id| rec(mid(id))).collect();
+        let vectors: Vec<_> = (1..=n).map(|id| (mid(id), 0.8)).collect();
+        let (engine, _) = graph_engine(records, &vectors, &[]);
+        let result = engine
+            .search_with_semantics(
+                query(serde_json::json!({"text":"q", "limit":1, "graphDepth":0})),
+                history(),
+            )
+            .await
+            .unwrap();
+        let count = &result.diagnostics.channels.as_ref().unwrap()[&RetrievalChannel::Vector];
+        assert_eq!(count.examined, Some(n as usize));
+        assert_eq!(count.eligible, Some(n as usize));
+        assert_eq!(count.exhausted, Some(true));
+        assert_eq!(count.candidate_limited, Some(n > 100));
+        assert_eq!(count.budget_exhausted, Some(false));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_entity_coverage_counts_actual_posting_work_before_cap() {
+    let mut records: Vec<_> = (1..=5)
+        .map(|id| {
+            let mut r = rec(mid(id));
+            r.entities = vec!["alice".into(), "bob".into()];
+            r
+        })
+        .collect();
+    records[3].tags.push(Tag::new("blocked").unwrap());
+    records[4].namespace_id = other_ns();
+    let vectors: Vec<_> = (1..=5).map(|id| (mid(id), 0.8)).collect();
+    let (engine, _) = graph_engine(records, &vectors, &[]);
+    let result = engine
+        .search_with_semantics(
+            query(serde_json::json!({
+                "text":"q", "limit":1, "graphDepth":0,
+                "entities":["alice", "ALICE", "bob"], "filter":{"excludeTags":["blocked"]}
+            })),
+            history(),
+        )
+        .await
+        .unwrap();
+    let channels = result.diagnostics.channels.as_ref().unwrap();
+    let count = &channels[&RetrievalChannel::Entity];
+    assert_eq!(count.examined, Some(8)); // Four target-namespace UUIDs, two distinct keys.
+    assert_eq!(count.eligible, Some(3)); // Distinct canonical eligible UUIDs.
+    assert_eq!(count.offered, Some(2)); // Total entity2L, including vector overlap.
+    assert_eq!(count.admitted, Some(2));
+    assert_eq!(count.exhausted, Some(true));
+    assert_eq!(count.candidate_limited, Some(true));
+    assert_eq!(count.budget_exhausted, Some(false));
+    let vector = &channels[&RetrievalChannel::Vector];
+    assert_eq!(vector.examined, Some(5)); // Shared physical vector entries include foreign UUID.
+    assert_eq!(vector.eligible, Some(3));
+    assert_eq!(vector.candidate_limited, Some(false));
+    assert!(
+        !result
+            .diagnostics
+            .provenance
+            .as_ref()
+            .unwrap()
+            .contains_key(&mid(4))
+    );
+    assert!(
+        !result
+            .diagnostics
+            .provenance
+            .as_ref()
+            .unwrap()
+            .contains_key(&mid(5))
+    );
+}
