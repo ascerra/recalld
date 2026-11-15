@@ -532,6 +532,16 @@ async fn legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_comp
             .unwrap(),
         2
     );
+    let observed = adapter
+        .batch_completion()
+        .observe_readiness(std::time::Instant::now() + std::time::Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert_eq!(observed.pending_batch_items, 2);
+    assert_eq!(observed.accepted_work, 0);
+    let projected = crate::serialization::contract::Readiness::observed(observed).unwrap();
+    assert!(!projected.ready);
+
     assert_eq!(spy.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     assert_eq!(current(&f), before);
@@ -671,8 +681,8 @@ async fn legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy() {
     let adapter = Arc::new(adapter);
     let body = json!({"summary":"unknown legacy profile","namespace":"default","storeId":before.store_id,"checkDuplicates":false});
     let response = crate::api::single_store_v2(adapter.as_ref(), "default", &body, None).await;
-    assert_ne!(response.status().as_u16(), 200);
-    let value: Value = serde_json::from_slice(
+    assert_eq!(response.status().as_u16(), 503);
+    let http: Value = serde_json::from_slice(
         &axum::body::to_bytes(
             response.into_body(),
             crate::daemon::protocol::MAX_MESSAGE_SIZE,
@@ -681,13 +691,20 @@ async fn legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy() {
         .unwrap(),
     )
     .unwrap();
-    // Existing prepared-native wrong-owner diagnostic is conservative Unknown.
-    // This control proves no legacy fallback, not corrected commit classification.
-    assert_eq!(value["error"]["category"], "unavailable", "{value}");
-    assert_eq!(value["error"]["code"], "COMMIT_OUTCOME_UNKNOWN");
-    assert_eq!(value["error"]["commitState"], "unknown");
-    assert!(value["error"].get("operationId").is_none());
-    assert!(value.get("receipt").is_none());
+    let request =
+        crate::serialization::native_single::Request::parse(&body, true, None, "default").unwrap();
+    let rpc = crate::daemon::server::native_method_test_rpc(
+        adapter.clone(),
+        serde_json::to_value(request).unwrap(),
+        "store_native_single_observed_v1",
+    )
+    .await;
+    assert!(rpc.error.is_none(), "{rpc:?}");
+    let reply: crate::serialization::native_single::Reply =
+        serde_json::from_value(rpc.result.unwrap()).unwrap();
+    let (status, envelope) = reply.response();
+    assert_eq!(status, 503);
+    let rpc = serde_json::to_value(envelope).unwrap();
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.storage = adapter;
     let mut body = body;
@@ -695,14 +712,36 @@ async fn legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy() {
     let result = crate::mcp::tools::dispatch_v2(&bridge, "store_memory", body).await;
     assert_eq!(result.is_error, Some(true));
     let packet = serde_json::to_value(result).unwrap();
-    let text: Value = serde_json::from_str(packet["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(packet["structuredContent"], text);
-    assert_eq!(text["error"]["code"], "COMMIT_OUTCOME_UNKNOWN", "{text}");
-    assert_eq!(text["error"]["commitState"], "unknown");
-    assert!(text["error"].get("operationId").is_none());
-    assert!(text.get("receipt").is_none());
+    let mcp: Value = serde_json::from_str(packet["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(packet["structuredContent"], mcp);
     assert_eq!(spy.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     assert_eq!(current(&f), before);
     assert_eq!(file_hashes(f.path()), bytes);
+    // Execute all three actual consumers before checking classification, so the
+    // BEFORE log proves the observed error at each boundary rather than a mock.
+    println!(
+        "PREWORK_OWNER_DIAGNOSTICS {}",
+        json!({"http":http["error"],"rpc":rpc["error"],"mcp":mcp["error"]})
+    );
+    for (name, value) in [("http", http), ("rpc", rpc), ("mcp", mcp)] {
+        assert_eq!(value["error"]["category"], "unavailable", "{name}: {value}");
+        assert_eq!(
+            value["error"]["code"], "STORAGE_UNAVAILABLE",
+            "{name}: {value}"
+        );
+        assert_eq!(
+            value["error"]["commitState"], "notCommitted",
+            "{name}: {value}"
+        );
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("canonical Bound embedding profile")
+        );
+        assert!(value["error"].get("operationId").is_none());
+        assert!(value.get("receipt").is_none());
+        assert!(value.get("readiness").is_none());
+    }
 }
