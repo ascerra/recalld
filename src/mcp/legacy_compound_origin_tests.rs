@@ -1,4 +1,6 @@
 //! Actual legacy-disk consumers and genuine pre-extension format1 fixtures.
+#[path = "legacy_semantic_admission_tests.rs"]
+mod semantic_admission;
 use super::*;
 use crate::mcp::bridge::StorageEngine as _;
 use crate::storage::batch::{BatchInput, BatchKind};
