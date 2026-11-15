@@ -13,7 +13,13 @@ def run(args):
     projection = json.load(sys.stdin)
     phase = projection["phase"]
     expected = {"phase", "startId", "deliveryOrdinal", "sources", "activeEmbedding"} if phase == "ingest" else {"phase", "startId", "deliveryOrdinal", "currentQuestion", "expectedMiss"}
+    if args.context_bundle and phase=="query":expected.add("contextPolicy")
     assert set(projection) == expected and phase in ("ingest", "query"), "unexpected actor projection fields"
+    tokenizer=encoder=None
+    if args.context_bundle and phase=="query":
+        import context_tokenizer as tokenizer
+        encoder=tokenizer.load(args.context_bundle)
+        tokenizer.overhead(encoder,projection["currentQuestion"]["text"],projection["contextPolicy"])
     source = projection.get("sources", [])
     read = os.fdopen(args.read_fd, "rb", buffering=0)
     write = os.fdopen(args.write_fd, "wb", buffering=0)
@@ -80,11 +86,15 @@ def run(args):
     else:
         query = projection["currentQuestion"]
         assert set(query) == {"queryId", "text"}
-        call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=1),
+        result=call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=3 if tokenizer else 1),
              "replay-miss" if projection["expectedMiss"] else "query:" + query["queryId"], error=projection["expectedMiss"])
+        if tokenizer and not projection["expectedMiss"]:
+            context=tokenizer.assemble(encoder,query["text"],result["memories"],projection["contextPolicy"])
+            print(json.dumps(dict(event="context",tag="context:"+query["queryId"],stepId=str(serial),deliveryOrdinal=projection["deliveryOrdinal"],context=context)),flush=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--context-bundle")
     for flag in ("read-fd", "write-fd", "deny-fd"):
         parser.add_argument("--" + flag, type=int, required=True)
     run(parser.parse_args())

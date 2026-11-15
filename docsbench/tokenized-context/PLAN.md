@@ -182,3 +182,16 @@ builds,read-only frozen source and no personal config/credentials/socket/store.
 No paid model, dataset download, large weights, training or performance claim.
 After publication/results, release completed exact raw roots centrally; keep code,
 reports, small next-consumer dependency inputs and one necessary reusable cache.
+
+## Accepted canary comparison contract, frozen before outcomes
+
+Independent legacy episodes generate different real UUIDs. UUID text is rendered
+and tokenized, so its BPE length may differ and may even cross a cap/change the
+selected prefix. Retain exact per-run UUIDs, entry text, renders, hashes and token
+counts. A declared UUID→source-ID bijection compares evidence identity only;
+it is never a normalization of token/render equality. Record any selected-prefix
+divergence rather than assert invariance or erase it. Deterministically re-render
+the same actual public payload, and independently reconstruct each receipt from
+that response. Reject internally self-consistent fabricated entries/receipts.
+Label canaries still require exact actor current-step inputs/requests and provider
+inputs/vectors, with environment/cache identities reported separately.

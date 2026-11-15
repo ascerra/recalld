@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 
+CONTEXT = runpy.run_path(str(Path(__file__).with_name("context-mcp-evaluation.py")))
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 MODEL = "a6-public-synthetic-v1"
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +26,8 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
                     canonicalSchemaAttested=False)
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
-EXTRA = ("scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+EXTRA = ("scripts/context-mcp-evaluation.py", "scripts/context_tokenizer.py", "scripts/context-tokenizer-lock.json", "scripts/context-encoding.json", "scripts/TIKTOKEN-LICENSE.txt", "scripts/prepare-context-assets.py", "scripts/test_context_mcp_evaluation.py", "scripts/check_context_mcp_evaluation.py",
+         "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl")
 
 
@@ -69,16 +71,17 @@ def fixtures():
     return actor, labels, cache, schedule
 
 
-def validate(manifest_path, binary, scorer, source_root):
+def validate(manifest_path, binary, scorer, source_root, context_assets=None):
     # Complete input validation before creating episode output, provider, or store.
     raw = manifest_path.read_bytes()
     m = json.loads(raw)
+    context = m.get("track") == CONTEXT["TRACK"]
     exact_keys(m, ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
                    "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
-                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
+                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset", *(("contextPolicy", "contextFixture") if context else ())))
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
-    if m["track"] != TRACK or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
+    if m["track"] != (CONTEXT["TRACK"] if context else TRACK) or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -104,7 +107,7 @@ def validate(manifest_path, binary, scorer, source_root):
             raise ValueError("artifact hash/reference mismatch")
         artifacts.append(json.loads(p.read_text()))
     actor, labels, cache, schedule = artifacts
-    expected_actor, _, expected_cache, expected_schedule = fixtures()
+    expected_actor, _, expected_cache, expected_schedule = CONTEXT["fixtures"](globals(),m["contextFixture"]) if context else fixtures()
     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
     exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
@@ -124,18 +127,24 @@ def validate(manifest_path, binary, scorer, source_root):
         raise ValueError("compiled provenance mismatch")
     if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
         raise ValueError("configuration profile mismatch")
+    if context: CONTEXT["preflight"](m,schedule,context_assets)
     return m, actor, labels, cache, schedule, digest(raw)
 
 
 def prepare(args):
+    context = getattr(args,"track",TRACK)==CONTEXT["TRACK"]
+    if context:
+        profile,kind=CONTEXT["PROFILES"][args.context_profile]
+        CONTEXT["TOKEN"]["load"](args.context_assets)
     args.out.mkdir()
     build = json.loads(args.build.read_text())
-    actor, labels, cache, schedule = fixtures()
+    actor, labels, cache, schedule = CONTEXT["fixtures"](globals(),kind) if context else fixtures()
     m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
              capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
              executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
              activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
+    if context: m.update(track=CONTEXT["TRACK"],contextPolicy=CONTEXT["TOKEN"]["policy"](profile),contextFixture=kind)
     for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels), ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
         save(args.out / name, value)
         m[key] = dict(file=name, sha256=digest((args.out / name).read_bytes()))
@@ -171,7 +180,7 @@ class Replay(http.server.BaseHTTPRequestHandler):
 
 
 def run_episode(args):
-    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
+    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root, getattr(args,"context_assets",None))
     args.out.mkdir()
     evaluator = args.out / "evaluator"
     evaluator.mkdir()
@@ -226,6 +235,10 @@ warm_file_enabled = false
                 shutil.copyfile(actor_path, args.out / "actor-code.py")
                 result["actorCodeSha256"] = digest(actor_path.read_bytes())
                 assert digest(actor_path.read_bytes()) == m["sourceFilesSha256"]["scripts/public-mcp-actor.py"]
+                if "contextPolicy" in m:
+                    for name in ("context_tokenizer.py","context-tokenizer-lock.json"):
+                        shutil.copyfile(Path(__file__).with_name(name),root/name)
+                        assert digest((root/name).read_bytes())==m["sourceFilesSha256"]["scripts/"+name]
                 start_id = 0
                 # The supervisor owns this schedule. Each actor process sees only its current question.
                 for ordinal in range(len(schedule["queries"]) + 2):
@@ -241,10 +254,11 @@ warm_file_enabled = false
                             stub.entries[stub.key(text)] = cache["entries"][text]
                         projection = dict(phase="query", startId=start_id, deliveryOrdinal=ordinal,
                                           currentQuestion=question, expectedMiss=miss)
+                    if "contextPolicy" in m and ordinal>0: projection["contextPolicy"]=m["contextPolicy"]
                     save(args.out / "actor-inputs" / f"step-{ordinal}.json", projection)
-                    child = subprocess.run([sys.executable, str(actor_path), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read)],
+                    child = subprocess.run([sys.executable, str(actor_path), *(["--context-bundle",str(args.context_assets)] if "contextPolicy" in m else []), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read)],
                         input=encoded(projection), stdout=wire, stderr=actor_log, cwd=root,
-                        env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC"),
+                        env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC", PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1"),
                         pass_fds=(process.stdin.fileno(), process.stdout.fileno()), timeout=90)
                     wire.flush()
                     delivered = rows(args.out / "actor-wire.jsonl")
@@ -298,6 +312,7 @@ warm_file_enabled = false
                            relevant=labels["relevant"], queries=queries, sourceEvents=event_text, sourceEventsSha256=digest(event_text.encode()))
         save(evaluator / "score-input.json", score_input)
         subprocess.run([str(args.scorer), "--input", str(evaluator / "score-input.json"), "--out", str(evaluator / "scores.json")], check=True)
+        if "contextPolicy" in m: CONTEXT["consume"](args,globals(),m,schedule,wire,score_input)
         for name in ("actor-projection.json", "actor-wire.jsonl", "actor-provider.jsonl", "source-mappings.json", "trace.jsonl"):
             if labels["labelCanary"].encode() in (args.out / name).read_bytes():
                 raise RuntimeError("evaluator canary leaked to actor channel")
@@ -396,8 +411,12 @@ def main():
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
+    p.add_argument("--track",choices=(TRACK,CONTEXT["TRACK"]),default=TRACK)
+    p.add_argument("--context-profile",choices=tuple(CONTEXT["PROFILES"]),default="default")
+    p.add_argument("--context-assets",type=Path)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
+    p.add_argument("--context-assets",type=Path)
     p = sub.add_parser("host")
     p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True); p.add_argument("--library-evidence", type=Path)
     args = parser.parse_args()
