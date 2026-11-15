@@ -847,12 +847,12 @@ pub async fn search_memories(
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
     let work = state.search.accept_work()?;
-    let result = async {
+    let result = crate::performance::measure("rest.search", req.record_access, async {
         let stamp = state.storage.effects_stamp().await?;
         let observed =
             search_memories_admitted(State(state.clone()), Json(req), stamp, work.as_ref()).await;
         observed?.finish(check_read_admission(&state, stamp).await)
-    }
+    })
     .await;
     state.search.finish_work(work);
     result
@@ -946,6 +946,7 @@ async fn search_memories_admitted(
         .await?;
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
+            let hydration = crate::performance::Timer::new("rest.hydration");
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -998,6 +999,7 @@ async fn search_memories_admitted(
                     score: selected.score.unwrap_or(0.0),
                 });
             }
+            hydration.complete();
             (hits, exposures, Some(prepared.evaluated_at))
         } else {
             let results = state
@@ -1005,6 +1007,7 @@ async fn search_memories_admitted(
                 .prepare_search_with_work(search_query, parent)
                 .await?;
 
+            let hydration = crate::performance::Timer::new("rest.hydration");
             // Batch-load embeddings with a single lock acquisition if requested.
             let embeddings = if req.include_embeddings {
                 let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
@@ -1052,6 +1055,7 @@ async fn search_memories_admitted(
                 });
             }
 
+            hydration.complete();
             (hits, exposures, None)
         };
 

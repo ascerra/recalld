@@ -1703,6 +1703,14 @@ mod tests {
             {
                 let meta = MetadataStore::open(&dir.path().join("meta.db")).unwrap();
                 assert_eq!(meta.get(b).is_err(), canonical_pending, "{point}");
+                assert_eq!(
+                    matches!(
+                        meta.records_in_namespace(ns),
+                        Err(StorageError::RecoveryRequired(_))
+                    ),
+                    canonical_pending,
+                    "namespace read at {point}"
+                );
             }
             if canonical_pending {
                 assert!(
@@ -1916,6 +1924,10 @@ mod tests {
         engine.mark_unavailable();
         assert!(engine.get_record(id).is_err());
         assert!(engine.meta_store().get(id).is_err());
+        assert!(matches!(
+            engine.meta_store().records_in_namespace(ns),
+            Err(StorageError::RecoveryRequired(_))
+        ));
         assert!(
             engine
                 .get_text(TextRef {
@@ -1931,6 +1943,10 @@ mod tests {
         assert!(engine.sync().is_err());
         drop(engine);
         let engine = open_engine(dir.path());
+        assert_eq!(
+            engine.meta_store().records_in_namespace(ns).unwrap().len(),
+            1
+        );
         assert_eq!(
             engine.get_record(id).unwrap().unwrap().to_bytes(),
             record.to_bytes()

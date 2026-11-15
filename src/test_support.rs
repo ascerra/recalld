@@ -283,6 +283,7 @@ impl Fixture {
             .expect("tombstone memory");
     }
 
+    /// Real read/search adapter over the isolated fixture, with no external provider.
     pub(crate) fn search_adapter(&self) -> crate::mcp::bridge_adapters::McpSearchAdapter {
         use crate::search::adapters::*;
         let embedding = Arc::new(crate::embedding::PassthroughProvider::new(DIM));
