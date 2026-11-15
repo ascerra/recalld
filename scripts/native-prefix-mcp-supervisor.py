@@ -210,9 +210,16 @@ warm_file_enabled = false
             unknown=copy.deepcopy(seed);unknown.update(fixtureVersion=2);unknown.pop("inheritedDecayAdoptions")
             unknown_root,_=build_prefix("unknown-inherited-prefix",unknown)
             before_unknown=inventory(unknown_root)
+            def unknown_files(phase):
+                values={str(p.relative_to(unknown_root)):dict(sha256=h["digest"](p.read_bytes()),size=p.stat().st_size)
+                    for p in unknown_root.rglob("*") if p.is_file() and not p.is_symlink()}
+                save(evaluator/("unknown-files-"+phase+".json"),values)
+                return values
+            unknown_files("before-open")
             unknown_owner=child("unknown-inherited-prefix",root=unknown_root,native=True)
             assert unknown_owner.control.call("capabilities",{}) == expected_capabilities
             before_state=unknown_owner.control.call("inspect",{})
+            unknown_files("before-sweep")
             provider_count=len(provider_rows())
             try:
                 unknown_owner.control.call("sweep",dict(deadlineMs=30000))
@@ -225,6 +232,7 @@ warm_file_enabled = false
                 assert failure["retryable"] is False
             else:
                 raise AssertionError("unknown inherited policy sweep succeeded")
+            unknown_files("after-sweep")
             unavailable=unknown_owner.control.call("inspect",{},error="CONTROL_UNAVAILABLE")
             assert "sweep episode invalid" in unavailable["message"]
             status=unknown_owner.control.call("sweepStatus",{})
@@ -233,7 +241,9 @@ warm_file_enabled = false
             assert status["lastSweep"]["result"] == failure["sweep"]["result"]
             assert status["lastSweep"]["error"]["code"] == "SWEEP_FAILED"
             assert len(provider_rows()) == provider_count
+            unknown_files("before-close")
             unknown_owner.close()
+            unknown_files("after-close")
             unchanged(unknown_root,before_unknown)
             reopened=child("unknown-inherited-reopened",root=unknown_root,native=True)
             assert reopened.control.call("capabilities",{}) == expected_capabilities
