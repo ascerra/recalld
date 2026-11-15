@@ -143,10 +143,15 @@ async fn invoke(
     let reply = crate::mcp::tools::dispatch_tool(bridge, tool, args).await;
     let success = reply.is_error != Some(true);
     let wire = serde_json::to_value(reply).unwrap();
-    (
-        success,
-        serde_json::from_str(wire["content"][0]["text"].as_str().unwrap()).unwrap(),
-    )
+    let text = wire["content"][0]["text"].as_str().unwrap();
+    let value = if success {
+        serde_json::from_str(text).unwrap()
+    } else {
+        // Existing API1 validation errors may be plain text. Preserve that
+        // contract instead of requiring the owned lifecycle error envelope.
+        serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.into()))
+    };
+    (success, value)
 }
 
 async fn remote_lane(
@@ -375,6 +380,43 @@ async fn public_matrix_summary_extreme_clocks_sticky_permastore_and_forget() {
                 assert_eq!(receipts(&f), receipt_state);
                 ready(&f);
             }
+            // Reopen while still Summary, before terminal deletion could hide
+            // accidental payload reconstruction. Reuse the same actual owner,
+            // clock and adapters; this is not a second storage plane.
+            let summary = f.record(d.parent).unwrap();
+            finish_remote(remote).await;
+            drop((bridge, state));
+            let root = f.close();
+            inspect_schema(&d.path).unwrap();
+            let engine = match layout {
+                Layout::Legacy => RedbStorageEngine::open(&d.path).unwrap(),
+                _ => {
+                    NativeLifecycleSession::open(
+                        &d.path,
+                        NativePolicyInputs::default(),
+                        clock.clone(),
+                    )
+                    .unwrap()
+                    .engine
+                }
+            };
+            let f = Fixture::from_open_engine(root, engine);
+            assert_eq!(
+                f.record(d.parent).unwrap().encode().unwrap(),
+                summary.encode().unwrap()
+            );
+            completion(&f).rebuild_all().await.unwrap();
+            let (mut bridge, state) = public_adapters(&f, clock.clone());
+            let remote = remote_lane(lane, &mut bridge).await;
+            let read = f
+                .storage_adapter()
+                .with_clock(clock.clone())
+                .get_memory(d.parent, false, Some("native"))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(read.full_text.is_none());
+            assert_eq!(read.summary, original.summary);
             let before = f.record(d.parent).unwrap();
             clock.time.store(min, Ordering::SeqCst);
             let (ok, reply) =
