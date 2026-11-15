@@ -3,7 +3,7 @@
 fn native_compaction_fixture(root: &Path) -> (RedbStorageEngine, Vec<(MemoryId, String)>) {
     use crate::storage::schema_migration::{MigrationOptions, inspect_schema, migrate_schema};
     let source = root.join("legacy");
-    let (engine, kept) = generation_fixture(&source);
+    let (mut engine, kept) = generation_fixture(&source);
     engine.sync().unwrap();
     drop(engine);
     let destination = root.join("native");

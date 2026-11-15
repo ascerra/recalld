@@ -3,7 +3,9 @@ import hashlib, json, pathlib, shutil, subprocess, sys
 source = pathlib.Path(__file__).resolve().parents[3]
 mode = sys.argv[1]
 assert mode in ('before', 'focused', 'full')
-root = pathlib.Path('/tmp/recalld-native-text-compaction-validation') / mode
+label = sys.argv[2] if len(sys.argv) > 2 else mode
+assert label.replace('-', '').isalnum()
+root = pathlib.Path('/tmp/recalld-native-text-compaction-validation') / label
 root.mkdir(parents=True, exist_ok=False)
 (root/'source').mkdir(); (root/'output').mkdir(); (root/'cargo').mkdir()
 head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source).decode().strip()
