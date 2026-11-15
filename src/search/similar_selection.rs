@@ -42,7 +42,41 @@ pub(crate) struct SimilarityCoverage {
     pub strengths: BTreeMap<NamespaceId, StrengthDiagnostics>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SimilarityAlgorithm {
+    CosineMax,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SimilarityOwnAdmission {
+    Missing,
+    RejectedByMinScore,
+    Admitted,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SimilarityOrigin {
+    pub origin_id: MemoryId,
+    pub cosine: f32,
+}
+
+/// Cosine selection evidence, not the ranked-query baseline formula.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SimilarityExplanation {
+    pub algorithm: SimilarityAlgorithm,
+    pub own_cosine: Option<f32>,
+    pub own_admission: SimilarityOwnAdmission,
+    pub min_score: Option<f32>,
+    pub admitted_own: Option<f32>,
+    pub inherited_floor: Option<f32>,
+    pub origins: Vec<SimilarityOrigin>,
+    pub omitted_origins: usize,
+    pub final_similarity: f32,
+    pub version: Option<VersionStatus>,
+}
+
 pub(crate) struct SelectedSimilarRow {
+    pub explanation: Option<SimilarityExplanation>,
     pub result: SearchResult,
     pub namespace: NamespaceConfig,
     pub payload: crate::storage::engine::HydratedRecord,
@@ -439,6 +473,7 @@ impl QueryEngine {
                         let payload = payload.remove(0);
                         result.full_text = payload.full_text.clone();
                         rows.push(SelectedSimilarRow {
+                            explanation: None,
                             result,
                             namespace,
                             payload,

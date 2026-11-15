@@ -864,3 +864,50 @@ async fn similar_v2_actual_chain_64_resolves_65_is_unresolved_history_stays_raw(
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn similar_explanation_actual_own_rejection_and_inherited_max() {
+    use super::super::similar_selection::{SimilarityAlgorithm, SimilarityOwnAdmission};
+    let f = similar_fixture().await;
+    f.f.storage.write().unwrap().sync().unwrap();
+    let before = bytes(&f.f);
+    for threshold in [None, Some(0.5)] {
+        let mut options =
+            similar_options(SimilarityScope::SameNamespace, VersionMode::Current, false);
+        options.limit = 1;
+        options.min_score = threshold;
+        let selected = f
+            .engine
+            .similar_selected_with_work(f.source, None, options, None)
+            .await
+            .unwrap()
+            .value;
+        let row = &selected.rows[0];
+        assert_eq!(row.result.memory_id, f.terminal);
+        assert_eq!(row.result.composite_score, Some(0.96));
+        let evidence = row
+            .explanation
+            .as_ref()
+            .expect("selected similarity must carry actual cosine evidence");
+        assert_eq!(evidence.algorithm, SimilarityAlgorithm::CosineMax);
+        assert_eq!(evidence.own_cosine, Some(0.0));
+        assert_eq!(evidence.min_score, threshold);
+        assert_eq!(
+            evidence.own_admission,
+            if threshold.is_some() {
+                SimilarityOwnAdmission::RejectedByMinScore
+            } else {
+                SimilarityOwnAdmission::Admitted
+            }
+        );
+        assert_eq!(evidence.admitted_own, threshold.is_none().then_some(0.0));
+        assert_eq!(evidence.inherited_floor, Some(0.96));
+        assert_eq!(evidence.final_similarity, 0.96);
+        assert_eq!(evidence.origins.len(), 1);
+        assert_eq!(evidence.origins[0].origin_id, f.old);
+        assert_eq!(evidence.origins[0].cosine, 0.96);
+        assert_eq!(evidence.omitted_origins, 0);
+        assert_eq!(evidence.version, Some(VersionStatus::Current));
+    }
+    assert_eq!(bytes(&f.f), before);
+}
