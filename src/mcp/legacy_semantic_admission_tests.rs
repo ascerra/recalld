@@ -681,7 +681,12 @@ async fn legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(value["commitState"], "notCommitted", "{value}");
+    // Existing prepared-native wrong-owner diagnostic is conservative Unknown.
+    // This control proves no legacy fallback, not corrected commit classification.
+    assert_eq!(value["error"]["category"], "unavailable", "{value}");
+    assert_eq!(value["error"]["code"], "COMMIT_OUTCOME_UNKNOWN");
+    assert_eq!(value["error"]["commitState"], "unknown");
+    assert!(value["error"].get("operationId").is_none());
     assert!(value.get("receipt").is_none());
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.storage = adapter;
@@ -692,7 +697,9 @@ async fn legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy() {
     let packet = serde_json::to_value(result).unwrap();
     let text: Value = serde_json::from_str(packet["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(packet["structuredContent"], text);
-    assert_eq!(text["commitState"], "notCommitted", "{text}");
+    assert_eq!(text["error"]["code"], "COMMIT_OUTCOME_UNKNOWN", "{text}");
+    assert_eq!(text["error"]["commitState"], "unknown");
+    assert!(text["error"].get("operationId").is_none());
     assert!(text.get("receipt").is_none());
     assert_eq!(spy.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
