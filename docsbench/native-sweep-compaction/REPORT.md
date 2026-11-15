@@ -111,7 +111,9 @@ before compilation and after execution. The actual executed library path is
 identified from its test log and hashed; example executables are hashed before
 and after the actual consumers. Full and focused example identities match.
 Commands, all failed/success logs, exact inputs, control/actor wire, receipts,
-scorer outputs and comparisons are retained in this directory.
+scorer outputs and comparisons are retained in this directory. Raw logs retain
+their original compiler whitespace; whole-evidence `git diff --check` reports
+those spaces/blank lines. Runtime source and Markdown checks are clean.
 
 | Executed binary | SHA256 |
 | --- | --- |
@@ -165,4 +167,3 @@ f2e05ec8a1bdb3f963934fb5aa68225e72d93b9bd8467b7f6aa1b3a622351261
 86e7c1c76b74e5336f6b9c2179f9e2d98b9a340f0496401782f7faa9b247e206
 2fb7bb63d2e64471708ec5f27d52e0f1f858531e345c4a68b56c7e44236abd1d
 ```
-
