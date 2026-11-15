@@ -1,0 +1,16 @@
+{
+  "actualActions": 45,
+  "actualEpisodes": 3,
+  "appendOnlyTraceEvents": 60,
+  "labelComparison": {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "actorRequestsEqual": true,
+    "cacheKeysChanged": true,
+    "environmentChanged": true,
+    "providerRequestsVectorsEqual": true
+  },
+  "manifestNegatives": 8,
+  "scope": "Synthetic RPC/body observations only; injected interruption/write/parse faults are separate unit tests; no latency-performance/reset/token-budget/cost claim.",
+  "status": "passed"
+}
