@@ -1,9 +1,10 @@
 # Legacy API2: operation admission before another selection writer
 
-Source-only plan, 2026-11-14. Direct source parent is PR157
+Approved source plan, 2026-11-14; bounded implementation/validation is recorded
+in [the report](../evidence/legacy-api2-semantic-boundary/REPORT.md). Direct source parent is PR157
 `5e6115d051fbe102cc22059337e24725aca362be`, containing actual PR148 and PR144.
-PR157 remains frozen with Halley; this separate branch changes documentation
-only. Its exact-head full CI gate remains in force.
+PR157 remains frozen with Halley. This separate child corrects only demonstrated
+fresh admission and typed pre-work diagnostics; original histories remain intact.
 
 ## Contract reconciliation
 
@@ -179,7 +180,8 @@ there is no claim that an unsupported pending operation is automatically drained
   cancellation/unknown/publication faults retain existing receipts, accepted work
   and graph→storage order. Add only tests touched by the actual join.
 
-These are proposed tests, not executed results. PR157's tests and CI are separate.
+This section records the original proposed proof scope. See the report for actual
+executed results and remaining bounds; PR157's tests and CI remain separate.
 
 ## Separate native producer-certification gate
 
