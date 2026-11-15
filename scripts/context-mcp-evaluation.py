@@ -17,7 +17,7 @@ def fixtures(h,kind):
         actor['sources']=[];labels['relevant']={'q0':[],'q1':[],'q3':[]}
         cache['entries']={k:v for k,v in cache['entries'].items() if k.startswith('a6-query:') or k=='a6-document:health check'}
     else:
-        long='cedar résumé 🌲 '+('cedar river ' * 300)
+        long='cedar résumé 🌲 '+('cedar river ' * 100)
         vectors=([1.,0.,0.,0.],[.8,.6,0.,0.],[.6,.8,0.,0.],[1.,0.,0.,0.])
         for index,source in enumerate(actor['sources']):
             del cache['entries']['a6-document:'+source['summary']]

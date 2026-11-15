@@ -28,6 +28,13 @@ class Tokenizer(unittest.TestCase):
         self.assertNotIn(100257,t.tokens(self.encoder,'<|endoftext|>'))
         with self.assertRaises(UnicodeEncodeError):t.tokens(self.encoder,'\ud800')
 
+    def test_real_store_fixture_respects_summary_bytes_and_still_exceeds_small_cap(self):
+        for kind in ('standard','oversized-first'):
+            actor,_,_,_=c['fixtures'](h,kind)
+            self.assertTrue(all(len(t.utf8(v['summary']))<=2000 for v in actor['sources']))
+            long=actor['sources'][0 if kind=='oversized-first' else 1]['summary']
+            self.assertGreater(len(t.tokens(self.encoder,long)),128)
+
     def test_ranked_prefix_omission_no_skip_ahead(self):
         rows=[dict(id='first',summary='amber'),dict(id='too-long',summary='cedar ' * 400),dict(id='later-short',summary='birch')]
         v=t.assemble(self.encoder,'amber',rows,t.policy('boundary'))
