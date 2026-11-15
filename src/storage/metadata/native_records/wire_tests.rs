@@ -548,3 +548,165 @@ mod origin;
 
 #[path = "forget_origin_tests.rs"]
 mod forget_origin;
+
+fn decoder_native_response_matrix(
+    request: crate::serialization::native_lifecycle::Request,
+    success: crate::serialization::native_lifecycle::Reply,
+    operation: Operation,
+    mismatched: crate::serialization::native_lifecycle::Request,
+) {
+    use crate::serialization::native_lifecycle::Reply;
+    let receipt = success.receipt.as_ref().unwrap().clone();
+    let error = Reply::storage(crate::storage::StorageError::CommittedMutation {
+        receipt: Box::new(receipt.clone()),
+        source: Box::new(crate::storage::StorageError::RecoveryRequired(
+            "synthetic peer publication error".into(),
+        )),
+    });
+    let success = serde_json::to_value(success).unwrap();
+    let mut malformed = success.clone();
+    malformed["unexpectedField"] = json!(true);
+    let mut failures = Vec::new();
+    for (name, value) in [
+        ("success", success),
+        ("error", serde_json::to_value(error).unwrap()),
+        ("malformed", malformed),
+    ] {
+        let matching = Reply::decode_response(value.clone(), &request, operation);
+        assert_eq!(matching.receipt.as_ref().unwrap(), &receipt);
+        if name != "success" {
+            assert_eq!(matching.error.unwrap().commit_state, CommitState::Committed);
+        } else {
+            assert!(matching.error.is_none());
+        }
+        let wrong = Reply::decode_response(value, &mismatched, operation);
+        if wrong.receipt.is_some()
+            || wrong
+                .error
+                .as_ref()
+                .is_none_or(|e| e.commit_state != CommitState::Unknown)
+        {
+            failures.push(name);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "mismatched native receipt accepted by {failures:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn decoder_native_feedback_quality_binds_success_error_and_malformed_receipts() {
+    let (f, d, clock, bridge, _state) = setup().await;
+    let request = parse(
+        &request(&f, &d, "decoder-quality"),
+        Operation::Feedback,
+        true,
+        None,
+    )
+    .unwrap();
+    let reply = bridge.storage.feedback_native(request.clone()).await;
+    let before = bytes(&f, d.parent);
+    let calls = clock.0.load(Ordering::SeqCst);
+    let mut wrong = request.clone();
+    wrong.quality = 4;
+    assert_ne!(wrong.quality, request.quality);
+    decoder_native_response_matrix(request, reply, Operation::Feedback, wrong);
+    assert_eq!(bytes(&f, d.parent), before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn decoder_native_namespace_binds_success_error_and_malformed_receipts() {
+    let (f, d, clock, bridge, _state) = setup().await;
+    for operation in [Operation::Feedback, Operation::Forget] {
+        let mut request = parse(
+            &request(
+                &f,
+                &d,
+                if operation == Operation::Feedback {
+                    "decoder-scope-feedback"
+                } else {
+                    "decoder-scope-forget"
+                },
+            ),
+            operation,
+            true,
+            None,
+        )
+        .unwrap();
+        let reply = if operation == Operation::Feedback {
+            bridge.storage.feedback_native(request.clone()).await
+        } else {
+            bridge.storage.forget_native(request.clone()).await
+        };
+        request.namespace_id = Some(reply.scope.as_ref().unwrap().0);
+        let before = bytes(&f, d.parent);
+        let calls = clock.0.load(Ordering::SeqCst);
+        let mut wrong = request.clone();
+        wrong.namespace_id = Some(crate::model::NamespaceId::new(
+            request.namespace_id.unwrap().get() + 1,
+        ));
+        decoder_native_response_matrix(request, reply, operation, wrong);
+        assert_eq!(bytes(&f, d.parent), before);
+        assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocated_id() {
+    use crate::serialization::native_lifecycle::Reply;
+    let (f, d, clock, bridge, _state) = setup().await;
+    let request = parse(
+        &request(&f, &d, "decoder-state"),
+        Operation::Feedback,
+        true,
+        None,
+    )
+    .unwrap();
+    let receipt = bridge
+        .storage
+        .feedback_native(request.clone())
+        .await
+        .receipt
+        .unwrap();
+    let before = bytes(&f, d.parent);
+    let calls = clock.0.load(Ordering::SeqCst);
+    let error = Reply::storage(crate::storage::StorageError::CommittedMutation {
+        receipt: Box::new(receipt.clone()),
+        source: Box::new(crate::storage::StorageError::RecoveryRequired(
+            "synthetic peer failure".into(),
+        )),
+    });
+    let mut missing = serde_json::to_value(error).unwrap();
+    missing["receipt"] = Value::Null;
+    let mut unknown = missing.clone();
+    unknown["error"]["commitState"] = json!("unknown");
+    let decoded = Reply::decode_response(unknown, &request, Operation::Feedback);
+    let error = decoded.error.unwrap();
+    assert_eq!(error.commit_state, CommitState::Unknown);
+    assert_eq!(error.operation_id, Some(receipt.operation_id));
+    assert_ne!(error.code, "INVALID_RESPONSE");
+    assert!(decoded.receipt.is_none());
+    let mut not_committed = missing.clone();
+    not_committed["error"]["commitState"] = json!("notCommitted");
+    not_committed["error"]["operationId"] = Value::Null;
+    let decoded = Reply::decode_response(not_committed, &request, Operation::Feedback);
+    assert_eq!(
+        decoded.error.as_ref().unwrap().commit_state,
+        CommitState::NotCommitted
+    );
+    assert!(decoded.error.unwrap().operation_id.is_none());
+    assert!(decoded.receipt.is_none());
+    let decoded = Reply::decode_response(missing, &request, Operation::Feedback);
+    let error = decoded.error.unwrap();
+    assert_eq!(
+        error.commit_state,
+        CommitState::Unknown,
+        "receipt-free committed claim is malformed"
+    );
+    assert_eq!(error.code, "INVALID_RESPONSE");
+    assert!(decoded.receipt.is_none());
+    assert_eq!(bytes(&f, d.parent), before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+}

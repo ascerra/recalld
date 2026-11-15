@@ -441,6 +441,7 @@ impl Reply {
             return self.data.is_none()
                 && self.legacy_data.is_none()
                 && self.readiness.is_none()
+                && (error.commit_state == CommitState::Committed) == self.receipt.is_some()
                 && self.receipt.as_ref().is_none_or(|r| {
                     error.commit_state == CommitState::Committed
                         && error.operation_id == Some(r.operation_id)
@@ -519,9 +520,20 @@ impl Reply {
                 }
                 (MutationOutcome::NativeMemoryTombstoned { transition }, Operation::Forget) => {
                     transition.memory_id == request.id
+                        && request
+                            .namespace_id
+                            .is_none_or(|id| id == transition.namespace_id)
                 }
                 (MutationOutcome::LifecycleFeedbackApplied { transition }, Operation::Feedback) => {
-                    transition.records.len() == 1 && transition.records[0].memory_id == request.id
+                    transition.records.len() == 1
+                        && transition.records[0].memory_id == request.id
+                        && transition
+                            .feedback
+                            .as_ref()
+                            .is_some_and(|f| f.quality == request.quality)
+                        && request
+                            .namespace_id
+                            .is_none_or(|id| id == transition.namespace_id)
                 }
                 _ => false,
             }
