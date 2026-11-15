@@ -23,7 +23,10 @@ mod diagnostics;
 mod payload_selection;
 #[path = "similar_selection.rs"]
 mod similar_selection;
-pub(crate) use similar_selection::{SimilarityScope, SimilaritySelection};
+pub(crate) use similar_selection::{
+    SimilarityAlgorithm, SimilarityExplanation, SimilarityOrigin, SimilarityOwnAdmission,
+    SimilarityScope, SimilaritySelection,
+};
 
 #[path = "read_view.rs"]
 mod read_view;

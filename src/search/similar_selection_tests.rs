@@ -918,7 +918,7 @@ async fn similar_v2_actual_chain_64_resolves_65_is_unresolved_history_stays_raw(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn similar_explanation_actual_own_rejection_and_inherited_max() {
-    use super::super::similar_selection::{SimilarityAlgorithm, SimilarityOwnAdmission};
+    use crate::search::{SimilarityAlgorithm, SimilarityOwnAdmission};
     let f = similar_fixture().await;
     f.f.storage.write().unwrap().sync().unwrap();
     let before = bytes(&f.f);
@@ -964,7 +964,7 @@ async fn similar_explanation_actual_own_rejection_and_inherited_max() {
 }
 
 fn assert_similarity_explanations(selected: &super::super::similar_selection::SelectedSimilarity) {
-    use super::super::similar_selection::{SimilarityAlgorithm, SimilarityOwnAdmission};
+    use crate::search::{SimilarityAlgorithm, SimilarityOwnAdmission};
     for row in &selected.rows {
         let e = row
             .explanation
