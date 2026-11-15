@@ -827,3 +827,6 @@ fn online_producer_aborted_root_keeps_queued_worker_context_and_owned_guards() {
         assert_eq!(&rebuild["spans"][0]["trace_id"], id);
     });
 }
+
+#[path = "performance_batch_tests.rs"]
+mod batch;
