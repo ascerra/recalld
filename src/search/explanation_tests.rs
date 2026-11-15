@@ -112,6 +112,7 @@ async fn score_explanations_reconstruct_all_formulas_and_temporal_factor() {
         }
         let result = engine.search_with_semantics(query(serde_json::json!({
             "text":"keyword", "limit":10, "recordAccess":false,
+            "filter":{"minStrength":0.0},
             "entities":if matches!(formula, ScoreFormula::Direct | ScoreFormula::EntityRecall) { vec!["Alice", "Bob"] } else { vec![] },
             "queryMode":if formula == ScoreFormula::Metadata {"metadata_only"} else {"embedding_plus_metadata"},
             "graphDepth":if formula == ScoreFormula::Graph {1} else {0},
