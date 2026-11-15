@@ -2418,6 +2418,42 @@ pub(crate) async fn scan_duplicates_v2(
     }
 }
 
+/// Prepared inner handler. Public middleware still rejects application2.
+pub(crate) async fn search_v2(
+    search: &dyn super::state::SearchPipeline,
+    default_namespace: &str,
+    body: &serde_json::Value,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let reply = match crate::serialization::query::QueryRequest::from_http(body, default_namespace)
+    {
+        Ok(request) => search.query_contract(request).await,
+        Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    (
+        axum::http::StatusCode::from_u16(reply.http_status).expect("query HTTP status"),
+        Json(reply),
+    )
+        .into_response()
+}
+
+pub(crate) async fn similar_v2(
+    search: &dyn super::state::SearchPipeline,
+    id: crate::model::MemoryId,
+    body: &serde_json::Value,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let reply = match crate::serialization::query::SimilarRequest::from_http(body, id) {
+        Ok(request) => search.similar_contract(request).await,
+        Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    (
+        axum::http::StatusCode::from_u16(reply.http_status).expect("similarity HTTP status"),
+        Json(reply),
+    )
+        .into_response()
+}
+
 /// Resolved v1 discovery only. Store/provider identity certifies no ReadView,
 /// native writer readiness or historical vector provenance.
 pub async fn capabilities(State(state): State<super::state::AppState>) -> axum::response::Response {

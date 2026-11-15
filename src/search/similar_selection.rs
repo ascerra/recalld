@@ -49,6 +49,7 @@ pub(crate) struct SelectedSimilarRow {
 }
 
 pub(crate) struct SelectedSimilarity {
+    pub source_namespace: NamespaceConfig,
     pub read_generation: GenerationRef,
     pub evaluated_at: i64,
     pub rows: Vec<SelectedSimilarRow>,
@@ -452,6 +453,7 @@ impl QueryEngine {
             .await
             .map_err(unavailable)??;
             Ok(SelectedSimilarity {
+                source_namespace: source_ns.clone(),
                 read_generation: at,
                 evaluated_at,
                 rows,

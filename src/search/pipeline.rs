@@ -21,9 +21,13 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 mod diagnostics;
 #[path = "payload_selection.rs"]
 mod payload_selection;
+#[path = "query_wire.rs"]
+mod query_wire;
 #[path = "similar_selection.rs"]
 mod similar_selection;
-pub(crate) use similar_selection::{SimilarityScope, SimilaritySelection};
+pub(crate) use similar_selection::{
+    SelectedSimilarity, SimilarityExclusion, SimilarityScope, SimilaritySelection,
+};
 
 #[path = "read_view.rs"]
 mod read_view;

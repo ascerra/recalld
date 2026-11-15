@@ -701,6 +701,7 @@ mod tests {
     use tokio::sync::Notify;
 
     include!("payload_tests.rs");
+    include!("query_wire_tests.rs");
     include!("similar_selection_tests.rs");
 
     struct Embeddings {
