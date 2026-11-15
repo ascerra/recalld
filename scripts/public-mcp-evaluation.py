@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 
+BEIR = runpy.run_path(str(Path(__file__).with_name("beir-mcp-evaluation.py")))
 GROUPED = runpy.run_path(str(Path(__file__).with_name("grouped-mcp-evaluation.py")))
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 MODEL = "a6-public-synthetic-v1"
@@ -32,7 +33,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
                     canonicalSchemaAttested=False)
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
-EXTRA = ("scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py", "scripts/test_trace_accounting.py", "scripts/check_trace_accounting.py", "scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+EXTRA = ("scripts/beir-mcp-evaluation.py", "scripts/beir-reference-lock.json", "scripts/test_beir_mcp_evaluation.py", "scripts/check_beir_mcp_evaluation.py", "scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py", "scripts/test_trace_accounting.py", "scripts/check_trace_accounting.py", "scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py", "scripts/native-sweep-mcp-supervisor.py", "scripts/test_native_sweep_episode.py", "src/storage/engine/fixtures/text-compaction-before.zip",
          *["docsbench/native-sweep-consumer/full-e1d4cea9/inputs/"+name for name in ("manifest.json","actor-inputs.json","evaluator-labels.json","evaluator-cache.json","evaluator-schedule.json")])
 
@@ -237,6 +238,8 @@ def track_profile(track):
 
 
 def fixtures(track=TRACK):
+    if track == BEIR["TRACK"]:
+        return BEIR["fixtures"](globals())
     if track == NATIVE_SWEEP["TRACK"]:
         return NATIVE_SWEEP["fixtures"](fixtures, NATIVE)
     if track == NATIVE["TRACK"]:
@@ -277,7 +280,7 @@ def validate_build(m, binary, scorer, source_root):
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
     versions, capabilities = track_profile(m["track"])
-    if m["track"] not in (TRACK, GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
+    if m["track"] not in (TRACK, BEIR["TRACK"], GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -318,6 +321,8 @@ def validate_artifacts(root, m, expected=None, prefix=""):
     actor, labels, cache, schedule = artifacts
     if expected is not None:
         expected_actor, _, expected_cache, expected_schedule = expected
+    elif m["track"] == BEIR["TRACK"]:
+        expected_actor, _, expected_cache, expected_schedule = BEIR["fixtures"](globals(), schedule.get("futureVariant") == "changed")
     elif m["track"] == NATIVE_SWEEP["TRACK"]:
         expected_actor, _, expected_cache, expected_schedule = NATIVE_SWEEP["fixtures"](fixtures, NATIVE, schedule.get("futureVariant") == "changed")
     elif m["track"] == NATIVE["TRACK"]:
@@ -326,7 +331,7 @@ def validate_artifacts(root, m, expected=None, prefix=""):
         expected_actor, _, expected_cache, expected_schedule = fixtures(m["track"])
     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
-    exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
+    exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary", *(("metricQrels",) if m["track"] == BEIR["TRACK"] else ())))
     if type(labels["adapterVersion"]) is not int or labels["adapterVersion"] != 1 or labels["annotationUnit"] != "synthetic-unit" or not isinstance(labels["labelCanary"], str) or not labels["labelCanary"]:
         raise ValueError("unsupported annotations")
     if not isinstance(labels["relevant"], dict) or not set(labels["relevant"]) <= {q["queryId"] for q in schedule["queries"]}:
@@ -340,18 +345,22 @@ def validate_artifacts(root, m, expected=None, prefix=""):
     return actor, labels, cache, schedule
 
 
-def validate(manifest_path, binary, scorer, source_root):
+def validate(manifest_path, binary, scorer, source_root, beir_reference=None):
     # Complete input validation before creating episode output, provider, or store.
     raw = manifest_path.read_bytes()
     m = json.loads(raw)
     accounted = m.get("track") == ACCOUNTING_TRACK
-    exact_keys(m, (*(("accountingPolicy",) if accounted else ()), "manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+    exact_keys(m, (*(("accountingPolicy",) if accounted else ()), *(("metricPolicy", "referenceBundleSha256") if m.get("track") == BEIR["TRACK"] else ()), "manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
                    "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
                    "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
     if accounted and encoded(m["accountingPolicy"]) != encoded(ACCOUNTING_POLICY):
         raise ValueError("unsupported accounting/token/context/cost policy")
     validate_build(m, binary, scorer, source_root)
-    return m, *validate_artifacts(manifest_path.parent, m), digest(raw)
+    artifacts = validate_artifacts(manifest_path.parent, m)
+    if m["track"] == BEIR["TRACK"]:
+        actor, labels, cache, schedule = artifacts
+        BEIR["preflight"](m, labels, actor, schedule, beir_reference)
+    return m, *artifacts, digest(raw)
 
 
 def build_manifest(args, build):
@@ -365,6 +374,7 @@ def build_manifest(args, build):
 def prepare(args):
     if getattr(args, "track", TRACK) == GROUPED["TRACK"]:
         return GROUPED["prepare"](args, globals())
+    reference_sha = BEIR["verify_reference"](getattr(args, "beir_reference", None)) if args.track == BEIR["TRACK"] else None
     args.out.mkdir()
     build = json.loads(args.build.read_text())
     actor, labels, cache, schedule = fixtures(args.track)
@@ -373,6 +383,8 @@ def prepare(args):
              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
              executables={"ownedEvaluator" if args.track in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
              activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
+    if args.track == BEIR["TRACK"]:
+        m.update(metricPolicy=BEIR["POLICY"], referenceBundleSha256=reference_sha)
     if getattr(args, "track", TRACK) == ACCOUNTING_TRACK:
         m.update(track=ACCOUNTING_TRACK, accountingPolicy=ACCOUNTING_POLICY)
     if args.track in (NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]):
@@ -452,10 +464,11 @@ def run_episode(args, prepared=None):
         return NATIVE["run"](args, globals())
     if prepared is None and json.loads(args.manifest.read_text()).get("track") in (RESET["TRACK"], SWEEP["TRACK"]):
         return RESET["run"](args, globals())
-    m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root)
+    m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root, getattr(args, "beir_reference", None))
     owned = m["track"] == OWNED["TRACK"]
-    scripted = owned or m["track"] == CONFORMANCE["TRACK"]
-    conformance = scripted and not owned
+    beir = m["track"] == BEIR["TRACK"]
+    scripted = owned or beir or m["track"] == CONFORMANCE["TRACK"]
+    conformance = scripted and not owned and not beir
     adapter = OWNED if owned else CONFORMANCE
     args.out.mkdir()
     evaluator = args.out / "evaluator"
@@ -653,6 +666,8 @@ warm_file_enabled = false
             raise RuntimeError(runtime_failure)
         score_input = dict(profile=m["scoringProfile"], environmentHash=environment, sourceIds=[s["sourceId"] for s in actor["sources"]], mappings=mappings,
                            relevant=labels["relevant"], queries=queries, sourceEvents=event_text, sourceEventsSha256=digest(event_text.encode()))
+        if beir:
+            BEIR["consume"](args, globals(), m, actor, labels, schedule, wire, score_input)
         save(evaluator / "score-input.json", score_input)
         subprocess.run([str(args.scorer), "--input", str(evaluator / "score-input.json"), "--out", str(evaluator / "scores.json")], check=True)
         for name in ("actor-projection.json", "actor-wire.jsonl", "actor-provider.jsonl", "source-mappings.json", "trace.jsonl"):
@@ -774,10 +789,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
-    p.add_argument("--track", choices=(TRACK, GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
+    p.add_argument("--track", choices=(TRACK, BEIR["TRACK"], GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
+    p.add_argument("--beir-reference", type=Path)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
+    p.add_argument("--beir-reference", type=Path)
     p = sub.add_parser("host")
     p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"]), default=TRACK)
     p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True); p.add_argument("--library-evidence", type=Path)
