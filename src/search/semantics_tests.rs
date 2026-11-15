@@ -5,7 +5,7 @@ use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{EdgeType, Tag};
 use crate::search::adapters::{RifProcessorAdapter, SharedGraphReader, StorageMetadataAdapter};
 
-fn graph_engine(
+pub(super) fn graph_engine(
     records: Vec<CachedRecord>,
     vectors: &[(MemoryId, f32)],
     edges: &[(MemoryId, MemoryId, EdgeType)],
@@ -33,10 +33,10 @@ fn graph_engine(
     (engine, graph)
 }
 
-fn current() -> RetrievalSemantics {
+pub(super) fn current() -> RetrievalSemantics {
     RetrievalSemantics::V2(VersionMode::Current)
 }
-fn history() -> RetrievalSemantics {
+pub(super) fn history() -> RetrievalSemantics {
     RetrievalSemantics::V2(VersionMode::History)
 }
 fn result_ids(response: &SearchResponse) -> Vec<MemoryId> {
@@ -599,6 +599,7 @@ async fn v2_inheritance_preserves_min_score_temporal_boost_and_stronger_own_evid
         let expected = own.unwrap_or(0.0).max(0.9) * 0.9 * 1.5;
         assert!((result.response.results[0].composite_score.unwrap() - expected).abs() < 1e-6);
         assert_eq!(result.response.total_matches, 1);
+        super::explanation_tests::assert_explanation(&result);
     }
 }
 

@@ -441,7 +441,7 @@ async fn coherent_v2_final_hydrated_exposures_reach_actual_recorder_once() {
     let before_a = f.record(a).unwrap();
     let before_terminal = f.record(terminal).unwrap();
     let before_old = f.record(old).unwrap().to_bytes();
-    let readonly = engine
+    let mut readonly = engine
         .prepare_coherent_payload_with_semantics(
             payload_query(1),
             RetrievalSemantics::V2(VersionMode::Current),
@@ -457,6 +457,34 @@ async fn coherent_v2_final_hydrated_exposures_reach_actual_recorder_once() {
     assert!(accesses.contains(&(a, AccessKind::DirectRetrieval)));
     assert!(accesses.contains(&(terminal, AccessKind::AssociativeRetrieval)));
     assert!(!accesses.iter().any(|(id, _)| *id == old));
+    let provenance = &readonly.response.diagnostics.provenance.as_ref().unwrap()[&terminal];
+    let explanation = provenance.explanation.as_ref().unwrap();
+    assert!(explanation.own.is_none());
+    assert_eq!(
+        explanation.rejected_direct.unwrap().disposition,
+        MinScoreDisposition::Rejected
+    );
+    assert_eq!(explanation.rejected_direct.unwrap().vector, Some(0.0));
+    assert_eq!(explanation.inherited_sources.len(), 1);
+    assert_eq!(explanation.inherited_sources[0].source, old);
+    assert_eq!(
+        explanation.inherited_sources[0].own.formula,
+        ScoreFormula::Graph
+    );
+    assert!(!provenance.own_channels.contains(&RetrievalChannel::Vector));
+    // Actual prepared consumer ignores explanation presentation for exposure.
+    // Public explain-toggle serialization remains the A4 wire consumer's test.
+    for p in readonly
+        .response
+        .diagnostics
+        .provenance
+        .as_mut()
+        .unwrap()
+        .values_mut()
+    {
+        p.explanation = None;
+    }
+    assert_eq!(readonly.exposures(true).unwrap(), accesses);
     assert!(
         readonly
             .response
