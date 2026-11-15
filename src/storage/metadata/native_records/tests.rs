@@ -20,7 +20,6 @@ mod readers;
 mod batches;
 #[path = "exact_scan_tests.rs"]
 mod exact_scan;
-
 #[path = "sweep_tests.rs"]
 mod sweep;
 
@@ -884,3 +883,6 @@ mod namespace_binding;
 
 #[path = "request_context_tests.rs"]
 mod request_context;
+
+#[path = "compaction_tests.rs"]
+mod compaction;

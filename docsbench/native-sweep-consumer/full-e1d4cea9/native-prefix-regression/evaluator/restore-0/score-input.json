@@ -1,0 +1,70 @@
+{
+  "environmentHash": "0fe61b677dea1fb62ede176e15592f26705e514c58aa2f7beffc4ac9a38729aa",
+  "mappings": {
+    "01a1dcc1-3f6e-7901-8ca7-b79a09fb90ed": [
+      "turn-0"
+    ],
+    "01a1dcc1-3f74-73f3-be86-3475e3623f8c": [
+      "turn-1"
+    ],
+    "01a1dcc1-3f76-7f30-ad2f-a81c843d9012": [
+      "turn-2"
+    ],
+    "01a1dcc1-3f7b-7ba2-9524-1a84725c03e0": [
+      "turn-3"
+    ]
+  },
+  "profile": "synthetic-unique-source-v1",
+  "queries": [
+    {
+      "memoryIds": [
+        "01a1dcc1-3f74-73f3-be86-3475e3623f8c",
+        "01a1dcc1-3f76-7f30-ad2f-a81c843d9012",
+        "01a1dcc1-3f6e-7901-8ca7-b79a09fb90ed"
+      ],
+      "queryId": "q0"
+    },
+    {
+      "memoryIds": [
+        "01a1dcc1-3f74-73f3-be86-3475e3623f8c",
+        "01a1dcc1-3f76-7f30-ad2f-a81c843d9012",
+        "01a1dcc1-3f6e-7901-8ca7-b79a09fb90ed"
+      ],
+      "queryId": "q1"
+    },
+    {
+      "memoryIds": [
+        "01a1dcc1-3f74-73f3-be86-3475e3623f8c",
+        "01a1dcc1-3f76-7f30-ad2f-a81c843d9012",
+        "01a1dcc1-3f6e-7901-8ca7-b79a09fb90ed"
+      ],
+      "queryId": "q2"
+    },
+    {
+      "memoryIds": [
+        "01a1dcc1-3f74-73f3-be86-3475e3623f8c",
+        "01a1dcc1-3f76-7f30-ad2f-a81c843d9012",
+        "01a1dcc1-3f6e-7901-8ca7-b79a09fb90ed"
+      ],
+      "queryId": "q3"
+    }
+  ],
+  "relevant": {
+    "q0": [
+      "turn-0",
+      "turn-1"
+    ],
+    "q1": [],
+    "q3": [
+      "turn-1"
+    ]
+  },
+  "sourceEvents": "{\"sourceId\": \"turn-0\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-0\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-0\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcc1-3f6e-7901-8ca7-b79a09fb90ed\"}\n{\"sourceId\": \"turn-1\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-1\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-1\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcc1-3f74-73f3-be86-3475e3623f8c\"}\n{\"sourceId\": \"turn-2\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-2\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-2\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcc1-3f76-7f30-ad2f-a81c843d9012\"}\n{\"sourceId\": \"turn-3\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-3\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-3\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcc1-3f7b-7ba2-9524-1a84725c03e0\"}\n",
+  "sourceEventsSha256": "1bf4018c73b476ac257c2f76e895751af23d792aff2ff4fd47855c0298565959",
+  "sourceIds": [
+    "turn-0",
+    "turn-1",
+    "turn-2",
+    "turn-3"
+  ]
+}

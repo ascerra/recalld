@@ -1,0 +1,51 @@
+[
+  {
+    "case": "old-owner",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "old-query-worker-active",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "unsupported-checkpoint-clock",
+    "error": "CONTROL_UNAVAILABLE"
+  },
+  {
+    "case": "existing-destination",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "symlink-destination",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "wrong-manifest-digest",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "wrong-source",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "unbound",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "wrong-model",
+    "exitCode": 1,
+    "providerCalls": 0
+  },
+  {
+    "case": "wrong-revision",
+    "exitCode": 1,
+    "providerCalls": 0
+  }
+]

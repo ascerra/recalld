@@ -1089,6 +1089,7 @@ impl MetadataStore {
         &self,
         namespace_id: NamespaceId,
     ) -> Result<Vec<DiskRecord>, StorageError> {
+        self.ensure_available()?;
         let timer = crate::performance::Timer::new("canonical.namespace_read");
         let instrumented = crate::performance::enabled();
         let mut encoded_bytes = 0usize;
@@ -1116,8 +1117,12 @@ impl MetadataStore {
                 result.push(record);
             }
         }
-        tracing::trace!(target: "recalld::performance", kind = "canonical_read",
-            examined, records = result.len(), encoded_record_bytes = encoded_bytes);
+        crate::performance::event!(
+            kind = "canonical_read",
+            examined,
+            records = result.len(),
+            encoded_record_bytes = encoded_bytes
+        );
         timer.complete();
         Ok(result)
     }

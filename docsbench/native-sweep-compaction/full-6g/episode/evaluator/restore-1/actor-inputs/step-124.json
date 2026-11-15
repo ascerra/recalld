@@ -1,0 +1,13 @@
+{
+  "currentAction": {
+    "arguments": {
+      "namespace": "default",
+      "summary": "unrecorded-write"
+    },
+    "tag": "blocked-store",
+    "tool": "store_memory"
+  },
+  "deliveryOrdinal": 124,
+  "phase": "action",
+  "startId": 120
+}

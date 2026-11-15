@@ -16,7 +16,7 @@ fn failure(code: &str, message: impl ToString, report: Option<&Value>) -> Value 
 
 impl OwnedEvaluator {
     pub(crate) async fn sweep(&self, request_id: u64, deadline: Instant) -> Result<Value, Value> {
-        if self.native_prefix {
+        if self.native_prefix && !self.native_sweep {
             return Err(failure(
                 "UNSUPPORTED_CONTROL",
                 "native prefix sweep is unavailable",
@@ -24,10 +24,11 @@ impl OwnedEvaluator {
             ));
         }
         self.controls
-            .sweep(
+            .sweep_for_schema(
                 request_id,
                 self.core.config().decay.decay_rate_multiplier,
                 deadline,
+                if self.native_sweep { 2 } else { 1 },
             )
             .await
     }
@@ -42,11 +43,23 @@ impl FrozenControls {
         json!({"episodeInvalidated":state.invalidated,"lastSweep":state.report})
     }
 
+    #[cfg(test)]
     async fn sweep(
         &self,
         request_id: u64,
         multiplier: f64,
         deadline: Instant,
+    ) -> Result<Value, Value> {
+        self.sweep_for_schema(request_id, multiplier, deadline, 1)
+            .await
+    }
+
+    async fn sweep_for_schema(
+        &self,
+        request_id: u64,
+        multiplier: f64,
+        deadline: Instant,
+        required_schema: u32,
     ) -> Result<Value, Value> {
         let permit = self.busy.clone().try_lock_owned().map_err(|_| {
             failure(
@@ -82,11 +95,11 @@ impl FrozenControls {
                 .control_state()
                 .map_err(|e| failure("SWEEP_REJECTED", e, None))?
                 .control_schema_version
-                != 1
+                != required_schema
             {
                 return Err(failure(
                     "UNSUPPORTED_CONTROL",
-                    "native sweep control is not validated",
+                    "sweep track canonical schema mismatch",
                     None,
                 ));
             }
@@ -107,7 +120,7 @@ impl FrozenControls {
             // Catch worker panic without releasing the controller permit early.
             // A panic leaves registered unfinished work unresolved, never ready.
             let worker = tokio::spawn(async move {
-                let result = DecaySweepRunner::execute_sweep_with_work(
+                let result = DecaySweepRunner::execute_sweep_with_origin_work(
                     &SweepConfig::default(),
                     &crate::decay::DecayConfig::default(),
                     &crate::graph::ActivationConfig::default(),
@@ -118,6 +131,7 @@ impl FrozenControls {
                     Some(now),
                     Some(&work),
                     Some(&owner),
+                    1, // Explicit manual application1; schema does not choose origin.
                 )
                 .await;
                 if result.uncertain_operation.is_none() {
@@ -131,6 +145,13 @@ impl FrozenControls {
                     || result.uncertain_operation.is_some();
                 let mut report = initial;
                 report["result"] = describe(&result);
+                if required_schema == 2 {
+                    report["result"]["compactionReceipt"] = json!(result.compaction_receipt);
+                    report["result"]["compactionCleanupPending"] =
+                        json!(result.compaction_cleanup_pending);
+                    report["result"]["missingSummarySkipped"] =
+                        json!(result.missing_summary_skipped);
+                }
                 report["phase"] = json!("failed");
                 if failed {
                     return Err(failure(
@@ -266,6 +287,23 @@ mod tests {
     }
     fn deadline() -> Instant {
         Instant::now() + Duration::from_secs(10)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sweep_track_rejects_legacy_owner_before_work_or_write() {
+        let (f, controls, _) = fixture().await;
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+        let status = tracker.status();
+        let error = controls
+            .sweep_for_schema(1, 1.0, deadline(), 2)
+            .await
+            .unwrap_err();
+        assert_eq!(error["code"], "UNSUPPORTED_CONTROL");
+        assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+        assert_eq!(tracker.status().pending, status.pending);
+        assert_eq!(tracker.status().admission_open, status.admission_open);
+        assert_eq!(controls.sweep_status()["lastSweep"], Value::Null);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

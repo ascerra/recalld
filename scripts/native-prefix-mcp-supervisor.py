@@ -56,11 +56,15 @@ def capabilities(h):
     return value
 
 
-def run(args, h):
+def run(args, h, sweep=None):
+    checkpoint_track = sweep["CHECKPOINT_TRACK"] if sweep else CHECKPOINT_TRACK
+    fixture = (lambda base, future=False: sweep["fixtures"](base, h["NATIVE"], future)) if sweep else fixtures
+    expected_capabilities = sweep["capabilities"](h) if sweep else capabilities(h)
     manifest, actor, labels, cache, schedule, environment = h["validate"](args.manifest, args.binary, args.scorer, args.source_root)
     # Only validated artifacts can create output/provider/store side effects.
     args.out.mkdir()
     evaluator=args.out/"evaluator"; evaluator.mkdir()
+    if sweep: sweep["check_old_manifest"](args, h, manifest, evaluator)
     runtime=args.out/"runtime"; runtime.mkdir(mode=0o700)
     (runtime/"home").mkdir(mode=0o700)
     shutil.copyfile(args.source_root/"scripts/public-mcp-actor.py", runtime/"actor.py")
@@ -92,7 +96,7 @@ document_prefix = "a6-document:"
 query_prefix = "a6-query:"
 [decay]
 disable_sweep = true
-decay_rate_multiplier = 0.0
+decay_rate_multiplier = {1.0 if sweep else 0.0}
 [rif]
 enabled = false
 [graph]
@@ -104,8 +108,9 @@ warm_file_enabled = false
         documentPreprocessing=dict(version="recalld-document-v1",prefix="a6-document:"),
         queryPreprocessing=dict(version="recalld-query-v1",prefix="a6-query:"),normalization="l2_unit_v1")
     seed=dict(fixtureVersion=1,profile=profile,attest=True,sources=[dict(sourceId=s["sourceId"],namespace=s["namespace"],summary=s["summary"],fullText=s.get("fullText"),embedding=s["embedding"]) for s in actor["sources"]])
+    if sweep: seed.update(fixtureVersion=3, namespaceDecayMultipliers={"foreign":0.0}, inheritedDecayAdoptions={"default":1.0})
     children=[]; negatives=[]; comparisons=[]
-    result=dict(status="running",track=TRACK,environmentHash=environment,independentNativeGenesis=False)
+    result=dict(status="running",track=sweep["TRACK"] if sweep else TRACK,environmentHash=environment,independentNativeGenesis=False)
     save=h["save"]
     def build_prefix(name, data):
         source=evaluator/(name+"-input.json"); report=evaluator/(name+"-provenance.json"); root=runtime/name
@@ -114,15 +119,16 @@ warm_file_enabled = false
             subprocess.run([str(args.binary.with_name("native_prefix_fixture")),"--input",str(source),"--root",str(root),"--report",str(report)],check=True,stdout=log,stderr=subprocess.STDOUT,env=dict(PATH="/usr/bin:/bin"))
         return root,json.loads(report.read_text())
     def child(name, root=None, checkpoint=None, prior=None, negative=False, native=False, cfg=None):
-        value=h["RESET"]["Child"](h,args,root or runtime/name,cfg or config,evaluator/name,checkpoint,prior,negative,native)
+        value=h["RESET"]["Child"](h,args,root or runtime/name,cfg or config,evaluator/name,checkpoint,prior,negative,native,native and sweep is not None)
         children.append(value);return value
     def snapshot(owner):
-        return h["RESET"]["checked_snapshot"](h,owner.control.call("snapshot",dict(deadlineMs=30000)),runtime,CHECKPOINT_TRACK)
+        return h["RESET"]["checked_snapshot"](h,owner.control.call("snapshot",dict(deadlineMs=30000)),runtime,checkpoint_track)
     def provider_rows(): return h["rows"](server.log) if server.log.exists() else []
-    def reject(name, root=None, checkpoint=None, native=False, cfg=None):
+    def reject(name, root=None, checkpoint=None, native=False, cfg=None, error_contains=None):
         count=len(provider_rows()); owner=child("negative-"+name,root,checkpoint,negative=True,native=native,cfg=cfg)
         try:
             assert owner.process.wait(timeout=30) != 0,name
+            if error_contains: assert error_contains in (owner.output/"runtime.log").read_text(),name
             assert len(provider_rows())==count,"rejected constructor called provider"
             if not native and root is None: assert not owner.root.exists(),"rejected restore created destination"
             negatives.append(dict(case=name,exitCode=owner.process.returncode,providerCalls=0))
@@ -133,10 +139,18 @@ warm_file_enabled = false
         return {str(p.relative_to(folder)):h["digest"](p.read_bytes()) for p in folder.rglob("*") if p.is_file() and not p.is_symlink()}
     def unchanged(folder,before):
         assert all((folder/name).is_file() and h["digest"]((folder/name).read_bytes())==sha for name,sha in before.items()),"source/checkpoint bytes changed"
+    def closed_inventory(root,name):
+        report=evaluator/(name+"-canonical.json")
+        with (evaluator/(name+"-canonical.log")).open("wb") as log:
+            subprocess.run([str(args.binary.with_name("native_prefix_fixture")),
+                "--inspect-existing","--root",str(root),"--report",str(report)],
+                check=True,stdout=log,stderr=subprocess.STDOUT,env=dict(PATH="/usr/bin:/bin"))
+        return json.loads(report.read_text())
     def admit(owner, expected=None, expected_state=None):
-        assert owner.control.call("capabilities",{})==capabilities(h)
-        owner.control.call("sweep",dict(deadlineMs=30000),error="UNSUPPORTED_CONTROL")
-        owner.control.call("sweepStatus",{},error="UNSUPPORTED_CONTROL")
+        assert owner.control.call("capabilities",{})==expected_capabilities
+        if not sweep:
+            owner.control.call("sweep",dict(deadlineMs=30000),error="UNSUPPORTED_CONTROL")
+            owner.control.call("sweepStatus",{},error="UNSUPPORTED_CONTROL")
         state,ready=owner.ready(); snap=snapshot(owner)
         if expected:
             assert snap["logicalHash"]==expected["logicalHash"] and snap["committed"]==expected["committed"]
@@ -145,6 +159,9 @@ warm_file_enabled = false
         owner.step(dict(phase="connect_native_prefix",startId=0,deliveryOrdinal=0))
         return state,snap
     def suffix(owner, mappings, current_labels, current_schedule, current_cache):
+        if sweep:
+            return sweep["suffix"](owner, mappings, h, args, manifest, actor, current_labels,
+                current_schedule, current_cache, server, runtime, snapshot, provider_rows)
         server.entries={}; first=len(provider_rows()); state,_=owner.ready(); start_id=100
         outputs=[]; receipts=[]; acks=[]; queries=[]
         for index,step in enumerate(current_schedule["steps"]):
@@ -196,7 +213,103 @@ warm_file_enabled = false
         comparison=dict(outputs=outputs,state=state,logicalHash=snap["logicalHash"],provider=[dict(request=json.loads(v["requestBody"]),status=v["status"],vectors=v["responseVectors"]) for v in provider])
         save(owner.output/"suffix.json",comparison);return comparison
     try:
+        if sweep:
+            unknown=copy.deepcopy(seed);unknown.update(fixtureVersion=2);unknown.pop("inheritedDecayAdoptions")
+            unknown_root,unknown_provenance=build_prefix("unknown-inherited-prefix",unknown)
+            before_unknown=inventory(unknown_root)
+            before_canonical=closed_inventory(unknown_root,"unknown-before-open")
+            unchanged(unknown_root,before_unknown)
+            def unknown_files(phase):
+                values={str(p.relative_to(unknown_root)):dict(sha256=h["digest"](p.read_bytes()),size=p.stat().st_size)
+                    for p in unknown_root.rglob("*") if p.is_file() and not p.is_symlink()}
+                save(evaluator/("unknown-files-"+phase+".json"),values)
+                return values
+            unknown_files("before-open")
+            startup_owner=child("unknown-startup",root=unknown_root,native=True)
+            assert startup_owner.control.call("capabilities",{}) == expected_capabilities
+            startup_state,startup_readiness=startup_owner.ready()
+            unknown_files("after-startup-open")
+            startup_owner.close()
+            unknown_files("after-startup-close")
+            completed_canonical=closed_inventory(unknown_root,"unknown-after-startup")
+            # The first real publisher acknowledges the four already-applied
+            # fixture insert effects. Prove that exact transition, rather than
+            # excluding effects from later state comparisons.
+            table=None; expected_items=[]; acknowledged=[]
+            for item in before_canonical["items"]:
+                if item["kind"] == "table": table=item["data"]["name"]
+                if item["kind"] == "row" and table == "mutation_effects":
+                    effect=json.loads(bytes(item["data"]["value"]))
+                    assert effect["version"] == 1 and effect["canonical_applied"] is True
+                    assert effect["receipt"]["outcome"]["kind"] == "memoryInserted"
+                    assert bytes(item["data"]["key"]).hex() == effect["receipt"]["operationId"].replace("-", "")
+                    acknowledged.append(effect)
+                else:
+                    expected_items.append(item)
+            assert len(acknowledged) == 4
+            by_operation=lambda rows: {r["operationId"]:r for r in rows}
+            assert by_operation([v["receipt"] for v in acknowledged]) == by_operation(unknown_provenance["sourceReceipts"])
+            assert completed_canonical["items"] == expected_items
+            for key in ("inventoryVersion","source","control","namespaces","records"):
+                assert completed_canonical[key] == before_canonical[key]
+            save(evaluator/"unknown-startup-completion.json",dict(
+                acknowledgedEffects=acknowledged,state=startup_state,readiness=startup_readiness,
+                beforeLogicalSha256=before_canonical["logicalSha256"],
+                afterLogicalSha256=completed_canonical["logicalSha256"],
+                exactOtherCanonicalItemsUnchanged=True))
+            before_canonical=completed_canonical
+            unknown_owner=child("unknown-inherited-prefix",root=unknown_root,native=True)
+            assert unknown_owner.control.call("capabilities",{}) == expected_capabilities
+            before_state=unknown_owner.control.call("inspect",{})
+            assert before_state == startup_state
+            before_sweep=unknown_files("before-sweep")
+            provider_count=len(provider_rows())
+            try:
+                unknown_owner.control.call("sweep",dict(deadlineMs=30000))
+            except ValueError:
+                # Preserve the full typed failed-sweep wire rather than claiming
+                # that an unknown policy forbids every nonprojecting read/open.
+                wire=h["rows"](unknown_owner.output/"control-wire.jsonl")
+                failure=wire[-1]["response"]["error"]
+                assert failure["code"] == "SWEEP_FAILED" and "inherited" in json.dumps(failure)
+                assert failure["retryable"] is False
+            else:
+                raise AssertionError("unknown inherited policy sweep succeeded")
+            assert unknown_files("after-sweep") == before_sweep
+            unavailable=unknown_owner.control.call("inspect",{},error="CONTROL_UNAVAILABLE")
+            assert "sweep episode invalid" in unavailable["message"]
+            status=unknown_owner.control.call("sweepStatus",{})
+            assert status["episodeInvalidated"] is True
+            assert status["lastSweep"]["phase"] == "failed"
+            assert status["lastSweep"]["result"] == failure["sweep"]["result"]
+            assert status["lastSweep"]["error"]["code"] == "SWEEP_FAILED"
+            assert len(provider_rows()) == provider_count
+            assert unknown_files("before-close") == before_sweep
+            unknown_owner.close()
+            unknown_files("after-close")
+            after_canonical=closed_inventory(unknown_root,"unknown-after-close")
+            assert after_canonical == before_canonical
+            reopened=child("unknown-inherited-reopened",root=unknown_root,native=True)
+            assert reopened.control.call("capabilities",{}) == expected_capabilities
+            after_state=reopened.control.call("inspect",{})
+            assert after_state == before_state
+            assert len(provider_rows()) == provider_count
+            reopened.close()
+            unknown_files("after-fresh-owner-close")
+            reopened_canonical=closed_inventory(unknown_root,"unknown-after-fresh-owner-close")
+            assert reopened_canonical == before_canonical
+            save(evaluator/"unknown-inherited-sweep.json",dict(failure=failure,
+                invalidatedOwnerInspect=unavailable,sweepStatus=status,
+                beforeState=before_state,freshOwnerState=after_state,
+                sourceFilesSha256=before_unknown,canonicalInventoryUnchanged=True,
+                fileBytesUnchangedDuringSweep=True,stateUnchanged=True,providerCalls=0))
+            negatives.append(dict(case="unknown-inherited-prefix-sweep",code="SWEEP_FAILED",providerCalls=0))
         root,provenance=build_prefix("original",seed); mappings=provenance["mappings"]
+        if sweep:
+            adoption=provenance["inheritedPolicyAdoptions"]
+            assert len(adoption)==2 and adoption[1]["historicalReceiptBytesPreserved"] and adoption[1]["foreignNamespaceUnchanged"]
+            assert adoption[0]["request"]["preview"]["prior"] is None
+            save(evaluator/"explicit-policy-adoption.json",adoption)
         original=child("original",root=root,native=True); initial_state,checkpoint=admit(original)
         # This is the actual source-owner lock gate, before any clone is installed.
         reject("old-owner",checkpoint=checkpoint)
@@ -218,7 +331,7 @@ warm_file_enabled = false
         for variant in ("labels","future"):
             folder=evaluator/("variant-"+variant);folder.mkdir()
             candidate=copy.deepcopy(manifest)
-            a,l,c,sc=fixtures(h["fixtures"],variant=="future")
+            a,l,c,sc=fixture(h["fixtures"],variant=="future")
             if variant=="labels":
                 l["relevant"]={"q0":["turn-2"],"q1":["turn-0"],"q3":[]}
                 l["labelCanary"]="CHANGED_NATIVE_EVALUATOR_LABEL_ONLY"
@@ -237,10 +350,12 @@ warm_file_enabled = false
                     assert filename.read_bytes()==(original.output/"actor-inputs"/filename.name).read_bytes()
             else:
                 first=next(i for i,step in enumerate(schedule["steps"]) if schedule["futureQueryCanary"] in json.dumps(step))
-                assert value["outputs"][:first]==baseline["outputs"][:first],"future question changed prior actor outputs"
-                for ordinal in [0,*range(100,100+first)]:
+                action_first=sum("control" not in step for step in schedule["steps"][:first])
+                assert value["outputs"][:action_first]==baseline["outputs"][:action_first],"future question changed prior actor outputs"
+                for ordinal in [0,*[100+i for i,step in enumerate(schedule["steps"][:first]) if "control" not in step]]:
                     assert (owner.output/"actor-inputs"/f"step-{ordinal}.json").read_bytes()==(original.output/"actor-inputs"/f"step-{ordinal}.json").read_bytes()
-                assert value["provider"][:3]==baseline["provider"][:3],"future question changed prior vectors"
+                prior_queries=sum(step.get("tool")=="recall_memories" and step["arguments"].get("recordAccess") is False for step in schedule["steps"][:first])
+                assert value["provider"][:prior_queries]==baseline["provider"][:prior_queries],"future question changed prior vectors"
             base_keys={key for row in provider_rows() if row["environmentHash"]==environment for key in row["cacheKeys"]}
             variant_keys={key for row in provider_rows() if row["environmentHash"]==variant_environment for key in row["cacheKeys"]}
             assert base_keys and variant_keys and not base_keys & variant_keys,"environment identities did not separate replay keys"
@@ -273,6 +388,11 @@ warm_file_enabled = false
         reject("symlink-destination",root=link,checkpoint=checkpoint);assert link.is_symlink() and inventory(destination)==before
         reject("wrong-manifest-digest",checkpoint=dict(checkpoint,sha256="0"*64))
         checkpoint_manifest=json.loads(Path(checkpoint["manifest"]).read_text())
+        if sweep:
+            old_track=dict(checkpoint_manifest,track="isolated-native-sweep-checkpoint-v1")
+            path=checkpoint_root/"negative-old-track.json";save(path,old_track)
+            assert old_track["executableSha256"] == checkpoint_manifest["executableSha256"]
+            reject("old-sweep-track-valid-digest",checkpoint=dict(checkpoint,manifest=str(path),sha256=h["digest"](path.read_bytes())),error_contains="unsupported checkpoint track")
         bad_source=dict(checkpoint_manifest,sourceRoot=str(runtime/"absent-source"))
         path=checkpoint_root/"negative-source.json";save(path,bad_source)
         reject("wrong-source",checkpoint=dict(checkpoint,manifest=str(path),sha256=h["digest"](path.read_bytes())))
@@ -281,7 +401,7 @@ warm_file_enabled = false
         for name,change in [("unbound",lambda v:v.update(attest=False)),("wrong-model",lambda v:v["profile"].update(modelId="synthetic-wrong-profile")),("wrong-revision",lambda v:v["profile"].update(modelRevision="synthetic-negative-only"))]:
             negative_seed=copy.deepcopy(seed);change(negative_seed)
             negative_root,_=build_prefix(name,negative_seed);reject(name,root=negative_root,native=True)
-        result.update(status="passed",restores=3,suffixes=4,actionsPerSuffix=len(schedule["steps"]),hashes=[v["logicalHash"] for v in comparisons],negativeCases=negatives,actorCurrentStepOnly=True,canaries=variants,sourceCheckpointBytesUnchanged=True,originalOwnerBytesUnchanged=True)
+        result.update(status="passed",restores=3,suffixes=4,actionsPerSuffix=sum("control" not in step for step in schedule["steps"]),hashes=[v["logicalHash"] for v in comparisons],negativeCases=negatives,actorCurrentStepOnly=True,canaries=variants,sourceCheckpointBytesUnchanged=True,originalOwnerBytesUnchanged=True)
     except BaseException as error:
         result.update(status="failed",error=str(error));raise
     finally:

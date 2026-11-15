@@ -1,7 +1,9 @@
 //! Engine-exclusive generation publication. No marker participates in selection.
 use super::*;
 use crate::storage::fsync::fsync_dir;
+use crate::storage::native_text;
 use crate::storage::text::generation::{cleanup_orphans, validate_rejection_gate};
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Stage {
@@ -39,7 +41,7 @@ impl RedbStorageEngine {
         self.ensure_available()?;
         // Admission precedes prepared file creation and stays live through the
         // selected handle and cleanup publication, including unknown failures.
-        let guard = self.meta_store.mutation_guard_with_work(parent)?;
+        let guard = self.meta_store.text_compaction_guard_with_work(parent)?;
         let old = self.meta_store.text_selection()?.ok_or_else(|| StorageError::RecoveryRequired(
             "legacy text compaction requires offline fresh-destination migration: recalld-text-migrate SOURCE DESTINATION".into()
         ))?;
@@ -59,10 +61,13 @@ impl RedbStorageEngine {
             })
             .collect();
         // Validate retained extents BEFORE any migration writes or selection.
-        for (_, reference) in &refs {
-            self.text_store.read(*reference)?;
+        let mut text_hashes = std::collections::BTreeMap::new();
+        for (id, reference) in &refs {
+            let bytes = self.text_store.read(*reference)?;
+            text_hashes.insert(*id, Sha256::digest(bytes.as_bytes()).into());
         }
         let state = self.control_state()?;
+        state.committed_generation.next()?; // Reject exhaustion before payload/ID allocation.
         let old_size = self.text_store.file_size();
         let old_count = self.text_store.complete_entry_count()?;
         let (mut prepared, id) = TextStore::create_generation_with_ids(
@@ -83,19 +88,54 @@ impl RedbStorageEngine {
         let descriptor = prepared.seal(state.store_id, id, 2)?;
         // Validate the exact prepared bytes before the one metadata transaction.
         let prepared = TextStore::open_generation(&self.db_path, &descriptor, true)?;
-        for (_, reference) in &new_refs {
-            prepared.read(*reference)?;
+        for (id, reference) in &new_refs {
+            let copied: [u8; 32] = Sha256::digest(prepared.read(*reference)?.as_bytes()).into();
+            if text_hashes.get(id) != Some(&copied) {
+                return Err(StorageError::InvalidTextRef);
+            }
         }
-        self.meta_store.select_text_generation_guarded(
+        let proof = if state.control_schema_version == 2 {
+            let namespaces = self.meta_store.list_namespaces()?;
+            let (record_count, records_sha256) =
+                native_text::record_digest(&records, &namespaces, &text_hashes)?;
+            Some(native_text::NativeTextRelocation {
+                proof_version: 1,
+                source: state.generation_ref(),
+                before: old.clone(),
+                after: descriptor.clone(),
+                record_count,
+                retained_count: refs.len() as u64,
+                before_refs_sha256: native_text::reference_digest(&refs)?,
+                after_refs_sha256: native_text::reference_digest(&new_refs)?,
+                records_sha256,
+                copied_text_sha256: native_text::copy_digest(&refs, &text_hashes)?,
+            })
+        } else {
+            None
+        };
+        let receipt = self.meta_store.select_text_generation_proved_guarded(
             &guard,
             state.committed_generation,
             &descriptor,
             &new_refs,
+            proof.as_ref(),
+            &text_hashes,
         )?;
-        boundary(Stage::Selected).inspect_err(|_| self.mark_unavailable())?;
+        boundary(Stage::Selected).map_err(|source| {
+            self.mark_unavailable();
+            StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(source),
+            }
+        })?;
         self.text_store = prepared; // infallible publication, while readers remain drained
-        boundary(Stage::Published)?;
-        let result = CompactionResult {
+        boundary(Stage::Published).map_err(|source| StorageError::CommittedMutation {
+            receipt: Box::new(receipt.clone()),
+            source: Box::new(source),
+        })?;
+        let mut result = CompactionResult {
+            receipt,
+            cleanup_pending: false,
             old_size,
             new_size: self.text_store.file_size(),
             entries_removed: old_count.saturating_sub(refs.len()),
@@ -113,6 +153,7 @@ impl RedbStorageEngine {
             Ok(())
         })();
         if let Err(error) = cleanup {
+            result.cleanup_pending = true;
             tracing::warn!(%error, "text generation committed; cleanup pending");
         }
         Ok(result)
@@ -123,6 +164,8 @@ impl RedbStorageEngine {
 mod tests {
     use super::*;
     use std::io::{Seek, SeekFrom, Write};
+
+    include!("text_compaction_native_tests.rs");
 
     fn generation_fixture(path: &Path) -> (RedbStorageEngine, Vec<(MemoryId, String)>) {
         let mut engine = RedbStorageEngine::open(path).unwrap();

@@ -1,0 +1,13 @@
+
+running 8 tests
+test storage::metadata::native_records::tests::sweep::native_sweep_actual_interval_registers_only_at_tick_and_publishes_fresh_generation ... ok
+test storage::metadata::native_records::tests::sweep::native_sweep_partial_publication_failure_keeps_original_receipt_until_actual_repair ... ok
+test storage::metadata::native_records::tests::sweep::native_sweep_aborted_or_queued_shutdown_work_cannot_claim_readiness ... ok
+test storage::metadata::native_records::tests::sweep::native_sweep_preserves_unknown_migration_marker_and_clamps_regressed_clock ... ok
+test storage::metadata::native_records::tests::sweep::native_sweep_rechecks_donor_and_fan_after_capture_without_resampling_clock ... ok
+test storage::metadata::native_records::tests::sweep::native_sweep_without_completion_refuses_before_canonical_mutation ... ok
+test storage::metadata::native_records::tests::sweep::native_sweep_startup_and_manual_finish_under_closed_admission_with_fresh_barrier ... ok
+test storage::metadata::native_records::tests::sweep::origin::native_sweep_compaction_manual_and_autonomous_preserve_internal_origin_and_readiness ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1192 filtered out; finished in 7.34s
+

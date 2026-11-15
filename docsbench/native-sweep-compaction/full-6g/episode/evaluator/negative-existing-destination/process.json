@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/episode/runtime/config.toml",
+    "--data-root",
+    "/output/episode/runtime/existing-destination",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--restore-checkpoint",
+    "/output/episode/runtime/recalld-frozen-canonical-E64zfN/manifest.json",
+    "--checkpoint-sha256",
+    "880c67e30781764459561b3f7ae7cd7203d4a96c06b3265738c52066ae65ab95"
+  ],
+  "exitCode": 1,
+  "forced": false,
+  "negativeConstructorProbe": true,
+  "pid": 4260,
+  "priorJoined": null,
+  "status": "joined"
+}
