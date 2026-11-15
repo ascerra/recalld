@@ -9,6 +9,7 @@ pub(crate) mod pair_cursor;
 pub mod query;
 mod query_explanation;
 pub mod query_response;
+pub(crate) mod query_schema;
 pub mod scan;
 pub mod session;
 

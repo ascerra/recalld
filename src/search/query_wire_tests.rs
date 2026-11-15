@@ -1,5 +1,50 @@
 // Real owned fixture consumers; included in read_view::tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn strict_query_actual_supplemental_coverage_after_filter_and_cap() {
+    let f = Fixture::new();
+    let owner = owner(&f);
+    let anchor = payload_record(&owner, 1, [1., 0., 0., 0.], None, None, true).await;
+    for number in (2..=25).rev() {
+        payload_record(
+            &owner,
+            number,
+            [0., 1., 0., 0.],
+            Some(anchor),
+            None,
+            number > 13,
+        )
+        .await;
+    }
+    let engine = payload_engine(&f, &owner);
+    f.storage.write().unwrap().sync().unwrap();
+    let before = bytes(&f);
+    let request = crate::serialization::query::QueryRequest::from_mcp(
+        &serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"limit":1,"depth":1,"compact":false,"recordAccess":false,"explain":true}), "default"
+    ).unwrap();
+    let reply = engine.query_contract(request).await;
+    assert_eq!(reply.http_status, 200, "{reply:?}");
+    let data = reply.envelope.data.as_ref().unwrap();
+    assert_eq!(data["results"][0]["memoryId"], anchor.to_string());
+    let neighbors = data["neighbors"].as_array().unwrap();
+    assert_eq!(neighbors.len(), 10);
+    for (neighbor, number) in neighbors.iter().zip(14..=23) {
+        assert_eq!(neighbor["memoryId"], fixed_id(number).to_string());
+        assert!(neighbor.get("explanation").is_none());
+    }
+    let coverage = &data["coverage"]["supplemental"];
+    assert_eq!(coverage["ineligibleNeighbors"], 12);
+    assert_eq!(coverage["eligibleUniqueNeighbors"], 12);
+    assert_eq!(coverage["neighborLimitApplied"], true);
+    assert_eq!(coverage["requested"], true);
+    assert_eq!(bytes(&f), before);
+    crate::serialization::query_schema::record_fixture(
+        "recall-supplemental",
+        false,
+        &serde_json::to_value(&reply).unwrap(),
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_query_explanation_preserves_actual_exposure_classification() {
     use crate::search::adapters::StorageAccessRecorder;
     let mut observations = Vec::new();
@@ -73,6 +118,7 @@ async fn strict_query_actual_prepared_mcp_rest_current_history_and_false_bytes()
         serde_json::from_str::<serde_json::Value>(text).unwrap(),
         value
     );
+    crate::serialization::query_schema::record_fixture("recall-plain", false, &value);
     assert_eq!(value["scope"]["namespaceId"], 1);
     assert_eq!(value["data"]["results"].as_array().unwrap().len(), 1);
     assert_eq!(value["data"]["results"][0]["memoryId"], current.to_string());
@@ -103,6 +149,7 @@ async fn strict_query_actual_prepared_mcp_rest_current_history_and_false_bytes()
     let explained = crate::mcp::tools::prepared_query(&mcp, "default", &explained_args).await;
     assert_eq!(explained.is_error, Some(false), "{explained:?}");
     let explained = serde_json::Value::Object(explained.structured_content.unwrap());
+    crate::serialization::query_schema::record_fixture("recall-explained", false, &explained);
     let mut without_evidence = explained.clone();
     for hit in without_evidence["data"]["results"].as_array_mut().unwrap() {
         let evidence = hit.as_object_mut().unwrap().remove("explanation").unwrap();
@@ -170,6 +217,11 @@ async fn strict_query_actual_original2_observer_and_current_barrier() {
     let before = f.record(id).unwrap().access_history.len();
     let reply = engine.query_contract(request).await;
     assert_eq!(reply.http_status, 200, "{reply:?}");
+    crate::serialization::query_schema::record_fixture(
+        "recall-legacy-observed",
+        false,
+        &serde_json::to_value(&reply).unwrap(),
+    );
     assert_eq!(reply.observation_receipts.len(), 1);
     let receipt = reply.envelope.receipt.as_ref().unwrap();
     assert!(matches!(
@@ -291,6 +343,11 @@ async fn strict_query_actual_final_barrier_failure_keeps_full_receipt_and_identi
     });
     let reply = engine.query_contract(request).await;
     assert_eq!(reply.http_status, 503, "{reply:?}");
+    crate::serialization::query_schema::record_fixture(
+        "recall-known-failure",
+        false,
+        &serde_json::to_value(&reply).unwrap(),
+    );
     let receipt = reply.envelope.receipt.as_ref().unwrap();
     assert_eq!(reply.observation_receipts, vec![receipt.clone()]);
     assert_eq!(
@@ -419,6 +476,7 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
     let result = crate::mcp::tools::prepared_similar(&mcp, &args).await;
     assert_eq!(result.is_error, Some(false), "{result:?}");
     let value = serde_json::Value::Object(result.structured_content.unwrap());
+    crate::serialization::query_schema::record_fixture("similar-plain", true, &value);
     let ids: Vec<_> = value["data"]["results"]
         .as_array()
         .unwrap()
@@ -469,6 +527,15 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
         let result = crate::mcp::tools::prepared_similar(&mcp, &unsupported).await;
         assert_eq!(result.is_error, Some(true));
         let rejected = serde_json::Value::Object(result.structured_content.unwrap());
+        crate::serialization::query_schema::record_fixture(
+            if access {
+                "similar-true-rejected"
+            } else {
+                "similar-false-rejected"
+            },
+            true,
+            &rejected,
+        );
         assert_eq!(rejected["error"]["code"], "UNSUPPORTED_FEATURE");
         assert_eq!(rejected["error"]["field"], "/explain");
         assert!(rejected.get("receipt").is_none());
@@ -518,6 +585,11 @@ async fn strict_query_actual_similar_original2_true_preserves_all_namespace_rece
     let request=crate::serialization::query::SimilarRequest::from_mcp(&serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"namespaceScope":"allCompatible","tags":["allow"]})).unwrap();
     let reply = f.engine.similar_contract(request).await;
     assert_eq!(reply.http_status, 200, "{reply:?}");
+    crate::serialization::query_schema::record_fixture(
+        "similar-native-observed",
+        true,
+        &serde_json::to_value(&reply).unwrap(),
+    );
     assert_eq!(reply.observation_receipts.len(), 2);
     assert!(reply.envelope.receipt.is_none());
     assert!(reply.envelope.readiness.as_ref().unwrap().ready);

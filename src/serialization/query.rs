@@ -505,7 +505,7 @@ pub(crate) fn input_schema(mcp: bool) -> Value {
         "namespace":{"type":["string","null"],"minLength":1,"maxLength":64},
         "query":{"type":"string","minLength":1,"maxLength":FULL_TEXT_MAX_BYTES,"description":"UTF-8 byte limit enforced by server"},
         "ftsQuery":{"type":"string","minLength":1,"maxLength":FULL_TEXT_MAX_BYTES},
-        "embedding":{"type":"array","minItems":1,"maxItems":8192,"items":{"type":"number"}},
+        "embedding":{"type":"array","minItems":1,"maxItems":8192,"items":{"type":"number","minimum":-(f32::MAX as f64),"maximum":f32::MAX as f64}},
         "embeddingProfileId":{"type":"string","pattern":"^ep1:[0-9a-f]{64}$"},
         "queryMode":{"enum":["embedding_plus_metadata","embedding_only","metadata_only"],"default":"embedding_plus_metadata"},
         "versionMode":{"enum":["current","history"],"default":"current"},
@@ -513,11 +513,11 @@ pub(crate) fn input_schema(mcp: bool) -> Value {
         "depth":{"type":"integer","minimum":0,"maximum":3,"default":0},
         "minStrength":{"type":"number","minimum":0,"maximum":1},
         "minScore":{"type":"number","minimum":0,"maximum":1},
-        "timeRangeStart":{"type":"integer"},"timeRangeEnd":{"type":"integer"},
+        "timeRangeStart":{"type":"integer","minimum":i64::MIN,"maximum":i64::MAX},"timeRangeEnd":{"type":"integer","minimum":i64::MIN,"maximum":i64::MAX},
         "recordAccess":{"type":"boolean","default":true},
         "includeEmbeddings":{"type":"boolean","default":false},
         "includeGhosts":{"type":"boolean","default":false},
-        "permastoreOnly":{"type":"boolean","default":false},"explain":{"type":"boolean","default":false}
+        "permastoreOnly":{"type":"boolean","default":false},"explain":{"type":"boolean","default":false,"description":"Ranked-query baseline-v1 evidence only; does not change ranking or exposure."}
     });
     for key in ["tags", "entities", "topics", "emotions"] {
         properties[key] = json!({"type":"array","maxItems":MAX_TAGS,"items":{"type":"string","minLength":1,"maxLength":TAG_MAX_BYTES}});
@@ -527,9 +527,20 @@ pub(crate) fn input_schema(mcp: bool) -> Value {
         properties["contractVersion"] = json!({"const":2});
         properties["compact"] = json!({"type":"boolean","default":true});
     }
-    json!({"type":"object","additionalProperties":false,"properties":properties,
+    let mut metadata = Vec::new();
+    for field in ["tags", "entities", "topics", "emotions", "phases"] {
+        metadata.push(json!({"required":[field],"properties":{field:{"minItems":1}}}));
+    }
+    metadata.push(json!({"required":["minStrength"]}));
+    metadata.push(
+        json!({"required":["permastoreOnly"],"properties":{"permastoreOnly":{"const":true}}}),
+    );
+    json!({"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":properties,
         "required":if mcp {vec!["contractVersion"]} else {vec![]},
-        "dependentRequired":{"embedding":["embeddingProfileId"],"embeddingProfileId":["embedding"]}})
+        "dependentRequired":{"embedding":["embeddingProfileId"],"embeddingProfileId":["embedding"]},
+        "if":{"required":["queryMode"],"properties":{"queryMode":{"const":"metadata_only"}}},
+        "then":{"allOf":[{"not":{"anyOf":[{"required":["query"]},{"required":["ftsQuery"]},{"required":["embedding"]}]}},{"anyOf":metadata}]},
+        "else":{"anyOf":[{"required":["embedding"]},{"required":["query"],"properties":{"query":{"pattern":"\\S"}}}]}})
 }
 
 pub(crate) fn similar_input_schema(mcp: bool) -> Value {
@@ -553,7 +564,7 @@ pub(crate) fn similar_input_schema(mcp: bool) -> Value {
     ] {
         properties.insert(field.into(), common["properties"][field].clone());
     }
-    properties.insert("explain".into(), json!({"const":false,"default":false}));
+    properties.insert("explain".into(), json!({"const":false,"default":false,"description":"Cosine-specific explanations are not supported by this producer."}));
     properties.insert(
         "namespaceScope".into(),
         json!({"enum":["sameNamespace","allCompatible"],"default":"sameNamespace"}),
@@ -563,7 +574,7 @@ pub(crate) fn similar_input_schema(mcp: bool) -> Value {
         properties.insert("mode".into(), json!({"const":"single","default":"single"}));
         properties.insert("id".into(), json!({"type":"string","format":"uuid"}));
     }
-    json!({"type":"object","additionalProperties":false,"properties":properties,"required":if mcp{vec!["contractVersion","id"]}else{vec![]}})
+    json!({"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":properties,"required":if mcp{vec!["contractVersion","id"]}else{vec![]}})
 }
 
 #[cfg(test)]

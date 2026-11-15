@@ -492,6 +492,11 @@ mod tests {
                 "raw diagnostic intentionally excluded: ".repeat(100_000),
             ),
         ));
+        super::super::query_schema::record_fixture(
+            "maximal-valid-receipts",
+            false,
+            &serde_json::to_value(&failure).unwrap(),
+        );
         assert_eq!(failure.observation_receipts, receipts);
         assert!(failure.envelope.receipt.is_none());
         assert!(failure.fits_transport());
