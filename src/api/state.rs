@@ -33,6 +33,18 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
+    async fn similar_contract(
+        &self,
+        _request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn query_contract(
+        &self,
+        _request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
     /// Same owned core as the production pipeline, before provider/selection work.
     /// Immutable test adapters do not register work; they may not inherit a ticket.
     fn accept_work(&self) -> Result<Option<crate::storage::work::WorkTicket>, SearchError> {

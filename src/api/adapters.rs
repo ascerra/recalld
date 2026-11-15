@@ -86,6 +86,18 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
+    async fn similar_contract(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.similar_contract(request).await
+    }
+    async fn query_contract(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.query_contract(request).await
+    }
     fn accept_work(
         &self,
     ) -> Result<Option<crate::storage::work::WorkTicket>, crate::search::SearchError> {

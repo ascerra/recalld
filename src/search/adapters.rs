@@ -581,20 +581,11 @@ impl StorageAccessRecorder {
     }
 }
 
-#[async_trait]
-impl AccessRecorder for StorageAccessRecorder {
-    fn supports_native_exposure(&self) -> bool {
-        self.completion.is_some()
-            && self
-                .storage
-                .read()
-                .is_ok_and(|s| s.meta_store().uses_native_lifecycle())
-    }
-
-    async fn record_access_batch_for_publication(
+impl StorageAccessRecorder {
+    async fn record_with_scopes(
         &self,
         accesses: &[(MemoryId, AccessKind)],
-        scope: Option<&crate::storage::control::ExposureScope>,
+        scopes: crate::decay::similarity_scope::ExposureScopes,
         sampled_at: Option<i64>,
         parent: Option<&crate::storage::work::WorkTicket>,
         policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
@@ -628,9 +619,9 @@ impl AccessRecorder for StorageAccessRecorder {
                 )
             })?;
             completion
-                .record_native_exposures_with_work(
+                .record_native_exposures_with_scopes(
                     accesses.to_vec(),
-                    scope.cloned(),
+                    scopes.clone(),
                     sampled_at.unwrap_or_else(|| self.clock.now_millis()),
                     policy.clone(),
                     parent,
@@ -638,12 +629,12 @@ impl AccessRecorder for StorageAccessRecorder {
                 )
                 .await?
         } else {
-            crate::decay::observation::record_exposures_scoped_with_origin_work(
+            crate::decay::observation::record_exposures_with_scopes(
                 self.storage.clone(),
                 self.cache.clone(),
                 accesses.to_vec(),
                 sampled_at.unwrap_or_else(|| self.clock.now_millis()),
-                scope.cloned(),
+                scopes.clone(),
                 parent,
                 original_contract_version,
             )
@@ -653,6 +644,57 @@ impl AccessRecorder for StorageAccessRecorder {
         Ok(crate::decay::observation::AccessObservation::from_receipts(
             receipts,
         ))
+    }
+}
+
+#[async_trait]
+impl AccessRecorder for StorageAccessRecorder {
+    fn supports_native_exposure(&self) -> bool {
+        self.completion.is_some()
+            && self
+                .storage
+                .read()
+                .is_ok_and(|s| s.meta_store().uses_native_lifecycle())
+    }
+
+    async fn record_access_batch_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        self.record_with_scopes(
+            accesses,
+            crate::decay::similarity_scope::ExposureScopes::Existing(scope.cloned()),
+            sampled_at,
+            parent,
+            policy,
+            original_contract_version,
+        )
+        .await
+    }
+
+    async fn record_similarity_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        selection: &crate::decay::similarity_scope::SimilarityExposure,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        self.record_with_scopes(
+            accesses,
+            crate::decay::similarity_scope::ExposureScopes::Similarity(selection.clone()),
+            Some(sampled_at),
+            parent,
+            Some(policy),
+            original_contract_version,
+        )
+        .await
     }
 
     async fn record_access(

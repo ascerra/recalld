@@ -40,11 +40,13 @@ pub struct ChannelDiagnostics {
     pub returned_inherited: usize,
 }
 
-/// Evidence for one returned UUID. No predecessor, rejected, or foreign IDs.
+/// Evidence for one returned UUID. No rejected or foreign IDs. Explanation
+/// sources contain only bounded eligible origins, not intermediate path IDs.
 /// Inherited channels describe all resolved predecessor evidence, including
 /// evidence below the winning inherited floor; they are not additive scores.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResultProvenance {
+    pub explanation: Option<super::ScoreExplanation>,
     pub own_channels: BTreeSet<RetrievalChannel>,
     pub inherited_channels: BTreeSet<RetrievalChannel>,
     pub own_vector_score: Option<f32>,
@@ -181,6 +183,8 @@ impl SemanticsDiagnostics {
             evidence.own_graph_activation =
                 evidence.own_graph_activation.or(candidate.activation_score);
             evidence.final_score = candidate.composite_score;
+            evidence.explanation =
+                Some(candidate.explain(self.versions.get(&candidate.record.id).copied()));
             for channel in &evidence.own_channels {
                 channels.get_mut(channel).unwrap().returned_own += 1;
             }
