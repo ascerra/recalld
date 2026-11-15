@@ -12,6 +12,12 @@ impl EmbeddingProvider for LocalProvider {
         if text.starts_with("private-input-canary") {
             assert_eq!(text, "private-input-canary\n\nprivate-text-canary");
         }
+        if text.starts_with("private-link-input-canary") {
+            assert_eq!(
+                text,
+                "private-link-input-canary\n\nprivate-text-canary entity/private-entity-canary"
+            );
+        }
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(vec![1.0, 0.0, 0.0, 0.0])
     }
@@ -659,6 +665,7 @@ async fn online_producer_actual_links_report_returned_counts_without_payload_lab
     let calls = Arc::new(AtomicUsize::new(0));
     let server = server_with_links(&fx, calls.clone(), true);
     let mut request: serde_json::Value = serde_json::from_str(&request()).unwrap();
+    request["params"]["arguments"]["summary"] = serde_json::json!("private-link-input-canary");
     request["params"]["arguments"]["entities"] = serde_json::json!(["private-entity-canary"]);
     let capture = Capture::default();
     for id in 1..=2 {
@@ -723,13 +730,10 @@ fn online_producer_aborted_root_keeps_queued_worker_context_and_owned_guards() {
             entities: fx.entity_index.clone(),
         };
         let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
-        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let blocker = tokio::task::spawn_blocking(move || {
-            entered_tx.send(()).unwrap();
-            let _ = release_rx.recv();
-        });
-        entered_rx.await.unwrap();
+        // Let publication_gate's own blocking lookup finish before occupying
+        // the pool. Hold graph acquisition to stop before the actual rebuild
+        // worker is queued; this does not alter any production lock order.
+        let held_graph = fx.graph.clone().write_owned().await;
         let capture = Capture::default();
         let task = tokio::spawn(
             measure_transport("test.abort_worker", async move {
@@ -737,6 +741,24 @@ fn online_producer_aborted_root_keeps_queued_worker_context_and_owned_guards() {
             })
             .with_subscriber(subscriber(capture.clone())),
         );
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !events(&capture)
+                .iter()
+                .any(|e| e["stage"] == "derived.publication.wait" && e["outcome"] == "ok")
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            entered_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        });
+        entered_rx.await.unwrap();
+        drop(held_graph);
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while tracker.status().pending < 2 {
                 tokio::task::yield_now().await;
