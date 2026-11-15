@@ -557,3 +557,91 @@ async fn online_producer_actual_committed_publication_failure_and_keyed_replay_k
             .any(|e| e["kind"] == "derived_ack" && e["success"] == true)
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn online_producer_actual_stdio_rejection_and_parse_failure_never_call_provider() {
+    for raw in ["{broken".to_string(), {
+        let mut value: serde_json::Value = serde_json::from_str(&request()).unwrap();
+        value["params"]["arguments"]["summary"] = serde_json::json!("");
+        value.to_string()
+    }] {
+        let fx = Fixture::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = server(&fx, calls.clone());
+        let before = fx.storage.read().unwrap().control_state().unwrap();
+        let capture = Capture::default();
+        let output = Output::default();
+        let captured = output.clone();
+        let input = format!("{raw}\n");
+        crate::mcp::transport::serve_io(server, input.as_bytes(), output)
+            .with_subscriber(subscriber(capture.clone()))
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&captured.bytes.lock().unwrap()).unwrap();
+        assert!(value.get("error").is_some() || value["result"]["isError"] == true);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
+        let trace = events(&capture);
+        assert!(!trace.iter().any(|e| e["kind"] == "provider_call"
+            || e["kind"] == "payload_append"
+            || e["kind"] == "insert_receipt"));
+        assert!(
+            trace
+                .iter()
+                .any(|e| e["kind"] == "transport_delivery" && e["success"] == true)
+        );
+        assert!(trace.iter().any(|e| e["kind"] == "transport_protocol"
+            && e["outcome"] == "parse_error"
+            || e["kind"] == "transport_tool_result" && e["tool_error"] == true));
+    }
+}
+
+#[tokio::test]
+async fn online_producer_invalid_provider_result_reports_return_and_validation_separately() {
+    struct Invalid;
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for Invalid {
+        async fn embed(&self, _: &str) -> Result<Vec<f32>, EmbeddingError> {
+            Ok(vec![f32::NAN; 4])
+        }
+        fn dimensions(&self) -> usize {
+            4
+        }
+        fn model_name(&self) -> &str {
+            "private-invalid-provider-canary"
+        }
+    }
+    let provider = crate::embedding::runtime::CheckedProvider(Box::new(Invalid));
+    let capture = Capture::default();
+    assert!(
+        measure_transport(
+            "test.invalid_provider",
+            provider.embed("private-input-canary")
+        )
+        .with_subscriber(subscriber(capture.clone()))
+        .await
+        .is_err()
+    );
+    let trace = events(&capture);
+    assert!(
+        trace
+            .iter()
+            .any(|e| e["kind"] == "provider_return" && e["success"] == true)
+    );
+    assert!(
+        trace
+            .iter()
+            .any(|e| e["stage"] == "provider.validate" && e["outcome"] == "error")
+    );
+    assert!(
+        trace
+            .iter()
+            .any(|e| e["stage"] == "test.invalid_provider" && e["outcome"] == "error")
+    );
+    assert!(
+        !String::from_utf8(capture.0.lock().unwrap().clone())
+            .unwrap()
+            .contains("canary")
+    );
+}

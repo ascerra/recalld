@@ -23,6 +23,7 @@ async fn online_producer_actual_daemon_socket_frames_include_complete_delivery()
         shutdown,
     )));
     let request = DaemonRequest {
+        jsonrpc: "2.0".into(),
         id: 1,
         method: "store_memory".into(),
         params: serde_json::json!({

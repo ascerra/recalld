@@ -166,10 +166,7 @@ pub(crate) async fn serve_io<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
                     source_bytes = json.len() + 1
                 );
             } else {
-                crate::performance::event!(
-                    kind = "transport_notification",
-                    transport = "mcp_stdio"
-                );
+                crate::performance::event!(kind = "transport_no_response", transport = "mcp_stdio");
             }
             timeline.mark("transport.write_flush");
             Ok::<_, McpError>(())

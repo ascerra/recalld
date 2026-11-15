@@ -1138,12 +1138,14 @@ impl McpStorageAdapter {
         crate::performance::measure("mcp.store", true, async {
             let accepted = crate::storage::work::accept_work(&self.storage, work)?;
             let work = Some(&accepted);
+            let mut timeline = crate::performance::Timeline::new();
             let result = async {
                 // This is shared by direct single writes and reserved batch children.
                 // Validate before replay normalization, provider work or payload staging.
                 let (merged_tags, canonical_input) =
                     crate::mcp::batches::canonical_input(&input)
                         .map_err(|error| bridge::BridgeError::InvalidInput(error.to_string()))?;
+                timeline.mark("store.validation");
                 if let Some(child) = child.clone() {
                     let canonical = canonical_input.clone();
                     let storage = self.storage.clone();
@@ -1151,19 +1153,22 @@ impl McpStorageAdapter {
                         .map(|p| p.child())
                         .transpose()
                         .map_err(crate::storage::StorageError::from)?;
+                    let performance_worker = crate::performance::Worker::new("store.replay_queue");
                     let replay = tokio::task::spawn_blocking(move || {
-                        let storage = storage.read().map_err(|e| {
-                            crate::storage::StorageError::RecoveryRequired(e.to_string())
-                        })?;
-                        let result = storage.meta_store().lookup_insert_child_with_work(
-                            &child,
-                            &canonical,
-                            worker.as_ref(),
-                        );
-                        if let Some(worker) = worker {
-                            storage.meta_store().finish_work(worker);
-                        }
-                        result
+                        performance_worker.run(move || {
+                            let storage = storage.read().map_err(|e| {
+                                crate::storage::StorageError::RecoveryRequired(e.to_string())
+                            })?;
+                            let result = storage.meta_store().lookup_insert_child_with_work(
+                                &child,
+                                &canonical,
+                                worker.as_ref(),
+                            );
+                            if let Some(worker) = worker {
+                                storage.meta_store().finish_work(worker);
+                            }
+                            result
+                        })
                     })
                     .await
                     .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
@@ -1190,21 +1195,31 @@ impl McpStorageAdapter {
                     let storage = self.storage.clone();
                     let ns_name = input.namespace.clone();
                     let reserved_namespace = child.as_ref().map(|c| c.namespace());
+                    let performance_worker =
+                        crate::performance::Worker::new("store.namespace_queue");
                     tokio::task::spawn_blocking(move || {
-                        let storage_r = storage.read().map_err(|e| {
-                            bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                        })?;
-                        (if let Some(id) = reserved_namespace {
-                            storage_r.get_namespace(id)
-                        } else {
-                            storage_r.get_namespace_by_name(&ns_name)
-                        })
-                        .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
-                        .ok_or_else(|| {
-                            bridge::BridgeError::NotFound(format!(
-                                "namespace '{}' not found",
-                                ns_name,
-                            ))
+                        performance_worker.run(move || {
+                            let wait = crate::performance::Timer::new("store.namespace_lock.wait");
+                            let storage_r = storage.read().map_err(|e| {
+                                bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
+                            })?;
+                            wait.complete();
+                            let storage_r = crate::performance::Hold::new(
+                                "store.namespace_lock.hold",
+                                storage_r,
+                            );
+                            (if let Some(id) = reserved_namespace {
+                                storage_r.get_namespace(id)
+                            } else {
+                                storage_r.get_namespace_by_name(&ns_name)
+                            })
+                            .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+                            .ok_or_else(|| {
+                                bridge::BridgeError::NotFound(format!(
+                                    "namespace '{}' not found",
+                                    ns_name,
+                                ))
+                            })
                         })
                     })
                     .await
@@ -1248,6 +1263,7 @@ impl McpStorageAdapter {
                 }
 
                 // Generate full embedding (summary + full_text + tags for max surface).
+                timeline.mark("store.namespace_links_validation");
                 let raw_embedding = match &input.embedding {
                     Some(emb) => {
                         crate::performance::event!(
@@ -1296,6 +1312,7 @@ impl McpStorageAdapter {
                     input.embedding.is_some(),
                 )?;
 
+                timeline.mark("store.embedding");
                 // Near-duplicate advisory.
                 //
                 // Runs BEFORE the write, for two reasons. The embedding is already
@@ -1330,6 +1347,7 @@ impl McpStorageAdapter {
                     )
                     .into());
                 }
+                timeline.mark("store.advisory");
                 let now = self.clock.now_millis();
                 let completion = crate::derived_completion::DerivedCompletion {
                     storage: self.storage.clone(),
@@ -1351,6 +1369,7 @@ impl McpStorageAdapter {
                         work,
                     )
                     .await?;
+                timeline.mark("store.canonical_and_initial_publication");
                 let receipt = inserted.receipt;
                 if receipt.replayed {
                     return Ok((
@@ -1471,6 +1490,7 @@ impl McpStorageAdapter {
                     }
                 }
 
+                timeline.mark("store.links");
                 completion
                     .complete_with_work(work)
                     .await
@@ -1479,6 +1499,7 @@ impl McpStorageAdapter {
                         source: Box::new(source),
                     })?;
                 self.cache.insert(memory_id, record.clone()).await;
+                timeline.mark("store.final_publication_cache");
                 Ok((
                     bridge::StoredMemory {
                         id: memory_id.to_string(),
