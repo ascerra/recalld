@@ -444,6 +444,7 @@ impl Reply {
                 && self.receipt.as_ref().is_none_or(|r| {
                     error.commit_state == CommitState::Committed
                         && error.operation_id == Some(r.operation_id)
+                        && Self::receipt_matches(r, request, operation)
                 });
         }
         let (Some(scope), Some(receipt), Some(ready)) =
@@ -452,6 +453,7 @@ impl Reply {
             return false;
         };
         if scope.0.is_unset()
+            || !Self::receipt_matches(receipt, request, operation)
             || request.namespace_id.is_some_and(|id| id != scope.0)
             || request
                 .namespace
@@ -498,6 +500,32 @@ impl Reply {
             _ => false,
         }
     }
+    fn receipt_matches(r: &WriteReceipt, request: &Request, operation: Operation) -> bool {
+        !r.store_id.is_nil()
+            && !r.operation_id.is_nil()
+            && r.receipt_version == 1
+            && request.options.store_id.is_none_or(|id| id == r.store_id)
+            && match (&r.outcome, operation) {
+                (MutationOutcome::MemoryTombstoned { memory_id, .. }, Operation::Forget) => {
+                    request.legacy_aware && *memory_id == request.id
+                }
+                (
+                    MutationOutcome::LegacyFeedbackRecorded {
+                        memory_id, quality, ..
+                    },
+                    Operation::Feedback,
+                ) => {
+                    request.legacy_aware && *memory_id == request.id && *quality == request.quality
+                }
+                (MutationOutcome::NativeMemoryTombstoned { transition }, Operation::Forget) => {
+                    transition.memory_id == request.id
+                }
+                (MutationOutcome::LifecycleFeedbackApplied { transition }, Operation::Feedback) => {
+                    transition.records.len() == 1 && transition.records[0].memory_id == request.id
+                }
+                _ => false,
+            }
+    }
     pub(crate) fn decode_response(value: Value, request: &Request, operation: Operation) -> Self {
         let receipt: Option<WriteReceipt> = value
             .get("receipt")
@@ -511,40 +539,9 @@ impl Reply {
                 let error = reply.error.as_mut().unwrap();
                 error.code = "INVALID_RESPONSE".into();
                 error.commit_state = CommitState::Unknown;
-                if let Some(receipt) = receipt.filter(|r| {
-                    !r.store_id.is_nil()
-                        && !r.operation_id.is_nil()
-                        && r.receipt_version == 1
-                        && request.options.store_id.is_none_or(|id| id == r.store_id)
-                        && match (&r.outcome, operation) {
-                            (
-                                MutationOutcome::MemoryTombstoned { memory_id, .. },
-                                Operation::Forget,
-                            ) => request.legacy_aware && *memory_id == request.id,
-                            (
-                                MutationOutcome::LegacyFeedbackRecorded {
-                                    memory_id, quality, ..
-                                },
-                                Operation::Feedback,
-                            ) => {
-                                request.legacy_aware
-                                    && *memory_id == request.id
-                                    && *quality == request.quality
-                            }
-                            (
-                                MutationOutcome::NativeMemoryTombstoned { transition },
-                                Operation::Forget,
-                            ) => transition.memory_id == request.id,
-                            (
-                                MutationOutcome::LifecycleFeedbackApplied { transition },
-                                Operation::Feedback,
-                            ) => {
-                                transition.records.len() == 1
-                                    && transition.records[0].memory_id == request.id
-                            }
-                            _ => false,
-                        }
-                }) {
+                if let Some(receipt) =
+                    receipt.filter(|r| Self::receipt_matches(r, request, operation))
+                {
                     error.commit_state = CommitState::Committed;
                     error.operation_id = Some(receipt.operation_id);
                     reply.receipt = Some(receipt);

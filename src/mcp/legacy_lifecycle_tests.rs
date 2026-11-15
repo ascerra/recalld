@@ -1034,3 +1034,125 @@ async fn legacy_api2_strict_private_validation_and_unkeyed_distinct_feedback() {
     assert_eq!(f.record(id).unwrap().access_history.len(), 2);
     assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_api2_prepared_mcp_tool_text_structured_http_parity_and_public_gate() {
+    let f = Fixture::new();
+    let id = f.insert_memory().await;
+    let clock = Arc::new(CountingClock::default());
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = Arc::new(
+        f.storage_adapter()
+            .with_clock(clock.clone())
+            .with_native_lifecycle_policy(Default::default()),
+    );
+    bridge.default_namespace = "unrelated-session-default".into();
+    let (state, query) = state(&f, clock);
+    for (operation, name) in [
+        (Operation::Feedback, "reinforce_memory"),
+        (Operation::Forget, "forget_memory"),
+    ] {
+        let value = request(&f, id, name);
+        let before = snapshot(&f, id);
+        let gated = crate::mcp::tools::dispatch_tool(&bridge, name, value.clone()).await;
+        assert_eq!(gated.is_error, Some(true));
+        assert_eq!(snapshot(&f, id), before, "ordinary public2 remains closed");
+        let result = crate::mcp::tools::dispatch_v2(&bridge, name, value.clone()).await;
+        assert_ne!(result.is_error, Some(true));
+        let encoded = serde_json::to_value(result).unwrap();
+        let text: Value =
+            serde_json::from_str(encoded["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(encoded["structuredContent"], text);
+        assert!(text["receipt"].is_object());
+        let (status, http) = http(state.clone(), id, operation, value).await;
+        assert_eq!(status, 200, "{http}");
+        assert_eq!(
+            http["receipt"]["operationId"],
+            text["receipt"]["operationId"]
+        );
+        assert_eq!(http["receipt"]["outcome"], text["receipt"]["outcome"]);
+        assert_eq!(http["data"]["id"], text["data"]["id"]);
+        assert_eq!(http["data"]["historical"], true);
+        assert!(text["data"].get("strength").is_none());
+    }
+    drop((bridge, state, query));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_api2_error_reply_cannot_claim_an_unrelated_or_future_receipt() {
+    use crate::daemon::{DaemonClient, DaemonResponse, protocol::*};
+    use crate::serialization::contract::CommitState;
+    use crate::serialization::native_lifecycle::{Reply, parse_lifecycle_private};
+    let f = Fixture::new();
+    let id = f.insert_memory().await;
+    let request =
+        parse_lifecycle_private(&request(&f, id, "error-identity"), Operation::Feedback).unwrap();
+    let first = f
+        .storage_adapter()
+        .with_native_lifecycle_policy(Default::default())
+        .feedback_native(request.clone())
+        .await;
+    let receipt = first.receipt.unwrap();
+    let before = snapshot(&f, id);
+    let mut wrong_target = receipt.clone();
+    if let crate::storage::control::MutationOutcome::LegacyFeedbackRecorded { memory_id, .. } =
+        &mut wrong_target.outcome
+    {
+        *memory_id = MemoryId::new();
+    } else {
+        panic!("actual legacy feedback receipt required");
+    }
+    let mut wrong_operation = receipt.clone();
+    wrong_operation.outcome = crate::storage::control::MutationOutcome::MemoryTombstoned {
+        memory_id: id,
+        status: crate::storage::tombstone::TombstoneStatus::Tombstoned,
+    };
+    let mut future = receipt;
+    future.receipt_version = 2;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("error-receipt.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        for receipt in [wrong_target, wrong_operation, future] {
+            let wire: crate::daemon::DaemonRequest =
+                read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+                    .await
+                    .unwrap();
+            assert_eq!(wire.method, "feedback_lifecycle_v1");
+            let reply = Reply::storage(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(receipt),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    "synthetic malformed peer response".into(),
+                )),
+            });
+            write_framed_message(
+                &mut stream,
+                &DaemonResponse {
+                    jsonrpc: "2.0".into(),
+                    id: wire.id,
+                    result: Some(serde_json::to_value(reply).unwrap()),
+                    error: None,
+                },
+                MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap();
+        }
+    });
+    let remote = crate::daemon::bridge_adapters::RemoteStorageAdapter::new(Arc::new(
+        DaemonClient::connect(&path).await.unwrap(),
+    ));
+    for _ in 0..3 {
+        let failed = remote.feedback_native(request.clone()).await;
+        assert_eq!(
+            failed.error.unwrap().commit_state,
+            CommitState::Unknown,
+            "an unrelated/future receipt cannot certify this request"
+        );
+        assert!(failed.receipt.is_none());
+    }
+    drop(remote);
+    task.await.unwrap();
+    assert_eq!(snapshot(&f, id), before);
+}
