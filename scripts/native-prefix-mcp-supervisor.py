@@ -215,7 +215,7 @@ warm_file_enabled = false
     try:
         if sweep:
             unknown=copy.deepcopy(seed);unknown.update(fixtureVersion=2);unknown.pop("inheritedDecayAdoptions")
-            unknown_root,_=build_prefix("unknown-inherited-prefix",unknown)
+            unknown_root,unknown_provenance=build_prefix("unknown-inherited-prefix",unknown)
             before_unknown=inventory(unknown_root)
             before_canonical=closed_inventory(unknown_root,"unknown-before-open")
             unchanged(unknown_root,before_unknown)
@@ -225,9 +225,43 @@ warm_file_enabled = false
                 save(evaluator/("unknown-files-"+phase+".json"),values)
                 return values
             unknown_files("before-open")
+            startup_owner=child("unknown-startup",root=unknown_root,native=True)
+            assert startup_owner.control.call("capabilities",{}) == expected_capabilities
+            startup_state,startup_readiness=startup_owner.ready()
+            unknown_files("after-startup-open")
+            startup_owner.close()
+            unknown_files("after-startup-close")
+            completed_canonical=closed_inventory(unknown_root,"unknown-after-startup")
+            # The first real publisher acknowledges the four already-applied
+            # fixture insert effects. Prove that exact transition, rather than
+            # excluding effects from later state comparisons.
+            table=None; expected_items=[]; acknowledged=[]
+            for item in before_canonical["items"]:
+                if item["kind"] == "table": table=item["data"]["name"]
+                if item["kind"] == "row" and table == "mutation_effects":
+                    effect=json.loads(bytes(item["data"]["value"]))
+                    assert effect["version"] == 1 and effect["canonical_applied"] is True
+                    assert effect["receipt"]["outcome"]["kind"] == "memoryInserted"
+                    assert bytes(item["data"]["key"]).hex() == effect["receipt"]["operationId"].replace("-", "")
+                    acknowledged.append(effect)
+                else:
+                    expected_items.append(item)
+            assert len(acknowledged) == 4
+            by_operation=lambda rows: {r["operationId"]:r for r in rows}
+            assert by_operation([v["receipt"] for v in acknowledged]) == by_operation(unknown_provenance["sourceReceipts"])
+            assert completed_canonical["items"] == expected_items
+            for key in ("inventoryVersion","source","control","namespaces","records"):
+                assert completed_canonical[key] == before_canonical[key]
+            save(evaluator/"unknown-startup-completion.json",dict(
+                acknowledgedEffects=acknowledged,state=startup_state,readiness=startup_readiness,
+                beforeLogicalSha256=before_canonical["logicalSha256"],
+                afterLogicalSha256=completed_canonical["logicalSha256"],
+                exactOtherCanonicalItemsUnchanged=True))
+            before_canonical=completed_canonical
             unknown_owner=child("unknown-inherited-prefix",root=unknown_root,native=True)
             assert unknown_owner.control.call("capabilities",{}) == expected_capabilities
             before_state=unknown_owner.control.call("inspect",{})
+            assert before_state == startup_state
             before_sweep=unknown_files("before-sweep")
             provider_count=len(provider_rows())
             try:
