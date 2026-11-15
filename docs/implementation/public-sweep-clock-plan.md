@@ -1,7 +1,7 @@
 # Public sweep clock boundary: compatibility plan and HTTP RED
 
-Status: source plan and test-only RED probe; no runtime correction authorized or
-made in this branch yet. The existing endpoint behavior is intentional old API1
+Status: actual HTTP RED retained; runtime correction approved and implemented,
+validation pending. The existing endpoint behavior is intentional old API1
 historical-seeding support, conflicting with the agreed A3 §3 clock boundary.
 This is not an exploit or evidence of an unintended historical implementation bug.
 
@@ -45,16 +45,17 @@ probe. None of those frozen branches or published studies is modified.
 
 Reject supplied public time overrides before calling any decay adapter, sampling
 clock, registering accepted work, reserving IDs or creating transactions. Reuse
-existing `AppError::BadRequest`: HTTP400, code BAD_REQUEST, field asOf, explicit
-message that public sweeps use the configured clock and isolated evaluation must
-advance its existing owned clock. Do not silently ignore a supplied override.
+existing `AppError::BadRequest`: HTTP400, code BAD_REQUEST, field asOf, concise
+message `Public sweeps use the configured clock; remove asOf/as_of`. Isolated
+control and historical-evaluation instructions stay in documentation. Do not silently ignore a supplied override.
 
 Proposed presence semantics: reject both `asOf` and `as_of` whenever present,
 including null and nonnumeric values. This intentionally also changes old null
 and ignored snake_case behavior; make that compatibility impact explicit. Preserve
 omission `{}` and unrelated API1 unknown-field compatibility. A small request-local
 raw field map/presence check can preserve that behavior without a new shared
-control type. Final request parsing choice needs Huygens/main review before code.
+control type. Main approved these presence semantics and request-local parsing; no new shared
+control type is introduced.
 Do not make permission depend on schema, lifecycle policy, API number, localhost,
 or a guessed client identity.
 
@@ -90,3 +91,17 @@ receipts/ledger/generation/tracker and no clock call; retain omitted-time compar
 and existing manual/autonomous origin/compaction/reopen tests. Relevant full checks
 are warranted for a real runtime change. The current task stops at reviewed plan
 and actual RED; it does not claim the correction or compatibility decision landed.
+
+
+## Actual retained RED
+
+Probe source `ebb8990de645da88186e84efe817a7b91830f7da` on147 produced1PASS/2FAIL
+in1.41s. Both explicit-asOf HTTP requests returned200, sampled the configured
+clock0 times, moved Full→Summary and stripped text20→0. Legacy G3→5; native
+G4→6. Omitted-time controls returned200, sampled once and retained Full/text/G.
+This confirms the intentional old endpoint behavior against the new agreed
+boundary; it does not relabel that behavior as an exploit or an unintended bug.
+Exact source and all emitted executable hashes were verified; proof is retained
+under `work-notes/public-sweep-clock/before/`. Only this package's cached outputs
+were cleaned on the owned target before switching source mounts; dependencies
+were retained and no other agent target was touched.
