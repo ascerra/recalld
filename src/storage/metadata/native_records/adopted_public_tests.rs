@@ -163,10 +163,11 @@ async fn invoke(
                 assert!(value.get("data").is_some(), "{value}");
                 assert!(value.get("receipt").is_none(), "old success shape");
             } else {
-                assert_eq!(
-                    value["observation"]["commitState"], "notCommitted",
-                    "{value}"
-                );
+                // API1 keeps its existing simple typed input-error projection.
+                assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+                assert_eq!(value["error"], "BAD_REQUEST", "{value}");
+                assert!(value.get("observation").is_none());
+                assert!(value.get("receipt").is_none());
                 assert!(value.to_string().contains("inherited"), "{value}");
             }
             status.is_success()
