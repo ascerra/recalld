@@ -80,7 +80,9 @@ async fn legacy_compound_origin_export_genuine_old_one() {
         return;
     };
     let f = Fixture::new();
-    let adapter = f.storage_adapter();
+    let mut adapter = f.storage_adapter();
+    // Explicit no-autolink fixture: isolate the reservation and child generations.
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
     let mut cases = Vec::new();
     for with_cas in [false, true] {
         for invalid in [false, true] {
