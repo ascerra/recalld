@@ -6,6 +6,9 @@ use crate::serialization::native_batch::NativeBatchReply;
 use crate::test_support::{Fixture, StubBridge};
 use serde_json::Value;
 
+#[path = "store_api1_tests.rs"]
+mod store_api1;
+
 fn adapter(
     f: &Fixture,
     provider: Arc<dyn crate::embedding::EmbeddingProvider>,

@@ -1507,6 +1507,40 @@ impl bridge::StorageEngine for McpStorageAdapter {
     ) -> crate::serialization::native_single::Reply {
         self.run_native_single_wire(request).await
     }
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::{contract::ContractVersion, native_single, store_api1::Reply};
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))
+            .and_then(|s| s.control_state())
+            .map(|c| c.control_schema_version == 2);
+        match native {
+            Err(e) => Reply::Owned(native_single::Reply::failure(e)),
+            Ok(true) => match request.prepare_native() {
+                Err(e) => Reply::Owned(native_single::Reply::invalid(e)),
+                Ok(parsed) => Reply::Owned(
+                    self.run_native_single_parsed(parsed, ContractVersion::V1)
+                        .await,
+                ),
+            },
+            Ok(false) => {
+                if let Err(e) = request.validate_legacy() {
+                    return Reply::Legacy(Err(e.to_string()));
+                }
+                match self.store_memory_reserved(request.input, None).await {
+                    Ok((data, _)) => Reply::Legacy(Ok(data)),
+                    Err(StoreWriteError::Canonical(e)) => {
+                        Reply::Owned(native_single::Reply::failure(e))
+                    }
+                    Err(StoreWriteError::Bridge(e)) => Reply::Legacy(Err(e.to_string())),
+                }
+            }
+        }
+    }
     async fn mutate_native_batch(
         &self,
         input: crate::storage::batch::BatchInput,

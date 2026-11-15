@@ -15,6 +15,7 @@
 pub mod adapters;
 mod errors;
 mod handlers;
+mod store_api1;
 #[cfg(test)]
 pub(crate) use handlers::{batch_store_v2, scan_duplicates_v2, single_store_v2};
 mod middleware;

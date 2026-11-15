@@ -248,6 +248,10 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Physical control format, never inferred from API version or a namespace.
+    async fn native_store_format(&self) -> Result<bool, StorageError> {
+        Ok(false)
+    }
     async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
         Err(StorageError::RecoveryRequired(
             "store identity unavailable".into(),

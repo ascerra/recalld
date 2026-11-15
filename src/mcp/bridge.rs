@@ -78,6 +78,23 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::store_api1::Reply;
+        if request.require_native {
+            return Reply::unavailable();
+        }
+        if let Err(error) = request.validate_legacy() {
+            return Reply::Legacy(Err(error.to_string()));
+        }
+        Reply::Legacy(
+            self.store_memory(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
     async fn store_native_wire(
         &self,
         _request: crate::serialization::native_single::Request,

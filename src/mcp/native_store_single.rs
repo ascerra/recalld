@@ -19,12 +19,22 @@ impl McpStorageAdapter {
         &self,
         request: crate::serialization::native_single::Request,
     ) -> crate::serialization::native_single::Reply {
-        use crate::serialization::{contract::*, native_single::Reply};
-        use crate::storage::metadata::NativeStoreProfileResolution;
-        let mut parsed = match request.prepare() {
+        use crate::serialization::{contract::ContractVersion, native_single::Reply};
+        let parsed = match request.prepare() {
             Ok(v) => v,
             Err(e) => return Reply::invalid(e),
         };
+        self.run_native_single_parsed(parsed, ContractVersion::V2)
+            .await
+    }
+
+    pub(super) async fn run_native_single_parsed(
+        &self,
+        mut parsed: crate::serialization::native_single::Parsed,
+        origin: crate::serialization::contract::ContractVersion,
+    ) -> crate::serialization::native_single::Reply {
+        use crate::serialization::{contract::*, native_single::Reply};
+        use crate::storage::metadata::NativeStoreProfileResolution;
         let completion = self.batch_completion();
         let work = match completion.accept_work(None) {
             Ok(work) => work,
@@ -52,7 +62,7 @@ impl McpStorageAdapter {
                 };
                 ctx = parsed.options.context(
                     crate::storage::control::MutationScope::Namespace(namespace_id),
-                    ContractVersion::V2,
+                    origin,
                 );
                 // Resolve matching history before current binding, policy, CAS,
                 // settings, provider, clocks or payload allocation.

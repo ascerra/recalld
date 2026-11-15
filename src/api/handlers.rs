@@ -180,8 +180,8 @@ pub async fn single_store_versioned(
         return single_reply_response(Reply::invalid(error));
     }
     if version == ContractVersion::V1 {
-        return match Json::<CreateMemoryApiRequest>::from_request(request, &state).await {
-            Ok(body) => create_memory(State(state), body).await.into_response(),
+        return match Json::<super::store_api1::Request>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::create(state, body).await,
             Err(error) => error.into_response(),
         };
     }

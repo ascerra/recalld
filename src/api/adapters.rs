@@ -454,6 +454,14 @@ impl state::StorageEngine for StorageEngineAdapter {
         .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
     }
 
+    async fn native_store_format(&self) -> Result<bool, crate::storage::StorageError> {
+        self.storage
+            .read()
+            .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+            .control_state()
+            .map(|c| c.control_schema_version == 2)
+    }
+
     async fn insert_memory(
         &self,
         namespace_id: NamespaceId,

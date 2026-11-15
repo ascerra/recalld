@@ -229,7 +229,7 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
     // Extraction, type strictness, markup detection, and the shared
     // content limits all live in `args`, so this handler and the batch
     // one below cannot drift apart.
-    let input = match args::parse_store_input(&arguments, bridge.default_namespace()) {
+    let input = match args::parse_store_input_fields(&arguments, bridge.default_namespace()) {
         Ok(input) => input,
         Err(e) => {
             // Logged, never silently defaulted: a client whose
@@ -246,13 +246,18 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
         }
     };
 
-    match bridge.storage.store_memory(input).await {
-        Ok(stored) => match ToolCallResult::json(&stored) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to store memory: {e}")),
-    }
+    // The original single-tool embedding/initialStability fields remain ignored.
+    // Representation admission belongs to the actual owned backend format.
+    bridge
+        .storage
+        .store_api1(crate::serialization::store_api1::Request {
+            input,
+            profile_id: None,
+            created_at: None,
+            require_native: false,
+        })
+        .await
+        .mcp()
 }
 
 // ═══════════════════════════════════════════════════════════════════════
