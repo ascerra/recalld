@@ -291,7 +291,8 @@ async fn selection_demand_actual_consumers_keep_semantic_and_advisory_corruption
                         None,
                     )
                     .await
-                    .unwrap_err();
+                    .err()
+                    .expect("corrupt candidate must reject");
                 assert!(
                     format!("{err:?}").contains("native candidate vector hash mismatch"),
                     "{err:?}"
