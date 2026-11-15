@@ -24,6 +24,8 @@ target=pathlib.Path('/tmp/recalld-owned-native-catalog-ids-full-xk182ybj/target'
 cmd=['docker','run','--rm','--name','recalld-feynman-native-compaction','--network','none','--cpus','2','--memory','4g','--memory-swap','4g','--cap-drop','ALL','--security-opt','no-new-privileges','--read-only','--tmpfs','/tmp:rw,nosuid,nodev','-w','/work/source','-e','HOME=/tmp/home','-e','RUSTUP_TOOLCHAIN=1.94.1','-e','CARGO_HOME=/work/cargo','-e','CARGO_TARGET_DIR=/work/target','-e','CARGO_BUILD_JOBS=2','-e','CARGO_NET_OFFLINE=true','-e','RUST_TEST_THREADS=2','-e','CARGO_PROFILE_DEV_DEBUG=0','-e','CARGO_PROFILE_TEST_DEBUG=0']
 for host,guest,ro in [(root,'/work',False),(root/'source','/work/source',True),(target,'/work/target',False),(pathlib.Path('/tmp/recalld-unit-tests-l__ja1yo/cargo/registry'),'/work/cargo/registry',True)]:
     cmd+=['--mount',f'type=bind,src={host},dst={guest}'+(',readonly' if ro else '')]
+if mode != 'before':
+    cmd += ['--mount','type=bind,src=/tmp/recalld-native-text-compaction-validation/before-corrected/output/legacy-before,dst=/before-compaction,readonly','-e','RECALLD_COMPACTION_BEFORE_INPUT=/before-compaction']
 script='''set -eu
 mkdir -p /tmp/home
 sha256sum -c /work/output/source.sha256 --quiet
@@ -40,7 +42,7 @@ for line in pathlib.Path('/work/output/build.jsonl').read_text().splitlines():
         pathlib.Path('/work/output/binary.sha256').write_text(hashlib.sha256(dst.read_bytes()).hexdigest())
 INNER
 set +e
-/work/output/recalld-test compaction_required --nocapture > /work/output/focused.log 2>&1
+/work/output/recalld-test compaction --nocapture > /work/output/focused.log 2>&1
 result=$?
 printf '%s\\n' "$result" > /work/output/focused.exit
 set -e

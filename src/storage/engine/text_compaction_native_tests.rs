@@ -160,3 +160,166 @@ fn compaction_genuine_before_fixture() {
     drop(engine);
     crate::storage::validation::validate_existing(&path).unwrap();
 }
+
+#[test]
+fn compaction_genuine_legacy_before_receipt_bytes_survive_open_and_new_selection() {
+    let Ok(source) = std::env::var("RECALLD_COMPACTION_BEFORE_INPUT") else {
+        return;
+    };
+    fn copy(source: &Path, target: &Path) {
+        std::fs::create_dir_all(target).unwrap();
+        for item in std::fs::read_dir(source).unwrap() {
+            let item = item.unwrap();
+            let dest = target.join(item.file_name());
+            if item.path().is_dir() {
+                copy(&item.path(), &dest)
+            } else {
+                std::fs::copy(item.path(), dest).unwrap();
+            }
+        }
+    }
+    fn receipts(path: &Path) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
+        use redb::ReadableTable;
+        let (_copy, db) =
+            crate::storage::validation::inspect_database(&path.join("meta.db")).unwrap();
+        let read = db.begin_read().unwrap();
+        read.open_table(crate::storage::control::RECEIPTS)
+            .unwrap()
+            .iter()
+            .unwrap()
+            .map(|row| {
+                let (k, v) = row.unwrap();
+                (k.value().to_vec(), v.value().to_vec())
+            })
+            .collect()
+    }
+    let root = tempfile::tempdir().unwrap();
+    copy(Path::new(&source), root.path());
+    let before = receipts(root.path());
+    let mut engine = RedbStorageEngine::open(root.path()).unwrap();
+    let result = engine.compact_text_log().unwrap();
+    assert!(matches!(
+        result.receipt.outcome,
+        crate::storage::control::MutationOutcome::TextGenerationSelected { .. }
+    ));
+    drop(engine);
+    let after = receipts(root.path());
+    assert_eq!(after.len(), before.len() + 1);
+    for (key, bytes) in before {
+        assert_eq!(after.get(&key), Some(&bytes));
+    }
+}
+
+#[test]
+fn compaction_native_process_child() {
+    let Ok(path) = std::env::var("RECALLD_NATIVE_TEXT_CRASH_PATH") else {
+        return;
+    };
+    let stop = std::env::var("RECALLD_NATIVE_TEXT_CRASH_STAGE").unwrap();
+    let mut engine =
+        RedbStorageEngine::open_with_ids(path, true, Box::new(crate::storage::ids::SystemIds))
+            .unwrap();
+    engine
+        .compact_text_at(|stage| {
+            if format!("{stage:?}") == stop {
+                std::process::exit(73)
+            }
+            Ok(())
+        })
+        .unwrap();
+    panic!("crash boundary not reached");
+}
+
+#[test]
+fn compaction_native_process_crashes_reopen_twice_at_exact_selection() {
+    for stage in [
+        Stage::EntriesWritten,
+        Stage::FileSynced,
+        Stage::DirectorySynced,
+        Stage::Selected,
+        Stage::Published,
+        Stage::Cleanup,
+        Stage::Unlinked,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let (engine, kept) = native_compaction_fixture(root.path());
+        let path = root.path().join("native");
+        let before = engine.control_state().unwrap();
+        let selected = engine.meta_store.text_selection().unwrap().unwrap();
+        drop(engine);
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "storage::engine::text_compaction::tests::compaction_native_process_child",
+                "--nocapture",
+            ])
+            .env("RECALLD_NATIVE_TEXT_CRASH_PATH", &path)
+            .env("RECALLD_NATIVE_TEXT_CRASH_STAGE", format!("{stage:?}"))
+            .output()
+            .unwrap();
+        assert_eq!(
+            child.status.code(),
+            Some(73),
+            "{stage:?}: {}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        for _ in 0..2 {
+            let engine = RedbStorageEngine::open_with_ids(
+                &path,
+                true,
+                Box::new(crate::storage::ids::SystemIds),
+            )
+            .unwrap();
+            let committed = matches!(
+                stage,
+                Stage::Selected | Stage::Published | Stage::Cleanup | Stage::Unlinked
+            );
+            assert_eq!(
+                engine.control_state().unwrap().committed_generation,
+                if committed {
+                    before.committed_generation.next().unwrap()
+                } else {
+                    before.committed_generation
+                }
+            );
+            assert_eq!(
+                engine.meta_store.text_selection().unwrap().unwrap().id == selected.id,
+                !committed
+            );
+            assert_texts(&engine, &kept);
+        }
+    }
+}
+
+#[test]
+fn compaction_native_unknown_commit_reopens_without_guessed_receipt() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut engine, kept) = native_compaction_fixture(root.path());
+    let before = engine.control_state().unwrap();
+    crate::storage::metadata::text_generation::FAIL_AFTER_TEXT_COMMIT.with(|flag| flag.set(true));
+    let error = engine.compact_text_log().unwrap_err();
+    let StorageError::CommitOutcomeUnknown { operation_id, .. } = error else {
+        panic!("{error}")
+    };
+    assert!(engine.compact_text_log().is_err());
+    drop(engine);
+    let engine = RedbStorageEngine::open_with_ids(
+        root.path().join("native"),
+        true,
+        Box::new(crate::storage::ids::SystemIds),
+    )
+    .unwrap();
+    let receipt = engine
+        .lookup_operation(before.store_id, MutationScope::Catalog, operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        receipt.committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    assert!(matches!(
+        receipt.outcome,
+        crate::storage::control::MutationOutcome::NativeTextGenerationSelected { .. }
+    ));
+    assert_texts(&engine, &kept);
+}

@@ -104,12 +104,12 @@ pub(crate) fn record_digest(
     namespaces: &[NamespaceConfig],
     text_hashes: &BTreeMap<MemoryId, [u8; 32]>,
 ) -> Result<(u64, [u8; 32]), StorageError> {
+    let namespaces: BTreeMap<_, _> = namespaces.iter().map(|ns| (ns.id.get(), ns)).collect();
     let states: Vec<_> = rows
         .iter()
         .map(|(id, r)| {
             let ns = namespaces
-                .iter()
-                .find(|ns| ns.id.get() == r.namespace_id)
+                .get(&r.namespace_id)
                 .ok_or_else(|| invalid("text relocation namespace missing"))?;
             Ok((
                 r.namespace_id,

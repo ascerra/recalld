@@ -67,6 +67,7 @@ impl RedbStorageEngine {
             text_hashes.insert(*id, Sha256::digest(bytes.as_bytes()).into());
         }
         let state = self.control_state()?;
+        state.committed_generation.next()?; // Reject exhaustion before payload/ID allocation.
         let old_size = self.text_store.file_size();
         let old_count = self.text_store.complete_entry_count()?;
         let (mut prepared, id) = TextStore::create_generation_with_ids(

@@ -808,3 +808,6 @@ mod mixed_history;
 
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
+
+#[path = "compaction_tests.rs"]
+mod compaction;
