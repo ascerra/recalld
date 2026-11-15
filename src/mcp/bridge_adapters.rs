@@ -1399,7 +1399,8 @@ impl McpStorageAdapter {
                     let threshold = self.config.graph.auto_link_threshold as f32;
                     let max_links = self.config.graph.max_auto_links;
 
-                    if let Err(e) = crate::graph::perform_autolink_with_work(
+                    let link_timer = crate::performance::Timer::new("store.link.semantic");
+                    let link_result = crate::graph::perform_autolink_with_work(
                         memory_id,
                         ns_config.id,
                         &embedding,
@@ -1412,8 +1413,22 @@ impl McpStorageAdapter {
                         &self.cache,
                         work,
                     )
-                    .await
-                    {
+                    .await;
+                    link_timer.outcome(link_result.is_ok());
+                    match &link_result {
+                        Ok(edges) => crate::performance::event!(
+                            kind = "link_call",
+                            link_kind = "semantic",
+                            success = true,
+                            returned_edges = *edges
+                        ),
+                        Err(_) => crate::performance::event!(
+                            kind = "link_call",
+                            link_kind = "semantic",
+                            success = false
+                        ),
+                    }
+                    if let Err(e) = link_result {
                         tracing::warn!(
                             memory_id = %memory_id,
                             %e,
@@ -1424,7 +1439,8 @@ impl McpStorageAdapter {
                     let entities = input.entities.clone();
                     if !entities.is_empty() {
                         let max_entity_links = self.config.graph.max_entity_links;
-                        let _ = crate::graph::perform_entity_link_with_work(
+                        let link_timer = crate::performance::Timer::new("store.link.entity");
+                        let link_result = crate::graph::perform_entity_link_with_work(
                             memory_id,
                             ns_config.id,
                             &entities,
@@ -1436,6 +1452,20 @@ impl McpStorageAdapter {
                             work,
                         )
                         .await;
+                        link_timer.outcome(link_result.is_ok());
+                        match &link_result {
+                            Ok(edges) => crate::performance::event!(
+                                kind = "link_call",
+                                link_kind = "entity",
+                                success = true,
+                                returned_edges = *edges
+                            ),
+                            Err(_) => crate::performance::event!(
+                                kind = "link_call",
+                                link_kind = "entity",
+                                success = false
+                            ),
+                        }
 
                         // Update entity index.
                         let mut idx = self.entity_index.write().await;
@@ -1466,7 +1496,8 @@ impl McpStorageAdapter {
                             .collect();
 
                         if !recent_memories.is_empty() {
-                            if let Err(e) = crate::graph::perform_temporal_link_with_work(
+                            let link_timer = crate::performance::Timer::new("store.link.temporal");
+                            let link_result = crate::graph::perform_temporal_link_with_work(
                                 memory_id,
                                 ns_config.id,
                                 now,
@@ -1478,8 +1509,22 @@ impl McpStorageAdapter {
                                 &self.cache,
                                 work,
                             )
-                            .await
-                            {
+                            .await;
+                            link_timer.outcome(link_result.is_ok());
+                            match &link_result {
+                                Ok(edges) => crate::performance::event!(
+                                    kind = "link_call",
+                                    link_kind = "temporal",
+                                    success = true,
+                                    returned_edges = *edges
+                                ),
+                                Err(_) => crate::performance::event!(
+                                    kind = "link_call",
+                                    link_kind = "temporal",
+                                    success = false
+                                ),
+                            }
+                            if let Err(e) = link_result {
                                 tracing::warn!(
                                     memory_id = %memory_id,
                                     %e,

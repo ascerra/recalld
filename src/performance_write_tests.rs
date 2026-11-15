@@ -24,8 +24,15 @@ impl EmbeddingProvider for LocalProvider {
 }
 
 fn server(fx: &Fixture, calls: Arc<AtomicUsize>) -> Arc<tokio::sync::Mutex<McpServer>> {
+    server_with_links(fx, calls, false)
+}
+fn server_with_links(
+    fx: &Fixture,
+    calls: Arc<AtomicUsize>,
+    links: bool,
+) -> Arc<tokio::sync::Mutex<McpServer>> {
     let mut config = crate::config::RecalldConfig::default();
-    config.graph.autolink_enabled = false;
+    config.graph.autolink_enabled = links;
     let storage = McpStorageAdapter::new(
         fx.storage.clone(),
         fx.cache.clone(),
@@ -644,4 +651,157 @@ async fn online_producer_invalid_provider_result_reports_return_and_validation_s
             .unwrap()
             .contains("canary")
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn online_producer_actual_links_report_returned_counts_without_payload_labels() {
+    let fx = Fixture::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let server = server_with_links(&fx, calls.clone(), true);
+    let mut request: serde_json::Value = serde_json::from_str(&request()).unwrap();
+    request["params"]["arguments"]["entities"] = serde_json::json!(["private-entity-canary"]);
+    let capture = Capture::default();
+    for id in 1..=2 {
+        request["id"] = serde_json::json!(id);
+        let response = crate::mcp::transport::process_line(&server, &request.to_string())
+            .with_subscriber(subscriber(capture.clone()))
+            .await
+            .unwrap()
+            .unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert!(response.get("error").is_none(), "{response}");
+        assert_ne!(response["result"]["isError"], true, "{response}");
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let trace = events(&capture);
+    for kind in ["semantic", "entity"] {
+        let links: Vec<_> = trace
+            .iter()
+            .filter(|e| e["kind"] == "link_call" && e["link_kind"] == kind)
+            .collect();
+        assert_eq!(links.len(), 2, "{links:?}");
+        assert!(links.iter().all(|e| e["success"] == true));
+        assert_eq!(links[0]["returned_edges"], 0);
+        assert_eq!(links[1]["returned_edges"], 1);
+    }
+    assert!(
+        !String::from_utf8(capture.0.lock().unwrap().clone())
+            .unwrap()
+            .contains("private-entity-canary")
+    );
+    assert!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+}
+
+#[test]
+fn online_producer_aborted_root_keeps_queued_worker_context_and_owned_guards() {
+    // Occupy the sole blocking slot, not a production lock, to establish a
+    // deterministic queued-worker boundary. No increased stack size.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let fx = Fixture::new();
+        fx.insert_memory().await;
+        let before = fx.storage.read().unwrap().control_state().unwrap();
+        let completion = crate::derived_completion::DerivedCompletion {
+            storage: fx.storage.clone(),
+            cache: fx.cache.clone(),
+            graph: fx.graph.clone(),
+            vectors: fx.vector_index.clone(),
+            fts: fx.fts_index.clone(),
+            entities: fx.entity_index.clone(),
+        };
+        let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            entered_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        });
+        entered_rx.await.unwrap();
+        let capture = Capture::default();
+        let task = tokio::spawn(
+            measure_transport("test.abort_worker", async move {
+                completion.rebuild_all().await
+            })
+            .with_subscriber(subscriber(capture.clone())),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while tracker.status().pending < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(
+            tracker.status().pending > 0,
+            "aborting a root did not drain the queued child"
+        );
+        assert!(tracker.status().unresolved > 0);
+        assert!(
+            fx.graph.try_write().is_err(),
+            "queued worker must still own its graph guard"
+        );
+        let prior = events(&capture);
+        assert!(
+            prior.iter().any(|e| e["stage"] == "test.abort_worker"
+                && e["outcome"] == "cancelled_error_or_unwound")
+        );
+        assert!(!prior.iter().any(|e| e["kind"] == "derived_rebuild"));
+        release_tx.send(()).unwrap();
+        blocker.await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !events(&capture)
+                .iter()
+                .any(|e| e["stage"] == "derived.graph.hold")
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(fx.graph.try_write().is_ok());
+        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+        assert!(
+            tracker.status().unresolved > 0,
+            "worker completion is not proof of the dropped root outcome"
+        );
+        let rows = raw_events(&capture);
+        let root = rows
+            .iter()
+            .find(|e| e["fields"]["stage"] == "test.abort_worker")
+            .unwrap();
+        let id = &root["spans"][0]["trace_id"];
+        for stage in ["derived.worker_queue", "derived.graph.hold"] {
+            let event = rows.iter().find(|e| e["fields"]["stage"] == stage).unwrap();
+            assert_eq!(&event["spans"][0]["trace_id"], id);
+        }
+        let rebuild = rows
+            .iter()
+            .find(|e| e["fields"]["kind"] == "derived_rebuild")
+            .unwrap();
+        assert_eq!(&rebuild["spans"][0]["trace_id"], id);
+    });
 }
