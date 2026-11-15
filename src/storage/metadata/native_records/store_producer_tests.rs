@@ -1281,16 +1281,7 @@ async fn native_document_recipe_actual_single_provider_input() {
     completion(&f).rebuild_all().await.unwrap();
     let p = provider(&d);
     let a = adapter(&f, p.clone(), clock, Default::default());
-    let mut input = profile_wire_input(&d, true);
-    input.insert.memory.summary = "header".into();
-    input.insert.memory.full_text = Some("body".into());
-    input.insert.memory.tags = ["raw", "entity/alice", "raw"]
-        .into_iter()
-        .map(|v| crate::model::Tag::new(v).unwrap())
-        .collect();
-    input.insert.entities = vec!["Alice".into(), "Bob".into()];
-    input.insert.topics = vec!["Rust".into()];
-    input.insert.emotions = vec!["Calm".into()];
+    let input = document_recipe_input(&d);
     let result = a
         .store_native_single_by_profile_id(
             single_context(&f, &d, "document-single"),
@@ -1331,4 +1322,63 @@ async fn native_document_recipe_actual_batch_provider_input() {
         *p.texts.lock().unwrap(),
         vec!["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
     );
+}
+
+fn document_recipe_input(d: &Data) -> crate::storage::native_store::NativeStoreInput {
+    let mut input = profile_wire_input(d, true);
+    input.insert.memory.summary = "header".into();
+    input.insert.memory.full_text = Some("body".into());
+    input.insert.memory.tags = ["raw", "entity/alice", "raw"]
+        .into_iter()
+        .map(|v| crate::model::Tag::new(v).unwrap())
+        .collect();
+    input.insert.entities = vec!["Alice".into(), "Bob".into()];
+    input.insert.topics = vec!["Rust".into()];
+    input.insert.emotions = vec!["Calm".into()];
+    input
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_export_old_fixture() {
+    let Some(output) = std::env::var_os("RECALLD_DOCUMENT_FIXTURE_OUT") else {
+        return;
+    };
+    let output = PathBuf::from(output);
+    std::fs::create_dir_all(&output).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let single = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "document-single"),
+            document_recipe_input(&d),
+            None,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    let mut batch = request(&f, "document-batch");
+    batch.items = vec![json!({"summary":"header", "fullText":"body",
+        "tags":["raw", "entity/alice", "raw"], "entities":["Alice", "Bob"],
+        "topics":["Rust"], "emotions":["Calm"]})];
+    let result = a.run_batch(batch).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    // This artifact documents the actual old bug; it is not certified recipe output.
+    assert_eq!(*p.texts.lock().unwrap(), vec!["body", "body"]);
+    let receipts = json!({"single":single.receipt, "batch":result,
+        "namespaceId":d.ns, "parent":d.parent, "profile":d.profile});
+    std::fs::write(
+        output.join("receipts.json"),
+        serde_json::to_vec(&receipts).unwrap(),
+    )
+    .unwrap();
+    drop(a);
+    let _root = f.close();
+    crate::storage::logical_export::export_store(&d.path, &output.join("store.jsonl")).unwrap();
 }
