@@ -16,8 +16,15 @@ use serde_json::json;
 use std::{collections::BTreeMap, path::PathBuf};
 #[derive(Parser)]
 struct Args {
+    #[arg(
+        long,
+        required_unless_present = "inspect_existing",
+        conflicts_with = "inspect_existing"
+    )]
+    input: Option<PathBuf>,
+    /// Read a closed fixture through the existing offline snapshot/export APIs.
     #[arg(long)]
-    input: PathBuf,
+    inspect_existing: bool,
     #[arg(long)]
     root: PathBuf,
     #[arg(long)]
@@ -44,7 +51,13 @@ struct Source {
 }
 fn main() -> Result<()> {
     let args = Args::parse();
-    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&args.input)?)?;
+    if args.inspect_existing {
+        ensure!(!args.report.exists(), "fresh report required");
+        return write_report(&args.report, &closed_inventory(&args.root)?);
+    }
+    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        args.input.as_ref().expect("clap requires input"),
+    )?)?;
     ensure!(
         raw["fixtureVersion"] != 1 || raw.get("namespaceDecayMultipliers").is_none(),
         "fixture v1 does not support namespace policy fields"
@@ -244,14 +257,50 @@ fn main() -> Result<()> {
     if let Some(policy) = input.namespace_decay_multipliers {
         value["namespaceDecayMultipliers"] = json!(policy);
     }
+    write_report(&args.report, &value)
+}
+
+fn write_report(path: &std::path::Path, value: &serde_json::Value) -> Result<()> {
     use std::io::Write;
     let mut out = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(args.report)?;
-    out.write_all(&serde_json::to_vec_pretty(&value)?)?;
+        .open(path)?;
+    out.write_all(&serde_json::to_vec_pretty(value)?)?;
     out.sync_all()?;
     Ok(())
+}
+
+// Compare canonical values, including raw record and retained receipt bytes,
+// separately from redb/SQLite open/close file bookkeeping. The export's random
+// transport envelope is excluded; every ordered chunk item is retained.
+fn closed_inventory(root: &std::path::Path) -> Result<serde_json::Value> {
+    let scratch = tempfile::tempdir()?;
+    let export = scratch.path().join("canonical.jsonl");
+    let summary = recalld::storage::logical_export::export_store(root, &export)?;
+    let mut items = Vec::new();
+    for line in std::fs::read_to_string(export)?.lines() {
+        let line: serde_json::Value = serde_json::from_str(line)?;
+        if line["kind"] == "chunk" {
+            items.push(line["data"]["item"].clone());
+        }
+    }
+    ensure!(items.len() as u64 == summary.chunks, "missing export item");
+    let snapshot = OfflineSnapshot::open(root)?;
+    ensure!(
+        snapshot.control().generation_ref() == summary.source,
+        "offline inventory source changed"
+    );
+    let mut records = Vec::new();
+    snapshot.for_each_record(|record| {
+        records.push(json!({"recordBytes":record.record.to_bytes(),
+            "fullText":record.full_text,
+            "embeddingBits":record.embedding.map(|v| v.into_iter().map(f32::to_bits).collect::<Vec<_>>())}));
+        Ok(())
+    })?;
+    Ok(json!({"inventoryVersion":1,"source":summary.source,
+        "logicalSha256":summary.logical_sha256,"control":snapshot.control(),
+        "namespaces":snapshot.namespaces(),"records":records,"items":items}))
 }
 
 // Inspect actual retained receipt key/value bytes through the existing logical
