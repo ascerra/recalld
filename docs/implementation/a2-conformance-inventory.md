@@ -42,6 +42,14 @@ These are source/test mappings, not a claim that every transport composition has
 
 Canonical namespace scans remain a material cost. Prior failed A5 instrumentation/sampling and incremental-publication gates do not establish performance promotion for this source. No new benchmark or default-enablement claim follows from this inventory.
 
+## Agreed explanation consumer boundary
+
+Huygens confirmed that his strict v2 selector/envelope child will consume returned-ID `ResultProvenance`, final response diagnostics and supplemental diagnostics after coherent selection returns. Enrich the existing provenance type at the actual scoring seams instead of introducing an unused core query option. The serializer omits explanations for `explain=false` while retaining coverage (including unknown/null fields). Changing serialization must not change selection, access classification or observation.
+
+The next bounded A2 implementation will capture the selected baseline formula, inputs and pre-boost score in `compute_composite_score`/`apply_boosts`, and the actual temporal factor where it is applied. Preserve raw/effective retrievability, entity overlap versus entity-recall admission, direct fused relevance and minScore disposition separately. A returned terminal whose own direct evidence failed minScore may describe that disposition but must not acquire an admitted own score. Injected terminals must not inherit a donor's raw vector/FTS score as their own. Rejected direct evidence stays separate from admitted own channels: describing it must not turn a graph-only returned result into a direct exposure.
+
+Capture inherited-floor sources at the existing max merge, with deterministic ties, bounded eligible predecessor/path details and truthful omission counts. Keep version status/profile and known Off multiplier explicit; joining experimental RIF requires its actual sibling's multiplier evidence, not an invented constant. Reconstruction tests must exercise each formula, temporal boost, lower/stronger own evidence, inherited minScore bypass, history, graph rediscovery and omitted/filtered source details. Existing graph/ranking work budgets, original API-origin routing and actual final exposure IDs remain unchanged. Full public toggle/access conformance is a joint consumer test with Huygens, not implied by internal factor collection alone.
+
 ## Resource handoff
 
 PR140 completed raw runs and its old target were released to the central cleanup owner, who confirmed deletion of all 13 named paths (batch 11). The observed concurrent free-space change was 6.99 GiB, not exclusively attributable to this release. Tracked reports/source and the sole private `.validation/cargo` cache remain. The next executable slice uses one fresh bounded target; no per-run cache clones or new HOME raw archives.
