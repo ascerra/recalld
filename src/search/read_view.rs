@@ -18,6 +18,25 @@ pub struct CoherentSearchResponse {
     pub payload: Option<CoherentPayload>,
 }
 
+/// A direct fetch owns its canonical row and selected text, including markers.
+pub struct CoherentGetResponse {
+    pub read_generation: GenerationRef,
+    pub evaluated_at: i64,
+    pub requested_access: bool,
+    pub payload: Option<(NamespaceConfig, crate::storage::engine::HydratedRecord)>,
+    pub response: Option<MemoryResponse>,
+}
+
+pub struct CoherentSimilarResponse {
+    /// Named legacy selector; coherence does not activate A2 version-2 ranking.
+    pub semantics: RetrievalSemantics,
+    pub read_generation: GenerationRef,
+    pub evaluated_at: i64,
+    pub requested_access: bool,
+    pub results: Vec<SearchResult>,
+    pub payload: CoherentPayload,
+}
+
 /// Canonical owned rows in exactly the selected result order. No handler reload.
 pub struct CoherentPayload {
     pub namespace: NamespaceConfig,
@@ -39,6 +58,15 @@ pub struct CoherentNeighbor {
 
 fn unavailable(error: impl std::fmt::Display) -> SearchError {
     SearchError::Unavailable(error.to_string())
+}
+
+fn canonical_read_error(error: crate::storage::StorageError) -> SearchError {
+    match error {
+        crate::storage::StorageError::NamespaceMismatch { .. }
+        | crate::storage::StorageError::InvalidNamespaceName { .. }
+        | crate::storage::StorageError::NotFound(_) => SearchError::CanonicalRead(Box::new(error)),
+        _ => unavailable(error),
+    }
 }
 
 #[async_trait::async_trait]
@@ -105,9 +133,16 @@ impl RecordCache for BypassCache {
         None
     }
 }
-struct RejectExposure;
+// Deferred selection retains the original observer capability, but this
+// pinned adapter still rejects EVERY attempted write.
+struct RejectExposure {
+    native_writer_available: bool,
+}
 #[async_trait::async_trait]
 impl AccessRecorder for RejectExposure {
+    fn supports_native_exposure(&self) -> bool {
+        self.native_writer_available
+    }
     async fn record_access(
         &self,
         _: MemoryId,
@@ -180,6 +215,195 @@ impl QueryEngine {
         .map(Some)
     }
 
+    pub(crate) async fn prepare_coherent_get(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<CoherentGetResponse>> {
+        let Some((owner, rif)) = &self.coherent_owner else {
+            return Ok(None);
+        };
+        let work = owner.accept_work(parent).map_err(unavailable)?;
+        let result = async {
+            let (engine, canonical, _graph, _publication, evaluated_at) =
+                self.pin_read_engine(owner, rif.clone(), &work).await?;
+            let at = canonical.at;
+            let storage = owner.storage.clone();
+            let namespace = namespace.map(str::to_owned);
+            let child = work.child().map_err(unavailable)?;
+            let payload = tokio::task::spawn_blocking(move || {
+                let storage = storage.read().map_err(unavailable)?;
+                let result = storage
+                    .hydrate_get_at(at, id, namespace.as_deref())
+                    .map_err(canonical_read_error);
+                storage.meta_store().finish_work(child);
+                result
+            })
+            .await
+            .map_err(unavailable)??;
+            let mut response = engine
+                .get_memory_with_access_admitted(id, requested_access, true, None, 1)
+                .await?
+                .finish::<SearchError>(Ok(()))?;
+            if let (Some(response), Some((_, payload))) = (&mut response, &payload) {
+                response.full_text = payload.full_text.clone();
+                response.access_count = payload.record.access_history.len();
+            }
+            Ok(CoherentGetResponse {
+                read_generation: at,
+                evaluated_at,
+                requested_access,
+                payload,
+                response,
+            })
+        };
+        let result = tokio::time::timeout(std::time::Duration::from_secs(30), result).await;
+        owner.finish_known_work(work);
+        result
+            .map_err(|_| unavailable("coherent get deadline expired"))?
+            .map(Some)
+    }
+
+    pub(crate) async fn prepare_coherent_similar(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        include_embeddings: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<CoherentSimilarResponse>> {
+        let Some((owner, rif)) = &self.coherent_owner else {
+            return Ok(None);
+        };
+        let work = owner.accept_work(parent).map_err(unavailable)?;
+        let result = async {
+            let (engine, canonical, _graph, _publication, evaluated_at) =
+                self.pin_read_engine(owner, rif.clone(), &work).await?;
+            let at = canonical.at;
+            let storage = owner.storage.clone();
+            let asserted = namespace.map(str::to_owned);
+            let child = work.child().map_err(unavailable)?;
+            let source = tokio::task::spawn_blocking(move || {
+                let storage = storage.read().map_err(unavailable)?;
+                let result = storage
+                    .hydrate_get_at(at, id, asserted.as_deref())
+                    .map_err(canonical_read_error);
+                storage.meta_store().finish_work(child);
+                result
+            })
+            .await
+            .map_err(unavailable)??
+            .ok_or(SearchError::MemoryNotFound(id))?;
+            let namespace = source.0;
+            let results = engine
+                .similar_with_access_admitted(id, k, min_score, requested_access, true, None, 1)
+                .await?
+                .finish::<SearchError>(Ok(()))?;
+            let ids: Vec<_> = results.iter().map(|r| r.memory_id).collect();
+            let storage = owner.storage.clone();
+            let namespace_id = namespace.id;
+            let child = work.child().map_err(unavailable)?;
+            let rows = tokio::task::spawn_blocking(move || {
+                let storage = storage.read().map_err(unavailable)?;
+                let result = storage
+                    .hydrate_at(at, namespace_id, &ids, include_embeddings)
+                    .map_err(unavailable);
+                storage.meta_store().finish_work(child);
+                result
+            })
+            .await
+            .map_err(unavailable)??;
+            Ok(CoherentSimilarResponse {
+                semantics: RetrievalSemantics::V1,
+                read_generation: at,
+                evaluated_at,
+                requested_access,
+                results,
+                payload: CoherentPayload {
+                    namespace,
+                    rows,
+                    related: HashMap::new(),
+                    neighbors: Vec::new(),
+                },
+            })
+        };
+        let result = tokio::time::timeout(std::time::Duration::from_secs(30), result).await;
+        owner.finish_known_work(work);
+        result
+            .map_err(|_| unavailable("coherent similar deadline expired"))?
+            .map(Some)
+    }
+
+    async fn pin_read_engine(
+        &self,
+        owner: &DerivedCompletion,
+        rif: Arc<crate::rif::RifEngine>,
+        work: &crate::storage::work::WorkTicket,
+    ) -> Result<(
+        Self,
+        Arc<CanonicalReadView>,
+        Arc<tokio::sync::OwnedRwLockReadGuard<crate::graph::RelationshipGraph>>,
+        tokio::sync::OwnedRwLockReadGuard<()>,
+        i64,
+    )> {
+        let storage = owner.storage.clone();
+        let child = work.child().map_err(unavailable)?;
+        let gate = tokio::task::spawn_blocking(move || {
+            let storage = storage.read().map_err(unavailable)?;
+            let gate = storage.meta_store().derived_publication.clone();
+            storage.meta_store().finish_work(child);
+            Ok::<_, SearchError>(gate)
+        })
+        .await
+        .map_err(unavailable)??;
+        // The same lock order as completion. Adapters below read these leases
+        // directly, avoiding recursive reads behind a queued publisher.
+        let publication = gate.read_owned().await;
+        let graph = Arc::new(owner.graph.clone().read_owned().await);
+        let vectors = Arc::new(owner.vectors.clone().read_owned().await);
+        let fts = owner.fts.clone().lock_owned().await;
+        let entities = Arc::new(owner.entities.clone().read_owned().await);
+        let storage = owner.storage.clone();
+        let child = work.child().map_err(unavailable)?;
+        let canonical = tokio::task::spawn_blocking(move || {
+            let storage = storage.read().map_err(unavailable)?;
+            let result = storage
+                .meta_store()
+                .capture_read_view()
+                .map_err(unavailable);
+            storage.meta_store().finish_work(child);
+            result
+        })
+        .await
+        .map_err(unavailable)??;
+        let canonical = Arc::new(canonical);
+        let evaluated_at = self.clock.now_millis();
+        let engine = Self {
+            native_query_admission: self.native_query_admission,
+            coherent_owner: None,
+            clock: Arc::new(crate::time::ManualClock::new(evaluated_at)),
+            decay_policy: self.decay_policy.clone(),
+            decay_multiplier: self.decay_multiplier,
+            namespace_resolver: canonical.clone(),
+            embedding_providers: self.embedding_providers.clone(),
+            vector_indexes: Arc::new(SharedVectorIndexRegistry::pinned(vectors)),
+            fts_index: Arc::new(SharedFtsIndexRegistry::pinned(fts)),
+            entity_index: Arc::new(SharedEntityIndexReader::pinned(entities)),
+            cache: Arc::new(BypassCache),
+            meta_store: canonical.clone(),
+            graph: Arc::new(SharedGraphReader::pinned(graph.clone())),
+            rif_engine: Arc::new(RifProcessorAdapter::pinned(rif, graph.clone())),
+            access_recorder: Arc::new(RejectExposure {
+                native_writer_available: self.access_recorder.supports_native_exposure(),
+            }),
+        };
+        Ok((engine, canonical, graph, publication, evaluated_at))
+    }
+
     async fn coherent_selection(
         &self,
         owner: &DerivedCompletion,
@@ -192,57 +416,10 @@ impl QueryEngine {
     ) -> Result<CoherentSearchResponse> {
         let work = owner.accept_work(parent).map_err(unavailable)?;
         let result = async {
-            let storage = owner.storage.clone();
-            let child = work.child().map_err(unavailable)?;
-            let gate = tokio::task::spawn_blocking(move || {
-                let storage = storage.read().map_err(unavailable)?;
-                let gate = storage.meta_store().derived_publication.clone();
-                storage.meta_store().finish_work(child);
-                Ok::<_, SearchError>(gate)
-            })
-            .await
-            .map_err(unavailable)??;
-            // The same lock order as completion. Adapters below read these leases
-            // directly, avoiding recursive reads behind a queued publisher.
-            let publication = gate.read_owned().await;
-            let graph = Arc::new(owner.graph.clone().read_owned().await);
-            let vectors = Arc::new(owner.vectors.clone().read_owned().await);
-            let fts = owner.fts.clone().lock_owned().await;
-            let entities = Arc::new(owner.entities.clone().read_owned().await);
-            let storage = owner.storage.clone();
-            let child = work.child().map_err(unavailable)?;
-            let canonical = tokio::task::spawn_blocking(move || {
-                let storage = storage.read().map_err(unavailable)?;
-                let result = storage
-                    .meta_store()
-                    .capture_read_view()
-                    .map_err(unavailable);
-                storage.meta_store().finish_work(child);
-                result
-            })
-            .await
-            .map_err(unavailable)??;
+            let (engine, canonical, graph, publication, evaluated_at) =
+                self.pin_read_engine(owner, rif, &work).await?;
             let at = canonical.at;
-            let canonical = Arc::new(canonical);
-            let evaluated_at = self.clock.now_millis();
             let namespace = canonical.resolve(&query.namespace).await?;
-            let engine = Self {
-                native_query_admission: self.native_query_admission,
-                coherent_owner: None,
-                clock: Arc::new(crate::time::ManualClock::new(evaluated_at)),
-                decay_policy: self.decay_policy.clone(),
-                decay_multiplier: self.decay_multiplier,
-                namespace_resolver: canonical.clone(),
-                embedding_providers: self.embedding_providers.clone(),
-                vector_indexes: Arc::new(SharedVectorIndexRegistry::pinned(vectors)),
-                fts_index: Arc::new(SharedFtsIndexRegistry::pinned(fts)),
-                entity_index: Arc::new(SharedEntityIndexReader::pinned(entities)),
-                cache: Arc::new(BypassCache),
-                meta_store: canonical.clone(),
-                graph: Arc::new(SharedGraphReader::pinned(graph.clone())),
-                rif_engine: Arc::new(RifProcessorAdapter::pinned(rif, graph.clone())),
-                access_recorder: Arc::new(RejectExposure),
-            };
             // Preserve requested mode for policy resolution, but never expose
             // until all selected content is copied and transport selection is final.
             let response = engine.search_checked(query, semantics, true).await?;
@@ -437,7 +614,9 @@ mod tests {
             Arc::new(StorageMetadataAdapter::new(f.storage.clone())),
             Arc::new(SharedGraphReader::new(f.graph.clone())),
             Arc::new(RifProcessorAdapter::new(rif, f.graph.clone())),
-            Arc::new(RejectExposure),
+            Arc::new(RejectExposure {
+                native_writer_available: false,
+            }),
         )
         .with_lifecycle_inputs(
             Arc::new(crate::time::ManualClock::new(123)),
