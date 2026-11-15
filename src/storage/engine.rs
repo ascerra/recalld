@@ -12,6 +12,7 @@ pub(crate) use catalog::rename_new_directory;
 mod checkpoint;
 pub(crate) use checkpoint::StagedCanonical;
 mod effects;
+mod inherited_policy;
 mod insertion;
 mod maintenance;
 mod native_catalog;
@@ -443,6 +444,15 @@ impl RedbStorageEngine {
     ) -> Result<Self, StorageError> {
         let ownership =
             crate::storage::ownership::StoreOwnership::acquire_recovering(path.as_ref())?;
+        Self::open_owned_with_ids(ownership, native, ids)
+    }
+    /// Transfer the same owner from an immutable offline preflight. No gap in
+    /// ownership lets another writer invalidate source/CAS before canonical open.
+    pub(crate) fn open_owned_with_ids(
+        ownership: crate::storage::ownership::StoreOwnership,
+        native: bool,
+        ids: Box<dyn super::ids::IdSource>,
+    ) -> Result<Self, StorageError> {
         let db_path = ownership.path.clone();
         std::fs::create_dir_all(&db_path)?;
         let lock_file = crate::storage::ownership::lock_directory(&db_path)?;

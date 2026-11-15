@@ -11,6 +11,7 @@ pub(crate) mod batch;
 mod canonical_vector_snapshot;
 mod catalog;
 pub(crate) mod effects;
+mod inherited_policy;
 mod insertion;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;

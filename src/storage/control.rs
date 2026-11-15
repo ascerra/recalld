@@ -97,7 +97,7 @@ impl From<Generation> for String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GenerationRef {
     pub store_id: Uuid,
     pub generation: Generation,
@@ -147,7 +147,12 @@ impl ControlState {
 
 /// Catalog cannot alias namespace 0 or a mutable namespace name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind", content = "namespaceId")]
+#[serde(
+    rename_all = "camelCase",
+    tag = "kind",
+    content = "namespaceId",
+    deny_unknown_fields
+)]
 pub enum MutationScope {
     Catalog,
     Namespace(NamespaceId),
@@ -168,7 +173,8 @@ impl MutationScope {
 
 /// Resolved immutable scope. A4 supplies normalized semantic fields; generated
 /// IDs/times and provider output must not enter request identity.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MutationContext {
     pub store_id: Option<Uuid>,
     pub scope: MutationScope,
@@ -231,6 +237,9 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    InheritedDecayAdopted {
+        transition: super::inherited_policy::InheritedDecayAdopted,
+    },
     NativeNamespacePurgeStarted {
         transition: super::native_purge::NativePurgeStarted,
     },
@@ -483,6 +492,9 @@ pub(crate) fn validate_existing(
             | MutationOutcome::BatchReserved { .. }
             | MutationOutcome::BatchItemRejected { .. }
             | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            MutationOutcome::InheritedDecayAdopted { transition } => {
+                scope == MutationScope::Namespace(transition.preview.namespace_id)
+            }
             MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
                 scope == MutationScope::Namespace(transition.namespace_id)
             }
@@ -524,6 +536,7 @@ pub(crate) fn validate_existing(
                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                 | MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
+                | MutationOutcome::InheritedDecayAdopted { .. }
                 | MutationOutcome::NativeNamespacePolicyUpdated { .. }
                 | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
@@ -705,6 +718,24 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::InheritedDecayAdopted { transition } => {
+            transition.validate(&stored.receipt)?;
+            let request = super::inherited_policy::AdoptInheritedDecay {
+                context: MutationContext {
+                    store_id: Some(stored.receipt.store_id),
+                    scope: MutationScope::Namespace(transition.preview.namespace_id),
+                    expected_generation: Some(transition.preview.source.generation),
+                    contract_version: transition.contract_version,
+                    idempotency_key: None,
+                },
+                preview: transition.preview.clone(),
+            };
+            if request.hash()? != stored.request_hash {
+                return Err(StorageError::InvalidControl(
+                    "inherited policy original request hash mismatch".into(),
+                ));
+            }
+        }
         MutationOutcome::NativeNamespacePurgeStarted { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -876,6 +907,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::NativeNamespacePurgeStarted { .. }
         | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
         | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+        | MutationOutcome::InheritedDecayAdopted { .. }
         | MutationOutcome::NativeNamespacePolicyUpdated { .. }
         | MutationOutcome::NativeNamespaceCreated { .. }
         | MutationOutcome::NativePhaseMaterialized { .. }

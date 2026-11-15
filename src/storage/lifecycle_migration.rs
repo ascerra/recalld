@@ -160,6 +160,11 @@ pub(crate) fn validate_policy_history(
         BTreeMap<Generation, super::native_policy::NativeNamespacePolicyUpdated>,
     > = HashMap::new();
     let mut policy_noops = Vec::new();
+    let mut inherited_updates: HashMap<
+        u32,
+        BTreeMap<Generation, super::inherited_policy::InheritedDecayAdopted>,
+    > = HashMap::new();
+    let mut inherited_noops = Vec::new();
     let mut native_history = Vec::new();
     let mut namespace_creations = HashMap::new();
     for row in read.open_table(control::RECEIPTS)?.iter()? {
@@ -207,6 +212,32 @@ pub(crate) fn validate_policy_history(
                     return Err(invalid("invalid native namespace receipt origin/identity"));
                 }
                 None
+            }
+            MutationOutcome::InheritedDecayAdopted { transition: t } => {
+                if t.changed() {
+                    if policies
+                        .entry(t.preview.namespace_id.get())
+                        .or_default()
+                        .insert(t.next_revision, (receipt.clone(), t.revision_transition()))
+                        .is_some()
+                        || inherited_updates
+                            .entry(t.preview.namespace_id.get())
+                            .or_default()
+                            .insert(t.next_revision, t.clone())
+                            .is_some()
+                    {
+                        return Err(invalid("ambiguous inherited policy revision"));
+                    }
+                } else {
+                    inherited_noops.push(t.clone());
+                    native_history.push((
+                        receipt.clone(),
+                        t.preview.namespace_id,
+                        t.preview.lifecycle_version,
+                        t.preview.policy_revision,
+                    ));
+                }
+                Some(t.preview.namespace_id)
             }
             MutationOutcome::NativeNamespacePolicyUpdated { transition: t } => {
                 if policies
@@ -487,6 +518,87 @@ pub(crate) fn validate_policy_history(
             t.before.apply(ns);
         }
     }
+    // Rewind every origin's immutable inherited binding by policy revision.
+    // A fork retains original adoption store/G/opID; its local counter is irrelevant.
+    let mut binding_changes: HashMap<
+        u32,
+        BTreeMap<
+            Generation,
+            (
+                Option<super::inherited_policy::InheritedDecayBinding>,
+                Option<super::inherited_policy::InheritedDecayBinding>,
+            ),
+        >,
+    > = HashMap::new();
+    for (id, history) in &inherited_updates {
+        for (revision, t) in history {
+            binding_changes
+                .entry(*id)
+                .or_default()
+                .insert(*revision, (t.preview.prior.clone(), Some(t.after.clone())));
+        }
+    }
+    for (id, history) in &numeric_policies {
+        for (revision, t) in history {
+            if t.before.decay_rate_multiplier.is_some() && t.after.decay_rate_multiplier.is_none() {
+                if binding_changes
+                    .entry(*id)
+                    .or_default()
+                    .insert(*revision, (t.cleared_inherited_decay.clone(), None))
+                    .is_some()
+                {
+                    return Err(invalid("ambiguous inherited binding change"));
+                }
+            }
+        }
+    }
+    for (id, history) in &binding_changes {
+        let schema = creation_configs
+            .get_mut(id)
+            .and_then(|ns| ns.schema.as_mut())
+            .ok_or_else(|| invalid("inherited binding namespace missing"))?;
+        for (before, after) in history.values().rev() {
+            if &schema.inherited_decay != after {
+                return Err(invalid("inherited binding history mismatch"));
+            }
+            schema.inherited_decay = before.clone();
+        }
+    }
+    for t in &inherited_noops {
+        let mut binding = configs
+            .get(&t.preview.namespace_id.get())
+            .and_then(|ns| ns.schema.as_ref())
+            .ok_or_else(|| invalid("inherited no-change namespace missing"))?
+            .inherited_decay
+            .clone();
+        if let Some(history) = binding_changes.get(&t.preview.namespace_id.get()) {
+            for (_, (before, _)) in history
+                .range((
+                    std::ops::Bound::Excluded(t.preview.policy_revision),
+                    std::ops::Bound::Unbounded,
+                ))
+                .rev()
+            {
+                binding = before.clone();
+            }
+        }
+        if binding.as_ref() != Some(&t.after) {
+            return Err(invalid("inherited no-change history mismatch"));
+        }
+    }
+    // No migrated baseline can manufacture an adoption. Its old binding was absent.
+    for (id, ns) in &creation_configs {
+        if !namespace_creations.contains_key(id)
+            && ns
+                .schema
+                .as_ref()
+                .ok_or_else(|| invalid("namespace lacks lifecycle schema"))?
+                .inherited_decay
+                .is_some()
+        {
+            return Err(invalid("inherited binding lacks creation/adoption receipt"));
+        }
+    }
     // A restored historical no-op must identify the numeric state at its own
     // revision, not merely any well-formed policy under the same lifecycle version.
     for t in &policy_noops {
@@ -729,6 +841,43 @@ pub(crate) fn validate_policy_history(
                 namespace_highwater = t.previous_max_id;
                 records.remove(&t.namespace_id.get());
             }
+            MutationOutcome::InheritedDecayAdopted { transition: t } => {
+                let policy = current_policy
+                    .get_mut(&t.preview.namespace_id.get())
+                    .ok_or_else(|| invalid("inherited policy namespace absent"))?;
+                let rows = records.entry(t.preview.namespace_id.get()).or_default();
+                let ns = configs
+                    .get_mut(&t.preview.namespace_id.get())
+                    .ok_or_else(|| invalid("inherited policy configuration absent"))?;
+                if *policy != (t.preview.lifecycle_version, t.next_revision)
+                    || ns.schema.as_ref().unwrap().inherited_decay.as_ref() != Some(&t.after)
+                    || rows.len() as u64 != t.preview.record_count
+                    || token_digest_values(rows.iter().map(|r| {
+                        (
+                            *r.id.as_bytes(),
+                            r.state.lifecycle.lifecycle.record_generation.get(),
+                        )
+                    })) != t.record_token_digest
+                {
+                    return Err(invalid("inherited policy affected-record proof mismatch"));
+                }
+                if t.changed() {
+                    for row in rows {
+                        let fields = &mut row.state.lifecycle.lifecycle;
+                        fields.record_generation = Generation::try_from(
+                            fields
+                                .record_generation
+                                .get()
+                                .checked_sub(1)
+                                .ok_or_else(|| invalid("inherited policy token underflow"))?
+                                .to_string(),
+                        )?;
+                        fields.policy_revision = t.preview.policy_revision;
+                    }
+                    ns.schema.as_mut().unwrap().inherited_decay = t.preview.prior.clone();
+                    *policy = (t.preview.lifecycle_version, t.preview.policy_revision);
+                }
+            }
             MutationOutcome::NativeNamespacePolicyUnchanged { transition: t } => {
                 if current_policy.get(&t.namespace_id.get())
                     != Some(&(t.lifecycle_version, t.policy_revision))
@@ -777,6 +926,14 @@ pub(crate) fn validate_policy_history(
                             .to_string(),
                     )?;
                     fields.policy_revision = t.previous_revision;
+                }
+                if t.before.decay_rate_multiplier.is_some()
+                    && t.after.decay_rate_multiplier.is_none()
+                {
+                    if ns.schema.as_ref().unwrap().inherited_decay.is_some() {
+                        return Err(invalid("inherited binding was not cleared"));
+                    }
+                    ns.schema.as_mut().unwrap().inherited_decay = t.cleared_inherited_decay.clone();
                 }
                 t.before.apply(ns);
                 *policy = (t.lifecycle_version, t.previous_revision);
