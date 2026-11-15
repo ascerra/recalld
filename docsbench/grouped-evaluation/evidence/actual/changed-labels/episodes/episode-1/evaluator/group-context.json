@@ -1,0 +1,13 @@
+{
+  "episodeId": "episode-1",
+  "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+  "groupMapSha256": "7928db2870b7545850e833d880842ba9893f8260014a3f5f9abc8443e79537d2",
+  "queryIds": [
+    "q0",
+    "q1",
+    "q2",
+    "q3"
+  ],
+  "split": "train",
+  "splitMapSha256": "e4beebf686bb7207cf87ff1657662d7cd4f049c316deb2c412c95ce7241ec23c"
+}
