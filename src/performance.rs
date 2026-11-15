@@ -213,25 +213,28 @@ async fn measure_request<T, E>(
             }
         }
     });
-    if !decision.selected {
-        return REQUEST.scope(decision, future).await;
-    }
-    let trace_id = NEXT_TRACE.fetch_add(1, Ordering::Relaxed);
+    // Keep a single future-containing path: duplicating it in sampled and
+    // unsampled branches compounds stack usage when request wrappers nest.
     // Full trace keeps its original event-v1 span fields. Sampled traces have
     // version 2 and explicit root-level counts (not whole-population metrics).
-    let span = if record_access.is_none() {
-        tracing::trace_span!(target: "recalld::performance", "performance_request",
+    let span = if !decision.selected {
+        tracing::Span::none()
+    } else {
+        let trace_id = NEXT_TRACE.fetch_add(1, Ordering::Relaxed);
+        if record_access.is_none() {
+            tracing::trace_span!(target: "recalld::performance", "performance_request",
             operation, intent = "unknown", trace_id, event_version = 3,
             sample_every = decision.every, root_ordinal = decision.root_ordinal,
             sampled_roots_seen = decision.sampled_roots_seen)
-    } else if decision.every == 1 {
-        tracing::trace_span!(target: "recalld::performance", "performance_request",
+        } else if decision.every == 1 {
+            tracing::trace_span!(target: "recalld::performance", "performance_request",
             operation, record_access = record_access.unwrap(), trace_id, event_version = 1)
-    } else {
-        tracing::trace_span!(target: "recalld::performance", "performance_request",
+        } else {
+            tracing::trace_span!(target: "recalld::performance", "performance_request",
             operation, record_access = record_access.unwrap(), trace_id, event_version = 2,
             sample_every = decision.every, root_ordinal = decision.root_ordinal,
             sampled_roots_seen = decision.sampled_roots_seen)
+        }
     };
     REQUEST
         .scope(
