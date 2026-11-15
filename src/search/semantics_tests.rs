@@ -1018,13 +1018,13 @@ async fn entity_total_budget_counts_vector_fts_overlap_before_union() {
                 let channel = &result.diagnostics.channels.as_ref().unwrap()[&Entity];
                 assert_eq!(channel.offered, Some(4), "overlap={overlap}");
                 assert_eq!(channel.admitted, Some(4));
-                // This interface does not measure the uncapped scan. A full
-                // page alone proves neither exhaustion nor unseen candidates.
-                assert_eq!(channel.examined, None);
-                assert_eq!(channel.eligible, None);
-                assert_eq!(channel.exhausted, None);
-                assert_eq!(channel.candidate_limited, None);
-                assert_eq!(channel.budget_exhausted, None);
+                // Actual target postings: 75 rejected UUIDs under two keys + 8 eligible.
+                assert_eq!(channel.examined, Some(158));
+                assert_eq!(channel.examined_unit, Some(ExaminationUnit::EntityPostings));
+                assert_eq!(channel.eligible, Some(8));
+                assert_eq!(channel.exhausted, Some(true));
+                assert_eq!(channel.candidate_limited, Some(true));
+                assert_eq!(channel.budget_exhausted, Some(false));
                 assert_eq!(result.response.total_matches, 5); // Four entities + vector 108.
                 assert_eq!(result.response.results[0].memory_id, mid(108));
                 let evidence = &result.diagnostics.provenance.as_ref().unwrap()[&mid(108)];
@@ -1085,10 +1085,11 @@ async fn diagnostics_capture_overlapping_sources_before_dedup_and_only_returned_
         assert_eq!(channels[&channel].admitted, Some(offered));
         assert_eq!(channels[&channel].returned_own, 2);
     }
-    for channel in [Vector, Entity] {
-        assert_eq!(channels[&channel].examined, None);
-        assert_eq!(channels[&channel].eligible, None);
-        assert_eq!(channels[&channel].exhausted, None);
+    for (channel, count) in [(Vector, 2), (Entity, 3)] {
+        assert_eq!(channels[&channel].examined, Some(count));
+        assert_eq!(channels[&channel].eligible, Some(count));
+        assert_eq!(channels[&channel].exhausted, Some(true));
+        assert_eq!(channels[&channel].candidate_limited, Some(false));
     }
     assert_eq!(channels[&Fts].examined, Some(3));
     assert_eq!(channels[&Fts].exhausted, Some(true));
@@ -1278,7 +1279,8 @@ async fn diagnostics_report_unknown_vector_exhaustion_and_measured_metadata_cap(
     use RetrievalChannel::*;
     let records: Vec<_> = (1..=150).map(|n| rec(mid(n))).collect();
     let vectors: Vec<_> = (1..=150).map(|n| (mid(n), 0.9)).collect();
-    let (engine, _) = graph_engine(records, &vectors, &[]);
+    let (mut engine, _) = graph_engine(records, &vectors, &[]);
+    engine.vector_indexes = Arc::new(ResultOnlyVector(engine.vector_indexes.clone()));
     let vector = engine
         .search_with_semantics(query(serde_json::json!({"text":"q","limit":1})), current())
         .await
@@ -1395,4 +1397,137 @@ async fn measured_source_entity_coverage_counts_actual_posting_work_before_cap()
             .unwrap()
             .contains_key(&mid(5))
     );
+}
+
+// Deliberately only the pre-existing result interface: defaults must not infer
+// source completion from an actual producer hidden behind this adapter.
+struct ResultOnlyVector(Arc<dyn VectorIndexRegistry>);
+impl VectorIndexRegistry for ResultOnlyVector {
+    fn search(
+        &self,
+        ns: NamespaceId,
+        q: &[f32],
+        k: usize,
+        ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<Vec<ScoredResult>> {
+        self.0.search(ns, q, k, ids)
+    }
+    fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>> {
+        self.0.get_vector(id)
+    }
+}
+struct ResultOnlyEntity(Arc<dyn EntityIndexReader>);
+impl EntityIndexReader for ResultOnlyEntity {
+    fn find_by_entities(
+        &self,
+        ns: NamespaceId,
+        e: &[String],
+        exclude: MemoryId,
+        k: usize,
+        ids: &HashSet<MemoryId>,
+    ) -> Result<Vec<EntityRecallResult>> {
+        self.0.find_by_entities(ns, e, exclude, k, ids)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_empty_unrequested_and_result_only_remain_distinct() {
+    let (mut engine, _) = graph_engine(Vec::new(), &[], &[]);
+    let q = serde_json::json!({"text":"q", "entities":["alice"], "graphDepth":0});
+    let measured = engine
+        .search_with_semantics(query(q.clone()), history())
+        .await
+        .unwrap();
+    for (channel, unit) in [
+        (RetrievalChannel::Vector, ExaminationUnit::VectorEntries),
+        (RetrievalChannel::Entity, ExaminationUnit::EntityPostings),
+    ] {
+        let c = &measured.diagnostics.channels.as_ref().unwrap()[&channel];
+        assert_eq!(c.participation, ChannelParticipation::Completed);
+        assert_eq!(
+            (c.examined, c.eligible, c.offered, c.admitted),
+            (Some(0), Some(0), Some(0), Some(0))
+        );
+        assert_eq!(c.examined_unit, Some(unit));
+        assert_eq!(c.exhausted, Some(true));
+        assert_eq!(c.candidate_limited, Some(false));
+    }
+    engine.vector_indexes = Arc::new(ResultOnlyVector(engine.vector_indexes.clone()));
+    engine.entity_index = Arc::new(ResultOnlyEntity(engine.entity_index.clone()));
+    let unknown = engine
+        .search_with_semantics(query(q), history())
+        .await
+        .unwrap();
+    for channel in [RetrievalChannel::Vector, RetrievalChannel::Entity] {
+        let c = &unknown.diagnostics.channels.as_ref().unwrap()[&channel];
+        assert_eq!(c.participation, ChannelParticipation::Completed);
+        assert_eq!(
+            (
+                c.examined,
+                c.eligible,
+                c.examined_unit,
+                c.exhausted,
+                c.candidate_limited,
+                c.budget_exhausted
+            ),
+            (None, None, None, None, None, None)
+        );
+        assert_eq!(c.offered, Some(0));
+    }
+    let metadata = engine
+        .search_with_semantics(
+            query(serde_json::json!({"queryMode":"metadata_only", "filter":{"minStrength":0.0}})),
+            history(),
+        )
+        .await
+        .unwrap();
+    for channel in [RetrievalChannel::Vector, RetrievalChannel::Entity] {
+        let c = &metadata.diagnostics.channels.as_ref().unwrap()[&channel];
+        assert_eq!(c.participation, ChannelParticipation::NotRequested);
+        assert_eq!(
+            (c.examined, c.examined_unit, c.exhausted),
+            (None, None, None)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_entity_cap_parity_exclusion_and_empty_keys() {
+    use crate::search::{EntityIndex, adapters::SharedEntityIndexReader};
+    let mut index = EntityIndex::new();
+    for n in 1..=5 {
+        index.add(ns(), mid(n), &["alice".into(), "bob".into()]);
+    }
+    index.add(other_ns(), mid(6), &["alice".into()]);
+    let adapter = SharedEntityIndexReader::new(Arc::new(tokio::sync::RwLock::new(index)));
+    let ids = [mid(1), mid(2), mid(3), mid(4)].into_iter().collect();
+    let entities = vec!["alice".into(), "ALICE".into(), "bob".into()];
+    for k in [0, 2, 3, 4] {
+        let source = adapter
+            .find_by_entities_measured(ns(), &entities, mid(4), k, &ids)
+            .unwrap();
+        let plain = adapter
+            .find_by_entities(ns(), &entities, mid(4), k, &ids)
+            .unwrap();
+        let pairs = |rows: &[EntityRecallResult]| {
+            rows.iter()
+                .map(|r| (r.memory_id, r.shared_count))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(pairs(&source.results), pairs(&plain));
+        assert_eq!(
+            pairs(&source.results),
+            (1..=3).take(k).map(|n| (mid(n), 2)).collect::<Vec<_>>()
+        );
+        let c = source.coverage.unwrap();
+        assert_eq!((c.examined, c.eligible), (10, 3));
+        assert!(c.exhausted); // Even k=0 actually scans this producer.
+        assert_eq!(c.candidate_limited, k < 3);
+        assert!(!c.budget_exhausted);
+    }
+    let empty = adapter
+        .find_by_entities_measured(ns(), &[], MemoryId::nil(), 2, &ids)
+        .unwrap();
+    assert_eq!(empty.coverage.unwrap().examined, 0);
+    assert!(empty.coverage.unwrap().exhausted);
 }

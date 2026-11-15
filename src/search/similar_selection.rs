@@ -384,6 +384,7 @@ impl QueryEngine {
                     .expect("vector channel");
                 vector.participation = ChannelParticipation::Completed;
                 vector.examined = Some(coverage.scored_records);
+                vector.examined_unit = Some(super::ExaminationUnit::ScoredVectors);
                 vector.eligible = Some(coverage.eligible_records);
                 vector.offered = Some(coverage.score_admitted);
                 vector.admitted = Some(coverage.score_admitted);

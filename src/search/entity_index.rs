@@ -105,8 +105,32 @@ impl EntityIndex {
         exclude_id: MemoryId,
         eligible: impl Fn(MemoryId) -> bool,
     ) -> Vec<(MemoryId, usize)> {
+        self.find_by_entities_measured(namespace_id, entities, exclude_id, eligible)
+            .results
+    }
+
+    /// Examined work counts posting entries, including repeated UUIDs across
+    /// distinct normalized keys and entries rejected by canonical eligibility.
+    pub fn find_by_entities_measured(
+        &self,
+        namespace_id: NamespaceId,
+        entities: &[String],
+        exclude_id: MemoryId,
+        eligible: impl Fn(MemoryId) -> bool,
+    ) -> super::SourceResults<(MemoryId, usize)> {
+        let mut coverage = super::SourceCoverage {
+            examined_unit: super::ExaminationUnit::EntityPostings,
+            examined: 0,
+            eligible: 0,
+            exhausted: true,
+            candidate_limited: false,
+            budget_exhausted: false,
+        };
         let Some(postings) = self.index.get(&namespace_id) else {
-            return Vec::new();
+            return super::SourceResults {
+                results: Vec::new(),
+                coverage: Some(coverage),
+            };
         };
         let mut counts: HashMap<MemoryId, usize> = HashMap::new();
         let mut seen_keys: HashSet<String> = HashSet::new();
@@ -117,6 +141,7 @@ impl EntityIndex {
                 }
                 if let Some(ids) = postings.get(&key) {
                     for &id in ids {
+                        coverage.examined += 1;
                         if id != exclude_id && eligible(id) {
                             *counts.entry(id).or_default() += 1;
                         }
@@ -126,7 +151,11 @@ impl EntityIndex {
         }
         let mut results: Vec<_> = counts.into_iter().collect();
         results.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        results
+        coverage.eligible = results.len();
+        super::SourceResults {
+            results,
+            coverage: Some(coverage),
+        }
     }
 
     /// Distinct namespace/UUID entries with at least one normalized entity key.

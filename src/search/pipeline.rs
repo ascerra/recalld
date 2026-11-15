@@ -48,7 +48,8 @@ mod semantics;
 #[path = "strength_tests.rs"]
 mod strength_tests;
 pub use diagnostics::{
-    ChannelDiagnostics, ChannelParticipation, ResultProvenance, RetrievalChannel,
+    ChannelDiagnostics, ChannelParticipation, ExaminationUnit, ResultProvenance, RetrievalChannel,
+    SourceCoverage, SourceResults,
 };
 #[cfg(test)]
 #[path = "semantics_tests.rs"]
@@ -105,6 +106,20 @@ pub trait VectorIndexRegistry: Send + Sync {
         k: usize,
         eligible_ids: Option<&HashSet<MemoryId>>,
     ) -> Result<Vec<ScoredResult>>;
+
+    /// Optional source measurements; result-only adapters retain honest unknowns.
+    fn search_measured(
+        &self,
+        namespace_id: NamespaceId,
+        query_vec: &[f32],
+        k: usize,
+        eligible_ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<SourceResults<ScoredResult>> {
+        Ok(SourceResults {
+            results: self.search(namespace_id, query_vec, k, eligible_ids)?,
+            coverage: None,
+        })
+    }
 
     /// Retrieve the raw embedding vector for a given memory ID, if present.
     fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>>;
@@ -405,6 +420,21 @@ pub trait EntityIndexReader: Send + Sync {
         k: usize,
         eligible_ids: &HashSet<MemoryId>,
     ) -> Result<Vec<EntityRecallResult>>;
+
+    /// Optional actual posting-scan measurements, never inferred from a full cap.
+    fn find_by_entities_measured(
+        &self,
+        namespace_id: NamespaceId,
+        entities: &[String],
+        exclude_id: MemoryId,
+        k: usize,
+        eligible_ids: &HashSet<MemoryId>,
+    ) -> Result<SourceResults<EntityRecallResult>> {
+        Ok(SourceResults {
+            results: self.find_by_entities(namespace_id, entities, exclude_id, k, eligible_ids)?,
+            coverage: None,
+        })
+    }
 }
 
 /// A single result from entity index recall.
@@ -846,9 +876,11 @@ impl QueryEngine {
             _ => (query.limit * 8).max(100).min(SearchQuery::MAX_FETCH_K),
         };
 
-        let (scored_candidates, vector_search_us) =
+        let (vector_source, vector_search_us) =
             self.run_vector_search(&query_embedding, ns_config.id, fetch_k, &eligible_ids)?;
         timings.vector_search_us = vector_search_us;
+        let vector_coverage = vector_source.coverage;
+        let scored_candidates = vector_source.results;
 
         let (fts_results, fts_search_us) = self.run_fts_search(
             &query,
@@ -889,6 +921,7 @@ impl QueryEngine {
         let mut entity_only_ids: Vec<(MemoryId, f32)> = Vec::new();
         let mut entity_hit_ids = HashSet::new();
         let mut entity_offered = None;
+        let mut entity_coverage = None;
 
         // Union vector and FTS results into the candidate pool.
         let mut all_candidate_ids: Vec<MemoryId> = vector_ids.clone();
@@ -908,7 +941,7 @@ impl QueryEngine {
             } else {
                 entity_recall_cap
             };
-            let entity_results = self.entity_index.find_by_entities(
+            let entity_source = self.entity_index.find_by_entities_measured(
                 ns_config.id,
                 &query_entities,
                 MemoryId::nil(),
@@ -916,9 +949,11 @@ impl QueryEngine {
                 &eligible_ids,
             )?;
 
+            entity_coverage = entity_source.coverage;
+            let entity_results = entity_source.results;
             if diagnostics.channels.is_some() {
                 // Retain admitted channel overlap before union/deduplication.
-                // Unmeasured scan counts/exhaustion remain unknown.
+                // Source measurements stay distinct from admitted overlap.
                 entity_hit_ids.extend(entity_results.iter().map(|r| r.memory_id));
                 entity_offered = Some(entity_hit_ids.len());
             }
@@ -1002,6 +1037,8 @@ impl QueryEngine {
                 entity_offered,
                 (query.query_mode == QueryMode::MetadataOnly).then_some(eligible_records.len()),
             );
+            diagnostics.observe_source(RetrievalChannel::Vector, vector_coverage);
+            diagnostics.observe_source(RetrievalChannel::Entity, entity_coverage);
         }
         timings.load_metadata_us = stage_start.elapsed().as_micros() as u64;
 
@@ -1153,13 +1190,16 @@ impl QueryEngine {
         namespace_id: NamespaceId,
         fetch_k: usize,
         eligible_ids: &HashSet<MemoryId>,
-    ) -> Result<(Vec<ScoredResult>, u64)> {
+    ) -> Result<(SourceResults<ScoredResult>, u64)> {
         let stage_start = Instant::now();
         let scored = if let Some(emb) = query_embedding {
             self.vector_indexes
-                .search(namespace_id, emb, fetch_k, Some(eligible_ids))?
+                .search_measured(namespace_id, emb, fetch_k, Some(eligible_ids))?
         } else {
-            Vec::new()
+            SourceResults {
+                results: Vec::new(),
+                coverage: None,
+            }
         };
         Ok((scored, stage_start.elapsed().as_micros() as u64))
     }
