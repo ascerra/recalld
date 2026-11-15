@@ -23,6 +23,7 @@ async fn actual(batch: bool) {
         let mut s = open(&d, clock.clone());
         let mut peer = input(&d);
         peer.memory.parent_id = None;
+        peer.memory.created_at = Some(86_400_000);
         peer.entities = vec!["shared".into()];
         let intent = s.capture_insert(scope(&d), &peer).unwrap();
         let peer_id = inserted(
@@ -41,12 +42,13 @@ async fn actual(batch: bool) {
         let a = adapter(&f, p.clone(), clock.clone(), config);
         let mut input = single_input(&d, true);
         input.insert.memory.parent_id = None;
+        input.insert.memory.created_at = Some(86_400_000);
         input.insert.entities = vec!["shared".into()];
         input.check_duplicates = mode == "advisory";
         let key = single_context(&f, &d, mode);
         let mut request = request(&f, mode);
         request.items[0] = json!({"summary":"native demand", "entities":["shared"],
-            "createdAt":3000,"checkDuplicates":mode == "advisory"});
+            "checkDuplicates":mode == "advisory"});
         take_reads();
         let receipt = if batch {
             let out = a.run_batch(request.clone()).await.unwrap();
@@ -268,6 +270,7 @@ async fn selection_demand_actual_consumers_keep_semantic_and_advisory_corruption
             .with_clock(clock.clone());
             let mut input = single_input(&d, true);
             input.insert.memory.parent_id = None;
+            input.insert.memory.created_at = Some(86_400_000);
             input.check_duplicates = advisory;
             let before = f.storage.read().unwrap().control_state().unwrap();
             let calls = clock.0.load(Ordering::SeqCst);
@@ -278,10 +281,35 @@ async fn selection_demand_actual_consumers_keep_semantic_and_advisory_corruption
                 let out = a.run_batch(r).await.unwrap();
                 assert!(!out.all_ready(), "{out:?}");
                 assert!(out.items[0].receipt.is_none(), "{out:?}");
-                assert!(
-                    format!("{out:?}").contains("native candidate vector hash mismatch"),
-                    "{out:?}"
+                assert_eq!(out.items[0].status, BatchStatus::Unknown);
+                assert_eq!(
+                    out.items[0].error.as_ref().unwrap().code,
+                    "RECONCILIATION_REQUIRED"
                 );
+                let engine = f.storage.read().unwrap();
+                let progress = engine
+                    .meta_store()
+                    .lookup_batch(out.store_id, out.batch_operation_id)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    out.reservation_receipt,
+                    Some(progress.reservation_receipt.clone())
+                );
+                assert_eq!(
+                    out.items[0].operation_id,
+                    Some(progress.items[0].operation_id)
+                );
+                assert_ne!(out.batch_operation_id, progress.items[0].operation_id);
+                assert!(matches!(
+                    progress.items[0].state,
+                    crate::storage::batch::BatchItemState::NotAttempted {}
+                ));
+                assert_eq!(
+                    engine.control_state().unwrap().committed_generation,
+                    before.committed_generation.next().unwrap()
+                );
+                assert!(out.bookkeeping_receipts.is_empty());
             } else {
                 let err = a
                     .store_native_single(
