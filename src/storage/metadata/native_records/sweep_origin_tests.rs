@@ -301,3 +301,111 @@ async fn manual_origin_legacy_harddelete_unknown_origin_rejects_before_missing_l
     }
     assert!(f.record(id).is_some());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_sweep_compaction_manual_and_autonomous_preserve_internal_origin_and_readiness() {
+    for autonomous in [false, true] {
+        let (f, d, id, c) = setup();
+        completion(&f).rebuild_all().await.unwrap();
+        c.set(10_000 * DAY);
+        let sweep = runner(&f, c.clone(), false);
+        let handle = autonomous.then(|| sweep.start());
+        let manual = adapter(&f, c.clone());
+        for (phase, compact) in [
+            (Some(DecayPhase::Summary), true),
+            (Some(DecayPhase::Ghost), false),
+            (None, true),
+        ] {
+            let before = target(&f);
+            let calls = c.calls.load(Ordering::SeqCst);
+            let selected = f
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .text_selection()
+                .unwrap()
+                .unwrap();
+            if autonomous {
+                sweep.trigger();
+                let report = completion(&f)
+                    .readiness_barrier(before, Instant::now() + Duration::from_secs(10))
+                    .await
+                    .unwrap();
+                assert!(report.ready);
+            } else {
+                let result = manual.trigger_sweep(None).await.unwrap();
+                assert!(result.errors.is_empty());
+                assert_eq!(result.compaction_triggered, compact);
+                assert_eq!(result.compaction_receipt.is_some(), compact);
+                assert!(!result.compaction_cleanup_pending);
+                if let Some(receipt) = result.compaction_receipt {
+                    assert_eq!(receipt.committed_generation, target(&f).generation);
+                    assert!(matches!(
+                        receipt.outcome,
+                        MutationOutcome::NativeTextGenerationSelected { .. }
+                    ));
+                }
+            }
+            assert_eq!(c.calls.load(Ordering::SeqCst), calls + 1);
+            assert_eq!(
+                f.storage
+                    .read()
+                    .unwrap()
+                    .get_record(id)
+                    .unwrap()
+                    .map(|r| r.phase),
+                phase
+            );
+            last_native_hash(&f, id, d.ns, if autonomous { 2 } else { 1 });
+            ready(&f).await;
+            let engine = f.storage.read().unwrap();
+            let after = engine.meta_store().text_selection().unwrap().unwrap();
+            assert_eq!(after != selected, compact);
+            let read = engine.meta_store().db.begin_read().unwrap();
+            let records = read.open_table(control::RECEIPTS).unwrap();
+            let relocations: Vec<_> = records
+                .iter()
+                .unwrap()
+                .map(|r| control::validate_receipt(r.unwrap().1.value()).unwrap())
+                .filter(|r| {
+                    r.receipt.committed_generation > before.generation
+                        && matches!(
+                            r.receipt.outcome,
+                            MutationOutcome::NativeTextGenerationSelected { .. }
+                        )
+                })
+                .collect();
+            assert_eq!(relocations.len(), usize::from(compact));
+            if let Some(stored) = relocations.first() {
+                let MutationOutcome::NativeTextGenerationSelected {
+                    transition: relocation,
+                } = &stored.receipt.outcome
+                else {
+                    unreachable!()
+                };
+                let mut ctx = crate::storage::native_text::request_context(relocation.source);
+                assert_eq!(
+                    stored.request_hash,
+                    control::request_hash(&ctx, "compactText", &[])
+                );
+                ctx.contract_version = 2;
+                assert_ne!(
+                    stored.request_hash,
+                    control::request_hash(&ctx, "compactText", &[])
+                );
+                assert_eq!(
+                    relocation.source.generation.next().unwrap(),
+                    stored.receipt.committed_generation
+                );
+            }
+        }
+        if let Some(handle) = handle {
+            sweep.shutdown();
+            handle.await.unwrap();
+        }
+        drop((manual, sweep));
+        let _root = f.close();
+        inspect_schema(&d.path).unwrap();
+    }
+}

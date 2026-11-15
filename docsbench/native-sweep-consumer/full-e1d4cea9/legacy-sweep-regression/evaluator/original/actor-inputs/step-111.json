@@ -1,0 +1,17 @@
+{
+  "currentAction": {
+    "arguments": {
+      "compact": false,
+      "depth": 0,
+      "limit": 1,
+      "namespace": "default",
+      "query": "chronological-sweep FUTURE_SWEEP_QUERY",
+      "recordAccess": false
+    },
+    "tag": "query:deleted",
+    "tool": "recall_memories"
+  },
+  "deliveryOrdinal": 111,
+  "phase": "action",
+  "startId": 107
+}

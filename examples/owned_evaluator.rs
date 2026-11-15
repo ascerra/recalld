@@ -12,6 +12,8 @@ struct Args {
     config: PathBuf,
     #[arg(long, conflicts_with = "restore_checkpoint")]
     native_prefix: bool,
+    #[arg(long, requires = "native_prefix")]
+    native_sweep: bool,
     #[arg(long)]
     data_root: PathBuf,
     #[arg(long)]
@@ -97,6 +99,8 @@ async fn run(args: Args, input: std::fs::File, output: std::fs::File) -> anyhow:
             args.checkpoint_sha256.as_deref().unwrap(),
         )
         .await?
+    } else if args.native_sweep {
+        recalld::bench::frozen::OwnedEvaluator::from_native_sweep_prefix(config).await?
     } else if args.native_prefix {
         recalld::bench::frozen::OwnedEvaluator::from_native_prefix(config).await?
     } else {

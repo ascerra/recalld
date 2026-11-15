@@ -98,7 +98,7 @@ def checked_snapshot(h, value, parent, track=CHECKPOINT_TRACK):
 
 class Child:
     """Owns the actual child and its actor subprocesses. No clone implementation."""
-    def __init__(self, h, args, root, config, output, checkpoint=None, prior=None, negative=False, native_prefix=False):
+    def __init__(self, h, args, root, config, output, checkpoint=None, prior=None, negative=False, native_prefix=False, native_sweep=False):
         if checkpoint is not None and prior is None and not negative:
             raise RuntimeError("restore requires a terminated and joined prior owner")
         if prior is not None and (not prior.joined or prior.process.poll() is None):
@@ -112,6 +112,8 @@ class Child:
         command = [str(args.binary), "--config", str(config), "--data-root", str(root), "--control-read-fd", str(rr), "--control-write-fd", str(sw)]
         if native_prefix:
             command += ["--native-prefix"]
+        if native_sweep:
+            command += ["--native-sweep"]
         if checkpoint:
             command += ["--restore-checkpoint", checkpoint["manifest"], "--checkpoint-sha256", checkpoint["sha256"]]
         self.process = subprocess.Popen(command, cwd=root.parent, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, bufsize=0,

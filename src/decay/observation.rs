@@ -45,8 +45,11 @@ impl<T> Observed<T> {
         E: From<ObservationError> + std::fmt::Debug,
     {
         crate::performance::receipts(&self.receipts);
-        tracing::trace!(target: "recalld::performance", kind = "final_admission",
-            accepted = admission.is_ok(), receipt_count = self.receipts.len());
+        crate::performance::event!(
+            kind = "final_admission",
+            accepted = admission.is_ok(),
+            receipt_count = self.receipts.len()
+        );
         match admission {
             Ok(()) => Ok(self.value),
             Err(error) if self.receipts.is_empty() => Err(error),
@@ -171,53 +174,60 @@ pub(crate) async fn record_exposures_scoped_with_work(
         .map_err(|e| ObservationError::failed(e, vec![]))?;
     let worker_storage = storage.clone();
     let worker = crate::performance::Worker::new("exposure.worker_queue");
-    let result = tokio::task::spawn_blocking(move || worker.run(|| {
-        let wait = crate::performance::Timer::new("storage.write.wait");
-        let storage = worker_storage
-            .write()
-            .map_err(|e| ObservationError::failed(e, vec![]))?;
-        wait.complete();
-        let storage = crate::performance::Hold::new("storage.write.hold", storage);
-        let result = (|| {
-            let transaction = crate::performance::Timer::new("exposure.canonical_commit");
-            let result = record_locked_scoped_with_work(
-                &storage,
-                &accesses,
-                sampled_at,
-                scope.as_ref(),
-                Some(&child),
-            );
-            transaction.outcome(result.is_ok());
-            let receipts = match &result {
-                Ok(r) => r,
-                Err(e) => &e.receipts,
-            };
-            crate::performance::receipts(receipts);
-            let publication = crate::performance::Timer::new("exposure.cache_publication");
-            let ids: Vec<_> = accesses.iter().map(|(id, _)| *id).collect();
-            // Publish even preceding successful batches when a later batch fails.
-            if let Err(mut publication) = publish(&storage, receipts, || {
-                tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&ids));
-            }) {
-                if let Err(prior) = &result
-                    && prior.commit_state == "unknown"
-                {
-                    publication.commit_state = "unknown";
-                    publication.unknown_operation_id = prior.unknown_operation_id;
+    let result = tokio::task::spawn_blocking(move || {
+        worker.run(|| {
+            let wait = crate::performance::Timer::new("storage.write.wait");
+            let storage = worker_storage
+                .write()
+                .map_err(|e| ObservationError::failed(e, vec![]))?;
+            wait.complete();
+            let storage = crate::performance::Hold::new("storage.write.hold", storage);
+            let result = (|| {
+                let transaction = crate::performance::Timer::new("exposure.canonical_commit");
+                let result = record_locked_scoped_with_work(
+                    &storage,
+                    &accesses,
+                    sampled_at,
+                    scope.as_ref(),
+                    Some(&child),
+                );
+                transaction.outcome(result.is_ok());
+                let receipts = match &result {
+                    Ok(r) => r,
+                    Err(e) => &e.receipts,
+                };
+                crate::performance::receipts(receipts);
+                let ids: Vec<_> = accesses.iter().map(|(id, _)| *id).collect();
+                let publication = crate::performance::Timer::new("exposure.cache_publication");
+                // Publish even preceding successful batches when a later batch fails.
+                if let Err(mut publication) = publish(&storage, receipts, || {
+                    tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&ids));
+                }) {
+                    if let Err(prior) = &result
+                        && prior.commit_state == "unknown"
+                    {
+                        publication.commit_state = "unknown";
+                        publication.unknown_operation_id = prior.unknown_operation_id;
+                    }
+                    return Err(publication);
                 }
-                return Err(publication);
-            }
-            publication.complete();
-            tracing::trace!(target: "recalld::performance", kind = "exposure", requested = accesses.len(), receipt_count = receipts.len(), success = result.is_ok());
-            #[cfg(test)]
-            if result.as_ref().is_ok_and(|r| !r.is_empty()) {
-                storage.meta_store().after_observation_probe();
-            }
+                publication.complete();
+                crate::performance::event!(
+                    kind = "exposure",
+                    requested = accesses.len(),
+                    receipt_count = receipts.len(),
+                    success = result.is_ok()
+                );
+                #[cfg(test)]
+                if result.as_ref().is_ok_and(|r| !r.is_empty()) {
+                    storage.meta_store().after_observation_probe();
+                }
+                result
+            })();
+            storage.meta_store().finish_work(child);
             result
-        })();
-        storage.meta_store().finish_work(child);
-        result
-    }))
+        })
+    })
     .await
     .map_err(ObservationError::worker_failed)?;
     crate::storage::work::finish_work(&storage, work);

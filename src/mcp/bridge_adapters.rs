@@ -245,6 +245,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?
             {
+                let hydration = crate::performance::Timer::new("mcp.hydration");
                 let payload = prepared.payload.ok_or_else(|| {
                     bridge::BridgeError::Internal("coherent payload missing".into())
                 })?;
@@ -334,6 +335,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         connected_to: neighbor.connected_to.to_string(),
                     });
                 }
+                hydration.complete();
                 check_read_admission(&self.storage, stamp).await?;
                 let receipts = if query.record_access {
                     self.query_engine
@@ -364,6 +366,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?;
 
+            let hydration = crate::performance::Timer::new("mcp.hydration");
             let mut exposures: Vec<_> = response
                 .results
                 .iter()
@@ -595,6 +598,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 })??
             };
 
+            hydration.complete();
             let receipts = if query.record_access {
                 for neighbor in &neighbors {
                     let id = neighbor
@@ -949,11 +953,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             })
         }
         .await;
-        if effects_stamp(&self.storage).await? != stamp {
-            return Err(bridge::BridgeError::Storage(
-                "unavailable: effects changed during read".into(),
-            ));
-        }
+        check_read_admission(&self.storage, stamp).await?;
         result
     }
 }
@@ -4103,17 +4103,41 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn entity_postings_preserve_legacy_validation_and_survive_disabled_autolink() {
+    async fn legacy_entity_admission_and_disabled_autolink_postings_remain_scoped() {
         let fx = Fixture::new();
         let foreign = fx.create_namespace("foreign");
         let mut adapter = fx.storage_adapter();
         Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
-        let before = fx.storage.read().unwrap().control_state().unwrap();
-        let mut invalid = store_input("unrepresentable legacy names", "default", unit_x());
-        invalid.entities = vec!["John Smith".into(), "José".into(), "Alice's".into()];
-        assert!(adapter.store_memory(invalid).await.is_err());
-        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
-        let names = vec!["John_Smith".into(), "Jose".into(), "Alice".into()];
+        // PR68 rejects labels the legacy carrier cannot retain. Keep that
+        // actual writer contract; UTF-8 native persistence is a later consumer.
+        let before = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .control_state()
+            .unwrap();
+        for name in ["John Smith", "José", "Alice's"] {
+            let mut input = store_input("rejected legacy name", "default", unit_x());
+            input.entities = vec![name.into()];
+            let error = adapter.store_memory(input).await.unwrap_err();
+            assert!(
+                matches!(error, bridge::BridgeError::InvalidInput(ref message)
+                if message.contains("cannot be represented by legacy storage"))
+            );
+        }
+        assert_eq!(
+            before,
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .control_state()
+                .unwrap()
+        );
+        assert!(fx.storage.read().unwrap().scan_all().unwrap().is_empty());
+        assert!(fx.entity_index.read().await.is_empty());
+        let names = vec!["John-Smith".into(), "JOSE".into(), "Alice".into()];
         let mut ids = Vec::new();
         for namespace in ["default", "foreign"] {
             let mut input = store_input("accepted names", namespace, unit_x());
@@ -4135,6 +4159,12 @@ mod tests {
                 vec![(ids[1], 3)]
             );
         }
+        // A stale derived-only alias must also disappear on deletion; do not
+        // pretend the legacy writer admitted or persisted this spelling.
+        fx.entity_index
+            .write()
+            .await
+            .add(default_ns(), ids[0], &["José".into()]);
         assert!(adapter.delete_memory(ids[0], None).await.unwrap());
         let index = fx.entity_index.read().await;
         assert_eq!(index.len(), 1);

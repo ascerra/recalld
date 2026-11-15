@@ -1,0 +1,14 @@
+{
+  "currentAction": {
+    "arguments": {
+      "namespace": "default",
+      "query": "beta",
+      "recordAccess": true
+    },
+    "tag": "true-search-access",
+    "tool": "recall_memories"
+  },
+  "deliveryOrdinal": 110,
+  "phase": "action",
+  "startId": 110
+}
