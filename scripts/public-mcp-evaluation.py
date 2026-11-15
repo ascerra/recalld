@@ -278,7 +278,7 @@ def validate_build(m, binary, scorer, source_root):
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
     versions, capabilities = track_profile(m["track"])
-    if m["track"] not in (TRACK, GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
+    if m["track"] not in (TRACK, GROUPED["TRACK"], PAIRED["TRACK"], PAIRED["ARM_TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
