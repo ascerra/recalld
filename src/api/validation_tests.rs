@@ -15,6 +15,13 @@ use crate::storage::StorageEngine as _;
 use crate::test_support::Fixture;
 
 fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
+    let (state, bridge) = fixture_state(f);
+    (
+        crate::api::routes::router(state, &Default::default()),
+        bridge,
+    )
+}
+fn fixture_state(f: &Fixture) -> (AppState, crate::mcp::bridge::McpBridge) {
     use crate::search::adapters::*;
     let embedding = Arc::new(crate::embedding::PassthroughProvider::new(
         crate::test_support::DIM,
@@ -81,10 +88,7 @@ fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
         Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
         Arc::new(NoopMetricsCollector),
     );
-    (
-        crate::api::routes::router(state, &Default::default()),
-        bridge,
-    )
+    (state, bridge)
 }
 
 async fn post(app: &Router, path: &str, body: Value) -> (StatusCode, Value) {
@@ -660,3 +664,6 @@ async fn scope_assertions_similarity_uses_canonical_source_scope_with_stale_cach
         assert_eq!(data["memories"][0]["id"], ids[1].to_string());
     }
 }
+
+#[path = "sweep_clock_tests.rs"]
+mod sweep_clock;
