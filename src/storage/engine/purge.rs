@@ -10,8 +10,16 @@ impl RedbStorageEngine {
         ctx: &MutationContext,
         force: bool,
     ) -> Result<PurgeProgress, StorageError> {
+        self.begin_namespace_purge_with_work(ctx, force, None)
+    }
+    pub(crate) fn begin_namespace_purge_with_work(
+        &mut self,
+        ctx: &MutationContext,
+        force: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<PurgeProgress, StorageError> {
         self.meta_store.ensure_handle_available()?;
-        self.meta_store.begin_purge(ctx, force)
+        self.meta_store.begin_purge_with_work(ctx, force, parent)
     }
 
     pub fn lookup_namespace_purge(
@@ -57,6 +65,18 @@ impl RedbStorageEngine {
                     p,
                     limit,
                     &self.edge_store.load_all_edges()?,
+                    |record| {
+                        if record.text_length == 0 {
+                            return Ok(None);
+                        }
+                        let text = self.text_store.read(TextRef {
+                            file_offset: record.text_offset,
+                            length: record.text_length,
+                        })?;
+                        Ok(Some(crate::storage::native_records::hash_bytes(
+                            text.as_bytes(),
+                        )))
+                    },
                 )?;
                 if let Some(result) = &result {
                     effects::apply_pending(

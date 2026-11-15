@@ -1,0 +1,615 @@
+{
+  "binarySha256": "7494ae0802f74de85eba5dd1df5bfce4daacc6ede4bc735ec5f4397f66045f81",
+  "episodes": [
+    {
+      "claim": "actual one-phase sweep/control diagnostic; no native/whole-state reset/rank or full-A6 claim",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/sweep/chronological-1/config.toml",
+        "--data-root",
+        "/work/output/sweep/chronological-1/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "falseFetchesUnchanged": 3,
+      "fixture": "legacy-chronological-sweep-v1",
+      "invalidRequestsWithoutMutation": 7,
+      "passed": true,
+      "replay": 1,
+      "reports": [
+        {
+          "controlRequestId": 13,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "5",
+            "derived": [
+              {
+                "appliedGeneration": "5",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": true,
+            "decayDisabledSkipped": 0,
+            "deletions": 0,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 1,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 0,
+            "transitions": [
+              {
+                "fromPhase": "full",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "summary"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        },
+        {
+          "controlRequestId": 17,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "6",
+            "derived": [
+              {
+                "appliedGeneration": "6",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": false,
+            "decayDisabledSkipped": 0,
+            "deletions": 0,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 0,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 1,
+            "transitions": [
+              {
+                "fromPhase": "summary",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "ghost"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        },
+        {
+          "controlRequestId": 21,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "8",
+            "derived": [
+              {
+                "appliedGeneration": "8",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": true,
+            "decayDisabledSkipped": 0,
+            "deletions": 1,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 0,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 0,
+            "transitions": [
+              {
+                "fromPhase": "ghost",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "deleted"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        }
+      ],
+      "sampledAtMillis": 4920825600000,
+      "storedId": "019b76da-a800-7428-b25c-9e93e54df962"
+    },
+    {
+      "claim": "actual one-phase sweep/control diagnostic; no native/whole-state reset/rank or full-A6 claim",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/sweep/chronological-2/config.toml",
+        "--data-root",
+        "/work/output/sweep/chronological-2/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "falseFetchesUnchanged": 3,
+      "fixture": "legacy-chronological-sweep-v1",
+      "invalidRequestsWithoutMutation": 7,
+      "passed": true,
+      "replay": 2,
+      "reports": [
+        {
+          "controlRequestId": 13,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "5",
+            "derived": [
+              {
+                "appliedGeneration": "5",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": true,
+            "decayDisabledSkipped": 0,
+            "deletions": 0,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 1,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 0,
+            "transitions": [
+              {
+                "fromPhase": "full",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "summary"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        },
+        {
+          "controlRequestId": 17,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "6",
+            "derived": [
+              {
+                "appliedGeneration": "6",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": false,
+            "decayDisabledSkipped": 0,
+            "deletions": 0,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 0,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 1,
+            "transitions": [
+              {
+                "fromPhase": "summary",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "ghost"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        },
+        {
+          "controlRequestId": 21,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "8",
+            "derived": [
+              {
+                "appliedGeneration": "8",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": true,
+            "decayDisabledSkipped": 0,
+            "deletions": 1,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 0,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 0,
+            "transitions": [
+              {
+                "fromPhase": "ghost",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "deleted"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        }
+      ],
+      "sampledAtMillis": 4920825600000,
+      "storedId": "019b76da-a800-7428-b25c-9e93e54df962"
+    },
+    {
+      "claim": "actual one-phase sweep/control diagnostic; no native/whole-state reset/rank or full-A6 claim",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/sweep/chronological-3/config.toml",
+        "--data-root",
+        "/work/output/sweep/chronological-3/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "falseFetchesUnchanged": 3,
+      "fixture": "legacy-chronological-sweep-v1",
+      "invalidRequestsWithoutMutation": 7,
+      "passed": true,
+      "replay": 3,
+      "reports": [
+        {
+          "controlRequestId": 13,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "5",
+            "derived": [
+              {
+                "appliedGeneration": "5",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "5",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": true,
+            "decayDisabledSkipped": 0,
+            "deletions": 0,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 1,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 0,
+            "transitions": [
+              {
+                "fromPhase": "full",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "summary"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        },
+        {
+          "controlRequestId": 17,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "6",
+            "derived": [
+              {
+                "appliedGeneration": "6",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "6",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": false,
+            "decayDisabledSkipped": 0,
+            "deletions": 0,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 0,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 1,
+            "transitions": [
+              {
+                "fromPhase": "summary",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "ghost"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        },
+        {
+          "controlRequestId": 21,
+          "executionCompleted": true,
+          "phase": "completed",
+          "readiness": {
+            "committedGeneration": "8",
+            "derived": [
+              {
+                "appliedGeneration": "8",
+                "name": "graph",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "vectors",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "fts",
+                "ready": true
+              },
+              {
+                "appliedGeneration": "8",
+                "name": "entities",
+                "ready": true
+              }
+            ],
+            "pendingWork": 0,
+            "ready": true,
+            "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+          },
+          "result": {
+            "compactionTriggered": true,
+            "decayDisabledSkipped": 0,
+            "deletions": 1,
+            "errors": [],
+            "exemptSkipped": 0,
+            "fullToSummary": 0,
+            "knownCommitError": null,
+            "knownCommittedReceipt": null,
+            "memoriesScanned": 1,
+            "permastoreSkipped": 0,
+            "publicationError": null,
+            "savedByConnectionBonus": 0,
+            "staleSkipped": 0,
+            "summaryToGhost": 0,
+            "transitions": [
+              {
+                "fromPhase": "ghost",
+                "id": "019b76da-a800-7428-b25c-9e93e54df962",
+                "retrievability": 0.020824532955884933,
+                "toPhase": "deleted"
+              }
+            ],
+            "uncertainOperation": null,
+            "unchangedSkipped": 0
+          },
+          "sampledAtMillis": 4920825600000
+        }
+      ],
+      "sampledAtMillis": 4920825600000,
+      "storedId": "019b76da-a800-7428-b25c-9e93e54df962"
+    }
+  ],
+  "providerCalls": 3
+}

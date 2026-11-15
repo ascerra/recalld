@@ -74,6 +74,29 @@ pub async fn generate(
     let profile = provider.profile();
     check_namespace(namespace, profile.as_ref())
         .map_err(|e| EmbeddingError::Unavailable(e.to_string()))?;
+    generate_checked(provider, namespace, text, profile).await
+}
+
+/// Private participating native writers already hold owned native admission.
+/// This checks provenance without opening the ordinary schema-v2 serving gate.
+pub(crate) async fn generate_native(
+    provider: &dyn EmbeddingProvider,
+    namespace: &NamespaceConfig,
+    text: &str,
+) -> Result<GeneratedEmbedding, EmbeddingError> {
+    let profile = provider
+        .profile()
+        .ok_or_else(|| EmbeddingError::Unavailable("provider identity missing".into()))?;
+    super::profile::require_compatible(namespace, &profile)
+        .map_err(|e| EmbeddingError::Unavailable(e.to_string()))?;
+    generate_checked(provider, namespace, text, Some(profile)).await
+}
+async fn generate_checked(
+    provider: &dyn EmbeddingProvider,
+    namespace: &NamespaceConfig,
+    text: &str,
+    profile: Option<EmbeddingProfile>,
+) -> Result<GeneratedEmbedding, EmbeddingError> {
     if provider.dimensions() != namespace.embedding_dim as usize {
         return Err(EmbeddingError::Unavailable(
             "provider dimension differs from namespace".into(),

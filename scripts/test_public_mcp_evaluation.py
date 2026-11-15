@@ -109,6 +109,141 @@ class Preflight(unittest.TestCase):
             self.assertEqual(run.stdout, "")
             self.assertIn("unexpected actor projection fields", run.stderr)
 
+    def test_conformance_track_is_distinct_and_schedule_is_evaluator_only(self):
+        actor, labels, cache, schedule = m["fixtures"](m["CONFORMANCE"]["TRACK"])
+        self.manifest["track"] = m["CONFORMANCE"]["TRACK"]
+        for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels),
+                                  ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
+            m["save"](self.root / name, value)
+            self.manifest[key]["sha256"] = m["digest"]((self.root / name).read_bytes())
+        self.manifest["dataset"]["actorArtifactSha256"] = self.manifest["actorInputs"]["sha256"]
+        self.validate()
+        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](actor).decode())
+        self.assertEqual(sum(s.get("restart", False) for s in schedule["steps"]), 1)
+        self.assertEqual(sum(s.get("expectedError", False) for s in schedule["steps"]), 11)
+        self.manifest["track"] = m["TRACK"]
+        with self.assertRaises(ValueError): self.validate()
+
+    def test_current_action_projection_resolves_only_acknowledged_ids(self):
+        _, labels, _, schedule = m["fixtures"](m["CONFORMANCE"]["TRACK"])
+        step = next(s for s in schedule["steps"] if s.get("tag") == "store:turn-3")
+        with self.assertRaises(KeyError): m["CONFORMANCE"]["projection"](step, {}, 10, 2)
+        delivered = m["CONFORMANCE"]["projection"](step, {"turn-0": "acknowledged-public-uuid"}, 10, 2)
+        self.assertEqual(delivered["currentAction"]["arguments"]["supersedes"], "acknowledged-public-uuid")
+        self.assertEqual(set(delivered["currentAction"]), {"tag", "tool", "arguments"})
+        self.assertNotIn(labels["labelCanary"], m["encoded"](delivered).decode())
+        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](delivered).decode())
+
+    def test_current_action_rejects_nested_evaluator_data_before_mcp_io(self):
+        import subprocess, sys
+        for field in ("futureQueries", "evaluatorLabels", "expectedError"):
+            projection = dict(phase="action", startId=0, deliveryOrdinal=1,
+                              currentAction=dict(tag="current", tool="get_memory", arguments=dict(id="public-id", recordAccess=False)))
+            projection["currentAction"][field] = "MUST_NOT_REACH_ACTOR"
+            run = subprocess.run([sys.executable, str(Path(__file__).with_name("public-mcp-actor.py")),
+                "--read-fd", "0", "--write-fd", "1", "--deny-fd", "9"], input=json.dumps(projection), capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertEqual(run.stdout, "")
+            self.assertIn("unexpected current action fields", run.stderr)
+
+
+    def install_owned(self):
+        self.manifest["track"] = m["OWNED"]["TRACK"]
+        self.manifest["versions"], self.manifest["capabilities"] = m["track_profile"](self.manifest["track"])
+        self.manifest["executables"]["ownedEvaluator"] = self.manifest["executables"].pop("recalld")
+        actor, labels, cache, schedule = m["fixtures"](self.manifest["track"])
+        for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels),
+                                  ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
+            m["save"](self.root / name, value)
+            self.manifest[key]["sha256"] = m["digest"]((self.root / name).read_bytes())
+        self.manifest["dataset"]["actorArtifactSha256"] = self.manifest["actorInputs"]["sha256"]
+        return actor, schedule
+
+    def test_owned_version_is_distinct_and_unsupported_guarantees_reject(self):
+        actor, schedule = self.install_owned()
+        self.validate()
+        self.assertNotIn("steps", actor)
+        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](actor).decode())
+        for change in (lambda v: v["versions"].update(privateControlVersion=2),
+                       lambda v: v["versions"].update(canonicalSchemaVersion=0),
+                       lambda v: v["versions"].update(canonicalSchemaVersion=2),
+                       lambda v: v["versions"].update(privateControlVersion=True),
+                       lambda v: v["capabilities"].update(reset=True),
+                       lambda v: v["capabilities"].update(clock="frozen"),
+                       lambda v: v["capabilities"].update(coherentReadView=True),
+                       lambda v: v["capabilities"].update(deterministicIds=True),
+                       lambda v: v["capabilities"].update(deterministicRng=True),
+                       lambda v: v["capabilities"].update(fullA6=True)):
+            value = copy.deepcopy(self.manifest); change(value)
+            with self.assertRaises(ValueError): self.validate(value)
+
+    def test_owned_barrier_rejects_missing_stale_duplicate_and_foreign_views(self):
+        owned = m["OWNED"]
+        at = dict(storeId="11111111-1111-4111-8111-111111111111", generation="9")
+        report = dict(storeId=at["storeId"], committedGeneration="9", ready=True, pendingWork=0,
+            derived=[dict(name=name, appliedGeneration="9", ready=True) for name in ("graph", "vectors", "fts", "entities")])
+        self.assertEqual(owned["checked_barrier"](report, at), report)
+        for change in (lambda v: v.update(ready=1), lambda v: v.update(pendingWork=False), lambda v: v.update(pendingWork=1),
+                       lambda v: v.update(storeId="other"), lambda v: v.update(committedGeneration="8"),
+                       lambda v: v["derived"].pop(), lambda v: v["derived"][0].update(name="vectors"),
+                       lambda v: v["derived"][0].update(appliedGeneration="8"), lambda v: v["derived"][0].update(ready=False)):
+            value = copy.deepcopy(report); change(value)
+            with self.assertRaises(ValueError): owned["checked_barrier"](value, at)
+        for bad in (0, True, "01", "-1", str(2**64)):
+            with self.assertRaises(ValueError): owned["generation"](bad)
+
+    def test_owned_control_rejects_wrong_ack_and_eof(self):
+        import os
+        for response in (dict(id=2, result={}), dict(id=True, result={}), dict(id=1, result={}, error={}), None):
+            request_read, request_write = os.pipe(); response_read, response_write = os.pipe()
+            try:
+                if response is not None: os.write(response_write, json.dumps(response).encode() + b"\n")
+                os.close(response_write)
+                client = m["OWNED"]["Control"](response_read, request_write, self.root / "control.jsonl")
+                with self.assertRaises((ValueError, RuntimeError)): client.call("inspect", {})
+            finally:
+                for fd in (request_read, request_write, response_read): os.close(fd)
+
+    def test_reset_profile_separates_constructor_from_broad_control_claims(self):
+        self.install_owned()
+        self.manifest["track"] = m["RESET"]["TRACK"]
+        self.manifest["versions"], self.manifest["capabilities"] = m["track_profile"](self.manifest["track"])
+        actor, labels, cache, schedule = m["fixtures"](self.manifest["track"])
+        for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels),
+                                  ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
+            m["save"](self.root / name, value)
+            self.manifest[key]["sha256"] = m["digest"]((self.root / name).read_bytes())
+        self.manifest["dataset"]["actorArtifactSha256"] = self.manifest["actorInputs"]["sha256"]
+        self.validate()
+        self.assertNotIn("steps",actor)
+        self.assertNotIn(schedule["futureQueryCanary"],m["encoded"](actor).decode())
+        self.assertFalse(self.manifest["capabilities"]["reset"])
+        self.assertFalse(self.manifest["capabilities"]["deterministicIds"])
+        for field in ("reset", "deterministicIds", "deterministicRng", "coherentReadView", "fullA6", "publicV2"):
+            value=copy.deepcopy(self.manifest);value["capabilities"][field]=True
+            with self.assertRaises(ValueError):self.validate(value)
+        value=copy.deepcopy(self.manifest);value["versions"]["checkpointVersion"]=2
+        with self.assertRaises(ValueError):self.validate(value)
+
+    def test_reset_restoration_refuses_unjoined_owner_before_side_effects(self):
+        from types import SimpleNamespace
+        for prior in (None, SimpleNamespace(joined=False,process=SimpleNamespace(poll=lambda:0)),
+                      SimpleNamespace(joined=True,process=SimpleNamespace(poll=lambda:None))):
+            destination=self.root / "must-not-exist"
+            with self.assertRaisesRegex(RuntimeError,"terminated and joined"):
+                m["RESET"]["Child"](m,None,destination,None,destination,{},prior)
+            self.assertFalse(destination.exists())
+
+    def test_reset_inspect_does_not_accept_fake_full_snapshot_or_bad_runtime(self):
+        value=dict(committed=dict(storeId="11111111-1111-4111-8111-111111111111",generation="9"),logicalHash=None,snapshot=False,
+            runtimeState=dict(nowMillis=1000,allocation=dict(version=1,seed=[7]*32,counter=3,lastMemoryMillis=1000)))
+        self.assertEqual(m["RESET"]["checked_state"](m,value),value)
+        for change in (lambda v:v.update(snapshot=True),lambda v:v["runtimeState"].update(nowMillis=True),
+                       lambda v:v["runtimeState"]["allocation"].update(counter=2**64-1),
+                       lambda v:v["runtimeState"]["allocation"].update(lastMemoryMillis=1001),
+                       lambda v:v["runtimeState"]["allocation"].update(seed=[True]*32)):
+            invalid=copy.deepcopy(value);change(invalid)
+            with self.assertRaises(ValueError):m["RESET"]["checked_state"](m,invalid)
 
 if __name__ == "__main__":
     unittest.main()

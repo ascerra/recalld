@@ -16,10 +16,18 @@ use std::sync::{
 #[path = "reader_tests.rs"]
 mod readers;
 
+#[path = "batch_tests.rs"]
+mod batches;
 #[path = "exact_scan_tests.rs"]
 mod exact_scan;
+#[path = "sweep_tests.rs"]
+mod sweep;
+
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
+
+#[path = "recovery_tests.rs"]
+mod recovery;
 
 struct FixedClock(AtomicUsize);
 impl Clock for FixedClock {
@@ -35,9 +43,19 @@ struct Data {
     profile: crate::model::schema::EmbeddingProfile,
 }
 fn fixture(root: &Path) -> Data {
-    fixture_with_ghost(root, false)
+    fixture_with_seed(root, |_| {})
+}
+fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
+    fixture_with_seed_and_ghost(root, seed, false)
 }
 fn fixture_with_ghost(root: &Path, ghost: bool) -> Data {
+    fixture_with_seed_and_ghost(root, |_| {}, ghost)
+}
+fn fixture_with_seed_and_ghost(
+    root: &Path,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+    ghost: bool,
+) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
     let mut config = NamespaceConfig::default_namespace(0);
@@ -59,6 +77,7 @@ fn fixture_with_ghost(root: &Path, ghost: bool) -> Data {
         .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &input, &[], 1000)
         .unwrap();
     let parent = crate::storage::insertion::inserted_id(&receipt).unwrap();
+    seed(&mut engine);
     if ghost {
         // Real legacy phase-loss receipts before explicit migration/attestation.
         // Never author a schema-v2 row or bypass native startup validation.
@@ -764,3 +783,68 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
     assert_eq!(tracker.status().pending, 0);
     assert_eq!(tracker.status().unresolved, 0);
 }
+
+#[test]
+fn owned_ids_actual_native_insert_uses_single_clock_sample_and_replay_allocates_nothing() {
+    use crate::storage::ids::{IdKind, IdSource, SeededIds};
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let engine =
+        RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([7; 32]))).unwrap();
+    let expected = SeededIds::new([7; 32]);
+    let expected_id = expected.memory(86_400_000).unwrap();
+    let expected_operation = expected.uuid(IdKind::Operation).unwrap();
+    let mut session = NativeLifecycleSession {
+        engine,
+        policy: NativePolicyInputs::default(),
+        clock: clock.clone(),
+    };
+    let original = input(&d);
+    let intent = session.capture_insert(scope(&d), &original).unwrap();
+    let key = ctx(&session, &d, "scoped-native");
+    let receipt = session
+        .insert_prepared(&key, &intent, &generated())
+        .unwrap();
+    assert_eq!(inserted(&receipt), expected_id);
+    assert_eq!(receipt.operation_id, expected_operation);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+    let cursor = session.metadata().id_source().checkpoint().unwrap();
+    assert_eq!(cursor, expected.checkpoint().unwrap());
+    let replay = session
+        .insert_prepared(&key, &intent, &generated())
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.operation_id, receipt.operation_id);
+    assert_eq!(inserted(&replay), expected_id);
+    assert_eq!(session.metadata().id_source().checkpoint().unwrap(), cursor);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+}
+#[path = "graph_tests.rs"]
+mod graph;
+#[path = "maintenance_tests.rs"]
+mod maintenance;
+
+#[path = "graph_producer_tests.rs"]
+mod graph_producers;
+
+#[path = "selection_tests.rs"]
+mod selection;
+
+#[path = "store_tests.rs"]
+mod store;
+
+#[path = "store_batch_tests.rs"]
+mod store_batches;
+
+#[path = "store_producer_tests.rs"]
+mod store_producers;
+
+#[path = "mixed_history_tests.rs"]
+mod mixed_history;
+
+#[path = "namespace_binding_tests.rs"]
+mod namespace_binding;
+
+#[path = "compaction_tests.rs"]
+mod compaction;

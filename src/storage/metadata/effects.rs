@@ -14,13 +14,29 @@ thread_local! {
 
 /// Ephemeral inputs only; receipts and effects never retain stripped content.
 pub(super) enum RecordMutation<'a> {
+    NativePhase {
+        before: &'a DiskRecord,
+        after: &'a DiskRecord,
+        transition: crate::storage::native_maintenance::NativePhaseWrite,
+    },
+    NativeHardDelete(crate::storage::native_maintenance::NativeHardDeleteWrite),
+    NativePurgeChunk(
+        &'a crate::storage::purge::PurgeProgress,
+        crate::storage::native_purge::NativePurgeChunk,
+    ),
     GraphOnly,
     LifecyclePatched {
         before: &'a DiskRecord,
         after: &'a DiskRecord,
     },
+    NativeGraphUnchanged(crate::storage::native_graph::NativeGraphNoChange),
+    NativeGraph(crate::storage::native_graph::NativeGraphWrite),
     PurgeChunk(&'a crate::storage::purge::PurgeProgress),
     Inserted(&'a DiskRecord, u32),
+    NativeStored(
+        &'a DiskRecord,
+        crate::storage::native_store::NativeStoreWrite,
+    ),
     NativeInserted(
         &'a DiskRecord,
         crate::storage::native_records::NativeRecordWrite,
@@ -104,8 +120,15 @@ pub(crate) fn validate_existing(
                         | MutationOutcome::MemoryInserted { .. }
                         | MutationOutcome::MemoryTombstoned { .. }
                         | MutationOutcome::LifecycleMaterialized { .. }
+                        | MutationOutcome::NativePhaseMaterialized { .. }
+                        | MutationOutcome::NativeMemoryHardDeleted { .. }
                         | MutationOutcome::NativeMemoryInserted { .. }
                         | MutationOutcome::NativeMemoryTombstoned { .. }
+                        | MutationOutcome::NativeNamespacePurgeStarted { .. }
+                        | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                        | MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+                        | MutationOutcome::NativeGraphChanged { .. }
+                        | MutationOutcome::NativeGraphUnchanged { .. }
                         | MutationOutcome::NamespacePurgeStarted { .. }
                         | MutationOutcome::NamespacePurgeAdvanced { .. }
                 ) {
@@ -164,6 +187,22 @@ pub(crate) fn validate_existing(
             ));
         }
         match &effect.receipt.outcome {
+            MutationOutcome::NativeNamespacePurgeAdvanced { .. } => {
+                crate::storage::native_purge::validate_effect(&effect)?
+            }
+            MutationOutcome::NativePhaseMaterialized { .. }
+            | MutationOutcome::NativeMemoryHardDeleted { .. } => {
+                super::native_maintenance::validate_effect(&effect)?
+            }
+            MutationOutcome::NativeGraphUnchanged { transition } => {
+                validate_native_graph_nochange_effect(&effect, transition)?
+            }
+            MutationOutcome::NativeGraphChanged { transition } => {
+                validate_native_graph_effect(&effect, transition)?
+            }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
+                validate_native_store_effect(&effect, transition)?
+            }
             MutationOutcome::NativeMemoryInserted { .. } => validate_native_effect(&effect, true)?,
             MutationOutcome::NativeMemoryTombstoned { .. } => {
                 validate_native_effect(&effect, false)?
@@ -179,8 +218,14 @@ pub(crate) fn validate_existing(
                     && effect.releases.is_empty()
                     && effect.peer_counts.is_empty()
                     && effect.invalidated_ids == [memory_id] => {}
+            MutationOutcome::NativeNamespacePurgeAdvanced { .. } => {}
+            MutationOutcome::NativePhaseMaterialized { .. }
+            | MutationOutcome::NativeMemoryHardDeleted { .. } => {}
             MutationOutcome::NativeMemoryInserted { .. }
             | MutationOutcome::NativeMemoryTombstoned { .. } => {}
+            MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+            | MutationOutcome::NativeGraphChanged { .. } => {}
+            MutationOutcome::NativeGraphUnchanged { .. } => {}
             MutationOutcome::MemoryTombstoned { memory_id, status }
                 if matches!(effect.scope, MutationScope::Namespace(_))
                     && effect.puts.is_empty()
@@ -322,10 +367,35 @@ impl MetadataStore {
         delete_records: bool,
         release_vectors: bool,
     ) -> Result<EffectResult, StorageError> {
+        self.commit_graph_effects_with_origin(
+            _guard,
+            namespace,
+            existing_edges,
+            puts,
+            incident_ids,
+            delete_records,
+            release_vectors,
+            1,
+        )
+    }
+
+    pub(crate) fn commit_graph_effects_with_origin(
+        &self,
+        _guard: &MutationGuard<'_>,
+        namespace: NamespaceId,
+        existing_edges: &[PersistedEdge],
+        puts: &[PersistedEdge],
+        incident_ids: &[MemoryId],
+        delete_records: bool,
+        release_vectors: bool,
+        original_contract_version: u32,
+    ) -> Result<EffectResult, StorageError> {
         _guard.check(self)?;
         self.ensure_available()?;
+        let mut ctx = MutationContext::unkeyed(namespace);
+        ctx.contract_version = original_contract_version;
+        ctx.validate()?;
         let tx = self.db.begin_write()?;
-        let ctx = MutationContext::unkeyed(namespace);
         let request = control::encode(&(puts, incident_ids, delete_records, release_vectors))?;
         let hash = control::request_hash(&ctx, "graph_effects", &[&request]);
         self.finish_record_effects(
@@ -339,6 +409,7 @@ impl MetadataStore {
             delete_records,
             release_vectors,
             RecordMutation::GraphOnly,
+            None,
         )
     }
 
@@ -356,6 +427,7 @@ impl MetadataStore {
         delete_records: bool,
         release_vectors: bool,
         mut mutation: RecordMutation<'_>,
+        child: Option<&crate::storage::batch::BatchChild>,
     ) -> Result<EffectResult, StorageError> {
         _guard.check(self)?;
         let MutationScope::Namespace(namespace) = ctx.scope else {
@@ -371,7 +443,10 @@ impl MetadataStore {
             return Err(StorageError::NamespaceNotFound(namespace.get()));
         }
 
-        if !matches!(mutation, RecordMutation::PurgeChunk(_)) {
+        if !matches!(
+            mutation,
+            RecordMutation::PurgeChunk(_) | RecordMutation::NativePurgeChunk(_, _)
+        ) {
             super::namespace_state::require_namespace_active(&tx, namespace)?;
         }
 
@@ -379,14 +454,21 @@ impl MetadataStore {
         let mut releases = Vec::new();
         let mut invalidated: std::collections::HashSet<_> = incident_ids.iter().copied().collect();
         match &mutation {
-            RecordMutation::Inserted(record, _)
+            RecordMutation::NativePhase { after: record, .. }
+            | RecordMutation::Inserted(record, _)
             | RecordMutation::Tombstoned { record, .. }
             | RecordMutation::LifecyclePatched { after: record, .. }
             | RecordMutation::NativeInserted(record, _)
+            | RecordMutation::NativeStored(record, _)
             | RecordMutation::NativeTombstoned { record, .. } => {
                 invalidated.insert(MemoryId::from_bytes(record.id));
             }
-            RecordMutation::GraphOnly | RecordMutation::PurgeChunk(_) => {}
+            RecordMutation::NativeHardDelete(_)
+            | RecordMutation::GraphOnly
+            | RecordMutation::PurgeChunk(_)
+            | RecordMutation::NativeGraph(_)
+            | RecordMutation::NativePurgeChunk(_, _)
+            | RecordMutation::NativeGraphUnchanged(_) => {}
         }
         if let RecordMutation::Tombstoned { record, old_phase }
         | RecordMutation::NativeTombstoned {
@@ -478,7 +560,15 @@ impl MetadataStore {
                     }
                 }
                 if let Some(old) = final_edges.iter_mut().find(|old| same_edge(old, edge)) {
-                    if old == edge {
+                    // Native receipt identity preserves f32 bits, including
+                    // signed zero. Keep legacy numeric equality unchanged.
+                    let unchanged = if matches!(&mutation, RecordMutation::NativeGraph(_)) {
+                        crate::storage::native_records::NativeEdgeProof::from(&*old)
+                            == crate::storage::native_records::NativeEdgeProof::from(edge)
+                    } else {
+                        old == edge
+                    };
+                    if unchanged {
                         continue;
                     }
                     *old = edge.clone();
@@ -528,14 +618,21 @@ impl MetadataStore {
                             "outgoing edge count exceeds record capacity".into(),
                         )
                     })?;
-                if let RecordMutation::NativeInserted(_, proof) = &mut mutation {
-                    let change = proof
-                        .records
-                        .iter_mut()
-                        .find(|r| r.memory_id == id)
-                        .ok_or_else(|| {
-                            StorageError::InvalidControl("native edge source proof missing".into())
-                        })?;
+                let insertion_changes = match &mut mutation {
+                    RecordMutation::NativeInserted(_, proof) => Some(&mut proof.records),
+                    RecordMutation::NativeStored(_, proof) => Some(&mut proof.records),
+                    _ => None,
+                };
+                if let Some(changes) = insertion_changes {
+                    let change =
+                        changes
+                            .iter_mut()
+                            .find(|r| r.memory_id == id)
+                            .ok_or_else(|| {
+                                StorageError::InvalidControl(
+                                    "native edge source proof missing".into(),
+                                )
+                            })?;
                     if let Some(before) = &change.before {
                         if before.lifecycle
                             != crate::storage::native_lifecycle::LifecycleState::capture(&record)?
@@ -557,6 +654,57 @@ impl MetadataStore {
                         change.after.lifecycle.lifecycle.record_generation =
                             record.schema.as_ref().unwrap().lifecycle.record_generation;
                     }
+                    change.after.edge_count = count;
+                }
+                let deletion_peers = match &mut mutation {
+                    RecordMutation::NativeHardDelete(proof) => Some(&mut proof.peers),
+                    RecordMutation::NativePurgeChunk(_, proof) => Some(&mut proof.peers),
+                    _ => None,
+                };
+                if let Some(peers) = deletion_peers {
+                    let peer = peers
+                        .iter_mut()
+                        .find(|p| p.change.memory_id == id)
+                        .ok_or_else(|| {
+                            StorageError::InvalidControl("native deleted peer proof missing".into())
+                        })?;
+                    let before = peer.change.before.as_ref().ok_or_else(|| {
+                        StorageError::InvalidControl("native deleted peer before missing".into())
+                    })?;
+                    if record.namespace_id != peer.namespace_id.get()
+                        || !before.matches_record(&record)?
+                    {
+                        return Err(StorageError::InvalidControl(
+                            "native deleted peer changed inside transaction".into(),
+                        ));
+                    }
+                    record.schema.as_mut().unwrap().lifecycle.record_generation =
+                        before.lifecycle.lifecycle.record_generation.next()?;
+                    peer.change.after.lifecycle.lifecycle.record_generation =
+                        record.schema.as_ref().unwrap().lifecycle.record_generation;
+                    peer.change.after.edge_count = count;
+                }
+                if let RecordMutation::NativeGraph(proof) = &mut mutation {
+                    let change = proof
+                        .records
+                        .iter_mut()
+                        .find(|r| r.memory_id == id)
+                        .ok_or_else(|| {
+                            StorageError::InvalidControl("native graph source proof missing".into())
+                        })?;
+                    let before = change.before.as_ref().ok_or_else(|| {
+                        StorageError::InvalidControl(
+                            "native graph source prior state missing".into(),
+                        )
+                    })?;
+                    if !before.matches_record(&record)? {
+                        return Err(StorageError::InvalidControl(
+                            "native graph source changed within transaction".into(),
+                        ));
+                    }
+                    let token = before.lifecycle.lifecycle.record_generation.next()?;
+                    record.schema.as_mut().unwrap().lifecycle.record_generation = token;
+                    change.after.lifecycle.lifecycle.record_generation = token;
                     change.after.edge_count = count;
                 }
                 record.edge_count = count;
@@ -587,6 +735,29 @@ impl MetadataStore {
                     ),
                 }
             }
+            RecordMutation::NativePhase { transition, .. } => {
+                MutationOutcome::NativePhaseMaterialized {
+                    transition: transition.clone(),
+                }
+            }
+            RecordMutation::NativeHardDelete(transition) => {
+                MutationOutcome::NativeMemoryHardDeleted {
+                    transition: transition.clone(),
+                }
+            }
+            RecordMutation::NativeStored(_, transition) => {
+                MutationOutcome::NativeMemoryInsertedWithLinks {
+                    transition: transition.clone(),
+                }
+            }
+            RecordMutation::NativeGraphUnchanged(transition) => {
+                MutationOutcome::NativeGraphUnchanged {
+                    transition: transition.clone(),
+                }
+            }
+            RecordMutation::NativeGraph(transition) => MutationOutcome::NativeGraphChanged {
+                transition: transition.clone(),
+            },
             RecordMutation::NativeInserted(_, transition) => {
                 MutationOutcome::NativeMemoryInserted {
                     transition: transition.clone(),
@@ -612,24 +783,37 @@ impl MetadataStore {
                     crate::storage::tombstone::TombstoneStatus::Tombstoned
                 },
             },
-            RecordMutation::GraphOnly | RecordMutation::PurgeChunk(_) => {
-                MutationOutcome::GraphChanged {
-                    edges_put: actual_puts.len(),
-                    edges_removed: deletes.len(),
-                    memories_removed: removed.len(),
-                }
-            }
+            RecordMutation::GraphOnly
+            | RecordMutation::PurgeChunk(_)
+            | RecordMutation::NativePurgeChunk(_, _) => MutationOutcome::GraphChanged {
+                edges_put: actual_puts.len(),
+                edges_removed: deletes.len(),
+                memories_removed: removed.len(),
+            },
         };
-        let receipt = if let RecordMutation::PurgeChunk(progress) = &mutation {
+        let receipt = if let RecordMutation::NativePurgeChunk(progress, chunk) = &mutation {
+            super::purge::record_next_native(
+                &tx,
+                progress,
+                self.ids.as_ref(),
+                crate::storage::purge::PurgeStage::Deleting,
+                &removed,
+                deletes.len(),
+                Some(chunk.clone()),
+            )?
+        } else if let RecordMutation::PurgeChunk(progress) = &mutation {
             super::purge::record_next(
                 &tx,
                 progress,
+                self.ids.as_ref(),
                 crate::storage::purge::PurgeStage::Deleting,
                 &removed,
                 deletes.len(),
             )?
+        } else if let Some(child) = child {
+            super::batch::record_child(&tx, child, ctx, hash, outcome)?
         } else {
-            control::record_receipt(&tx, ctx, hash, outcome)?
+            self.record_receipt(&tx, ctx, hash, outcome)?
         };
         if let RecordMutation::LifecyclePatched { before, after } = &mutation {
             super::removal_ledger::record_change(
@@ -663,7 +847,37 @@ impl MetadataStore {
                 )?;
             }
         }
+        if let RecordMutation::NativePhase { transition, .. } = &mutation {
+            let mask = transition.loss_mask();
+            if mask != 0 {
+                super::removal_ledger::record_removal(
+                    &tx,
+                    crate::storage::control::GenerationRef {
+                        store_id: receipt.store_id,
+                        generation: receipt.committed_generation,
+                    },
+                    namespace.get(),
+                    transition.memory_id,
+                    None,
+                    mask,
+                    receipt.operation_id,
+                )?;
+            }
+        }
         match &receipt.outcome {
+            MutationOutcome::NativePhaseMaterialized { transition } => {
+                transition.validate(&receipt)?
+            }
+            MutationOutcome::NativeMemoryHardDeleted { transition } => {
+                transition.validate(&receipt)?
+            }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
+                transition.validate(&receipt)?
+            }
+            MutationOutcome::NativeGraphChanged { transition } => transition.validate(&receipt)?,
+            MutationOutcome::NativeGraphUnchanged { transition } => {
+                transition.validate(&receipt)?
+            }
             MutationOutcome::NativeMemoryInserted { transition } => {
                 transition.validate(&receipt, true)?
             }
@@ -725,7 +939,13 @@ impl MetadataStore {
         // not assume failure means its staged bytes can be reclaimed.
         #[cfg(test)]
         let committed = committed.and_then(|()| {
-            if FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.replace(false)) {
+            if FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.replace(false))
+                || child.is_some()
+                    && self
+                        .fail_batch_commit
+                        .compare_exchange(3, 0, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+            {
                 Err(redb::CommitError::Storage(redb::StorageError::Io(
                     std::io::Error::other("injected unknown record commit"),
                 )))
@@ -740,9 +960,12 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         crash_point("after_metadata_commit");
         let mut phases = self.phase_index.write().unwrap_or_else(|e| e.into_inner());
-        if let RecordMutation::LifecyclePatched { before, after } = &mutation {
+        if let RecordMutation::LifecyclePatched { before, after }
+        | RecordMutation::NativePhase { before, after, .. } = &mutation
+        {
             phases.transition(
                 after.namespace_id,
                 after.vector_slot,
@@ -750,8 +973,9 @@ impl MetadataStore {
                 after.phase,
             );
         }
-        if let RecordMutation::Inserted(record, _) | RecordMutation::NativeInserted(record, _) =
-            &mutation
+        if let RecordMutation::Inserted(record, _)
+        | RecordMutation::NativeInserted(record, _)
+        | RecordMutation::NativeStored(record, _) = &mutation
         {
             phases.transition(
                 record.namespace_id,
@@ -864,6 +1088,33 @@ pub(crate) fn validate_plan(
     effect: &PendingEffects,
     records: &[(MemoryId, DiskRecord)],
 ) -> Result<(), StorageError> {
+    let graph_records = match &effect.receipt.outcome {
+        MutationOutcome::NativeGraphChanged { transition } => {
+            validate_native_graph_effect(effect, transition)?;
+            Some((transition.namespace_id, &transition.records))
+        }
+        MutationOutcome::NativeGraphUnchanged { transition } => {
+            validate_native_graph_nochange_effect(effect, transition)?;
+            Some((transition.namespace_id, &transition.records))
+        }
+        _ => None,
+    };
+    if let Some((namespace, changes)) = graph_records {
+        for change in changes {
+            let record = records
+                .iter()
+                .find(|(id, _)| *id == change.memory_id)
+                .map(|(_, r)| r)
+                .ok_or_else(|| {
+                    StorageError::InvalidControl("native graph pending endpoint missing".into())
+                })?;
+            if record.namespace_id != namespace.get() || !change.after.matches_record(record)? {
+                return Err(StorageError::InvalidControl(
+                    "native graph pending peer differs from canonical state".into(),
+                ));
+            }
+        }
+    }
     if effect
         .removed_ids
         .iter()
@@ -873,8 +1124,18 @@ pub(crate) fn validate_plan(
             "removed effect ID still exists".into(),
         ));
     }
-    if let Some(proof) = native_proof(effect) {
-        for change in &proof.records {
+    super::native_maintenance::validate_pending_records(effect, records)?;
+    crate::storage::native_purge::validate_pending_records(effect, records)?;
+    let record_proof = if let MutationOutcome::NativeMemoryInsertedWithLinks { transition } =
+        &effect.receipt.outcome
+    {
+        validate_native_store_effect(effect, transition)?;
+        Some((transition.namespace_id, &transition.records))
+    } else {
+        native_proof(effect).map(|p| (p.namespace_id, &p.records))
+    };
+    if let Some((namespace, changes)) = record_proof {
+        for change in changes {
             let record = records
                 .iter()
                 .find(|(id, _)| *id == change.memory_id)
@@ -882,9 +1143,7 @@ pub(crate) fn validate_plan(
                 .ok_or_else(|| {
                     StorageError::InvalidControl("native pending record missing".into())
                 })?;
-            if record.namespace_id != proof.namespace_id.get()
-                || !change.after.matches_record(record)?
-            {
+            if record.namespace_id != namespace.get() || !change.after.matches_record(record)? {
                 return Err(StorageError::InvalidControl(
                     "native pending proof differs from canonical record".into(),
                 ));
@@ -1003,6 +1262,19 @@ pub(crate) fn validate_plan(
     Ok(())
 }
 
+#[cfg(test)]
+impl MetadataStore {
+    /// Instance-local probe, reached only after actual exposure commit/publication.
+    pub(crate) fn after_observation_probe(&self) {
+        match self.observation_fault.swap(0, Ordering::SeqCst) {
+            1 => self.mark_unavailable(),
+            2 => {
+                self.effects_epoch.fetch_add(1, Ordering::SeqCst);
+            }
+            _ => {}
+        }
+    }
+}
 fn native_proof(
     effect: &PendingEffects,
 ) -> Option<&crate::storage::native_records::NativeRecordWrite> {
@@ -1011,6 +1283,60 @@ fn native_proof(
         | MutationOutcome::NativeMemoryTombstoned { transition } => Some(transition),
         _ => None,
     }
+}
+fn validate_native_graph_nochange_effect(
+    effect: &PendingEffects,
+    proof: &crate::storage::native_graph::NativeGraphNoChange,
+) -> Result<(), StorageError> {
+    proof.validate(&effect.receipt)?;
+    if effect.scope != MutationScope::Namespace(proof.namespace_id)
+        || !effect.puts.is_empty()
+        || !effect.deletes.is_empty()
+        || !effect.releases.is_empty()
+        || !effect.invalidated_ids.is_empty()
+        || !effect.removed_ids.is_empty()
+        || !effect.peer_counts.is_empty()
+    {
+        return Err(StorageError::InvalidControl(
+            "native graph no-change has effects".into(),
+        ));
+    }
+    Ok(())
+}
+fn validate_native_graph_effect(
+    effect: &PendingEffects,
+    proof: &crate::storage::native_graph::NativeGraphWrite,
+) -> Result<(), StorageError> {
+    proof.validate(&effect.receipt)?;
+    let mut invalidated: Vec<_> = proof
+        .edges
+        .iter()
+        .flat_map(|e| [e.after.source, e.after.target])
+        .collect();
+    invalidated.sort();
+    invalidated.dedup();
+    if effect.scope != MutationScope::Namespace(proof.namespace_id)
+        || !effect.deletes.is_empty()
+        || !effect.removed_ids.is_empty()
+        || !effect.releases.is_empty()
+        || effect
+            .puts
+            .iter()
+            .map(crate::storage::native_records::NativeEdgeProof::from)
+            .collect::<Vec<_>>()
+            != proof
+                .edges
+                .iter()
+                .map(|e| e.after.clone())
+                .collect::<Vec<_>>()
+        || effect.peer_counts != proof.peer_counts()
+        || effect.invalidated_ids != invalidated
+    {
+        return Err(StorageError::InvalidControl(
+            "native graph effects disagree with receipt".into(),
+        ));
+    }
+    Ok(())
 }
 fn terminal_effect(effect: &PendingEffects, id: MemoryId) -> bool {
     matches!(effect.receipt.outcome,MutationOutcome::MemoryTombstoned {memory_id,..} if memory_id==id)
@@ -1072,16 +1398,50 @@ fn validate_native_effect(effect: &PendingEffects, insertion: bool) -> Result<()
     }
     Ok(())
 }
-#[cfg(test)]
-impl MetadataStore {
-    /// Instance-local probe, reached only after actual exposure commit/publication.
-    pub(crate) fn after_observation_probe(&self) {
-        match self.observation_fault.swap(0, Ordering::SeqCst) {
-            1 => self.mark_unavailable(),
-            2 => {
-                self.effects_epoch.fetch_add(1, Ordering::SeqCst);
-            }
-            _ => {}
-        }
+fn validate_native_store_effect(
+    effect: &PendingEffects,
+    proof: &crate::storage::native_store::NativeStoreWrite,
+) -> Result<(), StorageError> {
+    proof.validate(&effect.receipt)?;
+    let mut invalidated = vec![proof.memory_id];
+    let mut sources = std::collections::BTreeSet::new();
+    for edge in &proof.edges {
+        invalidated.extend([edge.source, edge.target]);
+        sources.insert(edge.source);
     }
+    invalidated.sort();
+    invalidated.dedup();
+    let peers: Vec<_> = sources
+        .into_iter()
+        .map(|id| {
+            (
+                id,
+                proof
+                    .records
+                    .iter()
+                    .find(|r| r.memory_id == id)
+                    .unwrap()
+                    .after
+                    .edge_count,
+            )
+        })
+        .collect();
+    if effect.scope != MutationScope::Namespace(proof.namespace_id)
+        || !effect.deletes.is_empty()
+        || !effect.removed_ids.is_empty()
+        || !effect.releases.is_empty()
+        || effect
+            .puts
+            .iter()
+            .map(crate::storage::native_records::NativeEdgeProof::from)
+            .collect::<Vec<_>>()
+            != proof.edges
+        || effect.peer_counts != peers
+        || effect.invalidated_ids != invalidated
+    {
+        return Err(StorageError::InvalidControl(
+            "linked creation effects disagree with receipt".into(),
+        ));
+    }
+    Ok(())
 }

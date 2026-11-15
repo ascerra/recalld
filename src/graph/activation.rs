@@ -572,7 +572,7 @@ fn spreading_activation_resolved(
 
         // Ghost/Tombstone gate: ghosts and tombstones don't seed activation.
         // Tombstones have no content relevance; ghosts are nearly forgotten.
-        // Terminal identities remain structural evidence only.
+        // Terminal identities remain structural only; canonical projections govern v2.
         if (records.is_none()
             && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
             || (records.is_some() && canonical_strength(node).is_none())
@@ -625,7 +625,7 @@ fn spreading_activation_resolved(
             continue;
         };
 
-        // Terminal identities neither receive nor relay activation.
+        // Terminal identities remain structural only; canonical projections govern v2.
         if (records.is_none()
             && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
             || (records.is_some() && canonical_strength(node).is_none())
@@ -679,7 +679,7 @@ fn spreading_activation_resolved(
                 continue;
             }
 
-            // Terminal identities neither receive nor relay activation.
+            // Terminal identities remain structural only; canonical projections govern v2.
             if (records.is_none()
                 && matches!(
                     neighbor.decay_phase,

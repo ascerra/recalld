@@ -10,6 +10,7 @@ pub mod server;
 pub mod transport;
 
 pub mod args;
+pub(crate) mod batches;
 pub mod bridge;
 pub mod bridge_adapters;
 pub mod resources;
@@ -45,3 +46,5 @@ pub enum McpError {
     #[error("Bridge error: {0}")]
     Bridge(String),
 }
+
+pub(crate) mod native_advisory;

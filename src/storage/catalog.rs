@@ -79,9 +79,16 @@ thread_local! { pub(crate) static FAILURE: std::cell::Cell<Option<&'static str>>
 pub(crate) fn injected(point: &str) -> bool {
     FAILURE.with(|f| f.get() == Some(point))
 }
+#[cfg(test)]
+thread_local! { pub(crate) static BOUNDARY_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(&str)>>> = const { std::cell::RefCell::new(None) }; }
 pub(crate) fn boundary(_point: &str) -> Result<(), StorageError> {
     #[cfg(test)]
     {
+        BOUNDARY_HOOK.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook(_point);
+            }
+        });
         if std::env::var("RECALLD_CATALOG_CRASH").as_deref() == Ok(_point) {
             std::process::exit(89);
         }

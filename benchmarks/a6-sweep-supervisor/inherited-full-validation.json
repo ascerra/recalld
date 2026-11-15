@@ -1,0 +1,12 @@
+{
+  "cli": 2,
+  "examples": 10,
+  "fullLogSha256": "e6f65fc3016657fdec10904bf5ac2a733a1bfffa229c5c347cb9e2f38007d600",
+  "library": 1057,
+  "ownerSweepEpisodes": 3,
+  "priorFailure": "first public store: offline fixture omitted actual appended tag; preserved",
+  "publicEpisodes": 9,
+  "root": "/tmp/recalld-sweep-supervisor-13e4dd5c-a043vmll/output",
+  "runtimeAndCargoHashesIdentical": true,
+  "sourceCommit": "13e4dd5c06603533c0f9b82aedd0ef045eca483e"
+}

@@ -1,0 +1,474 @@
+{
+  "binarySha256": "481e734b03b5c8edbc113499f1cf3b9377f01a5eee7ddbd07905e39dae3e4ff1",
+  "claim": "same-core frozen clock/allocation diagnostic; matching projections are not whole-state reset/replay; no v2/A6 completion",
+  "constructorNegatives": [
+    {
+      "case": "duplicate-fd",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/duplicate-fd/config.toml",
+        "--data-root",
+        "/work/output/controls/duplicate-fd/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "4"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "actor-stdin-fd",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/actor-stdin-fd/config.toml",
+        "--data-root",
+        "/work/output/controls/actor-stdin-fd/data",
+        "--control-read-fd",
+        "0",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "wrong-direction",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/wrong-direction/config.toml",
+        "--data-root",
+        "/work/output/controls/wrong-direction/data",
+        "--control-read-fd",
+        "5",
+        "--control-write-fd",
+        "6"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "non-fifo",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/non-fifo/config.toml",
+        "--data-root",
+        "/work/output/controls/non-fifo/data",
+        "--control-read-fd",
+        "8",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "existing-root",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/existing-root/config.toml",
+        "--data-root",
+        "/work/output/controls/existing-root/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 1,
+      "passed": true
+    },
+    {
+      "case": "oversized-frame",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/oversized-frame/config.toml",
+        "--data-root",
+        "/work/output/controls/oversized-frame/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 0,
+      "passed": true
+    },
+    {
+      "case": "unterminated-eof",
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/unterminated-eof/config.toml",
+        "--data-root",
+        "/work/output/controls/unterminated-eof/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "exitCode": 0,
+      "passed": true
+    }
+  ],
+  "episodes": [
+    {
+      "acceptedBarrierWaitedForStore": true,
+      "afterExposure": {
+        "generation": "4",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "afterFeedback": {
+        "generation": "5",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "afterStore": {
+        "generation": "3",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/replay-1/config.toml",
+        "--data-root",
+        "/work/output/controls/replay-1/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "controlEofExitSeconds": 1.1563566799886758,
+      "initial": {
+        "generation": "2",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "passed": true,
+      "replay": 1,
+      "runtimeAfterStore": {
+        "allocation": {
+          "counter": 6,
+          "lastMemoryMillis": 1767225660000,
+          "seed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "nowMillis": 1767225660000
+      },
+      "runtimeInitial": {
+        "allocation": {
+          "counter": 4,
+          "lastMemoryMillis": null,
+          "seed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "nowMillis": 1767225660000
+      },
+      "storedId": "019b76db-9260-7428-b25c-9e93e54df962"
+    },
+    {
+      "acceptedBarrierWaitedForStore": true,
+      "afterExposure": {
+        "generation": "4",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "afterFeedback": {
+        "generation": "5",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "afterStore": {
+        "generation": "3",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/replay-2/config.toml",
+        "--data-root",
+        "/work/output/controls/replay-2/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "controlEofExitSeconds": 1.1565366349968826,
+      "initial": {
+        "generation": "2",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "passed": true,
+      "replay": 2,
+      "runtimeAfterStore": {
+        "allocation": {
+          "counter": 6,
+          "lastMemoryMillis": 1767225660000,
+          "seed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "nowMillis": 1767225660000
+      },
+      "runtimeInitial": {
+        "allocation": {
+          "counter": 4,
+          "lastMemoryMillis": null,
+          "seed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "nowMillis": 1767225660000
+      },
+      "storedId": "019b76db-9260-7428-b25c-9e93e54df962"
+    },
+    {
+      "acceptedBarrierWaitedForStore": true,
+      "afterExposure": {
+        "generation": "4",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "afterFeedback": {
+        "generation": "5",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "afterStore": {
+        "generation": "3",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "command": [
+        "/work/target/debug/examples/owned_evaluator",
+        "--config",
+        "/work/output/controls/replay-3/config.toml",
+        "--data-root",
+        "/work/output/controls/replay-3/data",
+        "--control-read-fd",
+        "4",
+        "--control-write-fd",
+        "7"
+      ],
+      "controlEofExitSeconds": 1.1414223370084073,
+      "initial": {
+        "generation": "2",
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "passed": true,
+      "replay": 3,
+      "runtimeAfterStore": {
+        "allocation": {
+          "counter": 6,
+          "lastMemoryMillis": 1767225660000,
+          "seed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "nowMillis": 1767225660000
+      },
+      "runtimeInitial": {
+        "allocation": {
+          "counter": 4,
+          "lastMemoryMillis": null,
+          "seed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "nowMillis": 1767225660000
+      },
+      "storedId": "019b76db-9260-7428-b25c-9e93e54df962"
+    }
+  ]
+}

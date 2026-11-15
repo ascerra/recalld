@@ -1,0 +1,18 @@
+{
+  "/work/target/debug/deps/lifecycle_cli-ef7aa35bda05dfab": "747611d52481bde5659837f080d2ada68efe1ca691680489122b0bd3011e7ea8",
+  "/work/target/debug/deps/recalld-27bbb81e23f12ff5": "aac8feac799d0098b9dbe8f8caabec17783f5adaba07fa8b4478e7fc695ba9a7",
+  "/work/target/debug/deps/recalld-7025a4141187b374": "f993339e92d4c5d5192cffdb8afec09bc35eb1a3f5ac84acdd2942de7b92366d",
+  "/work/target/debug/deps/recalld-db4c01372257a80b": "cc176d53b0ea7c273cabb9e76485a936f024725364393d81c56a76b3226aae6a",
+  "/work/target/debug/deps/recalld_cli-16a6b9f5f1a3f682": "032967153e2426fb7c9da75e1ea1e2d1f334d25c94c67d954e4af2dc57ee4c0d",
+  "/work/target/debug/deps/recalld_cli-ca555559ff833672": "bfd02c9de4459c5384b08b4a0bd6fe88ceef39afeb6b8911ea0f2bbe35701a8b",
+  "/work/target/debug/deps/recalld_text_migrate-abfd43d4b59f087a": "6f775c9950fc2554464ed006a8444c86e17c7333fc92795c24e165c1a5ca2fef",
+  "/work/target/debug/deps/recalld_text_migrate-b3ddbfaa472dba30": "914d80fb2c7ef46808f012b6fc1fc2a44c1834f27145278d415816439382317a",
+  "/work/target/debug/deps/text_migration_cli-c242142a48e76014": "dd6186fb274cc1317521ee86aa65322b4b8d53265fe61d7bcebe63bf2f3c50f3",
+  "/work/target/debug/examples/offline_eval-fa3d43944fc9fc5a": "8a9c20bb364f3e1c03dfd237450a15f47b8cc78b0cde4378dcb50d69f41d94b0",
+  "/work/target/debug/examples/owned_evaluator-a8398506c9c7b2b1": "3baae6dd97cac96356b2f4139a6df4e5285e62ac6bfa5189df213ed3cc7442e4",
+  "/work/target/debug/examples/performance_probe-67378b0c65de5c17": "50adb1c9371d69074958c25c06dce8dcd0eaa5647f5382b1df33caa8ba86e9af",
+  "/work/target/debug/examples/score_mcp_episode-bd683bb3c4eb99a4": "6d6acc8c3497e55b55304ae293919ec4c690d63aeb6d2300f088f3ab67b099e6",
+  "/work/target/debug/recalld": "cc176d53b0ea7c273cabb9e76485a936f024725364393d81c56a76b3226aae6a",
+  "/work/target/debug/recalld-cli": "bfd02c9de4459c5384b08b4a0bd6fe88ceef39afeb6b8911ea0f2bbe35701a8b",
+  "/work/target/debug/recalld-text-migrate": "6f775c9950fc2554464ed006a8444c86e17c7333fc92795c24e165c1a5ca2fef"
+}

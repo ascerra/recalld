@@ -1,0 +1,3 @@
+{"sourceId": "turn-0", "status": "seen", "reason": "acknowledged-checkpoint-prefix"}
+{"sourceId": "turn-0", "status": "attempted", "reason": "acknowledged-checkpoint-prefix"}
+{"sourceId": "turn-0", "status": "accepted", "reason": "acknowledged-checkpoint-prefix", "memoryId": "019b76da-a800-7cbf-aa23-03b88d1bbdca"}

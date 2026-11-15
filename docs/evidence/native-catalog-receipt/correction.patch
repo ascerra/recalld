@@ -1,0 +1,117 @@
+diff --git a/src/storage/engine/catalog.rs b/src/storage/engine/catalog.rs
+index 60cf2bb..51a1034 100644
+--- a/src/storage/engine/catalog.rs
++++ b/src/storage/engine/catalog.rs
+@@ -95,8 +95,8 @@ pub(super) fn publish_namespace(
+         })();
+         publish.map_err(|source| {
+             meta.mark_unavailable();
+-            StorageError::CommittedEffectsPending {
+-                operation_id: receipt.operation_id,
++            StorageError::CommittedMutation {
++                receipt: Box::new(receipt.clone()),
+                 source: Box::new(source),
+             }
+         })?;
+diff --git a/src/storage/metadata/catalog.rs b/src/storage/metadata/catalog.rs
+index 7037092..1d74332 100644
+--- a/src/storage/metadata/catalog.rs
++++ b/src/storage/metadata/catalog.rs
+@@ -130,8 +130,8 @@ impl MetadataStore {
+         })?;
+         crate::storage::catalog::boundary("after_metadata_commit").map_err(|source| {
+             self.mark_unavailable();
+-            StorageError::CommittedEffectsPending {
+-                operation_id: receipt.operation_id,
++            StorageError::CommittedMutation {
++                receipt: Box::new(receipt.clone()),
+                 source: Box::new(source),
+             }
+         })
+diff --git a/src/storage/native_catalog_tests.rs b/src/storage/native_catalog_tests.rs
+index 7b2c331..f450cc2 100644
+--- a/src/storage/native_catalog_tests.rs
++++ b/src/storage/native_catalog_tests.rs
+@@ -308,6 +308,7 @@ fn native_catalog_publication_fault_reconciles_receipt_on_reopen() {
+         "after_metadata_commit",
+         "before_handle_publish",
+         "after_handle_publish",
++        "commit_unknown",
+     ] {
+         let root = tempfile::tempdir().unwrap();
+         let (path, clock, mut session) = fixture(root.path());
+@@ -316,20 +317,72 @@ fn native_catalog_publication_fault_reconciles_receipt_on_reopen() {
+         let result = session.create_namespace(&ctx, &input(), &Provider(true));
+         crate::storage::catalog::FAILURE.with(|f| f.set(None));
+         assert!(result.is_err(), "{point}");
++        let known_commit = matches!(
++            point,
++            "after_metadata_commit" | "before_handle_publish" | "after_handle_publish"
++        );
++        let carried = match &result {
++            Err(StorageError::CommittedMutation { receipt, .. }) => Some((**receipt).clone()),
++            _ => None,
++        };
++        assert_eq!(carried.is_some(), known_commit, "{point}: {result:?}");
++        if point == "commit_unknown" {
++            assert!(matches!(
++                result,
++                Err(StorageError::CommitOutcomeUnknown { .. })
++            ));
++        }
++        if let Some(receipt) = &carried {
++            // No post-error readback can manufacture the response: the owner
++            // is poisoned, so the error must carry the receipt already in hand.
++            assert!(
++                session
++                    .engine
++                    .lookup_operation(
++                        receipt.store_id,
++                        MutationScope::Catalog,
++                        receipt.operation_id,
++                    )
++                    .is_err()
++            );
++            assert!(!receipt.replayed);
++        }
+         drop(session);
+         let mut reopened =
+             NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();
+         let receipt = reopened
+-            .create_namespace(&ctx, &input(), &Provider(true))
++            .create_namespace(
++                &ctx,
++                &input(),
++                &Provider(!known_commit && point != "commit_unknown"),
++            )
+             .unwrap();
+         assert_eq!(
+             receipt.replayed,
+             matches!(
+                 point,
+-                "after_metadata_commit" | "before_handle_publish" | "after_handle_publish"
++                "after_metadata_commit"
++                    | "before_handle_publish"
++                    | "after_handle_publish"
++                    | "commit_unknown"
+             ),
+             "{point}"
+         );
++        if let Some(carried) = carried {
++            let retained = reopened
++                .engine
++                .lookup_operation(
++                    carried.store_id,
++                    MutationScope::Catalog,
++                    carried.operation_id,
++                )
++                .unwrap()
++                .unwrap();
++            assert_eq!(carried, retained);
++            let mut original = receipt.clone();
++            original.replayed = false;
++            assert_eq!(carried, original);
++        }
+         assert!(path.join("created/vectors.dat").is_file());
+     }
+ }
