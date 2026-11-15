@@ -1,0 +1,52 @@
+{
+  "final-phase-clock/clippy.log.gz": {
+    "sha256": "54a5a76ba2719adba9db8c758035832119858872d84b90b4fe75980bc55d52ab",
+    "bytes": 41881,
+    "uncompressed_sha256": "41b83d83fcaaf30bda1b9921230f8efb4fdacabee4276543dd256544f457323b"
+  },
+  "final-phase-clock/commit.txt": {
+    "sha256": "64933cb505c9d156977a5ee953c69fd48ccb942e2c499042ac84f2931a7911e4",
+    "bytes": 41,
+    "uncompressed_sha256": "64933cb505c9d156977a5ee953c69fd48ccb942e2c499042ac84f2931a7911e4"
+  },
+  "final-phase-clock/container.txt": {
+    "sha256": "ec2e1c1e9205e9c2b003a758b633355655d987a0153928c4e8f14e9fa8ba083b",
+    "bytes": 658,
+    "uncompressed_sha256": "ec2e1c1e9205e9c2b003a758b633355655d987a0153928c4e8f14e9fa8ba083b"
+  },
+  "final-phase-clock/executed-binary-sha256.json": {
+    "sha256": "1c4f6fcbdb59a842e88a69a182d1689c5f5f2f87ff2ebe9f23c7986f12d5b8a4",
+    "bytes": 739,
+    "uncompressed_sha256": "1c4f6fcbdb59a842e88a69a182d1689c5f5f2f87ff2ebe9f23c7986f12d5b8a4"
+  },
+  "final-phase-clock/fmt-check.log.gz": {
+    "sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+    "bytes": 20,
+    "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "final-phase-clock/fmt.log.gz": {
+    "sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+    "bytes": 20,
+    "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "final-phase-clock/full.log.gz": {
+    "sha256": "f52059e1dff84f72613c433e3c64a9abe3f4457594df79696907dd8a8477a29d",
+    "bytes": 22541,
+    "uncompressed_sha256": "be8c9dd504009965b6e6fdb672f46d5a89e11acf2f6b5090fd384d5f824e0778"
+  },
+  "final-phase-clock/source-sha256.json": {
+    "sha256": "a7194cce6c07c0abb243c646144c539817b200c279c76b6bf888ca650a346767",
+    "bytes": 21981,
+    "uncompressed_sha256": "a7194cce6c07c0abb243c646144c539817b200c279c76b6bf888ca650a346767"
+  },
+  "final-phase-clock/source-verification.json": {
+    "sha256": "f773a15dc9e2f5a803c64d40cd3ab9e8068202e406bc6232669e517074172b47",
+    "bytes": 123,
+    "uncompressed_sha256": "f773a15dc9e2f5a803c64d40cd3ab9e8068202e406bc6232669e517074172b47"
+  },
+  "final-phase-clock/status.txt": {
+    "sha256": "559661058d4b31f7d03f9215c3cf2eb0d0959bedf83ead6840b3888cc3095bba",
+    "bytes": 23,
+    "uncompressed_sha256": "559661058d4b31f7d03f9215c3cf2eb0d0959bedf83ead6840b3888cc3095bba"
+  }
+}

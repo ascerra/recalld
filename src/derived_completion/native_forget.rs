@@ -72,11 +72,7 @@ impl DerivedCompletion {
             result
         })
         .await
-        .map_err(|e| {
-            failed(format!(
-                "native forget worker outcome unknown; reconcile before retry: {e}"
-            ))
-        })??;
+        .map_err(|e| StorageError::WorkerOutcomeUnknown(e.to_string()))??;
         // Never upgrade the worker's read lease in place. Publication uses the
         // same owner and registry; every known receipt survives completion failure.
         self.complete_with_work(Some(work))

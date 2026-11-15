@@ -20,6 +20,18 @@ impl MetadataStore {
         existing_edges: &[PersistedEdge],
         child: Option<&crate::storage::batch::BatchChild>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.tombstone_scoped_with_effects(guard, ctx, id, existing_edges, child, None)
+    }
+
+    pub(crate) fn tombstone_scoped_with_effects(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        id: MemoryId,
+        existing_edges: &[PersistedEdge],
+        child: Option<&crate::storage::batch::BatchChild>,
+        asserted_namespace: Option<&str>,
+    ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
         self.ensure_available()?;
         ctx.validate()?;
@@ -28,13 +40,8 @@ impl MetadataStore {
                 "tombstone requires namespace scope".into(),
             ));
         };
-        if ctx.contract_version != 1 {
-            return Err(StorageError::InvalidMutationContext(
-                "explicit-v2 tombstone is not enabled".into(),
-            ));
-        }
         let tx = self.db.begin_write()?;
-        let hash = crate::storage::tombstone::request_hash(ctx, id);
+        let hash = crate::storage::tombstone::scoped_request_hash(ctx, id, asserted_namespace);
         // Historical identity is checked before CAS or current existence.
         if let Some(child) = child {
             if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
@@ -46,6 +53,9 @@ impl MetadataStore {
         }
         control::read_control(&tx)?.committed_generation.next()?;
         let config = namespace_state::require_namespace_active(&tx, namespace)?;
+        if asserted_namespace.is_some_and(|name| name != config.name) {
+            return Err(StorageError::MutationNamespaceMismatch);
+        }
         if config.schema.is_some() || control::read_control(&tx)?.control_schema_version != 1 {
             return Err(StorageError::RecoveryRequired(
                 "schema-v2 tombstone requires participating writers; serving remains disabled"

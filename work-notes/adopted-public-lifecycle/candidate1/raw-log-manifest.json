@@ -1,0 +1,14 @@
+{
+  "build.jsonl": {
+    "sha256": "befb3ce1fcb4bb47b1ae0e41e9e4502f24b277bca8ba2746efda70073b7d07e2",
+    "bytes": 428337
+  },
+  "build.log": {
+    "sha256": "a9797fbcaf7666bb34ff6841adae088e275254f464c61ea5142d17b2a71a451e",
+    "bytes": 187
+  },
+  "package-clean.log": {
+    "sha256": "82de78de2431047c1792c92dbc01f521e8fc70c3a3016cf9442b01401b65d9e7",
+    "bytes": 39
+  }
+}

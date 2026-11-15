@@ -1,0 +1,26 @@
+
+running 4 tests
+test mcp::legacy_lifecycle_tests::legacy_api2_generate_genuine_before_one_fixture ... ok
+
+thread 'mcp::legacy_lifecycle_tests::legacy_api2_prepared_forget_reaches_actual_legacy_writer' (5561) panicked at src/mcp/legacy_lifecycle_tests.rs:41:5:
+actual prepared legacy2 forget failed: Some(ExecutionError { category: Unavailable, code: "UNAVAILABLE", message: "storage recovery required: explicit native lifecycle entry required", field: None, retryable: false, commit_state: NotCommitted, operation_id: None })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'mcp::legacy_lifecycle_tests::legacy_api2_prepared_feedback_reaches_actual_legacy_writer' (5556) panicked at src/mcp/legacy_lifecycle_tests.rs:32:5:
+actual prepared legacy2 feedback failed: Some(ExecutionError { category: Unavailable, code: "UNAVAILABLE", message: "storage recovery required: explicit native lifecycle entry required", field: None, retryable: false, commit_state: NotCommitted, operation_id: None })
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_feedback_reaches_actual_legacy_writer ... FAILED
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_forget_reaches_actual_legacy_writer ... FAILED
+
+thread 'mcp::legacy_lifecycle_tests::legacy_api2_tombstone_metadata_admits_original_two' (5566) panicked at src/mcp/legacy_lifecycle_tests.rs:48:72:
+called `Result::unwrap()` on an `Err` value: InvalidMutationContext("explicit-v2 tombstone is not enabled")
+test mcp::legacy_lifecycle_tests::legacy_api2_tombstone_metadata_admits_original_two ... FAILED
+
+failures:
+
+failures:
+    mcp::legacy_lifecycle_tests::legacy_api2_prepared_feedback_reaches_actual_legacy_writer
+    mcp::legacy_lifecycle_tests::legacy_api2_prepared_forget_reaches_actual_legacy_writer
+    mcp::legacy_lifecycle_tests::legacy_api2_tombstone_metadata_admits_original_two
+
+test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 1171 filtered out; finished in 0.29s
+
