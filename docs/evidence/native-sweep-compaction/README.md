@@ -1,6 +1,9 @@
 # Native sweep physical-compaction consumer evidence
 
-Validation complete; final publication review pending; no publication claim. Minimal actual parents are
+Validation complete. The coordinating agent reviewed sealed e494614 and the
+actual18-line runtime change, plus Pascal's independent source review, and
+approved normal publication with this documentation-only status update.
+Exact-head CI remains required; no full rerun follows this documentation tail. Minimal actual parents are
 PR145 `22760a2dd9522d35bd282a665286084366848fac` and PR135
 `24da9206ba141493cdb9ca988188be6d5690a814`, joined at43c0822. No broader
 checkpoint or private initializer parent. Pascal explicitly released consumer
