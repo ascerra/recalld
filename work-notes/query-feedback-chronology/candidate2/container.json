@@ -1,0 +1,34 @@
+{
+  "container": "5650882c24fb13ad03fb40e643d201fdf1b05491cedc442a85afe167435e3b3f",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "network": "none",
+  "nano_cpus": 2000000000,
+  "memory_bytes": 4294967296,
+  "mounts": [
+    {
+      "source": "/tmp/recalld-api1-lifecycle-validation/cargo",
+      "destination": "/cargo",
+      "rw": true
+    },
+    {
+      "source": "/tmp/recalld-implementation/query-feedback-chronology",
+      "destination": "/source",
+      "rw": false
+    },
+    {
+      "source": "/tmp/recalld-a3-matrix-target",
+      "destination": "/target",
+      "rw": true
+    },
+    {
+      "source": "/tmp/recalld-query-feedback-validation/candidate2",
+      "destination": "/validation",
+      "rw": true
+    },
+    {
+      "source": "/tmp/recalld-unit-tests-l__ja1yo/cargo/registry",
+      "destination": "/cargo/registry",
+      "rw": false
+    }
+  ]
+}

@@ -1,9 +1,10 @@
 # A3: prepared query exposure followed by public API1 feedback
 
-Status: source-only plan for review. No join, implementation, build or new
-executed result. Planning child starts on published PR166 only. PR166 stays at
-`3f3ca05d160cad917b716758dd360412a652e9d9`; exact-head CI is still required before
-its integration handoff. This document does not change that branch.
+Status: implemented and validated; see work-notes/query-feedback-chronology/REPORT.md
+for exact source, preserved failures and results. The following is the approved
+pre-implementation plan retained with its original scope limits. PR166 stays at
+`3f3ca05d160cad917b716758dd360412a652e9d9`; its exact-head CI subsequently passed
+and ownership was handed to Halley. This document does not change that branch.
 
 ## Actual consumer gap and parents
 
