@@ -69,7 +69,7 @@ fn snapshot(f: &Fixture, d: &Data) -> Vec<u8> {
         s.get_namespace(d.ns).unwrap(),
         s.control_state().unwrap(),
         s.meta_store().removal_ledger_export().unwrap(),
-        receipts(f),
+        receipts(f).into_iter().collect::<Vec<_>>(),
     ))
     .unwrap()
 }
@@ -193,17 +193,30 @@ async fn invoke(
                 &temp.path().join("peer.sock"),
             )
             .await;
-            let ok = match op {
-                Operation::Feedback => match remote.reinforce_memory(d.parent, 3, None).await {
-                    Ok(_) => true,
-                    Err(error) => {
-                        assert!(error.to_string().contains("inherited"), "{error}");
-                        false
-                    }
-                },
-                Operation::Forget => remote.delete_memory(d.parent, None).await.unwrap(),
+            let remote_bridge = McpBridge {
+                search: bridge.search.clone(),
+                storage: Arc::new(remote),
+                namespaces: bridge.namespaces.clone(),
+                health: bridge.health.clone(),
+                default_namespace: bridge.default_namespace.clone(),
+                timezone: bridge.timezone,
             };
-            drop(remote);
+            let tool = if op == Operation::Feedback {
+                "reinforce_memory"
+            } else {
+                "forget_memory"
+            };
+            let reply =
+                crate::mcp::tools::dispatch_tool(&remote_bridge, tool, json!({"id":d.parent}))
+                    .await;
+            let ok = reply.is_error != Some(true);
+            if !ok {
+                assert!(
+                    serde_json::to_string(&reply).unwrap().contains("inherited"),
+                    "{reply:?}"
+                );
+            }
+            drop(remote_bridge);
             task.await.unwrap();
             ok
         }

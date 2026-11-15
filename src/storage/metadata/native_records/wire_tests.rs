@@ -32,6 +32,9 @@ async fn setup_policy(
         // The real schema migration destination retains the legacy lifecycle.
         // No raw policy edits or fabricated proof receipts.
         d.path = root.path().join("schema");
+        // This intended-positive public fixture selects a different real migration
+        // destination. Adopt there explicitly; unknown-history cases opt out.
+        crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 2000);
     }
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
