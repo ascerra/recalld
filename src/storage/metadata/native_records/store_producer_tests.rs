@@ -1151,6 +1151,11 @@ async fn native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mut
         if case == 3 {
             assert!(matches!(error, StorageError::EmbeddingProfileMismatch));
             assert_eq!(error.to_string(), "EMBEDDING_PROFILE_MISMATCH");
+        } else if case >= 5 {
+            assert!(
+                matches!(error, StorageError::CallerVectorInvalid(_)),
+                "{error:?}"
+            );
         } else {
             assert!(
                 matches!(error, StorageError::InvalidMutation(_)),
