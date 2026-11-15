@@ -1531,3 +1531,85 @@ async fn measured_source_entity_cap_parity_exclusion_and_empty_keys() {
     assert_eq!(empty.coverage.unwrap().examined, 0);
     assert!(empty.coverage.unwrap().exhausted);
 }
+
+fn canonical_eligibility_fixture() -> QueryEngine {
+    let mut records: Vec<_> = (1..=8).map(|n| rec(mid(n))).collect();
+    records[1].phase = DecayPhase::Ghost;
+    records[2].phase = DecayPhase::Tombstone;
+    records[3].phase = DecayPhase::Summary;
+    records[4].strength = 0.1;
+    records[4].tags.push(Tag::new("blocked").unwrap());
+    records[5].tags.push(Tag::new("blocked").unwrap());
+    records[7].namespace_id = other_ns(); // Not presented by namespace enumeration.
+    let vectors: Vec<_> = (1..=8).map(|n| (mid(n), 0.8)).collect();
+    graph_engine(records, &vectors, &[]).0
+}
+
+fn canonical_eligibility_query(metadata: bool) -> SearchQuery {
+    let mut q = query(serde_json::json!({
+        "text":"q", "limit":10, "graphDepth":0,
+        "filter":{"phases":["full"], "minStrength":0.5, "excludeTags":["blocked"]}
+    }));
+    if metadata {
+        q.query_mode = QueryMode::MetadataOnly;
+        q.text = None;
+    }
+    q
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_metadata_measures_presented_rows_before_filter() {
+    let engine = canonical_eligibility_fixture();
+    let out = engine
+        .search_with_semantics(canonical_eligibility_query(true), history())
+        .await
+        .unwrap();
+    assert_eq!(result_ids(&out.response), vec![mid(1), mid(7)]);
+    let metadata = &out.diagnostics.channels.as_ref().unwrap()[&RetrievalChannel::Metadata];
+    assert_eq!(metadata.examined, Some(7));
+    assert_eq!(
+        metadata.examined_unit,
+        Some(ExaminationUnit::CanonicalRecords)
+    );
+    assert_eq!(metadata.eligible, Some(2));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_shared_hybrid_work_is_not_metadata_participation() {
+    use HardFilterRejection::*;
+    let engine = canonical_eligibility_fixture();
+    let out = engine
+        .search_with_semantics(canonical_eligibility_query(false), history())
+        .await
+        .unwrap();
+    assert_eq!(result_ids(&out.response), vec![mid(1), mid(7)]);
+    let facts = out
+        .diagnostics
+        .canonical_eligibility
+        .as_ref()
+        .expect("actual hard-filter loop measurements");
+    assert_eq!(facts.examined_unit, ExaminationUnit::CanonicalRecords);
+    assert_eq!((facts.examined, facts.passed), (7, 2));
+    assert_eq!(
+        facts.first_rejections,
+        [
+            (Tombstone, 1),
+            (Ghost, 1),
+            (Phase, 1),
+            (Strength, 1),
+            (ExcludedTag, 1)
+        ]
+        .into_iter()
+        .collect()
+    );
+    let metadata = &out.diagnostics.channels.as_ref().unwrap()[&RetrievalChannel::Metadata];
+    assert_eq!(metadata.participation, ChannelParticipation::NotRequested);
+    assert_eq!(
+        (
+            metadata.examined,
+            metadata.examined_unit,
+            metadata.exhausted
+        ),
+        (None, None, None)
+    );
+}

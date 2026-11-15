@@ -47,13 +47,14 @@ pub use entity_normalize::canonicalize_entity;
 // --- CS-16 re-exports ---
 pub use error::SearchError;
 pub use pipeline::{
-    AccessRecorder, ChannelDiagnostics, ChannelParticipation, CoherentGetResponse,
-    CoherentSearchResponse, CoherentSimilarResponse, EmbeddingProviderRegistry, EntityIndexReader,
-    EntityRecallResult, ExaminationUnit, FtsAvailability, FtsDiagnostics, FtsIndexRegistry,
-    FtsResult, GraphReader, MetadataStore, NamespaceResolver, QueryEngine, RecordCache,
-    ResultProvenance, RetrievalChannel, RetrievalSemantics, RifProcessor, RifSuppression,
-    ScoredResult, SemanticsDiagnostics, SemanticsResponse, SourceCoverage, SourceResults,
-    StrengthDiagnostics, UnresolvedReason, VectorIndexRegistry, VersionMode, VersionStatus,
+    AccessRecorder, CanonicalEligibilityDiagnostics, ChannelDiagnostics, ChannelParticipation,
+    CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse,
+    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, ExaminationUnit,
+    FtsAvailability, FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, HardFilterRejection,
+    MetadataStore, NamespaceResolver, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
+    RetrievalSemantics, RifProcessor, RifSuppression, ScoredResult, SemanticsDiagnostics,
+    SemanticsResponse, SourceCoverage, SourceResults, StrengthDiagnostics, UnresolvedReason,
+    VectorIndexRegistry, VersionMode, VersionStatus,
 };
 pub(crate) use pipeline::{SimilarityScope, SimilaritySelection};
 pub use query::SearchFilter as PipelineSearchFilter;

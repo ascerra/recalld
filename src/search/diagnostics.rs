@@ -28,6 +28,32 @@ pub enum ExaminationUnit {
     EntityPostings,
     FtsRows,
     ScoredVectors,
+    /// Canonical records actually presented to the post-projection hard filter.
+    CanonicalRecords,
+}
+
+/// First actual short-circuit rejection; never IDs or predicate values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HardFilterRejection {
+    Namespace,
+    Tombstone,
+    Ghost,
+    Phase,
+    Strength,
+    Permastore,
+    Labels,
+    RequiredTag,
+    ExcludedTag,
+}
+
+/// Shared canonical eligibility work, independent of channel participation.
+/// Counts loop rows, not physical storage reads, skipped upstream work or UUIDs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalEligibilityDiagnostics {
+    pub examined_unit: ExaminationUnit,
+    pub examined: usize,
+    pub passed: usize,
+    pub first_rejections: BTreeMap<HardFilterRejection, usize>,
 }
 
 /// Facts captured by a producer during its actual scan, before union/ranking.

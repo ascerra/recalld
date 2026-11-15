@@ -48,8 +48,8 @@ mod semantics;
 #[path = "strength_tests.rs"]
 mod strength_tests;
 pub use diagnostics::{
-    ChannelDiagnostics, ChannelParticipation, ExaminationUnit, ResultProvenance, RetrievalChannel,
-    SourceCoverage, SourceResults,
+    CanonicalEligibilityDiagnostics, ChannelDiagnostics, ChannelParticipation, ExaminationUnit,
+    HardFilterRejection, ResultProvenance, RetrievalChannel, SourceCoverage, SourceResults,
 };
 #[cfg(test)]
 #[path = "semantics_tests.rs"]
