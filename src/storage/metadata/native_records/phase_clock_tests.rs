@@ -3,9 +3,9 @@
 use super::*;
 use std::sync::atomic::AtomicI64;
 
-struct RegressedClock {
-    time: AtomicI64,
-    calls: AtomicUsize,
+pub(super) struct RegressedClock {
+    pub(super) time: AtomicI64,
+    pub(super) calls: AtomicUsize,
 }
 impl Clock for RegressedClock {
     fn now_millis(&self) -> i64 {

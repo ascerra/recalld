@@ -32,7 +32,8 @@ Legacy history has no fabricated native timestamp attribution.
    public numerical outcomes and the persisted stability/anchor/history with
    the actual shared planner under the same resolved policy. Assert original1
    receipt hash, exactly one event, one clock sample and no pending accepted work
-   on successful acknowledgement. Preserve old response shapes. Independent
+   on successful acknowledgement. This comparison proves adapter/policy/clock
+   agreement, not an independent formula oracle. Preserve old response shapes. Independent
    unkeyed operation UUIDs are intentionally different; do not call their complete
    logical hashes equal without an owned-ID/reset parent.
 2. Chronology: advance the shared clock, then regress it for a quality1 feedback
@@ -40,7 +41,8 @@ Legacy history has no fabricated native timestamp attribution.
    reinforced/anchor/updated values follow the current clamp, and forget keeps
    the existing phaseTimeRule marker monotone without rewriting migration history.
    A large representable forward jump must keep strength/stability finite and
-   within established bounds. Unrepresentable times reject before canonical work.
+   within established bounds. Use actual Chrono representable extremes and existing
+   entry validation, not an artificial invalid Clock/fault framework.
 3. Retained content: create Summary/Ghost through actual canonical phase-loss
    helpers before migration, then use public feedback/forget. Summary feedback
    cannot restore text; Ghost rejects feedback; low-threshold promotion remains

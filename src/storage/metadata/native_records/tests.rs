@@ -47,9 +47,16 @@ fn fixture_with_ghost(root: &Path, ghost: bool) -> Data {
     fixture_seeded(root, ghost, |_| {})
 }
 fn fixture_seeded(root: &Path, ghost: bool, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
+    fixture_configured(root, ghost, NamespaceConfig::default_namespace(0), seed)
+}
+fn fixture_configured(
+    root: &Path,
+    ghost: bool,
+    mut config: NamespaceConfig,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
-    let mut config = NamespaceConfig::default_namespace(0);
     config.name = "native".into();
     config.embedding_dim = 4;
     let ns = engine.create_namespace(&config).unwrap();

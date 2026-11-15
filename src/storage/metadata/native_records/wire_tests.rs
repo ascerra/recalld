@@ -37,7 +37,11 @@ async fn setup_policy(
     let session = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, session.engine);
     completion(&f).rebuild_all().await.unwrap();
-    let (_, mut bridge, engine) = readers(&f, clock.clone());
+    let (bridge, state) = public_adapters(&f, clock.clone());
+    (f, d, clock, bridge, state)
+}
+fn public_adapters(f: &Fixture, clock: Arc<dyn Clock>) -> (McpBridge, crate::api::AppState) {
+    let (_, mut bridge, engine) = readers(f, clock.clone());
     let policy = NativePolicyInputs::default();
     bridge.storage = Arc::new(
         McpStorageAdapter::new(
@@ -104,7 +108,7 @@ async fn setup_policy(
         Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
         Arc::new(NoopMetricsCollector),
     );
-    (f, d, clock, bridge, state)
+    (bridge, state)
 }
 fn request(f: &Fixture, d: &Data, key: &str) -> Value {
     let control = f.storage.read().unwrap().control_state().unwrap();
@@ -729,3 +733,6 @@ async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocate
 
 #[path = "public_api1_tests.rs"]
 mod public_api1;
+
+#[path = "public_matrix_tests.rs"]
+mod public_matrix;
