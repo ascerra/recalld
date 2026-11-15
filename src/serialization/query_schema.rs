@@ -48,7 +48,9 @@ pub(crate) fn output_schema(similar: bool) -> Value {
         }
     }
     alternatives.push(max.into());
-    let generation = json!({"type":"string","pattern":format!("^({})$", alternatives.join("|"))});
+    // `$` admits a trailing newline in common JSON Schema regex engines.
+    let generation =
+        json!({"type":"string","pattern":format!("^({})(?![\\s\\S])", alternatives.join("|"))});
     let phase = json!({"enum":["full","summary","ghost","tombstone"]});
     let version = json!({"enum":["legacy_access_v1","explicit_feedback_v2"]});
     let access = json!({"enum":["direct_retrieval","associative_retrieval"]});
@@ -181,6 +183,9 @@ mod tests {
                 values.push(v);
             }
             if !similar {
+                for suffix in ["", "\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+                    values.push(json!({"contractVersion":2,"embedding":[1],"embeddingProfileId":format!("ep1:{}{suffix}","a".repeat(64))}));
+                }
                 values.extend([json!({"contractVersion":2}),json!({"contractVersion":2,"query":"hello"}),json!({"contractVersion":2,"query":"   "}),json!({"contractVersion":2,"queryMode":"metadata_only","tags":[]}),json!({"contractVersion":2,"queryMode":"metadata_only","query":"hello","tags":["allow"]}),json!({"contractVersion":2,"queryMode":"metadata_only","minStrength":0}),json!({"contractVersion":2,"queryMode":"metadata_only","permastoreOnly":false}),json!({"contractVersion":2,"queryMode":"metadata_only","permastoreOnly":true})]);
             }
             for value in values {
@@ -190,6 +195,13 @@ mod tests {
                     super::super::query::QueryRequest::from_mcp(&value, "default").is_ok()
                 };
                 cases.push(json!({"schema":input,"value":value,"valid":valid}));
+            }
+            for suffix in ["\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+                let value = format!("1{suffix}");
+                assert!(crate::storage::control::Generation::try_from(value.clone()).is_err());
+                cases.push(
+                    json!({"schema":schema["$defs"]["generation"],"value":value,"valid":false}),
+                );
             }
         }
         if let Some(dir) = std::env::var_os("RECALLD_QUERY_SCHEMA_FIXTURES") {

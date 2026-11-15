@@ -32,7 +32,7 @@ for path in sorted(root.glob("*.json")):
         bad["undeclared"] = True
         assert not validator.is_valid(bad), path.name
         if "readGeneration" in value:
-            for generation in [1, "01", "-1", "9223372036854775808"]:
+            for generation in [1, "01", "-1", "9223372036854775808", "1\n", "1\r", "1\r\n", "1\u2028", "1\u2029"]:
                 bad = copy.deepcopy(value)
                 bad["readGeneration"]["generation"] = generation
                 assert not validator.is_valid(bad), (path.name, generation)

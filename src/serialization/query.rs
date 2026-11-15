@@ -506,7 +506,7 @@ pub(crate) fn input_schema(mcp: bool) -> Value {
         "query":{"type":"string","minLength":1,"maxLength":FULL_TEXT_MAX_BYTES,"description":"UTF-8 byte limit enforced by server"},
         "ftsQuery":{"type":"string","minLength":1,"maxLength":FULL_TEXT_MAX_BYTES},
         "embedding":{"type":"array","minItems":1,"maxItems":8192,"items":{"type":"number","minimum":-(f32::MAX as f64),"maximum":f32::MAX as f64}},
-        "embeddingProfileId":{"type":"string","pattern":"^ep1:[0-9a-f]{64}$"},
+        "embeddingProfileId":{"type":"string","pattern":"^ep1:[0-9a-f]{64}(?![\\s\\S])"},
         "queryMode":{"enum":["embedding_plus_metadata","embedding_only","metadata_only"],"default":"embedding_plus_metadata"},
         "versionMode":{"enum":["current","history"],"default":"current"},
         "limit":{"type":"integer","minimum":1,"maximum":MAX_SEARCH_LIMIT,"default":10},
