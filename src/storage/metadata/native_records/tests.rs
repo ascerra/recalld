@@ -18,6 +18,10 @@ mod readers;
 
 #[path = "batch_tests.rs"]
 mod batches;
+
+#[path = "sweep_tests.rs"]
+mod sweep;
+
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 
