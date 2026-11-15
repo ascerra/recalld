@@ -2,7 +2,7 @@
 
 Implementation candidate on `0d50ee864f83514dba23ffe73e57abea4be29e4f`:
 actual143 `0f34cd30e48b59dd655b3285d00f8b99e92c32d1` plus actual135
-`24da9206ba141493cdb9ca988188be6d5690a814`. Validation is in progress. This
+`24da9206ba141493cdb9ca988188be6d5690a814`. Runtime3e5fd806 passed the sealed validation in ../evidence/inherited-policy-adoption/README.md. This
 candidate does not enable ordinary native startup or public API2.
 
 The genuine143 restart probe at audit commit528cf28 observed inherited multiplier

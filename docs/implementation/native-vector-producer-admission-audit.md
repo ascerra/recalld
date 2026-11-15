@@ -186,3 +186,16 @@ explicit operator remedy semantics. Namespace cutover is only the conditional
 preference until those points have an executable proof. Descriptor/digest equality
 alone does not attest provenance or model authenticity. Finish policy adoption
 independently; no certification schema is included in that slice.
+
+Curie's separate legacy-disk API2 inventory has the same evidence problem without
+native Bound metadata: schema-less namespace rows have no immutable profile.
+A1's source-only recommendation is to reuse the existing explicit offline,
+fresh-destination schema migration and justified profile-attestation path, or
+actual re-embedding, rather than introduce a second legacy profile/certificate
+table. A4 section9 expressly reserves the unverified compatibility lane to
+legacy-disk API1. Unknown-profile semantic/advisory work must reject with a useful
+remediation diagnostic before fresh work; supported nonsemantic legacy API2
+operations remain independently routed. This is a per-operation admission
+boundary, not a blanket assertion that API2 requires native disk. Main/A4 review
+of this proposal and the future producer consumer is still required. Existing
+AlreadyBound attestation cannot repair known wrong native148 vectors.
