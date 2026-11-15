@@ -35,7 +35,8 @@
     },
     "clippy.log": {
       "sha256": "2ae7ea60d99010bac750e98cac016b2a94edecb6d66ca0c9f5cd6dd6ace4eb46",
-      "bytes": 965794
+      "bytes": 965794,
+      "stored_excerpt": "clippy.log.excerpt"
     },
     "nonsemantic.log": {
       "sha256": "bd420e1c982b33e9114ba300fadbeb793e716b0d8227e0da27df00a83bf51e00",
