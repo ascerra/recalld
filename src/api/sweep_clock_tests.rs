@@ -182,7 +182,7 @@ fn canonical_snapshot(f: &Fixture) -> Vec<u8> {
     use redb::ReadableTable;
     let engine = f.storage.read().unwrap();
     let (_copy, metadata) =
-        crate::storage::validation::inspect_database_copy(&engine.db_path().join("meta.db"), false)
+        crate::storage::validation::inspect_database_copy(&engine.db_path().join("meta.db"), true)
             .unwrap();
     let read = metadata.begin_read().unwrap();
     let mut tables = Vec::new();
