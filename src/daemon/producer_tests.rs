@@ -3,6 +3,108 @@ use crate::storage::StorageEngine as _;
 use crate::test_support::{Fixture, StubBridge};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn trace_provenance_actual_daemon_after_unsubscribed_first_callsite() {
+    const CHILD: &str = "RECALLD_DAEMON_COLD_TRACE_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // Cold process-global callsites, even when the parent runs a full suite.
+        // The marker belongs only to this subprocess, never the parent env.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "daemon::server::producer_tests::trace_provenance_actual_daemon_after_unsubscribed_first_callsite",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "cold daemon child failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    use tracing::instrument::WithSubscriber;
+    let capture = crate::performance::tests::Capture::default();
+    let dispatch = tracing::Dispatch::new(crate::performance::tests::subscriber(capture.clone()));
+    assert!(
+        !std::thread::spawn(crate::performance::enabled)
+            .join()
+            .unwrap()
+    );
+    let enabled_under_capture =
+        tracing::dispatcher::with_default(&dispatch, crate::performance::enabled);
+    let fx = Fixture::new();
+    let shared = Arc::new(StubBridge::default());
+    let (mut client, stream) = tokio::net::UnixStream::pair().unwrap();
+    let (shutdown, rx) = watch::channel(false);
+    let connections = Arc::new(AtomicU32::new(1));
+    let task = tokio::spawn(
+        handle_connection(
+            shared.clone(),
+            Arc::new(fx.storage_adapter()),
+            shared.clone(),
+            shared,
+            stream,
+            connections.clone(),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            shutdown,
+        )
+        .with_subscriber(dispatch),
+    );
+    let request = DaemonRequest {
+        jsonrpc: "2.0".into(),
+        id: 1,
+        method: "store_memory".into(),
+        params: serde_json::json!({"summary":"cold-daemon-fixture", "tags":[],
+            "namespace":"default", "embedding":[1.0,0.0,0.0,0.0], "checkDuplicates":false}),
+    };
+    let bytes = serde_json::to_vec(&request).unwrap().len();
+    write_framed_request(&mut client, &request, MAX_MESSAGE_SIZE)
+        .await
+        .unwrap();
+    let payload = read_frame(&mut client, MAX_MESSAGE_SIZE).await.unwrap();
+    let response: DaemonResponse = serde_json::from_slice(&payload).unwrap();
+    assert!(response.error.is_none(), "{response:?}");
+    drop(client);
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(connections.load(Ordering::Relaxed), 0);
+    assert_eq!(fx.storage.read().unwrap().scan_all().unwrap().len(), 1);
+    assert!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    let raw = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+    let rows: Vec<serde_json::Value> = raw
+        .lines()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    eprintln!(
+        "ACTUAL_DAEMON enabled_under_capture={enabled_under_capture} captured_rows={} rows={rows:?}",
+        rows.len()
+    );
+    assert!(rows.iter().any(|e| e["fields"]["kind"] == "transport_input"
+        && e["fields"]["source_bytes"] == bytes
+        && e["fields"]["framing_bytes"] == 4));
+    assert!(
+        rows.iter()
+            .any(|e| e["fields"]["kind"] == "transport_output"
+                && e["fields"]["phase"] == "complete"
+                && e["fields"]["source_bytes"] == payload.len())
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn online_producer_actual_daemon_socket_frames_include_complete_delivery() {
     let fx = Fixture::new();
     let shared = Arc::new(StubBridge::default());

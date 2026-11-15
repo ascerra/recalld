@@ -78,6 +78,16 @@ fn sampler() -> &'static Sampler {
     })
 }
 fn target_enabled() -> bool {
+    // Contain tracing-core#3611: an untraced thread must not first register
+    // this callsite against NoSubscriber while a scoped Dispatch is alive.
+    // Keep the global/static fast path before inspecting thread-local state.
+    if tracing::Level::TRACE > tracing::level_filters::STATIC_MAX_LEVEL
+        || tracing::Level::TRACE > tracing::level_filters::LevelFilter::current()
+        || tracing::dispatcher::get_default(|d| d.is::<tracing::subscriber::NoSubscriber>())
+    {
+        return false;
+    }
+    // Outside get_default: nesting would trigger dispatcher reentrancy suppression.
     tracing::enabled!(target: "recalld::performance", tracing::Level::TRACE)
 }
 pub(crate) fn enabled() -> bool {
