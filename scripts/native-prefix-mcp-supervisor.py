@@ -108,7 +108,7 @@ warm_file_enabled = false
         documentPreprocessing=dict(version="recalld-document-v1",prefix="a6-document:"),
         queryPreprocessing=dict(version="recalld-query-v1",prefix="a6-query:"),normalization="l2_unit_v1")
     seed=dict(fixtureVersion=1,profile=profile,attest=True,sources=[dict(sourceId=s["sourceId"],namespace=s["namespace"],summary=s["summary"],fullText=s.get("fullText"),embedding=s["embedding"]) for s in actor["sources"]])
-    if sweep: seed.update(fixtureVersion=2, namespaceDecayMultipliers={"foreign":0.0})
+    if sweep: seed.update(fixtureVersion=3, namespaceDecayMultipliers={"foreign":0.0}, inheritedDecayAdoptions={"default":1.0})
     children=[]; negatives=[]; comparisons=[]
     result=dict(status="running",track=sweep["TRACK"] if sweep else TRACK,environmentHash=environment,independentNativeGenesis=False)
     save=h["save"]
@@ -206,7 +206,37 @@ warm_file_enabled = false
         comparison=dict(outputs=outputs,state=state,logicalHash=snap["logicalHash"],provider=[dict(request=json.loads(v["requestBody"]),status=v["status"],vectors=v["responseVectors"]) for v in provider])
         save(owner.output/"suffix.json",comparison);return comparison
     try:
+        if sweep:
+            unknown=copy.deepcopy(seed);unknown.update(fixtureVersion=2);unknown.pop("inheritedDecayAdoptions")
+            unknown_root,_=build_prefix("unknown-inherited-prefix",unknown)
+            before_unknown=inventory(unknown_root)
+            unknown_owner=child("unknown-inherited-prefix",root=unknown_root,native=True)
+            assert unknown_owner.control.call("capabilities",{}) == expected_capabilities
+            before_state=unknown_owner.control.call("inspect",{})
+            provider_count=len(provider_rows())
+            try:
+                unknown_owner.control.call("sweep",dict(deadlineMs=30000))
+            except ValueError:
+                # Preserve the full typed failed-sweep wire rather than claiming
+                # that an unknown policy forbids every nonprojecting read/open.
+                wire=h["rows"](unknown_owner.output/"control-wire.jsonl")
+                failure=wire[-1]["response"]["error"]
+                assert failure["code"] == "SWEEP_FAILED" and "inherited" in json.dumps(failure)
+                assert failure["retryable"] is False
+            else:
+                raise AssertionError("unknown inherited policy sweep succeeded")
+            assert unknown_owner.control.call("inspect",{}) == before_state
+            assert len(provider_rows()) == provider_count
+            save(evaluator/"unknown-inherited-sweep.json",dict(failure=failure,stateUnchanged=True,providerCalls=0))
+            unknown_owner.close()
+            unchanged(unknown_root,before_unknown)
+            negatives.append(dict(case="unknown-inherited-prefix-sweep",code="SWEEP_FAILED",providerCalls=0))
         root,provenance=build_prefix("original",seed); mappings=provenance["mappings"]
+        if sweep:
+            adoption=provenance["inheritedPolicyAdoptions"]
+            assert len(adoption)==2 and adoption[1]["historicalReceiptBytesPreserved"] and adoption[1]["foreignNamespaceUnchanged"]
+            assert adoption[0]["request"]["preview"]["prior"] is None
+            save(evaluator/"explicit-policy-adoption.json",adoption)
         original=child("original",root=root,native=True); initial_state,checkpoint=admit(original)
         # This is the actual source-owner lock gate, before any clone is installed.
         reject("old-owner",checkpoint=checkpoint)

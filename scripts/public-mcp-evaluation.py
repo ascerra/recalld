@@ -60,7 +60,7 @@ def exact_keys(value, keys):
 def track_profile(track):
     if track == NATIVE_SWEEP["TRACK"]:
         versions, capabilities = track_profile(NATIVE["TRACK"])
-        return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1, physicalCompactionContractVersion=1, nativePrefixFixtureVersion=2), dict(capabilities,
+        return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1, physicalCompactionContractVersion=1, nativePrefixFixtureVersion=3, inheritedPolicyAdoptionVersion=1), dict(capabilities,
             nativeSweep=True, nativePhysicalCompaction=True, sweepDecayRateMultiplier=1.0, namespaceDecayMultipliers={"foreign":0.0})
     if track == NATIVE["TRACK"]:
         versions, capabilities = track_profile(RESET["TRACK"])

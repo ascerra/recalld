@@ -14,6 +14,8 @@ class NativeSweepTests(unittest.TestCase):
         self.assertEqual(versions["canonicalSchemaVersion"], 2)
         self.assertEqual(versions["publicContractVersion"], 1)
         self.assertEqual(versions["sweepOriginalContractVersion"], 1)
+        self.assertEqual(versions["nativePrefixFixtureVersion"], 3)
+        self.assertEqual(versions["inheritedPolicyAdoptionVersion"], 1)
         self.assertTrue(caps["nativeSweep"])
         self.assertTrue(caps["nativePhysicalCompaction"])
         self.assertEqual(versions["physicalCompactionContractVersion"], 1)
@@ -59,6 +61,8 @@ class NativeSweepTests(unittest.TestCase):
                        lambda v: v["capabilities"].update(automaticSweep=True),
                        lambda v: v["versions"].update(sweepOriginalContractVersion=2),
                        lambda v: v["versions"].update(canonicalSchemaVersion=1),
+                       lambda v: v["versions"].update(nativePrefixFixtureVersion=2),
+                       lambda v: v["versions"].update(inheritedPolicyAdoptionVersion=0),
                        lambda v: v.update(track="serialized-native-sweep-synthetic-diagnostic-v1")):
             candidate = copy.deepcopy(base.manifest); change(candidate)
             with self.assertRaises(ValueError):
