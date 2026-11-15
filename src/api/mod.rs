@@ -150,3 +150,5 @@ mod vector_query_tests;
 
 #[cfg(test)]
 mod legacy_label_tests;
+
+pub(crate) mod native_lifecycle;

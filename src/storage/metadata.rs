@@ -12,6 +12,7 @@ mod canonical_vector_snapshot;
 mod catalog;
 pub(crate) mod effects;
 mod insertion;
+mod legacy_lifecycle;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
 mod native_catalog;
@@ -128,6 +129,11 @@ pub struct MetadataStore {
 // ── Constructor ─────────────────────────────────────────────────────
 
 impl MetadataStore {
+    /// Immutable entry mode, selected only after strict native preflight.
+    pub(crate) fn uses_native_lifecycle(&self) -> bool {
+        self.native_lifecycle_only
+    }
+
     /// Open or create meta.db at the given path.
     ///
     /// - Sets a 16 MB read cache (covers top B+tree levels).

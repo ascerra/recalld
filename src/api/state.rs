@@ -72,6 +72,28 @@ pub trait SearchPipeline: Send + Sync {
         Ok(None)
     }
 
+    async fn prepare_coherent_get_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _requested_access: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentGetResponse>, SearchError> {
+        Ok(None)
+    }
+    async fn prepare_coherent_similar_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _limit: usize,
+        _min_score: Option<f32>,
+        _requested_access: bool,
+        _include_embeddings: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSimilarResponse>, SearchError> {
+        Ok(None)
+    }
+
     async fn prepare_search_with_work(
         &self,
         query: SearchQuery,
@@ -261,6 +283,15 @@ pub trait StorageEngine: Send + Sync {
     {
         Err(crate::search::exact_scan::ExactScanError::Unavailable)
     }
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
     async fn insert_memory_with_work(
         &self,
         namespace_id: NamespaceId,
@@ -549,6 +580,15 @@ pub trait RelationshipGraph: Send + Sync {
 /// FSRS decay engine for reinforcement and strength recalculation.
 #[async_trait::async_trait]
 pub trait FsrsEngine: Send + Sync {
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
     async fn reinforce_with_work(
         &self,
         id: MemoryId,

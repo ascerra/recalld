@@ -1891,6 +1891,21 @@ pub(crate) async fn dispatch_v2(
         let (status, envelope) = crate::serialization::native_batch::response(result);
         return crate::serialization::native_batch::mcp_result(status, &envelope);
     }
+
+    let lifecycle = match name {
+        "forget_memory" => Some(crate::serialization::native_lifecycle::Operation::Forget),
+        "reinforce_memory" => Some(crate::serialization::native_lifecycle::Operation::Feedback),
+        _ => None,
+    };
+    if let Some(operation) = lifecycle {
+        return crate::mcp::native_lifecycle_adapter::dispatch(
+            bridge.storage.as_ref(),
+            operation,
+            arguments,
+        )
+        .await
+        .mcp();
+    }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{
         contract::{CommitState, Envelope, ErrorCategory, ExecutionError},

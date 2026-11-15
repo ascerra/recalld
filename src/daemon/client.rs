@@ -1005,6 +1005,10 @@ mod tests {
             "reinforce_memory",
             "delete_memory",
             "delete_memories",
+            "forget_native_v1",
+            "feedback_native_v1",
+            "forget_lifecycle_v1",
+            "feedback_lifecycle_v1",
             "shutdown",
             // Not mutations, but not effect-free either: both record an
             // access per result, which moves the decay schedule.

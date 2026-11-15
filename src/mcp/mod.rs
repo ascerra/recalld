@@ -50,3 +50,7 @@ pub enum McpError {
 pub(crate) mod native_advisory;
 
 pub(crate) mod batch_budget;
+pub(crate) mod native_lifecycle_adapter;
+
+#[cfg(test)]
+mod legacy_lifecycle_tests;

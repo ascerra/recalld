@@ -98,6 +98,24 @@ pub trait StorageEngine: Send + Sync {
         Err(crate::serialization::native_batch::BatchFailure::unavailable())
     }
 
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
     /// Old implementations cannot manufacture durable receipts. The actual
     /// direct and daemon adapters opt in; callers never fall back after a write.
     fn supports_durable_batches(&self) -> bool {
