@@ -97,7 +97,9 @@ async fn legacy_compound_origin_export_genuine_old_one() {
                 }],
             );
             input.expected_generation = with_cas.then_some(before.committed_generation);
-            let outcome = adapter.mutate_batch(input.clone()).await.unwrap();
+            // Historical Some-CAS is supported by this actual private runner;
+            // the old public adapter intentionally does not advertise it.
+            let outcome = adapter.run_batch(input.clone()).await.unwrap();
             assert_eq!(
                 outcome
                     .reservation_receipt
@@ -113,7 +115,7 @@ async fn legacy_compound_origin_export_genuine_old_one() {
             );
             assert_eq!(outcome.failed, usize::from(invalid));
             assert_eq!(outcome.succeeded, usize::from(!invalid));
-            let replay = adapter.mutate_batch(input.clone()).await.unwrap();
+            let replay = adapter.run_batch(input.clone()).await.unwrap();
             assert_eq!(replay.batch_operation_id, outcome.batch_operation_id);
             cases.push(json!({"input":input,"outcome":outcome,"before":before}));
         }
