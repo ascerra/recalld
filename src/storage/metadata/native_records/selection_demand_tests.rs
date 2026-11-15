@@ -6,19 +6,21 @@ use crate::model::EdgeType;
 // from other tests and cannot count their independent stores.
 #[tokio::test]
 async fn selection_demand_actual_single_reads_edges_and_reopen_replay() {
-    actual(false).await;
+    actual(false, true).await;
+    actual(false, false).await;
 }
 
 #[tokio::test]
 async fn selection_demand_actual_batch_reads_edges_and_reopen_replay() {
-    actual(true).await;
+    actual(true, true).await;
+    actual(true, false).await;
 }
 
-async fn actual(batch: bool) {
+async fn actual(batch: bool, generate: bool) {
     let mut mismatches = Vec::new();
     for mode in ["off", "entity", "temporal", "semantic", "advisory"] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut s = open(&d, clock.clone());
         let mut peer = input(&d);
@@ -40,15 +42,36 @@ async fn actual(batch: bool) {
         config.graph.temporal_window_ms = 10;
         let p = provider(&d);
         let a = adapter(&f, p.clone(), clock.clone(), config);
-        let mut input = single_input(&d, true);
+        let mut input = single_input(&d, generate);
         input.insert.memory.parent_id = None;
         input.insert.memory.created_at = Some(86_400_000);
         input.insert.entities = vec!["shared".into()];
+        input.insert.topics.clear();
+        input.insert.emotions.clear();
+        input.insert.memory.summary = "native demand".into();
+        input.insert.memory.full_text = Some("original body".into());
+        input.insert.memory.tags = vec!["raw".into()];
         input.check_duplicates = mode == "advisory";
         let key = single_context(&f, &d, mode);
         let mut request = request(&f, mode);
-        request.items[0] = json!({"summary":"native demand", "entities":["shared"],
-            "checkDuplicates":mode == "advisory"});
+        request.items[0] = json!({"summary":"native demand", "fullText":"original body",
+            "tags":["raw"], "entities":["shared"], "checkDuplicates":mode == "advisory"});
+        if !generate {
+            request.items[0]["embedding"] = json!([2., 0., 0., 0.]);
+            request.items[0]["embeddingProfile"] = serde_json::to_value(&d.profile).unwrap();
+        }
+        let document = input.insert.document_v1();
+        let certification = f
+            .storage
+            .read()
+            .unwrap()
+            .get_namespace(d.ns)
+            .unwrap()
+            .unwrap()
+            .schema
+            .unwrap()
+            .vector_certification
+            .unwrap();
         take_reads();
         let receipt = if batch {
             let out = a.run_batch(request.clone()).await.unwrap();
@@ -103,7 +126,44 @@ async fn actual(batch: bool) {
             transition.advisory.as_ref().map(Vec::len),
             (mode == "advisory").then_some(2)
         );
-        assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(p.calls.load(Ordering::SeqCst), usize::from(generate));
+        let execution = transition.vector_execution.as_ref().unwrap();
+        assert_eq!(execution.certification, certification);
+        use crate::storage::vector_certification::{DocumentSource, VectorSource};
+        match &execution.source {
+            VectorSource::Generated { document: evidence } if generate => {
+                // Provider returns raw [2,0,0,0]. Selection must normalize a clone:
+                // changing/reconstructing the sealed result would fail final commit.
+                assert_eq!(*p.texts.lock().unwrap(), vec![document.clone()]);
+                assert_eq!(
+                    evidence.document_sha256,
+                    crate::storage::native_records::hash_bytes(document.as_bytes())
+                );
+                assert_eq!(evidence.source, DocumentSource::CallerDocumentV1);
+            }
+            VectorSource::Supplied { profile_id } if !generate => {
+                assert_eq!(profile_id, &d.profile.profile_id().unwrap());
+                assert!(p.texts.lock().unwrap().is_empty());
+                assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+            }
+            source => panic!("wrong vector source {source:?}, generated={generate}"),
+        }
+        let row = f
+            .storage
+            .read()
+            .unwrap()
+            .get_record(transition.memory_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .get_vector(d.ns, row.vector_slot)
+                .unwrap()
+                .unwrap(),
+            vec![1., 0., 0., 0.]
+        );
         let before = f.storage.read().unwrap().control_state().unwrap();
         drop(a);
         drop(f);
@@ -144,7 +204,7 @@ async fn actual(batch: bool) {
 #[test]
 fn selection_demand_uncomputed_scores_cannot_be_used_and_off_still_validates_input() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let mut input = single_input(&d, false);
@@ -189,6 +249,76 @@ fn selection_demand_uncomputed_scores_cannot_be_used_and_off_still_validates_inp
     ));
     assert_eq!(s.metadata().control_state().unwrap(), before);
     assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+}
+
+#[tokio::test]
+async fn selection_demand_all_off_uncertified_actual_consumers_reject_before_work() {
+    fn files(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+        let mut result = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                result.extend(files(&path));
+            } else {
+                result.insert(path.clone(), std::fs::read(path).unwrap());
+            }
+        }
+        result
+    }
+    // Deliberately retain the genuine uncertified setup for these negatives.
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(tempfile::tempdir().unwrap(), s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.autolink_enabled = false;
+    let a = adapter(&f, p.clone(), clock.clone(), config);
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let before_files = files(&d.path);
+    let sampled = clock.0.load(Ordering::SeqCst);
+    for generate in [true, false] {
+        let mut input = single_input(&d, generate);
+        input.check_duplicates = false;
+        take_reads();
+        let error = a
+            .store_native_single(
+                single_context(&f, &d, "uncertified"),
+                input,
+                NativePolicyInputs::default(),
+                None,
+            )
+            .await
+            .err()
+            .expect("fresh uncertified single must reject");
+        assert!(
+            matches!(error, StorageError::VectorCertificationRequired { namespace_id }
+            if namespace_id == d.ns.get())
+        );
+        let mut r = request(&f, "uncertified");
+        r.items[0] = json!({"summary":"uncertified", "checkDuplicates":false});
+        if !generate {
+            r.items[0]["embedding"] = json!([2., 0., 0., 0.]);
+            r.items[0]["embeddingProfile"] = json!(d.profile);
+        }
+        let error = a
+            .run_batch_typed(r)
+            .await
+            .err()
+            .expect("fresh uncertified batch must reject");
+        assert!(matches!(error,
+            crate::mcp::bridge_adapters::StoreWriteError::Canonical(
+                StorageError::VectorCertificationRequired { namespace_id })
+            if namespace_id == d.ns.get()));
+        assert_eq!(take_reads(), (0, 0));
+        assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+        assert_eq!(clock.0.load(Ordering::SeqCst), sampled);
+        assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+        assert_eq!(files(&d.path), before_files);
+    }
 }
 
 // Inject a genuine candidate-reference/payload mismatch only after the actual
@@ -243,7 +373,7 @@ async fn selection_demand_actual_consumers_keep_semantic_and_advisory_corruption
     for batch in [false, true] {
         for advisory in [false, true] {
             let root = tempfile::tempdir().unwrap();
-            let d = fixture(root.path());
+            let d = certified_fixture(root.path());
             let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
             let s = open(&d, clock.clone());
             let f = Fixture::from_open_engine(tempfile::tempdir().unwrap(), s.engine);
