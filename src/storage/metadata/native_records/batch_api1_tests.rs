@@ -166,22 +166,22 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
                 total = total.checked_add(file.size()).unwrap();
                 assert!(total <= 8 * 1024 * 1024);
             }
-            zip.extract(&source).unwrap();
             use sha2::Digest;
+            let hash = |bytes: Vec<u8>| {
+                sha2::Sha256::digest(bytes)
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            };
             assert_eq!(
-                format!(
-                    "{:x}",
-                    sha2::Sha256::digest(std::fs::read(archive).unwrap())
-                ),
+                hash(std::fs::read(archive).unwrap()),
                 provenance["archive_sha256"].as_str().unwrap()
             );
-            for (name, hash) in expected {
+            zip.extract(&source).unwrap();
+            for (name, expected) in expected {
                 assert_eq!(
-                    format!(
-                        "{:x}",
-                        sha2::Sha256::digest(std::fs::read(source.join(name)).unwrap())
-                    ),
-                    hash.as_str().unwrap()
+                    hash(std::fs::read(source.join(name)).unwrap()),
+                    expected.as_str().unwrap()
                 );
             }
             (artifact, source)
@@ -587,9 +587,12 @@ async fn api1_batch_malformed_known_reply_preserves_receipts_and_unknown_ids() {
         };
         let (status, error) = Reply::decode(value, &r).response(Surface::Rest);
         assert_eq!(status, 503);
-        assert_eq!(error["error"]["commitState"], "committed");
-        assert_eq!(error["batch"]["items"][0]["receipt"], canonical(&receipt));
-        assert_eq!(error["batch"]["items"][0]["ready"], false);
+        assert_eq!(error["error"]["commitState"], "unknown");
+        assert_eq!(
+            error["receivedEvidence"]["items"][0]["receipt"],
+            canonical(&receipt)
+        );
+        assert!(error.get("batch").is_none());
         assert!(error.get("readiness").is_none());
     }
     let mut unresolved = out;
@@ -723,7 +726,7 @@ async fn api1_batch_projection_enforces_display_limits_keeps_full_receipt() {
         panic!()
     };
     let receipt = out.outcome.items[0].receipt.clone().unwrap();
-    for case in 0..8 {
+    for case in 0..10 {
         let mut bad = out.clone();
         let result = bad.outcome.items[0].result.as_mut().unwrap();
         match case {
@@ -748,18 +751,139 @@ async fn api1_batch_projection_enforces_display_limits_keeps_full_receipt() {
                     field: None,
                 })
             }
-            _ => {
+            7 => {
                 bad.outcome.items[0].error = Some(crate::storage::batch::BatchError {
                     code: "INDEX_NOT_READY".into(),
                     field: Some("x".repeat(129)),
                 })
             }
+            8 => {
+                result["supersedes"] =
+                    json!({"target":d.parent,"status":"applied","unknown":"x".repeat(1000)})
+            }
+            _ => {
+                result["nearDuplicates"] = json!({"threshold":0.85,"matches":[{"id":d.parent,"score":1.,"summary":"ok","unknown":"x".repeat(1000)}]})
+            }
         }
         let (status, value) = Reply::owned(Ok(bad)).response(Surface::Rest);
         assert_eq!(status, 503, "case {case}");
-        assert_eq!(value["error"]["commitState"], "committed");
-        assert_eq!(value["batch"]["items"][0]["receipt"], canonical(&receipt));
-        assert!(value["batch"]["items"][0].get("result").is_none());
+        assert_eq!(value["error"]["commitState"], "unknown");
+        assert_eq!(
+            value["receivedEvidence"]["items"][0]["receipt"],
+            canonical(&receipt)
+        );
+        assert!(
+            value["receivedEvidence"]["items"][0]
+                .get("result")
+                .is_none()
+        );
         assert_eq!(value["warnings"][0], "BATCH_DISPLAY_OMITTED");
     }
+}
+
+#[tokio::test]
+async fn api1_batch_malformed_remote_evidence_never_claims_commit_or_counts() {
+    use crate::serialization::batch_api1::{Reply, Surface};
+    let (_d, f, a, _p, _clock) = setup().await;
+    let r = api1_request(
+        &f,
+        vec![json!({"summary":"remote evidence", "checkDuplicates":false})],
+    );
+    let Reply::Owned(Ok(out)) = a.store_batch_api1(r.clone()).await else {
+        panic!()
+    };
+    let original = canonical(&Reply::Owned(Ok(out.clone())));
+    for case in 0..7 {
+        let mut value = original.clone();
+        match case {
+            0 => value["result"]["Ok"]["succeeded"] = json!(99),
+            1 => {
+                value["result"]["Ok"]["items"][0]["receipt"]["storeId"] =
+                    json!(uuid::Uuid::new_v4())
+            }
+            2 => value["result"]["Ok"]["items"][0]["receipt"]["receiptVersion"] = json!(999),
+            3 => value["result"]["Ok"]["items"][0]["namespaceId"] = json!(999),
+            4 => {
+                value["result"]["Ok"]["reservationReceipt"]["outcome"]["caller_hash"] =
+                    json!(vec![0u8; 32])
+            }
+            5 => {
+                value["result"]["Ok"]["items"][0]["result"]["nearDuplicates"] =
+                    json!({"threshold":0.85,"matches":[],"unknown":"x".repeat(20_000)})
+            }
+            _ => value["result"]["Ok"]["warnings"] = json!(["x".repeat(20_000)]),
+        }
+        let expected = value["result"]["Ok"]["items"][0]["receipt"].clone();
+        let (status, error) = Reply::decode(value, &r).response(Surface::Rest);
+        assert_eq!(status, 503, "case {case}: {error}");
+        assert_eq!(error["error"]["commitState"], "unknown", "case {case}");
+        assert_eq!(
+            error["receivedEvidence"]["items"][0]["receipt"], expected,
+            "case {case}"
+        );
+        assert!(error.get("batch").is_none());
+        assert!(error.get("readiness").is_none());
+        assert!(error["receivedEvidence"].get("succeeded").is_none());
+        assert!(
+            error["receivedEvidence"]["items"][0]
+                .get("result")
+                .is_none()
+        );
+        assert!(serde_json::to_vec(&error).unwrap().len() < 20_000);
+    }
+}
+
+#[tokio::test]
+async fn api1_batch_remote_request_binding_keeps_only_matching_reservation_committed() {
+    use crate::serialization::{
+        batch_api1::{Reply, Surface},
+        native_batch::BatchFailure,
+    };
+    let (_d, f, a, _p, _clock) = setup().await;
+    let r = api1_request(
+        &f,
+        vec![json!({"summary":"bound caller", "checkDuplicates":false})],
+    );
+    let Reply::Owned(Ok(out)) = a.store_batch_api1(r.clone()).await else {
+        panic!()
+    };
+    let original = canonical(&Reply::Owned(Ok(out.clone())));
+    assert_eq!(
+        Reply::decode(original.clone(), &r)
+            .response(Surface::Rest)
+            .0,
+        201
+    );
+    for case in 0..4 {
+        let mut changed = r.clone();
+        match case {
+            0 => changed.input.items[0]["summary"] = json!("different caller"),
+            1 => changed.input.items[0]["namespace"] = json!("other"),
+            2 => changed.input.store_id = Some(uuid::Uuid::new_v4()),
+            _ => changed.input.batch_operation_id = Some(uuid::Uuid::new_v4()),
+        }
+        let (status, value) = Reply::decode(original.clone(), &changed).response(Surface::Rest);
+        assert_eq!(status, 503);
+        assert_eq!(value["error"]["commitState"], "unknown");
+        assert_eq!(
+            value["receivedEvidence"]["reservationReceipt"],
+            canonical(&out.outcome.reservation_receipt)
+        );
+    }
+    let mut failure = BatchFailure::uncertain();
+    failure.reservation_receipt = out.outcome.reservation_receipt.clone();
+    let (status, valid) =
+        Reply::decode(canonical(&Reply::Owned(Err(failure.clone()))), &r).response(Surface::Rest);
+    assert_eq!(status, 503);
+    assert_eq!(valid["error"]["commitState"], "committed");
+    assert_eq!(valid["commitEvidenceScope"], "reservation");
+    assert!(valid.get("batch").is_none());
+    let receipt = failure.reservation_receipt.as_mut().unwrap();
+    receipt.receipt_version = 999;
+    let expected = canonical(receipt);
+    let (_, invalid) =
+        Reply::decode(canonical(&Reply::Owned(Err(failure))), &r).response(Surface::Rest);
+    assert_eq!(invalid["error"]["commitState"], "unknown");
+    assert_eq!(invalid["reservationReceipt"], expected);
+    assert!(invalid.get("readiness").is_none());
 }

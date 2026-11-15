@@ -27,8 +27,12 @@ exact legacy mutate_batch request only if representable, selected before sending
 No error, lost reply or malformed reply triggers a second mutation. The new alias
 requires full receipt-frame negotiation before work; raw legacy insertion on a
 native owner rejects before reservation/provider. Already decoded receipts survive
-malformed live readiness/projection with unknown readiness rather than false
-rollback. The new RPC uses the compact typed serializer before its Value carrier;
+malformed live readiness/projection as receivedEvidence, with unknown commitment
+and readiness rather than false rollback. That error projection omits untrusted
+aggregate counts, displayed fields and readiness; it preserves every typed receipt
+and identity without treating receipt presence as proof. Normal remote outcomes
+validate the reservation against the original caller hash/store/resume identity
+and validate native child receipt proofs and scope before accepting success. The new RPC uses the compact typed serializer before its Value carrier;
 old RPCs and immutable receipt bytes are unchanged.
 
 Native compatibility results keep MCP results/total/stored/errors and REST
@@ -55,8 +59,8 @@ The actual shared projection enforces namespace/time lengths, advisory count,
 summary bytes, distinct IDs/score range, fixed warning alternatives/counts and
 bounded ASCII diagnostics. Unknown display members/private detail strings reject.
 An invalid live display is explicitly omitted with BATCH_DISPLAY_OMITTED and
-unknown readiness; full receipts, item states and identities remain present and
-known commitment is not relabeled as rollback. This guard runs before the daemon
+unknown commitment/readiness; full received receipts and identities remain
+present, explicitly unverified. No success/count claim or rollback is inferred. This guard runs before the daemon
 reply as well as the public projection. The bound therefore is not based solely
 on a maximum fixture.
 
@@ -79,6 +83,7 @@ real canonical receipt and historical oversize fixtures are labeled separately.
 Fresh over-budget input rejects before reservation/provider/clock. Existing
 unrepresentable historical batches use the existing whole RESPONSE_TOO_LARGE
 error with committed state and a small explicitly named reservation receipt only;
+commitEvidenceScope=reservation explicitly limits known commitment to that parent;
 no truncated item receipts or empty completed outcomes, no readiness claim and no
 new-key hint. A prior106 original2 oversize fixture exercises this API1 projection
 only, not an assertion of historical API1 acceptance.

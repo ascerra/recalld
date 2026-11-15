@@ -114,11 +114,13 @@ impl Reply {
                 serde_json::from_value::<crate::storage::control::WriteReceipt>(v.clone()).ok()
             });
         match serde_json::from_value::<Self>(value) {
-            Ok(Self::Owned(Ok(out))) if coherent(&out, request.input.items.len()) => {
+            Ok(Self::Owned(Ok(out)))
+                if coherent(&out, request.input.items.len()) && bound_outcome(&out, request) =>
+            {
                 Self::owned(Ok(out))
             }
             Ok(Self::Owned(Ok(out))) | Ok(Self::Uncertain(Some(out))) => Self::Uncertain(Some(out)),
-            Ok(Self::Owned(Err(error))) => Self::owned(Err(error)),
+            Ok(Self::Owned(Err(error))) => Self::owned(Err(remote_failure(error, request))),
             Ok(Self::Legacy(v)) if request.legacy().is_ok() => Self::Legacy(v),
             _ => {
                 if let Some(out) = retained {
@@ -127,9 +129,9 @@ impl Reply {
                     let mut failure = BatchFailure::uncertain();
                     failure.receipt = receipt;
                     failure.reservation_receipt = reservation;
-                    failure.error.commit_state = CommitState::Committed;
+                    failure.error.commit_state = CommitState::Unknown;
                     failure.warnings.push("READINESS_UNKNOWN".into());
-                    Self::Owned(Err(failure))
+                    Self::Owned(Err(remote_failure(failure, request)))
                 } else {
                     Self::Uncertain(None)
                 }
@@ -239,6 +241,9 @@ impl Reply {
                 )
             }
             Self::Owned(Err(error)) => {
+                let reservation_only = error.receipt.is_none()
+                    && error.reservation_receipt.is_some()
+                    && error.error.commit_state == CommitState::Committed;
                 let (status, full) = native_batch::response(Err(bounded_failure(error)));
                 let mut value = canonical(&full);
                 let obj = value.as_object_mut().unwrap();
@@ -246,31 +251,144 @@ impl Reply {
                 for key in ["contractVersion", "scope", "status"] {
                     obj.remove(key);
                 }
+                if reservation_only {
+                    obj.insert("commitEvidenceScope".into(), json!("reservation"));
+                }
                 (status, value)
             }
             Self::Uncertain(out) => {
                 let mut value = json!({"error":{"code":"COMMIT_OUTCOME_UNKNOWN","commitState":"unknown","retryable":false,"message":"batch reply incomplete; reconcile original request and identity before retry"}});
-                if let Some(mut out) = out {
-                    for i in &mut out.outcome.items {
-                        i.ready = false;
+                if let Some(out) = out {
+                    // A malformed remote wrapper cannot authenticate its own
+                    // counts, display, or receipt-to-request association. Keep
+                    // every decoded receipt/identity as received evidence only.
+                    let mut evidence = canonical(&out.outcome);
+                    let object = evidence.as_object_mut().unwrap();
+                    for key in [
+                        "resultVersion",
+                        "reservationState",
+                        "total",
+                        "succeeded",
+                        "failed",
+                        "unresolved",
+                    ] {
+                        object.remove(key);
                     }
-                    if out.outcome.reservation_receipt.is_some()
-                        || out.outcome.items.iter().any(|i| i.receipt.is_some())
-                    {
-                        value["error"]["commitState"] = json!("committed");
+                    for item in object.get_mut("items").unwrap().as_array_mut().unwrap() {
+                        item.as_object_mut().unwrap().retain(|key, _| {
+                            ["index", "operationId", "namespaceId", "receipt"]
+                                .contains(&key.as_str())
+                        });
                     }
-                    value["batch"] = canonical(&out.outcome);
-                    value["warnings"] = if out.warnings.is_empty() {
-                        json!(["READINESS_UNKNOWN"])
-                    } else {
-                        json!(out.warnings)
-                    };
+                    value["receivedEvidence"] = evidence;
+                    value["warnings"] = json!([
+                        "BATCH_DISPLAY_OMITTED",
+                        "UNVERIFIED_RECEIVED_EVIDENCE",
+                        "READINESS_UNKNOWN"
+                    ]);
                 }
                 (503, value)
             }
             Self::Legacy(_) => Self::Uncertain(None).response(surface),
         }
     }
+}
+// Validate the actual caller hash before trusting a remote reservation. This
+// repeats pure historical preparation only: no namespace lookup/provider/clock.
+fn bound_reservation(receipt: &crate::storage::control::WriteReceipt, request: &Request) -> bool {
+    use crate::storage::control::MutationOutcome;
+    if !receipt_header(receipt)
+        || request
+            .input
+            .store_id
+            .is_some_and(|id| id != receipt.store_id)
+        || request
+            .input
+            .batch_operation_id
+            .is_some_and(|id| id != receipt.operation_id)
+    {
+        return false;
+    }
+    let MutationOutcome::BatchReserved {
+        batch_kind,
+        item_count,
+        caller_hash,
+        ..
+    } = &receipt.outcome
+    else {
+        return false;
+    };
+    if *batch_kind != BatchKind::Insert || *item_count as usize != request.input.items.len() {
+        return false;
+    }
+    let mut input = request.input.clone();
+    input.mutation_version = 3;
+    input.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(1).unwrap();
+    let Ok(prepared) = crate::mcp::batches::prepare_native_store(&input) else {
+        return false;
+    };
+    let hashes: Vec<_> = prepared.iter().map(|p| p.plan.request_hash()).collect();
+    caller_hash_origin(3, 1, BatchKind::Insert, &hashes).is_ok_and(|hash| hash == *caller_hash)
+}
+fn receipt_header(receipt: &crate::storage::control::WriteReceipt) -> bool {
+    receipt.receipt_version == 1
+        && !receipt.store_id.is_nil()
+        && !receipt.operation_id.is_nil()
+        && receipt.committed_generation != crate::storage::control::Generation::default()
+}
+fn bound_outcome(out: &NativeBatchOutcome, request: &Request) -> bool {
+    use crate::storage::control::MutationOutcome;
+    let o = &out.outcome;
+    let Some(reservation) = &o.reservation_receipt else {
+        return o.reservation_state == BatchReservationState::Unknown
+            && o.bookkeeping_receipts.is_empty()
+            && o.items.iter().all(|i| i.receipt.is_none());
+    };
+    bound_reservation(reservation, request)
+        && reservation.store_id == o.store_id && reservation.operation_id == o.batch_operation_id
+        && o.items.iter().all(|item| item.receipt.as_ref().is_none_or(|receipt| {
+            let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome else { return false };
+            receipt_header(receipt) && receipt.store_id == o.store_id
+                && item.operation_id == Some(receipt.operation_id)
+                && item.namespace_id == Some(transition.namespace_id)
+                && transition.validate(receipt).is_ok()
+                && request.input.items.get(item.index as usize).is_some_and(|raw| {
+                    crate::mcp::args::namespace_or(raw, &request.input.default_namespace)
+                        .is_ok_and(|namespace| item.result.as_ref().and_then(|v| v["namespace"].as_str()) == Some(namespace.as_str()))
+                })
+        }))
+        && o.bookkeeping_receipts.iter().all(|receipt| {
+            receipt_header(receipt) && receipt.store_id == o.store_id
+                && matches!(&receipt.outcome, MutationOutcome::BatchItemRejected { batch_operation_id, index, error }
+                    if *batch_operation_id == o.batch_operation_id && (*index as usize) < request.input.items.len() && diagnostic_bounds(error))
+        })
+}
+fn remote_failure(mut failure: BatchFailure, request: &Request) -> BatchFailure {
+    // A small reservation receipt is sufficient evidence of the parent commit,
+    // not an atomic batch receipt or proof that any child succeeded.
+    let bound = failure
+        .reservation_receipt
+        .as_ref()
+        .is_some_and(|r| bound_reservation(r, request));
+    if failure.receipt.is_some()
+        || failure.reservation_receipt.is_some()
+        || failure.error.commit_state == CommitState::Committed
+    {
+        if !bound || failure.receipt.is_some() {
+            let operation_id = failure.error.operation_id;
+            failure.error = BatchFailure::uncertain().error;
+            failure.error.operation_id = operation_id;
+            failure.readiness = None;
+            failure.warnings = vec![
+                "UNVERIFIED_RECEIVED_EVIDENCE".into(),
+                "READINESS_UNKNOWN".into(),
+            ];
+        } else {
+            failure.error.commit_state = CommitState::Committed;
+        }
+    }
+    failure
 }
 fn bounded_failure(mut failure: BatchFailure) -> BatchFailure {
     let mut omitted = false;
@@ -294,7 +412,12 @@ fn bounded_failure(mut failure: BatchFailure) -> BatchFailure {
         failure.error.field = None;
         omitted = true;
     }
-    if failure.warnings.len() > 1 || failure.warnings.iter().any(|w| w != "READINESS_UNKNOWN") {
+    if failure.warnings.len() > 2
+        || failure
+            .warnings
+            .iter()
+            .any(|w| !["READINESS_UNKNOWN", "UNVERIFIED_RECEIVED_EVIDENCE"].contains(&w.as_str()))
+    {
         failure.warnings = vec!["READINESS_UNKNOWN".into()];
         omitted = true;
     }
@@ -303,7 +426,7 @@ fn bounded_failure(mut failure: BatchFailure) -> BatchFailure {
     }
     failure
 }
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Advisory {
     requested: bool,
@@ -321,6 +444,11 @@ fn diagnostic_bounds(error: &BatchError) -> bool {
                 && s.bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"._[]".contains(&b))
         })
+}
+fn closed_object(value: &Value, fields: &[&str]) -> bool {
+    value
+        .as_object()
+        .is_some_and(|o| o.keys().all(|k| fields.contains(&k.as_str())))
 }
 fn display_bounds(out: &NativeBatchOutcome) -> bool {
     use crate::model::constants::*;
@@ -356,6 +484,7 @@ fn display_bounds(out: &NativeBatchOutcome) -> bool {
             return false;
         };
         if stored.id.parse::<uuid::Uuid>().is_err()
+            || stored.id.len() != 36
             || stored.namespace.len() > NAMESPACE_NAME_MAX_BYTES
             || stored.created_at.len() > 64
             || stored.phase != "Full"
@@ -364,6 +493,36 @@ fn display_bounds(out: &NativeBatchOutcome) -> bool {
             || stored.stability <= 0.
         {
             return false;
+        }
+        if let Some(value) = object.get("supersedes").filter(|v| !v.is_null()) {
+            if !closed_object(value, &["target", "status", "detail"])
+                || stored
+                    .supersedes
+                    .as_ref()
+                    .is_none_or(|s| value["target"] != json!(s.target))
+            {
+                return false;
+            }
+        }
+        if let Some(value) = object.get("nearDuplicates").filter(|v| !v.is_null()) {
+            if !closed_object(value, &["threshold", "matches"])
+                || value["matches"].as_array().is_none_or(|rows| {
+                    rows.iter()
+                        .any(|v| !closed_object(v, &["id", "score", "summary"]))
+                })
+            {
+                return false;
+            }
+            if let Some(report) = &stored.near_duplicates {
+                if report
+                    .matches
+                    .iter()
+                    .enumerate()
+                    .any(|(n, m)| value["matches"][n]["id"] != json!(m.id))
+                {
+                    return false;
+                }
+            }
         }
         if stored.supersedes.as_ref().is_some_and(|s| {
             s.detail.is_some() || !matches!(s.status, crate::model::SupersedesStatus::Applied)
@@ -388,7 +547,9 @@ fn display_bounds(out: &NativeBatchOutcome) -> bool {
             let Ok(advisory) = serde_json::from_value::<Advisory>(value.clone()) else {
                 return false;
             };
-            let _ = (advisory.requested, advisory.read_generation);
+            if canonical(&advisory) != *value {
+                return false;
+            }
             if advisory.warnings.len() > 1
                 || advisory.warnings.iter().any(|w| {
                     !["ADVISORY_UNAVAILABLE", "ADVISORY_CONTENT_UNAVAILABLE"].contains(&w.as_str())
