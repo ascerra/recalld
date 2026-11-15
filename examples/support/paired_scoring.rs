@@ -163,7 +163,7 @@ fn bootstrap(groups: &[Group], stream: u64) -> Value {
         intervals.insert(*key,json!({"queryMicro":interval(&mut micro[i]),"groupMacro":interval(&mut macro_scores[i])}));
     }
     json!({"status":"synthetic_diagnostic_only","eligibleGroups":n.to_string(),"requestedReplicates":"10000","executedReplicates":"10000",
-        "point":point,"interval95":intervals,"drawsSha256":format!("{:x}",draw_hash.finalize()),"qualityPromotionEligible":false})
+        "point":point,"interval95":intervals,"drawsSha256":draw_hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>(),"qualityPromotionEligible":false})
 }
 
 pub(super) fn score_paired(input: PairedInput) -> Result<Value> {
