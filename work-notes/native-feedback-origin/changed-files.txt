@@ -1,0 +1,11 @@
+docs/implementation/native-feedback-origin.md
+docs/implementation/native-origin-propagation-plan.md
+src/daemon/server.rs
+src/mcp/native_lifecycle_adapter.rs
+src/serialization/native_lifecycle.rs
+src/storage/metadata/native_lifecycle.rs
+src/storage/metadata/native_lifecycle/tests.rs
+src/storage/metadata/native_records/feedback_consumer_tests.rs
+src/storage/metadata/native_records/fixtures/original-api-old2.zip
+src/storage/metadata/native_records/origin_tests.rs
+src/storage/metadata/native_records/wire_tests.rs

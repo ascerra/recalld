@@ -1,0 +1,103 @@
+[
+  {
+    "name": "mount",
+    "command": [
+      "python3",
+      ".test-scratch/seal.py",
+      "verify",
+      ".test-scratch/third"
+    ],
+    "exit": 0,
+    "start": 1794694879.8873441,
+    "end": 1794694879.9443202
+  },
+  {
+    "name": "format",
+    "command": [
+      "cargo",
+      "fmt",
+      "--all"
+    ],
+    "exit": 0,
+    "start": 1794694879.9447365,
+    "end": 1794694881.2324877
+  },
+  {
+    "name": "source",
+    "command": [
+      "python3",
+      ".test-scratch/seal.py",
+      "seal",
+      ".test-scratch/third"
+    ],
+    "exit": 0,
+    "start": 1794694881.233043,
+    "end": 1794694881.8478918
+  },
+  {
+    "name": "focused",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "exposure_origin",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0,
+    "start": 1794694881.8483224,
+    "end": 1794694925.200726
+  },
+  {
+    "name": "native",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "native_exposure",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0,
+    "start": 1794694925.2013113,
+    "end": 1794694943.8262987
+  },
+  {
+    "name": "full",
+    "command": [
+      "cargo",
+      "test",
+      "--offline"
+    ],
+    "exit": 0,
+    "start": 1794694943.8268158,
+    "end": 1794695579.844494
+  },
+  {
+    "name": "fmt",
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--",
+      "--check"
+    ],
+    "exit": 0,
+    "start": 1794695579.8503826,
+    "end": 1794695580.4666471
+  },
+  {
+    "name": "clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "--offline",
+      "--all-targets"
+    ],
+    "exit": 0,
+    "start": 1794695580.467015,
+    "end": 1794695604.05275
+  }
+]

@@ -1,4 +1,4 @@
-# Actual MCP/REST contract consumer, in progress
+# Gated exact-scan consumer and actual v1 discovery context
 
 Base: frozen prep ccdddee (runtime 7dea9d2), whose real prerequisites are PR69
 and PR13. Feynman owns the exact frozen backend API in
@@ -42,8 +42,9 @@ recoverable exclusion. That proof check is unchanged. The comparator handles
 finite, nonzero scaled inputs without changing bytes, but its scaled-vector
 unit fixtures do not claim valid Bound storage. Even an accepted unit vector
 can have enough f32 rounding error for raw dot and cosine to disagree at a
-nearby threshold; a regression covers that case. A5 oracle agreement and
-performance validation of this f64 implementation remain pending.
+nearby threshold; a regression covers that case. Hume independently reviewed the cosine implementation against the oracle; this
+was a source review, not a second execution. A5 performance validation remains
+pending.
 
 ## Response bound
 
@@ -79,7 +80,7 @@ final full validation waits for the frozen native reader dependency and actual
 native scan acceptance tests. These interim results are not native activation
 or performance-gate evidence.
 
-## Native acceptance baseline (promotion held)
+## Native acceptance baseline and corrected final join
 
 The exact frozen native reader dependency is PR82 runtime6a71248, whose direct
 prerequisites are native79 and labels69. The combined tests now use its actual
@@ -107,8 +108,20 @@ native startup and old-reader fences are unchanged.
 
 Pascal subsequently found a regressed-clock native-forget marker bug in the
 6a71248 baseline. This passing scan evidence does not fix or disprove that bug.
-Final native consumer promotion is held until his validated corrected PR82 head
-is consumed and the final joined suite passes. No moving WIP is imported.
+The frozen correction a69865b is now consumed in runtime2e4ef99. It preserves
+absent historical proof semantics and uses the explicit MonotonicMarkerV1 rule
+for new native forget operations. The final joined suite passed972 library tests
+and2 CLI tests, with4 doctests ignored; formatting and Clippy exited0 (Clippy
+warnings remain). This supersedes the baseline promotion hold, not the separate
+public contract2 activation gate. No moving WIP is imported.
+
+Final validation mounted this source read-only in recalld-ci:1.94 with
+RUSTUP_TOOLCHAIN=1.94.1, offline Cargo, network none,2 CPUs/4GiB and private
+cargo/target directories. All222 pre-run source hashes matched afterward;
+SHA256 hashes identify all6 executed test binaries. Source roots were never
+switched during consumer validation. The earlier prep-to-consumer switch used
+package clean and retained its binary hashes. Logs, failure evidence, commands,
+and provenance are sealed in [the final report](../evidence/contract-consumer/native-consumer-2e4ef99/REPORT.md).
 
 ## Actual v1 discovery context
 

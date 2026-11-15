@@ -1,0 +1,37 @@
+[
+  {
+    "candidate": "candidate1",
+    "head": "891d9489d182b7f73fb2d4c50174b3ecb48bbdec",
+    "source_count": 338,
+    "source_manifest_sha256": "c038f62dfcdaa357d99b0fa3b2be29404ddd6e1b9ff08fc0594fa7c70314bfa4",
+    "all_match_committed_blobs": true
+  },
+  {
+    "candidate": "candidate2",
+    "head": "5b28b8984cb0ab89beafdadef1954ae16351e9c4",
+    "source_count": 338,
+    "source_manifest_sha256": "69ad56f1d9a93d62722eb26883f0d3a836cc602aee76b2425cfe06c87adf2de9",
+    "all_match_committed_blobs": true
+  },
+  {
+    "candidate": "candidate3",
+    "head": "46bfb6bb5939f1f922dc4ffefdff31e69939bdfa",
+    "source_count": 338,
+    "source_manifest_sha256": "e744384ed6720e23129a97c016fae9cb7c47261420bd0ca70ac2e7cc3d9e415d",
+    "all_match_committed_blobs": true
+  },
+  {
+    "candidate": "candidate4",
+    "head": "3fbdcb09b275e47844577abfc5020913711bd8dd",
+    "source_count": 338,
+    "source_manifest_sha256": "9fcb4d6c32d49f459eb3e66d7a671f53de171d4a66291164eb63bdf91bbaa374",
+    "all_match_committed_blobs": true
+  },
+  {
+    "candidate": "candidate5",
+    "head": "db2d14f2e930b8ed72af45c5da9cc395daf43436",
+    "source_count": 338,
+    "source_manifest_sha256": "370736192af3acdeba25a4d8055bc1872ef719f600a5d35932c26f6180277dd0",
+    "all_match_committed_blobs": true
+  }
+]

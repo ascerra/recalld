@@ -1,0 +1,6 @@
+{
+  "sha256": "aabda933b1f8d42d6207b310bfaef8d5588ac009014704791e7d0d2c0499d37d",
+  "mtime_ns": 1794685963948669618,
+  "size": 404997936,
+  "result": "7PASS1FAIL: metadata-only query fixture omitted mandatory filter, EmptyQuery"
+}

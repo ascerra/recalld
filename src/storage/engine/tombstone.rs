@@ -37,14 +37,26 @@ impl RedbStorageEngine {
         child: Option<&crate::storage::batch::BatchChild>,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.tombstone_memory_scoped_with_work(ctx, id, child, None, parent)
+    }
+
+    pub(crate) fn tombstone_memory_scoped_with_work(
+        &mut self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        child: Option<&crate::storage::batch::BatchChild>,
+        asserted_namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
         let guard = self.meta_store.mutation_guard_with_work(parent)?;
-        let receipt = self.meta_store.tombstone_reserved_with_effects(
+        let receipt = self.meta_store.tombstone_scoped_with_effects(
             &guard,
             ctx,
             id,
             &self.edge_store.load_all_edges()?,
             child,
+            asserted_namespace,
         )?;
         if !receipt.replayed {
             effects::apply_pending(

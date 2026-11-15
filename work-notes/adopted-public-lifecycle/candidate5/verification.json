@@ -1,0 +1,29 @@
+{
+  "tested_head": "db2d14f2e930b8ed72af45c5da9cc395daf43436",
+  "source_count": 338,
+  "emitted_executable_count": 15,
+  "source_and_executables_verified_after_checks": true,
+  "container_exit_code": 0,
+  "focused_counts": {
+    "adopted_public_": 4,
+    "api1_public_": 18,
+    "inherited_policy_": 11,
+    "legacy_lifecycle": 21,
+    "decoder_native_": 3,
+    "native_exposure_": 9,
+    "native_record_context_": 2
+  },
+  "focus_passing_invocations": 68,
+  "focus_distinct_passing": 64,
+  "cli_passed": 3,
+  "example_passed": 10,
+  "fmt_exit": 0,
+  "clippy_exit": 0,
+  "clippy_warning_summaries": [
+    "warning: `recalld` (lib) generated 1076 warnings (run `cargo clippy --fix --lib -p recalld` to apply 117 suggestions)",
+    "warning: `recalld` (bin \"recalld\") generated 1 warning",
+    "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+    "warning: `recalld` (lib test) generated 1153 warnings (1041 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 9 suggestions)"
+  ],
+  "full_suite_at_final_head": "not run; approved test-only tail; exact published-head full CI required"
+}

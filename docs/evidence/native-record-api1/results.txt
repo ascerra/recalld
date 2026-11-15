@@ -1,0 +1,27 @@
+Source f19655b5e886e364a1f0d471412ff82202bec554
+Container exit 0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 36.79s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1097 filtered out; finished in 2.43s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.42s
+native-record origin_api=1 generated_provider_calls=3 replay_provider_calls=0 replay_clock_delta=0 unchanged_files=6
+native-record origin_api=2 generated_provider_calls=3 replay_provider_calls=0 replay_clock_delta=0 unchanged_files=6
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1093 filtered out; finished in 11.18s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.20s
+test result: ok. 1098 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 881.06s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.58s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 36.23s
