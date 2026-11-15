@@ -8,9 +8,9 @@ use crate::time::Clock;
 
 fn validate_context(ctx: &MutationContext) -> Result<(), StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || ctx.scope != MutationScope::Catalog {
+    if ctx.scope != MutationScope::Catalog {
         return Err(StorageError::InvalidMutationContext(
-            "native creation requires v2 catalog scope".into(),
+            "native creation requires catalog scope".into(),
         ));
     }
     Ok(())

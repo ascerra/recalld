@@ -10,11 +10,7 @@ impl DerivedCompletion {
         force: bool,
         parent: &WorkTicket,
     ) -> Result<PurgeProgress, StorageError> {
-        if ctx.contract_version != 2 {
-            return Err(StorageError::InvalidMutationContext(
-                "native purge requires contract2".into(),
-            ));
-        }
+        ctx.validate()?;
         let work = self.accept_work(Some(parent))?;
         let result = self.native_purge_work(ctx, force, &work).await;
         self.finish_known_work(work);
@@ -37,7 +33,10 @@ impl DerivedCompletion {
             let _publication = lease;
             let _graph = graph;
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            let result = storage.begin_namespace_purge_with_work(&ctx, force, Some(&child));
+            let result = storage
+                .meta_store()
+                .require_native_purge_owner()
+                .and_then(|_| storage.begin_namespace_purge_with_work(&ctx, force, Some(&child)));
             storage.meta_store().finish_work(child);
             result
         })

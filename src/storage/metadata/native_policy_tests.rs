@@ -521,3 +521,63 @@ fn native_policy_creation_proof_rewinds_numeric_changes_in_empty_namespace() {
         7.
     );
 }
+
+#[test]
+fn native_context_api1_policy_keyed_nochange_replay_after_other_policy() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, id, _) = fixture(root.path());
+    let mut s = open(&path);
+    let original = crate::storage::catalog::NamespacePolicy::from(
+        &s.engine.get_namespace(id).unwrap().unwrap(),
+    );
+    let mut key = ctx(&s, id, "api1-nochange");
+    key.contract_version = 1;
+    let first = s
+        .update_policy(&key, scope(&s, id), &original)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        first.outcome,
+        MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+    ));
+    let mut changed = original.clone();
+    changed.desired_retention = 0.8;
+    let mut fresh = ctx(&s, id, "api1-changed");
+    fresh.contract_version = 1;
+    s.update_policy(&fresh, scope(&s, id), &changed)
+        .unwrap()
+        .unwrap();
+    let before = rows(&s).iter().map(|r| r.to_bytes()).collect::<Vec<_>>();
+    let state = s.engine.control_state().unwrap();
+    let mut expected = first;
+    expected.replayed = true;
+    assert_eq!(
+        s.update_policy(&key, scope(&s, id), &original)
+            .unwrap()
+            .unwrap(),
+        expected
+    );
+    let mut other = key.clone();
+    other.contract_version = 2;
+    assert!(matches!(
+        s.update_policy(&other, scope(&s, id), &original),
+        Err(StorageError::IdempotencyConflict)
+    ));
+    assert!(matches!(
+        s.update_policy(&key, scope(&s, id), &changed),
+        Err(StorageError::IdempotencyConflict)
+    ));
+    assert_eq!(
+        rows(&s).iter().map(|r| r.to_bytes()).collect::<Vec<_>>(),
+        before
+    );
+    assert_eq!(s.engine.control_state().unwrap(), state);
+    drop(s);
+    let mut s = open(&path);
+    assert_eq!(
+        s.update_policy(&key, scope(&s, id), &original)
+            .unwrap()
+            .unwrap(),
+        expected
+    );
+}

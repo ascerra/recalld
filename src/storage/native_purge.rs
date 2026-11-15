@@ -67,8 +67,22 @@ impl NativeNamespaceProof {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativePurgeStarted {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub request: Option<NativePurgeRequest>,
     pub previous_generation: Generation,
     pub before_namespace: NativeNamespaceProof,
+}
+/// Bounded original API1 inputs, anchored in the immutable start receipt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePurgeRequest {
+    pub context: super::request_context::RetainedRequestContext,
+    pub force: bool,
+    pub expected_generation: Option<Generation>,
 }
 impl NativePurgeStarted {
     pub(crate) fn validate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
@@ -81,7 +95,71 @@ impl NativePurgeStarted {
             return Err(invalid("invalid native purge start proof"));
         }
         self.before_namespace.namespace()?;
+        if let Some(request) = &self.request {
+            super::request_context::RetainedRequestContext::native_contract(Some(
+                &request.context,
+            ))?;
+            if request
+                .expected_generation
+                .is_some_and(|g| g != self.previous_generation)
+            {
+                return Err(invalid(
+                    "purge request CAS differs from original start boundary",
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// One authority for startup, resume, current reads and offline inspection.
+    /// Historical absence is accepted only by the closed original codec hash.
+    pub(crate) fn validate_request(
+        &self,
+        stored: &super::control::StoredReceipt,
+    ) -> Result<u32, StorageError> {
+        self.validate(&stored.receipt)?;
+        if !matches!(&stored.receipt.outcome, super::control::MutationOutcome::NativeNamespacePurgeStarted { transition } if transition == self)
+        {
+            return Err(invalid("purge request receipt differs"));
+        }
+        let hash = |contract_version, force, expected_generation| {
+            super::control::request_hash(
+                &super::control::MutationContext {
+                    store_id: Some(stored.receipt.store_id),
+                    scope: super::control::MutationScope::Namespace(
+                        self.before_namespace.namespace_id,
+                    ),
+                    idempotency_key: None,
+                    expected_generation,
+                    contract_version,
+                },
+                "namespace_purge_v2",
+                &[&[u8::from(force)]],
+            )
+        };
+        if let Some(request) = &self.request {
+            let contract = super::request_context::RetainedRequestContext::native_contract(Some(
+                &request.context,
+            ))?;
+            if hash(contract, request.force, request.expected_generation) != stored.request_hash {
+                return Err(invalid("purge original request hash differs"));
+            }
+            return Ok(contract);
+        }
+        // ponytail: four known historical choices, not general provenance inference.
+        let matches = [false, true]
+            .into_iter()
+            .flat_map(|force| {
+                [None, Some(self.previous_generation)]
+                    .into_iter()
+                    .map(move |expected| (force, expected))
+            })
+            .filter(|&(force, expected)| hash(2, force, expected) == stored.request_hash)
+            .count();
+        if matches != 1 {
+            return Err(invalid("historical native purge request hash differs"));
+        }
+        Ok(2)
     }
 }
 
