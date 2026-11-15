@@ -126,6 +126,11 @@ pub struct RemoteStorageAdapter {
 }
 
 impl RemoteStorageAdapter {
+    #[cfg(test)]
+    pub(crate) fn test_client(&self) -> Arc<DaemonClient> {
+        self.client.clone()
+    }
+
     /// Creates a new adapter backed by the given daemon client.
     pub fn new(client: Arc<DaemonClient>) -> Self {
         Self { client }
@@ -174,6 +179,118 @@ impl bridge::StorageEngine for RemoteStorageAdapter {
         serde_json::from_value::<NativeBatchReply>(value)
             .map_err(|_| BatchFailure::uncertain())?
             .result()
+    }
+
+    async fn api1_lifecycle(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+        operation: crate::serialization::native_lifecycle::Operation,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{self, Reply, Value},
+            native_lifecycle::{self, Operation},
+        };
+        if let Err(error) = lifecycle_api1::parse(&request.wire(operation), operation) {
+            return Reply::failure(native_lifecycle::Reply::input(error));
+        }
+        let (new_method, old_method) = match operation {
+            Operation::Feedback => ("feedback_api1_v1", "reinforce_memory"),
+            Operation::Forget => ("forget_api1_v1", "delete_memory"),
+        };
+        let mut old_params = serde_json::json!({"id":request.id});
+        if operation == Operation::Feedback {
+            old_params["quality"] = serde_json::json!(request.quality);
+        }
+        let old_method = if let Some(namespace) = request.namespace.as_ref() {
+            old_params["namespace"] = serde_json::json!(namespace);
+            format!("{old_method}_scoped")
+        } else {
+            old_method.into()
+        };
+        match self
+            .client
+            .call_api1_lifecycle(new_method, request.wire(operation), &old_method, old_params)
+            .await
+        {
+            Ok((true, value)) => Reply::decode(value, &request, operation),
+            Ok((false, value)) => {
+                let parsed = match operation {
+                    Operation::Feedback => {
+                        serde_json::from_value(value).map(|result| Value::Feedback { result })
+                    }
+                    Operation::Forget => {
+                        serde_json::from_value(value).map(|deleted| Value::Forget { deleted })
+                    }
+                };
+                match parsed {
+                    Ok(value) => Reply::compatibility(value),
+                    Err(error) => Reply::failure(native_lifecycle::Reply::storage(
+                        crate::storage::StorageError::WorkerOutcomeUnknown(format!(
+                            "old API1 response decode: {error}"
+                        )),
+                    )),
+                }
+            }
+            Err(error) => Reply::bridge_error(error),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        use crate::serialization::{
+            contract::CommitState,
+            native_lifecycle::{Operation, Reply},
+        };
+        match self
+            .client
+            .call(
+                request.rpc_method(Operation::Forget),
+                request.wire(Operation::Forget),
+            )
+            .await
+        {
+            Ok(value) => Reply::decode_response(value, &request, Operation::Forget),
+            Err(error) => {
+                let mut reply = Reply::unavailable(&error.to_string());
+                // Only the server's typed rejection proves that the method was
+                // rejected. Transport/decode failures never imply rollback.
+                if !matches!(error, BridgeError::InvalidInput(_)) {
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                }
+                reply
+            }
+        }
+    }
+
+    async fn feedback_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        use crate::serialization::{
+            contract::CommitState,
+            native_lifecycle::{Operation, Reply},
+        };
+        match self
+            .client
+            .call(
+                request.rpc_method(Operation::Feedback),
+                request.wire(Operation::Feedback),
+            )
+            .await
+        {
+            Ok(value) => Reply::decode_response(value, &request, Operation::Feedback),
+            Err(error) => {
+                let mut reply = Reply::unavailable(&error.to_string());
+                // Only the server's typed rejection proves that the method was
+                // rejected. Transport/decode failures never imply rollback.
+                if !matches!(error, BridgeError::InvalidInput(_)) {
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                }
+                reply
+            }
+        }
     }
 
     fn supports_durable_batches(&self) -> bool {

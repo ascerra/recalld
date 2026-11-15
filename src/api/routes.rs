@@ -52,8 +52,8 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
         .route("/", post(handlers::single_store_versioned))
         .route("/batch", post(handlers::batch_store_versioned))
         .route("/{id}", get(handlers::get_memory))
-        .route("/{id}", delete(handlers::delete_memory))
-        .route("/{id}/reinforce", post(handlers::reinforce_memory));
+        .route("/{id}", delete(super::native_lifecycle::delete))
+        .route("/{id}/reinforce", post(super::native_lifecycle::feedback));
 
     let search_routes = Router::new()
         .route("/search", post(handlers::search_memories))

@@ -519,7 +519,7 @@ async fn native_feedback_rejects_quality_contract_scope_name_and_cas_without_tim
         match case {
             "quality-zero" => quality = 0,
             "quality-five" => quality = 5,
-            "contract" => key.contract_version = 1,
+            "contract" => key.contract_version = 3,
             "scope" => key.scope = MutationScope::Namespace(NamespaceId::new(999)),
             "name" => name = Some("another-name".into()),
             "cas" => key.expected_generation = Some(Generation::default()),

@@ -204,12 +204,12 @@ async fn native_api1_store_fresh_invalid_profile_and_vector_no_work() {
         ),
         (
             json!({"embeddingProfileId":profile,"embedding":[0.,0.,0.,0.]}),
-            400,
+            422,
             "OUT_OF_RANGE",
         ),
         (
             json!({"embeddingProfileId":profile,"embedding":[1.,0.,0.,0.],"initialStability":0}),
-            400,
+            422,
             "OUT_OF_RANGE",
         ),
     ] {
@@ -262,7 +262,7 @@ async fn native_api1_store_publication_failure_keeps_full_receipt_and_projection
     assert_eq!(failure["commitState"], "committed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_api1_store_legacy_shapes_and_explicit_profile_constraint() {
     let (_d, _native, _a, provider, clock) = setup().await;
     let f = Fixture::new();

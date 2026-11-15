@@ -7,6 +7,8 @@ mod native_store;
 
 use std::sync::{Arc, RwLock};
 
+mod native_exposure;
+
 #[path = "derived_readiness.rs"]
 mod readiness;
 
@@ -1142,3 +1144,5 @@ pub(crate) async fn publication_gate(
     .await
     .map_err(|e| failed(e.to_string()))?
 }
+
+mod legacy_lifecycle;
