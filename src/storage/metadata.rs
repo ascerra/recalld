@@ -1083,8 +1083,12 @@ impl MetadataStore {
                 result.push(record);
             }
         }
-        tracing::trace!(target: "recalld::performance", kind = "canonical_read",
-            examined, records = result.len(), encoded_record_bytes = encoded_bytes);
+        crate::performance::event!(
+            kind = "canonical_read",
+            examined,
+            records = result.len(),
+            encoded_record_bytes = encoded_bytes
+        );
         timer.complete();
         Ok(result)
     }
