@@ -1,6 +1,8 @@
 # Legacy disk lifecycle operations with original API context
 
-Work in progress; no activation or completed-validation claim.
+Implemented and validated on runtime `5a0c821b2f99f82564a76b5fe816255585480f2b`.
+See [validation report](../../work-notes/legacy-lifecycle-api2/REPORT.md).
+This remains prepared/private consumer scope, with public activation gated.
 
 Actual parents: PR136 `047ebe086b01747c0dec38228141a3696d885d29` plus PR132
 `5864c09050e532454c97ba8e73e00e7ba1670fb4`, joined at `fd73618`.
@@ -50,3 +52,11 @@ when its caller is cancelled. Known commits survive later publication/binding
 failures; failures do not invoke a self-draining readiness barrier. Purged scope
 uses retained terminal identity and validated purge-name proof, never a reused
 name or connection default. Compound historical-context codecs are unchanged.
+
+Final decoder regression rejects wrong-target/wrong-operation/future-version error
+receipts instead of mislabeling them as known commits. The same bounded matcher
+checks normal and malformed replies; valid matching receipts remain available on
+later failure. Full baseline ebb3b25:1188 library+2CLI. Final reviewed decoder tail:3probes
+within17nativeprotocol tests plus17legacy tests;fmt/clippy0 with warnings.
+Native matching includes quality and asserted namespace. Committed errors require
+a full matching receipt/operation ID; legitimate unknown allocated IDs survive.
