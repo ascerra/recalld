@@ -118,6 +118,8 @@ No model download or new statistical package is required.
 
 Pin seed encoding as little-endian u64 followed by zero padding to32bytes, and
 bounded u64 index draws using the pinned rand0.8.6 distribution implementation.
+Use the actual ChaCha `set_stream` with fixed train0/development1/test2 stream IDs;
+these streams are separate evaluator state, not a runtime RNG/control guarantee.
 Record exact Cargo.lock/build/algorithm policy; unknown versions/seed encoding or
 replicate count reject. This statistical RNG is evaluator computation only; it
 must not falsely set the manifest's runtime deterministicRng capability to true.
