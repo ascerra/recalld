@@ -57,15 +57,18 @@ impl DaemonServer {
             )
             .with_clock(system.clock().clone()),
         );
-        let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(McpNamespaceAdapter::new(
-            system.storage().clone(),
-            system.cache().clone(),
-            system.vector_index().clone(),
-            system.fts_index().clone(),
-            system.entity_index().clone(),
-            system.graph().clone(),
-            tz,
-        ));
+        let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(
+            McpNamespaceAdapter::new(
+                system.storage().clone(),
+                system.cache().clone(),
+                system.vector_index().clone(),
+                system.fts_index().clone(),
+                system.entity_index().clone(),
+                system.graph().clone(),
+                tz,
+            )
+            .with_clock(system.clock().clone()),
+        );
         let health: Arc<dyn HealthChecker> =
             Arc::new(McpHealthAdapter::new(system.storage().clone()));
 
@@ -439,6 +442,20 @@ async fn dispatch(
 
         "shutdown" => Ok(serde_json::json!({})),
 
+        "session_context_v1" => {
+            if !params.as_object().is_some_and(|object| object.is_empty()) {
+                return Err(BridgeError::InvalidInput(
+                    "session context requires an empty object".into(),
+                ));
+            }
+            let context = storage.backend_context().await?;
+            context
+                .validate()
+                .map_err(|e| BridgeError::Unavailable(e.into()))?;
+            serde_json::to_value(context)
+                .map_err(|_| BridgeError::Internal("context serialization failed".into()))
+        }
+
         "search" | "search_read_only" => {
             let mut input: SearchInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
@@ -644,6 +661,7 @@ mod tests {
             tx.clone(),
         ));
         let mut input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -728,6 +746,7 @@ mod tests {
         let adapter = fx.storage_adapter();
         let store_id = fx.storage.read().unwrap().control_state().unwrap().store_id;
         let mut input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -814,6 +833,7 @@ mod tests {
             .fail_batch_commit
             .store(3, std::sync::atomic::Ordering::SeqCst);
         let input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -1269,6 +1289,46 @@ mod read_only_tests;
 #[path = "scope_tests.rs"]
 mod scope_tests;
 
+/// Exercise the actual framed connection handler against isolated fixture stores.
+#[cfg(test)]
+pub(crate) async fn native_batch_test_rpc(
+    storage: Arc<dyn BridgeStorageEngine>,
+    input: &crate::storage::batch::BatchInput,
+) -> DaemonResponse {
+    let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(handle_connection(
+        stub.clone(),
+        storage,
+        stub.clone(),
+        stub,
+        server,
+        Arc::new(AtomicU32::new(1)),
+        Arc::new(AtomicI64::new(0)),
+        rx,
+        tx.clone(),
+    ));
+    write_framed_request(
+        &mut client,
+        &DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            method: "mutate_batch".into(),
+            params: serde_json::to_value(input).unwrap(),
+        },
+        LEGACY_MAX_MESSAGE_SIZE,
+    )
+    .await
+    .unwrap();
+    let response = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+        .await
+        .unwrap();
+    tx.send(true).unwrap();
+    drop(client);
+    task.await.unwrap();
+    response
+}
 #[cfg(test)]
 #[path = "batch_label_tests.rs"]
 mod batch_label_tests;

@@ -1,0 +1,14 @@
+{
+  "currentAction": {
+    "arguments": {
+      "id": "01a1dce9-d20b-74a2-9613-3d63a31c088c",
+      "namespace": "foreign",
+      "recordAccess": false
+    },
+    "tag": "foreign-get:full",
+    "tool": "get_memory"
+  },
+  "deliveryOrdinal": 102,
+  "phase": "action",
+  "startId": 102
+}

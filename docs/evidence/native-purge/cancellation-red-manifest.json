@@ -1,0 +1,8 @@
+{
+  "source": "125595077a5f254ca26c2bde69527bc5869938d5",
+  "tree": "d2cc7cac570dd62e3680de19fb1aad6140a1e6f1",
+  "result": "0 passed; 1 failed; 0.92s; lease lifetime only, graph guard and unresolved tracker retained",
+  "exit_code": 101,
+  "log_sha256": "02534e682b54a3b4d2e04923e7b74c214fc5a099b184a1a5dca1b313a0b234ac",
+  "binary_sha256": "6f6f98f8477bec9542bb3b3e9f71e9f9c356c91060aa0b85d3f9542479019709"
+}

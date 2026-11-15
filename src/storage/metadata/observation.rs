@@ -153,7 +153,7 @@ impl MetadataStore {
                 });
             }
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -291,7 +291,7 @@ impl MetadataStore {
         }
         tx.open_table(META_TABLE)?
             .insert(id.as_bytes().as_slice(), record.to_bytes().as_slice())?;
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,

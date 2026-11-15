@@ -6,6 +6,12 @@
 
 #[path = "batch_adapters.rs"]
 mod batch_adapters;
+#[path = "native_batch.rs"]
+mod native_batch;
+#[path = "native_store_batch.rs"]
+mod native_store_batch;
+#[path = "native_store_single.rs"]
+mod native_store_single;
 
 use crate::decay::observation::Observed;
 use std::sync::Arc;
@@ -148,6 +154,14 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn search(
         &self,
         query: bridge::SearchInput,
@@ -1480,6 +1494,27 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, bridge::BridgeError> {
+        use crate::serialization::session::{ActiveEmbedding, BackendContext};
+        let active = ActiveEmbedding::from_provider(self.embedding.as_ref()).map_err(|_| {
+            bridge::BridgeError::Unavailable("active embedding identity unavailable".into())
+        })?;
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            let control = engine.control_state().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            BackendContext::new(control.store_id, active)
+                .map_err(|e| bridge::BridgeError::Unavailable(e.into()))
+        })
+        .await
+        .map_err(|_| bridge::BridgeError::Unavailable("store context unavailable".into()))?
+    }
     fn supports_durable_batches(&self) -> bool {
         true
     }
@@ -1488,6 +1523,11 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: crate::storage::batch::BatchInput,
     ) -> Result<crate::storage::batch::BatchOutcome, bridge::BridgeError> {
+        if input.mutation_version == 3 {
+            return Err(bridge::BridgeError::Unavailable(
+                "linked native batch consumer remains gated pending transport validation".into(),
+            ));
+        }
         self.run_batch(input).await
     }
 
@@ -1653,6 +1693,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         }
         let outcome = self
             .run_batch(crate::storage::batch::BatchInput {
+                mutation_version: 1,
                 result_version: 1,
                 kind: crate::storage::batch::BatchKind::Forget,
                 items: ids
@@ -1982,6 +2023,7 @@ pub struct McpNamespaceAdapter {
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     graph: SharedGraph,
     timezone: chrono_tz::Tz,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl McpNamespaceAdapter {
@@ -2005,7 +2047,13 @@ impl McpNamespaceAdapter {
             entity_index,
             graph,
             timezone,
+            clock: Arc::new(crate::time::SystemClock),
         }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     async fn complete_effects(&self) -> Result<(), bridge::BridgeError> {
@@ -2156,7 +2204,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         let work =
             crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
         let worker = work.child().map_err(|e| map_mutation_error(e.into()))?;
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = self.clock.now_millis();
         let storage = self.storage.clone();
         let tz = self.timezone;
         let input_name = input.name.clone();
@@ -4163,5 +4211,59 @@ mod tests {
             vec![(orphan, 1)]
         );
         assert!(fx.record(orphan).is_some());
+    }
+}
+
+/// Construct the public MCP adapters from one existing system owner.
+/// No engine/session is opened and no evaluator control is registered as a tool.
+pub fn direct_bridge(
+    system: &crate::Recalld,
+    default_namespace: String,
+) -> crate::mcp::bridge::McpBridge {
+    let tz = crate::time::resolve_timezone(&system.config().timezone);
+
+    let search: Arc<dyn crate::mcp::bridge::SearchPipeline> = Arc::new(McpSearchAdapter::new(
+        system.query_engine().clone(),
+        system.embedding().clone(),
+        system.storage().clone(),
+        system.graph().clone(),
+        tz,
+    ));
+    let storage: Arc<dyn crate::mcp::bridge::StorageEngine> = Arc::new(
+        McpStorageAdapter::new(
+            system.storage().clone(),
+            system.cache().clone(),
+            system.embedding().clone(),
+            system.vector_index().clone(),
+            system.fts_index().clone(),
+            system.entity_index().clone(),
+            system.graph().clone(),
+            std::sync::Arc::new(system.config().clone()),
+            tz,
+        )
+        .with_clock(system.clock().clone()),
+    );
+    let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> = Arc::new(
+        McpNamespaceAdapter::new(
+            system.storage().clone(),
+            system.cache().clone(),
+            system.vector_index().clone(),
+            system.fts_index().clone(),
+            system.entity_index().clone(),
+            system.graph().clone(),
+            tz,
+        )
+        .with_clock(system.clock().clone()),
+    );
+    let health: Arc<dyn crate::mcp::bridge::HealthChecker> =
+        Arc::new(McpHealthAdapter::new(system.storage().clone()));
+
+    crate::mcp::bridge::McpBridge {
+        search,
+        storage,
+        namespaces,
+        health,
+        default_namespace,
+        timezone: tz,
     }
 }

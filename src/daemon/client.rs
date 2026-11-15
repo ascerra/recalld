@@ -63,6 +63,7 @@ fn is_retry_safe(method: &str) -> bool {
     matches!(
         method,
         "ping"
+            | "session_context_v1"
             | "check_health"
             | "scan_duplicates"
             | "get_memory"

@@ -1,0 +1,116 @@
+{
+  "source": "Local git ancestry at2026-11-14; exact owner/published refs, not merged-tree runtime proof",
+  "refs": {
+    "121": "3fa91d4e542ec8ed5519fe4c3b87e9e665043a40",
+    "103": "1b4876d9715361c1ac67358955fb1782d985c845",
+    "97": "292fb290e24736f5ff86baf345f5b2794d17aa9d",
+    "108": "b5673abeb39bfc79fa9ce8b22f9f784f2636cdb9",
+    "118": "f910c00d61165500c0483ec2c646de73118242d9",
+    "profile": "d7c4d5fa3d39e14f3bc2dc4be5554e2e1bf1c8c8",
+    "batch-wire": "abd03717b0f0dfda2ac8906445abb560aba8b716",
+    "96": "387c7118864040c68d7d28c44fb2600ade520a45",
+    "107": "785dfec4a543b585e3924eb9df298b0d0708d84d",
+    "105": "064686cc5aa7192b45f6e9f75dc6cfd1e7f1f958",
+    "114": "a03b92212cd6650cde3b1096a200bf1fd6922378",
+    "110": "ee0a9063823547d7e28f584aa4b16ac979e28105",
+    "119": "8ab79b45cf53f277f96c587808615273b0055882",
+    "113": "149beb60365717f706b4a5461564a03a05bbb492",
+    "112": "5951f757afbb4aed68e25703d4108f6dc7b810fd",
+    "100": "ff577809f8f4b9575ad465ae677ab4bab2b13195",
+    "88": "3961f6653d6c3076bdf9b5b8c27fa6b01a8f0b2e",
+    "82": "bb1a0863b2ab0eba940e767941ca4e85fe9b8e77",
+    "observer": "cc865c296247a55cadb09081e349c059c8724619",
+    "owned-native-ids": "a5865da02969631a5031f65c6e43269701d7a254",
+    "117": "bf7c2484018297b7f9af30e98d3214581f33f351"
+  },
+  "contained_by": {
+    "121": [],
+    "103": [],
+    "97": [
+      "121",
+      "108",
+      "118",
+      "profile",
+      "batch-wire",
+      "owned-native-ids"
+    ],
+    "108": [
+      "121"
+    ],
+    "118": [
+      "profile",
+      "owned-native-ids"
+    ],
+    "profile": [],
+    "batch-wire": [],
+    "96": [
+      "121",
+      "103",
+      "118",
+      "profile",
+      "107",
+      "114",
+      "110",
+      "119",
+      "113",
+      "observer",
+      "owned-native-ids",
+      "117"
+    ],
+    "107": [],
+    "105": [
+      "121"
+    ],
+    "114": [
+      "121"
+    ],
+    "110": [
+      "121"
+    ],
+    "119": [],
+    "113": [
+      "119"
+    ],
+    "112": [],
+    "100": [
+      "112"
+    ],
+    "88": [
+      "103",
+      "batch-wire",
+      "112",
+      "100"
+    ],
+    "82": [
+      "121",
+      "103",
+      "118",
+      "profile",
+      "96",
+      "107",
+      "105",
+      "114",
+      "110",
+      "119",
+      "113",
+      "observer",
+      "owned-native-ids",
+      "117"
+    ],
+    "observer": [],
+    "owned-native-ids": [],
+    "117": []
+  },
+  "maximal_required_leaves": [
+    "121",
+    "103",
+    "profile",
+    "batch-wire",
+    "107",
+    "119",
+    "112",
+    "observer",
+    "owned-native-ids",
+    "117"
+  ]
+}

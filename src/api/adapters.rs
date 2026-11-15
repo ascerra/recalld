@@ -162,6 +162,12 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+    }
     async fn embed_text(
         &self,
         text: &str,
@@ -403,6 +409,27 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn store_identity(&self) -> Result<uuid::Uuid, crate::storage::StorageError> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+            })?;
+            Ok(engine.control_state()?.store_id)
+        })
+        .await
+        .map_err(|_| {
+            crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+        })?
+    }
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn publication_lease(
         &self,
     ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, crate::storage::StorageError> {
@@ -1197,6 +1224,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
 
 /// Adapts the decay subsystem to the API `FsrsEngine` trait.
 pub struct FsrsEngineAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1207,6 +1235,89 @@ pub struct FsrsEngineAdapter {
 }
 
 impl FsrsEngineAdapter {
+    pub(crate) async fn trigger_sweep_with_origin(
+        &self,
+        as_of_millis: Option<i64>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
+        use crate::graph::ActivationConfig;
+
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(Box::new(
+                crate::storage::StorageError::InvalidMutationContext(
+                    "unsupported original application contract".into(),
+                ),
+            ));
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| e.to_string())?
+            .meta_store()
+            .uses_native_lifecycle();
+        let legacy = crate::storage::native_lifecycle::NativePolicyInputs {
+            global: crate::decay::DecayConfig::default(),
+            multiplier: self.config.decay.decay_rate_multiplier as f64,
+        };
+        let policy = if native {
+            self.native_policy.as_ref().ok_or_else(|| {
+                crate::storage::StorageError::InvalidMutationContext(
+                    "native manual sweep requires configured lifecycle policy".into(),
+                )
+            })?
+        } else {
+            &legacy
+        };
+        let sweep_config = SweepConfig::default();
+        let activation_config = ActivationConfig::default();
+
+        let result = DecaySweepRunner::execute_sweep_with_origin_work(
+            &sweep_config,
+            &policy.global,
+            &activation_config,
+            &self.storage,
+            &self.graph,
+            &self.cache,
+            policy.multiplier,
+            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
+            None,
+            self.completion.as_ref(),
+            original_contract_version,
+        )
+        .await;
+
+        // Do not let a subsequent unavailable-handle error hide the original
+        // canonical receipt or uncertain operation identity.
+        if let Some((receipt, message)) = &result.failed_commit {
+            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    message.clone(),
+                )),
+            }));
+        }
+        if let Some(operation_id) = result.uncertain_operation {
+            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
+                format!(
+                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
+                ),
+            )));
+        }
+        if let Some(error) = &result.publication_error {
+            return Err(error.clone().into());
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     /// Creates a new adapter with the storage engine, cache, and sweep-thread liveness flag.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1217,6 +1328,7 @@ impl FsrsEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -1318,49 +1430,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         &self,
         as_of_millis: Option<i64>,
     ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
-        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
-        use crate::graph::ActivationConfig;
-
-        let sweep_config = SweepConfig::default();
-        let decay_config = crate::decay::DecayConfig::default();
-        let activation_config = ActivationConfig::default();
-        let global_multiplier = self.config.decay.decay_rate_multiplier as f64;
-
-        let result = DecaySweepRunner::execute_sweep_with_work(
-            &sweep_config,
-            &decay_config,
-            &activation_config,
-            &self.storage,
-            &self.graph,
-            &self.cache,
-            global_multiplier,
-            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
-            None,
-            self.completion.as_ref(),
-        )
-        .await;
-
-        // Do not let a subsequent unavailable-handle error hide the original
-        // canonical receipt or uncertain operation identity.
-        if let Some((receipt, message)) = &result.failed_commit {
-            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
-                receipt: Box::new(receipt.clone()),
-                source: Box::new(crate::storage::StorageError::RecoveryRequired(
-                    message.clone(),
-                )),
-            }));
-        }
-        if let Some(operation_id) = result.uncertain_operation {
-            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
-                format!(
-                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
-                ),
-            )));
-        }
-        if let Some(error) = &result.publication_error {
-            return Err(error.clone().into());
-        }
-        Ok(result)
+        self.trigger_sweep_with_origin(as_of_millis, 1).await
     }
 }
 
@@ -1371,12 +1441,20 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl NamespaceRegistryAdapter {
     /// Creates a new adapter wrapping the storage engine for namespace operations.
     pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            clock: Arc::new(crate::time::SystemClock),
+        }
+    }
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -1462,7 +1540,7 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
         let work = crate::storage::work::accept_work(&self.storage, None)?;
         let worker = work.child()?;
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = self.clock.now_millis();
         let storage = self.storage.clone();
         let name_owned = name.to_string();
 

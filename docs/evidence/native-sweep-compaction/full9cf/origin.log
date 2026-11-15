@@ -1,0 +1,9 @@
+
+running 4 tests
+test storage::metadata::native_records::tests::sweep::origin::manual_origin_legacy_harddelete_unknown_origin_rejects_before_missing_lookup_or_write ... ok
+test storage::metadata::native_records::tests::sweep::origin::manual_origin_legacy_manual_and_startup_support_phase_and_hard_delete ... ok
+test storage::metadata::native_records::tests::sweep::origin::manual_origin_native_requires_configured_policy_and_rejects_unknown_before_clock ... ok
+test storage::metadata::native_records::tests::sweep::origin::manual_origin_native_api_one_and_autonomous_two_are_real_producers ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1196 filtered out; finished in 2.57s
+

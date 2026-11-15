@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/legacy-sweep-regression/runtime/config.toml",
+    "--data-root",
+    "/output/legacy-sweep-regression/runtime/original",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7"
+  ],
+  "exitCode": 0,
+  "forced": false,
+  "negativeConstructorProbe": false,
+  "pid": 4400,
+  "priorJoined": null,
+  "status": "joined"
+}

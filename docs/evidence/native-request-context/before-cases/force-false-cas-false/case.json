@@ -1,0 +1,136 @@
+{
+  "cas": false,
+  "force": false,
+  "previousGeneration": "15",
+  "progress": {
+    "cursor": null,
+    "edgesRemoved": 0,
+    "lastReceipt": {
+      "committedGeneration": "16",
+      "operationId": "fe0dc5e5-0539-4eb8-a4d1-c9850c300b63",
+      "outcome": {
+        "kind": "nativeNamespacePurgeStarted",
+        "transition": {
+          "beforeNamespace": {
+            "createdAt": 2000,
+            "embeddingDim": 4,
+            "name": "empty-purge",
+            "namespaceId": 3,
+            "policy": {
+              "decayRateMultiplier": null,
+              "defaultDifficulty": 5.0,
+              "desiredRetention": 0.8999999761581421,
+              "initialStability": 3.7144999504089355,
+              "permastoreThreshold": 1500.0,
+              "thresholds": [
+                0.699999988079071,
+                0.30000001192092896,
+                0.05000000074505806
+              ]
+            },
+            "schema": {
+              "embeddingBinding": {
+                "descriptor": {
+                  "dimension": 4,
+                  "documentPreprocessing": {
+                    "prefix": "",
+                    "version": "recalld-document-v1"
+                  },
+                  "identityVersion": 1,
+                  "modelId": "configured-model",
+                  "modelRevision": null,
+                  "normalization": "l2_unit_v1",
+                  "providerKind": "ollama",
+                  "queryPreprocessing": {
+                    "prefix": "",
+                    "version": "recalld-query-v1"
+                  }
+                },
+                "profileId": "ep1:676ea749a553656fd7675978dd214fe552062fff72290536c93fb4da0e736ff7",
+                "provenance": "native_v2",
+                "state": "bound"
+              },
+              "extensions": {},
+              "lifecycleVersion": "legacy_access_v1",
+              "namespaceSchemaVersion": 2,
+              "policyRevision": "0",
+              "requiredFeatures": []
+            }
+          },
+          "previousGeneration": "15"
+        }
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "3d80f05b-e479-498d-9d03-d972aaf605f4"
+    },
+    "name": "empty-purge",
+    "namespaceId": 3,
+    "nextOperationId": "6ca862ce-b770-45b2-b078-e2d180166f3e",
+    "removed": 0,
+    "sequence": 0,
+    "stage": "deleting",
+    "startReceipt": {
+      "committedGeneration": "16",
+      "operationId": "fe0dc5e5-0539-4eb8-a4d1-c9850c300b63",
+      "outcome": {
+        "kind": "nativeNamespacePurgeStarted",
+        "transition": {
+          "beforeNamespace": {
+            "createdAt": 2000,
+            "embeddingDim": 4,
+            "name": "empty-purge",
+            "namespaceId": 3,
+            "policy": {
+              "decayRateMultiplier": null,
+              "defaultDifficulty": 5.0,
+              "desiredRetention": 0.8999999761581421,
+              "initialStability": 3.7144999504089355,
+              "permastoreThreshold": 1500.0,
+              "thresholds": [
+                0.699999988079071,
+                0.30000001192092896,
+                0.05000000074505806
+              ]
+            },
+            "schema": {
+              "embeddingBinding": {
+                "descriptor": {
+                  "dimension": 4,
+                  "documentPreprocessing": {
+                    "prefix": "",
+                    "version": "recalld-document-v1"
+                  },
+                  "identityVersion": 1,
+                  "modelId": "configured-model",
+                  "modelRevision": null,
+                  "normalization": "l2_unit_v1",
+                  "providerKind": "ollama",
+                  "queryPreprocessing": {
+                    "prefix": "",
+                    "version": "recalld-query-v1"
+                  }
+                },
+                "profileId": "ep1:676ea749a553656fd7675978dd214fe552062fff72290536c93fb4da0e736ff7",
+                "provenance": "native_v2",
+                "state": "bound"
+              },
+              "extensions": {},
+              "lifecycleVersion": "legacy_access_v1",
+              "namespaceSchemaVersion": 2,
+              "policyRevision": "0",
+              "requiredFeatures": []
+            }
+          },
+          "previousGeneration": "15"
+        }
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "3d80f05b-e479-498d-9d03-d972aaf605f4"
+    },
+    "storeId": "3d80f05b-e479-498d-9d03-d972aaf605f4",
+    "tombstonesRemoved": 0,
+    "version": 2
+  }
+}

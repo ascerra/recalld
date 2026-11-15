@@ -1,0 +1,14 @@
+{
+  "currentAction": {
+    "arguments": {
+      "id": "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+      "namespace": "default",
+      "quality": 0
+    },
+    "tag": "invalid-quality",
+    "tool": "reinforce_memory"
+  },
+  "deliveryOrdinal": 112,
+  "phase": "action",
+  "startId": 108
+}

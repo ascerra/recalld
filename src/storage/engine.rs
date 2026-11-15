@@ -8,9 +8,16 @@
 //! See Spec 04 Section 7 for the design rationale.
 
 mod catalog;
+pub(crate) use catalog::rename_new_directory;
+mod checkpoint;
+pub(crate) use checkpoint::StagedCanonical;
 mod effects;
 mod insertion;
 mod maintenance;
+mod native_catalog;
+mod native_graph;
+mod native_maintenance;
+mod native_policy;
 mod native_records;
 mod purge;
 mod read_payload;
@@ -341,6 +348,9 @@ pub struct RedbStorageEngine {
     /// Exclusive file lock preventing multi-process access.
     _lock_file: crate::storage::ownership::OwnedFileLock,
     _ownership: crate::storage::ownership::StoreOwnership,
+    // Isolated fixture clones retain their ancestor owners until every worker
+    // releases this actual engine. Empty in all production constructors.
+    pub(crate) fixture_owners: Vec<crate::storage::ownership::OwnedFileLock>,
 }
 
 impl RedbStorageEngine {
@@ -418,15 +428,19 @@ impl RedbStorageEngine {
     /// 6. Opens vector files for all existing namespaces.
     /// 7. Runs startup validation (rebuilds phase index, cleans orphans).
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
-        Self::open_mode(path, false)
+        Self::open_with_ids(path, false, Box::new(super::ids::SystemIds))
     }
     pub(crate) fn open_native(path: &Path) -> Result<Self, StorageError> {
         if !path.is_dir() {
             return Err(StorageError::InvalidPath);
         }
-        Self::open_mode(path, true)
+        Self::open_with_ids(path, true, Box::new(super::ids::SystemIds))
     }
-    fn open_mode(path: impl AsRef<Path>, native: bool) -> Result<Self, StorageError> {
+    pub(crate) fn open_with_ids(
+        path: impl AsRef<Path>,
+        native: bool,
+        ids: Box<dyn super::ids::IdSource>,
+    ) -> Result<Self, StorageError> {
         let ownership =
             crate::storage::ownership::StoreOwnership::acquire_recovering(path.as_ref())?;
         let db_path = ownership.path.clone();
@@ -452,11 +466,7 @@ impl RedbStorageEngine {
         }
 
         // Step 2: Open meta.db.
-        let meta_store = if native {
-            MetadataStore::open_native_lifecycle(&db_path.join("meta.db"))?
-        } else {
-            MetadataStore::open(&db_path.join("meta.db"))?
-        };
+        let meta_store = MetadataStore::open_with_ids(&db_path.join("meta.db"), native, ids)?;
 
         // Step 3: Open edges.db.
         let edge_store = EdgeStore::open(&db_path.join("edges.db"))?;
@@ -465,7 +475,11 @@ impl RedbStorageEngine {
         // Step 5: Open fulltext.dat.
         if !existing {
             let state = meta_store.control_state()?;
-            let (prepared, id) = TextStore::create_generation(&db_path, state.store_id)?;
+            let (prepared, id) = TextStore::create_generation_with_ids(
+                &db_path,
+                state.store_id,
+                meta_store.id_source(),
+            )?;
             let descriptor = prepared.seal(state.store_id, id, 2)?;
             crate::storage::text::generation::write_rejection_gate(&db_path, &descriptor)?;
             meta_store.select_text_generation(state.committed_generation, &descriptor, &vec![])?;
@@ -510,6 +524,7 @@ impl RedbStorageEngine {
             edge_store,
             _lock_file: lock_file,
             _ownership: ownership,
+            fixture_owners: Vec::new(),
         };
 
         // Step 7: Startup validation.

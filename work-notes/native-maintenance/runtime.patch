@@ -1,0 +1,3081 @@
+diff --git a/docs/implementation/native-maintenance-plan.md b/docs/implementation/native-maintenance-plan.md
+new file mode 100644
+index 0000000..07b1b35
+--- /dev/null
++++ b/docs/implementation/native-maintenance-plan.md
+@@ -0,0 +1,107 @@
++# Native maintenance implementation boundary
++
++Assigned 2026-11-14 after Feynman confirmed no maintenance implementation had
++started. Parent: corrected PR82 bb1a086, runtime fb804a0. Existing native
++MutationGuard, RecordMutation and effects publication are the implementation
++boundary. The second parent is Hume's minimal profile-shape helper
++`1f4eb18c24a3d3f512030bbee0f9c4adcecfe656`, based directly on fb804a0.
++No 70/80, catalog, numeric-policy, graph-writer or batch dependency is imported.
++
++Pascal owns phase materialization, phase loss and automatic Ghost hard deletion.
++Feynman retains numeric namespace policy, native purge and shared history review.
++Hume owns native graph puts/upserts; Curie owns producer/batch registration.
++Additive shared match arms must compose without replacing their variants.
++
++The explicit native owning-session entry delegates to the existing engine and
++metadata transaction. Matching original-ID intent replay precedes capture,
++clock, fresh policy and tokens. Captured preconditions are not retry identity.
++One sampled clock is retained across final checks and projection. A final native
++publication guard protects canonical edge loading and the metadata write
++transaction. No graph await occurs under a storage/publication lock: this private
++entry computes from canonical edges, not a caller-supplied bonus or cached graph.
++`DerivedCompletion::apply_native_decay_accepted(ctx, intent, policy, parent)`
++consumes the producer's existing WorkTicket. It holds the publication read lease
++and acquires graph before storage, then releases those locks before awaiting
++derived publication. Known publication failure retains the full committed
++receipt; matching replay completes publication. It does not register a new root
++or enable a background producer.
++
++Projection uses the persisted decay anchor and effective time clamped to the
++record's lifecycle_updated_at. Only canonical same-namespace Full/Summary donors
++with retained reviewable content contribute; build a same-namespace graph so
++foreign edges cannot alter fan counts. Ghosts receive no bonus. Recompute even
++when the captured target previously needed only a strength update. Policy/token
++changes skip stale work; unchanged/exempt/missing-summary cases commit nothing.
++These are internal diagnostics and do not reserve a key or promise a public
++keyed-noop finalization contract.
++A pass captures each ID once and advances at most one destructive phase.
++
++Phase loss preserves anchors, provenance, access/history, feedback timestamps,
++stability and permastore. Full -> Summary drops full text only, requiring a
++nonempty summary. Summary -> Ghost strips summary/tags/structured labels while
++retaining any canonical vector. Phase time is max(effective_now, old marker);
++strength-only changes leave the phase marker alone. Unknown extensions fail
++closed before destructive changes.
++
++Typed NativePhaseMaterialized and NativeMemoryHardDeleted receipts keep original
++native tombstone receipt semantics untouched. A bounded deletion witness stores
++UUID/namespace, NativeRecordState and numeric access history, never removed text,
++labels or embedding bytes. Validate history/hash, predecessor state, origin,
++ledger HardDelete/ALL, and exact peer token/count decrements. Reverse proof only
++reconstructs ProofRecord, never canonical payloads. The existing final transaction
++commits record/peer changes, removal ledger, receipt and outbox together. Actual
++vector cleanup retains the existing canonical owner guard; a stale release may
++not touch a reused slot. Purge will consume the validated witness later.
++
++The shared witness is `NativeDeletionWitness { memory_id, namespace_id, before:
++NativeRecordState, history: Vec<AccessEvent> }`. `validate()` checks non-nil
++identities, lifecycle and profile shape, strict bounded history and its hash,
++and rejects unknown extensions before destructive use. `proof_record()` returns
++only a reverse-validation state. Automatic `NativeHardDeleteWrite` additionally
++requires a Ghost eligible for deletion, exact sorted incident edges, and exact
++surviving-peer token/count changes. All receipt origins bind profile commitments
++to their immutable namespace configuration. Purge must supply its validated
++beforeNamespace when that configuration has been removed.
++
++Native startup may repair disposable copies, fully validate them under ownership,
++then open the live databases. A missing physical edge endpoint is allowed only
++for the deleted primary in an exact typed, validated, unapplied pending hard
++deletion. Every other endpoint must exist. Matching uses every edge attribute,
++including float bits; +0 and -0 are distinct. Offline inspection/export continue
++to reject unapplied effects. Malformed proof or inventory rejection leaves the
++source files unchanged.
++
++New receipt kinds are explicit and unknown kinds fail closed. Older readers that
++do not implement these kinds reject them; this is not full old-reader format
++compatibility. Existing migration receipts and publication generations are never
++rewritten. Existing tombstone phaseTimeRule semantics remain unchanged.
++
++At the actual numeric-policy join, rewind namespace configuration before checking
++maintenance evidence against the policy at that revision. At the graph-writer
++join, reverse `NativeMemoryHardDeleted.removed_edges` before validating earlier
++graph/insertion proofs; do not silently skip the deletion variant. Phase writes
++change no edges. Batch integration must preserve the existing optional child
++argument in the shared final transaction. Those owners retain their changes.
++
++The retained history decoder enforces ACCESS_HISTORY_MAX before allocation grows
++beyond the bound. Incident-edge proof size is proportional to the existing graph;
++this change invents no arbitrary edge cap. Projection currently scans canonical
++namespace rows and edges per evaluated record. No scaling/performance claim is
++made. The graph freshness regression changes actual donor feedback and canonical
++fan-out while the target token stays unchanged; native edge-put joins require
++their own producer composition test.
++
++Validated evidence: actual migration/native writes, phase boundaries and retained
++payloads, stale feedback/policy/save-edge/no-transition plans, original clock and
++regression, exemptions/missing-summary/noops, keyed replay, harddelete peers and
++ledger, slot reuse safety, real precommit/process-exit recovery, strict reopen,
++export/import/fork and malformed-proof immutable rejection. All execution uses
++isolated offline Docker with private caches and the existing CPU/memory limits.
++Ordinary schema-2 serving remains gated; no completed A3/A6 or performance claim.
++
++Validation: 13 focused maintenance test entries (including the process helper),
++one accepted-publication test, 940 library tests and two CLI tests passed; four
++doctests remain ignored. Formatting passed. Clippy exited 0 with 623 library and
++661 library-test warnings (621 duplicates), plus one binary warning. The preserved
++recovery and signed-zero failures, source/binary identities and final raw logs
++are in `work-notes/native-maintenance/`.
+diff --git a/src/derived_completion.rs b/src/derived_completion.rs
+index bf4e23d..4943576 100644
+--- a/src/derived_completion.rs
++++ b/src/derived_completion.rs
+@@ -1,5 +1,7 @@
+ //! Online completion of committed effects. Lock order is graph -> indexes ->
+ //! storage; never hold storage while awaiting a derived lock.
++mod native_decay;
++
+ use std::sync::{Arc, RwLock};
+ 
+ use crate::cache::CacheManager;
+diff --git a/src/derived_completion/native_decay.rs b/src/derived_completion/native_decay.rs
+new file mode 100644
+index 0000000..44900a5
+--- /dev/null
++++ b/src/derived_completion/native_decay.rs
+@@ -0,0 +1,58 @@
++//! Accepted maintenance consumer. The producer owns root/pass registration.
++use super::*;
++use crate::storage::control::MutationContext;
++use crate::storage::native_lifecycle::NativePolicyInputs;
++use crate::storage::native_maintenance::{NativeDecayIntent, NativeDecayResult};
++
++impl DerivedCompletion {
++    /// Consume the producer's existing ticket, retaining the original snapshot
++    /// clock through canonical commit and awaited publication. No new root.
++    pub(crate) async fn apply_native_decay_accepted(
++        &self,
++        ctx: MutationContext,
++        intent: NativeDecayIntent,
++        policy: NativePolicyInputs,
++        parent: &WorkTicket,
++    ) -> Result<NativeDecayResult, StorageError> {
++        let work = self.accept_work(Some(parent))?;
++        let result = self.native_decay_work(ctx, intent, policy, &work).await;
++        self.finish_known_work(work);
++        result
++    }
++
++    async fn native_decay_work(
++        &self,
++        ctx: MutationContext,
++        intent: NativeDecayIntent,
++        policy: NativePolicyInputs,
++        work: &WorkTicket,
++    ) -> Result<NativeDecayResult, StorageError> {
++        let gate = publication_gate(&self.storage).await?;
++        let lease = gate.read_owned().await;
++        // Graph -> storage is the shared writer order. The engine recomputes
++        // from canonical edges/rows, so a stale cached graph is never authority.
++        let graph = self.graph.clone().read_owned().await;
++        let storage = self.storage.clone();
++        let child = work.child()?;
++        let result = tokio::task::spawn_blocking(move || {
++            let _graph = graph;
++            let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
++            let result = storage.apply_native_decay(&ctx, &intent, &policy, Some(&child));
++            storage.meta_store().finish_work(child);
++            result
++        })
++        .await
++        .map_err(|e| failed(e.to_string()))?;
++        drop(lease);
++        let result = result?;
++        if let NativeDecayResult::Committed(receipt) = &result {
++            self.complete_with_work(Some(work))
++                .await
++                .map_err(|source| StorageError::CommittedMutation {
++                    receipt: Box::new(receipt.clone()),
++                    source: Box::new(source),
++                })?;
++        }
++        Ok(result)
++    }
++}
+diff --git a/src/storage/control.rs b/src/storage/control.rs
+index a5ab930..5e88c57 100644
+--- a/src/storage/control.rs
++++ b/src/storage/control.rs
+@@ -231,6 +231,12 @@ pub struct ExposureOutcome {
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
+ pub enum MutationOutcome {
++    NativePhaseMaterialized {
++        transition: super::native_maintenance::NativePhaseWrite,
++    },
++    NativeMemoryHardDeleted {
++        transition: super::native_maintenance::NativeHardDeleteWrite,
++    },
+     NativeMemoryInserted {
+         transition: super::native_records::NativeRecordWrite,
+     },
+@@ -449,6 +455,8 @@ pub(crate) fn validate_existing(
+             MutationOutcome::LifecyclePolicyMigrated { .. }
+                 | MutationOutcome::LifecycleExposureRecorded { .. }
+                 | MutationOutcome::LifecycleFeedbackApplied { .. }
++                | MutationOutcome::NativePhaseMaterialized { .. }
++                | MutationOutcome::NativeMemoryHardDeleted { .. }
+                 | MutationOutcome::NativeMemoryInserted { .. }
+                 | MutationOutcome::NativeMemoryTombstoned { .. }
+         ) && state.control_schema_version != 2
+@@ -617,6 +625,12 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
+         ));
+     }
+     match &stored.receipt.outcome {
++        MutationOutcome::NativePhaseMaterialized { transition } => {
++            transition.validate(&stored.receipt)?
++        }
++        MutationOutcome::NativeMemoryHardDeleted { transition } => {
++            transition.validate(&stored.receipt)?
++        }
+         MutationOutcome::NativeMemoryInserted { transition } => {
+             transition.validate(&stored.receipt, true)?
+         }
+@@ -721,7 +735,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
+                 ));
+             }
+         }
+-        MutationOutcome::NativeMemoryInserted { .. }
++        MutationOutcome::NativePhaseMaterialized { .. }
++        | MutationOutcome::NativeMemoryHardDeleted { .. }
++        | MutationOutcome::NativeMemoryInserted { .. }
+         | MutationOutcome::NativeMemoryTombstoned { .. }
+         | MutationOutcome::LifecycleExposureRecorded { .. }
+         | MutationOutcome::LifecycleFeedbackApplied { .. }
+diff --git a/src/storage/engine.rs b/src/storage/engine.rs
+index 201461e..f8236bc 100644
+--- a/src/storage/engine.rs
++++ b/src/storage/engine.rs
+@@ -10,6 +10,7 @@
+ mod catalog;
+ mod effects;
+ mod insertion;
++mod native_maintenance;
+ mod native_records;
+ mod purge;
+ mod text_compaction;
+diff --git a/src/storage/engine/native_maintenance.rs b/src/storage/engine/native_maintenance.rs
+new file mode 100644
+index 0000000..9040d77
+--- /dev/null
++++ b/src/storage/engine/native_maintenance.rs
+@@ -0,0 +1,65 @@
++use super::*;
++use crate::storage::native_lifecycle::NativePolicyInputs;
++use crate::storage::native_maintenance::{NativeDecayIntent, NativeDecayResult};
++use crate::storage::work::WorkTicket;
++use std::collections::HashMap;
++impl RedbStorageEngine {
++    pub(crate) fn lookup_native_decay(
++        &self,
++        ctx: &MutationContext,
++        id: MemoryId,
++        parent: Option<&WorkTicket>,
++    ) -> Result<Option<WriteReceipt>, StorageError> {
++        let guard = self.meta_store.native_guard_with_work(parent)?;
++        self.meta_store.lookup_native_decay(&guard, ctx, id)
++    }
++    pub(crate) fn apply_native_decay(
++        &mut self,
++        ctx: &MutationContext,
++        intent: &NativeDecayIntent,
++        policy: &NativePolicyInputs,
++        parent: Option<&WorkTicket>,
++    ) -> Result<NativeDecayResult, StorageError> {
++        let guard = self.meta_store.native_guard_with_work(parent)?;
++        if let Some(receipt) = self
++            .meta_store
++            .lookup_native_decay(&guard, ctx, intent.memory_id)?
++        {
++            return Ok(NativeDecayResult::Committed(receipt));
++        }
++        let edges = self.edge_store.load_all_edges()?;
++        let mut ids = vec![intent.memory_id];
++        ids.extend(
++            edges
++                .iter()
++                .filter(|e| e.target == intent.memory_id)
++                .map(|e| e.source),
++        );
++        ids.sort();
++        ids.dedup();
++        let mut hashes = HashMap::new();
++        for id in ids {
++            if self.meta_store.get(id)?.is_some() {
++                hashes.insert(id, self.native_text_hash(id)?);
++            }
++        }
++        let result = self
++            .meta_store
++            .decay_native_with_effects(&guard, ctx, intent, policy, &edges, &hashes)?;
++        if let NativeDecayResult::Committed(receipt) = &result {
++            if !receipt.replayed {
++                effects::apply_pending(
++                    &self.meta_store,
++                    &guard,
++                    &self.edge_store,
++                    Some(&mut self.vector_manager),
++                )
++                .map_err(|source| StorageError::CommittedMutation {
++                    receipt: Box::new(receipt.clone()),
++                    source: Box::new(source),
++                })?;
++            }
++        }
++        Ok(result)
++    }
++}
+diff --git a/src/storage/engine/native_records.rs b/src/storage/engine/native_records.rs
+index 710d8aa..a341267 100644
+--- a/src/storage/engine/native_records.rs
++++ b/src/storage/engine/native_records.rs
+@@ -6,7 +6,7 @@ use crate::storage::work::WorkTicket;
+ use crate::time::Clock;
+ 
+ impl RedbStorageEngine {
+-    fn native_text_hash(&self, id: MemoryId) -> Result<Option<[u8; 32]>, StorageError> {
++    pub(super) fn native_text_hash(&self, id: MemoryId) -> Result<Option<[u8; 32]>, StorageError> {
+         let record = self
+             .meta_store
+             .get(id)?
+diff --git a/src/storage/lifecycle_migration.rs b/src/storage/lifecycle_migration.rs
+index 766d537..b708d57 100644
+--- a/src/storage/lifecycle_migration.rs
++++ b/src/storage/lifecycle_migration.rs
+@@ -201,6 +201,24 @@ pub(crate) fn validate_policy_history(
+                 ));
+                 Some(t.namespace_id)
+             }
++            MutationOutcome::NativePhaseMaterialized { transition: t } => {
++                native_history.push((
++                    receipt.clone(),
++                    t.namespace_id,
++                    t.lifecycle_version,
++                    t.policy_revision,
++                ));
++                Some(t.namespace_id)
++            }
++            MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
++                native_history.push((
++                    receipt.clone(),
++                    t.namespace_id,
++                    t.lifecycle_version,
++                    t.policy_revision,
++                ));
++                Some(t.namespace_id)
++            }
+             _ if active => return Err(invalid("unrecognized operation after schema publication")),
+             _ => None,
+         };
+@@ -275,6 +293,12 @@ pub(crate) fn validate_policy_history(
+         .collect::<Result<HashMap<_, _>, StorageError>>()?;
+     let creations = super::native_records::creation_proofs(read)?;
+     let ledger = super::metadata::removal_ledger::read_export(read, Some(control))?;
++    for row in read.open_table(control::RECEIPTS)?.iter()? {
++        let (_, bytes) = row?;
++        let receipt = control::validate_receipt(bytes.value())?.receipt;
++        super::native_maintenance::validate_ledger(&receipt, ledger.as_ref())?;
++        super::native_maintenance::validate_namespace_profiles(&receipt, &configs)?;
++    }
+     let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
+     for row in read.open_table(META_TABLE)?.iter()? {
+         let (_, v) = row?;
+@@ -396,6 +420,32 @@ pub(crate) fn validate_policy_history(
+                         .ok_or_else(|| invalid("native record namespace absent"))?,
+                 )?;
+             }
++            MutationOutcome::NativePhaseMaterialized { transition: t } => {
++                if current_policy.get(&t.namespace_id.get())
++                    != Some(&(t.lifecycle_version, t.policy_revision))
++                    || !t.policy.matches_namespace(
++                        configs
++                            .get(&t.namespace_id.get())
++                            .ok_or_else(|| invalid("phase namespace absent"))?,
++                    )
++                {
++                    return Err(invalid("phase policy proof mismatch"));
++                }
++                t.rewind(records.entry(t.namespace_id.get()).or_default())?;
++            }
++            MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
++                if current_policy.get(&t.namespace_id.get())
++                    != Some(&(t.lifecycle_version, t.policy_revision))
++                    || !t.policy.matches_namespace(
++                        configs
++                            .get(&t.namespace_id.get())
++                            .ok_or_else(|| invalid("delete namespace absent"))?,
++                    )
++                {
++                    return Err(invalid("deletion policy proof mismatch"));
++                }
++                t.rewind(&mut records)?;
++            }
+             _ => return Err(invalid("unrecognized operation in lifecycle proof")),
+         }
+     }
+diff --git a/src/storage/metadata.rs b/src/storage/metadata.rs
+index ef4a7c1..5f27bd4 100644
+--- a/src/storage/metadata.rs
++++ b/src/storage/metadata.rs
+@@ -13,6 +13,7 @@ mod insertion;
+ mod lifecycle_updates;
+ pub(crate) mod namespace_state;
+ mod native_lifecycle;
++mod native_maintenance;
+ mod native_records;
+ mod observation;
+ pub(crate) mod purge;
+diff --git a/src/storage/metadata/effects.rs b/src/storage/metadata/effects.rs
+index cc3962e..1bb09bb 100644
+--- a/src/storage/metadata/effects.rs
++++ b/src/storage/metadata/effects.rs
+@@ -14,6 +14,12 @@ thread_local! {
+ 
+ /// Ephemeral inputs only; receipts and effects never retain stripped content.
+ pub(super) enum RecordMutation<'a> {
++    NativePhase {
++        before: &'a DiskRecord,
++        after: &'a DiskRecord,
++        transition: crate::storage::native_maintenance::NativePhaseWrite,
++    },
++    NativeHardDelete(crate::storage::native_maintenance::NativeHardDeleteWrite),
+     GraphOnly,
+     PurgeChunk(&'a crate::storage::purge::PurgeProgress),
+     Inserted(&'a DiskRecord, u32),
+@@ -99,6 +105,8 @@ pub(crate) fn validate_existing(
+                     MutationOutcome::GraphChanged { .. }
+                         | MutationOutcome::MemoryInserted { .. }
+                         | MutationOutcome::MemoryTombstoned { .. }
++                        | MutationOutcome::NativePhaseMaterialized { .. }
++                        | MutationOutcome::NativeMemoryHardDeleted { .. }
+                         | MutationOutcome::NativeMemoryInserted { .. }
+                         | MutationOutcome::NativeMemoryTombstoned { .. }
+                         | MutationOutcome::NamespacePurgeStarted { .. }
+@@ -159,6 +167,10 @@ pub(crate) fn validate_existing(
+             ));
+         }
+         match &effect.receipt.outcome {
++            MutationOutcome::NativePhaseMaterialized { .. }
++            | MutationOutcome::NativeMemoryHardDeleted { .. } => {
++                super::native_maintenance::validate_effect(&effect)?
++            }
+             MutationOutcome::NativeMemoryInserted { .. } => validate_native_effect(&effect, true)?,
+             MutationOutcome::NativeMemoryTombstoned { .. } => {
+                 validate_native_effect(&effect, false)?
+@@ -166,6 +178,8 @@ pub(crate) fn validate_existing(
+             _ => {}
+         }
+         match effect.receipt.outcome {
++            MutationOutcome::NativePhaseMaterialized { .. }
++            | MutationOutcome::NativeMemoryHardDeleted { .. } => {}
+             MutationOutcome::NativeMemoryInserted { .. }
+             | MutationOutcome::NativeMemoryTombstoned { .. } => {}
+             MutationOutcome::MemoryTombstoned { memory_id, status }
+@@ -362,13 +376,16 @@ impl MetadataStore {
+         let mut releases = Vec::new();
+         let mut invalidated: std::collections::HashSet<_> = incident_ids.iter().copied().collect();
+         match &mutation {
+-            RecordMutation::Inserted(record, _)
++            RecordMutation::NativePhase { after: record, .. }
++            | RecordMutation::Inserted(record, _)
+             | RecordMutation::Tombstoned { record, .. }
+             | RecordMutation::NativeInserted(record, _)
+             | RecordMutation::NativeTombstoned { record, .. } => {
+                 invalidated.insert(MemoryId::from_bytes(record.id));
+             }
+-            RecordMutation::GraphOnly | RecordMutation::PurgeChunk(_) => {}
++            RecordMutation::NativeHardDelete(_)
++            | RecordMutation::GraphOnly
++            | RecordMutation::PurgeChunk(_) => {}
+         }
+         if let RecordMutation::Tombstoned { record, old_phase }
+         | RecordMutation::NativeTombstoned {
+@@ -541,6 +558,30 @@ impl MetadataStore {
+                     }
+                     change.after.edge_count = count;
+                 }
++                if let RecordMutation::NativeHardDelete(proof) = &mut mutation {
++                    let peer = proof
++                        .peers
++                        .iter_mut()
++                        .find(|p| p.change.memory_id == id)
++                        .ok_or_else(|| {
++                            StorageError::InvalidControl("native deleted peer proof missing".into())
++                        })?;
++                    let before = peer.change.before.as_ref().ok_or_else(|| {
++                        StorageError::InvalidControl("native deleted peer before missing".into())
++                    })?;
++                    if record.namespace_id != peer.namespace_id.get()
++                        || !before.matches_record(&record)?
++                    {
++                        return Err(StorageError::InvalidControl(
++                            "native deleted peer changed inside transaction".into(),
++                        ));
++                    }
++                    record.schema.as_mut().unwrap().lifecycle.record_generation =
++                        before.lifecycle.lifecycle.record_generation.next()?;
++                    peer.change.after.lifecycle.lifecycle.record_generation =
++                        record.schema.as_ref().unwrap().lifecycle.record_generation;
++                    peer.change.after.edge_count = count;
++                }
+                 record.edge_count = count;
+                 records.insert(id.as_bytes().as_slice(), record.to_bytes().as_slice())?;
+                 peer_counts.push((id, count));
+@@ -557,6 +598,16 @@ impl MetadataStore {
+                 .collect();
+         }
+         let outcome = match &mutation {
++            RecordMutation::NativePhase { transition, .. } => {
++                MutationOutcome::NativePhaseMaterialized {
++                    transition: transition.clone(),
++                }
++            }
++            RecordMutation::NativeHardDelete(transition) => {
++                MutationOutcome::NativeMemoryHardDeleted {
++                    transition: transition.clone(),
++                }
++            }
+             RecordMutation::NativeInserted(_, transition) => {
+                 MutationOutcome::NativeMemoryInserted {
+                     transition: transition.clone(),
+@@ -621,7 +672,30 @@ impl MetadataStore {
+                 )?;
+             }
+         }
++        if let RecordMutation::NativePhase { transition, .. } = &mutation {
++            let mask = transition.loss_mask();
++            if mask != 0 {
++                super::removal_ledger::record_removal(
++                    &tx,
++                    crate::storage::control::GenerationRef {
++                        store_id: receipt.store_id,
++                        generation: receipt.committed_generation,
++                    },
++                    namespace.get(),
++                    transition.memory_id,
++                    None,
++                    mask,
++                    receipt.operation_id,
++                )?;
++            }
++        }
+         match &receipt.outcome {
++            MutationOutcome::NativePhaseMaterialized { transition } => {
++                transition.validate(&receipt)?
++            }
++            MutationOutcome::NativeMemoryHardDeleted { transition } => {
++                transition.validate(&receipt)?
++            }
+             MutationOutcome::NativeMemoryInserted { transition } => {
+                 transition.validate(&receipt, true)?
+             }
+@@ -700,6 +774,14 @@ impl MetadataStore {
+         })?;
+         crash_point("after_metadata_commit");
+         let mut phases = self.phase_index.write().unwrap_or_else(|e| e.into_inner());
++        if let RecordMutation::NativePhase { before, after, .. } = &mutation {
++            phases.transition(
++                after.namespace_id,
++                after.vector_slot,
++                before.phase,
++                after.phase,
++            );
++        }
+         if let RecordMutation::Inserted(record, _) | RecordMutation::NativeInserted(record, _) =
+             &mutation
+         {
+@@ -823,6 +905,7 @@ pub(crate) fn validate_plan(
+             "removed effect ID still exists".into(),
+         ));
+     }
++    super::native_maintenance::validate_pending_records(effect, records)?;
+     if let Some(proof) = native_proof(effect) {
+         for change in &proof.records {
+             let record = records
+diff --git a/src/storage/metadata/native_maintenance.rs b/src/storage/metadata/native_maintenance.rs
+new file mode 100644
+index 0000000..da29fdb
+--- /dev/null
++++ b/src/storage/metadata/native_maintenance.rs
+@@ -0,0 +1,466 @@
++use super::*;
++use crate::storage::PersistedEdge;
++use crate::storage::native_lifecycle::{LifecycleScope, NativePolicyInputs};
++use crate::storage::native_maintenance::*;
++use crate::storage::native_records::{NativeEdgeProof, NativeRecordChange, NativeRecordState};
++
++pub(crate) fn request_hash(ctx: &MutationContext, id: MemoryId) -> Result<[u8; 32], StorageError> {
++    ctx.validate()?;
++    if ctx.contract_version != 2 || !matches!(ctx.scope, MutationScope::Namespace(_)) {
++        return Err(StorageError::InvalidMutationContext(
++            "native maintenance requires contract2 namespace scope".into(),
++        ));
++    }
++    Ok(control::request_hash(
++        ctx,
++        "native_maintenance",
++        &[id.as_bytes()],
++    ))
++}
++impl MetadataStore {
++    pub(crate) fn capture_native_decay_pass(
++        &self,
++        namespace: NamespaceId,
++        policy: &NativePolicyInputs,
++        sampled_at: i64,
++    ) -> Result<Vec<NativeDecayIntent>, StorageError> {
++        self.ensure_available()?;
++        let _guard = self.publication.read().unwrap_or_else(|e| e.into_inner());
++        self.ensure_available()?;
++        let read = self.db.begin_read()?;
++        let ns = NamespaceConfig::decode(
++            read.open_table(NAMESPACE_TABLE)?
++                .get(namespace.get())?
++                .ok_or(StorageError::NamespaceNotFound(namespace.get()))?
++                .value(),
++        )?;
++        let scope = LifecycleScope {
++            namespace_id: namespace,
++            namespace_name: ns.name,
++            source: None,
++        };
++        let mut ids = Vec::new();
++        for row in read.open_table(META_TABLE)?.iter()? {
++            let (_, v) = row?;
++            let record = DiskRecord::from_bytes(v.value())?;
++            if record.namespace_id == namespace.get() {
++                ids.push(MemoryId::from_bytes(record.id));
++            }
++        }
++        let captured = self.capture_at(&read, &scope, &ids, policy, false)?;
++        if chrono::DateTime::from_timestamp_millis(sampled_at).is_none() {
++            return Err(StorageError::InvalidMutation(
++                "invalid native maintenance clock".into(),
++            ));
++        }
++        Ok(captured
++            .records
++            .iter()
++            .map(|(id, token)| {
++                let capture = crate::storage::native_lifecycle::CapturedLifecycle {
++                    generation: captured.generation,
++                    version: captured.version,
++                    revision: captured.revision,
++                    policy_hash: captured.policy_hash,
++                    records: vec![(*id, *token)],
++                };
++                NativeDecayIntent {
++                    scope: scope.clone(),
++                    memory_id: *id,
++                    capture,
++                    sampled_at,
++                }
++            })
++            .collect())
++    }
++
++    pub(crate) fn lookup_native_decay(
++        &self,
++        guard: &MutationGuard<'_>,
++        ctx: &MutationContext,
++        id: MemoryId,
++    ) -> Result<Option<WriteReceipt>, StorageError> {
++        guard.check(self)?;
++        control::replay_or_check(&self.db.begin_write()?, ctx, request_hash(ctx, id)?)
++    }
++    pub(crate) fn capture_native_decay(
++        &self,
++        id: MemoryId,
++        namespace: NamespaceId,
++        policy: &NativePolicyInputs,
++        sampled_at: i64,
++    ) -> Result<NativeDecayIntent, StorageError> {
++        self.ensure_available()?;
++        let _guard = self.publication.read().unwrap_or_else(|e| e.into_inner());
++        self.ensure_available()?;
++        let read = self.db.begin_read()?;
++        let ns = NamespaceConfig::decode(
++            read.open_table(NAMESPACE_TABLE)?
++                .get(namespace.get())?
++                .ok_or(StorageError::NamespaceNotFound(namespace.get()))?
++                .value(),
++        )?;
++        let scope = LifecycleScope {
++            namespace_id: namespace,
++            namespace_name: ns.name,
++            source: None,
++        };
++        let capture = self.capture_at(&read, &scope, &[id], policy, false)?;
++        if chrono::DateTime::from_timestamp_millis(sampled_at).is_none() {
++            return Err(StorageError::InvalidMutation(
++                "invalid native maintenance clock".into(),
++            ));
++        }
++        Ok(NativeDecayIntent {
++            scope,
++            memory_id: id,
++            capture,
++            sampled_at,
++        })
++    }
++    pub(crate) fn decay_native_with_effects(
++        &self,
++        guard: &MutationGuard<'_>,
++        ctx: &MutationContext,
++        intent: &NativeDecayIntent,
++        policy: &NativePolicyInputs,
++        edges: &[PersistedEdge],
++        text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
++    ) -> Result<NativeDecayResult, StorageError> {
++        guard.check(self)?;
++        let hash = request_hash(ctx, intent.memory_id)?;
++        if ctx.scope != MutationScope::Namespace(intent.scope.namespace_id) {
++            return Err(StorageError::MutationNamespaceMismatch);
++        }
++        let tx = self.db.begin_write()?;
++        if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
++            return Ok(NativeDecayResult::Committed(receipt));
++        }
++        let (control, ns, resolved, mut current) =
++            match self.check_native_capture(&tx, &intent.scope, &intent.capture, policy, false) {
++                Ok(v) => v,
++                Err(
++                    StorageError::NotFound(_)
++                    | StorageError::NamespaceNotFound(_)
++                    | StorageError::LifecycleConflict(_),
++                ) => return Ok(NativeDecayResult::Skipped(NativeDecaySkip::Stale)),
++                Err(e) => return Err(e),
++            };
++        let record = current
++            .remove(&intent.memory_id)
++            .ok_or(StorageError::NotFound(intent.memory_id.into_inner()))?;
++        let before = NativeRecordState::capture(
++            &record,
++            &ns,
++            text_hashes.get(&intent.memory_id).copied().flatten(),
++        )?;
++        // Canonical graph and current donor rows, under the same native publication
++        // guard/write transaction as the patch. No cached graph or caller bonus.
++        let bonus = if record.phase == DecayPhase::Ghost {
++            0.
++        } else {
++            canonical_bonus(
++                &tx,
++                edges,
++                &ns,
++                &resolved,
++                intent.memory_id,
++                intent.sampled_at,
++            )?
++        };
++        let evidence = NativeDecayEvidence::capture(
++            &resolved,
++            bonus.min(resolved.config.max_connection_bonus),
++        )?;
++        match plan(&before, &evidence, intent.sampled_at)? {
++            PlannedDecay::Skipped(reason) => Ok(NativeDecayResult::Skipped(reason)),
++            PlannedDecay::Phase(after) => {
++                let transition = NativePhaseWrite {
++                    namespace_id: ns.id,
++                    memory_id: intent.memory_id,
++                    lifecycle_version: intent.capture.version,
++                    policy_revision: intent.capture.revision,
++                    previous_generation: control.committed_generation,
++                    capture_generation: intent.capture.generation,
++                    sampled_at: intent.sampled_at,
++                    policy: evidence,
++                    change: NativeRecordChange {
++                        memory_id: intent.memory_id,
++                        before: Some(before),
++                        after: after.clone(),
++                    },
++                };
++                let mut patched = record.clone();
++                after.lifecycle.apply(&mut patched);
++                if patched.phase != record.phase {
++                    patched.text_offset = 0;
++                    patched.text_length = 0;
++                    if patched.phase == DecayPhase::Ghost {
++                        let mut tags = tx.open_multimap_table(TAG_INDEX)?;
++                        for tag in &patched.tags {
++                            tags.remove(tag.as_str(), intent.memory_id.as_bytes().as_slice())?;
++                        }
++                        patched.summary.clear();
++                        patched.tags.clear();
++                        let labels = &mut patched.schema.as_mut().unwrap().labels;
++                        labels.entities.clear();
++                        labels.topics.clear();
++                        labels.emotions.clear();
++                    }
++                }
++                if !after.matches_record(&patched)? {
++                    return Err(StorageError::InvalidControl(
++                        "native phase patch differs from proof".into(),
++                    ));
++                }
++                tx.open_table(META_TABLE)?.insert(
++                    intent.memory_id.as_bytes().as_slice(),
++                    patched.encode()?.as_slice(),
++                )?;
++                self.finish_record_effects(
++                    guard,
++                    tx,
++                    ctx,
++                    hash,
++                    edges,
++                    &[],
++                    &[],
++                    false,
++                    false,
++                    effects::RecordMutation::NativePhase {
++                        before: &record,
++                        after: &patched,
++                        transition,
++                    },
++                )
++                .map(|r| NativeDecayResult::Committed(r.receipt))
++            }
++            PlannedDecay::Delete => {
++                let mut removed_edges = edges
++                    .iter()
++                    .filter(|e| e.source == intent.memory_id || e.target == intent.memory_id)
++                    .map(NativeEdgeProof::from)
++                    .collect::<Vec<_>>();
++                removed_edges.sort_by_key(|e| (e.source, e.target, e.edge_type.as_u8()));
++                let mut ids = removed_edges
++                    .iter()
++                    .filter(|e| e.source != intent.memory_id)
++                    .map(|e| e.source)
++                    .collect::<Vec<_>>();
++                ids.sort();
++                ids.dedup();
++                let mut peers = Vec::new();
++                for id in ids {
++                    let peer = DiskRecord::from_bytes(
++                        tx.open_table(META_TABLE)?
++                            .get(id.as_bytes().as_slice())?
++                            .ok_or(StorageError::NotFound(id.into_inner()))?
++                            .value(),
++                    )?;
++                    let cfg = NamespaceConfig::decode(
++                        tx.open_table(NAMESPACE_TABLE)?
++                            .get(peer.namespace_id)?
++                            .ok_or(StorageError::NamespaceNotFound(peer.namespace_id))?
++                            .value(),
++                    )?;
++                    let state = NativeRecordState::capture(
++                        &peer,
++                        &cfg,
++                        text_hashes.get(&id).copied().flatten(),
++                    )?;
++                    peers.push(NativePeerChange {
++                        namespace_id: cfg.id,
++                        change: NativeRecordChange {
++                            memory_id: id,
++                            before: Some(state.clone()),
++                            after: state,
++                        },
++                    });
++                }
++                let release = before.content.vector.is_some();
++                let transition = NativeHardDeleteWrite {
++                    namespace_id: ns.id,
++                    memory_id: intent.memory_id,
++                    lifecycle_version: intent.capture.version,
++                    policy_revision: intent.capture.revision,
++                    previous_generation: control.committed_generation,
++                    capture_generation: intent.capture.generation,
++                    sampled_at: intent.sampled_at,
++                    policy: evidence,
++                    deletion: NativeDeletionWitness {
++                        memory_id: intent.memory_id,
++                        namespace_id: ns.id,
++                        before,
++                        history: record.access_history.clone(),
++                    },
++                    peers,
++                    removed_edges,
++                };
++                self.finish_record_effects(
++                    guard,
++                    tx,
++                    ctx,
++                    hash,
++                    edges,
++                    &[],
++                    &[intent.memory_id],
++                    true,
++                    release,
++                    effects::RecordMutation::NativeHardDelete(transition),
++                )
++                .map(|r| NativeDecayResult::Committed(r.receipt))
++            }
++        }
++    }
++}
++fn canonical_bonus(
++    tx: &redb::WriteTransaction,
++    edges: &[PersistedEdge],
++    ns: &NamespaceConfig,
++    policy: &crate::decay::lifecycle::EffectiveLifecyclePolicy,
++    id: MemoryId,
++    now: i64,
++) -> Result<f32, StorageError> {
++    let mut graph = crate::graph::RelationshipGraph::new();
++    let mut donors = HashMap::new();
++    let mut ids = std::collections::HashSet::new();
++    for row in tx.open_table(META_TABLE)?.iter()? {
++        let (_, bytes) = row?;
++        let r = DiskRecord::from_bytes(bytes.value())?;
++        if r.namespace_id != ns.id.get() {
++            continue;
++        }
++        let key = MemoryId::from_bytes(r.id);
++        ids.insert(key);
++        graph
++            .add_node(key, ns.id, r.phase, r.strength, r.vector_slot)
++            .map_err(|e| StorageError::InvalidControl(e.to_string()))?;
++        let state = crate::storage::native_lifecycle::LifecycleState::capture(&r)?;
++        if state.eligible() {
++            let p = crate::decay::lifecycle::project(
++                r.stability,
++                state.lifecycle.decay_anchor_at,
++                policy,
++                now.max(state.lifecycle.lifecycle_updated_at),
++                0.,
++            )
++            .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
++            donors.insert(key, p.strength);
++        }
++    }
++    for e in edges {
++        if ids.contains(&e.source) && ids.contains(&e.target) {
++            graph
++                .add_edge(e.source, e.target, e.edge_type, e.weight, e.auto_created)
++                .map_err(|e| StorageError::InvalidControl(e.to_string()))?;
++        }
++    }
++    Ok(crate::graph::activation::connection_bonus_with_strengths(
++        id,
++        &graph,
++        &Default::default(),
++        &donors,
++    ))
++}
++
++pub(super) fn validate_effect(e: &effects::PendingEffects) -> Result<(), StorageError> {
++    let bad =
++        || StorageError::InvalidControl("native maintenance effect differs from receipt".into());
++    match &e.receipt.outcome {
++        MutationOutcome::NativePhaseMaterialized { transition: t } => {
++            t.validate(&e.receipt)?;
++            if e.scope != MutationScope::Namespace(t.namespace_id)
++                || !e.puts.is_empty()
++                || !e.deletes.is_empty()
++                || !e.releases.is_empty()
++                || !e.removed_ids.is_empty()
++                || !e.peer_counts.is_empty()
++                || e.invalidated_ids != [t.memory_id]
++            {
++                return Err(bad());
++            }
++        }
++        MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
++            t.validate(&e.receipt)?;
++            let mut edges = e
++                .deletes
++                .iter()
++                .map(NativeEdgeProof::from)
++                .collect::<Vec<_>>();
++            edges.sort_by_key(|e| (e.source, e.target, e.edge_type.as_u8()));
++            let mut peers = t
++                .peers
++                .iter()
++                .map(|p| (p.change.memory_id, p.change.after.edge_count))
++                .collect::<Vec<_>>();
++            peers.sort();
++            let mut invalidated = peers
++                .iter()
++                .map(|(id, _)| *id)
++                .chain([t.memory_id])
++                .collect::<Vec<_>>();
++            invalidated.sort();
++            invalidated.dedup();
++            let slot = t.deletion.before.content.vector.as_ref().map(|v| v.slot);
++            if e.scope != MutationScope::Namespace(t.namespace_id)
++                || !e.puts.is_empty()
++                || edges != t.removed_edges
++                || e.removed_ids != [t.memory_id]
++                || e.peer_counts != peers
++                || e.invalidated_ids != invalidated
++                || e.releases.len() != usize::from(slot.is_some())
++                || e.releases.iter().any(|r| {
++                    r.namespace_id != t.namespace_id
++                        || r.memory_id != t.memory_id
++                        || Some(r.slot) != slot
++                })
++            {
++                return Err(bad());
++            }
++        }
++        _ => {}
++    }
++    Ok(())
++}
++pub(super) fn validate_pending_records(
++    e: &effects::PendingEffects,
++    records: &[(MemoryId, DiskRecord)],
++) -> Result<(), StorageError> {
++    let check =
++        |id: MemoryId, ns: NamespaceId, state: &NativeRecordState| -> Result<(), StorageError> {
++            let r = records
++                .iter()
++                .find(|(key, _)| *key == id)
++                .map(|(_, r)| r)
++                .ok_or_else(|| {
++                    StorageError::InvalidControl("native maintenance pending row absent".into())
++                })?;
++            if r.namespace_id != ns.get() || !state.matches_record(r)? {
++                return Err(StorageError::InvalidControl(
++                    "native maintenance pending row mismatch".into(),
++                ));
++            }
++            Ok(())
++        };
++    match &e.receipt.outcome {
++        MutationOutcome::NativePhaseMaterialized { transition: t } => {
++            check(t.memory_id, t.namespace_id, &t.change.after)?
++        }
++        MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
++            for edge in &t.removed_edges {
++                for id in [edge.source, edge.target] {
++                    if id != t.memory_id && !records.iter().any(|(key, _)| *key == id) {
++                        return Err(StorageError::InvalidControl(
++                            "native deletion has an unproven missing endpoint".into(),
++                        ));
++                    }
++                }
++            }
++            for p in &t.peers {
++                check(p.change.memory_id, p.namespace_id, &p.change.after)?;
++            }
++        }
++        _ => {}
++    }
++    Ok(())
++}
+diff --git a/src/storage/metadata/native_records/maintenance_tests.rs b/src/storage/metadata/native_records/maintenance_tests.rs
+new file mode 100644
+index 0000000..ddb5261
+--- /dev/null
++++ b/src/storage/metadata/native_records/maintenance_tests.rs
+@@ -0,0 +1,1146 @@
++use super::*;
++use crate::storage::native_maintenance::{NativeDecayResult, NativeDecaySkip};
++use std::sync::atomic::AtomicI64;
++const DAY: i64 = 86_400_000;
++struct Clock {
++    now: AtomicI64,
++    calls: AtomicUsize,
++}
++impl Clock {
++    fn new(now: i64) -> Self {
++        Self {
++            now: AtomicI64::new(now),
++            calls: AtomicUsize::new(0),
++        }
++    }
++    fn set(&self, now: i64) {
++        self.now.store(now, Ordering::SeqCst);
++    }
++}
++impl crate::time::Clock for Clock {
++    fn now_millis(&self) -> i64 {
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        self.now.load(Ordering::SeqCst)
++    }
++}
++fn session(d: &Data, c: Arc<Clock>) -> NativeLifecycleSession {
++    NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c).unwrap()
++}
++fn create(
++    s: &mut NativeLifecycleSession,
++    d: &Data,
++    key: &str,
++    mut original: NativeInsert,
++) -> MemoryId {
++    original.memory.initial_stability = Some(1.);
++    let intent = s.capture_insert(scope(d), &original).unwrap();
++    inserted(
++        &s.insert_prepared(&ctx(s, d, key), &intent, &generated())
++            .unwrap(),
++    )
++}
++fn committed(r: NativeDecayResult) -> WriteReceipt {
++    match r {
++        NativeDecayResult::Committed(r) => r,
++        other => panic!("expected commit, got {other:?}"),
++    }
++}
++fn record(s: &NativeLifecycleSession, id: MemoryId) -> DiskRecord {
++    s.engine.get_record(id).unwrap().unwrap()
++}
++fn immutable_lifecycle(a: &DiskRecord, b: &DiskRecord) {
++    assert_eq!(a.stability, b.stability);
++    assert_eq!(a.difficulty, b.difficulty);
++    assert_eq!(a.last_accessed_at, b.last_accessed_at);
++    assert_eq!(a.access_history, b.access_history);
++    assert_eq!(a.is_permastore, b.is_permastore);
++    let x = &a.schema.as_ref().unwrap().lifecycle;
++    let y = &b.schema.as_ref().unwrap().lifecycle;
++    assert_eq!(x.decay_anchor_at, y.decay_anchor_at);
++    assert_eq!(x.observed_at, y.observed_at);
++    assert_eq!(x.retrieved_at, y.retrieved_at);
++    assert_eq!(x.reinforced_at, y.reinforced_at);
++    assert_eq!(x.timestamp_origin, y.timestamp_origin);
++}
++#[test]
++fn native_maintenance_one_phase_retains_ghost_vector_then_deletes_with_witness_peers_and_replay() {
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let c = Arc::new(Clock::new(3000));
++    let mut s = session(&d, c.clone());
++    let id = create(&mut s, &d, "create", input(&d));
++    let exposure = s
++        .capture_exposure(
++            scope(&d),
++            &[(id, crate::model::AccessKind::DirectRetrieval)],
++        )
++        .unwrap();
++    s.record_exposure(&ctx(&s, &d, "exposure"), &exposure)
++        .unwrap();
++    let original = record(&s, id);
++    let vector = original.schema.as_ref().unwrap().vector.clone();
++    let parent = record(&s, d.parent);
++    c.set(10_000 * DAY);
++    let first = committed(s.maintain(&ctx(&s, &d, "summary"), id).unwrap());
++    let summary = record(&s, id);
++    assert_eq!(summary.phase, DecayPhase::Summary);
++    assert_eq!(summary.summary, original.summary);
++    assert_eq!(
++        summary.schema.as_ref().unwrap().labels,
++        original.schema.as_ref().unwrap().labels
++    );
++    assert_eq!(summary.text_length, 0);
++    immutable_lifecycle(&original, &summary);
++    let mut phase_ledger = s.metadata().removal_ledger_export().unwrap();
++    crate::storage::native_maintenance::validate_ledger(&first, Some(&phase_ledger)).unwrap();
++    phase_ledger
++        .entries
++        .iter_mut()
++        .find(|e| e.memory_uuid == id.into_inner())
++        .unwrap()
++        .operation_id = uuid::Uuid::new_v4();
++    assert!(
++        crate::storage::native_maintenance::validate_ledger(&first, Some(&phase_ledger)).is_err()
++    );
++    drop(s);
++    let mut s = session(&d, c.clone());
++    let second = committed(s.maintain(&ctx(&s, &d, "ghost"), id).unwrap());
++    let ghost = record(&s, id);
++    assert_eq!(ghost.phase, DecayPhase::Ghost);
++    assert!(ghost.summary.is_empty());
++    assert!(ghost.tags.is_empty());
++    assert!(ghost.schema.as_ref().unwrap().labels.is_empty());
++    assert_eq!(ghost.schema.as_ref().unwrap().vector, vector);
++    immutable_lifecycle(&original, &ghost);
++    assert!(
++        !s.engine
++            .get_vector(d.ns, ghost.vector_slot)
++            .unwrap()
++            .unwrap()
++            .is_empty()
++    );
++    drop(s);
++    let mut s = session(&d, c.clone());
++    let key = ctx(&s, &d, "delete");
++    let third = committed(s.maintain(&key, id).unwrap());
++    let MutationOutcome::NativeMemoryHardDeleted { transition } = &third.outcome else {
++        panic!("wrong outcome")
++    };
++    assert_eq!(transition.deletion.history, original.access_history);
++    assert_eq!(transition.peers.len(), 1);
++    assert!(s.engine.get_record(id).unwrap().is_none());
++    let peer = record(&s, d.parent);
++    assert_eq!(peer.edge_count, 0);
++    assert_eq!(
++        peer.schema.as_ref().unwrap().lifecycle.record_generation,
++        parent
++            .schema
++            .as_ref()
++            .unwrap()
++            .lifecycle
++            .record_generation
++            .next()
++            .unwrap()
++    );
++    assert_eq!(
++        third.committed_generation,
++        second.committed_generation.next().unwrap()
++    );
++    assert_eq!(
++        second.committed_generation,
++        first.committed_generation.next().unwrap()
++    );
++    assert!(matches!(
++        s.maintain(&key, d.parent),
++        Err(StorageError::IdempotencyConflict)
++    ));
++    let raw = serde_json::to_string(&third).unwrap();
++    assert!(!raw.contains(&original.summary));
++    assert!(!raw.contains("native full text"));
++    assert!(!raw.contains("Topic / exact"));
++    let read = s.metadata().db.begin_read().unwrap();
++    let ledger = removal_ledger::read_export(&read, Some(&s.metadata().control_state().unwrap()))
++        .unwrap()
++        .unwrap();
++    assert!(
++        ledger
++            .entries
++            .iter()
++            .any(|e| e.memory_uuid == id.into_inner()
++                && e.terminal_kind == Some(removal_ledger::TerminalKind::HardDelete)
++                && e.removed_fields_mask == removal_ledger::ALL
++                && e.operation_id == third.operation_id)
++    );
++    drop(read);
++    let calls = c.calls.load(Ordering::SeqCst);
++    let replay = committed(s.maintain(&key, id).unwrap());
++    assert!(replay.replayed);
++    assert_eq!(replay.operation_id, third.operation_id);
++    assert_eq!(c.calls.load(Ordering::SeqCst), calls);
++    let mut new = input(&d);
++    new.memory.parent_id = None;
++    let replacement = create(&mut s, &d, "replacement", new);
++    let before = record(&s, replacement);
++    assert_eq!(before.vector_slot, original.vector_slot);
++    assert!(committed(s.maintain(&key, id).unwrap()).replayed);
++    assert_eq!(
++        record(&s, replacement).encode().unwrap(),
++        before.encode().unwrap()
++    );
++    assert!(
++        !s.engine
++            .get_vector(d.ns, before.vector_slot)
++            .unwrap()
++            .unwrap()
++            .is_empty()
++    );
++    let mut reuse = input(&d);
++    reuse.memory.id = Some(id);
++    let intent = s.capture_insert(scope(&d), &reuse).unwrap();
++    assert!(
++        s.insert_prepared(&ctx(&s, &d, "reuse"), &intent, &generated())
++            .is_err()
++    );
++    drop(s);
++    inspect_schema(&d.path).unwrap();
++    let _reopened = session(&d, c);
++}
++
++#[test]
++fn native_maintenance_rechecks_canonical_donors_and_fan_with_original_clock_for_phase_and_strength_only()
++ {
++    for days in [2.0, 4.5] {
++        let root = tempfile::tempdir().unwrap();
++        let d = fixture(root.path());
++        let c = Arc::new(Clock::new(3000));
++        let mut s = session(&d, c.clone());
++        let mut target = input(&d);
++        let created = 10_000 * DAY;
++        target.memory.created_at = Some(created);
++        c.set(created);
++        let id = create(&mut s, &d, "target", target);
++        let now = created + (days * DAY as f64) as i64;
++        c.set(now);
++        let intent = s.capture_decay(id, d.ns).unwrap();
++        let before = record(&s, id);
++        let ns = s.engine.get_namespace(d.ns).unwrap().unwrap();
++        let policy = NativePolicyInputs::default().resolve(&ns).unwrap();
++        let raw = crate::decay::lifecycle::project(1., created, &policy, now, 0.).unwrap();
++        if days == 4.5 {
++            assert!(raw.decay_strength < 0.7);
++        }
++        let mut donor = input(&d);
++        // Actual donor feedback refreshes its anchor; another actual insertion
++        // changes its canonical fan. Neither mutates the captured target token.
++        let feedback = s.capture_feedback(d.parent, None, 3).unwrap();
++        s.apply_feedback(&ctx(&s, &d, "donor-feedback"), &feedback)
++            .unwrap();
++        donor.memory.created_at = Some(now);
++        create(&mut s, &d, "donor", donor);
++        assert_eq!(
++            record(&s, id)
++                .schema
++                .as_ref()
++                .unwrap()
++                .lifecycle
++                .record_generation,
++            before.schema.as_ref().unwrap().lifecycle.record_generation
++        );
++        c.set(20_000 * DAY);
++        let calls = c.calls.load(Ordering::SeqCst);
++        committed(s.apply_decay(&ctx(&s, &d, "maintain"), &intent).unwrap());
++        let after = record(&s, id);
++        assert_eq!(after.phase, DecayPhase::Full);
++        assert_eq!(after.strength, raw.strength);
++        assert!(after.decay_strength > raw.decay_strength);
++        assert_eq!(
++            after
++                .schema
++                .as_ref()
++                .unwrap()
++                .lifecycle
++                .lifecycle_updated_at,
++            now
++        );
++        assert_eq!(c.calls.load(Ordering::SeqCst), calls);
++        immutable_lifecycle(&before, &after);
++        drop(s);
++        inspect_schema(&d.path).unwrap();
++    }
++}
++
++#[test]
++fn native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_without_receipts() {
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let c = Arc::new(Clock::new(3000));
++    let mut s = session(&d, c.clone());
++    let mut original = input(&d);
++    original.memory.parent_id = None;
++    let id = create(&mut s, &d, "target", original);
++    c.set(3000 + DAY);
++    let access = s
++        .capture_exposure(
++            scope(&d),
++            &[(id, crate::model::AccessKind::DirectRetrieval)],
++        )
++        .unwrap();
++    s.record_exposure(&ctx(&s, &d, "access"), &access).unwrap();
++    let before = record(&s, id);
++    assert_eq!(
++        before.schema.as_ref().unwrap().lifecycle.decay_anchor_at,
++        3000
++    );
++    assert_eq!(before.last_accessed_at, 3000 + DAY);
++    c.set(3000 + DAY * 9 / 2);
++    committed(s.maintain(&ctx(&s, &d, "phase"), id).unwrap());
++    assert_eq!(record(&s, id).phase, DecayPhase::Summary);
++    let intent = s.capture_decay(id, d.ns).unwrap();
++    let feedback = s.capture_feedback(id, None, 3).unwrap();
++    s.apply_feedback(&ctx(&s, &d, "feedback"), &feedback)
++        .unwrap();
++    let state = s.metadata().control_state().unwrap();
++    let before = record(&s, id).encode().unwrap();
++    assert!(matches!(
++        s.apply_decay(&ctx(&s, &d, "stale"), &intent).unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::Stale)
++    ));
++    assert_eq!(s.metadata().control_state().unwrap(), state);
++    assert_eq!(record(&s, id).encode().unwrap(), before);
++    let intent = s.capture_decay(id, d.ns).unwrap();
++    s.policy.multiplier = 2.;
++    assert!(matches!(
++        s.apply_decay(&ctx(&s, &d, "policy"), &intent).unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::Stale)
++    ));
++    assert_eq!(s.metadata().control_state().unwrap(), state);
++    s.policy.multiplier = 0.;
++    assert!(matches!(
++        s.maintain(&ctx(&s, &d, "exempt"), id).unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::Exempt)
++    ));
++    assert_eq!(s.metadata().control_state().unwrap(), state);
++    drop(s);
++    inspect_schema(&d.path).unwrap();
++}
++
++#[test]
++fn native_maintenance_process_child() {
++    let Ok(path) = std::env::var("RECALLD_NATIVE_MAINTENANCE_PATH") else {
++        return;
++    };
++    let ns = NamespaceId::new(
++        std::env::var("RECALLD_NATIVE_MAINTENANCE_NS")
++            .unwrap()
++            .parse()
++            .unwrap(),
++    );
++    let id = MemoryId::from_uuid(
++        std::env::var("RECALLD_NATIVE_MAINTENANCE_ID")
++            .unwrap()
++            .parse()
++            .unwrap(),
++    );
++    let mut s = NativeLifecycleSession::open(
++        Path::new(&path),
++        NativePolicyInputs::default(),
++        Arc::new(Clock::new(10_000 * DAY)),
++    )
++    .unwrap();
++    let key = MutationContext {
++        store_id: Some(s.metadata().control_state().unwrap().store_id),
++        scope: MutationScope::Namespace(ns),
++        idempotency_key: Some("crash-maintenance".into()),
++        expected_generation: None,
++        contract_version: 2,
++    };
++    s.maintain(&key, id).unwrap();
++    panic!("expected process exit hook");
++}
++#[test]
++fn native_harddelete_process_exit_recovers_exact_incident_edges_before_and_after_commit() {
++    for point in ["before_metadata_commit", "after_metadata_commit"] {
++        let root = tempfile::tempdir().unwrap();
++        let d = fixture(root.path());
++        let c = Arc::new(Clock::new(3000));
++        let mut s = session(&d, c.clone());
++        let id = create(&mut s, &d, "target", input(&d));
++        c.set(10_000 * DAY);
++        committed(s.maintain(&ctx(&s, &d, "summary"), id).unwrap());
++        committed(s.maintain(&ctx(&s, &d, "ghost"), id).unwrap());
++        let initial = s.metadata().control_state().unwrap();
++        let key = ctx(&s, &d, "crash-maintenance");
++        drop(s);
++        let out=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","storage::metadata::native_records::tests::maintenance::native_maintenance_process_child","--nocapture"]).env("RECALLD_NATIVE_MAINTENANCE_PATH",&d.path).env("RECALLD_NATIVE_MAINTENANCE_NS",d.ns.get().to_string()).env("RECALLD_NATIVE_MAINTENANCE_ID",id.to_string()).env("RECALLD_TEST_EFFECT_CRASH",point).output().unwrap();
++        assert_eq!(
++            out.status.code(),
++            Some(91),
++            "{point}: {}",
++            String::from_utf8_lossy(&out.stderr)
++        );
++        if point == "after_metadata_commit" {
++            // Use the real validated pending witness, not a permissive fabricated
++            // plan. Only its deleted primary may be absent from the snapshot.
++            let source = files(&d.path);
++            let (_copy, db) =
++                crate::storage::validation::inspect_database_copy(&d.path.join("meta.db"), true)
++                    .unwrap();
++            let read = db.begin_read().unwrap();
++            let pending = effects::validate_existing(&read).unwrap();
++            let effect = pending
++                .iter()
++                .find(|e| {
++                    matches!(
++                        e.receipt.outcome,
++                        MutationOutcome::NativeMemoryHardDeleted { .. }
++                    )
++                })
++                .unwrap();
++            let mut rows = read
++                .open_table(META_TABLE)
++                .unwrap()
++                .iter()
++                .unwrap()
++                .map(|item| {
++                    let (key, value) = item.unwrap();
++                    (
++                        MemoryId::from_bytes(key.value().try_into().unwrap()),
++                        DiskRecord::from_bytes(value.value()).unwrap(),
++                    )
++                })
++                .collect::<Vec<_>>();
++            effects::validate_plan(effect, &rows).unwrap();
++            rows.retain(|(id, _)| *id != d.parent);
++            assert!(matches!(effects::validate_plan(effect, &rows),
++                Err(StorageError::InvalidControl(message)) if message.contains("unproven missing endpoint")));
++            assert_eq!(source, files(&d.path));
++        }
++        let mut s = NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone())
++            .unwrap_or_else(|e| panic!("{point}: native harddelete recovery failed: {e:?}"));
++        let done = point == "after_metadata_commit";
++        assert_eq!(s.engine.get_record(id).unwrap().is_none(), done);
++        let receipt = committed(s.maintain(&key, id).unwrap());
++        assert_eq!(receipt.replayed, done);
++        assert_eq!(
++            receipt.committed_generation,
++            initial.committed_generation.next().unwrap()
++        );
++        assert_eq!(record(&s, d.parent).edge_count, 0);
++        assert!(s.engine.get_record(id).unwrap().is_none());
++        drop(s);
++        inspect_schema(&d.path).unwrap();
++    }
++}
++#[test]
++fn native_maintenance_precommit_failure_and_unknown_commit_reconcile_real_transactions() {
++    for unknown in [false, true] {
++        let root = tempfile::tempdir().unwrap();
++        let d = fixture(root.path());
++        let c = Arc::new(Clock::new(3000));
++        let mut s = session(&d, c.clone());
++        let id = create(&mut s, &d, "target", input(&d));
++        c.set(10_000 * DAY);
++        let before = record(&s, id);
++        let initial = s.metadata().control_state().unwrap();
++        let key = ctx(&s, &d, "phase-failure");
++        if unknown {
++            effects::FAIL_AFTER_RECORD_COMMIT.with(|f| f.set(true));
++        } else {
++            effects::FAIL_BEFORE_RECORD_COMMIT.with(|f| f.set(true));
++        }
++        let result = s.maintain(&key, id);
++        assert!(result.is_err());
++        if unknown {
++            assert!(matches!(
++                result,
++                Err(StorageError::CommitOutcomeUnknown { .. })
++            ));
++        } else {
++            assert_eq!(record(&s, id).encode().unwrap(), before.encode().unwrap());
++            assert_eq!(s.metadata().control_state().unwrap(), initial);
++        }
++        drop(s);
++        let mut s = session(&d, c.clone());
++        let receipt = committed(s.maintain(&key, id).unwrap());
++        assert_eq!(receipt.replayed, unknown);
++        assert_eq!(
++            receipt.committed_generation,
++            initial.committed_generation.next().unwrap()
++        );
++        assert_eq!(record(&s, id).phase, DecayPhase::Summary);
++        drop(s);
++        inspect_schema(&d.path).unwrap();
++    }
++}
++
++#[test]
++fn native_maintenance_pass_pins_one_clock_and_never_advances_an_id_twice() {
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let c = Arc::new(Clock::new(3000));
++    let mut s = session(&d, c.clone());
++    let id = create(&mut s, &d, "target", input(&d));
++    let initial = s.metadata().control_state().unwrap();
++    let before = record(&s, id).encode().unwrap();
++    assert!(matches!(
++        s.maintain(&ctx(&s, &d, "noop"), id).unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::Unchanged)
++    ));
++    assert_eq!(initial, s.metadata().control_state().unwrap());
++    assert_eq!(before, record(&s, id).encode().unwrap());
++    c.set(10_000 * DAY);
++    let calls = c.calls.load(Ordering::SeqCst);
++    let pass = s.capture_decay_pass(d.ns).unwrap();
++    assert_eq!(c.calls.load(Ordering::SeqCst), calls + 1);
++    assert_eq!(pass.len(), 2);
++    c.set(20_000 * DAY);
++    for intent in &pass {
++        committed(
++            s.apply_decay(&ctx(&s, &d, &format!("pass-{}", intent.memory_id)), intent)
++                .unwrap(),
++        );
++        assert_eq!(record(&s, intent.memory_id).phase, DecayPhase::Summary);
++        assert!(matches!(
++            s.apply_decay(
++                &ctx(&s, &d, &format!("duplicate-{}", intent.memory_id)),
++                intent
++            )
++            .unwrap(),
++            NativeDecayResult::Skipped(NativeDecaySkip::Stale)
++        ));
++    }
++    assert_eq!(c.calls.load(Ordering::SeqCst), calls + 1);
++    drop(s);
++    inspect_schema(&d.path).unwrap();
++}
++
++#[test]
++fn native_maintenance_missing_summary_permastore_and_unknown_phase_marker_are_preserved() {
++    let root = tempfile::tempdir().unwrap();
++    let mut d = fixture(root.path());
++    // A genuine legacy Full row can have only full text. Migrate that supported
++    // input through the production schema/policy path; never forge native rows.
++    let source = root.path().join("legacy");
++    let mut engine = RedbStorageEngine::open(&source).unwrap();
++    let mut r = engine.get_record(d.parent).unwrap().unwrap();
++    let missing = MemoryId::new();
++    r.id = *missing.as_bytes();
++    r.summary.clear();
++    r.stability = 1.;
++    r.text_offset = 0;
++    r.text_length = 0;
++    r.vector_slot = 0;
++    engine
++        .insert_memory(
++            missing,
++            d.ns,
++            &mut r,
++            &[1., 0., 0., 0.],
++            Some("only retained full text"),
++        )
++        .unwrap();
++    engine.sync().unwrap();
++    drop(engine);
++    let canonical = root.path().join("shape-schema");
++    migrate_schema(
++        &source,
++        &canonical,
++        &MigrationOptions {
++            migration_now: 10_000 * DAY,
++            expected_source: inspect_schema(&source).unwrap().control.generation_ref(),
++            attestations: vec![ProfileAttestationInput {
++                namespace_id: d.ns,
++                namespace_name: "native".into(),
++                descriptor: d.profile.clone(),
++            }],
++        },
++    )
++    .unwrap();
++    let destination = root.path().join("shape-v2");
++    migrate_lifecycle(
++        &canonical,
++        &destination,
++        &LifecycleMigrationOptions {
++            expected_source: inspect_schema(&canonical).unwrap().control.generation_ref(),
++            namespace_id: d.ns,
++            expected_policy_revision: Generation::default(),
++            target: LifecycleVersion::ExplicitFeedbackV2,
++            idempotency_key: "v2-shapes".into(),
++        },
++    )
++    .unwrap();
++    d.path = destination;
++    let c = Arc::new(Clock::new(500 * DAY));
++    let mut s = session(&d, c.clone());
++    let before = record(&s, missing).encode().unwrap();
++    let state = s.metadata().control_state().unwrap();
++    assert!(matches!(
++        s.maintain(&ctx(&s, &d, "missing"), missing).unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::MissingSummary)
++    ));
++    assert_eq!(state, s.metadata().control_state().unwrap());
++    assert_eq!(before, record(&s, missing).encode().unwrap());
++    let before = record(&s, d.parent);
++    committed(s.maintain(&ctx(&s, &d, "marker"), d.parent).unwrap());
++    let after = record(&s, d.parent);
++    assert_eq!(after.phase, DecayPhase::Summary);
++    assert_eq!(
++        after.schema.as_ref().unwrap().lifecycle.phase_changed_at,
++        10_000 * DAY
++    );
++    assert_eq!(
++        after
++            .schema
++            .as_ref()
++            .unwrap()
++            .lifecycle
++            .lifecycle_updated_at,
++        500 * DAY
++    );
++    immutable_lifecycle(&before, &after);
++    let mut original = input(&d);
++    original.memory.parent_id = None;
++    original.memory.initial_stability = Some(2000.);
++    original.memory.created_at = Some(500 * DAY);
++    let intent = s.capture_insert(scope(&d), &original).unwrap();
++    let pinned = inserted(
++        &s.insert_prepared(&ctx(&s, &d, "pin-create"), &intent, &generated())
++            .unwrap(),
++    );
++    let feedback = s.capture_feedback(pinned, None, 3).unwrap();
++    s.apply_feedback(&ctx(&s, &d, "pin-feedback"), &feedback)
++        .unwrap();
++    assert_eq!(record(&s, pinned).is_permastore, 1);
++    let state = s.metadata().control_state().unwrap();
++    c.set(30_000 * DAY);
++    assert!(matches!(
++        s.maintain(&ctx(&s, &d, "pin-skip"), pinned).unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::Exempt)
++    ));
++    assert_eq!(state, s.metadata().control_state().unwrap());
++    let forget = s.capture_tombstone(pinned, None).unwrap();
++    s.tombstone(&ctx(&s, &d, "forget-pin"), &forget).unwrap();
++    let state = s.metadata().control_state().unwrap();
++    assert!(matches!(
++        s.maintain(&ctx(&s, &d, "terminal"), pinned).unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::Exempt)
++    ));
++    assert_eq!(state, s.metadata().control_state().unwrap());
++    drop(s);
++    inspect_schema(&d.path).unwrap();
++}
++
++fn receipt_bytes(s: &NativeLifecycleSession) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
++    s.metadata()
++        .db
++        .begin_read()
++        .unwrap()
++        .open_table(control::RECEIPTS)
++        .unwrap()
++        .iter()
++        .unwrap()
++        .map(|row| {
++            let (k, v) = row.unwrap();
++            (k.value().to_vec(), v.value().to_vec())
++        })
++        .collect()
++}
++fn files(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
++    fn visit(root: &Path, at: &Path, result: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
++        for item in std::fs::read_dir(at).unwrap() {
++            let path = item.unwrap().path();
++            if path.is_dir() {
++                visit(root, &path, result)
++            } else {
++                result.insert(
++                    path.strip_prefix(root).unwrap().to_owned(),
++                    std::fs::read(path).unwrap(),
++                );
++            }
++        }
++    }
++    let mut result = Default::default();
++    visit(path, path, &mut result);
++    result
++}
++#[tokio::test]
++async fn native_maintenance_export_import_fork_and_foreign_malformed_witnesses_remain_strict() {
++    use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
++    use crate::storage::logical_export::{export_store, import_store};
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let c = Arc::new(Clock::new(3000));
++    let mut s = session(&d, c.clone());
++    let id = create(&mut s, &d, "target", input(&d));
++    let access = s
++        .capture_exposure(
++            scope(&d),
++            &[(id, crate::model::AccessKind::DirectRetrieval)],
++        )
++        .unwrap();
++    s.record_exposure(&ctx(&s, &d, "access"), &access).unwrap();
++    c.set(10_000 * DAY);
++    let phase = committed(s.maintain(&ctx(&s, &d, "summary"), id).unwrap());
++    committed(s.maintain(&ctx(&s, &d, "ghost"), id).unwrap());
++    let key = ctx(&s, &d, "delete");
++    let deleted = committed(s.maintain(&key, id).unwrap());
++    let retained = receipt_bytes(&s);
++    drop(s);
++    let schema = inspect_schema(&d.path).unwrap().schema.unwrap();
++    let stream = root.path().join("maintenance.jsonl");
++    let imported = root.path().join("imported");
++    let report = export_store(&d.path, &stream).unwrap();
++    assert_eq!(import_store(&stream, &imported).unwrap(), report);
++    assert_eq!(inspect_schema(&imported).unwrap().schema.unwrap(), schema);
++    let mut imported_session =
++        NativeLifecycleSession::open(&imported, NativePolicyInputs::default(), c.clone()).unwrap();
++    assert!(committed(imported_session.maintain(&key, id).unwrap()).replayed);
++    assert_eq!(receipt_bytes(&imported_session), retained);
++    drop(imported_session);
++    let backup = run_backup(
++        &crate::config::RecalldConfig::default(),
++        &root.path().join("maintenance.zip"),
++        Some(&d.path),
++        false,
++    )
++    .await
++    .unwrap();
++    restore_from_backup(RestoreOptions {
++        backup_path: backup,
++        data_dir: d.path.clone(),
++        force: true,
++        no_stop_daemon: true,
++        historical: false,
++    })
++    .await
++    .unwrap();
++    let inspection = inspect_schema(&d.path).unwrap();
++    assert_ne!(inspection.control.store_id, deleted.store_id);
++    assert_eq!(inspection.schema.unwrap(), schema);
++    let mut restored = session(&d, c.clone());
++    assert_eq!(receipt_bytes(&restored), retained);
++    assert!(restored.engine.get_record(id).unwrap().is_none());
++    assert!(matches!(
++        restored.maintain(&key, id),
++        Err(StorageError::StoreLineageMismatch)
++    ));
++    assert!(
++        restored.metadata().pending_effects().unwrap().is_empty(),
++        "private restore stage consumed applied effects"
++    );
++    drop(restored);
++    let deletion_key = control::scoped_key(
++        deleted.store_id,
++        MutationScope::Namespace(d.ns),
++        deleted.operation_id.as_bytes(),
++    );
++    let phase_key = control::scoped_key(
++        phase.store_id,
++        MutationScope::Namespace(d.ns),
++        phase.operation_id.as_bytes(),
++    );
++    for case in [
++        "nil-peer",
++        "witness-profile",
++        "peer-profile",
++        "phase-profile",
++        "history-hash",
++        "history-payload",
++        "history-limit",
++        "peer-token",
++        "ledger-terminal",
++        "unknown-field",
++        "wrong-profile",
++        "wrong-peer-profile",
++        "wrong-phase-profile",
++        "peer-namespace",
++    ] {
++        let receipt_key = if matches!(case, "phase-profile" | "wrong-phase-profile") {
++            &phase_key
++        } else {
++            &deletion_key
++        };
++        let original = retained.get(receipt_key).unwrap();
++        let mut bad: serde_json::Value = serde_json::from_slice(original).unwrap();
++        let t = &mut bad["receipt"]["outcome"]["transition"];
++        match case {
++            "nil-peer" => {
++                t["removedEdges"][0]["source"] = serde_json::json!(MemoryId::nil());
++                t["peers"][0]["change"]["memoryId"] = serde_json::json!(MemoryId::nil());
++            }
++            "witness-profile" => {
++                t["deletion"]["before"]["content"]["profileId"] = serde_json::json!("not-a-profile")
++            }
++            "peer-profile" => {
++                for state in ["before", "after"] {
++                    t["peers"][0]["change"][state]["content"]["profileId"] =
++                        serde_json::json!("not-a-profile");
++                }
++            }
++            "phase-profile" => {
++                for state in ["before", "after"] {
++                    t["change"][state]["content"]["profileId"] = serde_json::json!("not-a-profile");
++                }
++            }
++            "history-hash" => t["deletion"]["history"][0]["timestamp"] = serde_json::json!(5000),
++            "history-payload" => {
++                t["deletion"]["history"][0]["text"] =
++                    serde_json::json!("forbidden retained payload")
++            }
++            "history-limit" => {
++                let event = t["deletion"]["history"][0].clone();
++                t["deletion"]["history"] = serde_json::Value::Array(vec![
++                    event;
++                    crate::model::constants::ACCESS_HISTORY_MAX
++                        + 1
++                ]);
++            }
++            "peer-token" => {
++                t["peers"][0]["change"]["after"]["lifecycle"]["lifecycle"]["recordGeneration"] =
++                    t["peers"][0]["change"]["before"]["lifecycle"]["lifecycle"]["recordGeneration"]
++                        .clone()
++            }
++            "wrong-profile" => {
++                t["deletion"]["before"]["content"]["profileId"] =
++                    serde_json::json!(format!("ep1:{}", "0".repeat(64)))
++            }
++            "wrong-peer-profile" => {
++                for state in ["before", "after"] {
++                    t["peers"][0]["change"][state]["content"]["profileId"] =
++                        serde_json::json!(format!("ep1:{}", "0".repeat(64)));
++                }
++            }
++            "wrong-phase-profile" => {
++                for state in ["before", "after"] {
++                    t["change"][state]["content"]["profileId"] =
++                        serde_json::json!(format!("ep1:{}", "0".repeat(64)));
++                }
++            }
++            "peer-namespace" => t["peers"][0]["namespaceId"] = serde_json::json!(999),
++            "ledger-terminal" => {}
++            "unknown-field" => t["futureProofRule"] = serde_json::json!(1),
++            _ => unreachable!(),
++        }
++        let bytes = serde_json::to_vec(&bad).unwrap();
++        if !matches!(
++            case,
++            "ledger-terminal"
++                | "wrong-profile"
++                | "wrong-peer-profile"
++                | "wrong-phase-profile"
++                | "peer-namespace"
++        ) {
++            assert!(
++                control::validate_receipt(&bytes).is_err(),
++                "{case}: pure historical proof accepted"
++            );
++        }
++        let db = redb::Database::open(d.path.join("meta.db")).unwrap();
++        let tx = db.begin_write().unwrap();
++        let mut saved_ledger = None;
++        if case == "ledger-terminal" {
++            let k = removal_ledger::key(deleted.store_id, d.ns.get(), id.into_inner());
++            let mut table = tx.open_table(removal_ledger::LEDGER).unwrap();
++            let old = table.get(k.as_slice()).unwrap().unwrap().value().to_vec();
++            let mut entry: serde_json::Value = serde_json::from_slice(&old).unwrap();
++            entry["terminalKind"] = serde_json::json!("tombstone");
++            table
++                .insert(k.as_slice(), serde_json::to_vec(&entry).unwrap().as_slice())
++                .unwrap();
++            saved_ledger = Some((k, old));
++        } else {
++            tx.open_table(control::RECEIPTS)
++                .unwrap()
++                .insert(receipt_key.as_slice(), bytes.as_slice())
++                .unwrap();
++        }
++        tx.commit().unwrap();
++        drop(db);
++        let before = files(&d.path);
++        assert!(inspect_schema(&d.path).is_err(), "{case}");
++        assert!(
++            NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone())
++                .is_err(),
++            "{case}"
++        );
++        assert_eq!(
++            before,
++            files(&d.path),
++            "{case}: rejected open mutated source"
++        );
++        let db = redb::Database::open(d.path.join("meta.db")).unwrap();
++        let tx = db.begin_write().unwrap();
++        if let Some((k, old)) = saved_ledger {
++            tx.open_table(removal_ledger::LEDGER)
++                .unwrap()
++                .insert(k.as_slice(), old.as_slice())
++                .unwrap();
++        } else {
++            tx.open_table(control::RECEIPTS)
++                .unwrap()
++                .insert(receipt_key.as_slice(), original.as_slice())
++                .unwrap();
++        }
++        tx.commit().unwrap();
++        drop(db);
++        inspect_schema(&d.path).unwrap();
++    }
++}
++
++#[test]
++fn native_harddelete_pending_recovery_rejects_unproven_dangling_edges_without_source_writes() {
++    for changed_weight in [false, true] {
++        let root = tempfile::tempdir().unwrap();
++        let d = fixture(root.path());
++        let c = Arc::new(Clock::new(3000));
++        let mut s = session(&d, c.clone());
++        let id = create(&mut s, &d, "target", input(&d));
++        c.set(10_000 * DAY);
++        committed(s.maintain(&ctx(&s, &d, "summary"), id).unwrap());
++        committed(s.maintain(&ctx(&s, &d, "ghost"), id).unwrap());
++        drop(s);
++        let out=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","storage::metadata::native_records::tests::maintenance::native_maintenance_process_child","--nocapture"]).env("RECALLD_NATIVE_MAINTENANCE_PATH",&d.path).env("RECALLD_NATIVE_MAINTENANCE_NS",d.ns.get().to_string()).env("RECALLD_NATIVE_MAINTENANCE_ID",id.to_string()).env("RECALLD_TEST_EFFECT_CRASH","after_metadata_commit").output().unwrap();
++        assert_eq!(out.status.code(), Some(91));
++        // Negative-only corruption of an actual pending deletion. The two indexes
++        // remain mutually consistent, but the new edge is not the committed plan.
++        {
++            let _owner = crate::storage::ownership::StoreOwnership::acquire(&d.path).unwrap();
++            let _lock = crate::storage::ownership::lock_directory(&d.path).unwrap();
++            let edges = crate::storage::EdgeStore::open(&d.path.join("edges.db")).unwrap();
++            let mut bad = edges
++                .load_all_edges()
++                .unwrap()
++                .into_iter()
++                .find(|e| e.target == id)
++                .unwrap();
++            if changed_weight {
++                bad.weight = 0.5;
++            } else {
++                bad.target = MemoryId::new();
++            }
++            edges.batch_add_edges(&[bad]).unwrap();
++        }
++        let before = files(&d.path);
++        let captured = before.clone();
++        crate::storage::validation::NATIVE_PREFLIGHT_PROBE.with(|p| {
++            *p.borrow_mut() = Some(Box::new(move |path| {
++                assert_eq!(files(path), captured);
++                assert!(matches!(
++                    crate::storage::ownership::StoreOwnership::acquire(path),
++                    Err(StorageError::DatabaseLocked)
++                ));
++                assert!(crate::storage::ownership::lock_directory(path).is_err());
++            }))
++        });
++        let result = NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c);
++        crate::storage::validation::NATIVE_PREFLIGHT_PROBE.with(|p| {
++            p.borrow_mut().take();
++        });
++        assert!(matches!(result, Err(StorageError::CorruptIndex(_))));
++        assert_eq!(before, files(&d.path));
++    }
++}
++
++#[test]
++fn native_maintenance_actual_policy_migration_invalidates_plan_but_replays_old_receipt_first() {
++    let root = tempfile::tempdir().unwrap();
++    let mut d = fixture(root.path());
++    let c = Arc::new(Clock::new(3000));
++    let mut s = session(&d, c.clone());
++    let id = create(&mut s, &d, "target", input(&d));
++    c.set(10_000 * DAY);
++    let key = ctx(&s, &d, "summary");
++    let receipt = committed(s.maintain(&key, id).unwrap());
++    let intent = s.capture_decay(id, d.ns).unwrap();
++    let before = record(&s, id);
++    drop(s);
++    let destination = root.path().join("rollback");
++    migrate_lifecycle(
++        &d.path,
++        &destination,
++        &LifecycleMigrationOptions {
++            expected_source: inspect_schema(&d.path).unwrap().control.generation_ref(),
++            namespace_id: d.ns,
++            expected_policy_revision: "1".to_string().try_into().unwrap(),
++            target: LifecycleVersion::LegacyAccessV1,
++            idempotency_key: "rollback".into(),
++        },
++    )
++    .unwrap();
++    d.path = destination;
++    let mut s = session(&d, c.clone());
++    let state = s.metadata().control_state().unwrap();
++    let calls = c.calls.load(Ordering::SeqCst);
++    assert!(matches!(
++        s.apply_decay(&ctx(&s, &d, "stale-policy"), &intent)
++            .unwrap(),
++        NativeDecayResult::Skipped(NativeDecaySkip::Stale)
++    ));
++    assert_eq!(state, s.metadata().control_state().unwrap());
++    let replay = committed(s.maintain(&key, id).unwrap());
++    assert!(replay.replayed);
++    assert_eq!(replay.operation_id, receipt.operation_id);
++    assert_eq!(c.calls.load(Ordering::SeqCst), calls);
++    let after = record(&s, id);
++    immutable_lifecycle(&before, &after);
++    assert_eq!(after.phase, DecayPhase::Summary);
++    drop(s);
++    inspect_schema(&d.path).unwrap();
++}
++
++#[test]
++fn native_maintenance_pure_threshold_boundaries_are_inclusive_and_never_skip_phases() {
++    use crate::storage::native_maintenance::{NativeDecayEvidence, PlannedDecay, plan};
++    use crate::storage::native_records::NativeRecordState;
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let c = Arc::new(Clock::new(3000));
++    let mut s = session(&d, c);
++    let mut input = input(&d);
++    input.memory.parent_id = None;
++    let id = create(&mut s, &d, "target", input);
++    let row = record(&s, id);
++    let ns = s.engine.get_namespace(d.ns).unwrap().unwrap();
++    let p = NativePolicyInputs::default().resolve(&ns).unwrap();
++    let mut before = NativeRecordState::capture(
++        &row,
++        &ns,
++        Some(crate::storage::native_records::hash_bytes(
++            "native full text é中🙂".as_bytes(),
++        )),
++    )
++    .unwrap();
++    // Pure policy-boundary probes over real captured state. They do not persist
++    // invented policy receipts or claim these custom thresholds were committed.
++    for (phase, index, now) in [
++        (DecayPhase::Full, 0, 5 * DAY),
++        (DecayPhase::Summary, 1, 10 * DAY),
++        (DecayPhase::Ghost, 2, 1000 * DAY),
++    ] {
++        assert_eq!(before.lifecycle.phase, phase);
++        let raw = crate::decay::lifecycle::project(
++            before.lifecycle.stability.get(),
++            before.lifecycle.lifecycle.decay_anchor_at,
++            &p,
++            now,
++            0.,
++        )
++        .unwrap()
++        .strength;
++        let mut evidence = NativeDecayEvidence::capture(&p, 0.).unwrap();
++        evidence.thresholds[index] = raw.try_into().unwrap();
++        let mut just_above = evidence.clone();
++        just_above.thresholds[index] = f32::from_bits(raw.to_bits() - 1).try_into().unwrap();
++        match plan(&before, &just_above, now).unwrap() {
++            PlannedDecay::Phase(after) => assert_eq!(after.lifecycle.phase, phase),
++            PlannedDecay::Skipped(NativeDecaySkip::Unchanged) => {}
++            _ => panic!("advanced above threshold"),
++        }
++        match plan(&before, &evidence, now).unwrap() {
++            PlannedDecay::Phase(after) => {
++                assert_eq!(
++                    after.lifecycle.phase,
++                    if phase == DecayPhase::Full {
++                        DecayPhase::Summary
++                    } else {
++                        DecayPhase::Ghost
++                    }
++                );
++                before = after;
++            }
++            PlannedDecay::Delete => assert_eq!(phase, DecayPhase::Ghost),
++            _ => panic!("did not advance at boundary"),
++        }
++    }
++}
++
++#[test]
++fn native_harddelete_zero_weight_pending_edge_rejects_signed_zero_change_without_source_writes() {
++    let root = tempfile::tempdir().unwrap();
++    let mut d = fixture(root.path());
++    let source = root.path().join("legacy");
++    let mut engine = RedbStorageEngine::open(&source).unwrap();
++    let input = crate::storage::insertion::InsertMemory {
++        id: None,
++        summary: "zero edge child".into(),
++        full_text: Some("retained zero edge child text".into()),
++        tags: vec![],
++        initial_stability: Some(1.),
++        created_at: Some(1000),
++        embedding: Some(vec![1., 0., 0., 0.]),
++        parent_id: Some(d.parent),
++        supersedes: None,
++    };
++    let inserted = engine
++        .insert_memory_with_receipt(&MutationContext::unkeyed(d.ns), &input, &[], 1000)
++        .unwrap();
++    let id = crate::storage::insertion::inserted_id(&inserted).unwrap();
++    let edge = crate::storage::PersistedEdge {
++        source: d.parent,
++        target: id,
++        edge_type: crate::model::EdgeType::ParentChild,
++        weight: 0.,
++        auto_created: false,
++        created_at: 1000,
++    };
++    engine.put_edges_with_effects(&[edge]).unwrap();
++    engine.sync().unwrap();
++    drop(engine);
++    let canonical = root.path().join("zero-schema");
++    migrate_schema(
++        &source,
++        &canonical,
++        &MigrationOptions {
++            migration_now: 2000,
++            expected_source: inspect_schema(&source).unwrap().control.generation_ref(),
++            attestations: vec![ProfileAttestationInput {
++                namespace_id: d.ns,
++                namespace_name: "native".into(),
++                descriptor: d.profile.clone(),
++            }],
++        },
++    )
++    .unwrap();
++    let destination = root.path().join("zero-v2");
++    migrate_lifecycle(
++        &canonical,
++        &destination,
++        &LifecycleMigrationOptions {
++            expected_source: inspect_schema(&canonical).unwrap().control.generation_ref(),
++            namespace_id: d.ns,
++            expected_policy_revision: Generation::default(),
++            target: LifecycleVersion::ExplicitFeedbackV2,
++            idempotency_key: "zero-v2".into(),
++        },
++    )
++    .unwrap();
++    d.path = destination;
++    let c = Arc::new(Clock::new(10_000 * DAY));
++    let mut s = session(&d, c.clone());
++    committed(s.maintain(&ctx(&s, &d, "summary"), id).unwrap());
++    committed(s.maintain(&ctx(&s, &d, "ghost"), id).unwrap());
++    drop(s);
++    let out=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","storage::metadata::native_records::tests::maintenance::native_maintenance_process_child","--nocapture"]).env("RECALLD_NATIVE_MAINTENANCE_PATH",&d.path).env("RECALLD_NATIVE_MAINTENANCE_NS",d.ns.get().to_string()).env("RECALLD_NATIVE_MAINTENANCE_ID",id.to_string()).env("RECALLD_TEST_EFFECT_CRASH","after_metadata_commit").output().unwrap();
++    assert_eq!(out.status.code(), Some(91));
++    {
++        let _owner = crate::storage::ownership::StoreOwnership::acquire(&d.path).unwrap();
++        let _lock = crate::storage::ownership::lock_directory(&d.path).unwrap();
++        let edges = crate::storage::EdgeStore::open(&d.path.join("edges.db")).unwrap();
++        let mut edge = edges
++            .load_all_edges()
++            .unwrap()
++            .into_iter()
++            .find(|e| e.target == id)
++            .unwrap();
++        assert_eq!(edge.weight.to_bits(), 0_f32.to_bits());
++        edge.weight = -0.;
++        edges.batch_add_edges(&[edge]).unwrap();
++    }
++    let before = files(&d.path);
++    let result = NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c);
++    assert!(
++        result.is_err(),
++        "signed-zero-different edge was accepted as exact pending deletion"
++    );
++    assert_eq!(before, files(&d.path));
++}
+diff --git a/src/storage/metadata/native_records/reader_tests.rs b/src/storage/metadata/native_records/reader_tests.rs
+index ceae8e8..6ae2cdf 100644
+--- a/src/storage/metadata/native_records/reader_tests.rs
++++ b/src/storage/metadata/native_records/reader_tests.rs
+@@ -505,3 +505,146 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
+         DecayPhase::Tombstone
+     );
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn native_maintenance_accepted_publication_failure_replays_full_receipt_then_removes_content()
++{
++    use crate::storage::native_maintenance::NativeDecayResult;
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
++    let mut session = open(&d, clock.clone());
++    let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
++    let key = ctx(&session, &d, "maintenance-reader-create");
++    let created = session
++        .insert_prepared(&key, &intent, &generated())
++        .unwrap();
++    let id = inserted(&created);
++    let f = Fixture::from_open_engine(root, session.engine);
++    let publisher = completion(&f);
++    publisher.complete().await.unwrap();
++    let (api, bridge, query) = readers(&f, clock.clone());
++    let policy = NativePolicyInputs::default();
++    let sampled = 10_000 * 86_400_000_i64;
++    let capture = f
++        .storage
++        .read()
++        .unwrap()
++        .meta_store()
++        .capture_native_decay(id, d.ns, &policy, sampled)
++        .unwrap();
++    let context = MutationContext {
++        store_id: Some(created.store_id),
++        scope: MutationScope::Namespace(d.ns),
++        idempotency_key: Some("maintenance-reader-summary".into()),
++        expected_generation: None,
++        contract_version: 2,
++    };
++    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
++    let work = tracker.begin().unwrap();
++    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
++    let result = publisher
++        .apply_native_decay_accepted(context.clone(), capture.clone(), policy.clone(), &work)
++        .await;
++    let Err(StorageError::CommittedMutation { receipt, .. }) = result else {
++        panic!("expected full committed receipt")
++    };
++    assert!(matches!(
++        receipt.outcome,
++        MutationOutcome::NativePhaseMaterialized { .. }
++    ));
++    let generation = receipt.committed_generation;
++    let (status, _) = http(
++        &api,
++        "GET",
++        &format!("/memories/{id}?recordAccess=false"),
++        Value::Null,
++    )
++    .await;
++    assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
++    assert!(
++        f.storage
++            .read()
++            .unwrap()
++            .meta_store()
++            .effects_stamp()
++            .is_err()
++    );
++    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
++    let NativeDecayResult::Committed(replay) = publisher
++        .apply_native_decay_accepted(context, capture, policy.clone(), &work)
++        .await
++        .unwrap()
++    else {
++        panic!("expected receipt")
++    };
++    assert!(replay.replayed);
++    assert_eq!(replay.operation_id, receipt.operation_id);
++    assert_eq!(replay.committed_generation, generation);
++    work.finish();
++    let (status, body) = http(
++        &api,
++        "GET",
++        &format!("/memories/{id}?recordAccess=false"),
++        Value::Null,
++    )
++    .await;
++    assert!(status.is_success(), "{body}");
++    assert_eq!(body["data"]["summary"], json!("native exact summary"));
++    assert!(body["data"].get("fullText").is_none_or(Value::is_null));
++    for (key, expected) in [
++        ("maintenance-reader-ghost", Some(DecayPhase::Ghost)),
++        ("maintenance-reader-delete", None),
++    ] {
++        let capture = f
++            .storage
++            .read()
++            .unwrap()
++            .meta_store()
++            .capture_native_decay(id, d.ns, &policy, sampled)
++            .unwrap();
++        let work = tracker.begin().unwrap();
++        let context = MutationContext {
++            store_id: Some(created.store_id),
++            scope: MutationScope::Namespace(d.ns),
++            idempotency_key: Some(key.into()),
++            expected_generation: None,
++            contract_version: 2,
++        };
++        publisher
++            .apply_native_decay_accepted(context, capture, policy.clone(), &work)
++            .await
++            .unwrap();
++        work.finish();
++        let row = f.storage.read().unwrap().get_record(id).unwrap();
++        assert_eq!(row.as_ref().map(|r| r.phase), expected);
++        if let Some(row) = row {
++            assert!(row.schema.as_ref().unwrap().labels.is_empty());
++            assert!(row.schema.as_ref().unwrap().vector.is_some());
++        }
++    }
++    let (status, _) = http(
++        &api,
++        "GET",
++        &format!("/memories/{id}?recordAccess=false"),
++        Value::Null,
++    )
++    .await;
++    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
++    assert!(
++        f.storage
++            .read()
++            .unwrap()
++            .meta_store()
++            .pending_effects()
++            .unwrap()
++            .is_empty()
++    );
++    assert_eq!(tracker.status().pending, 0);
++    assert_eq!(tracker.status().unresolved, 0);
++    drop((api, bridge, query, publisher));
++    let _root = f.close();
++    inspect_schema(&d.path).unwrap();
++    let reopened = open(&d, clock);
++    assert!(reopened.engine.get_record(id).unwrap().is_none());
++}
+diff --git a/src/storage/metadata/native_records/tests.rs b/src/storage/metadata/native_records/tests.rs
+index ee41e7e..1da0910 100644
+--- a/src/storage/metadata/native_records/tests.rs
++++ b/src/storage/metadata/native_records/tests.rs
+@@ -740,3 +740,6 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work()
+     assert_eq!(tracker.status().pending, 0);
+     assert_eq!(tracker.status().unresolved, 0);
+ }
++
++#[path = "maintenance_tests.rs"]
++mod maintenance;
+diff --git a/src/storage/mod.rs b/src/storage/mod.rs
+index a19371e..d24dc63 100644
+--- a/src/storage/mod.rs
++++ b/src/storage/mod.rs
+@@ -28,6 +28,7 @@ pub(crate) mod lineage;
+ pub mod logical_export;
+ pub mod metadata;
+ pub mod native_lifecycle;
++pub mod native_maintenance;
+ pub mod native_records;
+ pub mod offline_snapshot;
+ pub(crate) mod ownership;
+diff --git a/src/storage/native_maintenance.rs b/src/storage/native_maintenance.rs
+new file mode 100644
+index 0000000..109163b
+--- /dev/null
++++ b/src/storage/native_maintenance.rs
+@@ -0,0 +1,600 @@
++//! Native maintenance proofs contain numeric state and commitments, never lost payloads.
++use serde::{Deserialize, Serialize};
++use std::collections::{HashMap, HashSet};
++
++use super::StorageError;
++use super::control::{Generation, GenerationRef, WriteReceipt};
++use super::native_lifecycle::{FiniteF32, history_hash, invalid};
++use super::native_records::{NativeEdgeProof, NativeRecordChange, NativeRecordState, ProofRecord};
++use crate::decay::{
++    DecayConfig,
++    lifecycle::{EffectiveLifecyclePolicy, project},
++};
++use crate::model::schema::LifecycleVersion;
++use crate::model::{AccessEvent, DecayPhase, MemoryId, NamespaceConfig, NamespaceId};
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum NativeDecaySkip {
++    Unchanged,
++    Stale,
++    Exempt,
++    MissingSummary,
++}
++#[derive(Debug, Clone)]
++pub enum NativeDecayResult {
++    Committed(WriteReceipt),
++    Skipped(NativeDecaySkip),
++}
++
++#[derive(Debug, Clone)]
++pub struct NativeDecayIntent {
++    pub(crate) scope: super::native_lifecycle::LifecycleScope,
++    pub(crate) memory_id: MemoryId,
++    pub(crate) capture: super::native_lifecycle::CapturedLifecycle,
++    pub(crate) sampled_at: i64,
++}
++impl NativeDecayIntent {
++    pub fn capture_generation(&self) -> GenerationRef {
++        self.capture.generation
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct NativeDecayEvidence {
++    pub multiplier: FiniteF32,
++    pub max_bonus: FiniteF32,
++    pub thresholds: [FiniteF32; 3],
++    pub bonus: FiniteF32,
++}
++impl NativeDecayEvidence {
++    pub(crate) fn capture(p: &EffectiveLifecyclePolicy, bonus: f32) -> Result<Self, StorageError> {
++        let finite = |v: f32| v.try_into().map_err(StorageError::InvalidMutation);
++        Ok(Self {
++            multiplier: finite(p.decay_rate_multiplier)?,
++            max_bonus: finite(p.config.max_connection_bonus)?,
++            thresholds: [
++                finite(p.config.phase_1_threshold)?,
++                finite(p.config.phase_2_threshold)?,
++                finite(p.config.phase_3_threshold)?,
++            ],
++            bonus: finite(bonus)?,
++        })
++    }
++    fn policy(&self) -> EffectiveLifecyclePolicy {
++        EffectiveLifecyclePolicy {
++            decay_rate_multiplier: self.multiplier.get(),
++            config: DecayConfig {
++                max_connection_bonus: self.max_bonus.get(),
++                phase_1_threshold: self.thresholds[0].get(),
++                phase_2_threshold: self.thresholds[1].get(),
++                phase_3_threshold: self.thresholds[2].get(),
++                ..DecayConfig::default()
++            },
++        }
++    }
++    pub(crate) fn matches_namespace(&self, ns: &NamespaceConfig) -> bool {
++        self.thresholds.map(FiniteF32::get)
++            == [
++                ns.phase_thresholds.full_to_summary,
++                ns.phase_thresholds.summary_to_ghost,
++                ns.phase_thresholds.ghost_to_delete,
++            ]
++            && ns
++                .decay_rate_multiplier
++                .is_none_or(|m| m == self.multiplier.get())
++    }
++}
++
++pub(crate) enum PlannedDecay {
++    Phase(NativeRecordState),
++    Delete,
++    Skipped(NativeDecaySkip),
++}
++pub(crate) fn plan(
++    before: &NativeRecordState,
++    e: &NativeDecayEvidence,
++    sampled_at: i64,
++) -> Result<PlannedDecay, StorageError> {
++    before.lifecycle.validate()?;
++    before.content.validate_profile_commitment()?;
++    if chrono::DateTime::from_timestamp_millis(sampled_at).is_none() {
++        return Err(invalid("invalid native maintenance clock"));
++    }
++    let b = &before.lifecycle;
++    let time = sampled_at.max(b.lifecycle.lifecycle_updated_at);
++    let p = project(
++        b.stability.get(),
++        b.lifecycle.decay_anchor_at,
++        &e.policy(),
++        time,
++        e.bonus.get(),
++    )
++    .map_err(|x| StorageError::InvalidMutation(x.to_string()))?;
++    if e.bonus.get() > e.max_bonus.get() || (b.phase == DecayPhase::Ghost && e.bonus.get() != 0.) {
++        return Err(invalid("invalid native maintenance bonus"));
++    }
++    if b.phase == DecayPhase::Tombstone || b.is_permastore || e.multiplier.get() == 0. {
++        return Ok(PlannedDecay::Skipped(NativeDecaySkip::Exempt));
++    }
++    let phase = match b.phase {
++        DecayPhase::Full if p.decay_strength <= e.thresholds[0].get() => {
++            if !b.has_summary {
++                return Ok(PlannedDecay::Skipped(NativeDecaySkip::MissingSummary));
++            }
++            DecayPhase::Summary
++        }
++        DecayPhase::Summary if p.decay_strength <= e.thresholds[1].get() => DecayPhase::Ghost,
++        DecayPhase::Ghost if p.decay_strength <= e.thresholds[2].get() => {
++            return Ok(PlannedDecay::Delete);
++        }
++        phase => phase,
++    };
++    if phase == b.phase
++        && p.strength == b.strength.get()
++        && p.decay_strength == b.decay_strength.get()
++    {
++        return Ok(PlannedDecay::Skipped(NativeDecaySkip::Unchanged));
++    }
++    let mut after = before.clone();
++    after.lifecycle.strength = p
++        .strength
++        .try_into()
++        .map_err(StorageError::InvalidMutation)?;
++    after.lifecycle.decay_strength = p
++        .decay_strength
++        .try_into()
++        .map_err(StorageError::InvalidMutation)?;
++    after.lifecycle.lifecycle.lifecycle_updated_at = time;
++    after.lifecycle.lifecycle.record_generation = b.lifecycle.record_generation.next()?;
++    if phase != b.phase {
++        // Unknown extensions may carry retained payload: require their consumer.
++        let erased = before.content.erased()?;
++        after.lifecycle.phase = phase;
++        after.lifecycle.lifecycle.phase_changed_at = time.max(b.lifecycle.phase_changed_at);
++        after.lifecycle.has_text = false;
++        after.content.text_sha256 = None;
++        if phase == DecayPhase::Ghost {
++            after.lifecycle.has_summary = false;
++            after.content = erased;
++            after.content.vector = before.content.vector.clone();
++        }
++    }
++    Ok(PlannedDecay::Phase(after))
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct NativePhaseWrite {
++    pub namespace_id: NamespaceId,
++    pub memory_id: MemoryId,
++    pub lifecycle_version: LifecycleVersion,
++    pub policy_revision: Generation,
++    pub previous_generation: Generation,
++    pub capture_generation: GenerationRef,
++    pub sampled_at: i64,
++    pub policy: NativeDecayEvidence,
++    pub change: NativeRecordChange,
++}
++fn boundary(
++    receipt: &WriteReceipt,
++    namespace: NamespaceId,
++    id: MemoryId,
++    previous: Generation,
++    capture: GenerationRef,
++    before: &NativeRecordState,
++    version: LifecycleVersion,
++    revision: Generation,
++) -> Result<(), StorageError> {
++    before.lifecycle.validate()?;
++    if namespace.is_unset()
++        || id == MemoryId::nil()
++        || capture.store_id != receipt.store_id
++        || capture.generation > previous
++        || previous.next()? != receipt.committed_generation
++        || before.lifecycle.lifecycle.lifecycle_version != version
++        || before.lifecycle.lifecycle.policy_revision != revision
++    {
++        return Err(invalid("invalid native maintenance boundary"));
++    }
++    Ok(())
++}
++impl NativePhaseWrite {
++    pub(crate) fn validate(&self, r: &WriteReceipt) -> Result<(), StorageError> {
++        let before = self
++            .change
++            .before
++            .as_ref()
++            .ok_or_else(|| invalid("phase prior state missing"))?;
++        boundary(
++            r,
++            self.namespace_id,
++            self.memory_id,
++            self.previous_generation,
++            self.capture_generation,
++            before,
++            self.lifecycle_version,
++            self.policy_revision,
++        )?;
++        if self.change.memory_id != self.memory_id {
++            return Err(invalid("phase identity mismatch"));
++        }
++        match plan(before, &self.policy, self.sampled_at)? {
++            PlannedDecay::Phase(expected) if expected == self.change.after => Ok(()),
++            _ => Err(invalid("invalid native phase transition")),
++        }
++    }
++    pub(crate) fn rewind(&self, rows: &mut [ProofRecord]) -> Result<(), StorageError> {
++        let row = rows
++            .iter_mut()
++            .find(|r| r.id == self.memory_id)
++            .ok_or_else(|| invalid("phase record absent"))?;
++        if row.namespace != self.namespace_id.get()
++            || row.state != self.change.after
++            || history_hash(&row.history)? != row.state.history_sha256
++        {
++            return Err(invalid("phase retained state mismatch"));
++        }
++        row.state = self
++            .change
++            .before
++            .clone()
++            .ok_or_else(|| invalid("phase prior state missing"))?;
++        Ok(())
++    }
++    pub(crate) fn loss_mask(&self) -> u8 {
++        use super::metadata::removal_ledger::{FULL_TEXT, SUMMARY, TAGS};
++        match (
++            self.change.before.as_ref().unwrap().lifecycle.phase,
++            self.change.after.lifecycle.phase,
++        ) {
++            (DecayPhase::Full, DecayPhase::Summary) => FULL_TEXT,
++            (DecayPhase::Summary, DecayPhase::Ghost) => FULL_TEXT | SUMMARY | TAGS,
++            _ => 0,
++        }
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct NativeDeletionWitness {
++    pub memory_id: MemoryId,
++    pub namespace_id: NamespaceId,
++    pub before: NativeRecordState,
++    #[serde(deserialize_with = "deserialize_witness_history")]
++    pub history: Vec<AccessEvent>,
++}
++fn deserialize_witness_history<'de, D: serde::Deserializer<'de>>(
++    d: D,
++) -> Result<Vec<AccessEvent>, D::Error> {
++    #[derive(Deserialize)]
++    #[serde(rename_all = "camelCase", deny_unknown_fields)]
++    struct Event {
++        timestamp: i64,
++        kind: crate::model::AccessKind,
++    }
++    struct History;
++    impl<'de> serde::de::Visitor<'de> for History {
++        type Value = Vec<AccessEvent>;
++        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
++            f.write_str("bounded numeric access history")
++        }
++        fn visit_seq<S: serde::de::SeqAccess<'de>>(
++            self,
++            mut seq: S,
++        ) -> Result<Self::Value, S::Error> {
++            let mut history = Vec::new();
++            while let Some(e) = seq.next_element::<Event>()? {
++                if history.len() == crate::model::constants::ACCESS_HISTORY_MAX {
++                    return Err(serde::de::Error::custom(
++                        "deletion history exceeds canonical bound",
++                    ));
++                }
++                history.push(AccessEvent {
++                    timestamp: e.timestamp,
++                    kind: e.kind,
++                });
++            }
++            Ok(history)
++        }
++    }
++    d.deserialize_seq(History)
++}
++impl NativeDeletionWitness {
++    pub(crate) fn validate(&self) -> Result<(), StorageError> {
++        self.before.lifecycle.validate()?;
++        self.before.content.validate_profile_commitment()?;
++        if self.memory_id == MemoryId::nil()
++            || self.namespace_id.is_unset()
++            || self.history.len() > crate::model::constants::ACCESS_HISTORY_MAX
++            || self
++                .history
++                .iter()
++                .any(|e| chrono::DateTime::from_timestamp_millis(e.timestamp).is_none())
++            || history_hash(&self.history)? != self.before.history_sha256
++        {
++            return Err(invalid("invalid native deletion witness"));
++        }
++        // Destructive writers cannot silently drop unknown extension payloads.
++        self.before.content.erased()?;
++        Ok(())
++    }
++    pub(crate) fn proof_record(&self) -> Result<ProofRecord, StorageError> {
++        self.validate()?;
++        Ok(ProofRecord {
++            id: self.memory_id,
++            namespace: self.namespace_id.get(),
++            state: self.before.clone(),
++            history: self.history.clone(),
++        })
++    }
++}
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct NativePeerChange {
++    pub namespace_id: NamespaceId,
++    pub change: NativeRecordChange,
++}
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct NativeHardDeleteWrite {
++    pub namespace_id: NamespaceId,
++    pub memory_id: MemoryId,
++    pub lifecycle_version: LifecycleVersion,
++    pub policy_revision: Generation,
++    pub previous_generation: Generation,
++    pub capture_generation: GenerationRef,
++    pub sampled_at: i64,
++    pub policy: NativeDecayEvidence,
++    pub deletion: NativeDeletionWitness,
++    pub peers: Vec<NativePeerChange>,
++    pub removed_edges: Vec<NativeEdgeProof>,
++}
++impl NativeHardDeleteWrite {
++    pub(crate) fn validate(&self, r: &WriteReceipt) -> Result<(), StorageError> {
++        self.deletion.validate()?;
++        boundary(
++            r,
++            self.namespace_id,
++            self.memory_id,
++            self.previous_generation,
++            self.capture_generation,
++            &self.deletion.before,
++            self.lifecycle_version,
++            self.policy_revision,
++        )?;
++        if self.deletion.memory_id != self.memory_id
++            || self.deletion.namespace_id != self.namespace_id
++            || !matches!(
++                plan(&self.deletion.before, &self.policy, self.sampled_at)?,
++                PlannedDecay::Delete
++            )
++        {
++            return Err(invalid("invalid native hard deletion"));
++        }
++        if self.removed_edges.windows(2).any(|p| {
++            (p[0].source, p[0].target, p[0].edge_type.as_u8())
++                >= (p[1].source, p[1].target, p[1].edge_type.as_u8())
++        }) || self
++            .peers
++            .windows(2)
++            .any(|p| p[0].change.memory_id >= p[1].change.memory_id)
++        {
++            return Err(invalid("native deletion proof order/duplicates"));
++        }
++        let mut keys = HashSet::new();
++        let mut decrements = HashMap::<MemoryId, u16>::new();
++        for e in &self.removed_edges {
++            let weight = f32::from_bits(e.weight_bits);
++            if (e.source != self.memory_id && e.target != self.memory_id)
++                || e.source == MemoryId::nil()
++                || e.target == MemoryId::nil()
++                || e.source == e.target
++                || !weight.is_finite()
++                || !(0. ..=1.).contains(&weight)
++                || !keys.insert((e.source, e.target, e.edge_type.as_u8()))
++            {
++                return Err(invalid("invalid removed native edge"));
++            }
++            if e.source != self.memory_id {
++                let count = decrements.entry(e.source).or_default();
++                *count = count
++                    .checked_add(1)
++                    .ok_or_else(|| invalid("peer decrement overflow"))?;
++            }
++        }
++        let outgoing = self
++            .removed_edges
++            .iter()
++            .filter(|e| e.source == self.memory_id)
++            .count();
++        if usize::from(self.deletion.before.edge_count) != outgoing {
++            return Err(invalid("deleted outgoing count mismatch"));
++        }
++        let mut ids = HashSet::new();
++        for peer in &self.peers {
++            let c = &peer.change;
++            let before = c
++                .before
++                .as_ref()
++                .ok_or_else(|| invalid("deleted edge peer prior state absent"))?;
++            before.lifecycle.validate()?;
++            before.content.validate_profile_commitment()?;
++            c.after.content.validate_profile_commitment()?;
++            let count = decrements
++                .remove(&c.memory_id)
++                .ok_or_else(|| invalid("peer without removed outgoing edge"))?;
++            let mut expected = before.clone();
++            expected.edge_count = before
++                .edge_count
++                .checked_sub(count)
++                .ok_or_else(|| invalid("peer count underflow"))?;
++            expected.lifecycle.lifecycle.record_generation =
++                before.lifecycle.lifecycle.record_generation.next()?;
++            if peer.namespace_id.is_unset()
++                || c.memory_id == MemoryId::nil()
++                || !ids.insert(c.memory_id)
++                || c.memory_id == self.memory_id
++                || expected != c.after
++            {
++                return Err(invalid("native deletion peer transition mismatch"));
++            }
++        }
++        if !decrements.is_empty() {
++            return Err(invalid("native deletion peer proof missing"));
++        }
++        Ok(())
++    }
++    pub(crate) fn rewind(
++        &self,
++        rows: &mut HashMap<u32, Vec<ProofRecord>>,
++    ) -> Result<(), StorageError> {
++        if rows.values().flatten().any(|r| r.id == self.memory_id) {
++            return Err(invalid("hard deleted record still present"));
++        }
++        for peer in &self.peers {
++            let row = rows
++                .get_mut(&peer.namespace_id.get())
++                .and_then(|rs| rs.iter_mut().find(|r| r.id == peer.change.memory_id))
++                .ok_or_else(|| invalid("hard deletion peer absent"))?;
++            if row.state != peer.change.after {
++                return Err(invalid("hard deletion peer retained state mismatch"));
++            }
++            row.state = peer
++                .change
++                .before
++                .clone()
++                .ok_or_else(|| invalid("peer prior state missing"))?;
++        }
++        rows.entry(self.namespace_id.get())
++            .or_default()
++            .push(self.deletion.proof_record()?);
++        Ok(())
++    }
++}
++
++impl super::native_lifecycle::NativeLifecycleSession {
++    /// One read snapshot and clock sample per explicit pass. Applying an intent
++    /// again with a new key is stale after its first mutation, never a second loss.
++    pub fn capture_decay_pass(
++        &self,
++        namespace: NamespaceId,
++    ) -> Result<Vec<NativeDecayIntent>, StorageError> {
++        self.metadata()
++            .capture_native_decay_pass(namespace, &self.policy, self.clock.now_millis())
++    }
++
++    /// Capture internal preconditions and exactly one clock sample. Reuse this
++    /// intent on retry; caller IDs, not captured tokens/time, identify the request.
++    pub fn capture_decay(
++        &self,
++        id: MemoryId,
++        namespace: NamespaceId,
++    ) -> Result<NativeDecayIntent, StorageError> {
++        self.metadata()
++            .capture_native_decay(id, namespace, &self.policy, self.clock.now_millis())
++    }
++    pub fn apply_decay(
++        &mut self,
++        ctx: &super::control::MutationContext,
++        intent: &NativeDecayIntent,
++    ) -> Result<NativeDecayResult, StorageError> {
++        self.engine
++            .apply_native_decay(ctx, intent, &self.policy, None)
++    }
++    /// Original-ID replay is checked before a fresh capture/clock/policy lookup.
++    pub fn maintain(
++        &mut self,
++        ctx: &super::control::MutationContext,
++        id: MemoryId,
++    ) -> Result<NativeDecayResult, StorageError> {
++        if let Some(receipt) = self.engine.lookup_native_decay(ctx, id, None)? {
++            return Ok(NativeDecayResult::Committed(receipt));
++        }
++        let super::control::MutationScope::Namespace(ns) = ctx.scope else {
++            return Err(StorageError::MutationNamespaceMismatch);
++        };
++        let intent = self.capture_decay(id, ns)?;
++        self.apply_decay(ctx, &intent)
++    }
++}
++
++pub(crate) fn validate_ledger(
++    receipt: &WriteReceipt,
++    ledger: Option<&super::metadata::removal_ledger::LedgerExport>,
++) -> Result<(), StorageError> {
++    use super::control::MutationOutcome;
++    use super::metadata::removal_ledger::{ALL, TerminalKind};
++    let (ns, id, mask, terminal) = match &receipt.outcome {
++        MutationOutcome::NativePhaseMaterialized { transition: t } => {
++            (t.namespace_id, t.memory_id, t.loss_mask(), false)
++        }
++        MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
++            (t.namespace_id, t.memory_id, ALL, true)
++        }
++        _ => return Ok(()),
++    };
++    if mask == 0 {
++        return Ok(());
++    }
++    if !ledger.into_iter().flat_map(|l| &l.entries).any(|e| {
++        e.origin_lineage == receipt.store_id
++            && e.namespace_id == ns.get()
++            && e.memory_uuid == id.into_inner()
++            && e.removed_fields_mask & mask == mask
++            && if terminal {
++                e.terminal_kind == Some(TerminalKind::HardDelete)
++                    && e.generation == receipt.committed_generation
++                    && e.operation_id == receipt.operation_id
++            } else {
++                e.generation > receipt.committed_generation
++                    || (e.generation == receipt.committed_generation
++                        && e.operation_id == receipt.operation_id)
++            }
++    }) {
++        return Err(invalid("native maintenance removal ledger proof missing"));
++    }
++    Ok(())
++}
++
++pub(crate) fn validate_namespace_profiles(
++    receipt: &WriteReceipt,
++    configs: &HashMap<u32, NamespaceConfig>,
++) -> Result<(), StorageError> {
++    let check = |ns: NamespaceId, state: &NativeRecordState| -> Result<(), StorageError> {
++        let cfg = configs
++            .get(&ns.get())
++            .ok_or_else(|| invalid("maintenance proof namespace missing"))?;
++        if state.content.profile_id != super::native_records::profile_id(cfg) {
++            return Err(invalid("maintenance proof namespace/profile mismatch"));
++        }
++        Ok(())
++    };
++    match &receipt.outcome {
++        super::control::MutationOutcome::NativePhaseMaterialized { transition: t } => {
++            check(
++                t.namespace_id,
++                t.change
++                    .before
++                    .as_ref()
++                    .ok_or_else(|| invalid("phase before missing"))?,
++            )?;
++            check(t.namespace_id, &t.change.after)?;
++        }
++        super::control::MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
++            check(t.namespace_id, &t.deletion.before)?;
++            for p in &t.peers {
++                check(
++                    p.namespace_id,
++                    p.change
++                        .before
++                        .as_ref()
++                        .ok_or_else(|| invalid("peer before missing"))?,
++                )?;
++                check(p.namespace_id, &p.change.after)?;
++            }
++        }
++        _ => {}
++    }
++    Ok(())
++}
+diff --git a/src/storage/native_records.rs b/src/storage/native_records.rs
+index 6fbd065..ed1810b 100644
+--- a/src/storage/native_records.rs
++++ b/src/storage/native_records.rs
+@@ -171,6 +171,21 @@ pub struct ContentProof {
+     pub profile_id: Option<String>,
+ }
+ impl ContentProof {
++    /// Shared shape check also applies to historical receipts whose records
++    /// were removed after a restore. None preserves unknown legacy provenance.
++    pub(crate) fn validate_profile_commitment(&self) -> Result<(), StorageError> {
++        if let Some(profile) = &self.profile_id {
++            if profile.len() != 68
++                || !profile.starts_with("ep1:")
++                || !profile.as_bytes()[4..]
++                    .iter()
++                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
++            {
++                return Err(invalid("invalid native profile commitment"));
++            }
++        }
++        Ok(())
++    }
+     pub(crate) fn capture(
+         record: &DiskRecord,
+         namespace: &NamespaceConfig,
+@@ -420,16 +435,7 @@ impl NativeRecordWrite {
+             let after = &change.after;
+             let fields = &after.lifecycle.lifecycle;
+             after.lifecycle.validate()?;
+-            if let Some(profile) = &after.content.profile_id {
+-                if profile.len() != 68
+-                    || !profile.starts_with("ep1:")
+-                    || !profile.as_bytes()[4..]
+-                        .iter()
+-                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+-                {
+-                    return Err(invalid("invalid native profile commitment"));
+-                }
+-            }
++            after.content.validate_profile_commitment()?;
+             if let Some(before) = &change.before {
+                 before.lifecycle.validate()?;
+             }
+diff --git a/src/storage/validation.rs b/src/storage/validation.rs
+index 4ef2bec..d790ca3 100644
+--- a/src/storage/validation.rs
++++ b/src/storage/validation.rs
+@@ -195,7 +195,9 @@ fn validate_snapshot(
+             && (!native_recovery
+                 || !matches!(
+                     e.receipt.outcome,
+-                    super::control::MutationOutcome::NativeMemoryInserted { .. }
++                    super::control::MutationOutcome::NativePhaseMaterialized { .. }
++                        | super::control::MutationOutcome::NativeMemoryHardDeleted { .. }
++                        | super::control::MutationOutcome::NativeMemoryInserted { .. }
+                         | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
+                 ))
+     }) {
+@@ -343,8 +345,26 @@ fn validate_snapshot(
+         reverse_key[..16].copy_from_slice(edge.target.as_bytes());
+         reverse_key[16] = edge.edge_type.as_u8();
+         reverse_key[17..].copy_from_slice(edge.source.as_bytes());
+-        if !ids.contains(&edge.source)
+-            || !ids.contains(&edge.target)
++        // A committed native hard deletion can precede its separate edge-DB
++        // replay. Admit only the exact, already validated pending deletion;
++        // unrelated dangling edges and missing reverse entries still fail.
++        let pending_delete = native_recovery
++            && effects.iter().any(|effect| {
++                let super::control::MutationOutcome::NativeMemoryHardDeleted { transition } =
++                    &effect.receipt.outcome
++                else {
++                    return false;
++                };
++                !effect.canonical_applied
++                    && effect.deletes.iter().any(|deleted| {
++                        super::native_records::NativeEdgeProof::from(deleted)
++                            == super::native_records::NativeEdgeProof::from(&edge)
++                    })
++                    && [edge.source, edge.target]
++                        .iter()
++                        .all(|id| *id == transition.memory_id || ids.contains(id))
++            });
++        if ((!ids.contains(&edge.source) || !ids.contains(&edge.target)) && !pending_delete)
+             || reverse.get(reverse_key.as_slice())?.is_none()
+         {
+             return Err(StorageError::CorruptIndex(

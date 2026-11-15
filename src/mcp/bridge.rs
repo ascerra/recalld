@@ -24,6 +24,15 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    /// Exact canonical/vector page. Public application v2 remains gated.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Execute a semantic search query.
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError>;
 
@@ -84,6 +93,14 @@ pub trait StorageEngine: Send + Sync {
         ))
     }
 
+    /// Optional resolved backend context; old adapters must not invent identity.
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        Err(BridgeError::Unavailable(
+            "backend context unavailable".into(),
+        ))
+    }
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 
