@@ -1308,7 +1308,8 @@ async fn diagnostics_report_unknown_vector_exhaustion_and_measured_metadata_cap(
         (count.offered, count.eligible, count.admitted),
         (Some(150), Some(150), Some(100))
     );
-    assert_eq!(count.examined, None); // Rejected canonical rows weren't instrumented.
+    assert_eq!(count.examined, Some(150));
+    assert_eq!(count.examined_unit, Some(ExaminationUnit::CanonicalRecords));
     assert_eq!(count.exhausted, Some(true));
     assert_eq!(count.candidate_limited, Some(true));
     assert_eq!(count.budget_exhausted, Some(false));
@@ -1612,4 +1613,279 @@ async fn canonical_eligibility_shared_hybrid_work_is_not_metadata_participation(
         ),
         (None, None, None)
     );
+}
+
+#[test]
+fn canonical_eligibility_first_rejection_preserves_short_circuit_order() {
+    use HardFilterRejection::*;
+    let mut q = canonical_eligibility_query(true);
+    q.filter.permastore_only = true;
+    q.filter.labels.entities = vec!["alice".into()];
+    q.filter.require_tags = vec![Tag::new("required").unwrap()];
+    let mut good = rec(mid(1));
+    good.is_permastore = true;
+    good.tags = vec![
+        Tag::new("entity/alice").unwrap(),
+        Tag::new("required").unwrap(),
+    ];
+    // Each row fails its named predicate and every later record predicate.
+    let mut blocked = good.clone();
+    blocked.tags.push(Tag::new("blocked").unwrap());
+    let mut required = blocked.clone();
+    required.tags.retain(|tag| tag.as_str() != "required");
+    let mut labels = required.clone();
+    labels.tags.retain(|tag| tag.as_str() != "entity/alice");
+    let mut permastore = labels.clone();
+    permastore.is_permastore = false;
+    let mut strength = permastore.clone();
+    strength.strength = 0.1;
+    let mut phase = strength.clone();
+    phase.phase = DecayPhase::Summary;
+    let mut ghost = phase.clone();
+    ghost.phase = DecayPhase::Ghost;
+    let mut tombstone = ghost.clone();
+    tombstone.phase = DecayPhase::Tombstone;
+    let mut foreign = tombstone.clone();
+    foreign.namespace_id = other_ns();
+    let rows = [
+        (foreign, Namespace),
+        (tombstone, Tombstone),
+        (ghost, Ghost),
+        (phase, Phase),
+        (strength, Strength),
+        (permastore, Permastore),
+        (labels, Labels),
+        (required, RequiredTag),
+        (blocked, ExcludedTag),
+    ];
+    for compiled in [false, true] {
+        q.filter.compiled_labels = compiled.then(|| q.filter.labels.compile());
+        assert!(QueryEngine::passes_hard_filters(&good, &q, ns()));
+        assert!(QueryEngine::record_passes_filter(&good, &q.filter));
+        for (row, reason) in &rows {
+            assert_eq!(
+                QueryEngine::hard_filter_rejection(row, &q, ns()),
+                Some(*reason)
+            );
+            assert!(!QueryEngine::passes_hard_filters(row, &q, ns()));
+        }
+        // Record-only callers still reject tombstones; ghost opt-in still reaches phase filtering.
+        assert!(!QueryEngine::record_passes_filter(&rows[1].0, &q.filter));
+        q.include_ghosts = true;
+        assert_eq!(
+            QueryEngine::hard_filter_rejection(&rows[2].0, &q, ns()),
+            Some(Phase)
+        );
+        q.include_ghosts = false;
+    }
+}
+
+/// Controlled adapter boundary cases, not states accepted by canonical storage.
+struct EligibilityRows {
+    records: Vec<CachedRecord>,
+    fail: bool,
+}
+#[async_trait::async_trait]
+impl MetadataStore for EligibilityRows {
+    async fn get(&self, id: &MemoryId) -> Result<Option<CachedRecord>> {
+        Ok(self.records.iter().find(|r| r.id == *id).cloned())
+    }
+    async fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<CachedRecord>> {
+        Ok(self
+            .records
+            .iter()
+            .filter(|r| ids.contains(&r.id))
+            .cloned()
+            .collect())
+    }
+    async fn list_namespace_memories(&self, _: NamespaceId) -> Result<Vec<MemoryId>> {
+        unreachable!("controlled namespace_records override")
+    }
+    async fn namespace_records(&self, _: NamespaceId) -> Result<Vec<CachedRecord>> {
+        if self.fail {
+            return Err(SearchError::MetadataError(
+                "controlled enumeration failure".into(),
+            ));
+        }
+        Ok(self.records.clone())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_controlled_duplicate_and_foreign_rows_are_not_unique_counts() {
+    let (mut engine, _) = graph_engine(vec![rec(mid(1))], &[], &[]);
+    let mut foreign = rec(mid(2));
+    foreign.namespace_id = other_ns();
+    foreign.phase = DecayPhase::Tombstone; // Namespace is the first real rejection.
+    engine.meta_store = Arc::new(EligibilityRows {
+        records: vec![rec(mid(1)), rec(mid(1)), foreign],
+        fail: false,
+    });
+    let out = engine
+        .search_with_semantics(canonical_eligibility_query(true), history())
+        .await
+        .unwrap();
+    assert_eq!(result_ids(&out.response), vec![mid(1)]);
+    let facts = out.diagnostics.canonical_eligibility.unwrap();
+    assert_eq!((facts.examined, facts.passed), (3, 2));
+    assert_eq!(
+        facts.first_rejections,
+        [(HardFilterRejection::Namespace, 1)].into_iter().collect()
+    );
+    let metadata = &out.diagnostics.channels.unwrap()[&RetrievalChannel::Metadata];
+    assert_eq!(
+        (metadata.examined, metadata.eligible, metadata.admitted),
+        (Some(3), Some(1), Some(1))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_empty_rejected_and_v1_score_parity() {
+    for records in [
+        vec![],
+        vec![{
+            let mut row = rec(mid(1));
+            row.phase = DecayPhase::Tombstone;
+            row
+        }],
+    ] {
+        let n = records.len();
+        let (engine, _) = graph_engine(records, &[], &[]);
+        let out = engine
+            .search_with_semantics(canonical_eligibility_query(true), history())
+            .await
+            .unwrap();
+        assert!(out.response.results.is_empty());
+        let facts = out.diagnostics.canonical_eligibility.unwrap();
+        assert_eq!((facts.examined, facts.passed), (n, 0));
+        assert_eq!(facts.first_rejections.values().sum::<usize>(), n);
+        let metadata = &out.diagnostics.channels.unwrap()[&RetrievalChannel::Metadata];
+        assert_eq!(
+            (metadata.examined, metadata.eligible, metadata.exhausted),
+            (Some(n), Some(0), Some(true))
+        );
+    }
+    for metadata in [false, true] {
+        let engine = canonical_eligibility_fixture();
+        let legacy = engine
+            .search_with_semantics(
+                canonical_eligibility_query(metadata),
+                RetrievalSemantics::V1,
+            )
+            .await
+            .unwrap();
+        let measured = engine
+            .search_with_semantics(canonical_eligibility_query(metadata), history())
+            .await
+            .unwrap();
+        let scores = |out: &SearchResponse| {
+            out.results
+                .iter()
+                .map(|r| (r.memory_id, r.composite_score.map(f32::to_bits)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(scores(&legacy.response), scores(&measured.response));
+        assert!(legacy.diagnostics.canonical_eligibility.is_none());
+        let facts = measured.diagnostics.canonical_eligibility.unwrap();
+        assert_eq!(
+            facts.examined,
+            facts.passed + facts.first_rejections.values().sum::<usize>()
+        );
+    }
+}
+
+struct NoEligibilityObservation;
+#[async_trait::async_trait]
+impl AccessRecorder for NoEligibilityObservation {
+    async fn record_access(
+        &self,
+        _: MemoryId,
+        _: AccessKind,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        panic!("failed eligibility must not observe")
+    }
+    async fn record_access_batch(
+        &self,
+        _: &[(MemoryId, AccessKind)],
+        _: Option<&crate::storage::control::ExposureScope>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        panic!("failed eligibility must not observe")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_errors_fail_before_observer_not_measured_empty_success() {
+    for failure in 0..3 {
+        let mut row = rec(mid(1));
+        if failure == 1 {
+            // Controlled nonfinite eligible row: existing validation must still fail.
+            row.strength = f32::NAN;
+        } else if failure == 2 {
+            // Controlled schema mismatch must fail projection, even though phase
+            // filtering would reject this row later. No pre-filter shortcut.
+            use crate::model::schema::{LifecycleFields, LifecycleVersion, TimestampOrigin};
+            row.phase = DecayPhase::Tombstone;
+            row.lifecycle = Some(LifecycleFields {
+                observed_at: 0,
+                retrieved_at: None,
+                reinforced_at: None,
+                decay_anchor_at: 0,
+                lifecycle_version: LifecycleVersion::LegacyAccessV1,
+                lifecycle_updated_at: 0,
+                timestamp_origin: TimestampOrigin::LegacyInferred,
+                phase_changed_at: 0,
+                policy_revision: Default::default(),
+                record_generation: Default::default(),
+            });
+        }
+        let (mut engine, _) = graph_engine(vec![rec(mid(1))], &[], &[]);
+        engine.meta_store = Arc::new(EligibilityRows {
+            records: vec![row],
+            fail: failure == 0,
+        });
+        engine.access_recorder = Arc::new(NoEligibilityObservation);
+        let mut q = canonical_eligibility_query(true);
+        q.record_access = true;
+        let error = engine
+            .search_with_semantics(q, history())
+            .await
+            .err()
+            .expect("failure, not empty measured success");
+        let expected = match failure {
+            0 => "controlled enumeration failure",
+            1 => "nonfinite",
+            _ => "record lifecycle/policy does not match pinned namespace",
+        };
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_real_adapter_false_mode_retains_record_bytes() {
+    use crate::test_support::Fixture;
+    let fixture = Fixture::new();
+    let ids = [fixture.insert_memory().await, fixture.insert_memory().await];
+    let before = ids.map(|id| fixture.record(id).unwrap().to_bytes());
+    let mut engine = search_engine(Vec::new(), &[]);
+    engine.meta_store = Arc::new(StorageMetadataAdapter::new(fixture.storage.clone()));
+    engine.graph = Arc::new(SharedGraphReader::new(fixture.graph.clone()));
+    engine.access_recorder = Arc::new(NoEligibilityObservation);
+    for mode in [current(), history()] {
+        let out = engine
+            .search_with_semantics(
+                query(serde_json::json!({
+                    "queryMode":"metadata_only", "recordAccess":false,
+                    "filter":{"minStrength":0.0}, "graphDepth":0
+                })),
+                mode,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.response.results.len(), 2);
+        let facts = out.diagnostics.canonical_eligibility.unwrap();
+        assert_eq!((facts.examined, facts.passed), (2, 2));
+        assert!(facts.first_rejections.is_empty());
+    }
+    tokio::task::yield_now().await;
+    assert_eq!(before, ids.map(|id| fixture.record(id).unwrap().to_bytes()));
 }

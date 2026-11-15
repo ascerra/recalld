@@ -56,6 +56,17 @@ pub struct CanonicalEligibilityDiagnostics {
     pub first_rejections: BTreeMap<HardFilterRejection, usize>,
 }
 
+impl Default for CanonicalEligibilityDiagnostics {
+    fn default() -> Self {
+        Self {
+            examined_unit: ExaminationUnit::CanonicalRecords,
+            examined: 0,
+            passed: 0,
+            first_rejections: BTreeMap::new(),
+        }
+    }
+}
+
 /// Facts captured by a producer during its actual scan, before union/ranking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceCoverage {
@@ -230,6 +241,10 @@ impl SemanticsDiagnostics {
                 .unwrap()
                 .get_mut(&RetrievalChannel::Metadata)
                 .unwrap();
+            if let Some(facts) = &self.canonical_eligibility {
+                metadata.examined = Some(facts.examined);
+                metadata.examined_unit = Some(facts.examined_unit);
+            }
             metadata.eligible = Some(eligible);
             metadata.exhausted = Some(true); // Canonical namespace enumeration completed.
             metadata.budget_exhausted = Some(false); // No early examination ceiling.

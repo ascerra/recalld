@@ -857,11 +857,25 @@ impl QueryEngine {
         let stage_start = Instant::now();
         let mut namespace_records = self.meta_store.namespace_records(ns_config.id).await?;
         strength_context.project_namespace(&mut namespace_records, self.graph.as_ref())?;
+        let mut eligibility =
+            (semantics != RetrievalSemantics::V1).then(CanonicalEligibilityDiagnostics::default);
         let eligible_records: HashMap<MemoryId, CachedRecord> = namespace_records
             .into_iter()
-            .filter(|record| Self::passes_hard_filters(record, &query, ns_config.id))
+            .filter(|record| {
+                let rejection = Self::hard_filter_rejection(record, &query, ns_config.id);
+                if let Some(facts) = &mut eligibility {
+                    facts.examined += 1;
+                    if let Some(reason) = rejection {
+                        *facts.first_rejections.entry(reason).or_default() += 1;
+                    } else {
+                        facts.passed += 1;
+                    }
+                }
+                rejection.is_none()
+            })
             .map(|record| (record.id, record))
             .collect();
+        diagnostics.canonical_eligibility = eligibility;
         let eligible_ids: HashSet<MemoryId> = eligible_records.keys().copied().collect();
         timings.eligibility_us = stage_start.elapsed().as_micros() as u64;
         if semantics != RetrievalSemantics::V1 {
@@ -2098,26 +2112,33 @@ impl QueryEngine {
     /// Shared filtering logic used by both `passes_filters()` (post-retrieval)
     /// and canonical eligibility scanning (all query modes).
     fn record_passes_filter(record: &CachedRecord, filter: &SearchFilter) -> bool {
+        Self::record_filter_rejection(record, filter).is_none()
+    }
+
+    fn record_filter_rejection(
+        record: &CachedRecord,
+        filter: &SearchFilter,
+    ) -> Option<HardFilterRejection> {
         // Tombstone filter: always exclude tombstoned memories.
         if record.phase == DecayPhase::Tombstone {
-            return false;
+            return Some(HardFilterRejection::Tombstone);
         }
 
         // Phase filter
         if !filter.phases.is_empty() && !filter.phases.contains(&record.phase) {
-            return false;
+            return Some(HardFilterRejection::Phase);
         }
 
         // Strength filter
         if let Some(min_strength) = filter.min_strength {
             if record.strength < min_strength {
-                return false;
+                return Some(HardFilterRejection::Strength);
             }
         }
 
         // Permastore filter
         if filter.permastore_only && !record.is_permastore {
-            return false;
+            return Some(HardFilterRejection::Permastore);
         }
 
         // Admitted queries reuse a compiled predicate. Direct internal callers
@@ -2130,14 +2151,14 @@ impl QueryEngine {
                 .matches(&record.tags, record.labels.as_ref()),
         };
         if !labels_match {
-            return false;
+            return Some(HardFilterRejection::Labels);
         }
 
         // Require tags (ALL must be present)
         if !filter.require_tags.is_empty() {
             for required in &filter.require_tags {
                 if !record.tags.contains(required) {
-                    return false;
+                    return Some(HardFilterRejection::RequiredTag);
                 }
             }
         }
@@ -2145,11 +2166,11 @@ impl QueryEngine {
         // Exclude tags (NONE may be present)
         for excluded in &filter.exclude_tags {
             if record.tags.contains(excluded) {
-                return false;
+                return Some(HardFilterRejection::ExcludedTag);
             }
         }
 
-        true
+        None
     }
 
     /// Hard eligibility is independent of score admission and retrieval channel.
@@ -2158,26 +2179,34 @@ impl QueryEngine {
         query: &SearchQuery,
         namespace_id: NamespaceId,
     ) -> bool {
+        Self::hard_filter_rejection(record, query, namespace_id).is_none()
+    }
+
+    fn hard_filter_rejection(
+        record: &CachedRecord,
+        query: &SearchQuery,
+        namespace_id: NamespaceId,
+    ) -> Option<HardFilterRejection> {
         // Namespace filter: discard candidates from other namespaces.
         // Entity recall and graph expansion can inject cross-namespace
         // candidates; this gate ensures they never reach the results.
         if record.namespace_id != namespace_id {
-            return false;
+            return Some(HardFilterRejection::Namespace);
         }
 
         // Tombstone filter: always exclude tombstoned memories from
         // search results. Their content has been stripped; they only
         // exist as graph relay nodes for spreading activation.
         if record.phase == DecayPhase::Tombstone {
-            return false;
+            return Some(HardFilterRejection::Tombstone);
         }
 
         // Ghost filter
         if record.phase == DecayPhase::Ghost && !query.include_ghosts {
-            return false;
+            return Some(HardFilterRejection::Ghost);
         }
 
-        Self::record_passes_filter(record, &query.filter)
+        Self::record_filter_rejection(record, &query.filter)
     }
 
     /// Check hard eligibility, then score admission on fused direct relevance.
