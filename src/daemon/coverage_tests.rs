@@ -59,16 +59,16 @@ async fn scan_coverage_rejects_unavailable_storage_in_both_wire_modes() {
                    "maxMemories": DUPLICATE_SAMPLE_CAP, "includeCoverage": include_coverage}),
         )
         .await;
-        assert!(result.is_err(), "unavailable scan returned success: {result:?}");
+        assert!(
+            result.is_err(),
+            "unavailable scan returned success: {result:?}"
+        );
     }
     let mut bridge = StubBridge::default().into_bridge();
     bridge.search = Arc::new(search);
-    let result = crate::mcp::tools::dispatch_tool(
-        &bridge,
-        "find_similar_memories",
-        json!({"mode": "scan"}),
-    )
-    .await;
+    let result =
+        crate::mcp::tools::dispatch_tool(&bridge, "find_similar_memories", json!({"mode": "scan"}))
+            .await;
     assert_eq!(result.is_error, Some(true));
 }
 

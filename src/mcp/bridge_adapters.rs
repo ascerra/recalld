@@ -592,7 +592,9 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 Ok::<_, bridge::BridgeError>((ns, ids, eligible_count))
             })
             .await
-            .map_err(|e| bridge::BridgeError::Internal(format!("blocking task join error: {e}")))??;
+            .map_err(|e| {
+                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
+            })??;
 
             // 3. Load embeddings for all sampled memories via the vector index.
             let mut id_embeddings: Vec<(MemoryId, Vec<f32>)> = Vec::with_capacity(memory_ids.len());
