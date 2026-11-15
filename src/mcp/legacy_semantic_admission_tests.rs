@@ -327,7 +327,7 @@ fn file_hashes(root: &std::path::Path) -> Vec<(String, String)> {
     use sha2::{Digest, Sha256};
     files(root)
         .into_iter()
-        .map(|(path, bytes)| (path, format!("{:x}", Sha256::digest(bytes))))
+        .map(|(path, bytes)| (path, format!("{:02x?}", Sha256::digest(bytes).as_slice())))
         .collect()
 }
 pub(super) fn history() -> Value {
