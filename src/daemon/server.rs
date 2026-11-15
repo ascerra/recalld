@@ -506,6 +506,18 @@ async fn dispatch(
                 BridgeError::PartiallyApplied(format!("batch result serialization failed: {e}"))
             })
         }
+        "forget_lifecycle_v1" | "feedback_lifecycle_v1" => {
+            let operation = if method == "forget_lifecycle_v1" {
+                crate::serialization::native_lifecycle::Operation::Forget
+            } else {
+                crate::serialization::native_lifecycle::Operation::Feedback
+            };
+            let reply = crate::mcp::native_lifecycle_adapter::dispatch_lifecycle_private(
+                storage, operation, params,
+            )
+            .await;
+            serde_json::to_value(reply).map_err(|e| BridgeError::PartiallyApplied(e.to_string()))
+        }
         "forget_native_v1" | "feedback_native_v1" => {
             let operation = if method == "forget_native_v1" {
                 crate::serialization::native_lifecycle::Operation::Forget

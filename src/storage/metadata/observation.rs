@@ -212,7 +212,8 @@ impl MetadataStore {
             ctx,
             id,
             quality,
-            sampled_at,
+            || sampled_at,
+            &crate::decay::DecayConfig::default(),
             global_multiplier,
             expected_namespace,
         )?;
@@ -236,10 +237,38 @@ impl MetadataStore {
             ctx,
             id,
             quality,
-            sampled_at,
+            || sampled_at,
+            &crate::decay::DecayConfig::default(),
             global_multiplier,
             None,
         )
+    }
+
+    /// The clock is sampled inside the actual transaction, after matching replay
+    /// and CAS. Existing pre-sampled Rust callers retain their original API.
+    pub(crate) fn record_legacy_feedback_clock_with_work(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        quality: u8,
+        clock: &dyn crate::time::Clock,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        asserted_namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        let publication = self.mutation_guard_with_work(parent)?;
+        let (tx, receipt) = self.prepare_feedback_scoped(
+            &publication,
+            ctx,
+            id,
+            quality,
+            || clock.now_millis(),
+            &policy.global,
+            policy.multiplier,
+            asserted_namespace,
+        )?;
+        self.commit_observation(tx, &receipt)?;
+        Ok(receipt)
     }
 
     fn prepare_feedback_scoped(
@@ -248,7 +277,8 @@ impl MetadataStore {
         ctx: &MutationContext,
         id: MemoryId,
         quality: u8,
-        sampled_at: i64,
+        sample: impl FnOnce() -> i64,
+        global: &crate::decay::DecayConfig,
         global_multiplier: f64,
         expected_namespace: Option<&str>,
     ) -> Result<(redb::WriteTransaction, WriteReceipt), StorageError> {
@@ -268,19 +298,19 @@ impl MetadataStore {
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok((tx, receipt));
         }
-        validate_observation_time(sampled_at)?;
         let policy = read_namespace(&tx, namespace)?;
         if expected_namespace.is_some_and(|name| name != policy.name) {
             return Err(StorageError::MutationNamespaceMismatch);
         }
         super::removal_ledger::ensure_insertable(&tx, id)?;
         let mut record = read_record(&tx.open_table(META_TABLE)?, id, namespace)?;
-        let resolved = crate::decay::lifecycle::resolve_policy(
-            &policy,
-            &crate::decay::DecayConfig::default(),
-            global_multiplier,
-        )
-        .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
+        let resolved = crate::decay::lifecycle::resolve_policy(&policy, global, global_multiplier)
+            .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
+        if matches!(record.phase, DecayPhase::Ghost | DecayPhase::Tombstone) {
+            return Err(StorageError::LifecycleContentUnavailable);
+        }
+        let sampled_at = sample();
+        validate_observation_time(sampled_at)?;
         let plan = crate::decay::lifecycle::plan_feedback(&record, &resolved, sampled_at, quality)
             .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
         validate_observation_time(plan.timestamp)?;

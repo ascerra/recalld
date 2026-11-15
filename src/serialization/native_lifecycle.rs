@@ -20,6 +20,9 @@ pub(crate) enum Operation {
 pub(crate) struct Request {
     /// Original application contract, independent of record/lifecycle schema.
     pub original_contract_version: u32,
+    /// Entry capability, never inferred from application version or disk schema.
+    /// Old private native-only aliases must reject legacy storage before writing.
+    pub legacy_aware: bool,
     pub id: MemoryId,
     pub namespace: Option<String>,
     pub namespace_id: Option<NamespaceId>,
@@ -45,7 +48,9 @@ pub(crate) fn parse(
             "explicit contractVersion 2 required",
         ));
     }
-    parse_request(value, operation, mcp, header_key, 2)
+    let mut request = parse_request(value, operation, mcp, header_key, 2)?;
+    request.legacy_aware = true;
+    Ok(request)
 }
 
 /// Private RPCs carry the original selector explicitly; no schema-derived default.
@@ -58,6 +63,15 @@ pub(crate) fn parse_private(value: &Value, operation: Operation) -> Result<Reque
     }
     let origin = ContractVersion::from_mcp(value)?.number();
     parse_request(value, operation, true, None, origin)
+}
+
+pub(crate) fn parse_lifecycle_private(
+    value: &Value,
+    operation: Operation,
+) -> Result<Request, InputError> {
+    let mut request = parse_private(value, operation)?;
+    request.legacy_aware = true;
+    Ok(request)
 }
 
 fn parse_request(
@@ -128,6 +142,7 @@ fn parse_request(
         .unwrap_or(3);
     Ok(Request {
         original_contract_version,
+        legacy_aware: false,
         id: id.into(),
         namespace,
         namespace_id,
@@ -136,6 +151,14 @@ fn parse_request(
     })
 }
 impl Request {
+    pub(crate) fn rpc_method(&self, operation: Operation) -> &'static str {
+        match (self.legacy_aware, operation) {
+            (false, Operation::Forget) => "forget_native_v1",
+            (false, Operation::Feedback) => "feedback_native_v1",
+            (true, Operation::Forget) => "forget_lifecycle_v1",
+            (true, Operation::Feedback) => "feedback_lifecycle_v1",
+        }
+    }
     pub(crate) fn wire(&self, operation: Operation) -> Value {
         let mut value = json!({"contractVersion":self.original_contract_version,"id":self.id});
         let object = value.as_object_mut().unwrap();
@@ -175,12 +198,57 @@ pub(crate) struct Data {
     pub is_permastore: bool,
     pub historical: bool,
 }
+/// Only historical fields actually present in legacy receipts. No current row
+/// is presented as the numerical result of a past operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum LegacyData {
+    Feedback {
+        id: MemoryId,
+        quality: u8,
+        #[serde(rename = "appliedAt")]
+        applied_at: i64,
+        historical: bool,
+    },
+    Forget {
+        id: MemoryId,
+        status: crate::storage::tombstone::TombstoneStatus,
+        historical: bool,
+    },
+}
+impl LegacyData {
+    fn from_receipt(receipt: &WriteReceipt, id: MemoryId) -> Option<Self> {
+        match &receipt.outcome {
+            MutationOutcome::LegacyFeedbackRecorded {
+                memory_id,
+                quality,
+                applied_at,
+            } if *memory_id == id => Some(Self::Feedback {
+                id,
+                quality: *quality,
+                applied_at: *applied_at,
+                historical: receipt.replayed,
+            }),
+            MutationOutcome::MemoryTombstoned { memory_id, status } if *memory_id == id => {
+                Some(Self::Forget {
+                    id,
+                    status: *status,
+                    historical: receipt.replayed,
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Private RPC payload keeps typed receipts/errors; adapters never parse diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Reply {
     pub scope: Option<(NamespaceId, String)>,
     pub data: Option<Data>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_data: Option<LegacyData>,
     pub receipt: Option<WriteReceipt>,
     pub error: Option<ExecutionError>,
     pub readiness: Option<Readiness>,
@@ -201,6 +269,7 @@ impl Reply {
         Self {
             scope: None,
             data: None,
+            legacy_data: None,
             receipt: None,
             error: Some(error),
             readiness: None,
@@ -277,6 +346,12 @@ impl Reply {
                 CommitState::NotCommitted,
                 None,
             ),
+            WorkerOutcomeUnknown(_) => (
+                ErrorCategory::Unavailable,
+                "COMMIT_OUTCOME_UNKNOWN",
+                CommitState::Unknown,
+                None,
+            ),
             CommitOutcomeUnknown { operation_id, .. } => (
                 ErrorCategory::Unavailable,
                 "COMMIT_OUTCOME_UNKNOWN",
@@ -311,6 +386,16 @@ impl Reply {
         receipt: WriteReceipt,
         id: MemoryId,
     ) -> Self {
+        if let Some(legacy_data) = LegacyData::from_receipt(&receipt, id) {
+            return Self {
+                scope: Some(scope),
+                data: None,
+                legacy_data: Some(legacy_data),
+                receipt: Some(receipt),
+                error: None,
+                readiness: None,
+            };
+        }
         let after = match &receipt.outcome {
             MutationOutcome::LifecycleFeedbackApplied { transition } => transition
                 .records
@@ -345,6 +430,7 @@ impl Reply {
         Self {
             scope: Some(scope),
             data: Some(data),
+            legacy_data: None,
             receipt: Some(receipt),
             error: None,
             readiness: None,
@@ -353,23 +439,51 @@ impl Reply {
     pub(crate) fn valid_response(&self, request: &Request, operation: Operation) -> bool {
         if let Some(error) = &self.error {
             return self.data.is_none()
+                && self.legacy_data.is_none()
                 && self.readiness.is_none()
                 && self.receipt.as_ref().is_none_or(|r| {
                     error.commit_state == CommitState::Committed
                         && error.operation_id == Some(r.operation_id)
                 });
         }
-        let (Some(scope), Some(receipt), Some(data), Some(ready)) =
-            (&self.scope, &self.receipt, &self.data, &self.readiness)
+        let (Some(scope), Some(receipt), Some(ready)) =
+            (&self.scope, &self.receipt, &self.readiness)
         else {
             return false;
         };
         if scope.0.is_unset()
-            || data.id != request.id
+            || request.namespace_id.is_some_and(|id| id != scope.0)
+            || request
+                .namespace
+                .as_ref()
+                .is_some_and(|name| !name.eq_ignore_ascii_case(&scope.1))
+            || request
+                .options
+                .store_id
+                .is_some_and(|id| id != receipt.store_id)
             || !ready.ready
             || ready.store_id != receipt.store_id
             || ready.committed_generation < receipt.committed_generation
         {
+            return false;
+        }
+        if let Some(legacy) = &self.legacy_data {
+            let operation_matches = match (legacy, operation) {
+                (LegacyData::Feedback { quality, .. }, Operation::Feedback) => {
+                    *quality == request.quality
+                }
+                (LegacyData::Forget { .. }, Operation::Forget) => true,
+                _ => false,
+            };
+            return request.legacy_aware
+                && self.data.is_none()
+                && LegacyData::from_receipt(receipt, request.id).as_ref() == Some(legacy)
+                && operation_matches;
+        }
+        let Some(data) = &self.data else {
+            return false;
+        };
+        if data.id != request.id {
             return false;
         }
         match (&receipt.outcome, operation) {
@@ -384,6 +498,61 @@ impl Reply {
             _ => false,
         }
     }
+    pub(crate) fn decode_response(value: Value, request: &Request, operation: Operation) -> Self {
+        let receipt: Option<WriteReceipt> = value
+            .get("receipt")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok());
+        match serde_json::from_value::<Self>(value) {
+            Ok(reply) if reply.valid_response(request, operation) => reply,
+            _ => {
+                let mut reply =
+                    Self::unavailable("lifecycle response invalid; reconcile original intent");
+                let error = reply.error.as_mut().unwrap();
+                error.code = "INVALID_RESPONSE".into();
+                error.commit_state = CommitState::Unknown;
+                if let Some(receipt) = receipt.filter(|r| {
+                    !r.store_id.is_nil()
+                        && !r.operation_id.is_nil()
+                        && r.receipt_version == 1
+                        && request.options.store_id.is_none_or(|id| id == r.store_id)
+                        && match (&r.outcome, operation) {
+                            (
+                                MutationOutcome::MemoryTombstoned { memory_id, .. },
+                                Operation::Forget,
+                            ) => request.legacy_aware && *memory_id == request.id,
+                            (
+                                MutationOutcome::LegacyFeedbackRecorded {
+                                    memory_id, quality, ..
+                                },
+                                Operation::Feedback,
+                            ) => {
+                                request.legacy_aware
+                                    && *memory_id == request.id
+                                    && *quality == request.quality
+                            }
+                            (
+                                MutationOutcome::NativeMemoryTombstoned { transition },
+                                Operation::Forget,
+                            ) => transition.memory_id == request.id,
+                            (
+                                MutationOutcome::LifecycleFeedbackApplied { transition },
+                                Operation::Feedback,
+                            ) => {
+                                transition.records.len() == 1
+                                    && transition.records[0].memory_id == request.id
+                            }
+                            _ => false,
+                        }
+                }) {
+                    error.commit_state = CommitState::Committed;
+                    error.operation_id = Some(receipt.operation_id);
+                    reply.receipt = Some(receipt);
+                }
+                reply
+            }
+        }
+    }
     pub(crate) fn status_code(&self) -> u16 {
         match self.error.as_ref().map(|e| e.category) {
             None => 200,
@@ -395,7 +564,7 @@ impl Reply {
             Some(ErrorCategory::Internal) => 500,
         }
     }
-    pub(crate) fn envelope(self) -> Envelope<Data> {
+    pub(crate) fn envelope(self) -> Envelope<Value> {
         let scope = self
             .scope
             .map(|(namespace_id, namespace)| Scope::Namespace {
@@ -408,7 +577,11 @@ impl Reply {
             // A successful native operation always has a verified scope and outcome.
             Envelope::success(
                 scope.expect("native scope"),
-                self.data.expect("native outcome"),
+                match (self.data, self.legacy_data) {
+                    (Some(data), None) => serde_json::to_value(data).expect("native outcome"),
+                    (None, Some(data)) => serde_json::to_value(data).expect("legacy outcome"),
+                    _ => unreachable!("lifecycle success requires exactly one validated outcome"),
+                },
             )
         };
         envelope.receipt = self.receipt;

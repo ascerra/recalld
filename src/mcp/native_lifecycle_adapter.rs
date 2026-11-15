@@ -42,12 +42,15 @@ pub(crate) async fn execute(
             .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
         let meta = storage.meta_store();
         let result = (|| {
-            let _guard = meta.native_guard_with_work(Some(&child))?;
+            if !requested.legacy_aware && !meta.uses_native_lifecycle() {
+                return Err(StorageError::RecoveryRequired(
+                    "native-only lifecycle entry requires native storage".into(),
+                ));
+            }
+            let _guard = meta.lifecycle_guard_with_work(Some(&child))?;
             let record = storage.get_record(requested.id)?;
             let canonical = if let Some(record) = record {
                 Some(crate::model::NamespaceId::new(record.namespace_id))
-            } else if requested.namespace_id.is_some() {
-                None
             } else {
                 // ponytail: rare deleted-row lookup scans retained payload-free ledger.
                 // A UUID index can replace this only if measured lookup cost warrants it.
@@ -59,13 +62,20 @@ pub(crate) async fn execute(
                         namespaces.insert(entry.namespace_id);
                     }
                 }
-                if namespaces.len() > 1 {
-                    return Err(StorageError::MutationNamespaceMismatch);
+                if let Some(asserted) = requested.namespace_id {
+                    if !namespaces.is_empty() && !namespaces.contains(&asserted.get()) {
+                        return Err(StorageError::MutationNamespaceMismatch);
+                    }
+                    Some(asserted)
+                } else {
+                    if namespaces.len() > 1 {
+                        return Err(StorageError::MutationNamespaceMismatch);
+                    }
+                    namespaces
+                        .first()
+                        .copied()
+                        .map(crate::model::NamespaceId::new)
                 }
-                namespaces
-                    .first()
-                    .copied()
-                    .map(crate::model::NamespaceId::new)
             };
             if let (Some(actual), Some(asserted)) = (canonical, requested.namespace_id) {
                 if actual != asserted {
@@ -75,13 +85,13 @@ pub(crate) async fn execute(
             let namespace = canonical
                 .or(requested.namespace_id)
                 .ok_or(StorageError::NotFound(requested.id.into_inner()))?;
-            Ok(namespace)
+            Ok((namespace, meta.uses_native_lifecycle()))
         })();
         meta.finish_work(child);
         result
     })
     .await;
-    let scope = match resolved {
+    let (scope, native) = match resolved {
         Ok(Ok(scope)) => scope,
         other => {
             owner.finish_known_work(work);
@@ -99,31 +109,45 @@ pub(crate) async fn execute(
         expected_generation: request.options.expected_generation,
         contract_version: request.original_contract_version,
     };
-    let result = match operation {
-        Operation::Forget => {
-            owner
-                .forget_native_with_work(
-                    context,
-                    request.id,
-                    request.namespace,
-                    policy.clone(),
-                    clock,
-                    Some(&work),
-                )
-                .await
-        }
-        Operation::Feedback => {
-            owner
-                .feedback_native_with_work(
-                    context,
-                    request.id,
-                    request.quality,
-                    request.namespace,
-                    policy.clone(),
-                    clock,
-                    Some(&work),
-                )
-                .await
+    let result = if !native {
+        owner
+            .legacy_lifecycle_with_work(
+                context,
+                request.id,
+                (operation == Operation::Feedback).then_some(request.quality),
+                request.namespace,
+                policy.clone(),
+                clock,
+                Some(&work),
+            )
+            .await
+    } else {
+        match operation {
+            Operation::Forget => {
+                owner
+                    .forget_native_with_work(
+                        context,
+                        request.id,
+                        request.namespace,
+                        policy.clone(),
+                        clock,
+                        Some(&work),
+                    )
+                    .await
+            }
+            Operation::Feedback => {
+                owner
+                    .feedback_native_with_work(
+                        context,
+                        request.id,
+                        request.quality,
+                        request.namespace,
+                        policy.clone(),
+                        clock,
+                        Some(&work),
+                    )
+                    .await
+            }
         }
     };
     let receipt = match result {
@@ -152,10 +176,9 @@ pub(crate) async fn execute(
             .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
         let meta = storage.meta_store();
         let result = (|| {
-            let guard = meta.native_guard_with_work(Some(&child))?;
-            let (_, binding) = meta.capture_namespace_binding(&guard, scope)?;
-            binding
-                .map(|b| (scope, b.name))
+            let guard = meta.lifecycle_guard_with_work(Some(&child))?;
+            meta.lifecycle_namespace_name(&guard, scope)?
+                .map(|name| (scope, name))
                 .ok_or(StorageError::NamespaceNotFound(scope.get()))
         })();
         meta.finish_work(child);
@@ -257,4 +280,18 @@ async fn dispatch_parsed(
         },
         Err(error) => Reply::input(error),
     }
+}
+
+/// Explicit new capability; old native-only aliases keep their old rejection.
+pub(crate) async fn dispatch_lifecycle_private(
+    storage: &dyn super::bridge::StorageEngine,
+    operation: Operation,
+    arguments: serde_json::Value,
+) -> Reply {
+    dispatch_parsed(
+        storage,
+        operation,
+        crate::serialization::native_lifecycle::parse_lifecycle_private(&arguments, operation),
+    )
+    .await
 }

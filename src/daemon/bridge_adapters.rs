@@ -144,19 +144,13 @@ impl bridge::StorageEngine for RemoteStorageAdapter {
         };
         match self
             .client
-            .call("forget_native_v1", request.wire(Operation::Forget))
+            .call(
+                request.rpc_method(Operation::Forget),
+                request.wire(Operation::Forget),
+            )
             .await
         {
-            Ok(value) => match serde_json::from_value::<Reply>(value) {
-                Ok(reply) if reply.valid_response(&request, Operation::Forget) => reply,
-                _ => {
-                    let mut reply = Reply::unavailable(
-                        "native lifecycle response invalid; reconcile original intent",
-                    );
-                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
-                    reply
-                }
-            },
+            Ok(value) => Reply::decode_response(value, &request, Operation::Forget),
             Err(error) => {
                 let mut reply = Reply::unavailable(&error.to_string());
                 // Only the server's typed rejection proves that the method was
@@ -179,19 +173,13 @@ impl bridge::StorageEngine for RemoteStorageAdapter {
         };
         match self
             .client
-            .call("feedback_native_v1", request.wire(Operation::Feedback))
+            .call(
+                request.rpc_method(Operation::Feedback),
+                request.wire(Operation::Feedback),
+            )
             .await
         {
-            Ok(value) => match serde_json::from_value::<Reply>(value) {
-                Ok(reply) if reply.valid_response(&request, Operation::Feedback) => reply,
-                _ => {
-                    let mut reply = Reply::unavailable(
-                        "native lifecycle response invalid; reconcile original intent",
-                    );
-                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
-                    reply
-                }
-            },
+            Ok(value) => Reply::decode_response(value, &request, Operation::Feedback),
             Err(error) => {
                 let mut reply = Reply::unavailable(&error.to_string());
                 // Only the server's typed rejection proves that the method was

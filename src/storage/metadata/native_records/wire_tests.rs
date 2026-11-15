@@ -530,7 +530,8 @@ async fn native_lifecycle_wire_old_rpc_unknown_method_fails_closed_without_legac
     ));
     let value = json!({"contractVersion":2,"id":uuid::Uuid::new_v4()});
     for operation in [Operation::Feedback, Operation::Forget] {
-        let request = parse(&value, operation, true, None).unwrap();
+        let request =
+            crate::serialization::native_lifecycle::parse_private(&value, operation).unwrap();
         let reply = if operation == Operation::Feedback {
             remote.feedback_native(request).await
         } else {
