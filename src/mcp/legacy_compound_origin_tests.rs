@@ -52,7 +52,9 @@ async fn legacy_compound_origin_actual_single_insert_two() {
         parent_id: None,
         supersedes: None,
     };
-    let result = owner.insert(ctx, input, vec![].into(), 100).await;
+    let result = owner
+        .insert(ctx.clone(), input.clone(), vec![].into(), 100)
+        .await;
     assert!(
         result.is_ok(),
         "actual legacy2 insertion rejected: {:?}",
@@ -62,6 +64,29 @@ async fn legacy_compound_origin_actual_single_insert_two() {
         current(&f).committed_generation.get(),
         before.committed_generation.get() + 1
     );
+    let receipt = result.unwrap().receipt;
+    let now = current(&f);
+    let mut replay = owner
+        .insert(ctx.clone(), input.clone(), vec![f32::NAN].into(), i64::MAX)
+        .await
+        .unwrap()
+        .receipt;
+    assert!(replay.replayed);
+    replay.replayed = false;
+    assert_eq!(replay, receipt);
+    let mut other = ctx.clone();
+    other.contract_version = 1;
+    assert!(matches!(
+        owner.insert(other, input.clone(), vec![].into(), 100).await,
+        Err(crate::storage::StorageError::IdempotencyConflict)
+    ));
+    let mut stale = ctx;
+    stale.idempotency_key = Some("new-stale-key".into());
+    assert!(matches!(
+        owner.insert(stale, input, vec![].into(), 100).await,
+        Err(crate::storage::StorageError::GenerationConflict { .. })
+    ));
+    assert_eq!(current(&f), now);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -184,6 +209,131 @@ impl crate::time::Clock for SpyClock {
     fn now_millis(&self) -> i64 {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         100
+    }
+}
+
+struct BlockedProvider {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+#[async_trait::async_trait]
+impl crate::embedding::EmbeddingProvider for BlockedProvider {
+    async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(vec![1., 0., 0., 0.])
+    }
+    fn dimensions(&self) -> usize {
+        4
+    }
+    fn model_name(&self) -> &str {
+        "synthetic-blocked-origin"
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_compound_origin_actual_rpc_publication_and_unknown_keep_current_child() {
+    use crate::storage::batch::{BatchOutcome, BatchStatus};
+    for unknown in [false, true] {
+        let f = Fixture::new();
+        let mut adapter = f.storage_adapter();
+        Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let calls = Arc::new(Default::default());
+        adapter.embedding = Arc::new(BlockedProvider {
+            entered: entered.clone(),
+            release: release.clone(),
+            calls: calls.clone(),
+        });
+        let adapter = Arc::new(adapter);
+        let mut value = item();
+        value.as_object_mut().unwrap().remove("embedding");
+        let input = request(&f, "publication", 4, vec![value]);
+        let task = {
+            let adapter = adapter.clone();
+            let input = input.clone();
+            tokio::spawn(async move {
+                crate::daemon::server::native_batch_test_rpc(adapter, &input).await
+            })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+            .await
+            .unwrap();
+        let before_child = current(&f);
+        if unknown {
+            f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .fail_batch_commit
+                .store(3, std::sync::atomic::Ordering::SeqCst);
+        } else {
+            // Reservation publication already completed; fail the actual CHILD rebuild.
+            *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+        }
+        release.notify_one();
+        let reply = task.await.unwrap();
+        assert!(reply.error.is_none(), "{:?}", reply.error);
+        let failed: BatchOutcome = serde_json::from_value(reply.result.unwrap()).unwrap();
+        assert_eq!(
+            failed.items[0].status,
+            if unknown {
+                BatchStatus::Unknown
+            } else {
+                BatchStatus::Ok
+            }
+        );
+        assert!(!failed.items[0].ready);
+        let child_id = failed.items[0].operation_id.unwrap();
+        assert_ne!(child_id, failed.batch_operation_id);
+        assert_eq!(
+            failed
+                .reservation_receipt
+                .as_ref()
+                .unwrap()
+                .committed_generation,
+            before_child.committed_generation
+        );
+        if let Some(receipt) = &failed.items[0].receipt {
+            assert_eq!(receipt.operation_id, child_id);
+            assert_eq!(
+                receipt.committed_generation.get(),
+                before_child.committed_generation.get() + 1
+            );
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(adapter);
+        let root = f.close();
+        let engine = RedbStorageEngine::open(root.path()).unwrap();
+        let f = Fixture::from_open_engine(root, engine);
+        let before = current(&f);
+        let spy = Arc::new(SpyProvider(Default::default()));
+        let mut adapter = f.storage_adapter();
+        adapter.embedding = spy.clone();
+        // Reopen repairs canonical/unknown state; completed replay ignores current auto settings.
+        let result = adapter.mutate_batch(input).await.unwrap();
+        assert!(result.all_ready());
+        let mut receipt = result.items[0].receipt.clone().unwrap();
+        assert!(receipt.replayed);
+        receipt.replayed = false;
+        assert_eq!(receipt.operation_id, child_id);
+        if let Some(original) = failed.items[0].receipt {
+            assert_eq!(receipt, original);
+        }
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .lookup_operation(receipt.store_id, receipt.scope, child_id)
+                .unwrap(),
+            Some(receipt)
+        );
+        assert_eq!(current(&f), before);
+        assert_eq!(spy.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 1);
     }
 }
 fn files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
@@ -358,4 +508,237 @@ async fn legacy_compound_origin_pending_selection_gate_keeps_exact_parent_rpc() 
             .unwrap(),
         1
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_compound_origin_invalid_only_records_parent_and_fixed_default_hashes() {
+    let f = Fixture::new();
+    let adapter = f.storage_adapter();
+    let before = current(&f);
+    let input = request(
+        &f,
+        "invalid-only",
+        4,
+        vec![json!(17), json!({"summary":""})],
+    );
+    let result = adapter.mutate_batch(input.clone()).await.unwrap();
+    assert_eq!(result.failed, 2);
+    assert_eq!(result.succeeded, 0);
+    assert_eq!(result.unresolved, 0);
+    assert!(result.items.iter().all(|i| i.receipt.is_none()));
+    assert_eq!(
+        current(&f).committed_generation.get(),
+        before.committed_generation.get() + 1
+    );
+    let replay = adapter.mutate_batch(input).await.unwrap();
+    assert_eq!(replay.batch_operation_id, result.batch_operation_id);
+    let mut explicit = item();
+    explicit["checkDuplicates"] = json!(true);
+    let mut absent = explicit.clone();
+    absent.as_object_mut().unwrap().remove("checkDuplicates");
+    let a = crate::mcp::batches::prepare(&request(&f, "hash", 4, vec![explicit])).unwrap();
+    let b = crate::mcp::batches::prepare(&request(&f, "hash", 4, vec![absent])).unwrap();
+    assert_eq!(a[0].plan.request_hash(), b[0].plan.request_hash());
+    let c = crate::mcp::batches::prepare(&request(&f, "hash", 4, vec![item()])).unwrap();
+    assert_ne!(a[0].plan.request_hash(), c[0].plan.request_hash());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_compound_origin_exact_hash_conflicts_and_forget_rpc() {
+    let f = Fixture::new();
+    let mut adapter = f.storage_adapter();
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+    let mut input = request(&f, "identity", 4, vec![item()]);
+    input.expected_generation = Some(current(&f).committed_generation);
+    let first = adapter.mutate_batch(input.clone()).await.unwrap();
+    assert!(first.all_ready());
+    let before = current(&f);
+    let bytes = files(f.path());
+    for mode in 0..5 {
+        let mut changed = input.clone();
+        match mode {
+            0 => changed.default_namespace = "different-context".into(),
+            1 => changed.items[0]["embedding"] = json!([2., 0., 0., 0.]),
+            2 => changed.items[0]["embedding"] = json!([1., -0.0, 0., 0.]),
+            3 => changed.expected_generation = None,
+            4 => {
+                changed.mutation_version = 1;
+            }
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            adapter.run_batch_typed(changed).await,
+            Err(StoreWriteError::Canonical(
+                crate::storage::StorageError::IdempotencyConflict
+            ))
+        ));
+        assert_eq!(current(&f), before);
+        assert_eq!(files(f.path()), bytes);
+    }
+    let id =
+        crate::storage::insertion::inserted_id(first.items[0].receipt.as_ref().unwrap()).unwrap();
+    let mut forget = request(&f, "forget2", 4, vec![json!(id.to_string())]);
+    forget.kind = BatchKind::Forget;
+    forget.expected_generation = Some(before.committed_generation);
+    let reply = crate::daemon::server::native_batch_test_rpc(Arc::new(adapter), &forget).await;
+    assert!(reply.error.is_none(), "{:?}", reply.error);
+    let outcome: crate::storage::batch::BatchOutcome =
+        serde_json::from_value(reply.result.unwrap()).unwrap();
+    assert!(outcome.all_ready());
+    assert_eq!(
+        current(&f).committed_generation.get(),
+        before.committed_generation.get() + 2
+    );
+    assert_eq!(
+        f.record(id).unwrap().phase,
+        crate::model::DecayPhase::Tombstone
+    );
+    let receipt = outcome.items[0].receipt.clone().unwrap();
+    let root = f.close();
+    let engine = RedbStorageEngine::open(root.path()).unwrap();
+    assert_eq!(
+        engine
+            .meta_store()
+            .lookup_operation(receipt.store_id, receipt.scope, receipt.operation_id)
+            .unwrap(),
+        Some(receipt)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_history() {
+    use crate::backup::{
+        archive::create_archive,
+        manifest::generate_manifest,
+        restore::{RestoreOptions, restore_from_backup},
+    };
+    use crate::storage::metadata::restoration::capture;
+    use crate::storage::{logical_export, schema_migration, text_migration};
+    let all = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir_in(all.path()).unwrap();
+    zip::ZipArchive::new(std::io::Cursor::new(include_bytes!(
+        "fixtures/legacy-compound-before.zip"
+    )))
+    .unwrap()
+    .extract(source.path())
+    .unwrap();
+    let engine = RedbStorageEngine::open(source.path()).unwrap();
+    let f = Fixture::from_open_engine(source, engine);
+    let mut adapter = f.storage_adapter();
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+    let mut original_requests = vec![];
+    for cas in [false, true] {
+        for invalid in [false, true] {
+            let mut input = request(
+                &f,
+                &format!("four-{cas}-{invalid}"),
+                4,
+                vec![if invalid { json!(17) } else { item() }],
+            );
+            input.expected_generation = cas.then_some(current(&f).committed_generation);
+            let outcome = adapter.mutate_batch(input.clone()).await.unwrap();
+            assert_eq!(outcome.unresolved, 0);
+            original_requests.push(input);
+        }
+    }
+    drop(adapter);
+    let source = f.close();
+    let original = capture(source.path()).unwrap();
+    let bytes = std::fs::read(source.path().join("meta.db")).unwrap();
+    let gated = all.path().join("gated");
+    text_migration::migrate_legacy_text(source.path(), &gated).unwrap();
+    assert_eq!(std::fs::read(source.path().join("meta.db")).unwrap(), bytes);
+    let backup = all.path().join("complete.zip");
+    let inventory = crate::storage::validation::canonical_files(&gated).unwrap();
+    let manifest = generate_manifest(&gated, &inventory).unwrap();
+    create_archive(&gated, &inventory, &manifest, &backup).unwrap();
+    restore_from_backup(RestoreOptions {
+        backup_path: backup,
+        data_dir: gated.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: false,
+    })
+    .await
+    .unwrap();
+    let fork = capture(&gated).unwrap();
+    assert_eq!(fork.batch_progress, original.batch_progress);
+    assert!(original.receipts.iter().all(|r| fork.receipts.contains(r)));
+    // Actual serving legacy fork rejects original store-ID before settings/provider.
+    let engine = RedbStorageEngine::open(&gated).unwrap();
+    let meta = engine.meta_store();
+    let control = engine.control_state().unwrap();
+    for input in &original_requests {
+        let plans: Vec<_> = crate::mcp::batches::prepare(input)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.plan)
+            .collect();
+        assert!(matches!(
+            meta.reserve_batch_version_with_work(
+                &input.context(),
+                4,
+                input.kind,
+                &plans,
+                None,
+                None,
+                || panic!("foreign replay consulted fresh settings")
+            ),
+            Err(crate::storage::StorageError::StoreLineageMismatch)
+        ));
+        assert_eq!(engine.control_state().unwrap(), control);
+    }
+    drop(engine);
+    // Schema migration and actual logical transfer preserve completed format4;
+    // they do not authorize serving or rebind old request identities.
+    let native = all.path().join("canonical");
+    let state = schema_migration::inspect_schema(&gated).unwrap();
+    schema_migration::migrate_schema(
+        &gated,
+        &native,
+        &schema_migration::MigrationOptions {
+            migration_now: 200,
+            expected_source: state.control.generation_ref(),
+            attestations: vec![],
+        },
+    )
+    .unwrap();
+    let stream = all.path().join("logical.jsonl");
+    let exported = logical_export::export_store(&native, &stream).unwrap();
+    let imported = all.path().join("imported");
+    assert_eq!(
+        logical_export::import_store(&stream, &imported).unwrap(),
+        exported
+    );
+    let copied = capture(&imported).unwrap();
+    assert_eq!(copied.batch_progress, original.batch_progress);
+    assert!(
+        original
+            .receipts
+            .iter()
+            .all(|r| copied.receipts.contains(r))
+    );
+    let inventory = crate::storage::validation::canonical_files(&imported).unwrap();
+    let manifest = generate_manifest(&imported, &inventory).unwrap();
+    let backup = all.path().join("native.zip");
+    create_archive(&imported, &inventory, &manifest, &backup).unwrap();
+    let historical = all.path().join("historical");
+    restore_from_backup(RestoreOptions {
+        backup_path: backup,
+        data_dir: historical.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: true,
+    })
+    .await
+    .unwrap();
+    let copied = capture(&historical).unwrap();
+    assert_eq!(copied.batch_progress, original.batch_progress);
+    assert!(
+        original
+            .receipts
+            .iter()
+            .all(|r| copied.receipts.contains(r))
+    );
+    assert!(RedbStorageEngine::open(&historical).is_err());
 }
