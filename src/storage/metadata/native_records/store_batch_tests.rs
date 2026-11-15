@@ -72,8 +72,7 @@ fn commit(
         .unwrap();
     let intent = s.capture_store(scope(d), input, frozen).unwrap();
     let candidates =
-        crate::graph::native_selection::capture(&s.engine, intent.insert_intent(), &generated())
-            .unwrap();
+        crate::graph::native_selection::capture(&s.engine, &intent, &generated()).unwrap();
     let prepared = s
         .prepare_store_links(&intent, &candidates.frozen_plan(&intent).unwrap())
         .unwrap();
@@ -421,8 +420,7 @@ fn linked_batch_process_child() {
         )
         .unwrap();
     let candidates =
-        crate::graph::native_selection::capture(&s.engine, intent.insert_intent(), &generated())
-            .unwrap();
+        crate::graph::native_selection::capture(&s.engine, &intent, &generated()).unwrap();
     let prepared = s
         .prepare_store_links(&intent, &candidates.frozen_plan(&intent).unwrap())
         .unwrap();

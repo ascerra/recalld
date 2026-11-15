@@ -1,0 +1,29 @@
+running 2 tests
+
+thread 'storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_batch_reads_edges_and_reopen_replay' (293) panicked at src/storage/metadata/native_records/selection_demand_tests.rs:50:13:
+off: BatchOutcome { result_version: 1, batch_operation_id: 15572b1a-8bf0-42f3-8060-0191d54e3118, store_id: 970ff0c2-fa3b-4418-b6ee-30e5fe42e2b2, reservation_state: Committed, reservation_receipt: Some(WriteReceipt { store_id: 970ff0c2-fa3b-4418-b6ee-30e5fe42e2b2, operation_id: 15572b1a-8bf0-42f3-8060-0191d54e3118, committed_generation: Generation(7), receipt_version: 1, outcome: BatchReserved { batch_kind: Insert, item_count: 1, caller_hash: [233, 53, 154, 71, 241, 8, 96, 159, 123, 10, 82, 250, 53, 208, 173, 219, 193, 34, 136, 89, 103, 198, 89, 26, 92, 121, 64, 32, 98, 200, 181, 135], resolution_hash: [109, 118, 165, 41, 71, 118, 86, 103, 184, 35, 218, 84, 226, 222, 67, 0, 221, 102, 109, 51, 175, 18, 8, 124, 246, 142, 113, 205, 177, 94, 95, 1] }, replayed: false }), bookkeeping_receipts: [], unknown_bookkeeping_operations: [], items: [BatchItemOutcome { index: 0, status: Error, operation_id: Some(c0c2006a-94d2-44b8-abb4-e5447f0425ad), namespace_id: None, receipt: None, error: Some(BatchError { code: "INVALID_INPUT", field: Some("memories[0]") }), ready: true, retryable: false, result: None }], total: 1, succeeded: 0, failed: 1, unresolved: 0 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_batch_reads_edges_and_reopen_replay ... FAILED
+
+thread 'storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_single_reads_edges_and_reopen_replay' (294) panicked at src/storage/metadata/native_records/selection_demand_tests.rs:108:5:
+selection work excess: ["off: actual=(1, 2) expected=(0, 0)", "entity: actual=(1, 2) expected=(1, 0)", "temporal: actual=(1, 2) expected=(1, 0)"]
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_single_reads_edges_and_reopen_replay ... FAILED
+
+failures:
+
+failures:
+    storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_batch_reads_edges_and_reopen_replay
+    storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_single_reads_edges_and_reopen_replay
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1334 filtered out; finished in 9.28s
+
+error: test failed, to rerun pass `--lib`
+low 0
+high 0
+max 0
+oom 0
+oom_kill 0
+oom_group_kill 0
+sock_throttled 0
+4081664000
+TEST_EXIT=101

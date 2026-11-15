@@ -126,11 +126,8 @@ impl DerivedCompletion {
             };
             let prepared = {
                 let engine = self.storage.read().map_err(|e| failed(e.to_string()))?;
-                let selected = crate::graph::native_selection::capture(
-                    &engine,
-                    intent.insert_intent(),
-                    &generated,
-                )?;
+                let selected =
+                    crate::graph::native_selection::capture(&engine, &intent, &generated)?;
                 engine.meta_store().prepare_native_store_links(
                     &intent,
                     &selected.frozen_plan(&intent)?,
