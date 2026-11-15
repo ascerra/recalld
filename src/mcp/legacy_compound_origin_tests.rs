@@ -320,8 +320,8 @@ async fn legacy_compound_origin_actual_rpc_publication_and_unknown_keep_current_
         assert!(receipt.replayed);
         receipt.replayed = false;
         assert_eq!(receipt.operation_id, child_id);
-        if let Some(original) = failed.items[0].receipt {
-            assert_eq!(receipt, original);
+        if let Some(original) = &failed.items[0].receipt {
+            assert_eq!(&receipt, original);
         }
         assert_eq!(
             f.storage
