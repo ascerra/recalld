@@ -7,6 +7,7 @@ pub mod contract;
 mod json;
 pub(crate) mod pair_cursor;
 pub mod query;
+mod query_explanation;
 pub mod query_response;
 pub mod scan;
 pub mod session;

@@ -105,7 +105,7 @@ impl QueryEngine {
                     "namespace changed during query admission".into(),
                 ));
             }
-            let mut reply = project(&prepared)?;
+            let mut reply = project(&prepared, request.explain)?;
             captured = Some((reply.envelope.scope.clone(), prepared.read_generation));
             let exposures = prepared.exposures(request.include_neighbors)?;
             if !reply.fits_before_observation(if request.query.record_access {

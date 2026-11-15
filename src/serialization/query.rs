@@ -14,6 +14,7 @@ pub struct QueryRequest {
     pub include_neighbors: bool,
     pub include_embeddings: bool,
     pub embedding_profile_id: Option<String>,
+    pub explain: bool,
 }
 
 pub struct SimilarRequest {
@@ -360,15 +361,7 @@ impl QueryRequest {
                 ));
             }
         };
-        // Full score evidence has a separate actual scoring owner. Never silently
-        // ignore explain=true or advertise partial decomposition as full §9.
-        if boolean(m, "explain", false)? {
-            return Err(invalid(
-                "UNSUPPORTED_FEATURE",
-                "explain",
-                "score explanation consumer is not available yet",
-            ));
-        }
+        let explain = boolean(m, "explain", false)?;
         let text = string(m, "query", FULL_TEXT_MAX_BYTES)?;
         let fts_query = string(m, "ftsQuery", FULL_TEXT_MAX_BYTES)?;
         let profile = string(m, "embeddingProfileId", 68)?;
@@ -501,6 +494,7 @@ impl QueryRequest {
             include_neighbors: mcp && !boolean(m, "compact", true)?,
             include_embeddings: boolean(m, "includeEmbeddings", false)?,
             embedding_profile_id: profile,
+            explain,
         })
     }
 }
@@ -523,7 +517,7 @@ pub(crate) fn input_schema(mcp: bool) -> Value {
         "recordAccess":{"type":"boolean","default":true},
         "includeEmbeddings":{"type":"boolean","default":false},
         "includeGhosts":{"type":"boolean","default":false},
-        "permastoreOnly":{"type":"boolean","default":false},"explain":{"const":false,"default":false}
+        "permastoreOnly":{"type":"boolean","default":false},"explain":{"type":"boolean","default":false}
     });
     for key in ["tags", "entities", "topics", "emotions"] {
         properties[key] = json!({"type":"array","maxItems":MAX_TAGS,"items":{"type":"string","minLength":1,"maxLength":TAG_MAX_BYTES}});
@@ -559,6 +553,7 @@ pub(crate) fn similar_input_schema(mcp: bool) -> Value {
     ] {
         properties.insert(field.into(), common["properties"][field].clone());
     }
+    properties.insert("explain".into(), json!({"const":false,"default":false}));
     properties.insert(
         "namespaceScope".into(),
         json!({"enum":["sameNamespace","allCompatible"],"default":"sameNamespace"}),
@@ -633,7 +628,7 @@ mod tests {
             ("depth", vec![json!(4), json!(null), json!(-1)]),
             ("minScore", vec![json!(-0.1), json!(1.1), json!(null)]),
             ("versionMode", vec![json!("asOf"), json!(null), json!(2)]),
-            ("explain", vec![json!(true), json!(null)]),
+            ("explain", vec![json!(null), json!("true")]),
             ("tags", vec![json!(null), json!("allow"), json!([1])]),
         ] {
             for value in values {

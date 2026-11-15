@@ -1,5 +1,40 @@
 // Real owned fixture consumers; included in read_view::tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn strict_query_explanation_preserves_actual_exposure_classification() {
+    use crate::search::adapters::StorageAccessRecorder;
+    let mut observations = Vec::new();
+    for explain in [false, true] {
+        let f = Fixture::new();
+        let owner = owner(&f);
+        let old = payload_record(&owner, 105, [1., 0., 0., 0.], None, None, true).await;
+        let current = payload_record(&owner, 106, [1., 0., 0., 0.], None, Some(old), true).await;
+        let old_before = f.record(old).unwrap().access_history.clone();
+        let current_before = f.record(current).unwrap().access_history.clone();
+        let mut engine = payload_engine(&f, &owner);
+        engine.access_recorder = Arc::new(
+            StorageAccessRecorder::new(f.storage.clone(), f.cache.clone()).with_completion(owner),
+        );
+        let request = crate::serialization::query::QueryRequest::from_mcp(
+            &serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"explain":explain}), "default"
+        ).unwrap();
+        let reply = engine.query_contract(request).await;
+        assert_eq!(reply.http_status, 200, "{reply:?}");
+        assert!(reply.envelope.readiness.as_ref().unwrap().ready);
+        let hits = reply.envelope.data.as_ref().unwrap()["results"]
+            .as_array()
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["memoryId"], current.to_string());
+        assert_eq!(hits[0].get("explanation").is_some(), explain);
+        assert_eq!(f.record(old).unwrap().access_history, old_before);
+        let history = f.record(current).unwrap().access_history;
+        assert_eq!(history.len(), current_before.len() + 1);
+        observations.push(history.last().unwrap().clone());
+    }
+    assert_eq!(observations[0], observations[1]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_query_actual_prepared_mcp_rest_current_history_and_false_bytes() {
     use crate::storage::StorageEngine as _;
     let f = Fixture::new();
@@ -62,6 +97,36 @@ async fn strict_query_actual_prepared_mcp_rest_current_history_and_false_bytes()
         serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
         value
     );
+    // Ranked-query evidence is optional projection, not a different scorer.
+    let mut explained_args = args.clone();
+    explained_args["explain"] = serde_json::json!(true);
+    let explained = crate::mcp::tools::prepared_query(&mcp, "default", &explained_args).await;
+    assert_eq!(explained.is_error, Some(false), "{explained:?}");
+    let explained = serde_json::Value::Object(explained.structured_content.unwrap());
+    let mut without_evidence = explained.clone();
+    for hit in without_evidence["data"]["results"].as_array_mut().unwrap() {
+        let evidence = hit.as_object_mut().unwrap().remove("explanation").unwrap();
+        assert_eq!(evidence["rankingProfile"], "baseline-v1");
+        assert_eq!(evidence["retrievalSemanticsVersion"], 2);
+        assert_eq!(evidence["finalScore"], hit["compositeScore"]);
+        assert_eq!(evidence["version"], hit["version"]);
+        assert_eq!(hit["memoryId"], current.to_string());
+    }
+    assert_eq!(without_evidence, value);
+    explained_args
+        .as_object_mut()
+        .unwrap()
+        .remove("contractVersion");
+    let response = crate::api::search_v2(&http, "default", &explained_args).await;
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let raw = axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
+        explained
+    );
+    assert_eq!(bytes(&f), before);
     body["contractVersion"] = serde_json::json!(2);
     body["versionMode"] = serde_json::json!("history");
     let history = crate::mcp::tools::prepared_query(&mcp, "default", &body).await;
@@ -363,6 +428,10 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
     assert!(ids.contains(&current.to_string()));
     assert!(!ids.contains(&old.to_string()));
     assert!(!ids.contains(&source.to_string()));
+    for hit in value["data"]["results"].as_array().unwrap() {
+        assert!(hit.get("explanation").is_none());
+        assert!(hit.get("rankingProfile").is_none());
+    }
     assert_eq!(value["data"]["sourceNamespace"]["namespace"], "default");
     assert!(
         value["data"]["coverage"]["searchedNamespaceIds"]
@@ -391,6 +460,34 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
         serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
         value
     );
+    // Similarity has cosine/current-max evidence, not ranked-query §9 evidence.
+    // Even the default mutating selector must fail before any exposure.
+    for access in [false, true] {
+        let mut unsupported = args.clone();
+        unsupported["explain"] = serde_json::json!(true);
+        unsupported["recordAccess"] = serde_json::json!(access);
+        let result = crate::mcp::tools::prepared_similar(&mcp, &unsupported).await;
+        assert_eq!(result.is_error, Some(true));
+        let rejected = serde_json::Value::Object(result.structured_content.unwrap());
+        assert_eq!(rejected["error"]["code"], "UNSUPPORTED_FEATURE");
+        assert_eq!(rejected["error"]["field"], "/explain");
+        assert!(rejected.get("receipt").is_none());
+        unsupported
+            .as_object_mut()
+            .unwrap()
+            .remove("contractVersion");
+        unsupported.as_object_mut().unwrap().remove("id");
+        let response = crate::api::similar_v2(&http, source, &unsupported).await;
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let raw = axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
+            rejected
+        );
+        assert_eq!(bytes(&f.f), before);
+    }
     args["versionMode"] = serde_json::json!("history");
     let result = crate::mcp::tools::prepared_similar(&mcp, &args).await;
     let value = serde_json::Value::Object(result.structured_content.unwrap());

@@ -269,6 +269,15 @@ fn reason(reason: UnresolvedReason) -> &'static str {
         UnresolvedReason::Ineligible => "ineligible",
     }
 }
+pub(crate) fn version(status: crate::search::VersionStatus) -> Value {
+    match status {
+        crate::search::VersionStatus::Current => json!({"status":"current"}),
+        crate::search::VersionStatus::Historical => json!({"status":"historical"}),
+        crate::search::VersionStatus::Unresolved(r) => {
+            json!({"status":"unresolved","reason":reason(r)})
+        }
+    }
+}
 fn counts(values: &std::collections::BTreeMap<UnresolvedReason, usize>) -> Value {
     Value::Object(
         values
@@ -278,7 +287,10 @@ fn counts(values: &std::collections::BTreeMap<UnresolvedReason, usize>) -> Value
     )
 }
 
-pub(crate) fn project(prepared: &CoherentSearchResponse) -> Result<QueryReply, SearchError> {
+pub(crate) fn project(
+    prepared: &CoherentSearchResponse,
+    explain: bool,
+) -> Result<QueryReply, SearchError> {
     let unavailable = || SearchError::Unavailable("coherent query projection is incomplete".into());
     let d = &prepared.response.diagnostics;
     let RetrievalSemantics::V2(mode) = d.semantics else {
@@ -313,6 +325,35 @@ pub(crate) fn project(prepared: &CoherentSearchResponse) -> Result<QueryReply, S
         result.labels = row.record.schema.as_ref().map(|s| s.labels.clone());
         let mut value = serde_json::to_value(result).map_err(|_| unavailable())?;
         value["namespaceId"] = json!(payload.namespace.id);
+        value["version"] = json!(
+            d.versions
+                .get(&crate::model::MemoryId::from_bytes(row.record.id))
+                .copied()
+                .map(version)
+        );
+        value["graphDepth"] = json!(
+            d.graph_depths
+                .get(&crate::model::MemoryId::from_bytes(row.record.id))
+        );
+        value["related"] = json!(
+            payload
+                .related
+                .get(&crate::model::MemoryId::from_bytes(row.record.id))
+                .map(|edges| edges
+                    .iter()
+                    .map(|e| json!({"id":e.id,"edgeType":e.edge_type,"weight":e.weight}))
+                    .collect::<Vec<_>>())
+                .unwrap_or_default()
+        );
+        if explain {
+            let evidence = d
+                .provenance
+                .as_ref()
+                .and_then(|p| p.get(&crate::model::MemoryId::from_bytes(row.record.id)))
+                .and_then(|p| p.explanation.as_ref())
+                .ok_or_else(unavailable)?;
+            value["explanation"] = super::query_explanation::project(evidence);
+        }
         if let Some(embedding) = &row.embedding {
             value["embedding"] = json!(embedding);
         }

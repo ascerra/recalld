@@ -1,7 +1,7 @@
 # Prepared strict query consumer
 
-Actual parents are published PR142 `3953afec0e07e1eafe5e5d418746d193a6bccdc0`
-(includes140/133/132) and PR88 `3961f6653d6c3076bdf9b5b8c27fa6b01a8f0b2e`.
+Actual parents are published PR146 `2d09509905fc2893bc54a3fad1ea2df0b6d5a3de`
+(includes142/140/133/132) and PR88 `3961f6653d6c3076bdf9b5b8c27fa6b01a8f0b2e`.
 Private merge `38f0644` retains the newer owner/work/receipt implementation and
 adds the shared wire/session/snapshot interfaces. No141,144, catalog, list or
 startup parent is needed merely for query preparation. PR132 already supplies
@@ -16,9 +16,13 @@ queries remain provider-free. Never route the new result through legacy ranking.
 
 Coverage is built after supplemental hydration from final diagnostics, preserving
 nullable unmeasured channel values, graph/chain limits, omission reasons and
-returned-only provenance. Explanation output stays absent until Hume's actual
-validated score-evidence consumer can satisfy the requested explanation. Do not
-advertise a partial score decomposition as full §9 compliance.
+returned-only provenance. Recall `explain:true` projects PR146's actual
+ranked-query `baseline-v1` evidence; omission/false leaves explanations absent.
+This parent supports RIF Off only. Similarity retains its cosine/current-max
+semantics, including the own-vector versus inherited-floor distinction; it does
+not acquire a baseline-v1 label or ranked-query decomposition. Similarity
+`explain:true` is explicitly unsupported before selection or observation, and
+its prepared schema allows only false until a cosine-specific producer lands.
 
 The public version selector and capabilities remain contract1 only. Private
 prepared consumers and real owned fixtures are useful before ordinary native
