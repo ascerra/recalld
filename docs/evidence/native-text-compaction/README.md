@@ -1,7 +1,11 @@
 # Native text compaction evidence
 
-Final source/report review is pending. No publication or READY claim is made by
-this draft. Runtime parent is actual PR138, `05e0d55aa3a92483e294b2a5e79cf490ce270609`.
+The coordinating agent reviewed the final report and actual relocation, selection,
+receipt and validated-restore anchor code and approved normal publication of
+sealed head `1db52a402e45d957b67866aa4e2c9868071f8582`, with this
+documentation-only status cleanup. Runtime parent is actual PR138,
+`05e0d55aa3a92483e294b2a5e79cf490ce270609`. Runtime and fixture-only
+validation attribution below is unchanged; no additional full run was needed.
 
 | Frozen source | Actual result | Interpretation |
 | --- | --- | --- |
