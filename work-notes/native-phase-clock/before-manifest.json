@@ -1,0 +1,13 @@
+{
+  "parent": "6f566245342daa3374ea7f7426073b59d01af08a",
+  "sources": {
+    "src/storage/native_records.rs": "342afb2d1f1177fa994a62e7f880f3c63c4e30e47fd01915fcc10f111aea1779",
+    "src/storage/metadata/native_records.rs": "dabc1627e32c1542879aa6ee9786c42653c4c1c82b72a82f67d4eb6b13e33119",
+    "src/storage/metadata/native_records/tests.rs": "99a4147c723a40785f77d50a541af6f3e23858f32466a2e0bbb6614e815d629b",
+    "src/storage/metadata/native_records/phase_clock_tests.rs": "a20e783dd989a5e78721cebcd63a9c0cb71c75184671bf641c8d061a93f286a8"
+  },
+  "binary_sha256": "2e047e8979167de15f9278a3d6eb829843e3b080a603e72369c7a945f0880876",
+  "binary_mtime_ns": 1794672325188486082,
+  "binary_size": 367695264,
+  "runtime_log_sha256": "ec3db9d8037392ce203b1c51e6ba0a0e7331c3e8fdf2336b0349eb7dad709602"
+}

@@ -1,0 +1,95 @@
+diff --git a/src/storage/metadata/native_records/reader_tests.rs b/src/storage/metadata/native_records/reader_tests.rs
+index 6ae2cdf..64fded6 100644
+--- a/src/storage/metadata/native_records/reader_tests.rs
++++ b/src/storage/metadata/native_records/reader_tests.rs
+@@ -648,3 +648,90 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
+     let reopened = open(&d, clock);
+     assert!(reopened.engine.get_record(id).unwrap().is_none());
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn native_decay_cancelled_waiter_keeps_worker_publication_lease() {
++    use std::time::Duration;
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
++    let mut s = open(&d, clock);
++    let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();
++    let key = ctx(&s, &d, "cancel-create");
++    let created = s.insert_prepared(&key, &intent, &generated()).unwrap();
++    let id = inserted(&created);
++    let context = ctx(&s, &d, "cancel-decay");
++    let policy = NativePolicyInputs::default();
++    let capture = s
++        .metadata()
++        .capture_native_decay(id, d.ns, &policy, 10_000 * 86_400_000)
++        .unwrap();
++    let f = Fixture::from_open_engine(root, s.engine);
++    let publisher = completion(&f);
++    publisher.complete().await.unwrap();
++    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
++    let accepted = tracker.begin().unwrap();
++    let gate = crate::derived_completion::publication_gate(&f.storage)
++        .await
++        .unwrap();
++    let graph_block = f.graph.clone().write_owned().await;
++    let task = tokio::spawn(async move {
++        publisher
++            .apply_native_decay_accepted(context, capture, policy, &accepted)
++            .await
++    });
++    tokio::time::timeout(Duration::from_secs(5), async {
++        loop {
++            if tracker.status().pending == 2 && gate.try_write().is_err() {
++                break;
++            }
++            tokio::task::yield_now().await;
++        }
++    })
++    .await
++    .unwrap();
++    let storage = f.storage.clone();
++    let (held_tx, held_rx) = tokio::sync::oneshot::channel();
++    let (release_tx, release_rx) = std::sync::mpsc::channel();
++    let blocker = tokio::task::spawn_blocking(move || {
++        let _guard = storage.write().unwrap();
++        held_tx.send(()).unwrap();
++        release_rx.recv().unwrap();
++    });
++    held_rx.await.unwrap();
++    drop(graph_block);
++    tokio::time::timeout(Duration::from_secs(5), async {
++        while tracker.status().pending != 3 {
++            tokio::task::yield_now().await;
++        }
++    })
++    .await
++    .unwrap();
++    task.abort();
++    assert!(task.await.unwrap_err().is_cancelled());
++    let publication_held = gate.try_write().is_err();
++    let graph_held = f.graph.try_write().is_err();
++    // Always unblock the actual worker before assertions/fixture cleanup, even RED.
++    release_tx.send(()).unwrap();
++    blocker.await.unwrap();
++    tokio::time::timeout(Duration::from_secs(5), async {
++        while tracker.status().pending > 2 {
++            tokio::task::yield_now().await;
++        }
++    })
++    .await
++    .unwrap();
++    let lease = tokio::time::timeout(Duration::from_secs(5), gate.write())
++        .await
++        .unwrap();
++    drop(lease);
++    assert!(graph_held, "worker graph guard was not retained");
++    assert!(
++        tracker.status().unresolved >= 1,
++        "cancelled waiter must remain unresolved"
++    );
++    assert!(
++        publication_held,
++        "cancelled waiter released publication lease before blocked worker completed"
++    );
++}

@@ -536,8 +536,10 @@ async fn run_serve(
                 system.entity_index().clone(),
             ),
         );
-        let namespaces: Arc<dyn recalld::api::NamespaceRegistry> =
-            Arc::new(NamespaceRegistryAdapter::new(system.storage().clone()));
+        let namespaces: Arc<dyn recalld::api::NamespaceRegistry> = Arc::new(
+            NamespaceRegistryAdapter::new(system.storage().clone())
+                .with_clock(system.clock().clone()),
+        );
         let metrics: Arc<dyn recalld::api::MetricsCollector> = Arc::new(NoopMetricsCollector);
 
         recalld::api::AppState::new(search, storage, cache, graph, decay, namespaces, metrics)
@@ -622,52 +624,7 @@ fn create_direct_mcp_bridge(
     system: &Recalld,
     default_namespace: String,
 ) -> recalld::mcp::bridge::McpBridge {
-    use recalld::mcp::bridge_adapters::*;
-
-    let tz = recalld::time::resolve_timezone(&system.config().timezone);
-
-    let search: Arc<dyn recalld::mcp::bridge::SearchPipeline> = Arc::new(McpSearchAdapter::new(
-        system.query_engine().clone(),
-        system.embedding().clone(),
-        system.storage().clone(),
-        system.graph().clone(),
-        tz,
-    ));
-    let storage: Arc<dyn recalld::mcp::bridge::StorageEngine> = Arc::new(
-        McpStorageAdapter::new(
-            system.storage().clone(),
-            system.cache().clone(),
-            system.embedding().clone(),
-            system.vector_index().clone(),
-            system.fts_index().clone(),
-            system.entity_index().clone(),
-            system.graph().clone(),
-            std::sync::Arc::new(system.config().clone()),
-            tz,
-        )
-        .with_clock(system.clock().clone()),
-    );
-    let namespaces: Arc<dyn recalld::mcp::bridge::NamespaceRegistry> =
-        Arc::new(McpNamespaceAdapter::new(
-            system.storage().clone(),
-            system.cache().clone(),
-            system.vector_index().clone(),
-            system.fts_index().clone(),
-            system.entity_index().clone(),
-            system.graph().clone(),
-            tz,
-        ));
-    let health: Arc<dyn recalld::mcp::bridge::HealthChecker> =
-        Arc::new(McpHealthAdapter::new(system.storage().clone()));
-
-    recalld::mcp::bridge::McpBridge {
-        search,
-        storage,
-        namespaces,
-        health,
-        default_namespace,
-        timezone: tz,
-    }
+    recalld::mcp::bridge_adapters::direct_bridge(system, default_namespace)
 }
 
 async fn run_mcp_direct(loaded: LoadedConfig) -> ExitCode {

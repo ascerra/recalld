@@ -15,8 +15,31 @@ impl RedbStorageEngine {
         strength: f32,
         decay_strength: f32,
     ) -> Result<DecayMutationResult, StorageError> {
+        self.apply_legacy_decay_with_work(
+            ctx,
+            id,
+            expected,
+            namespace,
+            phase,
+            strength,
+            decay_strength,
+            None,
+        )
+    }
+
+    pub(crate) fn apply_legacy_decay_with_work(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        expected: &DiskRecord,
+        namespace: &NamespaceConfig,
+        phase: DecayPhase,
+        strength: f32,
+        decay_strength: f32,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<DecayMutationResult, StorageError> {
         self.ensure_available()?;
-        let guard = self.meta_store.mutation_guard()?;
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let result = self.meta_store.decay_with_effects(
             &guard,
             ctx,

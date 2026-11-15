@@ -1,0 +1,62 @@
+[
+  {
+    "path": "/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2",
+    "sha256": "6e0a87e709173964e59386ffbffdafcb0403782af13b74f41d67e180714f2dcf",
+    "size": 14041800,
+    "mtime_ns": 1794710520899719151
+  },
+  {
+    "path": "/target/debug/deps/recalld-562f5ca8fdb44e42",
+    "sha256": "e16edddc6d5eceea02fe26858b4fa19575450691d7ac9cfdcc593c032308d13d",
+    "size": 1058728,
+    "mtime_ns": 1794710521387052376
+  },
+  {
+    "path": "/target/debug/deps/recalld-b5f6af44d2a89497",
+    "sha256": "6aa6303b1c9fe29a6436439935957a10a2e1f5bd5064af4d22e994e9d0bcc60b",
+    "size": 109627296,
+    "mtime_ns": 1794710535458147331
+  },
+  {
+    "path": "/target/debug/deps/recalld_cli-c8bdd12cfba39b69",
+    "sha256": "e0ec5b8b46a903a8e3d0081ee16a881c4ff2a892d6ad5d5093acbb2201397b08",
+    "size": 1057368,
+    "mtime_ns": 1794710515040238396
+  },
+  {
+    "path": "/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0",
+    "sha256": "975e2bec45b53f5533be1bd391917cba3ff37f74a1f0c306911d02d79f802163",
+    "size": 1057384,
+    "mtime_ns": 1794710521065398204
+  },
+  {
+    "path": "/target/debug/deps/text_migration_cli-2f292c1c7574ca84",
+    "sha256": "b20307fb9eb4cb4e20b17f29c285454950594edcfcbc8084fc9a5c2ef183270d",
+    "size": 13676736,
+    "mtime_ns": 1794710519444176961
+  },
+  {
+    "path": "/target/debug/examples/owned_evaluator",
+    "sha256": "dfc91852824e2b4989ad0e3b321d0574538f05865cc680d25c2d9c8ecf683386",
+    "size": 69962760,
+    "mtime_ns": 1794710518022221896
+  },
+  {
+    "path": "/target/debug/recalld",
+    "sha256": "94ce0d32d92aa3a303ef8ed5afe86317416e10ecb02eae97c40e18849fc9cc56",
+    "size": 89365280,
+    "mtime_ns": 1794710514854102268
+  },
+  {
+    "path": "/target/debug/recalld-cli",
+    "sha256": "5197b29790d2ef941b4307d2e1778dc67fbce7aa7f221128cb7015345693552f",
+    "size": 20221160,
+    "mtime_ns": 1794710524574087624
+  },
+  {
+    "path": "/target/debug/recalld-text-migrate",
+    "sha256": "aed464db0736f1652830dd01d61499b1b37a134697f4e5396129bf1c175fa1c7",
+    "size": 13969592,
+    "mtime_ns": 1794710522871422122
+  }
+]

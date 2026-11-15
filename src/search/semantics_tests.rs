@@ -473,11 +473,12 @@ async fn real_rif_changes_legacy_scores_but_v2_is_off_and_neither_persists_suppr
         Arc::new(crate::rif::RifEngine::new(crate::rif::RifConfig::default())),
         fixture.graph.clone(),
     ));
-    // The fixture access recorder is a no-op, isolating RIF from legacy exposure writes.
+    // Explicit false mode isolates real RIF scoring from exposure writes; do
+    // not rely on a no-op recorder to silently accept a mutating request.
     let before: Vec<_> = [a, b]
         .map(|id| fixture.record(id).unwrap().to_bytes())
         .into();
-    let q = serde_json::json!({"queryMode":"metadata_only","filter":{"minStrength":0.0}});
+    let q = serde_json::json!({"queryMode":"metadata_only","recordAccess":false,"filter":{"minStrength":0.0}});
     let legacy = engine.search(query(q.clone())).await.unwrap();
     assert!(
         legacy

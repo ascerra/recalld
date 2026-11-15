@@ -1,0 +1,241 @@
+{
+  "src/api/adapters.rs": [
+    {
+      "line": 89,
+      "ours92": "    fn active_embedding(\n        &self,\n    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>\n    {\n        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())\n    }\n",
+      "theirs99": "    fn accept_work(\n        &self,\n    ) -> Result<Option<crate::storage::work::WorkTicket>, crate::search::SearchError> {\n        self.query_engine.accept_work(None)\n    }\n    fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {\n        self.query_engine.finish_work(work);\n    }\n    async fn prepare_coherent_search_with_work(\n        &self,\n        query: state::SearchQuery,\n        include_embeddings: bool,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Option<crate::search::CoherentSearchResponse>, crate::search::SearchError> {\n        self.query_engine\n            .prepare_coherent_payload(\n                Self::pipeline_query(query)?,\n                include_embeddings,\n                false,\n                parent,\n            )\n            .await\n    }\n\n    async fn prepare_search_with_work(\n        &self,\n        query: state::SearchQuery,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {\n        self.search_inner(query, true, parent).await\n    }\n    async fn prepare_similar_with_work(\n        &self,\n        id: MemoryId,\n        limit: usize,\n        min_score: Option<f32>,\n        requested_access: bool,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::search::PipelineSearchResult>, crate::search::SearchError> {\n        self.query_engine\n            .prepare_similar_filtered_with_work(id, limit, min_score, requested_access, parent)\n            .await\n    }\n    async fn record_similar_with_work(\n        &self,\n        ids: &[MemoryId],\n        scope: crate::storage::control::ExposureScope,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {\n        self.query_engine\n            .record_similar_accesses_with_work(ids, scope, parent)\n            .await\n    }\n    async fn record_coherent_exposures_with_work(\n        &self,\n        accesses: &[(MemoryId, AccessKind)],\n        scope: crate::storage::control::ExposureScope,\n        sampled_at: i64,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {\n        self.query_engine\n            .record_exposures_at_with_work(accesses, scope, sampled_at, parent)\n            .await\n    }\n\n    async fn record_exposures_with_work(\n        &self,\n        accesses: &[(MemoryId, AccessKind)],\n        scope: crate::storage::control::ExposureScope,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {\n        self.query_engine\n            .record_exposures_with_work(accesses, scope, parent)\n            .await\n    }\n\n"
+    },
+    {
+      "line": 610,
+      "ours92": "        .forget_scoped(id, namespace.map(str::to_owned))\n",
+      "theirs99": "        .forget_with_work(id, namespace, parent)\n"
+    }
+  ],
+  "src/api/handlers.rs": [
+    {
+      "line": 849,
+      "ours92": "    crate::performance::measure(\"rest.search\", req.record_access, async {\n        let stamp = state.storage.effects_stamp().await?;\n        let observed = search_memories_admitted(State(state.clone()), Json(req), stamp).await;\n        observed?.finish(check_read_admission(&state, stamp).await)\n    })\n    .await\n",
+      "theirs99": "    let work = state.search.accept_work()?;\n    let result = async {\n        let stamp = state.storage.effects_stamp().await?;\n        let observed =\n            search_memories_admitted(State(state.clone()), Json(req), stamp, work.as_ref()).await;\n        observed?.finish(check_read_admission(&state, stamp).await)\n    }\n    .await;\n    state.search.finish_work(work);\n    result\n"
+    },
+    {
+      "line": 952,
+      "ours92": "    let results = state.search.prepare_search(search_query).await?;\n\n    let hydration = crate::performance::Timer::new(\"rest.hydration\");\n    // Batch-load embeddings with a single lock acquisition if requested.\n    let embeddings = if req.include_embeddings {\n        let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();\n        state.search.get_embeddings_batch(&ids)\n    } else {\n        std::collections::HashMap::new()\n    };\n\n    // Convert to API response, loading full_text from storage\n    let mut hits: Vec<SearchHit> = Vec::with_capacity(results.len());\n    let mut exposures = Vec::new();\n    for r in results {\n        exposures.push((r.memory.id, r.access_kind));\n        let canonical =\n            state\n                .storage\n                .get_record(r.memory.id)\n                .await\n                .ok_or_else(|| AppError::NotFound {\n                    resource: \"memory\",\n                    id: r.memory.id.to_string(),\n",
+      "theirs99": "    let coherent = state\n        .search\n        .prepare_coherent_search_with_work(search_query.clone(), req.include_embeddings, parent)\n        .await?;\n    let (hits, exposures, evaluated_at) =\n        if let Some(prepared) = coherent {\n            let payload = prepared\n                .payload\n                .ok_or_else(|| AppError::ServiceUnavailable {\n                    message: \"coherent payload capture missing\".into(),\n"
+    }
+  ],
+  "src/api/mod.rs": [
+    {
+      "line": 149,
+      "ours92": "mod legacy_label_tests;\n#[cfg(test)]\nmod vector_query_tests;\n",
+      "theirs99": "mod vector_query_tests;\n\n#[cfg(test)]\nmod legacy_label_tests;\n"
+    }
+  ],
+  "src/api/state.rs": [
+    {
+      "line": 36,
+      "ours92": "    fn active_embedding(\n        &self,\n    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {\n        Err(EmbeddingError::Unavailable(\n            \"active embedding identity unavailable\".into(),\n        ))\n    }\n",
+      "theirs99": "    /// Same owned core as the production pipeline, before provider/selection work.\n    /// Immutable test adapters do not register work; they may not inherit a ticket.\n    fn accept_work(&self) -> Result<Option<crate::storage::work::WorkTicket>, SearchError> {\n        Ok(None)\n    }\n    fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {\n        drop(work);\n    }\n\n    /// Owned production engines return a generation-checked payload page.\n    /// Immutable/mock adapters keep their explicit legacy path.\n    async fn record_coherent_exposures_with_work(\n        &self,\n        _accesses: &[(MemoryId, AccessKind)],\n        _scope: crate::storage::control::ExposureScope,\n        _sampled_at: i64,\n        _parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {\n        Err(SearchError::Unavailable(\n            \"coherent exposure unavailable\".into(),\n        ))\n    }\n\n    async fn prepare_coherent_search_with_work(\n        &self,\n        _query: SearchQuery,\n        _include_embeddings: bool,\n        _parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Option<crate::search::CoherentSearchResponse>, SearchError> {\n        Ok(None)\n    }\n\n    async fn prepare_search_with_work(\n        &self,\n        query: SearchQuery,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<ResolvedSearchResult>, SearchError> {\n        if parent.is_some() {\n            return Err(SearchError::Unavailable(\n                \"search adapter cannot inherit work\".into(),\n            ));\n        }\n        self.prepare_search(query).await\n    }\n    async fn prepare_similar_with_work(\n        &self,\n        id: MemoryId,\n        limit: usize,\n        min_score: Option<f32>,\n        requested_access: bool,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::search::PipelineSearchResult>, SearchError> {\n        if parent.is_some() {\n            return Err(SearchError::Unavailable(\n                \"search adapter cannot inherit work\".into(),\n            ));\n        }\n        self.prepare_similar_filtered(id, limit, min_score, requested_access)\n            .await\n    }\n    async fn record_similar_with_work(\n        &self,\n        ids: &[MemoryId],\n        scope: crate::storage::control::ExposureScope,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {\n        if parent.is_some() {\n            return Err(SearchError::Unavailable(\n                \"search adapter cannot inherit work\".into(),\n            ));\n        }\n        self.record_similar_accesses(ids, scope).await\n    }\n    async fn record_exposures_with_work(\n        &self,\n        accesses: &[(MemoryId, AccessKind)],\n        scope: crate::storage::control::ExposureScope,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {\n        if parent.is_some() {\n            return Err(SearchError::Unavailable(\n                \"search adapter cannot inherit work\".into(),\n            ));\n        }\n        self.record_exposures(accesses, scope).await\n    }\n\n"
+    },
+    {
+      "line": 254,
+      "ours92": "    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {\n        Err(StorageError::RecoveryRequired(\n            \"store identity unavailable\".into(),\n        ))\n    }\n    /// Concrete canonical/vector capture; no legacy backend fallback.\n    async fn scan_duplicate_pairs(\n        &self,\n        _request: crate::serialization::scan::ExactScanRequest,\n    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>\n    {\n        Err(crate::search::exact_scan::ExactScanError::Unavailable)\n",
+      "theirs99": "    async fn insert_memory_with_work(\n        &self,\n        namespace_id: NamespaceId,\n        input: crate::storage::insertion::InsertMemory,\n        embedding: crate::embedding::runtime::GeneratedEmbedding,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<crate::storage::insertion::InsertResult, StorageError> {\n        if parent.is_some() {\n            return Err(StorageError::RecoveryRequired(\n                \"storage adapter cannot inherit work\".into(),\n            ));\n        }\n        self.insert_memory(namespace_id, input, embedding).await\n    }\n    async fn complete_insertion_with_work(\n        &self,\n        receipt: &crate::storage::control::WriteReceipt,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<(), StorageError> {\n        if parent.is_some() {\n            return Err(StorageError::CommittedMutation {\n                receipt: Box::new(receipt.clone()),\n                source: Box::new(StorageError::RecoveryRequired(\n                    \"storage adapter cannot inherit work\".into(),\n                )),\n            });\n        }\n        self.complete_insertion(receipt).await\n    }\n    async fn delete_memory_with_work(\n        &self,\n        id: MemoryId,\n        namespace: Option<&str>,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<bool, StorageError> {\n        if parent.is_some() {\n            return Err(StorageError::RecoveryRequired(\n                \"storage adapter cannot inherit work\".into(),\n            ));\n        }\n        self.delete_memory(id, namespace).await\n"
+    }
+  ],
+  "src/daemon/bridge_adapters.rs": [
+    {
+      "line": 137,
+      "ours92": "    async fn backend_context(\n        &self,\n    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {\n        // Dedicated RPC: an old daemon cannot silently ignore new context fields.\n        let value = self\n            .client\n            .call(\"session_context_v1\", serde_json::json!({}))\n            .await?;\n        let context: crate::serialization::session::BackendContext = serde_json::from_value(value)\n            .map_err(|_| BridgeError::Unavailable(\"invalid backend context response\".into()))?;\n        context\n            .validate()\n            .map_err(|e| BridgeError::Unavailable(e.into()))?;\n        Ok(context)\n    }\n",
+      "theirs99": "    fn supports_durable_batches(&self) -> bool {\n        true\n    }\n\n    async fn mutate_batch(\n        &self,\n        input: crate::storage::batch::BatchInput,\n    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {\n        let params =\n            serde_json::to_value(input).map_err(|e| BridgeError::Internal(e.to_string()))?;\n        // This new method is mutating and never enters the client's read-only\n        // retry allowlist. An old daemon rejects it before doing any work.\n        let result = self.client.call(\"mutate_batch\", params).await?;\n        serde_json::from_value(result).map_err(|e| {\n            BridgeError::PartiallyApplied(format!(\n                \"batch response decode failed; reconcile the same request and key: {e}\"\n            ))\n        })\n    }\n\n"
+    }
+  ],
+  "src/daemon/server.rs": [
+    {
+      "line": 1287,
+      "ours92": "#[path = \"coverage_tests.rs\"]\nmod coverage_tests;\n",
+      "theirs99": "#[path = \"batch_label_tests.rs\"]\nmod batch_label_tests;\n"
+    }
+  ],
+  "src/decay/observation.rs": [
+    {
+      "line": 167,
+      "ours92": "    let worker = crate::performance::Worker::new(\"exposure.worker_queue\");\n    tokio::task::spawn_blocking(move || worker.run(|| {\n        let wait = crate::performance::Timer::new(\"storage.write.wait\");\n        let storage = storage\n            .write()\n            .map_err(|e| ObservationError::failed(e, vec![]))?;\n        wait.complete();\n        let storage = crate::performance::Hold::new(\"storage.write.hold\", storage);\n        let transaction = crate::performance::Timer::new(\"exposure.canonical_commit\");\n        let result = record_locked_scoped(&storage, &accesses, sampled_at, scope.as_ref());\n        transaction.outcome(result.is_ok());\n        let receipts = match &result {\n            Ok(r) => r,\n            Err(e) => &e.receipts,\n        };\n        crate::performance::receipts(receipts);\n        let ids: Vec<_> = accesses.iter().map(|(id, _)| *id).collect();\n        let publication = crate::performance::Timer::new(\"exposure.cache_publication\");\n        // Publish even preceding successful batches when a later batch fails.\n        if let Err(mut publication) = publish(&storage, receipts, || {\n            tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&ids));\n        }) {\n            if let Err(prior) = &result\n                && prior.commit_state == \"unknown\"\n            {\n                publication.commit_state = \"unknown\";\n                publication.unknown_operation_id = prior.unknown_operation_id;\n            }\n            return Err(publication);\n        }\n        publication.complete();\n        tracing::trace!(target: \"recalld::performance\", kind = \"exposure\", requested = accesses.len(), receipt_count = receipts.len(), success = result.is_ok());\n        #[cfg(test)]\n        if result.as_ref().is_ok_and(|r| !r.is_empty()) {\n            storage.meta_store().after_observation_probe();\n        }\n",
+      "theirs99": "    let work = crate::storage::work::accept_work(&storage, parent)\n        .map_err(|e| ObservationError::storage(e, vec![]))?;\n    let child = work\n        .child()\n        .map_err(|e| ObservationError::failed(e, vec![]))?;\n    let worker_storage = storage.clone();\n    let result = tokio::task::spawn_blocking(move || {\n        let storage = worker_storage\n            .write()\n            .map_err(|e| ObservationError::failed(e, vec![]))?;\n        let result = (|| {\n            let result = record_locked_scoped_with_work(\n                &storage,\n                &accesses,\n                sampled_at,\n                scope.as_ref(),\n                Some(&child),\n            );\n            let receipts = match &result {\n                Ok(r) => r,\n                Err(e) => &e.receipts,\n            };\n            let ids: Vec<_> = accesses.iter().map(|(id, _)| *id).collect();\n            // Publish even preceding successful batches when a later batch fails.\n            if let Err(mut publication) = publish(&storage, receipts, || {\n                tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&ids));\n            }) {\n                if let Err(prior) = &result\n                    && prior.commit_state == \"unknown\"\n                {\n                    publication.commit_state = \"unknown\";\n                    publication.unknown_operation_id = prior.unknown_operation_id;\n                }\n                return Err(publication);\n            }\n            #[cfg(test)]\n            if result.as_ref().is_ok_and(|r| !r.is_empty()) {\n                storage.meta_store().after_observation_probe();\n            }\n            result\n        })();\n        storage.meta_store().finish_work(child);\n"
+    }
+  ],
+  "src/derived_completion.rs": [
+    {
+      "line": 134,
+      "ours92": "    pub async fn forget(&self, id: crate::model::MemoryId) -> Result<bool, StorageError> {\n        self.forget_scoped(id, None).await\n",
+      "theirs99": "    pub async fn forget(\n        &self,\n        id: crate::model::MemoryId,\n        namespace: Option<&str>,\n    ) -> Result<bool, StorageError> {\n        self.forget_with_work(id, namespace, None).await\n"
+    },
+    {
+      "line": 317,
+      "ours92": "                let receipt = pending.first().map(|p| p.receipt.clone());\n                if receipt.is_none() && storage.meta_store().needs_effects_rebuild() {\n",
+      "theirs99": "                if storage.meta_store().needs_effects_rebuild() && pending.is_empty() {\n"
+    }
+  ],
+  "src/mcp/bridge.rs": [
+    {
+      "line": 81,
+      "ours92": "    /// Optional resolved backend context; old adapters must not invent identity.\n    async fn backend_context(\n        &self,\n    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {\n        Err(BridgeError::Unavailable(\n            \"backend context unavailable\".into(),\n        ))\n    }\n",
+      "theirs99": "    /// Old implementations cannot manufacture durable receipts. The actual\n    /// direct and daemon adapters opt in; callers never fall back after a write.\n    fn supports_durable_batches(&self) -> bool {\n        false\n    }\n\n    async fn mutate_batch(\n        &self,\n        _input: crate::storage::batch::BatchInput,\n    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {\n        Err(BridgeError::InvalidInput(\n            \"durable batch protocol is not supported by this storage adapter\".into(),\n        ))\n    }\n\n"
+    },
+    {
+      "line": 797,
+      "ours92": "    /// An explicit by-ID namespace assertion failed.\n    #[error(\"{0}\")]\n    NamespaceMismatch(String),\n    /// A provider or required service cannot satisfy the operation.\n    #[error(\"Unavailable: {0}\")]\n    Unavailable(String),\n",
+      "theirs99": "    /// A provider or required service cannot satisfy the operation.\n    #[error(\"Unavailable: {0}\")]\n    Unavailable(String),\n    /// An explicit by-ID namespace assertion failed.\n    #[error(\"{0}\")]\n    NamespaceMismatch(String),\n"
+    }
+  ],
+  "src/mcp/bridge_adapters.rs": [
+    {
+      "line": 163,
+      "ours92": "        crate::performance::measure(\"mcp.search\", query.record_access, async {\n",
+      "theirs99": "        // Admission follows the actual query metadata owner. Immutable offline\n        // adapters have no mutable core; they cannot inherit a placeholder's ticket.\n        let accepted = self\n            .query_engine\n            .accept_work(None)\n            .map_err(map_search_error)?;\n        let result = async {\n"
+    },
+    {
+      "line": 235,
+      "ours92": "            let response = self\n                .query_engine\n                .prepare_search(pipeline_query)\n",
+      "theirs99": "            if let Some(prepared) = self\n                .query_engine\n                .prepare_coherent_payload(\n                    pipeline_query.clone(),\n                    false,\n                    query.include_neighbors,\n                    accepted.as_ref(),\n                )\n                .await\n                .map_err(map_search_error)?\n            {\n                let payload = prepared.payload.ok_or_else(|| {\n                    bridge::BridgeError::Internal(\"coherent payload missing\".into())\n                })?;\n                if payload.namespace.id != ns_config.id\n                    || payload.rows.len() != prepared.response.response.results.len()\n                {\n                    return Err(bridge::BridgeError::Storage(\n                        \"coherent page scope changed\".into(),\n                    ));\n                }\n                let mut hits = Vec::with_capacity(payload.rows.len());\n                let mut exposures = Vec::new();\n                for (selected, row) in prepared\n                    .response\n                    .response\n                    .results\n                    .into_iter()\n                    .zip(payload.rows)\n                {\n                    if row.record.id != *selected.memory_id.as_bytes() {\n                        return Err(bridge::BridgeError::Storage(\n                            \"coherent page identity mismatch\".into(),\n                        ));\n                    }\n                    let labels = row.record.schema.as_ref().map(|s| s.labels.clone());\n                    let metadata =\n                        crate::model::structured_metadata(&row.record.tags, labels.as_ref());\n                    let related = payload\n                        .related\n                        .get(&selected.memory_id)\n                        .map(|edges| {\n                            edges\n                                .iter()\n                                .map(|e| bridge::RelatedMemory {\n                                    id: e.id.to_string(),\n                                    edge_type: e.edge_type.clone(),\n                                    weight: e.weight,\n                                })\n                                .collect()\n                        })\n                        .unwrap_or_default();\n                    exposures.push((\n                        selected.memory_id,\n                        if selected.activation_score.is_some() {\n                            crate::model::AccessKind::AssociativeRetrieval\n                        } else {\n                            crate::model::AccessKind::DirectRetrieval\n                        },\n                    ));\n                    hits.push(bridge::SearchHit {\n                        labels,\n                        id: selected.memory_id.to_string(),\n                        summary: row.record.summary.clone(),\n                        full_text: row.full_text,\n                        score: selected.score.unwrap_or(0.),\n                        namespace: payload.namespace.name.clone(),\n                        tags: row.record.tags.iter().map(ToString::to_string).collect(),\n                        entities: metadata.entities,\n                        topics: metadata.topics,\n                        emotions: metadata.emotions,\n                        phase: format!(\"{:?}\", row.record.phase),\n                        strength: selected.retrievability,\n                        created_at: format_timestamp(row.record.created_at, self.timezone),\n                        last_accessed_at: format_timestamp(\n                            row.record.last_accessed_at,\n                            self.timezone,\n                        ),\n                        related,\n                    });\n                }\n                let mut neighbors = Vec::with_capacity(payload.neighbors.len());\n                for neighbor in payload.neighbors {\n                    let disk = neighbor.payload.record;\n                    let id = crate::model::MemoryId::from_bytes(disk.id);\n                    let labels = disk.schema.as_ref().map(|s| s.labels.clone());\n                    let metadata = crate::model::structured_metadata(&disk.tags, labels.as_ref());\n                    exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));\n                    neighbors.push(bridge::NeighborMemory {\n                        labels,\n                        id: id.to_string(),\n                        summary: disk.summary,\n                        full_text: neighbor.payload.full_text,\n                        topics: metadata.topics,\n                        emotions: metadata.emotions,\n                        edge_type: neighbor.edge_type,\n                        weight: neighbor.weight,\n                        connected_to: neighbor.connected_to.to_string(),\n                    });\n                }\n                check_read_admission(&self.storage, stamp).await?;\n                let receipts = if query.record_access {\n                    self.query_engine\n                        .record_exposures_at_with_work(\n                            &exposures,\n                            crate::storage::control::ExposureScope {\n                                namespace: payload.namespace.name,\n                                source: None,\n                            },\n                            prepared.evaluated_at,\n                            accepted.as_ref(),\n                        )\n                        .await\n                        .map_err(map_search_error)?\n                } else {\n                    Vec::new()\n                };\n                return Observed {\n                    value: bridge::SearchResponse { hits, neighbors },\n                    receipts,\n                }\n                .finish(check_read_admission(&self.storage, stamp).await);\n            }\n\n            let response = self\n                .query_engine\n                .prepare_search_with_work(pipeline_query, accepted.as_ref())\n"
+    },
+    {
+      "line": 615,
+      "ours92": "                    .record_exposures(\n",
+      "theirs99": "                    .record_exposures_with_work(\n"
+    },
+    {
+      "line": 625,
+      "ours92": "",
+      "theirs99": "                        accepted.as_ref(),\n"
+    },
+    {
+      "line": 640,
+      "ours92": "        })\n        .await\n",
+      "theirs99": "        }\n        .await;\n        self.query_engine.finish_work(accepted);\n        result\n"
+    },
+    {
+      "line": 1132,
+      "ours92": "#[async_trait]\nimpl bridge::StorageEngine for McpStorageAdapter {\n    async fn backend_context(\n        &self,\n    ) -> Result<crate::serialization::session::BackendContext, bridge::BridgeError> {\n        use crate::serialization::session::{ActiveEmbedding, BackendContext};\n        let active = ActiveEmbedding::from_provider(self.embedding.as_ref()).map_err(|_| {\n            bridge::BridgeError::Unavailable(\"active embedding identity unavailable\".into())\n        })?;\n        let storage = self.storage.clone();\n        tokio::task::spawn_blocking(move || {\n            let engine = storage.read().map_err(|_| {\n                bridge::BridgeError::Unavailable(\"store context unavailable\".into())\n            })?;\n            let control = engine.control_state().map_err(|_| {\n                bridge::BridgeError::Unavailable(\"store context unavailable\".into())\n            })?;\n            BackendContext::new(control.store_id, active)\n                .map_err(|e| bridge::BridgeError::Unavailable(e.into()))\n        })\n        .await\n        .map_err(|_| bridge::BridgeError::Unavailable(\"store context unavailable\".into()))?\n    }\n    async fn store_memory(\n",
+      "theirs99": "/// Typed until the final legacy bridge boundary. Batch consumers must never\n/// recover commit state by parsing an old single-write diagnostic string.\n#[derive(Debug, thiserror::Error)]\npub(crate) enum StoreWriteError {\n    #[error(transparent)]\n    Bridge(#[from] bridge::BridgeError),\n    #[error(transparent)]\n    Canonical(#[from] crate::storage::StorageError),\n}\nimpl StoreWriteError {\n    fn into_bridge(self) -> bridge::BridgeError {\n        match self {\n            Self::Bridge(e) => e,\n            Self::Canonical(e) => map_mutation_error(e),\n        }\n    }\n}\n\nimpl McpStorageAdapter {\n    pub(crate) async fn store_memory_reserved(\n"
+    },
+    {
+      "line": 1702,
+      "ours92": "        .forget_scoped(id, namespace.map(str::to_owned))\n",
+      "theirs99": "        .forget(id, namespace)\n"
+    },
+    {
+      "line": 4169,
+      "ours92": "        // Only the scratch posting is orphaned. Canonical rebuild must retain\n        // the real foreign owner; noncanonical foreign postings are not retained.\n        let orphan = fx.insert_memory_in(default_ns(), &[\"entity/shared\"]).await;\n        let names = vec![\"Shared\".into()];\n",
+      "theirs99": "        // The completion rebuild must retain the actual foreign record, not\n        // preserve a phantom posting whose UUID has no canonical row.\n        let orphan = fx.insert_memory_in(default_ns(), &[\"entity/alice\"]).await;\n        let names = vec![\"Alice\".into()];\n"
+    }
+  ],
+  "src/search/adapters.rs": [
+    {
+      "line": 200,
+      "ours92": "        let wait = crate::performance::Timer::new(\"vector.lock_wait\");\n        let index = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.index.read())\n        });\n        wait.complete();\n        let index = crate::performance::Hold::new(\"vector.lock_hold\", index);\n",
+      "theirs99": "        let index = self.index.read();\n"
+    },
+    {
+      "line": 227,
+      "ours92": "        let wait = crate::performance::Timer::new(\"vector.lock_wait\");\n        let index = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.index.read())\n        });\n        wait.complete();\n        let index = crate::performance::Hold::new(\"vector.lock_hold\", index);\n",
+      "theirs99": "        let index = self.index.read();\n"
+    },
+    {
+      "line": 266,
+      "ours92": "        let wait = crate::performance::Timer::new(\"fts.lock_wait\");\n        let index = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.index.lock())\n        });\n        wait.complete();\n        let index = crate::performance::Hold::new(\"fts.lock_hold\", index);\n",
+      "theirs99": "        let index = self.index.lock();\n"
+    },
+    {
+      "line": 297,
+      "ours92": "        let wait = crate::performance::Timer::new(\"fts.lock_wait\");\n        let index = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.index.lock())\n        });\n        wait.complete();\n        let index = crate::performance::Hold::new(\"fts.lock_hold\", index);\n",
+      "theirs99": "        let index = self.index.lock();\n"
+    },
+    {
+      "line": 680,
+      "ours92": "        let wait = crate::performance::Timer::new(\"graph.lock_wait\");\n        let graph = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.graph.read())\n        });\n        wait.complete();\n        let graph = crate::performance::Hold::new(\"graph.lock_hold\", graph);\n",
+      "theirs99": "        let graph = self.graph.read();\n"
+    },
+    {
+      "line": 711,
+      "ours92": "        let wait = crate::performance::Timer::new(\"graph.lock_wait\");\n        let graph = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.graph.read())\n        });\n        wait.complete();\n        let graph = crate::performance::Hold::new(\"graph.lock_hold\", graph);\n",
+      "theirs99": "        let graph = self.graph.read();\n"
+    },
+    {
+      "line": 748,
+      "ours92": "        let wait = crate::performance::Timer::new(\"graph.lock_wait\");\n        let graph = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.graph.read())\n        });\n        wait.complete();\n        let graph = crate::performance::Hold::new(\"graph.lock_hold\", graph);\n",
+      "theirs99": "        let graph = self.graph.read();\n"
+    },
+    {
+      "line": 783,
+      "ours92": "        let wait = crate::performance::Timer::new(\"graph.lock_wait\");\n        let graph = tokio::task::block_in_place(|| {\n            tokio::runtime::Handle::current().block_on(self.graph.read())\n        });\n        wait.complete();\n        let graph = crate::performance::Hold::new(\"graph.lock_hold\", graph);\n",
+      "theirs99": "        let graph = self.graph.read();\n"
+    }
+  ],
+  "src/search/pipeline.rs": [
+    {
+      "line": 608,
+      "ours92": "        crate::performance::measure(\"engine.search\", query.record_access, async {\n            let stamp = self.meta_store.effects_stamp().await?;\n            let observed = self\n                .search_admitted(query, semantics, defer_recording)\n                .await?;\n            observed.finish(self.check_effects_stamp(stamp).await)\n        })\n        .await\n",
+      "theirs99": "        self.search_checked_with_work(query, semantics, defer_recording, None)\n            .await\n    }\n\n    pub(crate) async fn search_checked_with_work(\n        &self,\n        query: SearchQuery,\n        semantics: RetrievalSemantics,\n        defer_recording: bool,\n        parent: Option<&crate::storage::work::WorkTicket>,\n    ) -> Result<SemanticsResponse> {\n        let work = self.accept_work(parent)?;\n        let result = async {\n            let stamp = self.meta_store.effects_stamp().await?;\n            let observed = self\n                .search_admitted(query, semantics, defer_recording, work.as_ref())\n                .await?;\n            observed.finish(self.check_effects_stamp(stamp).await)\n        }\n        .await;\n        self.finish_work(work);\n        result\n"
+    }
+  ],
+  "src/storage/control.rs": [
+    {
+      "line": 234,
+      "ours92": "",
+      "theirs99": "    NativeMemoryInserted {\n        transition: super::native_records::NativeRecordWrite,\n    },\n    NativeMemoryTombstoned {\n        transition: super::native_records::NativeRecordWrite,\n    },\n    LifecycleExposureRecorded {\n        transition: super::native_lifecycle::NativeLifecycleWrite,\n    },\n    LifecycleFeedbackApplied {\n        transition: super::native_lifecycle::NativeLifecycleWrite,\n    },\n"
+    },
+    {
+      "line": 262,
+      "ours92": "    },\n    NativeMemoryInserted {\n        transition: super::native_records::NativeRecordWrite,\n",
+      "theirs99": ""
+    },
+    {
+      "line": 275,
+      "ours92": "    LifecycleExposureRecorded {\n        transition: super::native_lifecycle::NativeLifecycleWrite,\n    },\n    LifecycleFeedbackApplied {\n        transition: super::native_lifecycle::NativeLifecycleWrite,\n",
+      "theirs99": "    BatchItemRejected {\n        batch_operation_id: Uuid,\n        index: u32,\n        error: super::batch::BatchError,\n"
+    },
+    {
+      "line": 684,
+      "ours92": "",
+      "theirs99": "        | MutationOutcome::BatchReserved { .. }\n        | MutationOutcome::BatchItemRejected { .. }\n        | MutationOutcome::ExposuresRecorded { .. }\n        | MutationOutcome::LegacyFeedbackRecorded { .. }\n"
+    },
+    {
+      "line": 814,
+      "ours92": "        | MutationOutcome::NamespaceCreated { .. }\n        | MutationOutcome::NamespacePolicyUpdated { .. }\n        | MutationOutcome::NamespacePurgeStarted { .. }\n        | MutationOutcome::NamespacePurgeAdvanced { .. }\n        | MutationOutcome::MemoryTombstoned { .. }\n        | MutationOutcome::LifecycleMaterialized { .. }\n        | MutationOutcome::MemoryInserted { .. }\n        | MutationOutcome::AccessRecorded { .. }\n",
+      "theirs99": ""
+    },
+    {
+      "line": 829,
+      "ours92": "",
+      "theirs99": "        MutationOutcome::BatchReserved { .. }\n        | MutationOutcome::BatchItemRejected { .. }\n        | MutationOutcome::MemoryInserted { .. }\n        | MutationOutcome::MemoryTombstoned { .. }\n        | MutationOutcome::LifecycleMaterialized { .. }\n        | MutationOutcome::NamespaceCreated { .. }\n        | MutationOutcome::NamespacePolicyUpdated { .. }\n        | MutationOutcome::NamespacePurgeStarted { .. }\n        | MutationOutcome::NamespacePurgeAdvanced { .. } => {}\n"
+    }
+  ],
+  "src/storage/engine/maintenance.rs": [
+    {
+      "line": 42,
+      "ours92": "        let guard = self.meta_store.mutation_guard()?;\n",
+      "theirs99": "        let guard = self.meta_store.mutation_guard_with_work(parent)?;\n"
+    }
+  ],
+  "src/storage/metadata.rs": [
+    {
+      "line": 10,
+      "ours92": "mod canonical_vector_snapshot;\n",
+      "theirs99": "pub(crate) mod batch;\n"
+    }
+  ],
+  "src/storage/metadata/native_records/reader_tests.rs": [
+    {
+      "line": 483,
+      "ours92": "    assert!(matches!(failure,StorageError::CommittedMutation{receipt,..} if *receipt==forgotten));\n",
+      "theirs99": "    let StorageError::CommittedMutation { receipt, .. } = failure else {\n        panic!(\"publication failure lost full committed receipt: {failure:?}\");\n    };\n    assert_eq!(*receipt, forgotten);\n"
+    }
+  ],
+  "src/storage/metadata/observation_tests.rs": [
+    {
+      "line": 320,
+      "ours92": "    let before = counts(&store); // Includes the actual catalog creation receipts.\n",
+      "theirs99": "    let before = counts(&store);\n"
+    }
+  ]
+}

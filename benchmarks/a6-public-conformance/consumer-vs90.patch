@@ -1,0 +1,482 @@
+diff --git a/scripts/public-mcp-actor.py b/scripts/public-mcp-actor.py
+index a3d6342..59e8306 100644
+--- a/scripts/public-mcp-actor.py
++++ b/scripts/public-mcp-actor.py
+@@ -12,8 +12,18 @@ TRACK = "serialized-mcp-synthetic-diagnostic-v1"
+ def run(args):
+     projection = json.load(sys.stdin)
+     phase = projection["phase"]
+-    expected = {"phase", "startId", "deliveryOrdinal", "sources", "activeEmbedding"} if phase == "ingest" else {"phase", "startId", "deliveryOrdinal", "currentQuestion", "expectedMiss"}
+-    assert set(projection) == expected and phase in ("ingest", "query"), "unexpected actor projection fields"
++    fields = {"ingest": {"sources", "activeEmbedding"}, "connect": {"activeEmbedding"},
++              "query": {"currentQuestion", "expectedMiss"}, "action": {"currentAction"}}
++    assert phase in fields and set(projection) == {"phase", "startId", "deliveryOrdinal"} | fields[phase], "unexpected actor projection fields"
++    if phase == "action":
++        action = projection["currentAction"]
++        assert set(action) == {"tag", "tool", "arguments"}, "unexpected current action fields"
++        allowed = {"store_memory": {"summary", "fullText", "tags", "namespace", "checkDuplicates", "supersedes"},
++                   "get_memory": {"id", "namespace", "recordAccess"},
++                   "recall_memories": {"query", "namespace", "recordAccess", "depth", "limit"},
++                   "reinforce_memory": {"id", "namespace", "quality"}, "forget_memory": {"id", "namespace"}}
++        assert action["tool"] in allowed and isinstance(action["arguments"], dict)
++        assert set(action["arguments"]) <= allowed[action["tool"]], "unexpected current action arguments"
+     source = projection.get("sources", [])
+     read = os.fdopen(args.read_fd, "rb", buffering=0)
+     write = os.fdopen(args.write_fd, "wb", buffering=0)
+@@ -60,7 +70,7 @@ def run(args):
+         if "structuredContent" in result:
+             assert result["structuredContent"] == text
+         return text
+-    if phase == "ingest":
++    if phase in ("ingest", "connect"):
+         result = rpc("initialize", dict(protocolVersion="2025-06-18", capabilities={}, clientInfo=dict(name=TRACK, version="1")), "initialize")
+         assert result["protocolVersion"] == "2025-06-18"
+         rpc("notifications/initialized", {}, "initialized", notification=True)
+@@ -74,9 +84,13 @@ def run(args):
+         assert context["backendContext"]["activeEmbedding"] == projection["activeEmbedding"]
+         assert uuid.UUID(context["backendContext"]["storeId"]).int != 0
+         rpc("evaluator/capabilities", {}, "private-control-denied", expected_error=True)
+-        call("create_namespace", dict(name="foreign", embeddingDim=4), "namespace")
++        if phase == "ingest":
++            call("create_namespace", dict(name="foreign", embeddingDim=4), "namespace")
+         for entry in source:
+-            call("store_memory", dict(summary=entry["summary"], namespace=entry["namespace"], checkDuplicates=False), "store:" + entry["sourceId"])
++            call("store_memory", dict(summary=entry["summary"], namespace=entry["namespace"], checkDuplicates=False, **{k: entry[k] for k in ("fullText", "tags") if k in entry}), "store:" + entry["sourceId"])
++    elif phase == "action":
++        # Expected outcomes belong to the evaluator. Retain errors as normal wire outcomes.
++        rpc("tools/call", dict(name=action["tool"], arguments=action["arguments"]), action["tag"])
+     else:
+         query = projection["currentQuestion"]
+         assert set(query) == {"queryId", "text"}
+diff --git a/scripts/public-mcp-conformance.py b/scripts/public-mcp-conformance.py
+new file mode 100644
+index 0000000..20bbc3c
+--- /dev/null
++++ b/scripts/public-mcp-conformance.py
+@@ -0,0 +1,176 @@
++"""Evaluator-only frozen synthetic action schedule and public-response assertions."""
++import copy
++import hashlib
++import json
++
++TRACK = "serialized-mcp-synthetic-conformance-v1"
++
++
++def document_text(arguments):
++    # Frozen production McpStorageAdapter::store_memory input composition.
++    text = arguments["summary"]
++    if "fullText" in arguments:
++        text += "\n\n" + arguments["fullText"]
++    if arguments.get("tags"):
++        text += " " + " ".join(arguments["tags"])
++    return text
++
++
++def fixtures(base):
++    actor, labels, cache, _ = base()
++    texts = [("amber OBSOLETE_CONTENT", "default"), ("birch FORGET_CONTENT", "default"),
++             ("foreign NAMESPACE_CONTENT", "foreign"), ("amber CORRECTED_CONTENT", "default"),
++             ("rejected correction", "default")]
++    sources = []
++    for i, (text, namespace) in enumerate(texts):
++        source = dict(actor["sources"][0], sourceId=f"turn-{i}", turnId=f"turn-{i}", ordinal=i,
++                      summary=text, namespace=namespace, contentSha256=hashlib.sha256(text.encode()).hexdigest())
++        source["fullText"] = text + " synthetic full payload"
++        source["fullTextSha256"] = hashlib.sha256(source["fullText"].encode()).hexdigest()
++        source["tags"] = ["synthetic/payload-" + str(i)]
++        sources.append(source)
++    actor["sources"] = sources
++    steps = []
++    def action(tag, tool, arguments, error=False):
++        steps.append(dict(tag=tag, tool=tool, arguments=arguments, expectedError=error))
++    def fetch(tag, source, namespace="default", error=False):
++        arguments = dict(id="$" + source, recordAccess=False)
++        if namespace is not None:
++            arguments["namespace"] = namespace
++        action(tag, "get_memory", arguments, error)
++    queries = []
++    def search(qid, text="amber", namespace="default"):
++        queries.append(dict(queryId=qid, text=text))
++        action("query:" + qid, "recall_memories", dict(query=text, namespace=namespace, recordAccess=False, depth=0, limit=20))
++    fetch("read-before", "turn-0")
++    search("before")
++    steps[-1]["waitSeconds"] = 1.1
++    fetch("read-after", "turn-0")
++    fetch("invalid-before", "turn-1")
++    for i, quality in enumerate((0, 5, 1.5, True, None, "3")):
++        action(f"invalid-quality-{i}", "reinforce_memory", dict(id="$turn-1", namespace="default", quality=quality), True)
++    fetch("invalid-after", "turn-1")
++    for quality in (1, 2, 3, 4):
++        action(f"feedback-{quality}", "reinforce_memory", dict(id="$turn-1", namespace="default", quality=quality))
++    fetch("foreign-before", "turn-2", "foreign")
++    fetch("wrong-namespace-fetch", "turn-2", "default", True)
++    action("wrong-namespace-feedback", "reinforce_memory", dict(id="$turn-2", namespace="default", quality=4), True)
++    action("wrong-namespace-forget", "forget_memory", dict(id="$turn-2", namespace="default"), True)
++    fetch("foreign-after", "turn-2", None)
++    action("store:turn-4", "store_memory", dict(summary=texts[4][0], namespace="default", checkDuplicates=False, supersedes="$turn-2"), True)
++    action("store:turn-3", "store_memory", dict(summary=texts[3][0], fullText=sources[3]["fullText"], tags=sources[3]["tags"], namespace="default", checkDuplicates=False, supersedes="$turn-0"))
++    search("corrected")
++    fetch("correction-before", "turn-3")
++    for source in ("turn-0", "turn-1"):
++        action("forget:" + source, "forget_memory", dict(id="$" + source, namespace="default"))
++        fetch("deleted:" + source, source)
++        # Query immediately after the acknowledged deletion, including graph expansion.
++        search("deleted-" + source, "amber" if source == "turn-0" else "birch")
++        steps[-1]["arguments"]["depth"] = 1
++    search("foreign", "foreign", "foreign")
++    steps.append(dict(restart=True))
++    fetch("restart-deleted:turn-0", "turn-0")
++    fetch("restart-deleted:turn-1", "turn-1")
++    fetch("restart-correction", "turn-3")
++    search("restart-default")
++    steps[-1]["arguments"]["depth"] = 1
++    search("restart-birch", "birch")
++    search("restart-foreign", "foreign", "foreign")
++    search("future", "amber FUTURE_CONFORMANCE_QUERY")
++    action("replay-miss", "recall_memories", dict(query="unrecorded-query", namespace="default", recordAccess=False, depth=0, limit=1), True)
++    schedule = dict(scheduleVersion=1, queries=queries, steps=steps, futureQueryCanary="FUTURE_CONFORMANCE_QUERY")
++    labels["relevant"] = {q["queryId"]: ["turn-2" if "foreign" in q["queryId"] else "turn-0" if q["queryId"] == "before" else "turn-3"] for q in queries}
++    labels["relevant"]["restart-birch"] = []
++    del labels["relevant"]["deleted-turn-1"]
++    cache["entries"] = {"a6-document:" + document_text(source): [0., 1., 0., 0.] if i == 1 else [1., 0., 0., 0.] for i, source in enumerate(sources)}
++    cache["entries"]["a6-document:health check"] = [0., 0., 0., 1.]
++    for query in queries:
++        cache["entries"]["a6-query:" + query["text"]] = [0., 1., 0., 0.] if query["text"] == "birch" else [1., 0., 0., 0.]
++    return actor, labels, cache, schedule
++
++
++def projection(step, mappings, start_id, ordinal):
++    # Substitute only IDs obtained from prior acknowledged public stores.
++    arguments = copy.deepcopy(step["arguments"])
++    for field in ("id", "supersedes"):
++        if field in arguments:
++            arguments[field] = mappings[arguments[field].removeprefix("$")]
++    return dict(phase="action", startId=start_id, deliveryOrdinal=ordinal,
++                currentAction=dict(tag=step["tag"], tool=step["tool"], arguments=arguments))
++
++
++def value(row):
++    result = row["response"]["result"]
++    assert not result.get("isError", False), row["tag"]
++    parsed = json.loads(result["content"][0]["text"])
++    if "structuredContent" in result:
++        assert parsed == result["structuredContent"]
++    return parsed
++
++
++def verify(wire, schedule, mappings, sources, process_events):
++    outcomes = [r for r in wire if r["event"] == "outcome"]
++    by_tag = {r["tag"]: r for r in outcomes}
++    attempted = [r["request"] for r in wire if r["event"] == "attempt"]
++    assert attempted == [r["request"] for r in outcomes], "dropped action/outcome"
++    invalid = []
++    for step in schedule["steps"]:
++        if step.get("restart"):
++            continue
++        row = by_tag[step["tag"]]
++        assert row["response"]["result"].get("isError", False) == step["expectedError"], step["tag"]
++        if step["expectedError"]:
++            message = json.dumps(row["response"]["result"]).lower()
++            if step["tag"].startswith("invalid-quality"):
++                assert "quality" in message
++            if step["tag"].startswith("wrong-namespace") or step["tag"] == "store:turn-4":
++                assert "namespace" in message
++            invalid.append(dict(tag=step["tag"], request=row["request"], response=row["response"]))
++    ids = {source: memory for memory, source_ids in mappings.items() for source in source_ids}
++    assert set(ids) == {"turn-0", "turn-1", "turn-2", "turn-3"}
++    correction = value(by_tag["store:turn-3"])
++    assert correction["supersedes"] == dict(target=ids["turn-0"], status="applied")
++    # These are public observations, not a private counter/generation audit.
++    for before, after in (("read-before", "read-after"), ("invalid-before", "invalid-after"),
++                          ("foreign-before", "foreign-after"), ("correction-before", "restart-correction"), ("deleted:turn-0", "restart-deleted:turn-0"),
++                          ("deleted:turn-1", "restart-deleted:turn-1")):
++        assert value(by_tag[before]) == value(by_tag[after]), (before, after)
++    for quality in (1, 2, 3, 4):
++        feedback = value(by_tag[f"feedback-{quality}"])
++        assert feedback["id"] == ids["turn-1"] and 0 <= feedback["strength"] <= 1 and feedback["stability"] > 0
++    deleted_at = {}
++    for source in ("turn-0", "turn-1"):
++        ack = by_tag["forget:" + source]
++        assert value(ack) == dict(id=ids[source], deleted=True)
++        deleted_at[source] = int(ack["stepId"])
++        assert sources[int(source.split("-")[1])]["tags"]
++        assert sources[int(source.split("-")[1])]["fullText"]
++        for prefix in ("deleted:", "restart-deleted:"):
++            tombstone = value(by_tag[prefix + source])
++            assert tombstone["id"] == ids[source] and tombstone["phase"] == "Tombstone"
++            assert tombstone["summary"] == "" and tombstone["fullText"] is None and tombstone["tags"] == []
++    for row in outcomes:
++        if not row["tag"].startswith("query:"):
++            continue
++        memories = value(row)["memories"]
++        namespace = row["request"]["params"]["arguments"]["namespace"]
++        assert all(sources[int(mappings[m["id"]][0].split("-")[1])]["namespace"] == namespace for m in memories)
++        for source, ack in deleted_at.items():
++            if int(row["stepId"]) > ack:
++                assert ids[source] not in [m["id"] for m in memories]
++                assert sources[int(source.split("-")[1])]["summary"] not in json.dumps(memories)
++    for tag in ("query:corrected", "query:restart-default", "query:future"):
++        returned = [m["id"] for m in value(by_tag[tag])["memories"]]
++        assert ids["turn-3"] in returned and ids["turn-0"] not in returned
++    for tag in ("query:foreign", "query:restart-foreign"):
++        assert [m["id"] for m in value(by_tag[tag])["memories"]] == [ids["turn-2"]]
++    sessions = [json.loads(r["response"]["result"]["contents"][0]["text"])["backendContext"] for r in outcomes if r["tag"] == "session"]
++    assert len(sessions) == 2 and sessions[0] == sessions[1]
++    assert len(process_events) == 2 and process_events[0]["pid"] != process_events[1]["pid"]
++    assert process_events[0]["dataRoot"] == process_events[1]["dataRoot"]
++    assert all(event["exitCode"] == 0 for event in process_events)
++    return dict(status="passed", invalidActions=invalid, successfulFeedbackQualities=[1, 2, 3, 4],
++                restartStoreId=sessions[0]["storeId"], processEvents=process_events,
++                tombstoneFetch="empty public metadata retains UUID; recall excludes UUID/content",
++                falseReadProof="public record fields unchanged; no private counter/ReadView claim",
++                sourceMappingCount=len(mappings), actorActions=len(outcomes))
+diff --git a/scripts/public-mcp-evaluation.py b/scripts/public-mcp-evaluation.py
+index 0bbf69b..f74a508 100644
+--- a/scripts/public-mcp-evaluation.py
++++ b/scripts/public-mcp-evaluation.py
+@@ -18,6 +18,7 @@ import uuid
+ 
+ TRACK = "serialized-mcp-synthetic-diagnostic-v1"
+ MODEL = "a6-public-synthetic-v1"
++CONFORMANCE = runpy.run_path(str(Path(__file__).with_name("public-mcp-conformance.py")))
+ ROOT = Path(__file__).resolve().parents[1]
+ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadView=False,
+                     barrier=False, reset=False, snapshot=False, clock="system-uncontrolled",
+@@ -25,7 +26,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
+                     canonicalSchemaAttested=False)
+ VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
+                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
+-EXTRA = ("scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
++EXTRA = ("scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl")
+ 
+ 
+@@ -50,7 +51,11 @@ def exact_keys(value, keys):
+         raise ValueError("unsupported or missing fields")
+ 
+ 
+-def fixtures():
++def fixtures(track=TRACK):
++    if track == CONFORMANCE["TRACK"]:
++        return CONFORMANCE["fixtures"](fixtures)
++    if track != TRACK:
++        raise ValueError("unsupported diagnostic track")
+     sources = []
+     for i, (text, namespace) in enumerate((("amber", "default"), ("birch", "default"), ("olive", "default"), ("foreign", "foreign"))):
+         sources.append(dict(sourceId=f"turn-{i}", groupId="synthetic-regression", conversationId="synthetic-conversation",
+@@ -78,7 +83,7 @@ def validate(manifest_path, binary, scorer, source_root):
+                    "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
+     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
+         raise ValueError("unsupported independent harness version")
+-    if m["track"] != TRACK or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
++    if m["track"] not in (TRACK, CONFORMANCE["TRACK"]) or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
+         raise ValueError("unsupported public/schema/control requirements")
+     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
+         raise ValueError("unsupported resources/scorer")
+@@ -104,7 +109,7 @@ def validate(manifest_path, binary, scorer, source_root):
+             raise ValueError("artifact hash/reference mismatch")
+         artifacts.append(json.loads(p.read_text()))
+     actor, labels, cache, schedule = artifacts
+-    expected_actor, _, expected_cache, expected_schedule = fixtures()
++    expected_actor, _, expected_cache, expected_schedule = fixtures(m["track"])
+     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
+         raise ValueError("unsupported synthetic actor/cache fixture")
+     exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
+@@ -130,8 +135,8 @@ def validate(manifest_path, binary, scorer, source_root):
+ def prepare(args):
+     args.out.mkdir()
+     build = json.loads(args.build.read_text())
+-    actor, labels, cache, schedule = fixtures()
+-    m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
++    actor, labels, cache, schedule = fixtures(args.track)
++    m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=args.track, versions=VERSIONS,
+              capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
+              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
+              executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
+@@ -172,21 +177,24 @@ class Replay(http.server.BaseHTTPRequestHandler):
+ 
+ def run_episode(args):
+     m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
++    conformance = m["track"] == CONFORMANCE["TRACK"]
+     args.out.mkdir()
+     evaluator = args.out / "evaluator"
+     evaluator.mkdir()
+-    ingest_projection = dict(phase="ingest", sources=actor["sources"], activeEmbedding=m["activeEmbedding"], startId=0, deliveryOrdinal=0)
++    ingest_projection = dict(phase="ingest", sources=actor["sources"][:3] if conformance else actor["sources"], activeEmbedding=m["activeEmbedding"], startId=0, deliveryOrdinal=0)
+     save(args.out / "actor-projection.json", ingest_projection)
+     (args.out / "actor-inputs").mkdir()
+     # Cache server receives only the actor cache projection, never evaluator labels.
+     stub = http.server.HTTPServer(("127.0.0.1", 0), Replay)
+     stub.log, stub.environment, stub.delivery = args.out / "actor-provider.jsonl", environment, 0
+     stub.key = lambda text: digest(encoded(dict(environmentHash=environment, model=MODEL, dimension=4, prefixedInput=text)))
+-    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:")}
++    stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:") and (not conformance or text.removeprefix("a6-document:") in {CONFORMANCE["document_text"](s) for s in actor["sources"][:3]} or text == "a6-document:health check")}
+     threading.Thread(target=stub.serve_forever, daemon=True).start()
+     result = dict(status="running", environmentHash=environment, capabilities=CAPABILITIES)
+     process = None
+     runtime_failure = None
++    process_events = []
++    public_ids = {}
+     guard_read, guard_write = os.pipe()
+     try:
+         with tempfile.TemporaryDirectory(prefix="a6-public-runtime-") as temporary:
+@@ -219,8 +227,20 @@ warm_file_enabled = false
+             env = dict(PATH="/usr/local/bin:/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC", RUST_LOG="info",
+                        A6_SYNTHETIC_KEY="synthetic-fixture-only", RECALLD_DAEMON_SOCKET=str(root / "disabled-daemon/socket"))
+             with (args.out / "runtime.log").open("wb") as runtime_log, (args.out / "actor-wire.jsonl").open("wb") as wire, (args.out / "actor.log").open("wb") as actor_log:
+-                process = subprocess.Popen([str(args.binary), "--config", str(root / "config.toml"), "--data-dir", str(root / "data"), "mcp"],
+-                                           cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=runtime_log, bufsize=0)
++                def launch():
++                    child = subprocess.Popen([str(args.binary), "--config", str(root / "config.toml"), "--data-dir", str(root / "data"), "mcp"],
++                                             cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=runtime_log, bufsize=0)
++                    process_events.append(dict(pid=child.pid, dataRoot=str(root / "data"), exitCode=None))
++                    save(evaluator / "process-events.json", process_events)
++                    return child
++                def stop():
++                    process.stdin.close()
++                    process.wait(timeout=20)
++                    process_events[-1]["exitCode"] = process.returncode
++                    save(evaluator / "process-events.json", process_events)
++                    if process.returncode != 0:
++                        raise RuntimeError("production MCP child failed during EOF shutdown")
++                process = launch()
+                 actor_path = root / "actor.py"
+                 shutil.copyfile(Path(__file__).with_name("public-mcp-actor.py"), actor_path)
+                 shutil.copyfile(actor_path, args.out / "actor-code.py")
+@@ -228,10 +248,25 @@ warm_file_enabled = false
+                 assert digest(actor_path.read_bytes()) == m["sourceFilesSha256"]["scripts/public-mcp-actor.py"]
+                 start_id = 0
+                 # The supervisor owns this schedule. Each actor process sees only its current question.
+-                for ordinal in range(len(schedule["queries"]) + 2):
++                for ordinal in range(len(schedule["steps"]) + 1 if conformance else len(schedule["queries"]) + 2):
+                     stub.delivery = ordinal
+                     if ordinal == 0:
+                         projection = ingest_projection
++                    elif conformance:
++                        step = schedule["steps"][ordinal - 1]
++                        if step.get("restart"):
++                            stop()
++                            process = launch()
++                            projection = dict(phase="connect", startId=start_id, deliveryOrdinal=ordinal, activeEmbedding=m["activeEmbedding"])
++                        else:
++                            if "waitSeconds" in step:
++                                time.sleep(step["waitSeconds"])  # Real elapsed time; no frozen clock/control.
++                            projection = CONFORMANCE["projection"](step, public_ids, start_id, ordinal)
++                            arguments = projection["currentAction"]["arguments"]
++                            text = ("a6-query:" + arguments["query"] if "query" in arguments else
++                                    "a6-document:" + CONFORMANCE["document_text"](arguments) if "summary" in arguments else None)
++                            if text in cache["entries"]:
++                                stub.entries[stub.key(text)] = cache["entries"][text]
+                     else:
+                         miss = ordinal == len(schedule["queries"]) + 1
+                         question = dict(queryId="replay-miss", text="unrecorded-query") if miss else schedule["queries"][ordinal - 1]
+@@ -254,10 +289,12 @@ warm_file_enabled = false
+                         break
+                     assert acknowledgments and int(acknowledgments[-1]["stepId"]) > start_id
+                     start_id = int(acknowledgments[-1]["stepId"])
++                    for ack in acknowledgments:
++                        if ack["tag"].startswith("store:") and not ack["response"]["result"].get("isError"):
++                            public_ids[ack["tag"][6:]] = json.loads(ack["response"]["result"]["content"][0]["text"])["id"]
+                     with (evaluator / "schedule-ledger.jsonl").open("a") as log:
+                         log.write(json.dumps(dict(deliveryOrdinal=ordinal, acknowledgedThroughStepId=str(start_id))) + "\n")
+-                process.stdin.close()
+-                process.wait(timeout=20)
++                stop()
+                 if runtime_failure is None and process.returncode != 0:
+                     runtime_failure = f"actor/runtime exited {child.returncode}/{process.returncode}"
+             if "falling back to direct mode" not in (args.out / "runtime.log").read_text():
+@@ -307,12 +344,18 @@ warm_file_enabled = false
+         canary = schedule["futureQueryCanary"]
+         assert canary not in (args.out / "actor-code.py").read_text()
+         assert labels["labelCanary"] not in (args.out / "actor-code.py").read_text()
+-        for ordinal in range(4):
++        canary_ordinal = next(i for i in range(len(schedule["steps"]) + 1) if canary in (args.out / "actor-inputs" / f"step-{i}.json").read_text()) if conformance else 4
++        for ordinal in range(canary_ordinal):
+             assert canary not in (args.out / "actor-inputs" / f"step-{ordinal}.json").read_text()
+-        assert canary in (args.out / "actor-inputs/step-4.json").read_text()
+-        assert all(canary not in json.dumps(row) for row in wire if row["deliveryOrdinal"] < 4)
+-        assert all(canary not in json.dumps(row) for row in providers if row["deliveryOrdinal"] < 4)
+-        assert len(rows(evaluator / "schedule-ledger.jsonl")) == 6
++        assert canary in (args.out / "actor-inputs" / f"step-{canary_ordinal}.json").read_text()
++        assert all(canary not in json.dumps(row) for row in wire if row["deliveryOrdinal"] < canary_ordinal)
++        assert all(canary not in json.dumps(row) for row in providers if row["deliveryOrdinal"] < canary_ordinal)
++        assert len(rows(evaluator / "schedule-ledger.jsonl")) == (len(schedule["steps"]) + 1 if conformance else 6)
++        for projection_path in (args.out / "actor-inputs").glob("*.json"):
++            assert labels["labelCanary"] not in projection_path.read_text()
++        if conformance:
++            report = CONFORMANCE["verify"](wire, schedule, mappings, actor["sources"], process_events)
++            save(evaluator / "conformance.json", report)
+         result.update(futureQueryCanaryWithheldUntilDelivery=True, status="passed", actorActions=len(outcomes), expectedProviderMisses=1, storeMappings=len(mappings))
+     except BaseException as error:
+         result.update(status="failed", error=str(error))
+@@ -375,6 +418,9 @@ cargo build --offline --locked --bin recalld --example score_mcp_episode > /work
+ python3 scripts/public-mcp-evaluation.py prepare --binary /work/target/debug/recalld --scorer /work/target/debug/examples/score_mcp_episode --build /work/output/build.json --out /work/output/inputs
+ python3 scripts/public-mcp-evaluation.py run --binary /work/target/debug/recalld --scorer /work/target/debug/examples/score_mcp_episode --source-root /work/source --manifest /work/output/inputs/manifest.json --out /work/output/episode-0
+ '''
++    if args.track == CONFORMANCE["TRACK"]:
++        script = script.replace("cargo test --offline --locked --examples", "cargo test --offline --locked --example score_mcp_episode")
++        script = script.replace(" prepare --binary", " prepare --track " + args.track + " --binary")
+     if args.library_evidence:
+         script = "\n".join(line for line in script.split("\n") if "cargo test --offline --locked --lib " not in line)
+     (root / "build.sh").write_text(script)
+@@ -395,10 +441,12 @@ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     sub = parser.add_subparsers(dest="mode", required=True)
+     p = sub.add_parser("prepare")
++    p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"]), default=TRACK)
+     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
+     p = sub.add_parser("run")
+     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
+     p = sub.add_parser("host")
++    p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"]), default=TRACK)
+     p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True); p.add_argument("--library-evidence", type=Path)
+     args = parser.parse_args()
+     {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+diff --git a/scripts/test_public_mcp_evaluation.py b/scripts/test_public_mcp_evaluation.py
+index 19518d2..bcdf00f 100644
+--- a/scripts/test_public_mcp_evaluation.py
++++ b/scripts/test_public_mcp_evaluation.py
+@@ -109,6 +109,43 @@ class Preflight(unittest.TestCase):
+             self.assertEqual(run.stdout, "")
+             self.assertIn("unexpected actor projection fields", run.stderr)
+ 
++    def test_conformance_track_is_distinct_and_schedule_is_evaluator_only(self):
++        actor, labels, cache, schedule = m["fixtures"](m["CONFORMANCE"]["TRACK"])
++        self.manifest["track"] = m["CONFORMANCE"]["TRACK"]
++        for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels),
++                                  ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
++            m["save"](self.root / name, value)
++            self.manifest[key]["sha256"] = m["digest"]((self.root / name).read_bytes())
++        self.manifest["dataset"]["actorArtifactSha256"] = self.manifest["actorInputs"]["sha256"]
++        self.validate()
++        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](actor).decode())
++        self.assertEqual(sum(s.get("restart", False) for s in schedule["steps"]), 1)
++        self.assertEqual(sum(s.get("expectedError", False) for s in schedule["steps"]), 11)
++        self.manifest["track"] = m["TRACK"]
++        with self.assertRaises(ValueError): self.validate()
++
++    def test_current_action_projection_resolves_only_acknowledged_ids(self):
++        _, labels, _, schedule = m["fixtures"](m["CONFORMANCE"]["TRACK"])
++        step = next(s for s in schedule["steps"] if s.get("tag") == "store:turn-3")
++        with self.assertRaises(KeyError): m["CONFORMANCE"]["projection"](step, {}, 10, 2)
++        delivered = m["CONFORMANCE"]["projection"](step, {"turn-0": "acknowledged-public-uuid"}, 10, 2)
++        self.assertEqual(delivered["currentAction"]["arguments"]["supersedes"], "acknowledged-public-uuid")
++        self.assertEqual(set(delivered["currentAction"]), {"tag", "tool", "arguments"})
++        self.assertNotIn(labels["labelCanary"], m["encoded"](delivered).decode())
++        self.assertNotIn(schedule["futureQueryCanary"], m["encoded"](delivered).decode())
++
++    def test_current_action_rejects_nested_evaluator_data_before_mcp_io(self):
++        import subprocess, sys
++        for field in ("futureQueries", "evaluatorLabels", "expectedError"):
++            projection = dict(phase="action", startId=0, deliveryOrdinal=1,
++                              currentAction=dict(tag="current", tool="get_memory", arguments=dict(id="public-id", recordAccess=False)))
++            projection["currentAction"][field] = "MUST_NOT_REACH_ACTOR"
++            run = subprocess.run([sys.executable, str(Path(__file__).with_name("public-mcp-actor.py")),
++                "--read-fd", "0", "--write-fd", "1", "--deny-fd", "9"], input=json.dumps(projection), capture_output=True, text=True)
++            self.assertNotEqual(run.returncode, 0)
++            self.assertEqual(run.stdout, "")
++            self.assertIn("unexpected current action fields", run.stderr)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

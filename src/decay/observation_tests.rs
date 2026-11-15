@@ -261,3 +261,110 @@ async fn actual_feedback_consumer_commits_one_receipt_and_invalidates_before_ret
         matches!(receipts[0].outcome, MutationOutcome::LegacyFeedbackRecorded {memory_id, quality:3, ..} if memory_id == id)
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_observation_and_feedback_finish_after_root_admission_closes() {
+    use std::time::{Duration, Instant};
+    for feedback in [false, true] {
+        let f = Fixture::new();
+        let id = f.insert_memory().await;
+        f.cache
+            .insert(id, CachedRecord::from(&f.record(id).unwrap()))
+            .await;
+        let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+        // A read lease allows admission lookup but queues the actual writer.
+        let blocked = f.storage.read().unwrap();
+        let storage = f.storage.clone();
+        let cache = f.cache.clone();
+        let writer = tokio::spawn(async move {
+            if feedback {
+                crate::decay::storage_adapter::reinforce(storage, cache, id, 3, 1.0, 1000, None)
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            } else {
+                record_exposures(
+                    storage,
+                    cache,
+                    vec![(id, AccessKind::DirectRetrieval)],
+                    1000,
+                )
+                .await
+                .map(|r| assert_eq!(r.len(), 1))
+                .map_err(|e| e.to_string())
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while tracker.status().pending < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let closing = tracker.clone();
+        let drain = tokio::task::spawn_blocking(move || {
+            closing.close_and_drain(Instant::now() + Duration::from_secs(10))
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while tracker.status().admission_open {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!writer.is_finished());
+        drop(blocked);
+        writer.await.unwrap().unwrap();
+        let freeze = drain.await.unwrap().unwrap();
+        assert_eq!(tracker.status().pending, 0);
+        assert_eq!(tracker.status().unresolved, 0);
+        assert_eq!(f.record(id).unwrap().last_accessed_at, 1000);
+        assert!(f.cache.get(id).await.is_none());
+        // This is execution/publication proof, not all-component readiness:
+        // the canonical update makes earlier derived generation stamps stale.
+        drop(freeze);
+        assert!(tracker.status().admission_open);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_queued_observation_retains_root_and_registered_child() {
+    use std::time::Duration;
+    let f = Fixture::new();
+    let id = f.insert_memory().await;
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let blocked = f.storage.read().unwrap();
+    let storage = f.storage.clone();
+    let cache = f.cache.clone();
+    let writer = tokio::spawn(async move {
+        record_exposures(
+            storage,
+            cache,
+            vec![(id, AccessKind::DirectRetrieval)],
+            1000,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().pending < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    writer.abort();
+    assert!(writer.await.unwrap_err().is_cancelled());
+    assert!(tracker.status().unresolved >= 1);
+    drop(blocked);
+    // The detached worker remains accounted for until it finishes publication.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().pending > tracker.status().unresolved {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(tracker.status().pending, 1);
+    assert_eq!(tracker.status().unresolved, 1);
+    assert_eq!(f.record(id).unwrap().last_accessed_at, 1000);
+}

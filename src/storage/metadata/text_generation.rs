@@ -38,7 +38,7 @@ pub(crate) fn is_generation_filename(name: &str) -> bool {
 }
 
 impl TextGeneration {
-    fn validate(&self, store_id: Uuid) -> Result<(), StorageError> {
+    pub(crate) fn validate(&self, store_id: Uuid) -> Result<(), StorageError> {
         let header = match self.format_version {
             1 => 16,
             2 => 48,
@@ -96,12 +96,79 @@ pub(crate) fn read_selection(
             selected = Some(descriptor);
         }
     }
-    selected
-        .map(Some)
-        .ok_or_else(|| StorageError::InvalidControl("selected text descriptor missing".into()))
+    let selected = selected
+        .ok_or_else(|| StorageError::InvalidControl("selected text descriptor missing".into()))?;
+    // A same-identity physical generation must match its committed descriptor.
+    // Import/restore may legitimately repack to a different generation UUID.
+    for row in read.open_table(control::RECEIPTS)?.iter()? {
+        let (_, value) = row?;
+        let stored = control::validate_receipt(value.value())?;
+        if let MutationOutcome::NativeTextGenerationSelected { transition } =
+            &stored.receipt.outcome
+            && transition.after.id == selected.id
+        {
+            if transition.after != selected || stored.receipt.store_id != state.store_id {
+                return Err(StorageError::InvalidControl(
+                    "selected descriptor differs from native relocation".into(),
+                ));
+            }
+            let before = table
+                .get(transition.before.id.to_string().as_str())?
+                .ok_or_else(|| {
+                    StorageError::InvalidControl("native relocation before catalog missing".into())
+                })?;
+            if control::decode::<TextGeneration>(before.value())? != transition.before {
+                return Err(StorageError::InvalidControl(
+                    "native relocation before descriptor mismatch".into(),
+                ));
+            }
+            if stored.receipt.committed_generation == state.committed_generation {
+                let refs = read
+                    .open_table(META_TABLE)?
+                    .iter()?
+                    .filter_map(|row| {
+                        let row = row.map_err(StorageError::from).and_then(|(_, v)| {
+                            DiskRecord::from_bytes(v.value()).map_err(StorageError::from)
+                        });
+                        match row {
+                            Err(e) => Some(Err(e)),
+                            Ok(r) if r.text_offset != 0 || r.text_length != 0 => Some(Ok((
+                                MemoryId::from_bytes(r.id),
+                                TextRef {
+                                    file_offset: r.text_offset,
+                                    length: r.text_length,
+                                },
+                            ))),
+                            Ok(_) => None,
+                        }
+                    })
+                    .collect::<Result<RefMapping, StorageError>>()?;
+                if refs.len() as u64 != transition.retained_count
+                    || crate::storage::native_text::reference_digest(&refs)?
+                        != transition.after_refs_sha256
+                {
+                    return Err(StorageError::InvalidControl(
+                        "current native relocation references mismatch".into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(Some(selected))
 }
 
 impl MetadataStore {
+    pub(crate) fn text_compaction_guard_with_work(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<MutationGuard<'_>, StorageError> {
+        if self.native_lifecycle_only {
+            self.native_guard_with_work(parent)
+        } else {
+            self.mutation_guard_with_work(parent)
+        }
+    }
+
     pub(crate) fn text_selection(&self) -> Result<Option<TextGeneration>, StorageError> {
         self.ensure_available()?;
         self.text_selection_for_recovery()
@@ -121,9 +188,118 @@ impl MetadataStore {
         descriptor: &TextGeneration,
         refs: &RefMapping,
     ) -> Result<WriteReceipt, StorageError> {
-        let _gate = self.mutation_guard()?;
+        let guard = self.mutation_guard()?;
+        self.select_text_generation_guarded(&guard, expected, descriptor, refs)
+    }
+
+    pub(crate) fn select_text_generation_guarded(
+        &self,
+        guard: &MutationGuard<'_>,
+        expected: Generation,
+        descriptor: &TextGeneration,
+        refs: &RefMapping,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.select_text_generation_proved_guarded(
+            guard,
+            expected,
+            descriptor,
+            refs,
+            None,
+            &Default::default(),
+        )
+    }
+
+    pub(crate) fn select_text_generation_proved_guarded(
+        &self,
+        guard: &MutationGuard<'_>,
+        expected: Generation,
+        descriptor: &TextGeneration,
+        refs: &RefMapping,
+        proof: Option<&crate::storage::native_text::NativeTextRelocation>,
+        text_hashes: &std::collections::BTreeMap<MemoryId, [u8; 32]>,
+    ) -> Result<WriteReceipt, StorageError> {
+        use crate::storage::native_text;
+        guard.check(self)?;
         let tx = self.db.begin_write()?;
         let state = control::read_control(&tx)?;
+        if (state.control_schema_version == 2) != self.native_lifecycle_only
+            || self.native_lifecycle_only != proof.is_some()
+        {
+            return Err(StorageError::InvalidControl(
+                "text relocation proof/owner mismatch".into(),
+            ));
+        }
+        purge::require_no_active_write(&tx)?;
+        let capture = || -> Result<_, StorageError> {
+            let rows = tx
+                .open_table(META_TABLE)?
+                .iter()?
+                .map(|row| {
+                    let (_, value) = row?;
+                    let r = DiskRecord::from_bytes(value.value())?;
+                    Ok((MemoryId::from_bytes(r.id), r))
+                })
+                .collect::<Result<Vec<_>, StorageError>>()?;
+            let namespaces = tx
+                .open_table(NAMESPACE_TABLE)?
+                .iter()?
+                .map(|row| {
+                    let (_, value) = row?;
+                    NamespaceConfig::decode(value.value()).map_err(StorageError::from)
+                })
+                .collect::<Result<Vec<_>, StorageError>>()?;
+            Ok((rows, namespaces))
+        };
+        if let Some(proof) = proof {
+            if proof.source != state.generation_ref()
+                || &proof.after != descriptor
+                || native_text::reference_digest(refs)? != proof.after_refs_sha256
+                || native_text::copy_digest(refs, text_hashes)? != proof.copied_text_sha256
+                || proof.retained_count != refs.len() as u64
+            {
+                return Err(StorageError::InvalidControl(
+                    "text relocation selection mismatch".into(),
+                ));
+            }
+            let catalog = tx.open_table(CATALOG)?;
+            let active: Uuid = control::decode(
+                catalog
+                    .get("active")?
+                    .ok_or(StorageError::InvalidTextRef)?
+                    .value(),
+            )?;
+            let before: TextGeneration = control::decode(
+                catalog
+                    .get(active.to_string().as_str())?
+                    .ok_or(StorageError::InvalidTextRef)?
+                    .value(),
+            )?;
+            if before != proof.before {
+                return Err(StorageError::InvalidTextRef);
+            }
+            let (rows, namespaces) = capture()?;
+            let old_refs = rows
+                .iter()
+                .filter(|(_, r)| r.text_offset != 0 || r.text_length != 0)
+                .map(|(id, r)| {
+                    (
+                        *id,
+                        TextRef {
+                            file_offset: r.text_offset,
+                            length: r.text_length,
+                        },
+                    )
+                })
+                .collect();
+            if native_text::reference_digest(&old_refs)? != proof.before_refs_sha256
+                || native_text::record_digest(&rows, &namespaces, text_hashes)?
+                    != (proof.record_count, proof.records_sha256)
+            {
+                return Err(StorageError::InvalidControl(
+                    "text relocation before-state mismatch".into(),
+                ));
+            }
+        }
         descriptor.validate(state.store_id)?;
         let ctx = MutationContext {
             store_id: Some(state.store_id),
@@ -207,16 +383,30 @@ impl MetadataStore {
             catalog.insert(key.as_str(), bytes.as_slice())?;
             catalog.insert("active", control::encode(&descriptor.id)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
-            &tx,
-            &ctx,
-            hash,
+        let outcome = if let Some(proof) = proof {
+            let (rows, namespaces) = capture()?;
+            if native_text::record_digest(&rows, &namespaces, text_hashes)?
+                != (proof.record_count, proof.records_sha256)
+            {
+                return Err(StorageError::InvalidControl(
+                    "text relocation changed logical content".into(),
+                ));
+            }
+            MutationOutcome::NativeTextGenerationSelected {
+                transition: proof.clone(),
+            }
+        } else {
             MutationOutcome::TextGenerationSelected {
                 generation_id: descriptor.id,
                 format_version: descriptor.format_version,
                 entries_kept: refs.len() as u64,
-            },
-        )?;
+            }
+        };
+        let receipt = self.record_receipt(&tx, &ctx, hash, outcome)?;
+        if let Some(proof) = proof {
+            proof.validate(&receipt)?;
+        }
+
         let committed = tx.commit();
         // Model an I/O error whose commit actually became durable. Tests must
         // reconcile the receipt after reopen, not reclaim its selected payload.
@@ -237,6 +427,7 @@ impl MetadataStore {
                 source: e,
             }
         })?;
+        self.view_publication.canonical_committed();
         Ok(receipt)
     }
 }
