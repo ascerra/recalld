@@ -1,5 +1,20 @@
 use super::*;
-use crate::graph::native_selection::capture;
+// Existing all-channel controls exercise the same producer with a frozen intent.
+fn capture(
+    engine: &RedbStorageEngine,
+    insert: &NativeInsertIntent,
+    generated: &GeneratedEmbedding,
+) -> Result<crate::graph::native_selection::NativeCandidates, StorageError> {
+    crate::graph::native_selection::capture(
+        engine,
+        &crate::storage::native_store::NativeStoreIntent {
+            insert: insert.clone(),
+            check_duplicates: true,
+            settings: crate::graph::native_selection::freeze_settings(&Default::default())?,
+        },
+        generated,
+    )
+}
 use crate::model::EdgeType;
 
 fn add(
@@ -126,17 +141,17 @@ fn native_selection_canonical_scope_phase_labels_and_deterministic_caps() {
         temporal.iter().map(|e| e.target).collect::<Vec<_>>(),
         vec![d.parent, nearest]
     );
-    let advisory = captured.advisory(true).unwrap();
+    let advisory = captured.advisory(true).unwrap().unwrap();
     assert_eq!(
         advisory.iter().map(|p| p.0).collect::<Vec<_>>(),
         vec![d.parent, nearest, entity]
     );
-    assert!(captured.advisory(false).is_none());
+    assert!(captured.advisory(false).unwrap().is_none());
     let mut reversed = captured.clone();
     reversed.candidates.reverse();
     assert_eq!(reversed.static_links(&settings).unwrap(), links);
     assert_eq!(reversed.temporal_links(1000, &settings), temporal);
-    assert_eq!(reversed.advisory(true), Some(advisory));
+    assert_eq!(reversed.advisory(true).unwrap(), Some(advisory));
     assert_eq!(before, s.metadata().control_state().unwrap());
     assert_eq!(calls, clock.0.load(Ordering::SeqCst));
     assert_eq!(
@@ -287,6 +302,7 @@ fn native_selection_equal_scores_entities_and_times_use_uuid_ties_before_caps() 
     assert_eq!(
         selected
             .advisory(true)
+            .unwrap()
             .unwrap()
             .iter()
             .map(|m| m.0)

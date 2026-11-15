@@ -75,11 +75,8 @@ impl McpStorageAdapter {
                     .storage
                     .read()
                     .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
-                let candidates = crate::graph::native_selection::capture(
-                    &engine,
-                    intent.insert_intent(),
-                    &generated,
-                )?;
+                let candidates =
+                    crate::graph::native_selection::capture(&engine, &intent, &generated)?;
                 engine.meta_store().prepare_native_store_links(
                     &intent,
                     &candidates.frozen_plan(&intent)?,
