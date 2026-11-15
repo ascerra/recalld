@@ -159,3 +159,30 @@ Tokenizer/context assembly remains real implementation follow-up, as do upstream
 scorer adapters, richer A6 traces/native writer joins and priced cost accounting.
 This source plan authorizes no paid calls, data download, training, benchmark
 window, default activation, native/full-A6 or semantic-quality promotion.
+
+## Implemented invocation (validation pending)
+
+The existing runner consumes the pair directly:
+
+```sh
+python3 scripts/public-mcp-evaluation.py prepare \
+  --track serialized-mcp-paired-grouped-synthetic-diagnostic-v1 \
+  --binary /target/debug/recalld --scorer /target/debug/examples/score_mcp_episode \
+  --build /output/build.json --out /output/inputs
+python3 scripts/public-mcp-evaluation.py run \
+  --manifest /output/inputs/manifest.json --source-root /work/source \
+  --binary /target/debug/recalld --scorer /target/debug/examples/score_mcp_episode \
+  --out /output/paired
+```
+
+`paired-score-input.json` binds both manifests, the common predeclared contract,
+raw grouped inputs and complete status rosters. `score_mcp_episode --paired-input`
+consumes that receipt. `pair-status.json` retains all fourteen planned members,
+including failed and unattempted members; incomplete runs produce no comparison.
+
+Focused validation entry points are `scripts/test_paired_mcp_evaluation.py`,
+`cargo test --offline --locked -j1 --example score_mcp_episode`, and
+`scripts/check_paired_mcp_evaluation.py`. The last executes fourteen real episodes
+through the existing public runner, then scorer-only permutation/negative checks.
+The old grouped and single profiles retain their own fixtures. Statistical RNG
+pins do not claim deterministic runtime clocks, IDs, reset or model behavior.

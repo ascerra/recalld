@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 
+PAIRED = runpy.run_path(str(Path(__file__).with_name("paired-mcp-evaluation.py")))
 GROUPED = runpy.run_path(str(Path(__file__).with_name("grouped-mcp-evaluation.py")))
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 MODEL = "a6-public-synthetic-v1"
@@ -27,6 +28,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = ("scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+         "scripts/paired-mcp-evaluation.py", "scripts/test_paired_mcp_evaluation.py", "scripts/check_paired_mcp_evaluation.py",
          "scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl")
 
@@ -150,6 +152,8 @@ def build_manifest(args, build):
 
 
 def prepare(args):
+    if getattr(args, "track", TRACK) == PAIRED["TRACK"]:
+        return PAIRED["prepare"](args, globals())
     if getattr(args, "track", TRACK) == GROUPED["TRACK"]:
         return GROUPED["prepare"](args, globals())
     args.out.mkdir()
@@ -193,6 +197,8 @@ class Replay(http.server.BaseHTTPRequestHandler):
 
 
 def run_episode(args, prepared=None):
+    if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == PAIRED["TRACK"]:
+        return PAIRED["run"](args, globals())
     if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == GROUPED["TRACK"]:
         return GROUPED["run"](args, globals())
     m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root)
@@ -267,7 +273,7 @@ warm_file_enabled = false
                         projection = dict(phase="query", startId=start_id, deliveryOrdinal=ordinal,
                                           currentQuestion=question, expectedMiss=miss)
                     save(args.out / "actor-inputs" / f"step-{ordinal}.json", projection)
-                    child = subprocess.run([sys.executable, str(actor_path), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read)],
+                    child = subprocess.run([sys.executable, str(actor_path), *(["--retrieval-limit", str(m["pairedArm"]["retrievalLimit"])] if "pairedArm" in m else []), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read)],
                         input=encoded(projection), stdout=wire, stderr=actor_log, cwd=root,
                         env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC"),
                         pass_fds=(process.stdin.fileno(), process.stdout.fileno()), timeout=90)
@@ -422,7 +428,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
-    p.add_argument("--track", choices=(TRACK, GROUPED["TRACK"]), default=TRACK)
+    p.add_argument("--track", choices=(TRACK, GROUPED["TRACK"], PAIRED["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)

@@ -1,4 +1,6 @@
 //! Actual evaluator consumer for serialized synthetic MCP episodes. No engine owner.
+#[path = "support/paired_scoring.rs"]
+mod paired_scoring;
 #[path = "support/source_scoring.rs"]
 mod source_scoring;
 use anyhow::{Context, Result, ensure};
@@ -17,6 +19,8 @@ struct Args {
     input: Option<PathBuf>,
     #[arg(long, conflicts_with = "input")]
     grouped_input: Option<PathBuf>,
+    #[arg(long, conflicts_with_all = ["input", "grouped_input"])]
+    paired_input: Option<PathBuf>,
     #[arg(long)]
     out: Option<PathBuf>,
 }
@@ -177,7 +181,7 @@ struct GroupedInput {
     episode_roster: Vec<GroupMember>,
     episodes: Vec<GroupEpisode>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GroupMember {
     episode_id: String,
@@ -225,7 +229,16 @@ fn episode_environment(
         "groupMapSha256":group_hash,"splitMapSha256":split_hash});
     hash((serde_json::to_string_pretty(&context).unwrap() + "\n").as_bytes())
 }
+struct GroupEvaluation {
+    summary: Value,
+    metrics: BTreeMap<String, Vec<Value>>,
+    signatures: BTreeMap<String, Value>,
+    assignments: BTreeMap<String, String>,
+}
 fn score_grouped(input: GroupedInput) -> Result<Value> {
+    Ok(evaluate_grouped(input)?.summary)
+}
+fn evaluate_grouped(input: GroupedInput) -> Result<GroupEvaluation> {
     ensure!(
         input.profile == GROUPED_PROFILE
             && input.group_map_version == 1
@@ -346,6 +359,7 @@ fn score_grouped(input: GroupedInput) -> Result<Value> {
         .keys()
         .map(|g| (g.clone(), Vec::new()))
         .collect();
+    let mut signatures = BTreeMap::new();
     for (identity, episode) in episodes {
         let raw: Episode = serde_json::from_str(&episode.input_json)?;
         ensure!(
@@ -368,6 +382,10 @@ fn score_grouped(input: GroupedInput) -> Result<Value> {
                     .map(String::as_str)
                     .collect::<Vec<_>>(),
             "missing or duplicate scored query"
+        );
+        signatures.insert(
+            identity.clone(),
+            json!({"sourceIds":raw.source_ids,"relevant":raw.relevant,"queryIds":actual_queries}),
         );
         let value = score(raw)?;
         let mut rows = value["trace"]
@@ -433,19 +451,25 @@ fn score_grouped(input: GroupedInput) -> Result<Value> {
                 "scoredGroups":scored.len().to_string(), "unscoredGroups":(summaries.len()-scored.len()).to_string(),
                 "means":means,"allRequiredEvidenceRate":all_required},"groups":summaries}));
     }
-    Ok(
-        json!({"profile":GROUPED_PROFILE,"environmentHash":input.environment_hash,
+    Ok(GroupEvaluation {
+        summary: json!({"profile":GROUPED_PROFILE,"environmentHash":input.environment_hash,
         "groupMapVersion":1,"splitMapVersion":1,"groupMapSha256":input.group_map_sha256,
         "splitMapSha256":input.split_map_sha256,"episodes":roster.len().to_string(),
         "splits":results,"bootstrap":null,"semanticQualityClaim":false}),
-    )
+        metrics,
+        signatures,
+        assignments: splits.groups,
+    })
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     if args.profile {
         ensure!(
-            args.input.is_none() && args.grouped_input.is_none() && args.out.is_none(),
+            args.input.is_none()
+                && args.grouped_input.is_none()
+                && args.paired_input.is_none()
+                && args.out.is_none(),
             "profile mode does not read evaluator files"
         );
         // Read actual provider configuration identity without invoking the provider.
@@ -470,7 +494,9 @@ fn main() -> Result<()> {
         );
         return Ok(());
     }
-    let result = if let Some(path) = args.grouped_input {
+    let result = if let Some(path) = args.paired_input {
+        paired_scoring::score_paired(serde_json::from_slice(&fs::read(path)?)?)?
+    } else if let Some(path) = args.grouped_input {
         score_grouped(serde_json::from_slice(&fs::read(path)?)?)?
     } else {
         score(serde_json::from_slice(&fs::read(
