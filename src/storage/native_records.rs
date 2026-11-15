@@ -30,6 +30,35 @@ pub struct NativeInsert {
     pub embedding_profile: Option<EmbeddingProfile>,
 }
 impl NativeInsert {
+    /// Fresh provider input for the declared recalld-document-v1 recipe.
+    /// Keep caller fields untouched for identity, and perform replay before this.
+    pub(crate) fn document_v1(&self) -> String {
+        use crate::model::constants::{EMOTION_TAG_PREFIX, ENTITY_TAG_PREFIX, TOPIC_TAG_PREFIX};
+        let mut tags: Vec<String> = self.memory.tags.iter().map(ToString::to_string).collect();
+        for (values, prefix) in [
+            (&self.entities, ENTITY_TAG_PREFIX),
+            (&self.topics, TOPIC_TAG_PREFIX),
+            (&self.emotions, EMOTION_TAG_PREFIX),
+        ] {
+            for value in values {
+                let tag = format!("{prefix}{}", value.to_lowercase());
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        let mut text = self.memory.summary.clone();
+        if let Some(full_text) = &self.memory.full_text {
+            text.push_str("\n\n");
+            text.push_str(full_text);
+        }
+        if !tags.is_empty() {
+            text.push(' ');
+            text.push_str(&tags.join(" "));
+        }
+        text
+    }
+
     pub(crate) fn labels(&self) -> StructuredLabels {
         StructuredLabels {
             entities: self.entities.clone(),
@@ -802,11 +831,7 @@ impl super::native_lifecycle::NativeLifecycleSession {
             crate::embedding::runtime::generate_native(
                 provider,
                 &intent.namespace,
-                input
-                    .memory
-                    .full_text
-                    .as_deref()
-                    .unwrap_or(&input.memory.summary),
+                &input.document_v1(),
             )
             .await
             .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?

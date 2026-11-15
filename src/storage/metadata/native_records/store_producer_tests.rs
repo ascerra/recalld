@@ -1382,3 +1382,117 @@ async fn native_document_recipe_export_old_fixture() {
     let _root = f.close();
     crate::storage::logical_export::export_store(&d.path, &output.join("store.jsonl")).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_old_receipts_replay_without_provider_or_rewriting() {
+    let root = tempfile::tempdir().unwrap();
+    let export = root.path().join("old.jsonl");
+    std::fs::write(
+        &export,
+        include_bytes!("fixtures/document-recipe-legacy.jsonl"),
+    )
+    .unwrap();
+    let path = root.path().join("imported");
+    crate::storage::logical_export::import_store(&export, &path).unwrap();
+    let historical: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "fixtures/document-recipe-legacy-receipts.json"
+    ))
+    .unwrap();
+    let d = Data {
+        path,
+        ns: serde_json::from_value(historical["namespaceId"].clone()).unwrap(),
+        parent: serde_json::from_value(historical["parent"].clone()).unwrap(),
+        profile: serde_json::from_value(historical["profile"].clone()).unwrap(),
+    };
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    let a = adapter(&f, p.clone(), clock.clone(), config);
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let rows = receipt_rows(&f);
+    let original: WriteReceipt = serde_json::from_value(historical["single"].clone()).unwrap();
+    let result = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "document-single"),
+            document_recipe_input(&d),
+            None,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.receipt, expected_replay(&original));
+    let mut batch = request(&f, "document-batch");
+    batch.items = vec![json!({"summary":"header", "fullText":"body",
+        "tags":["raw", "entity/alice", "raw"], "entities":["Alice", "Bob"],
+        "topics":["Rust"], "emotions":["Calm"]})];
+    let result = a.run_batch(batch).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    let child: WriteReceipt =
+        serde_json::from_value(historical["batch"]["items"][0]["receipt"].clone()).unwrap();
+    assert_eq!(result.items[0].receipt, Some(expected_replay(&child)));
+    assert_eq!(receipt_rows(&f), rows);
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert!(p.texts.lock().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_offline_actual_api1_and_api2() {
+    for api in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let d = fixture(root.path());
+        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+        let mut session = open(&d, clock);
+        let p = provider(&d);
+        let mut key = ctx(&session, &d, "offline-document");
+        key.contract_version = api;
+        let mut input = document_recipe_input(&d).insert;
+        input.memory.full_text = None;
+        input.entities.push("José".into());
+        let receipt = session
+            .insert_generated(&key, scope(&d), &input, p.as_ref())
+            .await
+            .unwrap();
+        assert!(matches!(
+            receipt.outcome,
+            MutationOutcome::NativeMemoryInserted { .. }
+        ));
+        assert_eq!(
+            *p.texts.lock().unwrap(),
+            vec!["header raw entity/alice raw entity/bob entity/josé topic/rust emotion/calm"]
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_plain_batch_with_explicit_auxiliary_disable() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.autolink_enabled = false;
+    let a = adapter(&f, p.clone(), clock, config);
+    let mut input = request(&f, "plain-document-batch");
+    input.mutation_version = 2;
+    input.items = vec![json!({"summary":"header", "fullText":"body",
+        "tags":["raw", "entity/alice", "raw"], "entities":["Alice", "Bob"],
+        "topics":["Rust"], "emotions":["Calm"], "checkDuplicates":false})];
+    let result = a.run_batch(input).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    assert_eq!(
+        *p.texts.lock().unwrap(),
+        vec!["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
+    );
+}

@@ -58,12 +58,7 @@ impl McpStorageAdapter {
                 crate::embedding::runtime::generate_native(
                     self.embedding.as_ref(),
                     &intent.insert_intent().namespace,
-                    input
-                        .insert
-                        .memory
-                        .full_text
-                        .as_deref()
-                        .unwrap_or(&input.insert.memory.summary),
+                    &input.insert.document_v1(),
                 )
                 .await
                 .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?
