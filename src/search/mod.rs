@@ -48,12 +48,14 @@ pub use entity_normalize::canonicalize_entity;
 pub use error::SearchError;
 pub use pipeline::{
     AccessRecorder, ChannelDiagnostics, ChannelParticipation, CoherentGetResponse,
-    CoherentSearchResponse, CoherentSimilarResponse, EmbeddingProviderRegistry, EntityIndexReader,
-    EntityRecallResult, FtsAvailability, FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader,
-    MetadataStore, NamespaceResolver, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
-    RetrievalSemantics, RifProcessor, RifSuppression, ScoredResult, SemanticsDiagnostics,
-    SemanticsResponse, StrengthDiagnostics, UnresolvedReason, VectorIndexRegistry, VersionMode,
-    VersionStatus,
+    CoherentSearchResponse, CoherentSimilarResponse, DirectScoreEvidence,
+    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, FtsAvailability,
+    FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, InheritedScoreExplanation,
+    MAX_EXPLANATION_SOURCES, MetadataStore, MinScoreDisposition, NamespaceResolver,
+    OwnScoreExplanation, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
+    RetrievalSemantics, RifProcessor, RifSuppression, ScoreExplanation, ScoreFormula, ScoredResult,
+    SemanticsDiagnostics, SemanticsResponse, StrengthDiagnostics, UnresolvedReason,
+    VectorIndexRegistry, VersionMode, VersionStatus,
 };
 pub(crate) use pipeline::{SimilarityScope, SimilaritySelection};
 pub use query::SearchFilter as PipelineSearchFilter;

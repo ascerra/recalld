@@ -19,6 +19,12 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 
 #[path = "diagnostics.rs"]
 mod diagnostics;
+#[path = "explanation.rs"]
+mod explanation;
+pub use explanation::{
+    DirectScoreEvidence, InheritedScoreExplanation, MAX_EXPLANATION_SOURCES, MinScoreDisposition,
+    OwnScoreExplanation, ScoreExplanation, ScoreFormula,
+};
 #[path = "payload_selection.rs"]
 mod payload_selection;
 #[path = "similar_selection.rs"]
@@ -50,6 +56,9 @@ mod strength_tests;
 pub use diagnostics::{
     ChannelDiagnostics, ChannelParticipation, ResultProvenance, RetrievalChannel,
 };
+#[cfg(test)]
+#[path = "explanation_tests.rs"]
+mod explanation_tests;
 #[cfg(test)]
 #[path = "semantics_tests.rs"]
 mod semantics_tests;
@@ -456,6 +465,11 @@ struct Candidate {
     seed_score: f32,
     /// Diagnostic evidence only; never read by ranking or source selection.
     provenance: ResultProvenance,
+    score_explanation: Option<OwnScoreExplanation>,
+    rejected_direct: Option<DirectScoreEvidence>,
+    // Deduplicate actual admitted origins across version-resolution passes.
+    // The response projection bounds details; this map is not a 64-entry cap.
+    inherited_score_sources: std::collections::BTreeMap<MemoryId, OwnScoreExplanation>,
 }
 
 impl Candidate {
@@ -474,6 +488,9 @@ impl Candidate {
             graph_depth: None,
             seed_score: 0.0,
             provenance: ResultProvenance::default(),
+            score_explanation: None,
+            rejected_direct: None,
+            inherited_score_sources: Default::default(),
         }
     }
 }
@@ -1054,7 +1071,7 @@ impl QueryEngine {
             // -- Stage 8: Composite Score + Boosts + Sort ----------------------
             let stage_start = Instant::now();
             total_matches = candidates.len();
-            self.apply_boosts(&mut candidates, &query);
+            self.apply_boosts(&mut candidates, &query, false);
 
             // UUID ties make scan/cache insertion order irrelevant.
             candidates.sort_by(|a, b| {
@@ -1341,9 +1358,26 @@ impl QueryEngine {
     }
 
     /// Stage 8: Compute composite scores and apply temporal boost.
-    fn apply_boosts(&self, candidates: &mut Vec<Candidate>, query: &SearchQuery) {
+    fn apply_boosts(&self, candidates: &mut Vec<Candidate>, query: &SearchQuery, explain: bool) {
         for candidate in candidates.iter_mut() {
-            candidate.composite_score = Self::compute_composite_score(candidate);
+            let (formula, fts_signal, base_score) = Self::compute_composite_score(candidate);
+            candidate.composite_score = base_score;
+            if explain {
+                candidate.score_explanation = Some(OwnScoreExplanation {
+                    formula,
+                    direct: DirectScoreEvidence::capture(candidate, query.min_score),
+                    entity_overlap: candidate.entity_score,
+                    entity_recall: candidate.entity_recall_score,
+                    fts_signal,
+                    raw_retrievability: candidate.record.strength,
+                    effective_retrievability: candidate.effective_r,
+                    activation: candidate.activation_score,
+                    activation_depth: candidate.activation_score.and(candidate.graph_depth),
+                    base_score,
+                    temporal_factor: 1.0,
+                    score: base_score,
+                });
+            }
         }
 
         // Temporal boost: Gaussian falloff centered on the query's time range.
@@ -1357,6 +1391,10 @@ impl QueryEngine {
                 let distance = (candidate.record.created_at as f64 - range_mid).abs();
                 let boost = 1.0 + 0.5 * (-0.5 * (distance / sigma).powi(2)).exp();
                 candidate.composite_score *= boost as f32;
+                if let Some(evidence) = &mut candidate.score_explanation {
+                    evidence.temporal_factor = boost as f32;
+                    evidence.score = candidate.composite_score;
+                }
             }
         }
     }
@@ -2165,7 +2203,7 @@ impl QueryEngine {
 
     /// Compute the final composite ranking score.
     ///
-    fn compute_composite_score(candidate: &Candidate) -> f32 {
+    fn compute_composite_score(candidate: &Candidate) -> (ScoreFormula, f32, f32) {
         const FTS_COMPOSITE_THRESHOLD: f32 = 0.5;
 
         const ACTIVATION_WEIGHT: f32 = 0.70;
@@ -2181,20 +2219,29 @@ impl QueryEngine {
             _ => 0.0,
         };
 
-        match candidate.relevance_score {
-            Some(rel) => 0.90 * rel + 0.05 * candidate.entity_score + 0.05 * fts_signal,
+        let (formula, score) = match candidate.relevance_score {
+            Some(rel) => (
+                ScoreFormula::Direct,
+                0.90 * rel + 0.05 * candidate.entity_score + 0.05 * fts_signal,
+            ),
             None if candidate.activation_score.is_some() => {
                 let activation = candidate.activation_score.unwrap();
-                ACTIVATION_WEIGHT * activation + ACTIVATION_ENTITY_WEIGHT * candidate.entity_score
+                (
+                    ScoreFormula::Graph,
+                    ACTIVATION_WEIGHT * activation
+                        + ACTIVATION_ENTITY_WEIGHT * candidate.entity_score,
+                )
             }
-            None if candidate.entity_recall_score > 0.0 => {
+            None if candidate.entity_recall_score > 0.0 => (
+                ScoreFormula::EntityRecall,
                 ENTITY_RECALL_WEIGHT * candidate.entity_recall_score
                     + ENTITY_RECALL_ENTITY_WEIGHT * candidate.entity_score
                     + ENTITY_RECALL_R_WEIGHT * candidate.effective_r
-                    + ENTITY_RECALL_FTS_WEIGHT * fts_signal
-            }
-            None => candidate.effective_r * 0.1,
-        }
+                    + ENTITY_RECALL_FTS_WEIGHT * fts_signal,
+            ),
+            None => (ScoreFormula::Metadata, candidate.effective_r * 0.1),
+        };
+        (formula, fts_signal, score)
     }
 
     /// Assemble SearchResult structs from ranked candidates.
