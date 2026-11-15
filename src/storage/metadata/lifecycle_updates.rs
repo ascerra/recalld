@@ -236,7 +236,7 @@ impl MetadataStore {
     ) -> Result<DecayMutationResult, StorageError> {
         guard.check(self)?;
         ctx.validate()?;
-        if ctx.contract_version != 1 || ctx.scope != MutationScope::Namespace(namespace.id) {
+        if ctx.scope != MutationScope::Namespace(namespace.id) {
             return Err(StorageError::InvalidMutationContext(
                 "legacy maintenance requires matching namespace scope".into(),
             ));
@@ -288,6 +288,7 @@ impl MetadataStore {
                 before: &before,
                 after: &after,
             },
+            None,
         )
         .map(|result| DecayMutationResult::Committed(result.receipt))
     }

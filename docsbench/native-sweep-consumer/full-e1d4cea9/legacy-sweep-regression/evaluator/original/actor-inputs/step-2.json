@@ -1,0 +1,10 @@
+{
+  "currentQuestion": {
+    "queryId": "warm",
+    "text": "chronological-sweep"
+  },
+  "deliveryOrdinal": 2,
+  "expectedMiss": false,
+  "phase": "query",
+  "startId": 8
+}

@@ -1,0 +1,12 @@
+{
+  "mergeCommit": "3e23717fe9ee49d6dd33d7498a4e174e11e8274e",
+  "parents": [
+    "0084ad30d768747b13c2815d838be8f0feaee284",
+    "534d9be9c4df54a95b5fca440f163b4a703a3238"
+  ],
+  "excluded102Ancestor": true,
+  "conflictRecordSha256": "3a4ef9d095e1fae2e6aa316c935bde8e3ba5753922f2def34c3f56ae64da57f9",
+  "resolutionPatchSha256": "3167eeb371d1f838e8c22183684e986878fffdfc3a4294d2fae4834c6b157c1f",
+  "initialMeasuredSource": "c8f126bd0d737106d0c4aedd65c521a460cc2125",
+  "sourceCommit": "c2ddf67605a1d6f3b9956fb4a67a0f40db0168a1"
+}

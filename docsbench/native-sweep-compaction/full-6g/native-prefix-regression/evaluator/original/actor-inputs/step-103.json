@@ -1,0 +1,17 @@
+{
+  "currentAction": {
+    "arguments": {
+      "compact": false,
+      "depth": 0,
+      "limit": 3,
+      "namespace": "default",
+      "query": "beta",
+      "recordAccess": false
+    },
+    "tag": "query:q1",
+    "tool": "recall_memories"
+  },
+  "deliveryOrdinal": 103,
+  "phase": "action",
+  "startId": 103
+}

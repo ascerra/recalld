@@ -1,0 +1,13 @@
+{
+  "currentAction": {
+    "arguments": {
+      "namespace": "default",
+      "query": "beta"
+    },
+    "tag": "omitted-search-access",
+    "tool": "recall_memories"
+  },
+  "deliveryOrdinal": 109,
+  "phase": "action",
+  "startId": 109
+}

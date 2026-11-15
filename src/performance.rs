@@ -4,15 +4,96 @@
 //! Ordinary writer I/O errors cannot replace domain outcomes. Subscriber panics
 //! are not caught: no unwind-safety guarantee is made for arbitrary subscribers.
 use std::future::Future;
+use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 static NEXT_TRACE: AtomicU64 = AtomicU64::new(1);
 use tracing::Instrument;
 
-pub(crate) fn enabled() -> bool {
+// A root decision lives on the polling task, including cancellation drops. The
+// same Copy value is carried into blocking workers with sync_scope; no Arc/box.
+tokio::task_local! { static REQUEST: Decision; }
+#[derive(Clone, Copy)]
+struct Decision {
+    selected: bool,
+    every: u64,
+    root_ordinal: u64,
+    sampled_roots_seen: u64,
+}
+struct Sampler {
+    every: Option<NonZeroU64>,
+    roots: AtomicU64,
+    selected: AtomicU64,
+}
+impl Sampler {
+    fn new(every: Option<NonZeroU64>) -> Self {
+        Self {
+            every,
+            roots: AtomicU64::new(0),
+            selected: AtomicU64::new(0),
+        }
+    }
+    fn decide(&self) -> Decision {
+        let root_ordinal = self.roots.fetch_add(1, Ordering::Relaxed) + 1;
+        let every = self.every.map_or(0, NonZeroU64::get);
+        let selected = every != 0 && selected(root_ordinal, every);
+        let sampled_roots_seen = if selected {
+            self.selected.fetch_add(1, Ordering::Relaxed) + 1
+        } else {
+            0
+        };
+        Decision {
+            selected,
+            every,
+            root_ordinal,
+            sampled_roots_seen,
+        }
+    }
+}
+// Fixed SplitMix64 permutation avoids cadence aliasing with periodic workloads.
+// This is deterministic sequence sampling, not random traffic/quality evidence.
+fn selected(ordinal: u64, every: u64) -> bool {
+    let mut z = ordinal.wrapping_add(0x9e3779b97f4a7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    ((z ^ (z >> 31)) % every) == 0
+}
+fn parse_rate(value: Option<&str>) -> Option<NonZeroU64> {
+    value.unwrap_or("1").parse::<NonZeroU64>().ok()
+}
+fn sampler() -> &'static Sampler {
+    static SAMPLER: OnceLock<Sampler> = OnceLock::new();
+    SAMPLER.get_or_init(|| {
+        // Read once, only when tracing is enabled. Invalid values disable this
+        // instrumentation, never change a domain result or silently select full.
+        let rate = match std::env::var("RECALLD_PERFORMANCE_SAMPLE_EVERY") {
+            Ok(value) => parse_rate(Some(&value)),
+            Err(std::env::VarError::NotPresent) => parse_rate(None),
+            Err(_) => None,
+        };
+        Sampler::new(rate)
+    })
+}
+fn target_enabled() -> bool {
     tracing::enabled!(target: "recalld::performance", tracing::Level::TRACE)
 }
+pub(crate) fn enabled() -> bool {
+    REQUEST
+        .try_with(|d| d.selected)
+        .unwrap_or_else(|_| target_enabled())
+}
+// Gate before evaluating fields, not only inside the tracing subscriber. All
+// performance events, including counters outside Timer, must use this gate.
+macro_rules! event {
+    ($($fields:tt)*) => {
+        if $crate::performance::enabled() {
+            tracing::trace!(target: "recalld::performance", $($fields)*);
+        }
+    };
+}
+pub(crate) use event;
 
 pub(crate) struct Timer {
     stage: &'static str,
@@ -27,8 +108,12 @@ impl Timer {
     }
     fn end(&mut self, outcome: &'static str) {
         if let Some(start) = self.start.take() {
-            tracing::trace!(target: "recalld::performance", kind = "duration",
-                stage = self.stage, outcome, elapsed_ns = start.elapsed().as_nanos() as u64);
+            crate::performance::event!(
+                kind = "duration",
+                stage = self.stage,
+                outcome,
+                elapsed_ns = start.elapsed().as_nanos() as u64
+            );
         }
     }
     pub fn outcome(mut self, success: bool) {
@@ -66,8 +151,7 @@ impl Timeline {
             let elapsed = now.duration_since(last).as_nanos() as u64;
             self.accounted += elapsed;
             self.last = Some(now);
-            tracing::trace!(target: "recalld::performance", kind = "exclusive_pipeline",
-                stage, elapsed_ns = elapsed);
+            crate::performance::event!(kind = "exclusive_pipeline", stage, elapsed_ns = elapsed);
         }
     }
 }
@@ -75,9 +159,11 @@ impl Drop for Timeline {
     fn drop(&mut self) {
         self.mark("residual");
         if let (Some(start), Some(end)) = (self.start, self.last) {
-            tracing::trace!(target: "recalld::performance", kind = "pipeline_accounting",
+            crate::performance::event!(
+                kind = "pipeline_accounting",
                 elapsed_ns = end.duration_since(start).as_nanos() as u64,
-                accounted_ns = self.accounted);
+                accounted_ns = self.accounted
+            );
         }
     }
 }
@@ -89,22 +175,54 @@ pub(crate) async fn measure<T, E>(
     record_access: bool,
     future: impl Future<Output = Result<T, E>>,
 ) -> Result<T, E> {
-    let trace_id = if enabled() {
-        NEXT_TRACE.fetch_add(1, Ordering::Relaxed)
-    } else {
-        0
-    };
-    async move {
-        let mut timer = Timer::new(operation);
-        let result = future.await;
-        timer.end(if result.is_ok() { "ok" } else { "error" });
-        result
+    measure_with_sampler(operation, record_access, future, None).await
+}
+
+async fn measure_with_sampler<T, E>(
+    operation: &'static str,
+    record_access: bool,
+    future: impl Future<Output = Result<T, E>>,
+    sampler_override: Option<&Sampler>,
+) -> Result<T, E> {
+    let decision = REQUEST.try_with(|d| *d).unwrap_or_else(|_| {
+        if target_enabled() {
+            sampler_override.unwrap_or_else(|| sampler()).decide()
+        } else {
+            Decision {
+                selected: false,
+                every: 0,
+                root_ordinal: 0,
+                sampled_roots_seen: 0,
+            }
+        }
+    });
+    if !decision.selected {
+        return REQUEST.scope(decision, future).await;
     }
-    .instrument(
+    let trace_id = NEXT_TRACE.fetch_add(1, Ordering::Relaxed);
+    // Full trace keeps its original event-v1 span fields. Sampled traces have
+    // version 2 and explicit root-level counts (not whole-population metrics).
+    let span = if decision.every == 1 {
         tracing::trace_span!(target: "recalld::performance", "performance_request",
-        operation, record_access, trace_id, event_version = 1),
-    )
-    .await
+            operation, record_access, trace_id, event_version = 1)
+    } else {
+        tracing::trace_span!(target: "recalld::performance", "performance_request",
+            operation, record_access, trace_id, event_version = 2,
+            sample_every = decision.every, root_ordinal = decision.root_ordinal,
+            sampled_roots_seen = decision.sampled_roots_seen)
+    };
+    REQUEST
+        .scope(
+            decision,
+            async move {
+                let mut timer = Timer::new(operation);
+                let result = future.await;
+                timer.end(if result.is_ok() { "ok" } else { "error" });
+                result
+            }
+            .instrument(span),
+        )
+        .await
 }
 
 /// Canonical receipt identities are isolated trace fields, never metric labels.
@@ -112,7 +230,7 @@ pub(crate) async fn measure<T, E>(
 pub(crate) fn receipts(receipts: &[crate::storage::control::WriteReceipt]) {
     if enabled() {
         for receipt in receipts {
-            tracing::trace!(target: "recalld::performance", kind = "committed_receipt",
+            crate::performance::event!( kind = "committed_receipt",
                 store_id = %receipt.store_id, operation_id = %receipt.operation_id,
                 committed_generation = receipt.committed_generation.get());
         }
@@ -124,6 +242,7 @@ pub(crate) fn receipts(receipts: &[crate::storage::control::WriteReceipt]) {
 pub(crate) struct Worker {
     context: Option<(tracing::Dispatch, tracing::Span)>,
     queued: Timer,
+    decision: Option<Decision>,
 }
 impl Worker {
     pub fn new(stage: &'static str) -> Self {
@@ -138,11 +257,19 @@ impl Worker {
             stage,
             start: context.as_ref().map(|_| Instant::now()),
         };
-        Self { context, queued }
+        Self {
+            context,
+            queued,
+            decision: REQUEST.try_with(|d| *d).ok(),
+        }
     }
     pub fn run<T>(self, work: impl FnOnce() -> T) -> T {
-        let Self { context, queued } = self;
-        match context {
+        let Self {
+            context,
+            queued,
+            decision,
+        } = self;
+        let run = || match context {
             Some((dispatch, span)) => tracing::dispatcher::with_default(&dispatch, || {
                 span.in_scope(|| {
                     queued.complete();
@@ -150,6 +277,10 @@ impl Worker {
                 })
             }),
             None => work(),
+        };
+        match decision {
+            Some(decision) => REQUEST.sync_scope(decision, run),
+            None => run(),
         }
     }
 }
@@ -188,4 +319,4 @@ impl<G> Drop for Hold<G> {
 
 #[cfg(test)]
 #[path = "performance_tests.rs"]
-mod tests;
+pub(crate) mod tests;

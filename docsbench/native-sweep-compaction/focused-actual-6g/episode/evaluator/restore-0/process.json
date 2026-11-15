@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/episode/runtime/config.toml",
+    "--data-root",
+    "/output/episode/runtime/restore-0",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--restore-checkpoint",
+    "/output/episode/runtime/recalld-frozen-canonical-HcTwOs/manifest.json",
+    "--checkpoint-sha256",
+    "606810aa4e1ecc6fec112b6d88405a90f433d6a3b35a5acbdcae8e369f451e1c"
+  ],
+  "exitCode": 0,
+  "forced": false,
+  "negativeConstructorProbe": false,
+  "pid": 1254,
+  "priorJoined": true,
+  "status": "joined"
+}

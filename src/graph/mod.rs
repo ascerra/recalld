@@ -12,6 +12,7 @@
 pub mod activation;
 pub mod autolink;
 pub mod explicit_links;
+pub(crate) mod native_selection;
 pub mod query;
 pub mod rebuild;
 mod structure;
@@ -77,3 +78,7 @@ use tokio::sync::RwLock;
 /// but the async compatibility is required by CS-04's decay sweep and
 /// other async consumers.
 pub type SharedGraph = Arc<RwLock<RelationshipGraph>>;
+
+pub(crate) use autolink::{
+    perform_autolink_with_work, perform_entity_link_with_work, perform_temporal_link_with_work,
+};
