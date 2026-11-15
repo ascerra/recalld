@@ -144,10 +144,46 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
                 .join("tests/fixtures/native-api1-batch-before158");
             extracted = tempfile::tempdir().unwrap();
             let source = extracted.path().join("source");
-            zip::ZipArchive::new(std::fs::File::open(artifact.join("store.zip")).unwrap())
-                .unwrap()
-                .extract(&source)
-                .unwrap();
+            let archive = artifact.join("store.zip");
+            assert!(std::fs::metadata(&archive).unwrap().len() <= 2 * 1024 * 1024);
+            let provenance: Value =
+                serde_json::from_slice(&std::fs::read(artifact.join("PROVENANCE.json")).unwrap())
+                    .unwrap();
+            let expected = provenance["store_files_sha256"].as_object().unwrap();
+            let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
+            assert_eq!(zip.len(), expected.len());
+            assert!(zip.len() <= 16);
+            let mut total = 0_u64;
+            let mut seen = std::collections::BTreeSet::new();
+            for n in 0..zip.len() {
+                let file = zip.by_index(n).unwrap();
+                assert!(file.enclosed_name().is_some());
+                assert!(file.name().len() <= 256);
+                assert!(!file.is_dir());
+                assert!(file.unix_mode().is_none_or(|m| m & 0o170000 != 0o120000));
+                assert!(expected.contains_key(file.name()));
+                assert!(seen.insert(file.name().to_owned()));
+                total = total.checked_add(file.size()).unwrap();
+                assert!(total <= 8 * 1024 * 1024);
+            }
+            zip.extract(&source).unwrap();
+            use sha2::Digest;
+            assert_eq!(
+                format!(
+                    "{:x}",
+                    sha2::Sha256::digest(std::fs::read(archive).unwrap())
+                ),
+                provenance["archive_sha256"].as_str().unwrap()
+            );
+            for (name, hash) in expected {
+                assert_eq!(
+                    format!(
+                        "{:x}",
+                        sha2::Sha256::digest(std::fs::read(source.join(name)).unwrap())
+                    ),
+                    hash.as_str().unwrap()
+                );
+            }
             (artifact, source)
         }
     };
