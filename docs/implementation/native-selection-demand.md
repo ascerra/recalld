@@ -42,3 +42,9 @@ global payload integrity scan.
 Use one owned cache/target, network-none Docker Rust1.94.1, 2CPU/4GiB/jobs2.
 This worktree's new `.validation` is active; old released scratch is never reused.
 Central cleanup alone deletes completed raw runs after PR/results handoff.
+
+Final source `6b7f0765572caa3ab69a1886357d1a741dcac1cc`: 9 focused tests,
+1,336 library tests and 2 CLI tests pass; fmt/clippy exit0. See the
+[sealed report](../evidence/native-selection-demand/REPORT.md) for corrected
+BEFORE attribution, ignored tests, exact commands and source/binary manifests.
+This remains a local review handoff, not a publication or activation claim.
