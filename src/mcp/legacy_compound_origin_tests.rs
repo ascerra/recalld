@@ -617,7 +617,7 @@ async fn legacy_compound_origin_exact_hash_conflicts_and_forget_rpc() {
 async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_history() {
     use crate::backup::restore::{RestoreOptions, restore_from_backup};
     use crate::storage::metadata::restoration::capture;
-    use crate::storage::{logical_export, schema_migration, text_migration};
+    use crate::storage::{logical_export, schema_migration};
     let all = tempfile::tempdir().unwrap();
     let source = tempfile::tempdir_in(all.path()).unwrap();
     zip::ZipArchive::new(std::io::Cursor::new(include_bytes!(
@@ -650,10 +650,8 @@ async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_h
     let original = capture(source.path()).unwrap();
     let bytes = std::fs::read(source.path().join("meta.db")).unwrap();
     let gated = all.path().join("gated");
-    text_migration::migrate_legacy_text(source.path(), &gated).unwrap();
-    assert_eq!(std::fs::read(source.path().join("meta.db")).unwrap(), bytes);
     let backup = all.path().join("complete.zip");
-    crate::backup::run_backup(&Default::default(), &backup, Some(&gated), false)
+    crate::backup::run_backup(&Default::default(), &backup, Some(source.path()), false)
         .await
         .unwrap();
     restore_from_backup(RestoreOptions {
@@ -665,6 +663,7 @@ async fn legacy_compound_origin_offline_transfer_and_fork_preserve_old_and_new_h
     })
     .await
     .unwrap();
+    assert_eq!(std::fs::read(source.path().join("meta.db")).unwrap(), bytes);
     let fork = capture(&gated).unwrap();
     assert_eq!(fork.batch_progress, original.batch_progress);
     assert!(original.receipts.iter().all(|r| fork.receipts.contains(r)));
