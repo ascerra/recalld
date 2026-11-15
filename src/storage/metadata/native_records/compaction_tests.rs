@@ -237,6 +237,72 @@ async fn compaction_caller_retains_receipt_on_real_publication_failure_and_repai
     assert_eq!(repaired.canonical, state.canonical);
 }
 
+#[tokio::test]
+async fn compaction_prior_phase_failure_keeps_receipt_and_allocates_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let engine =
+        RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([21; 32])))
+            .unwrap();
+    let f = crate::test_support::Fixture::from_open_engine(root, engine);
+    let c = completion(&f);
+    c.complete().await.unwrap();
+    let prior = {
+        let mut engine = f.storage.write().unwrap();
+        let policy = NativePolicyInputs::default();
+        let intent = engine
+            .meta_store()
+            .capture_native_decay(d.parent, d.ns, &policy, 10_000 * 86_400_000_i64)
+            .unwrap();
+        let ctx = MutationContext {
+            store_id: Some(engine.control_state().unwrap().store_id),
+            scope: MutationScope::Namespace(d.ns),
+            idempotency_key: Some("prior-phase".into()),
+            expected_generation: None,
+            contract_version: 2,
+        };
+        let crate::storage::native_maintenance::NativeDecayResult::Committed(receipt) = engine
+            .apply_native_decay(&ctx, &intent, &policy, None)
+            .unwrap()
+        else {
+            panic!()
+        };
+        receipt
+    };
+    let (before, ids, selected) = {
+        let engine = f.storage.read().unwrap();
+        (
+            engine.control_state().unwrap(),
+            engine.meta_store().id_source().checkpoint().unwrap(),
+            engine.meta_store().text_selection().unwrap(),
+        )
+    };
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(5);
+    let error = c.compact_text_with_work(None).await.unwrap_err();
+    let StorageError::CommittedMutation { receipt, .. } = error else {
+        panic!("{error}")
+    };
+    assert_eq!(*receipt, prior);
+    {
+        let engine = f.storage.read().unwrap();
+        assert_eq!(engine.control_state().unwrap(), before);
+        assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
+        assert_eq!(engine.meta_store().text_selection().unwrap(), selected);
+    }
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    c.complete().await.unwrap();
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+    let result = c.compact_text_with_work(None).await.unwrap();
+    assert_eq!(
+        result.receipt.committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    assert!(matches!(
+        result.receipt.outcome,
+        MutationOutcome::NativeTextGenerationSelected { .. }
+    ));
+}
+
 async fn fork(root: &Path) -> PathBuf {
     let d = fixture(root);
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));

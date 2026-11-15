@@ -28,6 +28,7 @@ if mode != 'before':
     cmd += ['--mount','type=bind,src=/tmp/recalld-native-text-compaction-validation/before-corrected/output/legacy-before,dst=/before-compaction,readonly','-e','RECALLD_COMPACTION_BEFORE_INPUT=/before-compaction']
 script='''set -eu
 mkdir -p /tmp/home
+trap 'sha256sum -c /work/output/source.sha256 --quiet > /work/output/source-after.txt; cat /sys/fs/cgroup/memory.events > /work/output/memory-events.txt; cat /sys/fs/cgroup/memory.peak > /work/output/memory-peak.txt' EXIT
 sha256sum -c /work/output/source.sha256 --quiet
 rustc -Vv > /work/output/rustc.txt
 cargo clean -p recalld > /work/output/clean.log 2>&1
@@ -52,6 +53,8 @@ cat /sys/fs/cgroup/memory.peak > /work/output/memory-peak.txt
 '''
 if mode != 'before':
     script += 'test "$result" -eq 0\n'
+    script += '/work/output/recalld-test --exact producer_work_tests::sweep_publication_failure_preserves_receipt_and_can_repair_without_reopen --nocapture > /work/output/prior-deletion.log 2>&1\n'
+    script += '/work/output/recalld-test --exact storage::maintenance_tests::actual_manual_sweep_awaits_publication_and_keeps_receipt_on_failure --nocapture > /work/output/prior-phase.log 2>&1\n'
 if mode == 'full':
     cmd += ['--mount','type=bind,src=/tmp/recalld-native-context-validation/before/fixtures,dst=/before-context,readonly','--mount','type=bind,src=/tmp/recalld-native-context-validation/before/target/debug/deps/recalld-b2844bb1c4a63074,dst=/old/context-test,readonly','-e','RECALLD_CONTEXT_BEFORE_FIXTURES=/before-context','-e','RECALLD_CONTEXT_OLD_TEST_BINARY=/old/context-test']
     script += 'cargo fmt --all --check > /work/output/fmt.log 2>&1\n'
