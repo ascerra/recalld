@@ -489,6 +489,7 @@ struct Candidate {
     /// Diagnostic evidence only; never read by ranking or source selection.
     provenance: ResultProvenance,
     score_explanation: Option<OwnScoreExplanation>,
+    applied_rif_multiplier: f32,
     rejected_direct: Option<DirectScoreEvidence>,
     // Deduplicate actual admitted origins across version-resolution passes.
     // The response projection bounds details; this map is not a 64-entry cap.
@@ -512,6 +513,7 @@ impl Candidate {
             seed_score: 0.0,
             provenance: ResultProvenance::default(),
             score_explanation: None,
+            applied_rif_multiplier: 1.0,
             rejected_direct: None,
             inherited_score_sources: Default::default(),
         }
@@ -1401,6 +1403,7 @@ impl QueryEngine {
                     fts_signal,
                     raw_retrievability: candidate.record.strength,
                     effective_retrievability: candidate.effective_r,
+                    rif_multiplier: candidate.applied_rif_multiplier,
                     activation: candidate.activation_score,
                     activation_depth: candidate.activation_score.and(candidate.graph_depth),
                     base_score,

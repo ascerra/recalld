@@ -67,6 +67,46 @@ fn hit(r: &SemanticsResponse, id: u128) -> &SearchResult {
         .unwrap()
 }
 
+fn assert_applied_explanations(result: &SemanticsResponse, mode: RifMode) {
+    for row in &result.response.results {
+        let e = result.diagnostics.provenance.as_ref().unwrap()[&row.memory_id]
+            .explanation
+            .as_ref()
+            .unwrap();
+        let applied = if mode == RifMode::Experimental {
+            result
+                .diagnostics
+                .rif
+                .as_ref()
+                .unwrap()
+                .returned_multipliers[&row.memory_id]
+        } else {
+            1.0
+        };
+        assert_eq!(e.rif_multiplier, applied);
+        assert_eq!(e.effective_retrievability, row.effective_r);
+        if let Some(own) = e.own {
+            assert_eq!(own.rif_multiplier, applied);
+            assert_eq!(own.effective_retrievability, row.effective_r);
+        }
+        let own = e
+            .own
+            .as_ref()
+            .map_or(0.0, super::explanation_tests::reconstruct);
+        let inherited = e
+            .inherited_sources
+            .iter()
+            .map(|source| {
+                assert!((0.75..=1.0).contains(&source.own.rif_multiplier));
+                super::explanation_tests::reconstruct(&source.own)
+            })
+            .fold(0.0, f32::max);
+        assert_eq!(inherited, e.inherited_floor.unwrap_or(0.0));
+        assert_eq!(own.max(inherited), e.final_score);
+        assert_eq!(Some(e.final_score), row.composite_score);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rif_explanations_follow_applied_own_and_inherited_scores() {
     let mut records: Vec<_> = (1..=3).map(|i| rec(mid(i))).collect();
@@ -123,6 +163,7 @@ async fn rif_explanations_follow_applied_own_and_inherited_scores() {
             "returned record applied multiplier"
         );
         let own = e.own.unwrap();
+        assert_eq!(own.rif_multiplier, applied);
         assert_eq!(own.formula, ScoreFormula::Metadata);
         assert_eq!(own.effective_retrievability, row.effective_r);
         assert_eq!(own.temporal_factor, 1.5);
@@ -142,6 +183,15 @@ async fn rif_explanations_follow_applied_own_and_inherited_scores() {
     let donor = &e.inherited_sources[0];
     assert_eq!(donor.source, mid(1));
     assert_eq!(
+        donor.own.rif_multiplier,
+        history
+            .diagnostics
+            .rif
+            .as_ref()
+            .unwrap()
+            .returned_multipliers[&mid(1)]
+    );
+    assert_eq!(
         donor.own.effective_retrievability,
         hit(&history, 1).effective_r
     );
@@ -152,6 +202,10 @@ async fn rif_explanations_follow_applied_own_and_inherited_scores() {
     assert_eq!(e.inherited_floor, Some(donor.own.score));
     assert_eq!(e.final_score, e.own.unwrap().score.max(donor.own.score));
     assert_eq!(Some(e.final_score), hit(&current, 2).composite_score);
+    assert_applied_explanations(&off, RifMode::Off);
+    assert_applied_explanations(&shadow, RifMode::Shadow);
+    assert_applied_explanations(&history, RifMode::Experimental);
+    assert_applied_explanations(&current, RifMode::Experimental);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -454,6 +508,9 @@ async fn rif_all_channels_keep_baseline_formulas_and_report_unchanged_scores() {
         assert_eq!(values(&off), values(&shadow));
         e.rif_mode = RifMode::Experimental;
         let got = e.search_with_semantics(q, history()).await.unwrap();
+        assert_applied_explanations(&off, RifMode::Off);
+        assert_applied_explanations(&shadow, RifMode::Shadow);
+        assert_applied_explanations(&got, RifMode::Experimental);
         let expected_unchanged = matches!(
             channel,
             RetrievalChannel::Vector | RetrievalChannel::Fts | RetrievalChannel::Graph
@@ -570,6 +627,8 @@ async fn rif_neutral_overlay_keeps_graph_rediscovered_predecessor_and_own_maximu
     let got = e.search_with_semantics(q, current()).await.unwrap();
     assert_eq!(got.diagnostics.rif.as_ref().unwrap().suppressed_targets, 0);
     assert_eq!(values(&got), values(&off));
+    assert_applied_explanations(&off, RifMode::Off);
+    assert_applied_explanations(&got, RifMode::Experimental);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

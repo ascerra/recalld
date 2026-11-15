@@ -273,13 +273,17 @@ impl QueryEngine {
         for candidate in candidates {
             let mut own = None;
             let mut inherited: Option<f32> = None;
+            let mut own_explanation: Option<OwnScoreExplanation> = None;
+            let mut inherited_explanations = BTreeMap::<MemoryId, OwnScoreExplanation>::new();
             for baseline in &inputs[&candidate.record.id] {
                 let origin = baseline.record.id;
                 let mut scored = baseline.clone();
-                scored.effective_r *= multipliers.get(&origin).copied().unwrap_or(1.0);
+                scored.applied_rif_multiplier = multipliers.get(&origin).copied().unwrap_or(1.0);
+                scored.effective_r *= scored.applied_rif_multiplier;
                 // Recompute from the original channel inputs, not a merged or
                 // already-boosted final score. Temporal boost is applied once.
                 self.apply_boosts(std::slice::from_mut(&mut scored), query, true);
+                let explanation = scored.score_explanation.expect("captured RIF score");
                 if scored.composite_score == baseline.composite_score {
                     for &channel in &baseline.provenance.own_channels {
                         *diagnostic
@@ -289,10 +293,24 @@ impl QueryEngine {
                     }
                 }
                 if origin == candidate.record.id {
+                    // Preserve the existing maximum over independent original
+                    // contributions, including metadata/graph rediscovery.
+                    // Equal scores retain the first deterministic contribution.
+                    if own_explanation.is_none_or(|e| explanation.score > e.score) {
+                        own_explanation = Some(explanation);
+                    }
                     own = Some(own.map_or(scored.composite_score, |v: f32| {
                         v.max(scored.composite_score)
                     }));
                 } else {
+                    inherited_explanations
+                        .entry(origin)
+                        .and_modify(|e| {
+                            if explanation.score > e.score {
+                                *e = explanation;
+                            }
+                        })
+                        .or_insert(explanation);
                     inherited = Some(
                         inherited.map_or(scored.composite_score, |v| v.max(scored.composite_score)),
                     );
@@ -307,6 +325,9 @@ impl QueryEngine {
                 .insert(candidate.record.id, multiplier);
             if self.rif_mode == RifMode::Experimental {
                 candidate.effective_r *= multiplier;
+                candidate.applied_rif_multiplier = multiplier;
+                candidate.score_explanation = own_explanation;
+                candidate.inherited_score_sources = inherited_explanations;
                 candidate.provenance.own_score = own;
                 candidate.provenance.inherited_floor = inherited;
                 candidate.composite_score = own

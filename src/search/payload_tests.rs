@@ -44,6 +44,77 @@ async fn payload_record(
     id
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_rif_explanations_use_pinned_mode_and_preserve_canonical_bytes() {
+    let f = Fixture::new();
+    let owner = owner(&f);
+    let old = payload_record(&owner, 1, [1., 0., 0., 0.], None, None, true).await;
+    let terminal = payload_record(&owner, 2, [1., 0., 0., 0.], None, Some(old), true).await;
+    let _anchor = payload_record(&owner, 3, [1., 0., 0., 0.], Some(old), None, true).await;
+    let mut engine = payload_engine(&f, &owner);
+    f.storage.write().unwrap().sync().unwrap();
+    let before = bytes(&f);
+    let q: SearchQuery = serde_json::from_value(serde_json::json!({
+        "queryMode":"metadata_only", "filter":{"minStrength":0.0},
+        "limit":3,"graphDepth":0,"recordAccess":false
+    }))
+    .unwrap();
+    let mut off = None;
+    for mode in [RifMode::Off, RifMode::Shadow, RifMode::Experimental] {
+        engine.rif_mode = mode;
+        let response = engine
+            .prepare_coherent_payload_with_semantics(
+                q.clone(),
+                RetrievalSemantics::V2(VersionMode::Current),
+                false,
+                false,
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.evaluated_at, 123);
+        assert_eq!(bytes(&f), before);
+        let explanation = response.response.diagnostics.provenance.as_ref().unwrap()[&terminal]
+            .explanation
+            .as_ref()
+            .unwrap();
+        assert_eq!(explanation.inherited_sources.len(), 1);
+        let donor = &explanation.inherited_sources[0];
+        assert_eq!(donor.source, old);
+        assert_eq!(explanation.rif_multiplier, 1.0); // Terminal itself is not suppressed.
+        match mode {
+            RifMode::Off => off = Some(explanation.clone()),
+            RifMode::Shadow => assert_eq!(Some(explanation), off.as_ref()),
+            RifMode::Experimental => {
+                assert!(
+                    response
+                        .response
+                        .diagnostics
+                        .rif
+                        .as_ref()
+                        .unwrap()
+                        .suppressed_targets
+                        > 0
+                );
+                assert!(donor.own.rif_multiplier < 1.0);
+                assert_eq!(
+                    donor.own.effective_retrievability,
+                    off.as_ref().unwrap().inherited_sources[0]
+                        .own
+                        .effective_retrievability
+                        * donor.own.rif_multiplier
+                );
+                assert_eq!(explanation.inherited_floor, Some(donor.own.score));
+                let inherited = super::super::explanation_tests::reconstruct(&donor.own);
+                let own = super::super::explanation_tests::reconstruct(&explanation.own.unwrap());
+                assert_eq!(explanation.final_score, own.max(inherited));
+            }
+        }
+    }
+    assert_eq!(bytes(&f), before);
+}
+
 fn payload_query(depth: u8) -> SearchQuery {
     serde_json::from_value(serde_json::json!({
         "queryEmbedding":[1.0,0.0,0.0,0.0], "recordAccess":false,
