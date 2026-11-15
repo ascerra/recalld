@@ -1,0 +1,20 @@
+{
+  "status": "source-only; owner-agreed three wire positive setup sites after run035",
+  "reported_baseline": "Feynman run035:237 passed,3 failed,1 ignored; not independently executed here",
+  "files": {
+    "src/storage/metadata/native_records/wire_tests.rs": {
+      "before_sha256": "e5ad5f96413e112d00954c67e9d6f93948cdcdde10be50a82aa7a2bdfbdba3ca",
+      "after_sha256": "fef2395d20622d3608a936fa5125096f8ebba314fc6567093f3a5a9e837995bb"
+    },
+    "src/storage/metadata/native_records/forget_origin_tests.rs": {
+      "before_sha256": "dd5e4c00662e5602c61e9710f7247665fd035a8455714fecf6ff6eebd7374c18",
+      "after_sha256": "e718fc634d12b793028f110068246b5d8c30c6787557f6330789ad867d88609b"
+    },
+    "src/storage/metadata/native_records/public_api1_tests.rs": {
+      "before_sha256": "340e17c7fd4b1d5a8050e6a6c88de27b77eae4df3716064b038f1ab5cef8c915",
+      "after_sha256": "b1fc7542be1cb6f94d7b68f0989341339fb05955694aa1a115ad433997ce41bd"
+    }
+  },
+  "helper_sha256": "e2a1a607851df29e7bc92a8ed47423a687c8304215612186cd49216a1f85685d",
+  "patch_sha256": "130a34d65c94a009d89f582dd011df325bb30217b0c90034c52e558e3e8e059e"
+}

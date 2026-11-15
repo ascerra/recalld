@@ -1,0 +1,2467 @@
+diff --git a/src/cli/commands.rs b/src/cli/commands.rs
+--- a/src/cli/commands.rs
++++ b/src/cli/commands.rs
+@@ -39,6 +39,8 @@
+ /// Top-level CLI commands.
+ #[derive(Debug, Subcommand)]
+ pub enum Command {
++    /// Explicit offline vector re-embedding into a fresh destination (no daemon).
++    ReembedVectors(ReembedVectorsArgs),
+     /// Explicit offline inherited-policy preview/adoption (no daemon).
+     Policy(PolicyArgs),
+     /// Store a new memory
+@@ -79,6 +81,20 @@
+ 
+     /// Comprehensive health report: decay forecast, at-risk memories, storage breakdown
+     Health(HealthArgs),
++}
++
++#[derive(Debug, Args)]
++pub struct ReembedVectorsArgs {
++    #[arg(long)]
++    pub source: std::path::PathBuf,
++    #[arg(long)]
++    pub destination: std::path::PathBuf,
++    /// JSON ReembedVectors request with original namespace/profile and full CAS.
++    #[arg(long)]
++    pub request: std::path::PathBuf,
++    /// Explicit JSON provider configuration and document/query prefixes.
++    #[arg(long)]
++    pub provider: std::path::PathBuf,
+ }
+ 
+ // ── Store ──────────────────────────────────────────────────────────
+diff --git a/src/cli/mod.rs b/src/cli/mod.rs
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -10,6 +10,7 @@
+ mod import;
+ mod output;
+ mod policy;
++mod vector_certification;
+ 
+ pub use client::RecalldClient;
+ pub use commands::Cli;
+@@ -69,6 +70,7 @@
+ /// dispatches to the appropriate command handler.
+ pub async fn run(cli: Cli, config: CliConfig) -> Result<()> {
+     let command = match cli.command {
++        Command::ReembedVectors(args) => return vector_certification::run(args).await,
+         Command::Policy(args) => return policy::run(args),
+         other => other,
+     };
+@@ -80,6 +82,7 @@
+     };
+ 
+     match command {
++        Command::ReembedVectors(_) => unreachable!("offline re-embedding dispatched before client construction"),
+         Command::Policy(_) => unreachable!("offline policy dispatched before client construction"),
+         Command::Store(args) => cmd_store(&client, &*formatter, args).await,
+         Command::Recall(args) => cmd_recall(&client, &*formatter, args).await,
+diff --git a/src/cli/vector_certification.rs b/src/cli/vector_certification.rs
+new file mode 100644
+--- /dev/null
++++ b/src/cli/vector_certification.rs
+@@ -0,0 +1,44 @@
++use super::{CliError, Result, commands::ReembedVectorsArgs, print_out};
++use crate::storage::vector_certification::{ReembedVectors, reembed_fresh};
++use serde::Deserialize;
++use std::io::Read;
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct ProviderInput {
++    configuration: crate::embedding::EmbeddingConfig,
++    document_prefix: String,
++    query_prefix: String,
++}
++fn read<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T> {
++    let mut bytes = Vec::new();
++    std::fs::File::open(path).map_err(|e| CliError::Other(e.to_string()))?
++        .take(16 * 1024 + 1).read_to_end(&mut bytes).map_err(|e| CliError::Other(e.to_string()))?;
++    if bytes.len() > 16 * 1024 { return Err(CliError::Other("offline request/configuration exceeds 16 KiB".into())); }
++    Ok(serde_json::from_slice(&bytes)?)
++}
++pub(super) async fn run(args: ReembedVectorsArgs) -> Result<()> {
++    let request: ReembedVectors = read(&args.request)?;
++    let config: ProviderInput = read(&args.provider)?;
++    // Re-embedding must execute the provider recipe, not reuse cached old output.
++    if config.configuration.cache_embeddings {
++        return Err(CliError::Other("offline re-embedding requires cache_embeddings=false".into()));
++    }
++    let provider = crate::embedding::build_provider(&config.configuration, &config.document_prefix, &config.query_prefix)
++        .await.map_err(|e| CliError::Other(e.to_string()))?;
++    let result = reembed_fresh(&args.source, &args.destination, &request, provider.as_ref()).await;
++    let receipt = match result {
++        Ok(receipt) => receipt,
++        Err(crate::storage::StorageError::CommittedMutation { receipt, source }) => {
++            print_out(&format!("{}\n", serde_json::json!({"receipt": receipt, "readiness": "recovery_required", "error": source.to_string()})));
++            return Err(CliError::Other("canonical cutover committed; inspect or retry the original request".into()));
++        }
++        Err(crate::storage::StorageError::CommitOutcomeUnknown { operation_id, source }) => {
++            print_out(&format!("{}\n", serde_json::json!({"outcome": "unknown", "operationId": operation_id, "error": source.to_string()})));
++            return Err(CliError::Other("cutover outcome unknown; retain the private stage and retry the original request".into()));
++        }
++        Err(error) => return Err(CliError::Other(error.to_string())),
++    };
++    print_out(&format!("{}\n", serde_json::json!({"receipt": receipt, "readiness": "reopen_required"})));
++    Ok(())
++}
+diff --git a/src/derived_completion/native_store.rs b/src/derived_completion/native_store.rs
+--- a/src/derived_completion/native_store.rs
++++ b/src/derived_completion/native_store.rs
+@@ -114,10 +114,7 @@
+                 )?
+             };
+             let generated = if input.insert.memory.embedding.is_some() {
+-                GeneratedEmbedding {
+-                    values: vec![],
+-                    profile: None,
+-                }
++                GeneratedEmbedding::unverified(vec![], None)
+             } else {
+                 crate::embedding::runtime::generate_native(
+                     provider.as_ref(),
+diff --git a/src/embedding/runtime.rs b/src/embedding/runtime.rs
+--- a/src/embedding/runtime.rs
++++ b/src/embedding/runtime.rs
+@@ -9,6 +9,43 @@
+ pub struct GeneratedEmbedding {
+     pub values: Vec<f32>,
+     pub profile: Option<EmbeddingProfile>,
++    // The public compatibility payload can be changed by a caller. The private
++    // seal binds all execution inputs and the raw result, checked before final
++    // normalization. A document digest alone would not bind the returned vector.
++    seal: Option<GeneratedSeal>,
++}
++
++#[derive(Debug, Clone)]
++struct GeneratedSeal {
++    document: [u8; 32],
++    profile_id: String,
++    raw_vector: [u8; 32],
++}
++
++fn vector_digest(values: &[f32]) -> [u8; 32] {
++    use sha2::{Digest, Sha256};
++    let mut hash = Sha256::new();
++    for value in values { hash.update(value.to_le_bytes()); }
++    hash.finalize().into()
++}
++
++impl GeneratedEmbedding {
++    /// Raw/supplied compatibility input is deliberately not provider evidence.
++    pub(crate) fn unverified(values: Vec<f32>, profile: Option<EmbeddingProfile>) -> Self {
++        Self { values, profile, seal: None }
++    }
++    pub(crate) fn verify_document(&self, text: &str) -> Result<(), EmbeddingError> {
++        let expected = self.profile.as_ref()
++            .ok_or_else(|| EmbeddingError::InvalidResponse("generated profile missing".into()))?
++            .profile_id().map_err(EmbeddingError::InvalidResponse)?;
++        if self.seal.as_ref().is_none_or(|seal| {
++            seal.document != crate::storage::native_records::hash_bytes(text.as_bytes())
++                || seal.profile_id != expected || seal.raw_vector != vector_digest(&self.values)
++        }) {
++            return Err(EmbeddingError::InvalidResponse("generated document/profile/output evidence mismatch".into()));
++        }
++        Ok(())
++    }
+ }
+ 
+ impl From<Vec<f32>> for GeneratedEmbedding {
+@@ -16,6 +53,7 @@
+         Self {
+             values,
+             profile: None,
++            seal: None,
+         }
+     }
+ }
+@@ -107,7 +145,14 @@
+     // must each normalize the same original values (rounding is not idempotent).
+     super::validation::normalize_vector(&mut values.clone(), namespace.embedding_dim as usize)
+         .map_err(EmbeddingError::InvalidResponse)?;
+-    Ok(GeneratedEmbedding { values, profile })
++    let seal = profile.as_ref().map(|profile| {
++        Ok::<_, EmbeddingError>(GeneratedSeal {
++            document: crate::storage::native_records::hash_bytes(text.as_bytes()),
++            profile_id: profile.profile_id().map_err(EmbeddingError::InvalidResponse)?,
++            raw_vector: vector_digest(&values),
++        })
++    }).transpose()?;
++    Ok(GeneratedEmbedding { values, profile, seal })
+ }
+ 
+ /// Factory boundary inside the cache: invalid outputs never become cache hits.
+@@ -198,6 +243,26 @@
+         fn profile(&self) -> Option<EmbeddingProfile> {
+             self.profile.clone()
+         }
++    }
++
++    #[tokio::test]
++    async fn generated_document_seal_binds_actual_input_profile_and_raw_output() {
++        let calls = Arc::new(AtomicUsize::new(0));
++        let provider = Output { calls: calls.clone(), profile: Some(profile()),
++            values: vec![0.3, 0.4, 0., 0.], batch_count: 1 };
++        let namespace = bound();
++        let generated = generate_native(&provider, &namespace, "actual document").await.unwrap();
++        generated.verify_document("actual document").unwrap();
++        assert!(generated.verify_document("different document").is_err());
++        let mut wrong_values = generated.clone();
++        wrong_values.values = vec![1., 0., 0., 0.];
++        assert!(wrong_values.verify_document("actual document").is_err());
++        let mut wrong_profile = generated.clone();
++        wrong_profile.profile.as_mut().unwrap().model_id = "different-model".into();
++        assert!(wrong_profile.verify_document("actual document").is_err());
++        let unverified = GeneratedEmbedding::unverified(generated.values.clone(), generated.profile.clone());
++        assert!(unverified.verify_document("actual document").is_err());
++        assert_eq!(calls.load(Ordering::SeqCst), 1);
+     }
+ 
+     #[tokio::test]
+diff --git a/src/mcp/native_batch.rs b/src/mcp/native_batch.rs
+--- a/src/mcp/native_batch.rs
++++ b/src/mcp/native_batch.rs
+@@ -87,10 +87,7 @@
+                         )?
+                     };
+                     let generated = if input.memory.embedding.is_some() {
+-                        crate::embedding::runtime::GeneratedEmbedding {
+-                            values: vec![],
+-                            profile: None,
+-                        }
++                        crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
+                     } else {
+                         crate::embedding::runtime::generate_native(
+                             self.embedding.as_ref(),
+diff --git a/src/mcp/native_store_batch.rs b/src/mcp/native_store_batch.rs
+--- a/src/mcp/native_store_batch.rs
++++ b/src/mcp/native_store_batch.rs
+@@ -57,10 +57,7 @@
+                     &policy,
+                 )?;
+             let generated = if input.insert.memory.embedding.is_some() {
+-                crate::embedding::runtime::GeneratedEmbedding {
+-                    values: vec![],
+-                    profile: None,
+-                }
++                crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
+             } else {
+                 crate::embedding::runtime::generate_native(
+                     self.embedding.as_ref(),
+diff --git a/src/model/schema.rs b/src/model/schema.rs
+--- a/src/model/schema.rs
++++ b/src/model/schema.rs
+@@ -332,6 +332,9 @@
+         deserialize_with = "crate::storage::request_context::deserialize_present"
+     )]
+     pub inherited_decay: Option<crate::storage::inherited_policy::InheritedDecayBinding>,
++    #[serde(default, skip_serializing_if = "Option::is_none",
++        deserialize_with = "crate::storage::request_context::deserialize_present")]
++    pub vector_certification: Option<crate::storage::vector_certification::VectorCertification>,
+     pub required_features: Vec<String>,
+     pub extensions: BTreeMap<String, serde_json::Value>,
+ }
+@@ -343,13 +346,21 @@
+             policy_revision: Generation::default(),
+             embedding_binding: EmbeddingBinding::UnknownLegacy,
+             inherited_decay: None,
++            vector_certification: None,
+             required_features: vec![],
+             extensions: BTreeMap::new(),
+         }
+     }
+     pub fn validate(&self, namespace: &NamespaceConfig) -> Result<(), String> {
+         if self.namespace_schema_version != NAMESPACE_SCHEMA_VERSION
+-            || !self.required_features.is_empty()
++            || match &self.vector_certification {
++                None => !self.required_features.is_empty(),
++                Some(binding) => {
++                    self.required_features != [crate::storage::vector_certification::REQUIRED_FEATURE]
++                        || binding.validate().is_err()
++                        || !matches!(self.embedding_binding, EmbeddingBinding::Bound { .. })
++                }
++            }
+         {
+             return Err("unsupported namespace schema/features".into());
+         }
+diff --git a/src/storage/canonical_schema.rs b/src/storage/canonical_schema.rs
+--- a/src/storage/canonical_schema.rs
++++ b/src/storage/canonical_schema.rs
+@@ -154,6 +154,7 @@
+         ));
+     }
+     super::lifecycle_migration::validate_policy_history(read, control, &state)?;
++    super::vector_certification::validate_current(read, control)?;
+     Ok(Some(state))
+ }
+ 
+diff --git a/src/storage/control.rs b/src/storage/control.rs
+--- a/src/storage/control.rs
++++ b/src/storage/control.rs
+@@ -29,16 +29,22 @@
+ pub(crate) struct ValidationWork {
+     pub full_validations: usize,
+     pub receipt_decodes: usize,
++    pub certification_scans: usize,
+ }
+ #[cfg(test)]
+ thread_local! {
+     static VALIDATION_WORK: std::cell::Cell<ValidationWork> = const {
+-        std::cell::Cell::new(ValidationWork { full_validations: 0, receipt_decodes: 0 })
++        std::cell::Cell::new(ValidationWork { full_validations: 0, receipt_decodes: 0, certification_scans: 0 })
+     };
+ }
+ #[cfg(test)]
+ pub(crate) fn take_validation_work() -> ValidationWork {
+     VALIDATION_WORK.with(|work| work.replace(ValidationWork::default()))
++}
++
++#[cfg(test)]
++pub(crate) fn certification_scan() {
++    VALIDATION_WORK.with(|work| { let mut count = work.get(); count.certification_scans += 1; work.set(count); });
+ }
+ 
+ /// Final exposure assertion, checked with canonical records in the write transaction.
+@@ -237,6 +243,9 @@
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
+ pub enum MutationOutcome {
++    VectorsReembedded {
++        transition: super::vector_certification::VectorsReembedded,
++    },
+     InheritedDecayAdopted {
+         transition: super::inherited_policy::InheritedDecayAdopted,
+     },
+@@ -482,6 +491,9 @@
+         let (lineage, scope, operation) = decode_scope(key.value())?;
+         let stored = validate_receipt(value.value())?;
+         let scope_matches = match &stored.receipt.outcome {
++            MutationOutcome::VectorsReembedded { transition } => {
++                scope == MutationScope::Namespace(transition.before_namespace.namespace_id)
++            }
+             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                 scope == MutationScope::Namespace(t.before_namespace.namespace_id)
+             }
+@@ -533,6 +545,7 @@
+         if matches!(
+             stored.receipt.outcome,
+             MutationOutcome::NativeNamespacePurgeStarted { .. }
++                | MutationOutcome::VectorsReembedded { .. }
+                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                 | MutationOutcome::LifecyclePolicyMigrated { .. }
+                 | MutationOutcome::NativeNamespaceCreated { .. }
+@@ -718,6 +731,28 @@
+         ));
+     }
+     match &stored.receipt.outcome {
++        MutationOutcome::VectorsReembedded { transition } => {
++            transition.validate(&stored.receipt)?;
++            let namespace = transition.before_namespace.namespace()?;
++            let request = super::vector_certification::ReembedVectors {
++                context: MutationContext {
++                    store_id: Some(stored.receipt.store_id),
++                    scope: MutationScope::Namespace(namespace.id),
++                    expected_generation: Some(transition.source.generation),
++                    contract_version: transition.contract_version,
++                    idempotency_key: None,
++                },
++                source: transition.source,
++                namespace_id: namespace.id,
++                namespace_name: namespace.name.clone(),
++                profile_id: super::native_records::profile_id(&namespace)
++                    .ok_or_else(|| StorageError::InvalidControl("cutover profile missing".into()))?,
++            };
++            if request.hash(&transition.source_origins, transition.before_inventory_root,
++                transition.documents_root()?)? != stored.request_hash {
++                return Err(StorageError::InvalidControl("vector cutover original request hash mismatch".into()));
++            }
++        }
+         MutationOutcome::InheritedDecayAdopted { transition } => {
+             transition.validate(&stored.receipt)?;
+             let request = super::inherited_policy::AdoptInheritedDecay {
+@@ -904,6 +939,7 @@
+             }
+         }
+         MutationOutcome::AccessRecorded { .. }
++        | MutationOutcome::VectorsReembedded { .. }
+         | MutationOutcome::NativeNamespacePurgeStarted { .. }
+         | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+         | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+diff --git a/src/storage/engine/native_records.rs b/src/storage/engine/native_records.rs
+--- a/src/storage/engine/native_records.rs
++++ b/src/storage/engine/native_records.rs
+@@ -160,6 +160,7 @@
+             policy,
+             clock,
+             embedding,
++            generated,
+             profile,
+             &edges,
+             &hashes,
+diff --git a/src/storage/lifecycle_migration.rs b/src/storage/lifecycle_migration.rs
+--- a/src/storage/lifecycle_migration.rs
++++ b/src/storage/lifecycle_migration.rs
+@@ -180,6 +180,12 @@
+             return Err(invalid("duplicate lifecycle generation"));
+         }
+         let namespace = match &receipt.outcome {
++            MutationOutcome::VectorsReembedded { transition: t } => {
++                native_history.push((receipt.clone(), t.before_namespace.namespace_id,
++                    t.before_namespace.schema.lifecycle_version,
++                    t.before_namespace.schema.policy_revision));
++                Some(t.before_namespace.namespace_id)
++            }
+             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                 native_history.push((
+                     receipt.clone(),
+@@ -621,6 +627,18 @@
+             return Err(invalid(
+                 "policy no-change differs from its historical revision",
+             ));
++        }
++    }
++    for row in read.open_table(control::RECEIPTS)?.iter()? {
++        let (_, bytes) = row?;
++        if let MutationOutcome::VectorsReembedded { transition } = control::validate_receipt(bytes.value())?.receipt.outcome {
++            let schema = creation_configs.get_mut(&transition.before_namespace.namespace_id.get())
++                .and_then(|ns| ns.schema.as_mut()).ok_or_else(|| invalid("cutover namespace absent"))?;
++            if schema.vector_certification.as_ref() != Some(&transition.certification) {
++                return Err(invalid("cutover creation binding mismatch"));
++            }
++            schema.vector_certification = None;
++            schema.required_features = transition.before_namespace.schema.required_features.clone();
+         }
+     }
+     for (id, creation) in &namespace_creations {
+@@ -772,6 +790,30 @@
+     // assumption that every token increment was a namespace policy migration.
+     for receipt in suffix.values().rev() {
+         match &receipt.outcome {
++            MutationOutcome::VectorsReembedded { transition: t } => {
++                let namespace = configs.get_mut(&t.before_namespace.namespace_id.get())
++                    .ok_or_else(|| invalid("cutover reverse namespace missing"))?;
++                let mut expected = t.before_namespace.clone();
++                expected.schema.vector_certification = Some(t.certification.clone());
++                expected.schema.required_features = vec![super::vector_certification::REQUIRED_FEATURE.into()];
++                if super::native_purge::NativeNamespaceProof::capture(namespace)? != expected {
++                    return Err(invalid("cutover reverse namespace differs"));
++                }
++                let rows = records.entry(namespace.id.get()).or_default();
++                if rows.iter().filter(|r| r.state.content.vector.is_some()).count() != t.records.len() {
++                    return Err(invalid("cutover reverse inventory count differs"));
++                }
++                for replacement in &t.records {
++                    let current = rows.iter_mut().find(|r| r.id == replacement.record.memory_id)
++                        .ok_or_else(|| invalid("cutover reverse row missing"))?;
++                    if current.state != replacement.record.after {
++                        return Err(invalid("cutover reverse row differs"));
++                    }
++                    current.state = replacement.record.before.clone()
++                        .ok_or_else(|| invalid("cutover reverse prior state absent"))?;
++                }
++                *namespace = t.before_namespace.namespace()?;
++            }
+             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                 let ns = configs
+                     .get(&t.before_namespace.namespace_id.get())
+diff --git a/src/storage/logical_export.rs b/src/storage/logical_export.rs
+--- a/src/storage/logical_export.rs
++++ b/src/storage/logical_export.rs
+@@ -775,7 +775,10 @@
+     Ok(())
+ }
+ 
++mod vector_layout;
++
+ struct Importer {
++    vector_layout: vector_layout::VectorLayout,
+     meta: redb::Database,
+     edges: redb::Database,
+     vectors: super::VectorManager,
+@@ -806,6 +809,7 @@
+             }
+         }
+         Ok(Self {
++            vector_layout: vector_layout::VectorLayout::default(),
+             meta,
+             edges: redb::Database::open(path.join("edges.db"))?,
+             vectors,
+@@ -814,6 +818,7 @@
+         })
+     }
+     fn chunk(&mut self, chunk: &Chunk, current_table: &str) -> Result<(), StorageError> {
++        self.vector_layout.observe(&chunk.item, current_table)?;
+         if chunk.sequence <= self.progress.completed {
+             if chunk.sequence == self.progress.completed && chunk.sha256 != self.progress.prefix {
+                 return Err(invalid("resume prefix differs from committed chunks"));
+@@ -871,6 +876,7 @@
+                 }
+             },
+             Item::Memory(memory) => {
++                self.vector_layout.prepare(&mut self.vectors)?;
+                 let mut record = DiskRecord::from_bytes(&memory.record)?;
+                 if let Some(bits) = &memory.embedding_bits {
+                     let vector: Vec<_> = bits.iter().map(|b| f32::from_bits(*b)).collect();
+@@ -878,7 +884,10 @@
+                         .vectors
+                         .get_mut(crate::model::NamespaceId::new(record.namespace_id))
+                         .ok_or(StorageError::NamespaceNotFound(record.namespace_id))?;
+-                    record.vector_slot = store.insert_vector(&vector)?;
++                    record.vector_slot = if let Some(slot) = self.vector_layout.reference(&record)? {
++                        store.write_import_vector(slot, &vector)?;
++                        slot
++                    } else { store.insert_vector(&vector)? };
+                     store.sync()?;
+                     record
+                         .schema
+@@ -933,7 +942,8 @@
+         checkpoint("chunk_committed");
+         Ok(())
+     }
+-    fn select_text(self, path: &Path) -> Result<(), StorageError> {
++    fn select_text(mut self, path: &Path) -> Result<(), StorageError> {
++        vector_layout::VectorLayout::reclaim_placeholders(&self.meta, &mut self.vectors)?;
+         let descriptor = self.text.seal(
+             self.progress.summary.source.store_id,
+             self.progress.text.id,
+diff --git a/src/storage/logical_export/vector_layout.rs b/src/storage/logical_export/vector_layout.rs
+new file mode 100644
+--- /dev/null
++++ b/src/storage/logical_export/vector_layout.rs
+@@ -0,0 +1,107 @@
++//! Import preserves references protected by immutable native proofs. It creates
++//! only zero placeholders for sparse historical slots, never old log payload.
++use super::*;
++use crate::model::{MemoryId, NamespaceId, schema::VectorReference};
++use crate::storage::control::{self, MutationOutcome};
++use std::collections::{HashMap, HashSet};
++
++#[derive(Default)]
++pub(super) struct VectorLayout {
++    originals: HashMap<MemoryId, (NamespaceId, VectorReference)>,
++    replacements: HashMap<MemoryId, (NamespaceId, VectorReference)>,
++    prepared: bool,
++}
++impl VectorLayout {
++    pub(super) fn observe(&mut self, item: &Item, table: &str) -> Result<(), StorageError> {
++        if table != "mutation_receipts" { return Ok(()); }
++        let Item::Row { value, .. } = item else { return Ok(()); };
++        let receipt = control::validate_receipt(value)?.receipt;
++        let original = match &receipt.outcome {
++            MutationOutcome::NativeMemoryInserted { transition } => Some((transition.namespace_id, transition.primary()?)),
++            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => Some((transition.namespace_id, transition.primary()?)),
++            MutationOutcome::VectorsReembedded { transition } => {
++                for row in &transition.records {
++                    let reference = row.record.after.content.vector.clone().ok_or_else(|| invalid("cutover vector absent"))?;
++                    if self.replacements.insert(row.record.memory_id, (transition.before_namespace.namespace_id, reference)).is_some() {
++                        return Err(invalid("ambiguous import vector replacement"));
++                    }
++                }
++                None
++            }
++            _ => None,
++        };
++        if let Some((namespace, change)) = original {
++            let reference = change.after.content.vector.clone().ok_or_else(|| invalid("creation vector absent"))?;
++            if self.originals.insert(change.memory_id, (namespace, reference)).is_some() {
++                return Err(invalid("ambiguous import vector creation"));
++            }
++        }
++        if self.originals.len().saturating_add(self.replacements.len()) > 2 * crate::storage::vector_certification::MAX_ROWS as usize {
++            return Err(invalid("import native reference history limit exceeded"));
++        }
++        Ok(())
++    }
++    pub(super) fn prepare(&mut self, vectors: &mut crate::storage::VectorManager) -> Result<(), StorageError> {
++        if self.prepared { return Ok(()); }
++        let mut high = HashMap::<NamespaceId, u32>::new();
++        for (namespace, reference) in self.originals.values().chain(self.replacements.values()) {
++            // Retired namespaces need no physical file. The complete typed
++            // history/ledger validator still checks their absence after import.
++            if vectors.get(*namespace).is_some() {
++                high.entry(*namespace).and_modify(|v| *v = (*v).max(reference.slot)).or_insert(reference.slot);
++            }
++        }
++        let mut bytes = 0_u64;
++        for (namespace, slot) in &high {
++            let store = vectors.get(*namespace).ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
++            bytes = bytes.checked_add((u64::from(*slot) + 1) * u64::from(store.dimensions()) * 4)
++                .ok_or_else(|| invalid("import physical reference size overflow"))?;
++            if bytes > crate::storage::vector_certification::MAX_BYTES {
++                return Err(invalid("import protected vector layout exceeds 256 MiB"));
++            }
++        }
++        for (namespace, last) in high {
++            let store = vectors.get_mut(namespace).ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
++            let zero = vec![0.; store.dimensions() as usize];
++            for slot in 0..=last {
++                if slot >= store.slot_count() || store.is_free(slot) {
++                    if store.insert_vector(&zero)? != slot {
++                        return Err(invalid("resumed protected vector layout differs"));
++                    }
++                }
++            }
++            store.sync()?;
++        }
++        self.prepared = true;
++        Ok(())
++    }
++    pub(super) fn reference(&self, record: &DiskRecord) -> Result<Option<u32>, StorageError> {
++        let id = MemoryId::from_bytes(record.id);
++        let Some((namespace, reference)) = self.replacements.get(&id).or_else(|| self.originals.get(&id)) else { return Ok(None); };
++        let current = record.schema.as_ref().and_then(|s| s.vector.as_ref()).ok_or_else(|| invalid("import vector schema absent"))?;
++        if namespace.get() != record.namespace_id || current.sha256 != reference.sha256 || current.allocation_epoch != reference.allocation_epoch {
++            return Err(invalid("logical vector disagrees with its retained physical commitment"));
++        }
++        Ok(Some(reference.slot))
++    }
++    pub(super) fn reclaim_placeholders(meta: &redb::Database, vectors: &mut crate::storage::VectorManager) -> Result<(), StorageError> {
++        let read = meta.begin_read()?;
++        let mut live = HashSet::new();
++        for row in read.open_table(crate::storage::metadata::META_TABLE)?.iter()? {
++            let (_, bytes) = row?;
++            let record = DiskRecord::from_bytes(bytes.value())?;
++            if record.schema.as_ref().and_then(|s| s.vector.as_ref()).is_some() {
++                live.insert((record.namespace_id, record.vector_slot));
++            }
++        }
++        let namespaces: Vec<_> = vectors.iter().map(|(id, _)| id).collect();
++        for namespace in namespaces {
++            let store = vectors.get_mut(namespace).ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
++            for slot in 0..store.slot_count() {
++                if !store.is_free(slot) && !live.contains(&(namespace.get(), slot)) { store.free_slot(slot)?; }
++            }
++            store.sync()?;
++        }
++        Ok(())
++    }
++}
+diff --git a/src/storage/metadata.rs b/src/storage/metadata.rs
+--- a/src/storage/metadata.rs
++++ b/src/storage/metadata.rs
+@@ -10,6 +10,7 @@
+ pub(crate) mod batch;
+ mod canonical_vector_snapshot;
+ mod catalog;
++mod certification;
+ pub(crate) mod effects;
+ mod inherited_policy;
+ mod insertion;
+@@ -101,6 +102,9 @@
+     db: Database,
+     ids: Box<dyn super::ids::IdSource>,
+     native_lifecycle_only: bool,
++    // A validated position in canonical history, never a generation allocator.
++    // Only this owner's guarded commit paths can move it to a committed receipt.
++    vector_validation: std::sync::Arc<std::sync::RwLock<Option<certification::OwnedVectorValidation>>>,
+     work_tracker: WorkTracker,
+     view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
+     unavailable: std::sync::atomic::AtomicBool,
+@@ -265,6 +269,7 @@
+             db,
+             ids,
+             native_lifecycle_only,
++            vector_validation: std::sync::Arc::new(std::sync::RwLock::new(None)),
+             work_tracker: WorkTracker::new(store_id),
+             view_publication: std::sync::Arc::new(
+                 super::publication::PublicationRegistry::default(),
+@@ -295,6 +300,9 @@
+                 .any(|p| p.stage != crate::storage::purge::PurgeStage::Complete),
+             std::sync::atomic::Ordering::SeqCst,
+         );
++        if native_lifecycle_only {
++            store.initialize_vector_validation()?;
++        }
+         let records = store.scan_all_for_recovery()?;
+         let phases: Vec<_> = records
+             .iter()
+diff --git a/src/storage/metadata/batch.rs b/src/storage/metadata/batch.rs
+--- a/src/storage/metadata/batch.rs
++++ b/src/storage/metadata/batch.rs
+@@ -766,6 +766,7 @@
+         tx: redb::WriteTransaction,
+         receipt: &WriteReceipt,
+     ) -> Result<(), StorageError> {
++        let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
+         super::effects::crash_point("before_batch_commit");
+         let result = tx.commit();
+         #[cfg(test)]
+@@ -799,6 +800,7 @@
+                 source,
+             }
+         })?;
++        self.publish_vector_validation_commit(certification, receipt)?;
+         self.view_publication.canonical_committed();
+         super::effects::crash_point("after_batch_commit");
+         Ok(())
+diff --git a/src/storage/metadata/canonical_vector_snapshot.rs b/src/storage/metadata/canonical_vector_snapshot.rs
+--- a/src/storage/metadata/canonical_vector_snapshot.rs
++++ b/src/storage/metadata/canonical_vector_snapshot.rs
+@@ -97,7 +97,12 @@
+             return Err(SnapshotError::Stale);
+         }
+         crate::storage::lineage::ensure_serving(&tx, &state)?;
+-        let schema = canonical_schema::read_state(&tx, &state)?;
++        let schema = if self.native_lifecycle_only {
++            self.require_certified_namespace(state.generation_ref(), &namespace)?;
++            Some(self.owned_schema_at(&tx, state.generation_ref())?)
++        } else {
++            canonical_schema::read_state(&tx, &state)?
++        };
+         let store = vectors
+             .get(namespace.id)
+             .ok_or_else(|| unavailable("namespace vector store missing"))?;
+diff --git a/src/storage/metadata/catalog.rs b/src/storage/metadata/catalog.rs
+--- a/src/storage/metadata/catalog.rs
++++ b/src/storage/metadata/catalog.rs
+@@ -127,6 +127,7 @@
+         tx: redb::WriteTransaction,
+         receipt: &WriteReceipt,
+     ) -> Result<(), StorageError> {
++        let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
+         crate::storage::catalog::boundary("before_metadata_commit")?;
+         let result = tx.commit();
+         #[cfg(test)]
+@@ -144,6 +145,7 @@
+                 source,
+             }
+         })?;
++        self.publish_vector_validation_commit(certification, receipt)?;
+         self.view_publication.canonical_committed();
+         crate::storage::catalog::boundary("after_metadata_commit").map_err(|source| {
+             self.mark_unavailable();
+diff --git a/src/storage/metadata/certification.rs b/src/storage/metadata/certification.rs
+new file mode 100644
+--- /dev/null
++++ b/src/storage/metadata/certification.rs
+@@ -0,0 +1,148 @@
++//! The existing metadata publication lock owns this validation state. It grants
++//! no work admission, derived readiness, or independent generation authority.
++use super::*;
++use crate::storage::control::GenerationRef;
++use crate::storage::vector_certification::VectorCertification;
++use std::collections::BTreeMap;
++
++pub(super) struct OwnedVectorValidation {
++    at: GenerationRef,
++    schema: crate::storage::canonical_schema::CanonicalSchemaState,
++    namespaces: BTreeMap<u32, VectorCertification>,
++}
++pub(super) struct VectorValidationCommit {
++    before: GenerationRef,
++    after: GenerationRef,
++    created: Option<(u32, VectorCertification)>,
++}
++impl OwnedVectorValidation {
++    pub(super) fn require_at(&self, at: GenerationRef) -> Result<(), StorageError> {
++        if self.at != at {
++            return Err(StorageError::RecoveryRequired("owned vector validation does not match canonical generation".into()));
++        }
++        Ok(())
++    }
++    pub(super) fn require_namespace(&self, at: GenerationRef, namespace: &NamespaceConfig) -> Result<(), StorageError> {
++        self.require_at(at)?;
++        let binding = namespace.schema.as_ref().and_then(|s| s.vector_certification.as_ref());
++        if binding.is_none() || self.namespaces.get(&namespace.id.get()) != binding {
++            return Err(StorageError::RecoveryRequired("namespace vectors require explicit offline re-embedding certification".into()));
++        }
++        Ok(())
++    }
++}
++impl MetadataStore {
++    pub(super) fn initialize_vector_validation(&self) -> Result<(), StorageError> {
++        // Constructor preflight already validated canonical history and payloads
++        // under stable engine ownership. Capture its exact live canonical G.
++        let read = self.db.begin_read()?;
++        let state = control::validate_existing(&read)?.ok_or_else(|| StorageError::InvalidControl("native control missing".into()))?;
++        let summary = crate::storage::vector_certification::validate_current(&read, &state)?;
++        let schema = crate::storage::canonical_schema::read_state(&read, &state)?
++            .ok_or_else(|| StorageError::InvalidControl("native schema missing".into()))?;
++        *self.vector_validation.write().map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))? =
++            Some(OwnedVectorValidation { at: state.generation_ref(), schema, namespaces: summary.selected });
++        Ok(())
++    }
++
++    /// Full validation belongs to owned reopen. An exact-G reader checks the
++    /// immutable schema singleton in its own transaction, without history scans.
++    pub(super) fn owned_schema_at(&self, read: &redb::ReadTransaction, at: GenerationRef)
++        -> Result<crate::storage::canonical_schema::CanonicalSchemaState, StorageError>
++    {
++        let owned = self.vector_validation.read().map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?;
++        let owned = owned.as_ref().ok_or_else(|| StorageError::RecoveryRequired("owned vector validation missing".into()))?;
++        owned.require_at(at)?;
++        let table = read.open_table(crate::storage::canonical_schema::SCHEMA)?;
++        let value = table.get("state")?.ok_or_else(|| StorageError::InvalidControl("native schema missing".into()))?;
++        let schema: crate::storage::canonical_schema::CanonicalSchemaState = control::decode(value.value())?;
++        if table.len()? != 1 || schema != owned.schema {
++            return Err(StorageError::RecoveryRequired("owned native schema changed".into()));
++        }
++        Ok(schema)
++    }
++
++    pub(super) fn require_vector_validation_at(&self, at: GenerationRef) -> Result<(), StorageError> {
++        self.vector_validation.read().map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?
++            .as_ref().ok_or_else(|| StorageError::RecoveryRequired("owned vector validation missing".into()))?.require_at(at)
++    }
++    pub(super) fn require_certified_namespace(&self, at: GenerationRef, namespace: &NamespaceConfig) -> Result<(), StorageError> {
++        self.vector_validation.read().map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?
++            .as_ref().ok_or_else(|| StorageError::RecoveryRequired("owned vector validation missing".into()))?
++            .require_namespace(at, namespace)
++    }
++
++    pub(super) fn prepare_vector_validation_commit(&self, tx: &redb::WriteTransaction, receipt: &WriteReceipt)
++        -> Result<Option<VectorValidationCommit>, StorageError>
++    {
++        if !self.native_lifecycle_only { return Ok(None); }
++        let owned = self.vector_validation.read().map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?;
++        let owned = owned.as_ref().ok_or_else(|| StorageError::RecoveryRequired("owned vector validation missing".into()))?;
++        let state = control::read_control(tx)?;
++        if state.store_id != receipt.store_id || state.committed_generation != receipt.committed_generation
++            || owned.at.store_id != state.store_id || owned.at.generation.next()? != state.committed_generation
++        { return Err(StorageError::RecoveryRequired("unparticipating canonical writer or stale vector validation".into())); }
++        let mut created = None;
++        match &receipt.outcome {
++            MutationOutcome::NativeNamespaceCreated { transition } => {
++                transition.validate(receipt)?;
++                let binding = transition.vector_certification.as_ref().ok_or_else(|| StorageError::InvalidControl("fresh namespace lacks empty-vector certification".into()))?;
++                if owned.namespaces.contains_key(&transition.namespace_id.get()) {
++                    return Err(StorageError::InvalidControl("certified namespace identity reused".into()));
++                }
++                created = Some((transition.namespace_id.get(), binding.clone()));
++            }
++            MutationOutcome::NativeMemoryInserted { transition } => {
++                transition.validate(receipt, true)?;
++                let expected = owned.namespaces.get(&transition.namespace_id.get());
++                if expected.is_none() || transition.vector_execution.as_ref().map(|e| &e.certification) != expected {
++                    return Err(StorageError::RecoveryRequired("fresh vector lacks owned certification/execution proof".into()));
++                }
++            }
++            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
++                transition.validate(receipt)?;
++                let expected = owned.namespaces.get(&transition.namespace_id.get());
++                if expected.is_none() || transition.vector_execution.as_ref().map(|e| &e.certification) != expected {
++                    return Err(StorageError::RecoveryRequired("fresh linked vector lacks owned certification/execution proof".into()));
++                }
++            }
++            // These existing typed writers preserve vectors or remove exact
++            // owned references. Their transaction/ledger validators remain in
++            // force; carrying this validation position is not a readiness ack.
++            MutationOutcome::NativeNamespacePurgeStarted { .. }
++            | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
++            | MutationOutcome::NativeNamespacePolicyUpdated { .. }
++            | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
++            | MutationOutcome::InheritedDecayAdopted { .. }
++            | MutationOutcome::NativePhaseMaterialized { .. }
++            | MutationOutcome::NativeMemoryHardDeleted { .. }
++            | MutationOutcome::NativeMemoryTombstoned { .. }
++            | MutationOutcome::NativeGraphChanged { .. }
++            | MutationOutcome::NativeGraphUnchanged { .. }
++            | MutationOutcome::LifecycleFeedbackApplied { .. }
++            | MutationOutcome::LifecycleExposureRecorded { .. }
++            | MutationOutcome::BatchReserved { .. }
++            | MutationOutcome::BatchItemRejected { .. } => {}
++            _ => return Err(StorageError::RecoveryRequired("native writer has no vector-certification transition consumer".into())),
++        }
++        Ok(Some(VectorValidationCommit { before: owned.at, after: state.generation_ref(), created }))
++    }
++
++    pub(super) fn publish_vector_validation_commit(&self, pending: Option<VectorValidationCommit>, receipt: &WriteReceipt)
++        -> Result<(), StorageError>
++    {
++        let Some(pending) = pending else { return Ok(()); };
++        let result = (|| {
++            let mut owned = self.vector_validation.write().map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?;
++            let owned = owned.as_mut().ok_or_else(|| StorageError::RecoveryRequired("owned vector validation missing".into()))?;
++            owned.require_at(pending.before)?;
++            if let Some((namespace, certification)) = pending.created { owned.namespaces.insert(namespace, certification); }
++            owned.at = pending.after;
++            Ok(())
++        })();
++        result.map_err(|source| {
++            self.mark_unavailable();
++            StorageError::CommittedMutation { receipt: Box::new(receipt.clone()), source: Box::new(source) }
++        })
++    }
++}
+diff --git a/src/storage/metadata/effects.rs b/src/storage/metadata/effects.rs
+--- a/src/storage/metadata/effects.rs
++++ b/src/storage/metadata/effects.rs
+@@ -923,6 +923,7 @@
+                 "injected precommit abandonment".into(),
+             ));
+         }
++        let certification = self.prepare_vector_validation_commit(&tx, &receipt)?;
+         crash_point("before_metadata_commit");
+         // Publish dirty before advancing the epoch. Admission samples the
+         // epoch twice; it cannot accept a new stamp with an old clean flag.
+@@ -960,6 +961,7 @@
+                 source,
+             }
+         })?;
++        self.publish_vector_validation_commit(certification, &receipt)?;
+         self.view_publication.canonical_committed();
+         crash_point("after_metadata_commit");
+         let mut phases = self.phase_index.write().unwrap_or_else(|e| e.into_inner());
+diff --git a/src/storage/metadata/native_catalog.rs b/src/storage/metadata/native_catalog.rs
+--- a/src/storage/metadata/native_catalog.rs
++++ b/src/storage/metadata/native_catalog.rs
+@@ -95,9 +95,19 @@
+                 operation_id,
+             }
+         });
++        let vector_certification = crate::storage::vector_certification::VectorCertification {
++            version: 1,
++            origin: control::GenerationRef { store_id: state.store_id, generation: state.committed_generation.next()? },
++            operation_id,
++            inventory_root: crate::storage::vector_certification::inventory_root(&config, std::iter::empty())?,
++            vector_count: 0,
++        };
++        config.schema.as_mut().unwrap().vector_certification = Some(vector_certification.clone());
++        config.schema.as_mut().unwrap().required_features = vec![crate::storage::vector_certification::REQUIRED_FEATURE.into()];
+         tx.open_table(NAMESPACE_TABLE)?
+             .insert(config.id.get(), control::encode(&config)?.as_slice())?;
+         let transition = NativeNamespaceCreated {
++            vector_certification: Some(vector_certification),
+             namespace_id: config.id,
+             previous_max_id,
+             previous_generation: state.committed_generation,
+diff --git a/src/storage/metadata/native_lifecycle.rs b/src/storage/metadata/native_lifecycle.rs
+--- a/src/storage/metadata/native_lifecycle.rs
++++ b/src/storage/metadata/native_lifecycle.rs
+@@ -124,6 +124,7 @@
+             return Err(invalid("native control schema required"));
+         }
+         crate::storage::lineage::ensure_serving(read, &state)?;
++        self.require_vector_validation_at(state.generation_ref())?;
+         Ok(state)
+     }
+     pub(super) fn native_guard(&self) -> Result<MutationGuard<'_>, StorageError> {
+@@ -528,6 +529,7 @@
+     ) -> Result<Option<WriteReceipt>, StorageError> {
+         if let Some(receipt) = &receipt {
+             if !receipt.replayed {
++                let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
+                 let committed = tx.commit();
+                 // A durable transaction can still be reported as an I/O error.
+                 // Exercise reconciliation against the actual committed database.
+@@ -548,6 +550,7 @@
+                         source,
+                     }
+                 })?;
++                self.publish_vector_validation_commit(certification, receipt)?;
+                 self.view_publication.canonical_committed();
+             }
+         }
+diff --git a/src/storage/metadata/native_records.rs b/src/storage/metadata/native_records.rs
+--- a/src/storage/metadata/native_records.rs
++++ b/src/storage/metadata/native_records.rs
+@@ -93,6 +93,7 @@
+                 "native insertion requires an explicitly bound namespace profile".into(),
+             ));
+         }
++        self.require_certified_namespace(capture.generation, &namespace)?;
+         Ok(NativeInsertIntent {
+             scope,
+             original: input.clone(),
+@@ -199,6 +200,7 @@
+         policy: &NativePolicyInputs,
+         clock: &dyn Clock,
+         embedding: &[f32],
++        generated: &crate::embedding::runtime::GeneratedEmbedding,
+         profile: &crate::model::schema::EmbeddingProfile,
+         existing_edges: &[PersistedEdge],
+         text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
+@@ -276,6 +278,12 @@
+             .memory
+             .initial_stability
+             .unwrap_or(ns.initial_stability);
++        if ns.schema.as_ref().is_some_and(|s| s.vector_certification.is_some())
++            && input.memory.embedding.is_none()
++        {
++            generated.verify_document(&input.document_v1())
++                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
++        }
+         if !stability.is_finite() || stability <= 0. {
+             return Err(StorageError::InvalidMutation(
+                 "invalid initial stability".into(),
+@@ -451,6 +459,9 @@
+                 .as_ref()
+                 .map(|s| hash_bytes(s.as_bytes())),
+         )?;
++        let vector_execution = crate::storage::vector_certification::VectorExecution::for_insert(
++            &ns, &record, input, generated,
++        )?;
+         let mut records = vec![NativeRecordChange {
+             memory_id: id,
+             before: None,
+@@ -501,6 +512,7 @@
+             effects::RecordMutation::NativeStored(
+                 &record,
+                 crate::storage::native_store::NativeStoreWrite {
++                    vector_execution,
+                     namespace_id: ns.id,
+                     memory_id: id,
+                     lifecycle_version: intent.capture.version,
+@@ -529,6 +541,7 @@
+             )
+         } else {
+             let transition = NativeRecordWrite {
++                vector_execution,
+                 namespace_id: ns.id,
+                 memory_id: id,
+                 lifecycle_version: intent.capture.version,
+@@ -669,6 +682,7 @@
+             )?;
+         }
+         let transition = NativeRecordWrite {
++            vector_execution: None,
+             namespace_id: ns.id,
+             memory_id: intent.memory_id,
+             lifecycle_version: intent.capture.version,
+diff --git a/src/storage/metadata/native_records/selection_tests.rs b/src/storage/metadata/native_records/selection_tests.rs
+--- a/src/storage/metadata/native_records/selection_tests.rs
++++ b/src/storage/metadata/native_records/selection_tests.rs
+@@ -166,28 +166,19 @@
+     ));
+     intent.original.memory.embedding = None;
+     intent.original.embedding_profile = None;
+-    let bad = GeneratedEmbedding {
+-        values: vec![f32::NAN; 4],
+-        profile: Some(d.profile.clone()),
+-    };
++    let bad = GeneratedEmbedding::unverified(vec![f32::NAN; 4], Some(d.profile.clone()));
+     assert!(matches!(
+         capture(&s.engine, &intent, &bad),
+         Err(StorageError::ProviderVectorUnavailable(_))
+     ));
+-    let missing_profile = GeneratedEmbedding {
+-        values: vec![1., 0., 0., 0.],
+-        profile: None,
+-    };
++    let missing_profile = GeneratedEmbedding::unverified(vec![1., 0., 0., 0.], None);
+     assert!(matches!(
+         capture(&s.engine, &intent, &missing_profile),
+         Err(StorageError::ProviderVectorUnavailable(_))
+     ));
+     let mut wrong_profile = d.profile.clone();
+     wrong_profile.dimension = 2;
+-    let wrong_profile = GeneratedEmbedding {
+-        values: vec![1., 0., 0., 0.],
+-        profile: Some(wrong_profile),
+-    };
++    let wrong_profile = GeneratedEmbedding::unverified(vec![1., 0., 0., 0.], Some(wrong_profile));
+     assert!(matches!(
+         capture(&s.engine, &intent, &wrong_profile),
+         Err(StorageError::ProviderVectorUnavailable(_))
+diff --git a/src/storage/metadata/native_records/store_tests.rs b/src/storage/metadata/native_records/store_tests.rs
+--- a/src/storage/metadata/native_records/store_tests.rs
++++ b/src/storage/metadata/native_records/store_tests.rs
+@@ -111,10 +111,7 @@
+         .store_prepared(
+             &key,
+             &prepared,
+-            &GeneratedEmbedding {
+-                values: vec![f32::NAN],
+-                profile: None,
+-            },
++            &GeneratedEmbedding::unverified(vec![f32::NAN], None),
+         )
+         .unwrap();
+     assert!(replay.replayed);
+@@ -145,10 +142,7 @@
+         .store_prepared(
+             &key,
+             &current_prepared,
+-            &GeneratedEmbedding {
+-                values: vec![],
+-                profile: None,
+-            },
++            &GeneratedEmbedding::unverified(vec![], None),
+         )
+         .unwrap();
+     assert!(replay.replayed);
+@@ -248,10 +242,7 @@
+         let result = session.store_prepared(
+             &ctx(&session, &d, "bad-vector"),
+             &prepared,
+-            &GeneratedEmbedding {
+-                values: vec![0.; 4],
+-                profile: Some(d.profile.clone()),
+-            },
++            &GeneratedEmbedding::unverified(vec![0.; 4], Some(d.profile.clone())),
+         );
+         assert!(if supplied {
+             matches!(result, Err(StorageError::CallerVectorInvalid(_)))
+@@ -576,6 +567,7 @@
+     // The old two-edge outcome remains strict even if all common fields fit.
+     let p = proof(&receipt);
+     let old = NativeRecordWrite {
++        vector_execution: None,
+         namespace_id: p.namespace_id,
+         memory_id: p.memory_id,
+         lifecycle_version: p.lifecycle_version,
+diff --git a/src/storage/metadata/native_records/tests.rs b/src/storage/metadata/native_records/tests.rs
+--- a/src/storage/metadata/native_records/tests.rs
++++ b/src/storage/metadata/native_records/tests.rs
+@@ -190,10 +190,7 @@
+     }
+ }
+ fn generated() -> GeneratedEmbedding {
+-    GeneratedEmbedding {
+-        values: vec![],
+-        profile: None,
+-    }
++    GeneratedEmbedding::unverified(vec![], None)
+ }
+ fn open(d: &Data, clock: Arc<FixedClock>) -> NativeLifecycleSession {
+     NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), clock).unwrap()
+@@ -269,10 +266,7 @@
+             .insert_prepared(
+                 &key,
+                 &intent,
+-                &GeneratedEmbedding {
+-                    values: vec![f32::NAN],
+-                    profile: None
+-                }
++                &GeneratedEmbedding::unverified(vec![f32::NAN], None)
+             )
+             .unwrap()
+             .replayed
+diff --git a/src/storage/metadata/observation.rs b/src/storage/metadata/observation.rs
+--- a/src/storage/metadata/observation.rs
++++ b/src/storage/metadata/observation.rs
+@@ -387,6 +387,7 @@
+         receipt: &WriteReceipt,
+     ) -> Result<(), StorageError> {
+         if !receipt.replayed {
++            let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
+             tx.commit().map_err(|source| {
+                 self.mark_unavailable();
+                 StorageError::CommitOutcomeUnknown {
+@@ -394,6 +395,7 @@
+                     source,
+                 }
+             })?;
++            self.publish_vector_validation_commit(certification, receipt)?;
+             self.view_publication.canonical_committed();
+         }
+         Ok(())
+diff --git a/src/storage/metadata/publication.rs b/src/storage/metadata/publication.rs
+--- a/src/storage/metadata/publication.rs
++++ b/src/storage/metadata/publication.rs
+@@ -1,5 +1,6 @@
+ //! Bridge actual canonical transactions and the single owned view registry.
+ use super::*;
++use std::sync::{Arc, RwLock};
+ use crate::model::CachedRecord;
+ use crate::storage::publication::{DerivedView, PublicationState};
+ 
+@@ -125,6 +126,7 @@
+     read: redb::ReadTransaction,
+     pub at: control::GenerationRef,
+     native_owned: bool,
++    vector_validation: Arc<RwLock<Option<super::certification::OwnedVectorValidation>>>,
+ }
+ 
+ impl MetadataStore {
+@@ -165,6 +167,7 @@
+             read,
+             at: state.generation_ref(),
+             native_owned: self.native_lifecycle_only,
++            vector_validation: self.vector_validation.clone(),
+         })
+     }
+ 
+@@ -217,6 +220,9 @@
+                 "native query canonical scope mismatch".into(),
+             ));
+         }
++        self.vector_validation.read().map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?
++            .as_ref().ok_or_else(|| StorageError::RecoveryRequired("owned vector validation missing".into()))?
++            .require_namespace(self.at, &actual)?;
+         let active = active.ok_or_else(|| {
+             StorageError::RecoveryRequired("native query provider identity missing".into())
+         })?;
+diff --git a/src/storage/metadata/purge.rs b/src/storage/metadata/purge.rs
+--- a/src/storage/metadata/purge.rs
++++ b/src/storage/metadata/purge.rs
+@@ -704,6 +704,7 @@
+         tx: redb::WriteTransaction,
+         receipt: &WriteReceipt,
+     ) -> Result<(), StorageError> {
++        let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
+         super::effects::crash_point("before_purge_commit");
+         let result = tx.commit();
+         #[cfg(test)]
+@@ -723,6 +724,7 @@
+                 source,
+             }
+         })?;
++        self.publish_vector_validation_commit(certification, receipt)?;
+         self.view_publication.canonical_committed();
+         super::effects::crash_point("after_purge_commit");
+         Ok(())
+diff --git a/src/storage/metadata/restoration.rs b/src/storage/metadata/restoration.rs
+--- a/src/storage/metadata/restoration.rs
++++ b/src/storage/metadata/restoration.rs
+@@ -29,6 +29,9 @@
+     /// Completed immutable manifests, including reserved IDs and final errors.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub batch_progress: Option<Rows>,
++    /// Inspection result, never authority to certify a different selected store.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub vector_certification: Option<crate::storage::vector_certification::CertificationSummary>,
+ }
+ 
+ /// Layouts whose canonical tables have explicit consumers. Native owned open
+@@ -110,7 +113,9 @@
+             })
+             .collect()
+     };
++    let certification = crate::storage::vector_certification::validate_current(&read, &control)?;
+     Ok(CapturedSnapshot {
++        vector_certification: (!certification.selected.is_empty()).then_some(certification),
+         control,
+         lineage,
+         ledger,
+@@ -175,6 +180,29 @@
+     new_store_id: Uuid,
+     archive_sha256: [u8; 32],
+ ) -> Result<LineageState, StorageError> {
++    for captured in std::iter::once(snapshot).chain(target) {
++        let mut required = crate::storage::vector_certification::CertificationSummary::default();
++        for (_, bytes) in &captured.receipts {
++            let receipt = control::validate_receipt(bytes)?.receipt;
++            let binding = match receipt.outcome {
++                MutationOutcome::VectorsReembedded { transition } => Some((transition.before_namespace.namespace_id.get(), transition.certification)),
++                MutationOutcome::NativeNamespaceCreated { transition } => transition.vector_certification.map(|binding| (transition.namespace_id.get(), binding)),
++                _ => None,
++            };
++            if let Some((namespace, binding)) = binding {
++                if required.selected.insert(namespace, binding).is_some() {
++                    return Err(StorageError::InvalidControl("restore capture has conflicting certification anchors".into()));
++                }
++            }
++        }
++        let required = (!required.selected.is_empty()).then_some(required);
++        if captured.vector_certification != required {
++            return Err(StorageError::InvalidControl("restore capture lost or changed required vector certification".into()));
++        }
++    }
++    crate::storage::vector_certification::validate_restore_pair(
++        snapshot.vector_certification.as_ref(), target.and_then(|t| t.vector_certification.as_ref()),
++    )?;
+     if target.is_some_and(|t| !compatible(snapshot, t))
+         || (mode == RestoreMode::Serving && target.is_none())
+     {
+diff --git a/src/storage/metadata/text_generation.rs b/src/storage/metadata/text_generation.rs
+--- a/src/storage/metadata/text_generation.rs
++++ b/src/storage/metadata/text_generation.rs
+@@ -228,6 +228,7 @@
+                 entries_kept: refs.len() as u64,
+             },
+         )?;
++        let certification = self.prepare_vector_validation_commit(&tx, &receipt)?;
+         let committed = tx.commit();
+         // Model an I/O error whose commit actually became durable. Tests must
+         // reconcile the receipt after reopen, not reclaim its selected payload.
+@@ -248,6 +249,7 @@
+                 source: e,
+             }
+         })?;
++        self.publish_vector_validation_commit(certification, &receipt)?;
+         self.view_publication.canonical_committed();
+         Ok(receipt)
+     }
+diff --git a/src/storage/mod.rs b/src/storage/mod.rs
+--- a/src/storage/mod.rs
++++ b/src/storage/mod.rs
+@@ -62,6 +62,7 @@
+ mod tombstone_tests;
+ pub(crate) mod validation;
+ pub mod vectors;
++pub mod vector_certification;
+ pub mod work;
+ 
+ // ── Re-exports ──────────────────────────────────────────────────────
+diff --git a/src/storage/native_catalog.rs b/src/storage/native_catalog.rs
+--- a/src/storage/native_catalog.rs
++++ b/src/storage/native_catalog.rs
+@@ -167,6 +167,9 @@
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase", deny_unknown_fields)]
+ pub struct NativeNamespaceCreated {
++    #[serde(default, skip_serializing_if = "Option::is_none",
++        deserialize_with = "super::request_context::deserialize_present")]
++    pub vector_certification: Option<super::vector_certification::VectorCertification>,
+     pub namespace_id: NamespaceId,
+     pub previous_max_id: u32,
+     pub previous_generation: Generation,
+@@ -195,6 +198,10 @@
+         ns.id = self.namespace_id;
+         self.policy.apply(&mut ns);
+         ns.schema.as_mut().unwrap().inherited_decay = self.inherited_decay.clone();
++        if let Some(certification) = &self.vector_certification {
++            ns.schema.as_mut().unwrap().vector_certification = Some(certification.clone());
++            ns.schema.as_mut().unwrap().required_features = vec![super::vector_certification::REQUIRED_FEATURE.into()];
++        }
+         super::catalog::NamespacePolicy::from(&ns).validate()?;
+         ns.schema
+             .as_ref()
+@@ -210,7 +217,13 @@
+         {
+             return Err(invalid("invalid native namespace creation boundary"));
+         }
+-        self.namespace()?;
++        let namespace = self.namespace()?;
++        if let Some(certification) = &self.vector_certification {
++            certification.validate()?;
++            if !certification.matches(receipt) || certification.vector_count != 0
++                || certification.inventory_root != super::vector_certification::inventory_root(&namespace, std::iter::empty())?
++            { return Err(invalid("new namespace certification is not its empty creation inventory")); }
++        }
+         if let Some(binding) = &self.inherited_decay {
+             binding.validate()?;
+             if !binding.matches_receipt(receipt) || self.policy.decay_rate_multiplier.is_some() {
+diff --git a/src/storage/native_catalog_tests.rs b/src/storage/native_catalog_tests.rs
+--- a/src/storage/native_catalog_tests.rs
++++ b/src/storage/native_catalog_tests.rs
+@@ -176,10 +176,7 @@
+         .insert_prepared(
+             &insert_ctx,
+             &intent,
+-            &crate::embedding::runtime::GeneratedEmbedding {
+-                values: vec![],
+-                profile: Some(profile()),
+-            },
++            &crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], Some(profile())),
+         )
+         .unwrap();
+     session.engine.sync().unwrap();
+diff --git a/src/storage/native_records.rs b/src/storage/native_records.rs
+--- a/src/storage/native_records.rs
++++ b/src/storage/native_records.rs
+@@ -418,6 +418,9 @@
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase", deny_unknown_fields)]
+ pub struct NativeRecordWrite {
++    #[serde(default, skip_serializing_if = "Option::is_none",
++        deserialize_with = "super::request_context::deserialize_present")]
++    pub vector_execution: Option<super::vector_certification::VectorExecution>,
+     pub namespace_id: crate::model::NamespaceId,
+     pub memory_id: MemoryId,
+     pub lifecycle_version: LifecycleVersion,
+@@ -505,6 +508,12 @@
+         receipt: &WriteReceipt,
+         insertion: bool,
+     ) -> Result<(), StorageError> {
++        if let Some(execution) = &self.vector_execution {
++            if !insertion {
++                return Err(invalid("non-vector mutation has vector execution evidence"));
++            }
++            execution.validate(&self.primary()?.after, receipt)?;
++        }
+         if self.namespace_id.is_unset()
+             || self.memory_id == MemoryId::nil()
+             || self.capture_generation.store_id != receipt.store_id
+@@ -639,6 +648,8 @@
+ pub(crate) struct CreationCommitment {
+     pub namespace_id: crate::model::NamespaceId,
+     pub primary: NativeRecordChange,
++    /// Validated typed replacement, not a rewrite of the original receipt.
++    pub reembedded_vector: Option<VectorReference>,
+ }
+ impl CreationCommitment {
+     pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
+@@ -653,6 +664,7 @@
+ ) -> Result<HashMap<MemoryId, CreationCommitment>, StorageError> {
+     use redb::ReadableTable;
+     let mut result = HashMap::new();
++    let mut replacements = HashMap::new();
+     for row in read.open_table(super::control::RECEIPTS)?.iter()? {
+         let (_, value) = row?;
+         let receipt = super::control::validate_receipt(value.value())?.receipt;
+@@ -662,6 +674,7 @@
+                 CreationCommitment {
+                     namespace_id: transition.namespace_id,
+                     primary: transition.primary()?.clone(),
++                    reembedded_vector: None,
+                 },
+             )),
+             MutationOutcome::NativeMemoryInsertedWithLinks { transition } => Some((
+@@ -669,14 +682,34 @@
+                 CreationCommitment {
+                     namespace_id: transition.namespace_id,
+                     primary: transition.primary()?.clone(),
++                    reembedded_vector: None,
+                 },
+             )),
++            MutationOutcome::VectorsReembedded { transition } => {
++                for replacement in &transition.records {
++                    if replacements.insert(replacement.record.memory_id, replacement.record.clone()).is_some() {
++                        return Err(invalid("ambiguous vector replacement history"));
++                    }
++                }
++                None
++            }
+             _ => None,
+         };
+         if let Some((id, proof)) = creation {
+             if result.insert(id, proof).is_some() {
+                 return Err(invalid("duplicate native creation identity"));
+             }
++        }
++    }
++    for (id, replacement) in replacements {
++        if let Some(creation) = result.get_mut(&id) {
++            let before = replacement.before.as_ref().ok_or_else(|| invalid("replacement source missing"))?;
++            if before.content.vector != creation.primary.after.content.vector
++                || before.content.profile_id != creation.primary.after.content.profile_id
++            {
++                return Err(invalid("replacement differs from original creation vector/profile"));
++            }
++            creation.reembedded_vector = replacement.after.content.vector;
+         }
+     }
+     Ok(result)
+@@ -723,7 +756,7 @@
+             && (current.tags_sha256 != expected.tags_sha256
+                 || current.labels_sha256 != expected.labels_sha256))
+         || (mask & FULL_TEXT == 0 && (record.text_length != 0) != original.lifecycle.has_text)
+-        || (mask & EMBEDDING == 0 && current.vector != expected.vector)
++        || (mask & EMBEDDING == 0 && current.vector.as_ref() != creation.reembedded_vector.as_ref().or(expected.vector.as_ref()))
+     {
+         return Err(invalid(
+             "retained native record disagrees with its creation commitment",
+@@ -823,10 +856,7 @@
+         }
+         let intent = self.capture_insert(scope, input)?;
+         let generated = if input.memory.embedding.is_some() {
+-            crate::embedding::runtime::GeneratedEmbedding {
+-                values: vec![],
+-                profile: None,
+-            }
++            crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
+         } else {
+             crate::embedding::runtime::generate_native(
+                 provider,
+diff --git a/src/storage/native_store.rs b/src/storage/native_store.rs
+--- a/src/storage/native_store.rs
++++ b/src/storage/native_store.rs
+@@ -176,6 +176,9 @@
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase", deny_unknown_fields)]
+ pub struct NativeStoreWrite {
++    #[serde(default, skip_serializing_if = "Option::is_none",
++        deserialize_with = "super::request_context::deserialize_present")]
++    pub vector_execution: Option<super::vector_certification::VectorExecution>,
+     pub namespace_id: NamespaceId,
+     pub memory_id: MemoryId,
+     pub lifecycle_version: LifecycleVersion,
+@@ -222,6 +225,9 @@
+         Ok(())
+     }
+     pub(crate) fn validate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
++        if let Some(execution) = &self.vector_execution {
++            execution.validate(&self.primary()?.after, receipt)?;
++        }
+         self.settings
+             .validate()
+             .map_err(|_| invalid("invalid linked creation settings"))?;
+diff --git a/src/storage/offline_snapshot.rs b/src/storage/offline_snapshot.rs
+--- a/src/storage/offline_snapshot.rs
++++ b/src/storage/offline_snapshot.rs
+@@ -21,6 +21,7 @@
+ /// validated copy; payload reads hold their file handles and source ownership.
+ /// Drop the snapshot before opening a writer. No provider calls or effects replay.
+ pub struct OfflineSnapshot {
++    pub(crate) canonical_files: Vec<std::path::PathBuf>,
+     pub(crate) metadata: redb::Database,
+     pub(crate) edges: redb::Database,
+     control: ControlState,
+@@ -53,11 +54,14 @@
+     fn from_owner(owner: StoreOwnership, importing: bool) -> Result<Self, StorageError> {
+         let source = &owner.path;
+         let source_lock = lock_directory(source)?;
+-        if importing {
+-            super::validation::validate_import_stage(source)?;
++        let canonical_files = if importing {
++            let mut files: Vec<_> = super::validation::validate_import_stage(source)?
++                .into_iter().map(|name| source.join(name)).collect();
++            files.sort();
++            files
+         } else {
+-            super::validation::canonical_files(source)?;
+-        }
++            super::validation::canonical_files(source)?
++        };
+         let (meta_copy, metadata) = super::validation::inspect_database(&source.join("meta.db"))?;
+         let (edges_copy, edges) = super::validation::inspect_database(&source.join("edges.db"))?;
+         let read = metadata.begin_read()?;
+@@ -83,6 +87,7 @@
+         };
+         drop(read);
+         Ok(Self {
++            canonical_files,
+             metadata,
+             edges,
+             control,
+diff --git a/src/storage/vector_certification.rs b/src/storage/vector_certification.rs
+new file mode 100644
+--- /dev/null
++++ b/src/storage/vector_certification.rs
+@@ -0,0 +1,357 @@
++//! Explicit document-recipe evidence. A profile identity alone does not prove
++//! how an existing vector was produced. Old bytes retain absent evidence.
++use super::control::{self, Generation, GenerationRef, MutationContext, MutationScope, WriteReceipt};
++use super::native_lifecycle::invalid;
++use super::native_records::{NativeInsert, NativeRecordChange, NativeRecordState, hash_bytes};
++use super::{StorageError, insertion::InsertMemory};
++use crate::model::schema::{EmbeddingBinding, LabelProvenance, VectorReference};
++use crate::model::{DecayPhase, DiskRecord, MemoryId, NamespaceConfig, NamespaceId};
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++use uuid::Uuid;
++
++mod history;
++mod offline;
++pub use offline::reembed_fresh;
++pub(crate) use history::{CertificationSummary, validate_current, validate_restore_pair};
++
++pub const REQUIRED_FEATURE: &str = "vector-recipe-certification-v1";
++pub(crate) const MAX_ROWS: u64 = 100_000;
++pub(crate) const MAX_BYTES: u64 = 256 * 1024 * 1024;
++pub(crate) const MAX_PROOF_BYTES: u64 = 16 * 1024 * 1024;
++pub(crate) const MAX_HISTORY_ROWS: u64 = 1_000_000;
++pub(crate) const MAX_HISTORY_BYTES: u64 = 512 * 1024 * 1024;
++
++/// Immutable original cutover identity. A restore must preserve, not retarget it.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct VectorCertification {
++    pub version: u32,
++    pub origin: GenerationRef,
++    pub operation_id: Uuid,
++    pub inventory_root: [u8; 32],
++    pub vector_count: u64,
++}
++impl VectorCertification {
++    pub(crate) fn validate(&self) -> Result<(), StorageError> {
++        if self.version != 1 || self.origin.store_id.is_nil() || self.operation_id.is_nil()
++            || self.origin.generation == Generation::default() || self.vector_count > MAX_ROWS
++        {
++            return Err(invalid("invalid vector certification binding"));
++        }
++        Ok(())
++    }
++    pub(crate) fn matches(&self, receipt: &WriteReceipt) -> bool {
++        self.origin.store_id == receipt.store_id
++            && self.origin.generation == receipt.committed_generation
++            && self.operation_id == receipt.operation_id
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
++pub enum RetainedTextInput {
++    Absent,
++    Present { sha256: [u8; 32] },
++}
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum DocumentRecipe { DocumentV1 }
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum DocumentSource { RetainedCanonicalV1, CallerDocumentV1 }
++
++/// No payload or vector bytes. Explicit absence differs from unknown old text
++/// provenance in ContentProof. Component hashes preserve the stored labels.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct DocumentEvidence {
++    pub recipe: DocumentRecipe,
++    pub source: DocumentSource,
++    pub source_record_generation: Generation,
++    pub phase: DecayPhase,
++    pub summary_sha256: [u8; 32],
++    pub tags_sha256: [u8; 32],
++    pub labels_sha256: [u8; 32],
++    pub label_provenance: LabelProvenance,
++    pub full_text: RetainedTextInput,
++    pub document_sha256: [u8; 32],
++}
++
++pub(crate) struct RetainedDocument {
++    pub text: String,
++    pub evidence: DocumentEvidence,
++}
++
++pub(crate) fn retained_document(
++    record: &DiskRecord,
++    full_text: Option<&str>,
++) -> Result<RetainedDocument, StorageError> {
++    let schema = record.schema.as_ref().ok_or_else(|| invalid("document schema missing"))?;
++    if !matches!(record.phase, DecayPhase::Full | DecayPhase::Summary)
++        || record.summary.is_empty()
++        || (record.text_length != 0) != full_text.is_some()
++        || full_text.is_some_and(|text| text.len() != record.text_length as usize)
++    {
++        return Err(StorageError::InvalidMutation(
++            "record has no complete retained document for re-embedding".into(),
++        ));
++    }
++    // This value is used ONLY by the shared composition function. In particular
++    // labels() is not called: it would manufacture NativeV2 label provenance.
++    let input = NativeInsert {
++        memory: InsertMemory {
++            id: Some(MemoryId::from_bytes(record.id)),
++            summary: record.summary.clone(),
++            full_text: full_text.map(str::to_owned),
++            tags: record.tags.clone(),
++            initial_stability: None,
++            created_at: None,
++            embedding: None,
++            parent_id: None,
++            supersedes: None,
++        },
++        observed_at: None,
++        entities: schema.labels.entities.clone(),
++        topics: schema.labels.topics.clone(),
++        emotions: schema.labels.emotions.clone(),
++        embedding_profile: None,
++    };
++    let text = input.document_v1();
++    let evidence = DocumentEvidence {
++        recipe: DocumentRecipe::DocumentV1,
++        source: DocumentSource::RetainedCanonicalV1,
++        source_record_generation: schema.lifecycle.record_generation,
++        phase: record.phase,
++        summary_sha256: hash_bytes(record.summary.as_bytes()),
++        tags_sha256: hash_bytes(&control::encode(&record.tags)?),
++        labels_sha256: hash_bytes(&control::encode(&schema.labels)?),
++        label_provenance: schema.labels.provenance,
++        full_text: full_text.map_or(RetainedTextInput::Absent, |text| RetainedTextInput::Present {
++            sha256: hash_bytes(text.as_bytes()),
++        }),
++        document_sha256: hash_bytes(text.as_bytes()),
++    };
++    Ok(RetainedDocument { text, evidence })
++}
++
++impl DocumentEvidence {
++    pub(crate) fn validate_source(&self, before: &NativeRecordState) -> Result<(), StorageError> {
++        let content = &before.content;
++        let text_matches = match self.full_text {
++            RetainedTextInput::Absent => !before.lifecycle.has_text,
++            RetainedTextInput::Present { sha256 } => before.lifecycle.has_text
++                && content.text_sha256.is_none_or(|expected| expected == sha256),
++        };
++        if self.source_record_generation != before.lifecycle.lifecycle.record_generation
++            || self.phase != before.lifecycle.phase
++            || !matches!(self.phase, DecayPhase::Full | DecayPhase::Summary)
++            || !before.lifecycle.has_summary || !text_matches
++            || self.summary_sha256 != content.summary_sha256
++            || self.tags_sha256 != content.tags_sha256
++            || self.labels_sha256 != content.labels_sha256
++            || self.label_provenance != content.label_provenance
++        {
++            return Err(invalid("vector document evidence differs from retained source"));
++        }
++        Ok(())
++    }
++}
++
++/// The request commits to original source CAS and the exact immutable profile;
++/// provider output is execution evidence, never normalized request identity.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct ReembedVectors {
++    pub context: MutationContext,
++    pub source: GenerationRef,
++    pub namespace_id: NamespaceId,
++    pub namespace_name: String,
++    pub profile_id: String,
++}
++impl ReembedVectors {
++    pub(crate) fn hash(&self, source_origins: &[GenerationRef], before_root: [u8; 32], documents_root: [u8; 32]) -> Result<[u8; 32], StorageError> {
++        self.context.validate()?;
++        if self.context.scope != MutationScope::Namespace(self.namespace_id)
++            || self.context.store_id != Some(self.source.store_id)
++            || self.context.expected_generation != Some(self.source.generation)
++        {
++            return Err(StorageError::InvalidMutationContext(
++                "vector re-embedding requires exact original source identity and generation".into(),
++            ));
++        }
++        Ok(control::request_hash(&self.context, "reembed_retained_vectors_v1", &[
++            &control::encode(&(self.source, self.namespace_id, &self.namespace_name, &self.profile_id,
++                source_origins, before_root, documents_root))?,
++        ]))
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct VectorReplacement {
++    pub record: NativeRecordChange,
++    pub document: DocumentEvidence,
++}
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct VectorsReembedded {
++    pub version: u32,
++    pub contract_version: u32,
++    pub source: GenerationRef,
++    /// Exact sorted source ancestry cutoffs captured before this operation.
++    /// A later restore cannot expand these to bless post-cutover old proofs.
++    pub source_origins: Vec<GenerationRef>,
++    pub before_namespace: super::native_purge::NativeNamespaceProof,
++    pub certification: VectorCertification,
++    pub before_inventory_root: [u8; 32],
++    pub records: Vec<VectorReplacement>,
++}
++
++pub(crate) fn inventory_root<'a>(
++    namespace: &NamespaceConfig,
++    rows: impl IntoIterator<Item = (MemoryId, Generation, &'a VectorReference)>,
++) -> Result<[u8; 32], StorageError> {
++    let mut hash = Sha256::new();
++    hash.update(b"recalld-vector-certification-inventory-v1\0");
++    hash.update(control::encode(&(namespace.id, namespace.embedding_dim,
++        super::native_records::profile_id(namespace)))?);
++    let mut previous = None;
++    for (id, token, vector) in rows {
++        if previous.is_some_and(|previous| previous >= id) {
++            return Err(invalid("vector inventory is not strictly ordered"));
++        }
++        previous = Some(id);
++        hash.update(control::encode(&(id, token, vector))?);
++    }
++    Ok(hash.finalize().into())
++}
++
++impl VectorsReembedded {
++    pub(crate) fn documents_root(&self) -> Result<[u8; 32], StorageError> {
++        let mut hash = Sha256::new();
++        hash.update(b"recalld-retained-documents-v1\0");
++        for row in &self.records {
++            hash.update(control::encode(&(row.record.memory_id, &row.document))?);
++        }
++        Ok(hash.finalize().into())
++    }
++    pub(crate) fn precedes_cutover(&self, receipt: &WriteReceipt) -> bool {
++        self.source_origins.iter().any(|origin| origin.store_id == receipt.store_id
++            && receipt.committed_generation <= origin.generation)
++    }
++    pub(crate) fn validate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
++        self.certification.validate()?;
++        let namespace = self.before_namespace.namespace()?;
++        let schema = namespace.schema.as_ref().ok_or_else(|| invalid("cutover schema missing"))?;
++        if self.version != 1 || !matches!(self.contract_version, 1 | 2)
++            || !self.certification.matches(receipt)
++            || self.source.store_id != receipt.store_id
++            || self.source.generation.next()? != receipt.committed_generation
++            || !self.source_origins.contains(&self.source)
++            || self.source_origins.iter().any(|o| o.store_id.is_nil())
++            || self.source_origins.windows(2).any(|pair| pair[0].store_id >= pair[1].store_id)
++            || self.records.len() as u64 != self.certification.vector_count
++            || !matches!(schema.embedding_binding, EmbeddingBinding::Bound { .. })
++            || !schema.required_features.is_empty()
++            || control::encode(self)?.len() as u64 > MAX_PROOF_BYTES
++        {
++            return Err(invalid("invalid vector re-embedding cutover"));
++        }
++        for replacement in &self.records {
++            let change = &replacement.record;
++            let before = change.before.as_ref().ok_or_else(|| invalid("cutover source absent"))?;
++            replacement.document.validate_source(before)?;
++            if replacement.document.source != DocumentSource::RetainedCanonicalV1 {
++                return Err(invalid("cutover requires actual retained-document evidence"));
++            }
++            before.content.validate_namespace_profile(&namespace)?;
++            change.after.content.validate_namespace_profile(&namespace)?;
++            let before_vector = before.content.vector.as_ref().ok_or_else(|| invalid("source vector absent"))?;
++            let after_vector = change.after.content.vector.as_ref().ok_or_else(|| invalid("output vector absent"))?;
++            let mut expected = before.clone();
++            expected.content.vector = Some(after_vector.clone());
++            expected.lifecycle.lifecycle.record_generation = before.lifecycle.lifecycle.record_generation.next()?;
++            if expected != change.after || before_vector.slot == after_vector.slot
++                || after_vector.allocation_epoch != receipt.committed_generation
++            {
++                return Err(invalid("vector replacement changed unrelated canonical state"));
++            }
++        }
++        let before = inventory_root(&namespace, self.records.iter().map(|r| {
++            let state = r.record.before.as_ref().expect("validated source");
++            (r.record.memory_id, state.lifecycle.lifecycle.record_generation,
++             state.content.vector.as_ref().expect("validated source vector"))
++        }))?;
++        let after = inventory_root(&namespace, self.records.iter().map(|r| {
++            (r.record.memory_id, r.record.after.lifecycle.lifecycle.record_generation,
++             r.record.after.content.vector.as_ref().expect("validated output vector"))
++        }))?;
++        if before != self.before_inventory_root || after != self.certification.inventory_root {
++            return Err(invalid("vector cutover inventory commitment mismatch"));
++        }
++        Ok(())
++    }
++}
++
++/// Mandatory for a fresh vector in a certified namespace. Absence on genuine
++/// older writes is permitted only inside the cutover's original ancestry bound.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct VectorExecution {
++    pub certification: VectorCertification,
++    pub source: VectorSource,
++}
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
++pub enum VectorSource {
++    Generated { document: DocumentEvidence },
++    Supplied { profile_id: String },
++}
++impl VectorExecution {
++    pub(crate) fn for_insert(
++        namespace: &NamespaceConfig, record: &DiskRecord, input: &NativeInsert,
++        generated: &crate::embedding::runtime::GeneratedEmbedding,
++    ) -> Result<Option<Self>, StorageError> {
++        let Some(certification) = namespace.schema.as_ref().and_then(|s| s.vector_certification.clone()) else {
++            return Ok(None);
++        };
++        let source = if input.memory.embedding.is_some() {
++            let profile = input.embedding_profile.as_ref().ok_or_else(|| invalid("supplied profile absent"))?;
++            VectorSource::Supplied { profile_id: profile.profile_id().map_err(StorageError::InvalidMutation)? }
++        } else {
++            generated.verify_document(&input.document_v1())
++                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
++            let mut document = retained_document(record, input.memory.full_text.as_deref())?.evidence;
++            document.source = DocumentSource::CallerDocumentV1;
++            VectorSource::Generated { document }
++        };
++        Ok(Some(Self { certification, source }))
++    }
++    pub(crate) fn validate(&self, primary: &NativeRecordState, receipt: &WriteReceipt) -> Result<(), StorageError> {
++        self.certification.validate()?;
++        if primary.content.vector.is_none()
++            || (self.certification.origin.store_id == receipt.store_id
++                && self.certification.origin.generation >= receipt.committed_generation)
++        {
++            return Err(invalid("vector execution does not follow certification"));
++        }
++        match &self.source {
++            VectorSource::Generated { document } => {
++                if document.source != DocumentSource::CallerDocumentV1 {
++                    return Err(invalid("fresh vector evidence is not caller-document execution"));
++                }
++                document.validate_source(primary)?;
++            }
++            VectorSource::Supplied { profile_id } => {
++                if primary.content.profile_id.as_ref() != Some(profile_id) {
++                    return Err(invalid("supplied vector assertion differs from canonical profile"));
++                }
++            }
++        }
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/src/storage/vector_certification/history.rs b/src/storage/vector_certification/history.rs
+new file mode 100644
+--- /dev/null
++++ b/src/storage/vector_certification/history.rs
+@@ -0,0 +1,183 @@
++use super::*;
++use crate::storage::control::{ControlState, MutationOutcome};
++use crate::storage::metadata::{META_TABLE, NAMESPACE_TABLE, removal_ledger};
++use redb::ReadableTable;
++use std::collections::{BTreeMap, HashMap, HashSet};
++
++#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub(crate) struct CertificationSummary {
++    /// Includes strictly validated retired namespace bindings after purge.
++    pub selected: BTreeMap<u32, VectorCertification>,
++}
++
++pub(crate) fn validate_restore_pair(
++    selected: Option<&CertificationSummary>, target: Option<&CertificationSummary>,
++) -> Result<(), StorageError> {
++    if let Some(target) = target {
++        for (id, certification) in &target.selected {
++            if selected.and_then(|s| s.selected.get(id)) != Some(certification) {
++                return Err(StorageError::InvalidMutation(
++                    "selected backup cannot prove the retained target's vector certification; restore separately as uncertified historical data or use a compatible snapshot".into(),
++                ));
++            }
++        }
++    }
++    Ok(())
++}
++
++pub(crate) fn validate_current(
++    read: &redb::ReadTransaction, control: &ControlState,
++) -> Result<CertificationSummary, StorageError> {
++    #[cfg(test)]
++    control::certification_scan();
++    let mut examined = 0_u64;
++    let mut bytes = 0_u64;
++    let mut cutovers = BTreeMap::new();
++    let mut empty_creations = BTreeMap::new();
++    let mut creations = Vec::new();
++    for row in read.open_table(control::RECEIPTS)?.iter()? {
++        let (key, value) = row?;
++        examined += 1;
++        bytes = bytes.checked_add(value.value().len() as u64).ok_or_else(|| invalid("certification history size overflow"))?;
++        if examined > MAX_HISTORY_ROWS || bytes > MAX_HISTORY_BYTES {
++            return Err(invalid("certification history exceeds bounded inspection limit"));
++        }
++        let receipt = control::validate_receipt(value.value())?.receipt;
++        match &receipt.outcome {
++            MutationOutcome::NativeNamespaceCreated { transition } => {
++                if let Some(certification) = &transition.vector_certification {
++                    if empty_creations.insert(transition.namespace_id.get(), certification.clone()).is_some()
++                        || !control::permits_generation_origin(read, control, certification.origin)?
++                    { return Err(invalid("ambiguous certified namespace creation")); }
++                }
++            }
++            MutationOutcome::VectorsReembedded { transition } => {
++                let id = transition.before_namespace.namespace_id;
++                if key.value() != control::scoped_key(receipt.store_id,
++                    MutationScope::Namespace(id), receipt.operation_id.as_bytes())
++                    || !control::permits_generation_origin(read, control, transition.certification.origin)?
++                    || cutovers.insert(id.get(), transition.clone()).is_some()
++                {
++                    return Err(invalid("ambiguous or foreign vector certification origin"));
++                }
++                for origin in &transition.source_origins {
++                    if !control::permits_generation_origin(read, control, *origin)? {
++                        return Err(invalid("cutover source ancestry is not retained"));
++                    }
++                }
++            }
++            MutationOutcome::NativeMemoryInserted { transition } => {
++                creations.push((receipt.clone(), transition.namespace_id,
++                    transition.memory_id, transition.vector_execution.clone()));
++            }
++            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
++                creations.push((receipt.clone(), transition.namespace_id,
++                    transition.memory_id, transition.vector_execution.clone()));
++            }
++            _ => {}
++        }
++    }
++    let mut namespaces = HashMap::new();
++    for row in read.open_table(NAMESPACE_TABLE)?.iter()? {
++        let (_, value) = row?;
++        let namespace = NamespaceConfig::decode(value.value())?;
++        namespaces.insert(namespace.id.get(), namespace);
++    }
++    let progress = crate::storage::metadata::purge::validate_existing(read, Some(control))?;
++    for (id, retired) in crate::storage::native_purge::retired_namespace_bindings(&progress)? {
++        let namespace = retired.namespace()?;
++        if let Some(current) = namespaces.get(&id) {
++            if crate::storage::native_purge::NativeNamespaceProof::capture(current)? != *retired {
++                return Err(invalid("certification retired namespace mismatch"));
++            }
++        } else { namespaces.insert(id, namespace); }
++    }
++    let mut summary = CertificationSummary::default();
++    for (&id, namespace) in &namespaces {
++        let selected = namespace.schema.as_ref().and_then(|s| s.vector_certification.as_ref());
++        match (selected, cutovers.get(&id)) {
++            (None, None) if !empty_creations.contains_key(&id) => {}
++            (Some(binding), None) if empty_creations.get(&id) == Some(binding) => {
++                summary.selected.insert(id, binding.clone());
++            }
++            (Some(binding), Some(cutover)) if *binding == cutover.certification => {
++                if empty_creations.contains_key(&id) {
++                    return Err(invalid("already certified namespace cannot have a second cutover"));
++                }
++                let original = cutover.before_namespace.namespace()?;
++                if original.id != namespace.id || original.name != namespace.name
++                    || original.embedding_dim != namespace.embedding_dim
++                    || original.schema.as_ref().unwrap().embedding_binding
++                        != namespace.schema.as_ref().unwrap().embedding_binding
++                { return Err(invalid("certified namespace immutable binding changed")); }
++                summary.selected.insert(id, binding.clone());
++            }
++            _ => return Err(invalid("required vector certification anchor/feature missing or inconsistent")),
++        }
++    }
++    if cutovers.keys().chain(empty_creations.keys()).any(|id| !summary.selected.contains_key(id)) {
++        return Err(invalid("vector cutover lacks live or terminal namespace witness"));
++    }
++    let mut certified_creations = HashSet::new();
++    for (receipt, namespace, memory, execution) in creations {
++        match (summary.selected.get(&namespace.get()), execution) {
++            (Some(binding), Some(execution)) if execution.certification == *binding => {
++                if cutovers.get(&namespace.get()).is_some_and(|cutover| cutover.precedes_cutover(&receipt)) {
++                    return Err(invalid("vector execution predates its cutover"));
++                }
++                certified_creations.insert(memory);
++            }
++            (Some(_), None) if cutovers.get(&namespace.get()).is_some_and(|cutover| cutover.precedes_cutover(&receipt)) => {}
++            (None, None) => {}
++            _ => return Err(invalid("post-cutover vector execution evidence missing or foreign")),
++        }
++    }
++    let ledger = removal_ledger::read_export(read, Some(control))?;
++    let mut loss = HashMap::<(u32, Uuid), u8>::new();
++    for entry in ledger.iter().flat_map(|l| &l.entries) {
++        *loss.entry((entry.namespace_id, entry.memory_uuid)).or_default() |= entry.removed_fields_mask;
++    }
++    let mut current = HashMap::new();
++    let mut count = 0_u64;
++    let mut row_bytes = 0_u64;
++    for row in read.open_table(META_TABLE)?.iter()? {
++        let (key, value) = row?;
++        count += 1;
++        row_bytes = row_bytes.checked_add(value.value().len() as u64).ok_or_else(|| invalid("inventory size overflow"))?;
++        if count > MAX_ROWS || row_bytes > MAX_BYTES {
++            return Err(invalid("vector certification inventory exceeds bounded inspection limit"));
++        }
++        let record = DiskRecord::from_bytes(value.value())?;
++        if record.id.as_slice() != key.value() { return Err(invalid("certification inventory key mismatch")); }
++        if record.schema.as_ref().and_then(|s| s.vector.as_ref()).is_some() {
++            let namespace = namespaces.get(&record.namespace_id).ok_or_else(|| invalid("inventory namespace missing"))?;
++            row_bytes = row_bytes.checked_add(u64::from(namespace.embedding_dim) * 4)
++                .ok_or_else(|| invalid("inventory vector accounting overflow"))?;
++            if row_bytes > MAX_BYTES { return Err(invalid("vector certification payload budget exceeded")); }
++        }
++        let id = MemoryId::from_bytes(record.id);
++        if summary.selected.contains_key(&record.namespace_id) {
++            let vector = record.schema.as_ref().and_then(|s| s.vector.as_ref());
++            if vector.is_some() && !certified_creations.contains(&id)
++                && !cutovers.get(&record.namespace_id).is_some_and(|cutover|
++                    cutover.records.binary_search_by_key(&id, |r| r.record.memory_id).is_ok())
++            { return Err(invalid("current vector has no certified inventory/execution proof")); }
++            current.insert(id, (record.namespace_id, vector.cloned()));
++        }
++    }
++    for (namespace, cutover) in &cutovers {
++        for row in &cutover.records {
++            let id = row.record.memory_id;
++            match current.get(&id) {
++                Some((ns, Some(vector))) if ns == namespace
++                    && Some(vector) == row.record.after.content.vector.as_ref() => {}
++                Some((ns, None)) if ns == namespace
++                    && loss.get(&(*namespace, id.into_inner())).is_some_and(|m| m & removal_ledger::EMBEDDING != 0) => {}
++                None if loss.get(&(*namespace, id.into_inner())).is_some_and(|m| *m == removal_ledger::ALL) => {}
++                _ => return Err(invalid("certified inventory row/reference omitted without validated loss")),
++            }
++        }
++    }
++    Ok(summary)
++}
+diff --git a/src/storage/vector_certification/offline.rs b/src/storage/vector_certification/offline.rs
+new file mode 100644
+--- /dev/null
++++ b/src/storage/vector_certification/offline.rs
+@@ -0,0 +1,242 @@
++//! Fresh-destination re-embedding. The source owner spans inspection and all
++//! provider work; only a private copy is writable. No serving admission here.
++use super::*;
++use crate::embedding::{EmbeddingProvider, runtime::generate_native};
++use crate::storage::{offline_snapshot::OfflineSnapshot, ownership::StoreOwnership};
++use crate::storage::metadata::{META_TABLE, NAMESPACE_TABLE};
++use redb::ReadableTable;
++use std::path::{Path, PathBuf};
++
++const MAX_CONTROL_BYTES: u64 = 512 * 1024 * 1024;
++
++fn snapshot_owned(owner: StoreOwnership) -> Result<OfflineSnapshot, StorageError> {
++    let mut bytes = 0_u64;
++    for name in ["meta.db", "edges.db"] {
++        let path = owner.path.join(name);
++        crate::storage::validation::require_file(&path)?;
++        bytes = bytes.checked_add(path.metadata()?.len()).ok_or_else(|| invalid("inspection size overflow"))?;
++        if bytes > MAX_CONTROL_BYTES { return Err(invalid("certification control inspection exceeds 512 MiB")); }
++    }
++    OfflineSnapshot::open_owned(owner)
++}
++
++fn replay(snapshot: &OfflineSnapshot, request: &ReembedVectors) -> Result<WriteReceipt, StorageError> {
++    // This write transaction belongs to the disposable inspection copy. It is
++    // never committed and never opens the original canonical database writable.
++    let tx = snapshot.metadata.begin_write()?;
++    let stored = control::keyed_receipt(&tx, &request.context)?
++        .ok_or_else(|| invalid("existing destination/stage has no matching cutover; inspect it before retrying"))?;
++    let control::MutationOutcome::VectorsReembedded { transition } = &stored.receipt.outcome else {
++        return Err(StorageError::IdempotencyConflict);
++    };
++    let hash = request.hash(&transition.source_origins, transition.before_inventory_root, transition.documents_root()?)?;
++    control::replay_or_check(&tx, &request.context, hash)?
++        .ok_or_else(|| invalid("cutover receipt disappeared"))
++}
++
++fn publish(stage: &Path, target: &Path, receipt: &WriteReceipt) -> Result<(), StorageError> {
++    let result = (|| {
++        crate::storage::catalog::boundary("certification_after_commit")?;
++        for file in crate::storage::validation::canonical_files(stage)? {
++            std::fs::File::open(file)?.sync_all()?;
++        }
++        crate::storage::fsync::fsync_dir(stage)?;
++        if target.try_exists()? { return Err(invalid("fresh destination appeared during cutover")); }
++        std::fs::rename(stage, target)?;
++        crate::storage::catalog::boundary("certification_published")?;
++        crate::storage::fsync::fsync_dir(target.parent().ok_or(StorageError::InvalidPath)?)?;
++        Ok(())
++    })();
++    result.map_err(|source| StorageError::CommittedMutation {
++        receipt: Box::new(receipt.clone()), source: Box::new(source),
++    })
++}
++
++struct UncommittedStage(Option<PathBuf>);
++impl Drop for UncommittedStage {
++    fn drop(&mut self) {
++        if let Some(path) = &self.0 { let _ = std::fs::remove_dir_all(path); }
++    }
++}
++
++/// Re-embed actual retained Full/Summary documents into a fresh destination.
++/// Existing matching destinations/stages replay before provider use or source
++/// CAS. A private ambiguous stage is never overwritten or automatically erased.
++pub async fn reembed_fresh(
++    source: &Path, destination: &Path, request: &ReembedVectors,
++    provider: &dyn EmbeddingProvider,
++) -> Result<WriteReceipt, StorageError> {
++    request.context.validate()?;
++    if request.context.idempotency_key.is_none() {
++        return Err(StorageError::InvalidMutationContext("offline certification requires a stable idempotency key".into()));
++    }
++    // Validate original context even on an existing destination.
++    request.hash(&[], [0; 32], [0; 32])?;
++    let target_owner = StoreOwnership::acquire(destination)?;
++    let target = &target_owner.path;
++    let source = source.canonicalize()?;
++    if target.starts_with(&source) || source.starts_with(target) { return Err(StorageError::InvalidPath); }
++    let mut stage_name = target.file_name().ok_or(StorageError::InvalidPath)?.to_os_string();
++    stage_name.push(".recalld-vector-certification");
++    let stage = target.with_file_name(stage_name);
++    if target.try_exists()? {
++        return replay(&snapshot_owned(target_owner)?, request);
++    }
++    let stage_owner = StoreOwnership::acquire(&stage)?;
++    if stage.try_exists()? {
++        let snapshot = snapshot_owned(stage_owner)?;
++        let receipt = replay(&snapshot, request)?;
++        let _stage_owner = snapshot.into_owner();
++        publish(&stage, target, &receipt)?;
++        return Ok(receipt);
++    }
++    let snapshot = snapshot_owned(StoreOwnership::acquire(&source)?)?;
++    let state = snapshot.control();
++    if state.generation_ref() != request.source {
++        return Err(if state.store_id != request.source.store_id { StorageError::StoreLineageMismatch }
++            else { StorageError::GenerationConflict { expected: request.source.generation.into(), actual: state.committed_generation.into() } });
++    }
++    let namespace = snapshot.namespaces().iter().find(|n| n.id == request.namespace_id)
++        .ok_or(StorageError::NamespaceNotFound(request.namespace_id.get()))?.clone();
++    if namespace.name != request.namespace_name || super::super::native_records::profile_id(&namespace).as_ref() != Some(&request.profile_id) {
++        return Err(StorageError::InvalidMutation("re-embedding namespace/profile does not match original request".into()));
++    }
++    let schema = namespace.schema.as_ref().ok_or_else(|| invalid("re-embedding requires native schema"))?;
++    if schema.vector_certification.is_some() || !schema.required_features.is_empty() {
++        return Err(StorageError::InvalidMutation("namespace is already certified or has unsupported required features".into()));
++    }
++    let active = provider.profile().ok_or_else(|| invalid("re-embedding provider profile missing"))?;
++    crate::embedding::profile::require_compatible(&namespace, &active)
++        .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
++    let mut origins = {
++        let read = snapshot.metadata.begin_read()?;
++        crate::storage::lineage::ensure_serving(&read, state)?;
++        let mut origins = crate::storage::lineage::read_lineage(&read, state)?.map(|l| l.ancestors).unwrap_or_default();
++        origins.retain(|o| o.store_id != state.store_id);
++        origins.push(state.generation_ref());
++        origins
++    };
++    origins.sort_by_key(|o| o.store_id);
++    if origins.windows(2).any(|pair| pair[0].store_id == pair[1].store_id) { return Err(invalid("duplicate source ancestry")); }
++    let mut retained = Vec::new();
++    {
++        let read = snapshot.metadata.begin_read()?;
++        let mut count = 0_u64;
++        let mut bytes = 0_u64;
++        for row in read.open_table(META_TABLE)?.iter()? {
++            let (id, value) = row?;
++            count += 1;
++            bytes = bytes.checked_add(value.value().len() as u64).ok_or_else(|| invalid("inventory size overflow"))?;
++            if count > MAX_ROWS || bytes > MAX_BYTES { return Err(invalid("certification inventory limit exceeded")); }
++            let record = DiskRecord::from_bytes(value.value())?;
++            if record.id.as_slice() != id.value() { return Err(invalid("inventory key mismatch")); }
++            if record.namespace_id != namespace.id.get() { continue; }
++            let Some(reference) = record.schema.as_ref().and_then(|s| s.vector.as_ref()) else { continue; };
++            // Charge vector and text bytes BEFORE OfflineSnapshot materializes them.
++            bytes = bytes.checked_add(u64::from(namespace.embedding_dim) * 4)
++                .and_then(|n| n.checked_add(u64::from(record.text_length)))
++                .ok_or_else(|| invalid("inventory payload size overflow"))?;
++            if bytes > MAX_BYTES { return Err(invalid("certification inventory payload limit exceeded")); }
++            let raw = snapshot.record(MemoryId::from_bytes(record.id))?.ok_or_else(|| invalid("retained record disappeared"))?;
++            let vector = raw.embedding.as_ref().ok_or_else(|| invalid("referenced vector missing"))?;
++            let mut digest = Sha256::new();
++            for value in vector { digest.update(value.to_le_bytes()); }
++            if reference.sha256 != <[u8; 32]>::from(digest.finalize()) { return Err(invalid("retained vector hash mismatch")); }
++            let document = retained_document(&raw.record, raw.full_text.as_deref())?;
++            let before = NativeRecordState::capture(&raw.record, &namespace, raw.full_text.as_deref().map(|t| hash_bytes(t.as_bytes())))?;
++            retained.push((raw.record, before, document));
++        }
++    }
++    let before_root = inventory_root(&namespace, retained.iter().map(|(record, proof, _)| (
++        MemoryId::from_bytes(record.id), proof.lifecycle.lifecycle.record_generation,
++        proof.content.vector.as_ref().expect("selected reference"),
++    )))?;
++    let mut documents = Sha256::new();
++    documents.update(b"recalld-retained-documents-v1\0");
++    for (record, _, document) in &retained { documents.update(control::encode(&(MemoryId::from_bytes(record.id), &document.evidence))?); }
++    let hash = request.hash(&origins, before_root, documents.finalize().into())?;
++    // Stable key conflicts in the source are resolved before provider or staging.
++    if control::replay_or_check(&snapshot.metadata.begin_write()?, &request.context, hash)?.is_some() {
++        return Err(invalid("source already contains this cutover; use its original destination"));
++    }
++    let next = state.committed_generation.next()?;
++    std::fs::create_dir(&stage)?;
++    let mut cleanup = UncommittedStage(Some(stage.clone()));
++    // Already validated before this snapshot acquired the payload handles.
++    // Reopening them for a second scan would contend with our own file locks.
++    let files = &snapshot.canonical_files;
++    let mut copy_bytes = 0_u64;
++    for file in files {
++        copy_bytes = copy_bytes.checked_add(file.metadata()?.len()).ok_or_else(|| invalid("staging copy size overflow"))?;
++        if copy_bytes > MAX_CONTROL_BYTES { return Err(invalid("certification canonical copy exceeds 512 MiB")); }
++    }
++    for file in files {
++        let copied = stage.join(file.strip_prefix(&source).map_err(|_| StorageError::InvalidPath)?);
++        let parent = copied.parent().ok_or(StorageError::InvalidPath)?;
++        std::fs::create_dir_all(parent)?;
++        std::fs::copy(file, &copied)?;
++        std::fs::File::open(&copied)?.sync_all()?;
++        crate::storage::fsync::fsync_dir(parent)?;
++    }
++    let mut vectors = crate::storage::VectorStore::open(&stage.join(&namespace.name), namespace.embedding_dim as usize)?;
++    let mut replacements = Vec::new();
++    let mut updated = Vec::new();
++    for (mut record, before, document) in retained {
++        let generated = generate_native(provider, &namespace, &document.text).await
++            .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
++        generated.verify_document(&document.text).map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
++        let mut values = generated.values;
++        crate::storage::insertion::normalize_embedding(&mut values, namespace.embedding_dim, false)?;
++        let slot = vectors.insert_vector(&values)?;
++        let mut digest = Sha256::new();
++        for value in &values { digest.update(value.to_le_bytes()); }
++        record.vector_slot = slot;
++        let schema = record.schema.as_mut().ok_or_else(|| invalid("retained schema missing"))?;
++        schema.vector = Some(VectorReference { slot, allocation_epoch: next, sha256: digest.finalize().into() });
++        schema.lifecycle.record_generation = schema.lifecycle.record_generation.next()?;
++        let mut after = before.clone();
++        after.content.vector = schema.vector.clone();
++        after.lifecycle.lifecycle.record_generation = schema.lifecycle.record_generation;
++        replacements.push(VectorReplacement { record: NativeRecordChange { memory_id: MemoryId::from_bytes(record.id), before: Some(before), after }, document: document.evidence });
++        updated.push(record);
++    }
++    vectors.sync()?;
++    let operation_id = crate::storage::ids::IdSource::uuid(&crate::storage::ids::SystemIds, crate::storage::ids::IdKind::Operation)?;
++    let certification = VectorCertification { version: 1, origin: GenerationRef { store_id: state.store_id, generation: next }, operation_id,
++        vector_count: replacements.len() as u64,
++        inventory_root: inventory_root(&namespace, replacements.iter().map(|r| (r.record.memory_id, r.record.after.lifecycle.lifecycle.record_generation, r.record.after.content.vector.as_ref().expect("replacement reference"))))?,
++    };
++    let transition = VectorsReembedded { version: 1, contract_version: request.context.contract_version,
++        source: request.source, source_origins: origins, before_namespace: crate::storage::native_purge::NativeNamespaceProof::capture(&namespace)?,
++        certification: certification.clone(), before_inventory_root: before_root, records: replacements };
++    if control::encode(&transition)?.len() as u64 > MAX_PROOF_BYTES { return Err(invalid("replacement proof exceeds 16 MiB")); }
++    let db = redb::Database::open(stage.join("meta.db"))?;
++    let tx = db.begin_write()?;
++    control::replay_or_check(&tx, &request.context, hash)?;
++    for record in updated { tx.open_table(META_TABLE)?.insert(record.id.as_slice(), record.to_bytes().as_slice())?; }
++    let mut after_namespace = namespace;
++    let schema = after_namespace.schema.as_mut().ok_or_else(|| invalid("native namespace schema missing"))?;
++    schema.vector_certification = Some(certification);
++    schema.required_features = vec![REQUIRED_FEATURE.into()];
++    tx.open_table(NAMESPACE_TABLE)?.insert(after_namespace.id.get(), control::encode(&after_namespace)?.as_slice())?;
++    let receipt = control::record_reserved_receipt(&tx, &request.context, hash,
++        control::MutationOutcome::VectorsReembedded { transition }, operation_id)?;
++    let encoded = control::encode(&control::StoredReceipt { request_hash_version: 1, request_hash: hash, receipt: receipt.clone() })?;
++    control::validate_receipt(&encoded)?;
++    crate::storage::catalog::boundary("certification_before_commit")?;
++    // From this point neither cancellation nor uncertain acknowledgement may
++    // delete the stage. Retry inspects the same canonical receipt first.
++    cleanup.0 = None;
++    let committed = tx.commit();
++    #[cfg(test)]
++    let committed = committed.and_then(|()| {
++        if crate::storage::catalog::injected("certification_commit_unknown") {
++            Err(redb::CommitError::Storage(redb::StorageError::Io(std::io::Error::other("injected uncertain certification acknowledgement"))))
++        } else { Ok(()) }
++    });
++    committed.map_err(|source| StorageError::CommitOutcomeUnknown { operation_id, source })?;
++    drop(db);
++    drop(vectors);
++    publish(&stage, target, &receipt)?;
++    Ok(receipt)
++}
+diff --git a/src/storage/vector_certification/tests.rs b/src/storage/vector_certification/tests.rs
+new file mode 100644
+--- /dev/null
++++ b/src/storage/vector_certification/tests.rs
+@@ -0,0 +1,117 @@
++use super::*;
++use crate::storage::{RedbStorageEngine, logical_export, offline_snapshot::OfflineSnapshot};
++use std::collections::BTreeMap;
++use std::path::{Path, PathBuf};
++use std::sync::Mutex;
++use redb::ReadableTable;
++
++struct Provider {
++    profile: crate::model::schema::EmbeddingProfile,
++    texts: Mutex<Vec<String>>,
++    fail: bool,
++}
++#[async_trait::async_trait]
++impl crate::embedding::EmbeddingProvider for Provider {
++    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> { Some(self.profile.clone()) }
++    fn dimensions(&self) -> usize { self.profile.dimension as usize }
++    fn model_name(&self) -> &str { &self.profile.model_id }
++    async fn embed(&self, text: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
++        self.texts.lock().unwrap().push(text.into());
++        if self.fail { return Err(crate::embedding::EmbeddingError::Unavailable("test provider failure".into())); }
++        Ok(vec![0., 1., 0., 0.])
++    }
++}
++fn fixture(root: &Path) -> (PathBuf, ReembedVectors, Provider) {
++    let export = root.join("genuine-before.jsonl");
++    std::fs::write(&export, include_bytes!("../metadata/native_records/fixtures/document-recipe-legacy.jsonl")).unwrap();
++    let path = root.join("old");
++    logical_export::import_store(&export, &path).unwrap();
++    let history: serde_json::Value = serde_json::from_slice(include_bytes!("../metadata/native_records/fixtures/document-recipe-legacy-receipts.json")).unwrap();
++    let profile: crate::model::schema::EmbeddingProfile = serde_json::from_value(history["profile"].clone()).unwrap();
++    let ns: NamespaceId = serde_json::from_value(history["namespaceId"].clone()).unwrap();
++    let snapshot = OfflineSnapshot::open(&path).unwrap();
++    let source = snapshot.control().generation_ref();
++    let namespace = snapshot.namespaces().iter().find(|n| n.id == ns).unwrap();
++    let request = ReembedVectors { source, namespace_id: ns, namespace_name: namespace.name.clone(), profile_id: profile.profile_id().unwrap(),
++        context: MutationContext { store_id: Some(source.store_id), expected_generation: Some(source.generation), scope: MutationScope::Namespace(ns), contract_version: 1, idempotency_key: Some("explicit-reembedding".into()) } };
++    (path, request, Provider { profile, texts: Mutex::new(vec![]), fail: false })
++}
++fn file_hashes(path: &Path) -> BTreeMap<PathBuf, [u8; 32]> {
++    crate::storage::validation::canonical_files(path).unwrap().into_iter().map(|p| {
++        (p.strip_prefix(path).unwrap().to_owned(), hash_bytes(&std::fs::read(p).unwrap()))
++    }).collect()
++}
++fn receipts(snapshot: &OfflineSnapshot) -> BTreeMap<Vec<u8>, Vec<u8>> {
++    snapshot.metadata.begin_read().unwrap().open_table(control::RECEIPTS).unwrap().iter().unwrap()
++        .map(|row| { let (key, value) = row.unwrap(); (key.value().to_vec(), value.value().to_vec()) }).collect()
++}
++fn limits() -> crate::storage::canonical_vector_snapshot::SnapshotLimits {
++    crate::storage::canonical_vector_snapshot::SnapshotLimits { max_records: 1000, max_bytes: 1024 * 1024 }
++}
++
++#[tokio::test]
++async fn vector_certification_genuine_wrong_document_remedy_replay_export_reopen() {
++    let root = tempfile::tempdir().unwrap();
++    let (source, request, provider) = fixture(root.path());
++    let before = file_hashes(&source);
++    let old = OfflineSnapshot::open(&source).unwrap();
++    let original_receipts = receipts(&old);
++    let mut documents = vec![];
++    old.for_each_record(|raw| {
++        if raw.record.namespace_id == request.namespace_id.get() && raw.embedding.is_some() {
++            documents.push(retained_document(&raw.record, raw.full_text.as_deref())?.text);
++        }
++        Ok(())
++    }).unwrap();
++    drop(old);
++    let engine = RedbStorageEngine::open_native(&source).unwrap();
++    assert!(engine.canonical_vector_snapshot(&request.namespace_name, None, limits()).unwrap_err().to_string().contains("re-embedding"));
++    drop(engine);
++    // Opening the actual owned source may update redb bookkeeping; immutable
++    // remedy assertion begins after that independently tested serving rejection.
++    let before_remedy = file_hashes(&source);
++    assert_eq!(before.keys().collect::<Vec<_>>(), before_remedy.keys().collect::<Vec<_>>());
++    let destination = root.path().join("certified");
++    let receipt = reembed_fresh(&source, &destination, &request, &provider).await.unwrap();
++    assert_eq!(receipt.committed_generation, request.source.generation.next().unwrap());
++    assert_eq!(*provider.texts.lock().unwrap(), documents);
++    assert!(documents.iter().any(|text| text != "body" && text.contains("header")));
++    assert_eq!(file_hashes(&source), before_remedy);
++    let snapshot = OfflineSnapshot::open(&destination).unwrap();
++    let after_receipts = receipts(&snapshot);
++    for (key, bytes) in original_receipts { assert_eq!(after_receipts.get(&key), Some(&bytes)); }
++    assert_eq!(snapshot.control().store_id, request.source.store_id);
++    let ns = snapshot.namespaces().iter().find(|n| n.id == request.namespace_id).unwrap();
++    assert_eq!(crate::storage::native_records::profile_id(ns).unwrap(), request.profile_id);
++    assert!(ns.schema.as_ref().unwrap().vector_certification.is_some());
++    drop(snapshot);
++    let replay_provider = Provider { fail: true, ..provider };
++    let replay = reembed_fresh(&source, &destination, &request, &replay_provider).await.unwrap();
++    assert!(replay.replayed);
++    assert_eq!(replay.operation_id, receipt.operation_id);
++    assert_eq!(*replay_provider.texts.lock().unwrap(), documents);
++    let engine = RedbStorageEngine::open_native(&destination).unwrap();
++    let captured = engine.canonical_vector_snapshot(&request.namespace_name, None, limits()).unwrap();
++    assert_eq!(captured.binding.at.generation, receipt.committed_generation);
++    drop(engine);
++    let export = root.path().join("certified.jsonl");
++    logical_export::export_store(&destination, &export).unwrap();
++    let imported = root.path().join("roundtrip");
++    logical_export::import_store(&export, &imported).unwrap();
++    let reopened = OfflineSnapshot::open(&imported).unwrap();
++    assert_eq!(receipts(&reopened), after_receipts);
++}
++
++#[tokio::test]
++async fn vector_certification_provider_failure_leaves_source_and_destination_unchanged() {
++    let root = tempfile::tempdir().unwrap();
++    let (source, request, mut provider) = fixture(root.path());
++    provider.fail = true;
++    let before = file_hashes(&source);
++    let destination = root.path().join("failed");
++    let error = reembed_fresh(&source, &destination, &request, &provider).await.unwrap_err();
++    assert!(error.to_string().contains("test provider failure"), "{error:?}");
++    assert_eq!(file_hashes(&source), before);
++    assert!(!destination.exists());
++    assert!(!root.path().join("failed.recalld-vector-certification").exists());
++}
+diff --git a/src/storage/vectors.rs b/src/storage/vectors.rs
+--- a/src/storage/vectors.rs
++++ b/src/storage/vectors.rs
+@@ -511,6 +511,25 @@
+         }
+ 
+         let slot = self.allocate_slot()?;
++        self.write_allocated_vector(slot, vector)?;
++        Ok(slot)
++    }
++
++    /// Only the private checksummed logical importer uses this to fill its
++    /// reserved layout. Normal writers allocate a new slot; they never overwrite
++    /// a canonical reference. Interrupted imports repeat the same verified bytes.
++    pub(super) fn write_import_vector(&mut self, slot: u32, vector: &[f32]) -> Result<()> {
++        if slot >= self.slot_count || self.is_free(slot) {
++            return Err(VectorError::Corrupt { path: self.path.clone(), reason: "import slot was not reserved".into() });
++        }
++        if vector.len() != self.dimensions as usize {
++            return Err(VectorError::WrongVectorLength { expected: self.dimensions as usize, got: vector.len() });
++        }
++        self.write_allocated_vector(slot, vector)?;
++        self.remap()
++    }
++
++    fn write_allocated_vector(&mut self, slot: u32, vector: &[f32]) -> Result<()> {
+         let offset = VectorFileHeader::data_offset(slot, self.stride);
+ 
+         // Write vector data via the file descriptor (not through mmap).
+@@ -527,7 +546,7 @@
+         })?;
+         // Note: fsync is deferred to the caller's batch sync.
+ 
+-        Ok(slot)
++        Ok(())
+     }
+ 
+     /// Finish a batch of `insert_vector_no_remap` calls by performing

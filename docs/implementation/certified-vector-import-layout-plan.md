@@ -174,3 +174,23 @@ checksum rejection with no stage, exact logical/f32/history roundtrip, foreign
 fork and post-loss/purge proof, interruption/replay and subsequent slot reuse.
 Only then appropriate full/fmt/clippy checks on the final source. Current008/009
 are failed candidates and remain explicitly distinguished from future results.
+
+
+## Implemented candidate refinements after approval
+
+The100k/256MiB reconstruction bounds apply only to format2/certified state;
+ordinary format1 retains its existing limits. Format2 additionally bounds its
+canonical table prepass at1m rows/512MiB, before staging. The private inspector
+retains its disclosed bounded control-copy checks. A retired certificate with no
+vectors still selects format2 and invents no placements.
+
+The old-binary downgrade probes are deliberately separate. Header2 rejects at
+its version fence. A header1 copy with the new namespace field rejects at serde's
+unknown-shape fence. A second invalid header1 copy removes that optional field
+but retains required_features, isolating the actual old required-feature check
+before Memory hints. This does not claim the invalid stream is a valid old export.
+
+Actual run results, including rejected008/009 approaches and foreign-origin
+strict validation016 RED, are recorded in
+[the candidate report](../evidence/vector-certification/REPORT.md). These are
+implementation-candidate results, not ordinary native activation approval.
