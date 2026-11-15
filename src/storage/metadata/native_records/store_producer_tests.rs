@@ -7,6 +7,9 @@ use serde_json::json;
 #[path = "insertion_origin_tests.rs"]
 mod insertion_origin_tests;
 
+#[path = "selection_demand_tests.rs"]
+mod selection_demand;
+
 struct Provider {
     texts: std::sync::Mutex<Vec<String>>,
     profile: Option<crate::model::schema::EmbeddingProfile>,

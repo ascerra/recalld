@@ -12,6 +12,17 @@ use crate::storage::{RedbStorageEngine, StorageEngine, StorageError};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+// Selection-only counters: actual consumer tests run on their own current-thread
+// runtime. Completion/reopen vector reads are deliberately outside this count.
+#[cfg(test)]
+thread_local! {
+    static READS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+#[cfg(test)]
+pub(crate) fn take_reads() -> (usize, usize) {
+    READS.with(|reads| reads.replace((0, 0)))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct NativeCandidate {
     pub id: MemoryId,
@@ -89,6 +100,8 @@ pub(crate) fn capture(
     let namespace_id = intent.scope.namespace_id;
     let new_entities = keys(&input.entities);
     let mut candidates = Vec::new();
+    #[cfg(test)]
+    READS.with(|reads| { let (scan, vectors) = reads.get(); reads.set((scan + 1, vectors)); });
     for record in engine.meta_store().records_in_namespace(namespace_id)? {
         if !matches!(record.phase, DecayPhase::Full | DecayPhase::Summary) {
             continue;
@@ -108,6 +121,8 @@ pub(crate) fn capture(
                 "native candidate vector slot mismatch".into(),
             ));
         }
+        #[cfg(test)]
+        READS.with(|reads| { let (scan, vectors) = reads.get(); reads.set((scan, vectors + 1)); });
         let vector = engine
             .get_vector(namespace_id, record.vector_slot)?
             .ok_or_else(|| {
