@@ -9,6 +9,93 @@ use super::sweep::{DecayMetadata, SweepError};
 use crate::model::{DecayPhase, MemoryId, NamespaceId};
 use crate::storage::StorageEngine;
 
+/// Serialize current-layout feedback with other users of the storage lock.
+/// State, history and an unkeyed receipt commit together; cache invalidation
+/// finishes before this adapter acknowledges success.
+/// Lock order: storage only here. Do not acquire/await graph while holding this
+/// guard: sweep publication holds graph first, then acquires storage.
+pub async fn reinforce(
+    storage: std::sync::Arc<std::sync::RwLock<crate::storage::RedbStorageEngine>>,
+    cache: std::sync::Arc<crate::cache::CacheManager>,
+    id: MemoryId,
+    quality: u8,
+    global_multiplier: f64,
+    now_millis: i64,
+    expected_namespace: Option<String>,
+) -> Result<super::lifecycle::FeedbackPlan, super::lifecycle::LifecycleError> {
+    use super::lifecycle::{LifecycleError, plan_feedback, resolve_policy};
+    tokio::task::spawn_blocking(move || {
+        let storage = storage
+            .write()
+            .map_err(|e| LifecycleError::Storage(e.to_string()))?;
+        if let Some(namespace) = expected_namespace.as_deref() {
+            storage
+                .assert_memory_namespace(id, namespace)
+                .map_err(|error| match error {
+                    crate::storage::StorageError::NamespaceMismatch { .. } => {
+                        LifecycleError::NamespaceMismatch(error.to_string())
+                    }
+                    crate::storage::StorageError::NotFound(_) => LifecycleError::NotFound,
+                    crate::storage::StorageError::InvalidNamespaceName { .. } => {
+                        LifecycleError::InvalidInput("invalid namespace assertion")
+                    }
+                    _ => LifecycleError::Storage(error.to_string()),
+                })?;
+        }
+        let record = storage
+            .get_record(id)
+            .map_err(|e| LifecycleError::Storage(e.to_string()))?
+            .ok_or(LifecycleError::NotFound)?;
+        let namespace = storage
+            .get_namespace(NamespaceId::new(record.namespace_id))
+            .map_err(|e| LifecycleError::Storage(e.to_string()))?
+            .ok_or(LifecycleError::NotFound)?;
+        let policy = resolve_policy(
+            &namespace,
+            &super::DecayConfig::default(),
+            global_multiplier,
+        )?;
+        plan_feedback(&record, &policy, now_millis, quality)?;
+        let receipt = storage
+            .meta_store()
+            .record_legacy_feedback_scoped(
+                &crate::storage::control::MutationContext::unkeyed(namespace.id),
+                id,
+                quality,
+                now_millis,
+                global_multiplier,
+                Some(&namespace.name),
+            )
+            .map_err(|e| super::observation::ObservationError::storage(e, vec![]))?;
+        super::observation::publish(&storage, std::slice::from_ref(&receipt), || {
+            tokio::runtime::Handle::current().block_on(cache.invalidate(id));
+        })?;
+        // Return canonical values, not the preflight plan: the metadata
+        // transaction is the authority even if an internal writer bypassed
+        // the outer storage lock. No historical response payload is retained.
+        let current = storage
+            .get_record(id)
+            .map_err(|e| super::observation::ObservationError::storage(e, vec![receipt.clone()]))?
+            .ok_or_else(|| {
+                super::observation::ObservationError::storage(
+                    crate::storage::StorageError::NotFound(id.into_inner()),
+                    vec![receipt.clone()],
+                )
+            })?;
+        Ok(super::lifecycle::FeedbackPlan {
+            timestamp: current.last_accessed_at,
+            stability: current.stability,
+            strength: current.strength,
+            phase: current.phase,
+            is_permastore: current.is_permastore != 0,
+        })
+    })
+    .await
+    .map_err(|e| {
+        LifecycleError::Observation(super::observation::ObservationError::worker_failed(e))
+    })?
+}
+
 /// Extract decay-relevant metadata from a `DiskRecord`, including the
 /// namespace's decay rate multiplier (if set).
 pub fn get_decay_metadata(
@@ -17,18 +104,21 @@ pub fn get_decay_metadata(
 ) -> Result<Option<DecayMetadata>, SweepError> {
     match storage.get_record(id) {
         Ok(Some(record)) => {
-            // Look up the namespace config to get the decay rate multiplier.
-            let decay_rate_multiplier = storage
+            if record.phase == DecayPhase::Tombstone {
+                return Ok(None);
+            }
+            let namespace = storage
                 .get_namespace(NamespaceId::new(record.namespace_id))
-                .ok()
-                .flatten()
-                .and_then(|ns| ns.decay_rate_multiplier);
+                .map_err(|e| SweepError::Storage(e.to_string()))?
+                .ok_or_else(|| SweepError::Storage("namespace policy not found".to_string()))?;
 
             Ok(Some(DecayMetadata {
+                phase: record.phase,
+                created_at: record.created_at,
                 stability: record.stability,
                 last_accessed_at: record.last_accessed_at,
                 is_permastore: record.is_permastore != 0,
-                decay_rate_multiplier,
+                namespace,
                 has_summary: !record.summary.is_empty(),
             }))
         }
@@ -68,6 +158,7 @@ pub fn ids_in_phase(
 }
 
 /// Update decay state with `SweepError` wrapping.
+#[cfg(test)]
 pub fn update_decay_state(
     storage: &dyn StorageEngine,
     id: MemoryId,

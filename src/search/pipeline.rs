@@ -4,6 +4,7 @@
 //! FSRS retrievability calculation, RIF suppression, ranking, and
 //! response assembly.
 
+use crate::decay::observation::Observed;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -13,7 +14,30 @@ use tracing::{debug, instrument, warn};
 use super::error::{Result, SearchError};
 use super::query::{QueryMode, SearchFilter, SearchQuery};
 use super::response::{MemoryResponse, SearchResponse, SearchResult, StageTimings};
+use super::{EligibleFtsResults, FtsCoverage};
 use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConfig, NamespaceId};
+
+#[path = "diagnostics.rs"]
+mod diagnostics;
+#[path = "strength.rs"]
+mod strength;
+use strength::StrengthContext;
+pub use strength::StrengthDiagnostics;
+#[path = "semantics.rs"]
+mod semantics;
+#[cfg(test)]
+#[path = "strength_tests.rs"]
+mod strength_tests;
+pub use diagnostics::{
+    ChannelDiagnostics, ChannelParticipation, ResultProvenance, RetrievalChannel,
+};
+#[cfg(test)]
+#[path = "semantics_tests.rs"]
+mod semantics_tests;
+pub use semantics::{
+    FtsAvailability, FtsDiagnostics, RetrievalSemantics, SemanticsDiagnostics, SemanticsResponse,
+    UnresolvedReason, VersionMode, VersionStatus,
+};
 
 // ---------------------------------------------------------------------------
 // Subsystem Traits (DI contracts for QueryEngine)
@@ -27,6 +51,10 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 pub trait NamespaceResolver: Send + Sync {
     /// Look up a namespace by name, returning its configuration.
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
+    /// Resolve canonical by-ID scope without guessing a session default.
+    async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
+        Err(SearchError::NamespaceNotFound(format!("id {}", id.get())))
+    }
 }
 
 /// Per-namespace embedding provider registry.
@@ -70,6 +98,20 @@ pub struct ScoredResult {
 pub trait FtsIndexRegistry: Send + Sync {
     /// Search the namespace's FTS index for the top-K keyword matches.
     fn search(&self, namespace_id: NamespaceId, query: &str, k: usize) -> Result<Vec<FtsResult>>;
+
+    /// Stable eligible refill. Unsupported adapters fail explicitly in v2;
+    /// a legacy top-K call cannot certify exhaustion or refill coverage.
+    fn search_eligible(
+        &self,
+        _namespace_id: NamespaceId,
+        _query: &str,
+        _k: usize,
+        _eligible_ids: &HashSet<MemoryId>,
+    ) -> Result<EligibleFtsResults> {
+        Err(SearchError::Internal(
+            "eligible FTS search unavailable".into(),
+        ))
+    }
 }
 
 /// A single result from FTS5 keyword search.
@@ -90,6 +132,11 @@ pub trait RecordCache: Send + Sync {
 /// On-disk metadata storage fallback.
 #[async_trait::async_trait]
 pub trait MetadataStore: Send + Sync {
+    /// Internal effects admission stamp, not a canonical generation/read view.
+    async fn effects_stamp(&self) -> Result<u64> {
+        Ok(0)
+    }
+
     /// Get a single record by ID.
     async fn get(&self, id: &MemoryId) -> Result<Option<CachedRecord>>;
     /// Batch load multiple records. Missing IDs are silently skipped.
@@ -97,6 +144,11 @@ pub trait MetadataStore: Send + Sync {
     /// Enumerate all namespace members without a candidate/scan cap.
     /// IDs are discovery only; load canonical records before checking eligibility.
     async fn list_namespace_memories(&self, namespace_id: NamespaceId) -> Result<Vec<MemoryId>>;
+    /// Production adapters may load IDs and records in one metadata transaction.
+    async fn namespace_records(&self, namespace_id: NamespaceId) -> Result<Vec<CachedRecord>> {
+        let ids = self.list_namespace_memories(namespace_id).await?;
+        self.get_batch(&ids).await
+    }
 }
 
 /// RIF processor -- applies retrieval-induced forgetting.
@@ -122,9 +174,17 @@ pub struct RifSuppression {
 #[async_trait::async_trait]
 pub trait AccessRecorder: Send + Sync {
     /// Record that a memory was accessed.
-    async fn record_access(&self, id: MemoryId, kind: AccessKind) -> Result<()>;
+    async fn record_access(
+        &self,
+        id: MemoryId,
+        kind: AccessKind,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>>;
     /// Batch record access for multiple memories.
-    async fn record_access_batch(&self, accesses: &[(MemoryId, AccessKind)]) -> Result<()>;
+    async fn record_access_batch(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        _scope: Option<&crate::storage::control::ExposureScope>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>>;
 }
 
 /// Shared graph handle for read-locked graph access.
@@ -133,6 +193,51 @@ pub trait AccessRecorder: Send + Sync {
 /// identifying RIF competitors. In production, this wraps an
 /// `Arc<tokio::sync::RwLock<RelationshipGraph>>`.
 pub trait GraphReader: Send + Sync {
+    /// Canonical same-scope live donor strengths, independent of query filters.
+    fn connection_bonuses(
+        &self,
+        _strengths: &HashMap<MemoryId, f32>,
+    ) -> Result<HashMap<MemoryId, f32>> {
+        Err(SearchError::Internal(
+            "canonical connection bonus unavailable".into(),
+        ))
+    }
+
+    /// Legacy PQSA formulas with canonical projected strength/phase inputs.
+    fn spreading_activation_canonical(
+        &self,
+        _seeds: &[(MemoryId, f32)],
+        _namespace: NamespaceId,
+        _depth: u8,
+        _records: &HashMap<MemoryId, CachedRecord>,
+    ) -> Result<Vec<(MemoryId, f32)>> {
+        Err(SearchError::Internal(
+            "canonical graph spreading unavailable".into(),
+        ))
+    }
+
+    /// Internal v2 structural read. Unsupported adapters must fail, never prove currentness.
+    fn supersession_links(
+        &self,
+        _id: MemoryId,
+        _allowance: usize,
+    ) -> Result<crate::graph::query::SupersessionLinks> {
+        Err(SearchError::Internal(
+            "semantics2 graph reads unavailable".into(),
+        ))
+    }
+
+    fn expand_eligible(
+        &self,
+        _seeds: &[(MemoryId, f32)],
+        _namespace: NamespaceId,
+        _depth: u8,
+        _eligible: &HashMap<MemoryId, CachedRecord>,
+    ) -> Result<crate::graph::query::GraphExpansion> {
+        Err(SearchError::Internal(
+            "semantics2 graph expansion unavailable".into(),
+        ))
+    }
     /// Get the neighbor IDs for a given memory.
     /// Used by RIF computation (line 601) to find competitors.
     fn neighbors(&self, id: &MemoryId) -> Vec<MemoryId>;
@@ -196,6 +301,7 @@ pub struct EntityRecallResult {
 // ---------------------------------------------------------------------------
 
 /// Internal candidate struct used during pipeline processing.
+#[derive(Clone)]
 struct Candidate {
     record: CachedRecord,
     /// Fused relevance score via convex combination of normalized
@@ -224,6 +330,12 @@ struct Candidate {
     /// where score encodes edge weights, fan attenuation, hop decay,
     /// and neighbor retrievability.
     activation_score: Option<f32>,
+    /// Internal v2 provenance; never a transport field in this slice.
+    graph_depth: Option<u8>,
+    /// V2 graph seed evidence, merged independently of discovery order.
+    seed_score: f32,
+    /// Diagnostic evidence only; never read by ranking or source selection.
+    provenance: ResultProvenance,
 }
 
 impl Candidate {
@@ -239,6 +351,9 @@ impl Candidate {
             entity_recall_score: 0.0,
             composite_score: 0.0,
             activation_score: None,
+            graph_depth: None,
+            seed_score: 0.0,
+            provenance: ResultProvenance::default(),
         }
     }
 }
@@ -268,6 +383,9 @@ const FTS_ONLY_RATE: f32 = 0.3;
 /// Holds `Arc` references to all subsystems. Cheap to clone, safe to
 /// share across request handlers.
 pub struct QueryEngine {
+    clock: Arc<dyn crate::time::Clock>,
+    decay_policy: crate::decay::DecayConfig,
+    decay_multiplier: f64,
     /// Resolves namespace names to configs.
     namespace_resolver: Arc<dyn NamespaceResolver>,
     /// Per-namespace embedding providers.
@@ -305,6 +423,9 @@ impl QueryEngine {
         access_recorder: Arc<dyn AccessRecorder>,
     ) -> Self {
         Self {
+            clock: Arc::new(crate::time::SystemClock),
+            decay_policy: crate::decay::DecayConfig::default(),
+            decay_multiplier: 1.0,
             namespace_resolver,
             embedding_providers,
             vector_indexes,
@@ -353,18 +474,83 @@ impl QueryEngine {
     /// 8. **Rank**: Composite score, sort descending, truncate to limit.
     /// 9. **Return**: Assemble SearchResponse, record access events async.
     #[instrument(skip(self, query), fields(namespace = %query.namespace, mode = ?query.query_mode))]
-    pub async fn search(&self, mut query: SearchQuery) -> Result<SearchResponse> {
+    pub async fn search(&self, query: SearchQuery) -> Result<SearchResponse> {
+        Ok(self
+            .search_with_semantics(query, RetrievalSemantics::V1)
+            .await?
+            .response)
+    }
+
+    /// Rust-only harness entry point. No transport selects semantics2 until A1/A4 readiness.
+    pub async fn search_with_semantics(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+    ) -> Result<SemanticsResponse> {
+        self.search_checked(query, semantics, false).await
+    }
+
+    pub async fn prepare_search(&self, query: SearchQuery) -> Result<SearchResponse> {
+        Ok(self
+            .search_checked(query, RetrievalSemantics::V1, true)
+            .await?
+            .response)
+    }
+
+    async fn search_checked(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+    ) -> Result<SemanticsResponse> {
+        crate::performance::measure("engine.search", query.record_access, async {
+            let stamp = self.meta_store.effects_stamp().await?;
+            let observed = self
+                .search_admitted(query, semantics, defer_recording)
+                .await?;
+            observed.finish(self.check_effects_stamp(stamp).await)
+        })
+        .await
+    }
+
+    async fn check_effects_stamp(&self, stamp: u64) -> Result<()> {
+        if self.meta_store.effects_stamp().await? != stamp {
+            return Err(SearchError::Unavailable(
+                "graph effects changed during query".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn effects_stamp(&self) -> Result<u64> {
+        self.meta_store.effects_stamp().await
+    }
+
+    async fn search_admitted(
+        &self,
+        mut query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+    ) -> Result<Observed<SemanticsResponse>> {
+        let mut diagnostics = SemanticsDiagnostics::new(semantics);
         let pipeline_start = Instant::now();
+        let mut performance = crate::performance::Timeline::new();
         let mut timings = StageTimings::default();
 
         // -- Stage 1: Parse & Validate -----------------------------------
         let stage_start = Instant::now();
+        if semantics != RetrievalSemantics::V1 {
+            semantics::validate_query(&query)?;
+        }
         query.validate()?;
         let ns_config = self.namespace_resolver.resolve(&query.namespace).await?;
+        let mut strength_context = StrengthContext::pin(self, &ns_config, query.record_access)?;
+        diagnostics.strength = Some(strength_context.diagnostics);
         if let Some(embedding) = query.query_embedding.as_mut() {
             super::query::normalize_query_embedding(embedding, ns_config.embedding_dim as usize)?;
         }
         timings.parse_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("parse_namespace");
 
         // -- Stage 2: Embed ----------------------------------------------
         let stage_start = Instant::now();
@@ -381,24 +567,40 @@ impl QueryEngine {
             }
         };
         timings.embed_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("embedding");
+        if semantics != RetrievalSemantics::V1
+            && query_embedding
+                .as_ref()
+                .is_some_and(|v| v.iter().any(|x| !x.is_finite()))
+        {
+            return Err(SearchError::EmbeddingFailed(
+                "nonfinite query embedding".into(),
+            ));
+        }
 
         // Canonical metadata, not cached/index metadata, decides hard eligibility.
         // ponytail: load every namespace member until A1 supplies certified filtered views.
         let stage_start = Instant::now();
-        let namespace_ids = self
-            .meta_store
-            .list_namespace_memories(ns_config.id)
-            .await?;
-        let eligible_records: HashMap<MemoryId, CachedRecord> = self
-            .meta_store
-            .get_batch(&namespace_ids)
-            .await?
+        let mut namespace_records = self.meta_store.namespace_records(ns_config.id).await?;
+        performance.mark("canonical_read");
+        let examined = namespace_records.len();
+        strength_context.project_namespace(&mut namespace_records, self.graph.as_ref())?;
+        performance.mark("strength_projection");
+        let eligible_records: HashMap<MemoryId, CachedRecord> = namespace_records
             .into_iter()
             .filter(|record| Self::passes_hard_filters(record, &query, ns_config.id))
             .map(|record| (record.id, record))
             .collect();
         let eligible_ids: HashSet<MemoryId> = eligible_records.keys().copied().collect();
+        tracing::trace!(target: "recalld::performance", kind = "eligibility",
+            examined, eligible = eligible_ids.len(), rejected = examined - eligible_ids.len());
         timings.eligibility_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("hard_filter");
+        if semantics != RetrievalSemantics::V1 {
+            for record in eligible_records.values() {
+                semantics::validate_record(record)?;
+            }
+        }
 
         // -- Stage 3: Vector Search + FTS + Entity Recall -----------------
         let fetch_k = match query.query_mode {
@@ -409,9 +611,25 @@ impl QueryEngine {
         let (scored_candidates, vector_search_us) =
             self.run_vector_search(&query_embedding, ns_config.id, fetch_k, &eligible_ids)?;
         timings.vector_search_us = vector_search_us;
+        performance.mark("vector");
 
-        let (fts_results, fts_search_us) = self.run_fts_search(&query, ns_config.id, fetch_k)?;
+        let (fts_results, fts_search_us) = self.run_fts_search(
+            &query,
+            ns_config.id,
+            fetch_k,
+            &eligible_ids,
+            &mut diagnostics,
+        )?;
         timings.fts_search_us = fts_search_us;
+        performance.mark("fts");
+        if semantics != RetrievalSemantics::V1
+            && (scored_candidates.iter().any(|r| !r.score.is_finite())
+                || fts_results.iter().any(|r| !r.score.is_finite()))
+        {
+            return Err(SearchError::Internal(
+                "nonfinite retrieval source score".into(),
+            ));
+        }
 
         // -- Score fusion: build lookup maps --
         let fusion_stage_start = Instant::now();
@@ -426,6 +644,7 @@ impl QueryEngine {
             fts_results.iter().map(|s| (s.memory_id, s.score)).collect();
 
         timings.score_fusion_us = fusion_stage_start.elapsed().as_micros() as u64;
+        performance.mark("fusion");
 
         let query_entities = query.entities.clone();
 
@@ -433,6 +652,8 @@ impl QueryEngine {
         let entity_recall_start = Instant::now();
         let entity_recall_cap = query.limit * 2;
         let mut entity_only_ids: Vec<(MemoryId, f32)> = Vec::new();
+        let mut entity_hit_ids = HashSet::new();
+        let mut entity_offered = None;
 
         // Union vector and FTS results into the candidate pool.
         let mut all_candidate_ids: Vec<MemoryId> = vector_ids.clone();
@@ -453,6 +674,12 @@ impl QueryEngine {
                 &eligible_ids,
             )?;
 
+            if diagnostics.channels.is_some() {
+                // Observe overlap before the ranking path skips existing IDs
+                // and caps novel entity candidates. This never changes that path.
+                entity_hit_ids.extend(entity_results.iter().map(|r| r.memory_id));
+                entity_offered = Some(entity_hit_ids.len());
+            }
             let query_entity_count = query_entities.len() as f32;
 
             for result in entity_results {
@@ -467,6 +694,7 @@ impl QueryEngine {
             }
         }
         timings.entity_recall_us = entity_recall_start.elapsed().as_micros() as u64;
+        performance.mark("entity");
 
         for &(eid, _) in &entity_only_ids {
             all_candidate_ids.push(eid);
@@ -491,6 +719,11 @@ impl QueryEngine {
                 let raw_vector = vector_score_map.get(&record.id).copied();
                 let raw_fts = fts_score_map.get(&record.id).copied();
                 let relevance = Self::fuse_scores(raw_vector, raw_fts);
+                if semantics != RetrievalSemantics::V1
+                    && relevance.is_some_and(|score| !score.is_finite())
+                {
+                    return Err(SearchError::Internal("nonfinite fused relevance".into()));
+                }
 
                 let mut c = Candidate::new(record);
                 c.relevance_score = relevance;
@@ -502,75 +735,160 @@ impl QueryEngine {
 
         if query.query_mode == QueryMode::MetadataOnly {
             // Scan through completion; only ranked results may consume the limit.
-            for record in eligible_records.into_values() {
-                candidates.push(Candidate::new(record));
+            for record in eligible_records.values() {
+                candidates.push(Candidate::new(record.clone()));
             }
         }
+        if diagnostics.channels.is_some() {
+            for candidate in &mut candidates {
+                let channels = &mut candidate.provenance.own_channels;
+                if candidate.raw_vector_score.is_some() {
+                    channels.insert(RetrievalChannel::Vector);
+                }
+                if candidate.raw_fts_score.is_some() {
+                    channels.insert(RetrievalChannel::Fts);
+                }
+                if entity_hit_ids.contains(&candidate.record.id) {
+                    channels.insert(RetrievalChannel::Entity);
+                }
+                if query.query_mode == QueryMode::MetadataOnly {
+                    channels.insert(RetrievalChannel::Metadata);
+                }
+            }
+            diagnostics.observe_direct_channels(
+                &candidates,
+                query_embedding.as_ref().map(|_| vector_score_map.len()),
+                entity_offered,
+                (query.query_mode == QueryMode::MetadataOnly).then_some(eligible_records.len()),
+            );
+        }
         timings.load_metadata_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("candidate_assembly");
 
-        // -- Stage 4b: Graph Expansion ------------------------------------
-        {
-            let stage_start = Instant::now();
-            self.expand_graph_candidates(&mut candidates, ns_config.id, query.graph_depth)
+        let total_matches;
+        if matches!(semantics, RetrievalSemantics::V2(_)) {
+            self.finish_semantics2(
+                &mut candidates,
+                &query,
+                ns_config.id,
+                &eligible_records,
+                &mut diagnostics,
+                &mut timings,
+                Some(&strength_context),
+            )
+            .await?;
+            total_matches = candidates.len();
+        } else {
+            // -- Stage 4b: Graph Expansion ------------------------------------
+            {
+                let stage_start = Instant::now();
+                self.expand_graph_candidates(
+                    &mut candidates,
+                    ns_config.id,
+                    query.graph_depth,
+                    query.record_access,
+                    Some(&strength_context),
+                    &eligible_records,
+                )
                 .await?;
-            timings.graph_expansion_us = stage_start.elapsed().as_micros() as u64;
+                timings.graph_expansion_us = stage_start.elapsed().as_micros() as u64;
+                performance.mark("graph");
+            }
+
+            // -- Stage 5: Apply Filters (entity overlap + metadata filters) ---
+            let stage_start = Instant::now();
+            self.apply_filters(&mut candidates, &query, &query_entities, ns_config.id);
+            timings.apply_filters_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("candidate_filter");
+
+            // -- Stage 6: Calculate Effective R --------------------------------
+            let stage_start = Instant::now();
+            for candidate in &mut candidates {
+                candidate.effective_r = Self::compute_effective_r(&candidate.record);
+            }
+            timings.calculate_r_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("effective_strength");
+
+            // -- Stage 7: Apply RIF -------------------------------------------
+            let stage_start = Instant::now();
+            self.apply_rif(&mut candidates);
+            timings.apply_rif_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("rif");
+
+            // -- Stage 8: Composite Score + Boosts + Sort ----------------------
+            let stage_start = Instant::now();
+            total_matches = candidates.len();
+            self.apply_boosts(&mut candidates, &query);
+
+            // UUID ties make scan/cache insertion order irrelevant.
+            candidates.sort_by(|a, b| {
+                b.composite_score
+                    .partial_cmp(&a.composite_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.record.id.cmp(&b.record.id))
+            });
+            timings.rank_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("rank");
+
+            // -- Stage 8c: Supersedes Resolution ------------------------------
+            self.resolve_supersedes(
+                &mut candidates,
+                &query,
+                &query_entities,
+                ns_config.id,
+                Some(&strength_context),
+            )
+            .await?;
+
+            candidates.sort_by(|a, b| {
+                b.composite_score
+                    .partial_cmp(&a.composite_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.record.id.cmp(&b.record.id))
+            });
         }
 
-        // -- Stage 5: Apply Filters (entity overlap + metadata filters) ---
-        let stage_start = Instant::now();
-        self.apply_filters(&mut candidates, &query, &query_entities, ns_config.id);
-        timings.apply_filters_us = stage_start.elapsed().as_micros() as u64;
-
-        // -- Stage 6: Calculate Effective R --------------------------------
-        let stage_start = Instant::now();
-        for candidate in &mut candidates {
-            candidate.effective_r = Self::compute_effective_r(&candidate.record);
+        performance.mark("graph_filter_rank_supersession");
+        if semantics != RetrievalSemantics::V1 {
+            tracing::trace!(target: "recalld::performance", kind = "graph_work", known = true,
+                expanded_states = diagnostics.graph.expanded_states,
+                examined_edges = diagnostics.graph.examined_edges,
+                supersession_edges = diagnostics.supersession_edges_examined);
+        } else {
+            tracing::trace!(target: "recalld::performance", kind = "graph_work", known = false);
         }
-        timings.calculate_r_us = stage_start.elapsed().as_micros() as u64;
-
-        // -- Stage 7: Apply RIF -------------------------------------------
-        let stage_start = Instant::now();
-        self.apply_rif(&mut candidates);
-        timings.apply_rif_us = stage_start.elapsed().as_micros() as u64;
-
-        // -- Stage 8: Composite Score + Boosts + Sort ----------------------
-        let stage_start = Instant::now();
-        let total_matches = candidates.len();
-        self.apply_boosts(&mut candidates, &query);
-
-        // UUID ties make scan/cache insertion order irrelevant.
-        candidates.sort_by(|a, b| {
-            b.composite_score
-                .partial_cmp(&a.composite_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.record.id.cmp(&b.record.id))
-        });
-        timings.rank_us = stage_start.elapsed().as_micros() as u64;
-
-        // -- Stage 8c: Supersedes Resolution ------------------------------
-        self.resolve_supersedes(&mut candidates, &query, &query_entities, ns_config.id)
-            .await;
-
-        candidates.sort_by(|a, b| {
-            b.composite_score
-                .partial_cmp(&a.composite_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.record.id.cmp(&b.record.id))
-        });
-
         // -- Stage 8d: Truncate -------------------------------------------
+        diagnostics.result_limit_applied = candidates.len() > query.limit;
         candidates.truncate(query.limit);
+        diagnostics.retain_returned(&candidates);
 
         // -- Stage 9: Build Response & Record Access ----------------------
         let stage_start = Instant::now();
         let results = Self::build_results(&candidates, &query.namespace);
         timings.build_response_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("response");
 
         timings.total_us = pipeline_start.elapsed().as_micros() as u64;
         let query_time_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
 
-        self.record_accesses_async(&candidates);
+        let receipts = if query.record_access && !defer_recording {
+            self.record_accesses(
+                &candidates,
+                crate::storage::control::ExposureScope {
+                    namespace: ns_config.name.clone(),
+                    source: None,
+                },
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
 
+        performance.mark("exposure");
+        tracing::trace!(target: "recalld::performance", kind = "selection",
+            vector_admitted = vector_ids.len(), fts_admitted = fts_ids.len(),
+            entity_admitted = entity_only_ids.len(), union_candidates = all_candidate_ids.len(),
+            pre_limit = total_matches, returned = results.len(), receipt_count = receipts.len());
         let response = SearchResponse {
             results,
             total_matches,
@@ -586,7 +904,13 @@ impl QueryEngine {
             "search complete"
         );
 
-        Ok(response)
+        Ok(Observed {
+            value: SemanticsResponse {
+                response,
+                diagnostics,
+            },
+            receipts,
+        })
     }
 
     /// Stage 3a: Run vector similarity search.
@@ -617,14 +941,44 @@ impl QueryEngine {
         query: &SearchQuery,
         namespace_id: NamespaceId,
         fetch_k: usize,
+        eligible_ids: &HashSet<MemoryId>,
+        diagnostics: &mut SemanticsDiagnostics,
     ) -> Result<(Vec<FtsResult>, u64)> {
         let stage_start = Instant::now();
         let fts_text = query.fts_query.as_ref().or(query.text.as_ref());
         let results = match fts_text {
-            Some(text) if query.query_mode != QueryMode::MetadataOnly => self
-                .fts_index
-                .search(namespace_id, text, fetch_k)
-                .unwrap_or_default(),
+            Some(text) if query.query_mode != QueryMode::MetadataOnly => {
+                if diagnostics.semantics == RetrievalSemantics::V1 {
+                    match self.fts_index.search(namespace_id, text, fetch_k) {
+                        Ok(results) => {
+                            diagnostics.fts.availability = FtsAvailability::Available;
+                            // Legacy top-K has no exhaustion/examination evidence.
+                            results
+                        }
+                        Err(error) => {
+                            diagnostics.fts.availability = FtsAvailability::Unavailable;
+                            warn!(%error, "legacy FTS fallback: channel unavailable");
+                            Vec::new()
+                        }
+                    }
+                } else {
+                    // Fail the query on FTS errors. Degraded partial serving is
+                    // optional and requires A1 readiness for independent views.
+                    let results = self.fts_index.search_eligible(
+                        namespace_id,
+                        text,
+                        fetch_k,
+                        eligible_ids,
+                    )?;
+                    diagnostics.fts.availability = FtsAvailability::Available;
+                    diagnostics.fts.coverage = Some(results.coverage);
+                    results
+                        .matches
+                        .into_iter()
+                        .map(|(memory_id, score)| FtsResult { memory_id, score })
+                        .collect()
+                }
+            }
             _ => Vec::new(),
         };
         Ok((results, stage_start.elapsed().as_micros() as u64))
@@ -649,6 +1003,9 @@ impl QueryEngine {
         candidates: &mut Vec<Candidate>,
         namespace_id: NamespaceId,
         graph_depth: u8,
+        record_access: bool,
+        context: Option<&StrengthContext>,
+        eligible: &HashMap<MemoryId, CachedRecord>,
     ) -> Result<()> {
         if graph_depth == 0 || candidates.is_empty() {
             return Ok(());
@@ -663,9 +1020,17 @@ impl QueryEngine {
             return Ok(());
         }
 
-        let activated = self
-            .graph
-            .spreading_activation(&seeds, namespace_id, graph_depth);
+        let activated = if context.is_some_and(StrengthContext::explicit) {
+            self.graph.spreading_activation_canonical(
+                &seeds,
+                namespace_id,
+                graph_depth,
+                eligible,
+            )?
+        } else {
+            self.graph
+                .spreading_activation(&seeds, namespace_id, graph_depth)
+        };
 
         let existing_ids: std::collections::HashSet<MemoryId> =
             candidates.iter().map(|c| c.record.id).collect();
@@ -679,7 +1044,11 @@ impl QueryEngine {
             let load_ids: Vec<MemoryId> = new_ids.iter().map(|(mid, _)| *mid).collect();
             let activation_map: std::collections::HashMap<MemoryId, f32> =
                 new_ids.into_iter().collect();
-            let expand_records = self.load_records(&load_ids).await?;
+            let expand_records = if context.is_some() {
+                self.strength_records(&load_ids, context).await?
+            } else {
+                self.load_records(&load_ids, record_access).await?
+            };
 
             for record in expand_records {
                 let activation = activation_map.get(&record.id).copied().unwrap_or(0.0);
@@ -785,7 +1154,8 @@ impl QueryEngine {
         query: &SearchQuery,
         query_entities: &[String],
         namespace_id: NamespaceId,
-    ) {
+        context: Option<&StrengthContext>,
+    ) -> Result<()> {
         use std::collections::{HashMap, HashSet};
 
         // -- Plan: which candidates are superseded, and by what. Nothing is
@@ -802,7 +1172,7 @@ impl QueryEngine {
             .collect();
 
         if planned.is_empty() {
-            return;
+            return Ok(());
         }
 
         // Several superseded candidates can share one replacement; it
@@ -830,9 +1200,12 @@ impl QueryEngine {
         // query's filters before letting it displace anything.
         let mut injected: Vec<Candidate> = Vec::with_capacity(to_load.len());
         if !to_load.is_empty() {
-            let records = match self.meta_store.get_batch(&to_load).await {
+            let records = match self.strength_records(&to_load, context).await {
                 Ok(records) => records,
                 Err(e) => {
+                    if context.is_some_and(StrengthContext::explicit) {
+                        return Err(e);
+                    }
                     // Without the replacements there is nothing to put in
                     // the originals' place, so the originals stay.
                     warn!(
@@ -840,7 +1213,7 @@ impl QueryEngine {
                         count = to_load.len(),
                         "failed to load supersedes replacements; keeping the superseded memories in the results"
                     );
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -891,71 +1264,184 @@ impl QueryEngine {
             .collect();
 
         candidates.extend(injected);
+        Ok(())
     }
 
     /// Retrieve a single memory by ID.
     #[instrument(skip(self))]
     pub async fn get_memory(&self, id: MemoryId) -> Result<Option<MemoryResponse>> {
-        let record = match self.cache.get(&id) {
-            Some(r) => r,
-            None => match self.meta_store.get(&id).await? {
-                Some(r) => r,
-                None => return Ok(None),
-            },
+        self.get_memory_with_access(id, true).await
+    }
+
+    pub async fn get_memory_with_access(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+    ) -> Result<Option<MemoryResponse>> {
+        let stamp = self.meta_store.effects_stamp().await?;
+        let observed = self
+            .get_memory_with_access_admitted(id, record_access)
+            .await?;
+        observed.finish(self.check_effects_stamp(stamp).await)
+    }
+
+    async fn get_memory_with_access_admitted(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+    ) -> Result<Observed<Option<MemoryResponse>>> {
+        let Some(mut record) = self.meta_store.get(&id).await? else {
+            return Ok(Observed::unobserved(None));
         };
+        let namespace = self
+            .namespace_resolver
+            .resolve_id(record.namespace_id)
+            .await?;
+        if namespace.id != record.namespace_id {
+            return Err(SearchError::MetadataError(
+                "resolved namespace differs from canonical source".into(),
+            ));
+        }
+        let context = self
+            .by_id_strength_context(&namespace, record_access)
+            .await?;
+        context.apply(&mut record)?;
 
-        // Record access (fire-and-forget).
-        let recorder = Arc::clone(&self.access_recorder);
-        let access_id = id;
-        tokio::spawn(async move {
-            if let Err(e) = recorder
-                .record_access(access_id, AccessKind::DirectRetrieval)
-                .await
-            {
-                warn!("failed to record access for {access_id:?}: {e}");
-            }
-        });
-
-        Ok(Some(MemoryResponse {
-            id: record.id,
-            namespace: String::new(), // Resolved by API layer from namespace_id
-            created_at: record.created_at,
-            last_accessed_at: record.last_accessed_at,
-            summary: if record.phase != DecayPhase::Ghost && record.phase != DecayPhase::Tombstone {
-                Some(record.summary.clone())
-            } else {
-                None
-            },
-            full_text: None, // Loaded on demand by API layer
-            tags: record.tags.clone(),
-            phase: record.phase,
-            strength: record.strength,
-            decay_strength: record.decay_strength,
-            stability: record.stability,
-            is_permastore: record.is_permastore,
-            edge_count: record.edge_count,
-            access_count: 0, // Populated by API layer from access_history
-        }))
+        let receipts = if record_access && record.phase != DecayPhase::Tombstone {
+            self.record_exposures(
+                &[(id, AccessKind::DirectRetrieval)],
+                crate::storage::control::ExposureScope {
+                    namespace: namespace.name.clone(),
+                    source: Some(id),
+                },
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
+        Ok(Observed {
+            receipts,
+            value: Some(MemoryResponse {
+                id: record.id,
+                namespace: namespace.name,
+                created_at: record.created_at,
+                last_accessed_at: record.last_accessed_at,
+                summary: if record.phase != DecayPhase::Ghost
+                    && record.phase != DecayPhase::Tombstone
+                {
+                    Some(record.summary.clone())
+                } else {
+                    None
+                },
+                full_text: None, // Loaded on demand by API layer
+                tags: record.tags.clone(),
+                phase: record.phase,
+                strength: record.strength,
+                decay_strength: record.decay_strength,
+                stability: record.stability,
+                is_permastore: record.is_permastore,
+                edge_count: record.edge_count,
+                access_count: 0, // Populated by API layer from access_history
+            }),
+        })
     }
 
     /// Find the K most similar memories to a given memory.
     #[instrument(skip(self))]
     pub async fn similar(&self, id: MemoryId, k: usize) -> Result<Vec<SearchResult>> {
-        let k = k.clamp(1, SearchQuery::MAX_USER_LIMIT);
+        self.similar_with_access(id, k, true).await
+    }
 
-        let record = match self.cache.get(&id) {
-            Some(r) => r,
-            None => self
-                .meta_store
-                .get(&id)
-                .await?
-                .ok_or(SearchError::MemoryNotFound(id))?,
-        };
+    pub async fn similar_with_access(
+        &self,
+        id: MemoryId,
+        k: usize,
+        record_access: bool,
+    ) -> Result<Vec<SearchResult>> {
+        self.similar_filtered_with_access(id, k, None, record_access)
+            .await
+    }
+
+    /// Select the final similarity response before recording any exposure.
+    pub async fn similar_filtered_with_access(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        record_access: bool,
+    ) -> Result<Vec<SearchResult>> {
+        self.similar_with_access_checked(id, k, min_score, record_access, false)
+            .await
+    }
+
+    /// Preserve the caller's observation intent while deferring exposure until
+    /// the caller finishes fallible response hydration. Not a transport mode.
+    pub async fn prepare_similar_filtered(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+    ) -> Result<Vec<SearchResult>> {
+        self.similar_with_access_checked(id, k, min_score, requested_access, true)
+            .await
+    }
+
+    async fn similar_with_access_checked(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        defer_recording: bool,
+    ) -> Result<Vec<SearchResult>> {
+        let stamp = self.meta_store.effects_stamp().await?;
+        let observed = self
+            .similar_with_access_admitted(id, k, min_score, requested_access, defer_recording)
+            .await?;
+        observed.finish(self.check_effects_stamp(stamp).await)
+    }
+
+    async fn similar_with_access_admitted(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        record_access: bool,
+        defer_recording: bool,
+    ) -> Result<Observed<Vec<SearchResult>>> {
+        let k = k.min(SearchQuery::MAX_USER_LIMIT);
+        let mut record = self
+            .meta_store
+            .get(&id)
+            .await?
+            .ok_or(SearchError::MemoryNotFound(id))?;
+        if matches!(record.phase, DecayPhase::Ghost | DecayPhase::Tombstone) {
+            return Err(SearchError::MemoryNotFound(id));
+        }
+        let namespace = self
+            .namespace_resolver
+            .resolve_id(record.namespace_id)
+            .await?;
+        if namespace.id != record.namespace_id {
+            return Err(SearchError::MetadataError(
+                "resolved namespace differs from canonical source".into(),
+            ));
+        }
+        let context = self
+            .by_id_strength_context(&namespace, record_access)
+            .await?;
+        context.apply(&mut record)?;
 
         // Load the source memory's embedding from the vector index.
-        let source_embedding = self.vector_indexes.get_vector(id).ok_or_else(|| {
+        let mut source_embedding = self.vector_indexes.get_vector(id).ok_or_else(|| {
             SearchError::Internal(format!("no embedding found for memory {id:?}"))
         })?;
+
+        super::query::normalize_query_embedding(
+            &mut source_embedding,
+            namespace.embedding_dim as usize,
+        )?;
 
         // Over-fetch by 1 to account for self-match removal.
         let scored =
@@ -965,12 +1451,12 @@ impl QueryEngine {
         // Remove the source memory from results.
         let filtered: Vec<ScoredResult> = scored
             .into_iter()
-            .filter(|s| s.memory_id != id)
+            .filter(|s| s.memory_id != id && min_score.is_none_or(|minimum| s.score >= minimum))
             .take(k)
             .collect();
 
         let result_ids: Vec<MemoryId> = filtered.iter().map(|s| s.memory_id).collect();
-        let records = self.load_records(&result_ids).await?;
+        let records = self.strength_records(&result_ids, Some(&context)).await?;
 
         // Build a lookup map so we can iterate `filtered` (which preserves
         // descending similarity order from the vector search) instead of
@@ -982,6 +1468,11 @@ impl QueryEngine {
             .iter()
             .filter_map(|scored| {
                 let rec = record_map.get(&scored.memory_id)?;
+                if rec.namespace_id != namespace.id
+                    || matches!(rec.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+                {
+                    return None;
+                }
                 let score = Some(scored.score);
                 Some(SearchResult {
                     memory_id: rec.id,
@@ -1005,26 +1496,57 @@ impl QueryEngine {
                     activation_score: None,
                     is_permastore: rec.is_permastore,
                     stability: rec.stability,
-                    namespace: String::new(),
+                    namespace: namespace.name.clone(),
                 })
             })
             .collect();
 
-        // Record associative access for returned results.
-        let accesses: Vec<(MemoryId, AccessKind)> = results
-            .iter()
-            .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
-            .collect();
-        if !accesses.is_empty() {
-            let recorder = Arc::clone(&self.access_recorder);
-            tokio::spawn(async move {
-                if let Err(e) = recorder.record_access_batch(&accesses).await {
-                    warn!("failed to record associative access: {e}");
-                }
-            });
-        }
+        let receipts = if context.requested_record_access && !defer_recording {
+            self.record_similar_accesses(
+                &results.iter().map(|r| r.memory_id).collect::<Vec<_>>(),
+                crate::storage::control::ExposureScope {
+                    namespace: namespace.name.clone(),
+                    source: Some(id),
+                },
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
+        Ok(Observed {
+            value: results,
+            receipts,
+        })
+    }
 
-        Ok(results)
+    /// Shared final-result exposure hook. REST calls this only after fallible
+    /// response hydration. Legacy batches are awaited, not receipt-atomic.
+    pub async fn record_similar_accesses(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        let mut seen = std::collections::HashSet::new();
+        // Consumer preflight only: a schema-aware observation writer must also
+        // enforce this under its publication guard on the later A3 join.
+        let records = self.meta_store.get_batch(ids).await?;
+        if records.iter().any(|r| {
+            r.lifecycle.as_ref().is_some_and(|fields| {
+                fields.lifecycle_version
+                    == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+            })
+        }) {
+            return Err(SearchError::Unavailable(
+                "explicit-feedback exposure writer unavailable".into(),
+            ));
+        }
+        let accesses: Vec<_> = ids
+            .iter()
+            .copied()
+            .filter(|id| seen.insert(*id))
+            .map(|id| (id, AccessKind::AssociativeRetrieval))
+            .collect();
+        self.record_exposures(&accesses, scope).await
     }
 
     // =====================================================================
@@ -1032,7 +1554,10 @@ impl QueryEngine {
     // =====================================================================
 
     /// Load records for a batch of MemoryIds, checking RAM cache first.
-    async fn load_records(&self, ids: &[MemoryId]) -> Result<Vec<CachedRecord>> {
+    async fn load_records(&self, ids: &[MemoryId], use_cache: bool) -> Result<Vec<CachedRecord>> {
+        if !use_cache {
+            return self.meta_store.get_batch(ids).await;
+        }
         let mut results = Vec::with_capacity(ids.len());
         let mut cache_misses = Vec::new();
 
@@ -1143,8 +1668,8 @@ impl QueryEngine {
 
     /// Compute effective retrievability for a memory.
     ///
-    /// Uses the pre-computed decay_strength which already includes the
-    /// connection bonus from spreading activation.
+    /// Uses canonical materialized effective R for legacy lifecycle, or the
+    /// operation-local A3 projection for explicit-feedback lifecycle.
     fn compute_effective_r(record: &CachedRecord) -> f32 {
         record.decay_strength.clamp(0.0, 1.0)
     }
@@ -1216,8 +1741,11 @@ impl QueryEngine {
             .collect()
     }
 
-    /// Fire-and-forget access recording.
-    fn record_accesses_async(&self, candidates: &[Candidate]) {
+    async fn record_accesses(
+        &self,
+        candidates: &[Candidate],
+        scope: crate::storage::control::ExposureScope,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         let accesses: Vec<(MemoryId, AccessKind)> = candidates
             .iter()
             .map(|c| {
@@ -1230,16 +1758,22 @@ impl QueryEngine {
             })
             .collect();
 
-        if accesses.is_empty() {
-            return;
-        }
+        self.record_exposures(&accesses, scope).await
+    }
 
-        let recorder = Arc::clone(&self.access_recorder);
-        tokio::spawn(async move {
-            if let Err(e) = recorder.record_access_batch(&accesses).await {
-                warn!("failed to record access events: {e}");
-            }
-        });
+    /// Record the final caller-visible set after any outer hydration/filtering.
+    /// Outer callers must disable core recording to avoid duplicate events.
+    pub async fn record_exposures(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        if accesses.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.access_recorder
+            .record_access_batch(accesses, Some(&scope))
+            .await
     }
 }
 
@@ -1391,28 +1925,37 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AccessRecorder for Unused {
-        async fn record_access(&self, _id: MemoryId, _kind: AccessKind) -> Result<()> {
+        async fn record_access(
+            &self,
+            _id: MemoryId,
+            _kind: AccessKind,
+        ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
             unreachable!("stage 8c does not record access")
         }
 
-        async fn record_access_batch(&self, _a: &[(MemoryId, AccessKind)]) -> Result<()> {
+        async fn record_access_batch(
+            &self,
+            _a: &[(MemoryId, AccessKind)],
+            _scope: Option<&crate::storage::control::ExposureScope>,
+        ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
             unreachable!("stage 8c does not record access")
         }
     }
 
     // -- Fixtures ---------------------------------------------------------
 
-    fn ns() -> NamespaceId {
+    pub(super) fn ns() -> NamespaceId {
         NamespaceId::new(1)
     }
 
-    fn other_ns() -> NamespaceId {
+    pub(super) fn other_ns() -> NamespaceId {
         NamespaceId::new(2)
     }
 
     /// A Full-phase, strong, untagged record in namespace 1.
-    fn rec(id: MemoryId) -> CachedRecord {
+    pub(super) fn rec(id: MemoryId) -> CachedRecord {
         CachedRecord {
+            lifecycle: None,
             id,
             namespace_id: ns(),
             created_at: 1_700_000_000_000,
@@ -1440,7 +1983,7 @@ mod tests {
         c
     }
 
-    fn query(value: serde_json::Value) -> SearchQuery {
+    pub(super) fn query(value: serde_json::Value) -> SearchQuery {
         serde_json::from_value(value).expect("valid query")
     }
 
@@ -1457,6 +2000,82 @@ mod tests {
             Arc::new(Unused),
             Arc::new(Unused),
         )
+    }
+
+    #[tokio::test]
+    async fn effects_completed_during_query_cannot_return_a_successful_miss() {
+        use crate::storage::StorageEngine as _;
+        let fx = crate::test_support::Fixture::new();
+        let a = fx.insert_memory().await;
+        let b = fx.insert_memory().await;
+        fx.storage
+            .read()
+            .unwrap()
+            .add_edge(a, b, crate::model::EdgeType::Associative, 0.5, false, 1)
+            .unwrap();
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .acknowledge_rebuilt_effects()
+            .unwrap();
+        struct MutatingLookup {
+            storage: Arc<std::sync::RwLock<crate::storage::engine::RedbStorageEngine>>,
+            target: MemoryId,
+        }
+        #[async_trait::async_trait]
+        impl MetadataStore for MutatingLookup {
+            async fn list_namespace_memories(&self, _: NamespaceId) -> Result<Vec<MemoryId>> {
+                Ok(Vec::new())
+            }
+            async fn effects_stamp(&self) -> Result<u64> {
+                self.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .effects_stamp()
+                    .map_err(|e| SearchError::MetadataError(e.to_string()))
+            }
+            async fn get(&self, id: &MemoryId) -> Result<Option<CachedRecord>> {
+                let storage = self.storage.write().unwrap();
+                let old = storage
+                    .get_record(*id)
+                    .unwrap()
+                    .map(|r| CachedRecord::from(&r));
+                storage.remove_all_edges(self.target).unwrap();
+                // Even complete publication must be noticed by the in-flight query.
+                storage.meta_store().acknowledge_rebuilt_effects().unwrap();
+                Ok(old)
+            }
+            async fn get_batch(&self, _: &[MemoryId]) -> Result<Vec<CachedRecord>> {
+                unreachable!()
+            }
+        }
+        let mut engine = engine(StubGraph::default(), StubMetaStore::default());
+        engine.meta_store = Arc::new(MutatingLookup {
+            storage: fx.storage.clone(),
+            target: b,
+        });
+        let result = engine.get_memory(MemoryId::new()).await;
+        assert!(matches!(result, Err(SearchError::Unavailable(_))));
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .effects_stamp()
+                .is_ok()
+        );
+        assert_eq!(
+            fx.storage
+                .read()
+                .unwrap()
+                .get_record(a)
+                .unwrap()
+                .unwrap()
+                .edge_count,
+            0
+        );
     }
 
     /// Wire up "B is superseded by A", where A's record is `replacement`.
@@ -1486,8 +2105,15 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old), 0.8)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![new]);
         assert!(candidates[0].composite_score >= 0.8);
@@ -1503,8 +2129,15 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old), 0.8), candidate(rec(new), 0.9)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![new]);
     }
@@ -1522,8 +2155,15 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old), 0.8)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![old]);
     }
@@ -1539,8 +2179,15 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old), 0.8)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![old]);
     }
@@ -1561,8 +2208,10 @@ mod tests {
                 &query(json!({"text": "q", "includeGhosts": true})),
                 &[],
                 ns(),
+                None,
             )
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![new]);
     }
@@ -1582,8 +2231,15 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old), 0.8)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![old]);
     }
@@ -1634,8 +2290,9 @@ mod tests {
 
             let mut candidates = vec![candidate(original, 0.8)];
             engine
-                .resolve_supersedes(&mut candidates, &query(q), &[], ns())
-                .await;
+                .resolve_supersedes(&mut candidates, &query(q), &[], ns(), None)
+                .await
+                .unwrap();
 
             assert_eq!(ids(&candidates), vec![old], "{label}");
         }
@@ -1652,8 +2309,15 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old), 0.8)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![old]);
     }
@@ -1668,8 +2332,15 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old), 0.8)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![old]);
     }
@@ -1688,13 +2359,20 @@ mod tests {
 
         let mut candidates = vec![candidate(rec(old_a), 0.5), candidate(rec(old_b), 0.85)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(ids(&candidates), vec![new]);
         assert!(candidates[0].composite_score >= 0.85);
     }
-    fn mid(n: u128) -> MemoryId {
+    pub(super) fn mid(n: u128) -> MemoryId {
         MemoryId::from_bytes(n.to_be_bytes())
     }
 
@@ -1745,6 +2423,22 @@ mod tests {
         fn search(&self, _ns: NamespaceId, _q: &str, _k: usize) -> Result<Vec<FtsResult>> {
             Ok(Vec::new())
         }
+
+        fn search_eligible(
+            &self,
+            _ns: NamespaceId,
+            _q: &str,
+            _k: usize,
+            _eligible: &HashSet<MemoryId>,
+        ) -> Result<EligibleFtsResults> {
+            Ok(EligibleFtsResults {
+                matches: Vec::new(),
+                coverage: FtsCoverage {
+                    exhausted: true,
+                    ..Default::default()
+                },
+            })
+        }
     }
 
     impl RifProcessor for SearchFixture {
@@ -1759,15 +2453,26 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AccessRecorder for SearchFixture {
-        async fn record_access(&self, _id: MemoryId, _kind: AccessKind) -> Result<()> {
-            Ok(())
+        async fn record_access(
+            &self,
+            _id: MemoryId,
+            _kind: AccessKind,
+        ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+            Ok(Vec::new())
         }
-        async fn record_access_batch(&self, _accesses: &[(MemoryId, AccessKind)]) -> Result<()> {
-            Ok(())
+        async fn record_access_batch(
+            &self,
+            _accesses: &[(MemoryId, AccessKind)],
+            _scope: Option<&crate::storage::control::ExposureScope>,
+        ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+            Ok(Vec::new())
         }
     }
 
-    fn search_engine(records: Vec<CachedRecord>, vectors: &[(MemoryId, f32)]) -> QueryEngine {
+    pub(super) fn search_engine(
+        records: Vec<CachedRecord>,
+        vectors: &[(MemoryId, f32)],
+    ) -> QueryEngine {
         use crate::search::adapters::{SharedEntityIndexReader, SharedVectorIndexRegistry};
         use crate::search::{EntityIndex, FlatVectorIndex, VectorIndex, VectorMetadata};
 
@@ -1994,7 +2699,7 @@ mod tests {
                 }
                 engine.resolve_supersedes(&mut candidates, &query(json!({"text": "q",
                     "timeRangeStart": 1_699_999_999_000i64, "timeRangeEnd": 1_700_000_001_000i64
-                })), &[], ns()).await;
+                })), &[], ns(), None).await.unwrap();
                 candidates
                     .sort_by(|a, b| b.composite_score.partial_cmp(&a.composite_score).unwrap());
                 assert_eq!(candidates[0].record.id, mid(100));
@@ -2013,8 +2718,9 @@ mod tests {
         let mut candidates = vec![candidate(rec(mid(1)), 0.9), candidate(rec(mid(2)), 0.1)];
         engine.apply_filters(&mut candidates, &q, &[], ns());
         engine
-            .resolve_supersedes(&mut candidates, &q, &[], ns())
-            .await;
+            .resolve_supersedes(&mut candidates, &q, &[], ns(), None)
+            .await
+            .unwrap();
         assert_eq!(ids(&candidates), vec![mid(2)]);
         assert_eq!(candidates[0].composite_score, 0.9);
         assert_eq!(candidates[0].raw_vector_score, None);
@@ -2022,8 +2728,15 @@ mod tests {
         // A newly discovered terminal has no independent metadata-channel score.
         let mut candidates = vec![candidate(rec(mid(1)), 0.01)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(candidates[0].composite_score, 0.01);
     }
 
@@ -2047,8 +2760,15 @@ mod tests {
         let engine = engine(graph, meta);
         let mut candidates = vec![candidate(rec(mid(1)), 0.9), candidate(rec(mid(2)), 0.1)];
         engine
-            .resolve_supersedes(&mut candidates, &query(json!({"text": "q"})), &[], ns())
-            .await;
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
         // Legacy fallback keeps the original; stale terminal metadata cannot leak it.
         assert_eq!(ids(&candidates), vec![mid(1)]);
     }

@@ -8,6 +8,52 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    /// Canonical mutation exists; retry publication, never retry as a new write.
+    #[error("INDEX_NOT_READY commitState=committed ready=false receipt={} cause={source}", serde_json::to_string(receipt).unwrap_or_default())]
+    CommittedMutation {
+        receipt: Box<crate::storage::control::WriteReceipt>,
+        #[source]
+        source: Box<StorageError>,
+    },
+
+    /// Invalid lineage, key, version, or generation encoding.
+    #[error("invalid mutation context: {0}")]
+    InvalidMutationContext(String),
+
+    #[error("STORE_LINEAGE_MISMATCH")]
+    StoreLineageMismatch,
+
+    #[error("GENERATION_CONFLICT: expected {expected}, actual {actual}")]
+    GenerationConflict { expected: String, actual: String },
+
+    #[error("IDEMPOTENCY_CONFLICT")]
+    IdempotencyConflict,
+
+    #[error("NAMESPACE_MISMATCH")]
+    MutationNamespaceMismatch,
+
+    #[error("canonical generation exhausted")]
+    GenerationExhausted,
+
+    #[error("unsupported or corrupt canonical control: {0}")]
+    InvalidControl(String),
+
+    /// The database may have committed; reconcile by operation ID after reopen.
+    #[error("commit outcome unknown for operation {operation_id}: {source}")]
+    CommitOutcomeUnknown {
+        operation_id: Uuid,
+        #[source]
+        source: redb::CommitError,
+    },
+
+    /// Canonical metadata is durable; materialization must resume after reopen.
+    #[error("operation {operation_id} committed; canonical effects unavailable: {source}")]
+    CommittedEffectsPending {
+        operation_id: Uuid,
+        #[source]
+        source: Box<StorageError>,
+    },
+
     // ── redb errors (from metadata.rs and edges.rs) ──────────────────
     /// A generic redb error.
     #[error("redb error: {0}")]
@@ -32,6 +78,13 @@ pub enum StorageError {
     /// A redb commit error.
     #[error("redb commit error: {0}")]
     RedbCommit(#[from] redb::CommitError),
+
+    /// Provider output failed vector validation; the store remains usable.
+    #[error("EMBEDDING_UNAVAILABLE: invalid provider vector: {0}")]
+    ProviderVectorUnavailable(String),
+
+    #[error("EDGE_CONFLICT: {0}")]
+    EdgeConflict(String),
 
     #[error("invalid storage mutation: {0}")]
     InvalidMutation(String),
@@ -67,6 +120,15 @@ pub enum StorageError {
     /// No namespace exists for the given ID.
     #[error("namespace not found: {0}")]
     NamespaceNotFound(u32),
+
+    /// An explicit namespace assertion does not match the record's immutable scope.
+    #[error("NAMESPACE_MISMATCH: memory {id} does not belong to namespace '{namespace}'")]
+    NamespaceMismatch {
+        /// Memory being addressed.
+        id: Uuid,
+        /// Caller asserted namespace.
+        namespace: String,
+    },
 
     /// A secondary index is corrupt or inconsistent.
     #[error("corrupt index: {0}")]

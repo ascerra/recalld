@@ -13,9 +13,9 @@ use crate::model::{DecayPhase, Tag};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMode {
-    /// Vector similarity search only; skips metadata filtering.
+    /// Embedding-driven retrieval; all supplied hard filters still apply.
     EmbeddingOnly,
-    /// Vector search with post-hoc metadata filters (default).
+    /// Embedding-driven retrieval with explicit metadata criteria (default).
     EmbeddingPlusMetadata,
     /// Tag and attribute filtering without vector search.
     MetadataOnly,
@@ -31,7 +31,7 @@ impl Default for QueryMode {
 // SearchFilter (pipeline-level)
 // ---------------------------------------------------------------------------
 
-/// Post-retrieval filters applied after vector search and metadata loading.
+/// Canonical hard filters apply in every query mode, including EmbeddingOnly.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchFilter {
@@ -64,6 +64,9 @@ pub struct SearchFilter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchQuery {
+    /// Permit legacy exposure recording. False also bypasses behavioral record caches.
+    #[serde(default = "default_record_access")]
+    pub record_access: bool,
     /// Precomputed vector for semantic search. Takes precedence over text for
     /// embedding; text (or fts_query) still supplies the keyword channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -84,7 +87,7 @@ pub struct SearchQuery {
     #[serde(default = "default_namespace")]
     pub namespace: String,
 
-    /// Post-retrieval filters.
+    /// Hard eligibility filters applied in every query mode.
     #[serde(default)]
     pub filter: SearchFilter,
 
@@ -119,6 +122,11 @@ pub struct SearchQuery {
     /// Named entities provided by the caller for entity overlap scoring.
     #[serde(default)]
     pub entities: Vec<String>,
+}
+
+/// Omitted access control preserves each v1 path's existing behavior.
+pub fn default_record_access() -> bool {
+    true
 }
 
 fn default_namespace() -> String {

@@ -4,6 +4,8 @@
 //! is length-prefixed with a CRC32 checksum for corruption detection.
 //! See CS-08 for the full specification.
 
+pub(crate) mod generation;
+
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
@@ -186,13 +188,14 @@ pub struct TextStore {
     path: PathBuf,
     /// Current write position (byte offset of the next append).
     write_pos: u64,
+    header_size: u64,
 }
 
 impl TextStore {
     /// Open an existing fulltext.dat, or create a new one if the file
     /// does not exist. Validates the header and sets the write
     /// position to end-of-file.
-    pub fn open(path: &Path) -> Result<TextStore, StorageError> {
+    pub(crate) fn open(path: &Path) -> Result<TextStore, StorageError> {
         if path.exists() {
             // --- Open existing ---
             let mut file = OpenOptions::new().read(true).write(true).open(path)?;
@@ -214,6 +217,7 @@ impl TextStore {
                 file,
                 path: path.to_path_buf(),
                 write_pos,
+                header_size: 16,
             })
         } else {
             // --- Create new ---
@@ -232,6 +236,7 @@ impl TextStore {
                 file,
                 path: path.to_path_buf(),
                 write_pos: TextLogHeader::SIZE as u64,
+                header_size: 16,
             })
         }
     }
@@ -240,7 +245,7 @@ impl TextStore {
     ///
     /// Returns a `TextRef` containing the file offset and payload
     /// length. The caller stores this in meta.db's `DiskRecord`.
-    pub fn append(&mut self, text: &str) -> Result<TextRef, StorageError> {
+    pub(super) fn append(&mut self, text: &str) -> Result<TextRef, StorageError> {
         let data = text.as_bytes();
         let length = data.len();
 
@@ -282,6 +287,7 @@ impl TextStore {
             file,
             path: path.to_path_buf(),
             write_pos,
+            header_size: 16,
         };
         store.validate_header()?;
         Ok(store)
@@ -298,7 +304,7 @@ impl TextStore {
     pub fn read(&self, text_ref: TextRef) -> Result<String, StorageError> {
         if !text_ref.is_some()
             || text_ref.length > MAX_ENTRY_SIZE
-            || text_ref.file_offset < TextLogHeader::SIZE as u64
+            || text_ref.file_offset < self.header_size
             || text_ref
                 .file_offset
                 .checked_add(ENTRY_HEADER_SIZE)
@@ -349,6 +355,9 @@ impl TextStore {
 
     /// Validate the file header. Called during startup validation.
     pub fn validate_header(&mut self) -> Result<(), StorageError> {
+        if self.header_size == 48 {
+            return Ok(());
+        } // Full identity checked by open_generation.
         self.file.seek(SeekFrom::Start(0))?;
         let mut header_buf = [0u8; TextLogHeader::SIZE];
         self.file.read_exact(&mut header_buf)?;
@@ -376,7 +385,7 @@ impl TextStore {
     }
 
     /// Legacy compaction is disabled until metadata selects text generations.
-    pub fn compact_write_new_file(
+    pub(super) fn compact_write_new_file(
         &mut self,
         _live_refs: &[(MemoryId, TextRef)],
     ) -> Result<(CompactionResult, bool), StorageError> {
@@ -386,7 +395,7 @@ impl TextStore {
     }
 
     /// Never finalize a marker-driven swap: the committed file is ambiguous.
-    pub fn compact_finalize(&mut self) -> Result<(), StorageError> {
+    pub(super) fn compact_finalize(&mut self) -> Result<(), StorageError> {
         Err(StorageError::RecoveryRequired(
             "legacy text compaction is disabled".into(),
         ))

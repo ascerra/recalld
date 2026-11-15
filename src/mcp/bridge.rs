@@ -28,38 +28,81 @@ pub trait SearchPipeline: Send + Sync {
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError>;
 
     /// Find memories similar to an existing memory by its ID.
+    /// `namespace`, when supplied, asserts canonical source scope before effects.
     async fn find_similar(
         &self,
         id: MemoryId,
         limit: usize,
         min_score: Option<f32>,
         same_namespace: bool,
+        record_access: bool,
+        namespace: Option<&str>,
     ) -> Result<Vec<SearchHit>, BridgeError>;
 
     /// Scan a namespace for clusters of near-duplicate memories.
     ///
-    /// Samples up to `max_memories` from the namespace, runs pairwise
-    /// similarity checks, and groups memories whose similarity exceeds
-    /// `threshold` into clusters.
+    /// Samples up to `max_memories` and groups threshold-connected memories
+    /// found by bounded nearest-neighbor searches; not an exhaustive pair scan.
     async fn scan_duplicates(
         &self,
         namespace: &str,
         threshold: f32,
         max_memories: usize,
     ) -> Result<Vec<DuplicateCluster>, BridgeError>;
+
+    /// Same scan with observed coverage. Legacy implementations cannot report counts.
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<DuplicateScanReport, BridgeError> {
+        Ok(DuplicateScanReport {
+            clusters: self
+                .scan_duplicates(namespace, threshold, max_memories)
+                .await?,
+            coverage: None,
+        })
+    }
 }
 
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Old implementations cannot manufacture durable receipts. The actual
+    /// direct and daemon adapters opt in; callers never fall back after a write.
+    fn supports_durable_batches(&self) -> bool {
+        false
+    }
+
+    async fn mutate_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {
+        Err(BridgeError::InvalidInput(
+            "durable batch protocol is not supported by this storage adapter".into(),
+        ))
+    }
+
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 
     /// Retrieve a full memory record by ID, or `None` if not found.
-    async fn get_memory(&self, id: MemoryId) -> Result<Option<MemoryRecord>, BridgeError>;
+    /// `namespace`, when supplied, asserts canonical scope; unknown IDs are errors.
+    async fn get_memory(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+        namespace: Option<&str>,
+    ) -> Result<Option<MemoryRecord>, BridgeError>;
 
     /// Delete a memory by ID. Returns `true` if the memory existed and was deleted.
-    async fn delete_memory(&self, id: MemoryId) -> Result<bool, BridgeError>;
+    /// `namespace`, when supplied, must match canonical scope before mutation.
+    async fn delete_memory(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> Result<bool, BridgeError>;
 
     /// Delete many memories in one pass.
     ///
@@ -71,10 +114,12 @@ pub trait StorageEngine: Send + Sync {
     async fn delete_memories(&self, ids: &[MemoryId]) -> Result<Vec<bool>, BridgeError>;
 
     /// Reinforce a memory with the given FSRS quality rating (1-4).
+    /// `namespace`, when supplied, must match canonical scope before mutation.
     async fn reinforce_memory(
         &self,
         id: MemoryId,
         quality: u8,
+        namespace: Option<&str>,
     ) -> Result<ReinforceResult, BridgeError>;
 
     /// List memories in a namespace with pagination and optional filters.
@@ -133,6 +178,16 @@ pub trait HealthChecker: Send + Sync {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchInput {
+    /// Internal response shaping: compact tools do not expose graph neighbors.
+    /// Defaults true for existing direct/daemon search clients.
+    #[serde(default = "crate::search::default_record_access")]
+    pub include_neighbors: bool,
+    /// False forbids retrieval-attributable writes; omission preserves v1 behavior.
+    #[serde(
+        rename = "recordAccess",
+        default = "crate::search::default_record_access"
+    )]
+    pub record_access: bool,
     /// Natural language search query.
     pub query: String,
     /// Namespace to search within.
@@ -241,6 +296,38 @@ pub struct SearchHit {
     /// Related memories connected by graph edges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<RelatedMemory>,
+}
+
+/// Public MCP sample cap and per-source vector candidate cap (including self).
+pub const DUPLICATE_SAMPLE_CAP: usize = 200;
+pub const DUPLICATE_NEIGHBOR_CAP: usize = 11;
+
+/// Legacy clusters plus optional coverage; None means an older bridge/daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanReport {
+    pub clusters: Vec<DuplicateCluster>,
+    pub coverage: Option<DuplicateScanCoverage>,
+}
+
+/// Observed scan counts, not a generation-consistent namespace snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanCoverage {
+    pub algorithm: String,
+    /// Live records before sampling; includes ghosts and records with missing vectors.
+    pub eligible_count: usize,
+    pub sampled_count: usize,
+    /// Sampled records whose vectors were absent at vector loading time.
+    pub skipped_vector_count: usize,
+    pub sample_cap: usize,
+    /// Vector candidates per source, including self when returned.
+    pub neighbor_cap: usize,
+    /// Whether the record sample was truncated; separate from neighbor limiting.
+    pub truncated: bool,
+    pub counts_available: bool,
+    /// Always false for this bounded, unpinned scan.
+    pub complete: bool,
 }
 
 /// A cluster of near-duplicate memories found during namespace scan.
@@ -675,6 +762,13 @@ pub enum BridgeError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// A provider or required service cannot satisfy the operation.
+    #[error("Unavailable: {0}")]
+    Unavailable(String),
+    /// An explicit by-ID namespace assertion failed.
+    #[error("{0}")]
+    NamespaceMismatch(String),
+
     /// A storage subsystem error occurred.
     #[error("Storage error: {0}")]
     Storage(String),
@@ -702,6 +796,18 @@ pub enum BridgeError {
     /// destroyed records are still there.
     #[error("Partially applied: {0}")]
     PartiallyApplied(String),
+}
+
+impl From<crate::storage::StorageError> for BridgeError {
+    fn from(error: crate::storage::StorageError) -> Self {
+        use crate::storage::StorageError;
+        match error {
+            StorageError::NamespaceMismatch { .. } => Self::NamespaceMismatch(error.to_string()),
+            StorageError::NotFound(_) => Self::NotFound(error.to_string()),
+            StorageError::InvalidNamespaceName { .. } => Self::InvalidInput(error.to_string()),
+            _ => Self::Storage(error.to_string()),
+        }
+    }
 }
 
 impl BridgeError {

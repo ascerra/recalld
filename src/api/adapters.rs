@@ -94,103 +94,57 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         self.embedding.embed(text).await
     }
 
+    async fn record_exposures(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine.record_exposures(accesses, scope).await
+    }
+
     async fn search(
         &self,
         query: state::SearchQuery,
     ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
-        // Convert API-layer SearchQuery to the pipeline's SearchQuery.
-        let (text, query_embedding) = match query.query {
-            state::QueryInput::Text(t) => (Some(t), None),
-            state::QueryInput::Vector(vector) => (None, Some(vector)),
-            state::QueryInput::TextAndVector { text, embedding } => (Some(text), Some(embedding)),
-        };
+        self.search_inner(query, false).await
+    }
+    async fn prepare_search(
+        &self,
+        query: state::SearchQuery,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        self.search_inner(query, true).await
+    }
 
-        // A label that cannot become a tag is an error, not a dropped
-        // filter: dropping one from `includeTags` or `entities` WIDENS
-        // the query, and a caller cannot tell "every memory in the
-        // namespace" from a genuine match.
-        let mut require_tags: Vec<Tag> =
-            crate::model::parse_filter_tags("includeTags", "", &query.include_tags)
-                .map_err(|e| crate::search::SearchError::InvalidFilter(e.to_string()))?;
-        require_tags.extend(
-            crate::model::parse_filter_tags(
-                "entities",
-                crate::model::constants::ENTITY_TAG_PREFIX,
-                &query.entities,
-            )
-            .map_err(|e| crate::search::SearchError::InvalidFilter(e.to_string()))?,
-        );
-        // `excludeTags` is the safe direction — dropping one can only
-        // ever return MORE than asked for in the same sense a missing
-        // exclusion does, and it never masquerades as a match — so it
-        // keeps the lossy parse.
-        let exclude_tags: Vec<Tag> =
-            crate::model::parse_tags_lossy("search.excludeTags", &query.exclude_tags);
-        let phases: Vec<DecayPhase> = query
-            .decay_phases
-            .as_ref()
-            .map(|ps| {
-                ps.iter()
-                    .filter_map(|&p| match p {
-                        0 => Some(DecayPhase::Full),
-                        1 => Some(DecayPhase::Summary),
-                        2 => Some(DecayPhase::Ghost),
-                        _ => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+    async fn find_similar(
+        &self,
+        id: MemoryId,
+        limit: usize,
+        min_score: Option<f32>,
+        record_access: bool,
+    ) -> Result<Vec<crate::search::PipelineSearchResult>, crate::search::SearchError> {
+        self.query_engine
+            .similar_filtered_with_access(id, limit, min_score, record_access)
+            .await
+    }
 
-        let pipeline_query = crate::search::SearchQuery {
-            query_embedding,
-            text,
-            fts_query: None,
-            namespace: query.namespace_name.clone(), // Issue 1: pass actual namespace name
-            filter: crate::search::PipelineSearchFilter {
-                require_tags,
-                exclude_tags,
-                phases,
-                min_strength: query.min_score, // Issue 2: pass min_strength
-                ..Default::default()
-            },
-            limit: query.k,
-            min_score: 0.0,
-            include_ghosts: false,
-            query_mode: crate::search::QueryMode::default(),
-            graph_depth: (query.graph_depth as u8).min(3),
-            time_range_start: query.time_range_start, // Issue 3: pass time range
-            time_range_end: query.time_range_end,     // Issue 3: pass time range
-            entities: query.entities.clone(),         // Issue 4: pass entities
-        };
-        let response = self.query_engine.search(pipeline_query).await?;
-        Ok(response
-            .results
-            .into_iter()
-            .map(|r| {
-                // Issue 5: Parse entities from tags
-                let metadata = parse_structured_tags(&r.tags);
-                state::ResolvedSearchResult {
-                    memory: CachedRecord {
-                        id: r.memory_id,
-                        namespace_id: query.namespace_id, // Issue 6: use actual namespace_id
-                        created_at: r.created_at,
-                        last_accessed_at: r.last_accessed_at,
-                        phase: r.phase,
-                        strength: r.retrievability,
-                        decay_strength: r.effective_r,
-                        stability: r.stability,
-                        difficulty: 5.0,
-                        is_permastore: r.is_permastore,
-                        summary: r.summary.unwrap_or_default(),
-                        tags: r.tags,
-                        edge_count: r.edge_count,
-                        vector_slot: 0,
-                        entities: metadata.entities,
-                    },
-                    score: r.score.unwrap_or(0.0),
-                }
-            })
-            .collect())
+    async fn prepare_similar_filtered(
+        &self,
+        id: MemoryId,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+    ) -> Result<Vec<crate::search::PipelineSearchResult>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_similar_filtered(id, limit, min_score, requested_access)
+            .await
+    }
+
+    async fn record_similar_accesses(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        self.query_engine.record_similar_accesses(ids, scope).await
     }
 
     async fn near_duplicates(
@@ -199,9 +153,19 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         namespace_id: NamespaceId,
         threshold: f32,
         limit: usize,
-    ) -> Vec<(MemoryId, f32)> {
+    ) -> Result<Vec<(MemoryId, f32)>, super::errors::AppError> {
+        let stamp = self.query_engine.effects_stamp().await?;
         let index = self.vector_index.read().await;
-        crate::search::find_near_duplicates(&index, embedding, namespace_id, threshold, limit)
+        let result =
+            crate::search::find_near_duplicates(&index, embedding, namespace_id, threshold, limit);
+        drop(index);
+        if self.query_engine.effects_stamp().await? != stamp {
+            return Err(crate::storage::StorageError::RecoveryRequired(
+                "effects changed during advisory".into(),
+            )
+            .into());
+        }
+        Ok(result)
     }
 
     async fn index_memory(&self, id: MemoryId, embedding: &[f32], namespace_id: NamespaceId) {
@@ -316,6 +280,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `StorageEngine` trait.
 pub struct StorageEngineAdapter {
+    clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     /// Held so `delete_memory` can clean the indexes storage cannot
@@ -341,7 +306,9 @@ impl StorageEngineAdapter {
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         graph: crate::graph::SharedGraph,
     ) -> Self {
+        cache.bind_storage(&storage);
         Self {
+            clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
             vector_index,
@@ -350,10 +317,82 @@ impl StorageEngineAdapter {
             graph,
         }
     }
+    /// Use the system instance's clock (or an isolated manual clock).
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
 }
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn publication_lease(
+        &self,
+    ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, crate::storage::StorageError> {
+        Ok(Some(
+            crate::derived_completion::publication_gate(&self.storage)
+                .await?
+                .read_owned()
+                .await,
+        ))
+    }
+
+    async fn effects_stamp(&self) -> Result<u64, crate::storage::StorageError> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            storage
+                .read()
+                .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+                .meta_store()
+                .effects_stamp()
+        })
+        .await
+        .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+    }
+
+    async fn insert_memory(
+        &self,
+        namespace_id: NamespaceId,
+        input: crate::storage::insertion::InsertMemory,
+        generated_embedding: Vec<f32>,
+    ) -> Result<crate::storage::insertion::InsertResult, crate::storage::StorageError> {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .insert(
+            crate::storage::control::MutationContext::unkeyed(namespace_id),
+            input,
+            generated_embedding,
+            self.clock.now_millis(),
+        )
+        .await
+    }
+
+    async fn complete_insertion(
+        &self,
+        receipt: &crate::storage::control::WriteReceipt,
+    ) -> Result<(), crate::storage::StorageError> {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .complete()
+        .await
+        .map_err(|source| crate::storage::StorageError::CommittedMutation {
+            receipt: Box::new(receipt.clone()),
+            source: Box::new(source),
+        })
+    }
+
     async fn create_memory(
         &self,
         namespace_id: NamespaceId,
@@ -364,71 +403,30 @@ impl state::StorageEngine for StorageEngineAdapter {
         initial_stability: Option<f32>,
         created_at: Option<i64>,
     ) -> Result<CachedRecord, crate::storage::StorageError> {
-        use crate::model::Tag;
-        use crate::model::record::DiskRecord;
-
-        let id = MemoryId::new();
-        let now = chrono::Utc::now().timestamp_millis();
-        let ts = created_at.unwrap_or(now);
-        // Over-long tags cannot reach this point: the shared request
-        // validator bounds every tag and reserves the `entity/` /
-        // `topic/` / `emotion/` prefix out of the label limits. A drop
-        // here therefore means a tag outside `Tag`'s alphabet, and it
-        // is logged rather than swallowed.
-        let parsed_tags: Vec<Tag> = crate::model::parse_tags_lossy("create_memory.tags", tags);
-
-        let mut record = DiskRecord {
-            version: DiskRecord::CURRENT_VERSION,
-            id: *id.as_bytes(),
-            namespace_id: namespace_id.get(),
-            created_at: ts,
-            last_accessed_at: ts,
-            phase: DecayPhase::Full,
-            strength: 1.0,
-            decay_strength: 1.0,
-            stability: initial_stability.unwrap_or(3.7145),
-            difficulty: 5.0,
-            is_permastore: 0,
-            vector_slot: 0,
-            edge_count: 0,
-            summary: summary.to_string(),
-            tags: parsed_tags,
-            access_history: Vec::new(),
-            text_offset: 0,
-            text_length: 0,
-        };
-
-        let storage = self.storage.clone();
-        let embedding_vec = embedding.to_vec();
-        let full_text_owned = full_text.map(|s| s.to_string());
-
-        let record = tokio::task::spawn_blocking(move || {
-            let mut storage_w = storage.write().map_err(|e| {
-                crate::storage::StorageError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("storage lock poisoned: {e}"),
-                ))
-            })?;
-            storage_w.insert_memory(
-                id,
+        let result = self
+            .insert_memory(
                 namespace_id,
-                &mut record,
-                &embedding_vec,
-                full_text_owned.as_deref(),
-            )?;
-            Ok::<_, crate::storage::StorageError>(record)
+                crate::storage::insertion::InsertMemory {
+                    id: None,
+                    summary: summary.into(),
+                    full_text: full_text.map(str::to_owned),
+                    tags: crate::model::parse_tags_lossy("create_memory.tags", tags),
+                    embedding: Some(embedding.to_vec()),
+                    initial_stability,
+                    created_at,
+                    parent_id: None,
+                    supersedes: None,
+                },
+                vec![],
+            )
+            .await?;
+        result.record.ok_or_else(|| {
+            crate::storage::StorageError::NotFound(
+                crate::storage::insertion::inserted_id(&result.receipt)
+                    .expect("insertion receipt")
+                    .into_inner(),
+            )
         })
-        .await
-        .map_err(|e| {
-            crate::storage::StorageError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("blocking task join error: {e}"),
-            ))
-        })??;
-
-        let cached = CachedRecord::from(&record);
-        self.cache.insert(id, cached.clone()).await;
-        Ok(cached)
     }
 
     async fn get_record(&self, id: MemoryId) -> Option<DiskRecord> {
@@ -442,92 +440,38 @@ impl state::StorageEngine for StorageEngineAdapter {
         .flatten()
     }
 
-    async fn delete_memory(&self, id: MemoryId) -> Result<bool, crate::storage::StorageError> {
+    async fn assert_memory_namespace(
+        &self,
+        id: MemoryId,
+        namespace: &str,
+    ) -> Result<(), crate::storage::StorageError> {
         let storage = self.storage.clone();
-
-        // Perform read, tombstone check, tombstone, and free_vector_slot
-        // atomically under a single write lock to prevent TOCTOU races.
-        // Without this, two concurrent deletes could both read the record
-        // as non-tombstoned, both tombstone it, and both free the same
-        // vector slot -- corrupting the free list into a self-referential
-        // cycle.
-        // Returns the PRE-tombstone record, not a bool: `tombstone`
-        // erases the tag list, and the tag list is where the entity
-        // names live. A bool here would leave the entity index with no
-        // way to know what to unlink.
-        let deleted = tokio::task::spawn_blocking(move || {
-            let mut storage_w = storage.write().map_err(|e| {
-                crate::storage::StorageError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("storage lock poisoned: {e}"),
-                ))
+        let namespace = namespace.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let storage = storage.read().map_err(|e| {
+                crate::storage::StorageError::Io(std::io::Error::other(e.to_string()))
             })?;
-
-            // Check if the record exists and is not already tombstoned.
-            let existing_record = match storage_w.get_record(id)? {
-                Some(r) => r,
-                None => {
-                    return Ok::<Option<crate::model::DiskRecord>, crate::storage::StorageError>(
-                        None,
-                    );
-                }
-            };
-
-            if existing_record.phase == DecayPhase::Tombstone {
-                return Ok(None);
-            }
-
-            // Tombstone the record.
-            storage_w.tombstone_memory(id)?;
-
-            // Free the vector slot.
-            let ns_id = NamespaceId::new(existing_record.namespace_id);
-            if let Err(e) = storage_w.free_vector_slot(ns_id, existing_record.vector_slot) {
-                tracing::warn!(
-                    memory_id = %id,
-                    vector_slot = existing_record.vector_slot,
-                    %e,
-                    "vector slot free failed (non-fatal)"
-                );
-            }
-
-            Ok(Some(existing_record))
+            storage.assert_memory_namespace(id, &namespace)
         })
         .await
-        .map_err(|e| {
-            crate::storage::StorageError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("blocking task join error: {e}"),
-            ))
-        })??;
+        .map_err(|e| crate::storage::StorageError::Io(std::io::Error::other(e.to_string())))?
+    }
 
-        let Some(record) = deleted else {
-            return Ok(false);
-        };
-
-        // This used to stop at `cache.invalidate`, so an HTTP-deleted
-        // memory kept its vector-index entry (burning a top-k slot in
-        // every search and reading as a live autolink target), kept its
-        // FTS row — which survives restart, because the FTS index is
-        // only rebuilt when it is empty — and kept a graph node
-        // reporting Full phase at strength 1.0, still propping up its
-        // neighbours' decay resistance. Same helper as the MCP path now,
-        // so the two cannot drift apart again.
-        crate::index_cleanup::purge_from_indexes(
-            &crate::index_cleanup::IndexHandles {
-                cache: &self.cache,
-                vector_index: &self.vector_index,
-                fts_index: &self.fts_index,
-                entity_index: &self.entity_index,
-                graph: &self.graph,
-            },
-            std::slice::from_ref(&(id, record)),
-            crate::index_cleanup::FtsAction::PerRecord,
-            crate::index_cleanup::GraphAction::MarkTombstoned,
-        )
-        .await;
-
-        Ok(true)
+    async fn delete_memory(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> Result<bool, crate::storage::StorageError> {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .forget(id, namespace)
+        .await
     }
 
     async fn namespace_stats(
@@ -1091,6 +1035,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
 
 /// Adapts the decay subsystem to the API `FsrsEngine` trait.
 pub struct FsrsEngineAdapter {
+    clock: Arc<dyn crate::time::Clock>,
+    completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     graph: crate::graph::SharedGraph,
@@ -1107,134 +1053,82 @@ impl FsrsEngineAdapter {
         config: Arc<RecalldConfig>,
         has_sweep: bool,
     ) -> Self {
+        cache.bind_storage(&storage);
         Self {
+            clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
             graph,
             config,
             sweep_alive: has_sweep,
+            completion: None,
         }
+    }
+    /// Use the system instance's clock (or an isolated manual clock).
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+    /// Attach the live derived views so manual sweeps complete committed effects.
+    pub fn with_indexes(
+        mut self,
+        vectors: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        fts: Arc<tokio::sync::Mutex<FtsIndex>>,
+        entities: Arc<tokio::sync::RwLock<EntityIndex>>,
+    ) -> Self {
+        self.completion = Some(crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors,
+            fts,
+            entities,
+        });
+        self
     }
 }
 
 #[async_trait]
 impl state::FsrsEngine for FsrsEngineAdapter {
-    async fn record_access(&self, id: MemoryId, kind: AccessKind) {
-        let now = chrono::Utc::now().timestamp_millis();
-        let storage = self.storage.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Ok(storage_r) = storage.read() {
-                let _ = storage_r.update_access(id, now, kind);
-            }
-        })
-        .await;
+    async fn record_access_batch(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+    ) -> Result<
+        Vec<crate::storage::control::WriteReceipt>,
+        crate::decay::observation::ObservationError,
+    > {
+        crate::decay::observation::record_exposures(
+            self.storage.clone(),
+            self.cache.clone(),
+            accesses.to_vec(),
+            self.clock.now_millis(),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn reinforce(
         &self,
         id: MemoryId,
         quality: u8,
+        namespace: Option<&str>,
     ) -> Result<state::ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
-        // Step 1: Read the current record.
-        let record = {
-            let storage = self.storage.clone();
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage
-                    .read()
-                    .map_err(|e| format!("storage lock poisoned: {e}"))?;
-                storage_r
-                    .get_record(id)
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| format!("memory {id} not found"))
-            })
-            .await
-            .map_err(|e| format!("blocking task join error: {e}"))??
-        };
-
-        // Tombstoned memories cannot be reinforced.
-        if record.phase == DecayPhase::Tombstone {
-            return Err(format!("memory {id} has been deleted (tombstoned)").into());
-        }
-
-        let phase = record.phase;
-
-        // Step 2: Look up the namespace's decay rate multiplier.
-        let ns_decay_multiplier = {
-            let storage = self.storage.clone();
-            let ns_id = record.namespace_id;
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage
-                    .read()
-                    .map_err(|e| format!("storage lock poisoned: {e}"))?;
-                let multiplier = storage_r
-                    .get_namespace(NamespaceId::new(ns_id))
-                    .ok()
-                    .flatten()
-                    .and_then(|ns| ns.decay_rate_multiplier)
-                    .unwrap_or(1.0);
-                Ok::<f32, String>(multiplier)
-            })
-            .await
-            .map_err(|e| format!("blocking task join error: {e}"))??
-        };
-
-        // Step 3: Compute elapsed days since last access.
-        let now = chrono::Utc::now().timestamp_millis();
-        let elapsed_millis = (now - record.last_accessed_at).max(0) as f64;
-        let elapsed_days = (elapsed_millis / 86_400_000.0) as f32;
-
-        // Step 4: Use FSRS to compute new stability based on quality rating.
-        let decay_config = crate::decay::DecayConfig::default();
-        let engine = crate::decay::FsrsEngine::new(&decay_config);
-        let new_stability =
-            engine.review_stability(record.stability, elapsed_days, quality, ns_decay_multiplier);
-
-        // Step 5: Compute new retrievability (just reinforced = 1.0).
-        let new_strength = 1.0_f32;
-        let is_permastore =
-            record.is_permastore != 0 || new_stability >= decay_config.permastore_threshold;
-
-        // Step 6: Persist the updated decay state and access event.
-        {
-            let storage = self.storage.clone();
-            tokio::task::spawn_blocking(move || {
-                let storage_r = storage
-                    .read()
-                    .map_err(|e| format!("storage lock poisoned: {e}"))?;
-                storage_r
-                    .update_decay_state(
-                        id,
-                        phase,
-                        new_strength,
-                        new_strength,
-                        new_stability,
-                        is_permastore,
-                    )
-                    .map_err(|e| e.to_string())?;
-                storage_r
-                    .update_access(id, now, crate::model::AccessKind::ManualReinforcement)
-                    .map_err(|e| e.to_string())
-            })
-            .await
-            .map_err(|e| format!("blocking task join error: {e}"))??;
-        }
-
-        // Step 7: Update cache.
-        if let Some(existing) = self.cache.get(id).await {
-            let mut updated = (*existing).clone();
-            updated.stability = new_stability;
-            updated.strength = new_strength;
-            updated.decay_strength = new_strength;
-            updated.is_permastore = is_permastore;
-            updated.last_accessed_at = now;
-            self.cache.insert(id, updated).await;
-        }
-
+        let outcome = crate::decay::storage_adapter::reinforce(
+            self.storage.clone(),
+            self.cache.clone(),
+            id,
+            quality,
+            self.config.decay.decay_rate_multiplier,
+            self.clock.now_millis(),
+            namespace.map(str::to_owned),
+        )
+        .await;
+        let plan = outcome?;
         Ok(state::ReinforceResult {
-            strength: new_strength,
-            stability: new_stability,
-            phase,
-            is_permastore,
+            strength: plan.strength,
+            stability: plan.stability,
+            phase: plan.phase,
+            is_permastore: plan.is_permastore,
         })
     }
 
@@ -1266,10 +1160,38 @@ impl state::FsrsEngine for FsrsEngineAdapter {
             &self.graph,
             &self.cache,
             global_multiplier,
-            as_of_millis,
+            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
         )
         .await;
 
+        // Do not let a subsequent unavailable-handle error hide the original
+        // canonical receipt or uncertain operation identity.
+        if let Some((receipt, message)) = &result.failed_commit {
+            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    message.clone(),
+                )),
+            }));
+        }
+        if let Some(operation_id) = result.uncertain_operation {
+            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
+                format!(
+                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
+                ),
+            )));
+        }
+        if let Some(completion) = &self.completion {
+            completion.complete().await?;
+        } else if self
+            .storage
+            .read()
+            .map_err(|e| e.to_string())?
+            .meta_store()
+            .needs_effects_rebuild()
+        {
+            return Err("derived completion handles missing; reopen required".into());
+        }
         Ok(result)
     }
 }
@@ -1387,6 +1309,7 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
             });
 
             let ns_config = NamespaceConfig {
+                schema: None,
                 id: NamespaceId::UNSET,
                 name: name_owned,
                 embedding_dim: dim,
@@ -1399,6 +1322,12 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
                 decay_rate_multiplier,
             };
 
+            crate::decay::lifecycle::resolve_policy(
+                &ns_config,
+                &crate::decay::DecayConfig::default(),
+                1.0,
+            )?;
+
             let mut storage_w = storage.write().map_err(|e| {
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -1407,6 +1336,7 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
             })?;
             let assigned_id = storage_w.create_namespace(&ns_config)?;
             Ok(NamespaceConfig {
+                schema: None,
                 id: assigned_id,
                 ..ns_config
             })
@@ -1445,6 +1375,120 @@ mod tests {
     use crate::api::state::StorageEngine as _;
     use crate::search::{VectorIndex as _, VectorMetadata};
     use crate::test_support::{DIM, Fixture, MemorySpec};
+
+    #[tokio::test]
+    async fn insertion_http_boundary_distinguishes_provider_unavailable_from_caller_invalid() {
+        use axum::response::IntoResponse;
+        let fx = Fixture::new();
+        for supplied in [false, true] {
+            let input = crate::storage::insertion::InsertMemory {
+                id: None,
+                summary: "vector boundary".into(),
+                full_text: None,
+                tags: vec![],
+                initial_stability: None,
+                created_at: None,
+                embedding: supplied.then(|| vec![0.; DIM]),
+                parent_id: None,
+                supersedes: None,
+            };
+            let before = fx
+                .storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation;
+            let error = match adapter(&fx)
+                .insert_memory(NamespaceId::new(1), input, vec![0.; DIM])
+                .await
+            {
+                Ok(_) => panic!("zero vector accepted"),
+                Err(error) => error,
+            };
+            let response = super::super::errors::AppError::from(error).into_response();
+            assert_eq!(
+                response.status(),
+                if supplied {
+                    axum::http::StatusCode::UNPROCESSABLE_ENTITY
+                } else {
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE
+                }
+            );
+            assert_eq!(
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .control_state()
+                    .unwrap()
+                    .committed_generation,
+                before
+            );
+            assert!(fx.storage.read().unwrap().scan_all().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn actual_http_insertion_adapter_reports_durable_receipt_if_publication_fails() {
+        use axum::response::IntoResponse;
+        let fx = Fixture::new();
+        *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
+        let error = match adapter(&fx)
+            .insert_memory(
+                NamespaceId::new(1),
+                crate::storage::insertion::InsertMemory {
+                    id: None,
+                    summary: "http committed insertion".into(),
+                    full_text: None,
+                    tags: vec![],
+                    initial_stability: None,
+                    created_at: None,
+                    embedding: Some(unit_vector()),
+                    parent_id: None,
+                    supersedes: None,
+                },
+                vec![],
+            )
+            .await
+        {
+            Ok(_) => panic!("publication failure reported success"),
+            Err(error) => error,
+        };
+        let response = super::super::errors::AppError::from(error).into_response();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["commitState"], "committed");
+        assert_eq!(body["ready"], false);
+        let receipt: crate::storage::control::WriteReceipt =
+            serde_json::from_value(body["receipt"].clone()).unwrap();
+        let id = crate::storage::insertion::inserted_id(&receipt).unwrap();
+        assert!(fx.record(id).is_some());
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .effects_stamp()
+                .is_err()
+        );
+        *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
+        adapter(&fx).complete_insertion(&receipt).await.unwrap();
+        assert!(fx.vector_index.read().await.get_vector(id).is_some());
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .effects_stamp()
+                .is_ok()
+        );
+    }
 
     /// A vector of the fixture's width, so it matches the index.
     fn unit_vector() -> Vec<f32> {
@@ -1513,7 +1557,7 @@ mod tests {
         let fx = Fixture::new();
         let id = indexed_memory(&fx).await;
 
-        assert!(adapter(&fx).delete_memory(id).await.expect("delete"));
+        assert!(adapter(&fx).delete_memory(id, None).await.expect("delete"));
 
         assert!(
             fx.fts_index.lock().await.is_empty().expect("fts"),
@@ -1547,7 +1591,7 @@ mod tests {
         let id = indexed_memory(&fx).await;
         let adapter = adapter(&fx);
 
-        assert!(adapter.delete_memory(id).await.expect("first delete"));
+        assert!(adapter.delete_memory(id, None).await.expect("first delete"));
 
         // Re-index it, so a second pass through the cleanup would be
         // visible rather than idempotent by accident.
@@ -1558,12 +1602,199 @@ mod tests {
             .expect("fts add");
 
         assert!(
-            !adapter.delete_memory(id).await.expect("second delete"),
+            !adapter
+                .delete_memory(id, None)
+                .await
+                .expect("second delete"),
             "an already-tombstoned memory must report false"
         );
         assert!(
             !fx.fts_index.lock().await.is_empty().expect("fts"),
             "the second delete ran the index cleanup anyway"
         );
+    }
+    #[tokio::test]
+    async fn creation_adapters_reject_unusable_lifecycle_policy_before_persistence() {
+        use crate::api::state::NamespaceRegistry as _;
+        use crate::mcp::bridge::{BridgeError, CreateNamespaceInput, NamespaceRegistry as _};
+        let f = Fixture::new();
+        let http = NamespaceRegistryAdapter::new(f.storage.clone());
+        let mcp = f.namespace_adapter();
+        for (stability, multiplier) in [
+            (0.0, None),
+            (-1.0, None),
+            (f32::NAN, None),
+            (f32::INFINITY, None),
+            (1.0, Some(-1.0)),
+            (1.0, Some(f32::NAN)),
+            (1.0, Some(f32::INFINITY)),
+        ] {
+            let error = http
+                .create("invalid-http", Some(DIM as u32), stability, 0.9, multiplier)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<crate::decay::lifecycle::LifecycleError>(),
+                Some(crate::decay::lifecycle::LifecycleError::InvalidInput(_))
+            ));
+            let error = mcp
+                .create_namespace(CreateNamespaceInput {
+                    name: "invalid-mcp".into(),
+                    embedding_dim: Some(DIM as u16),
+                    initial_stability: Some(stability),
+                    desired_retention: None,
+                    decay_rate_multiplier: multiplier,
+                })
+                .await
+                .unwrap_err();
+            assert!(matches!(error, BridgeError::InvalidInput(_)));
+        }
+        assert!(
+            f.storage
+                .read()
+                .unwrap()
+                .get_namespace_by_name("invalid-http")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            f.storage
+                .read()
+                .unwrap()
+                .get_namespace_by_name("invalid-mcp")
+                .unwrap()
+                .is_none()
+        );
+        // Zero decay is valid, zero stability is not; inherited settings stay valid.
+        for multiplier in [None, Some(0.0)] {
+            let name = if multiplier.is_none() {
+                "inherited"
+            } else {
+                "disabled"
+            };
+            let ns = http
+                .create(name, Some(DIM as u32), 1.0, 0.9, multiplier)
+                .await
+                .unwrap();
+            crate::decay::lifecycle::resolve_policy(
+                &ns,
+                &crate::decay::DecayConfig::default(),
+                1.0,
+            )
+            .unwrap();
+        }
+    }
+}
+
+impl SearchPipelineAdapter {
+    async fn search_inner(
+        &self,
+        query: state::SearchQuery,
+        defer_recording: bool,
+    ) -> Result<Vec<state::ResolvedSearchResult>, crate::search::SearchError> {
+        // Convert API-layer SearchQuery to the pipeline's SearchQuery.
+        let (text, query_embedding) = match query.query {
+            state::QueryInput::Text(t) => (Some(t), None),
+            state::QueryInput::Vector(vector) => (None, Some(vector)),
+            state::QueryInput::TextAndVector { text, embedding } => (Some(text), Some(embedding)),
+        };
+
+        // A label that cannot become a tag is an error, not a dropped
+        // filter: dropping one from `includeTags` or `entities` WIDENS
+        // the query, and a caller cannot tell "every memory in the
+        // namespace" from a genuine match.
+        let mut require_tags: Vec<Tag> =
+            crate::model::parse_filter_tags("includeTags", "", &query.include_tags)
+                .map_err(|e| crate::search::SearchError::InvalidFilter(e.to_string()))?;
+        require_tags.extend(
+            crate::model::parse_filter_tags(
+                "entities",
+                crate::model::constants::ENTITY_TAG_PREFIX,
+                &query.entities,
+            )
+            .map_err(|e| crate::search::SearchError::InvalidFilter(e.to_string()))?,
+        );
+        // `excludeTags` is the safe direction — dropping one can only
+        // ever return MORE than asked for in the same sense a missing
+        // exclusion does, and it never masquerades as a match — so it
+        // keeps the lossy parse.
+        let exclude_tags: Vec<Tag> =
+            crate::model::parse_tags_lossy("search.excludeTags", &query.exclude_tags);
+        let phases: Vec<DecayPhase> = query
+            .decay_phases
+            .as_ref()
+            .map(|ps| {
+                ps.iter()
+                    .filter_map(|&p| match p {
+                        0 => Some(DecayPhase::Full),
+                        1 => Some(DecayPhase::Summary),
+                        2 => Some(DecayPhase::Ghost),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let pipeline_query = crate::search::SearchQuery {
+            record_access: query.record_access,
+            query_embedding,
+            text,
+            fts_query: None,
+            namespace: query.namespace_name.clone(), // Issue 1: pass actual namespace name
+            filter: crate::search::PipelineSearchFilter {
+                require_tags,
+                exclude_tags,
+                phases,
+                min_strength: query.min_score, // Issue 2: pass min_strength
+                ..Default::default()
+            },
+            limit: query.k,
+            min_score: 0.0,
+            include_ghosts: false,
+            query_mode: crate::search::QueryMode::default(),
+            graph_depth: (query.graph_depth as u8).min(3),
+            time_range_start: query.time_range_start, // Issue 3: pass time range
+            time_range_end: query.time_range_end,     // Issue 3: pass time range
+            entities: query.entities.clone(),         // Issue 4: pass entities
+        };
+        let response = if defer_recording {
+            self.query_engine.prepare_search(pipeline_query).await?
+        } else {
+            self.query_engine.search(pipeline_query).await?
+        };
+        Ok(response
+            .results
+            .into_iter()
+            .map(|r| {
+                // Issue 5: Parse entities from tags
+                let metadata = parse_structured_tags(&r.tags);
+                state::ResolvedSearchResult {
+                    access_kind: if r.activation_score.is_some() {
+                        AccessKind::AssociativeRetrieval
+                    } else {
+                        AccessKind::DirectRetrieval
+                    },
+                    memory: CachedRecord {
+                        lifecycle: None,
+                        id: r.memory_id,
+                        namespace_id: query.namespace_id, // Issue 6: use actual namespace_id
+                        created_at: r.created_at,
+                        last_accessed_at: r.last_accessed_at,
+                        phase: r.phase,
+                        strength: r.retrievability,
+                        decay_strength: r.effective_r,
+                        stability: r.stability,
+                        difficulty: 5.0,
+                        is_permastore: r.is_permastore,
+                        summary: r.summary.unwrap_or_default(),
+                        tags: r.tags,
+                        edge_count: r.edge_count,
+                        vector_slot: 0,
+                        entities: metadata.entities,
+                    },
+                    score: r.score.unwrap_or(0.0),
+                }
+            })
+            .collect())
     }
 }

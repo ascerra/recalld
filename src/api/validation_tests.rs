@@ -32,7 +32,10 @@ fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
             Arc::new(crate::rif::RifEngine::new(Default::default())),
             f.graph.clone(),
         )),
-        Arc::new(StorageAccessRecorder::new(f.storage.clone())),
+        Arc::new(StorageAccessRecorder::new(
+            f.storage.clone(),
+            f.cache.clone(),
+        )),
     ));
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.search = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
@@ -200,6 +203,84 @@ async fn http_namespace_rejects_exported_probe_values_without_creation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn namespace_creation_typed_validation_and_unavailable_errors() {
+    use crate::storage::StorageError;
+    use axum::response::IntoResponse;
+    let operation_id = uuid::Uuid::new_v4();
+    for (error, status) in [
+        (
+            StorageError::InvalidMutation("invalid policy".into()),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            StorageError::RecoveryRequired("reopen".into()),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            StorageError::CommittedEffectsPending {
+                operation_id,
+                source: Box::new(StorageError::RecoveryRequired("publish".into())),
+            },
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            StorageError::CommitOutcomeUnknown {
+                operation_id,
+                source: redb::CommitError::Storage(redb::StorageError::Io(std::io::Error::other(
+                    "lost commit acknowledgement",
+                ))),
+            },
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+    ] {
+        let carries_operation = matches!(
+            &error,
+            StorageError::CommittedEffectsPending { .. }
+                | StorageError::CommitOutcomeUnknown { .. }
+        );
+        let response = namespace_create_error(Box::new(error)).into_response();
+        assert_eq!(response.status(), status);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(!body.contains("already exists"));
+        if carries_operation {
+            assert!(body.contains(&operation_id.to_string()));
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn namespace_creation_storage_failure_is_not_a_duplicate() {
+    let f = Fixture::new();
+    let (app, _) = fixture_clients(&f);
+    let (status, _) = post(&app, "/namespaces", json!({"name":"duplicate"})).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, body) = post(&app, "/namespaces", json!({"name":"duplicate"})).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let before = f.storage.read().unwrap().control_state().unwrap();
+
+    // Force a real catalog filesystem failure while keeping its database handles
+    // open. Restore the synthetic root before checking the response or dropping it.
+    let parked = tempfile::tempdir().unwrap();
+    let store = parked.path().join("store");
+    std::fs::rename(f.path(), &store).unwrap();
+    std::fs::write(f.path(), b"not a directory").unwrap();
+    let (status, body) = post(&app, "/namespaces", json!({"name":"io-failure"})).await;
+    std::fs::remove_file(f.path()).unwrap();
+    std::fs::rename(&store, f.path()).unwrap();
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert!(!body.to_string().contains("already exists"), "{body}");
+    let storage = f.storage.read().unwrap();
+    assert_eq!(storage.control_state().unwrap(), before);
+    assert!(
+        storage
+            .get_namespace_by_name("io-failure")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn namespace_option_parity_and_no_creation_on_invalid_input() {
     let f = Fixture::new();
     let (app, _) = fixture_clients(&f);
@@ -298,15 +379,11 @@ async fn http_duplicate_coverage_reports_caps_missing_vectors_and_empty_samples(
     assert_eq!(coverage["complete"], false);
     assert_eq!(coverage["sampleCap"], 200);
     assert_eq!(coverage["neighborCap"], 11);
-    assert_eq!(coverage["countsAvailable"], false);
-    for key in [
-        "sampledCount",
-        "eligibleCount",
-        "skippedVectorCount",
-        "truncated",
-    ] {
-        assert!(coverage[key].is_null(), "{key}");
+    assert_eq!(coverage["countsAvailable"], true);
+    for key in ["sampledCount", "eligibleCount", "skippedVectorCount"] {
+        assert_eq!(coverage[key], 0, "{key}");
     }
+    assert_eq!(coverage["truncated"], false);
     for count in 0..=2 {
         if count > 0 {
             f.insert_memory().await;
@@ -336,5 +413,246 @@ async fn http_duplicate_coverage_reports_caps_missing_vectors_and_empty_samples(
             post(&app, "/namespaces/default/duplicates", args).await.0,
             StatusCode::BAD_REQUEST
         );
+    }
+}
+
+// Run the actual HTTP router and MCP dispatch against the same canonical fixture.
+async fn scope_request(app: &Router, method: &str, path: &str, body: Value) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned())),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scope_assertions_reject_wrong_namespace_before_access_search_or_mutation() {
+    let f = Fixture::new();
+    let other = f.create_namespace("other");
+    let id = f.insert_memory().await;
+    // Deliberately spoof cached scope. The guard must use disk, not cache.
+    let mut cached = crate::model::CachedRecord::from(&f.record(id).unwrap());
+    cached.id = id;
+    cached.namespace_id = other;
+    f.cache.insert(id, cached).await;
+    let before = format!("{:?}", f.record(id));
+    let (app, mut bridge) = fixture_clients(&f);
+    bridge.storage = Arc::new(f.storage_adapter());
+    bridge.default_namespace = "other".into();
+    for namespace in ["other", "missing"] {
+        for (method, suffix) in [
+            ("GET", ""),
+            ("DELETE", ""),
+            ("POST", "/reinforce"),
+            ("POST", "/similar"),
+        ] {
+            let path = if suffix == "/similar" {
+                format!("/similar/{id}")
+            } else if method == "POST" {
+                format!("/memories/{id}{suffix}")
+            } else {
+                format!("/memories/{id}?namespace={namespace}")
+            };
+            let (status, body) =
+                scope_request(&app, method, &path, json!({"namespace":namespace})).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{method} {path}: {body}");
+            assert_eq!(body["error"], "NAMESPACE_MISMATCH");
+            assert_eq!(before, format!("{:?}", f.record(id)));
+        }
+        for tool in [
+            "get_memory",
+            "reinforce_memory",
+            "forget_memory",
+            "find_similar_memories",
+        ] {
+            let result = crate::mcp::tools::dispatch_tool(
+                &bridge,
+                tool,
+                json!({"id":id.to_string(), "namespace":namespace}),
+            )
+            .await;
+            assert_eq!(result.is_error, Some(true), "{tool}");
+            assert!(
+                serde_json::to_string(&result)
+                    .unwrap()
+                    .contains("NAMESPACE_MISMATCH")
+            );
+            assert_eq!(before, format!("{:?}", f.record(id)));
+        }
+    }
+    // Assertion input cannot silently become omission, even if a valid record exists.
+    for value in [
+        Value::Null,
+        json!(42),
+        json!(false),
+        json!([]),
+        json!(""),
+        json!("bad space"),
+    ] {
+        for tool in [
+            "get_memory",
+            "reinforce_memory",
+            "forget_memory",
+            "find_similar_memories",
+        ] {
+            let result = crate::mcp::tools::dispatch_tool(
+                &bridge,
+                tool,
+                json!({"id":id.to_string(), "namespace":value}),
+            )
+            .await;
+            assert_eq!(result.is_error, Some(true), "{tool}: {value}");
+        }
+        for suffix in ["reinforce", "similar"] {
+            let (status, _) = scope_request(
+                &app,
+                "POST",
+                &if suffix == "similar" {
+                    format!("/similar/{id}")
+                } else {
+                    format!("/memories/{id}/{suffix}")
+                },
+                json!({"namespace":value}),
+            )
+            .await;
+            assert!(status.is_client_error(), "{suffix}: {value}");
+        }
+    }
+    assert_eq!(before, format!("{:?}", f.record(id)));
+    // Unknown IDs stay not found, rather than revealing/inferring a namespace.
+    let missing = crate::model::MemoryId::new();
+    let (status, _) = scope_request(
+        &app,
+        "GET",
+        &format!("/memories/{missing}?namespace=other"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Retained tombstones still have canonical scope to assert.
+    f.tombstone(id);
+    let (status, _) = scope_request(
+        &app,
+        "DELETE",
+        &format!("/memories/{id}?namespace=other"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scope_assertions_preserve_record_scope_despite_wrong_session_default() {
+    for asserted in [false, true] {
+        let f = Fixture::new();
+        f.create_namespace("other");
+        let records = f.create_namespace("records");
+        let id = f.insert_memory_in(records, &[]).await;
+        let (app, mut bridge) = fixture_clients(&f);
+        bridge.storage = Arc::new(f.storage_adapter());
+        bridge.default_namespace = "other".into();
+        let mut arguments = json!({"id":id.to_string()});
+        if asserted {
+            arguments["namespace"] = json!("RECORDS");
+        }
+        for tool in ["get_memory", "reinforce_memory", "forget_memory"] {
+            let result = crate::mcp::tools::dispatch_tool(&bridge, tool, arguments.clone()).await;
+            assert_ne!(result.is_error, Some(true), "{tool}: {result:?}");
+        }
+        assert_eq!(
+            f.record(id).unwrap().phase,
+            crate::model::DecayPhase::Tombstone
+        );
+        let id = f.insert_memory_in(records, &[]).await;
+        let suffix = if asserted { "?namespace=RECORDS" } else { "" };
+        let (status, body) =
+            scope_request(&app, "GET", &format!("/memories/{id}{suffix}"), json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["namespace"], "records");
+        assert!(!f.record(id).unwrap().access_history.is_empty());
+        let body = if asserted {
+            json!({"namespace":"RECORDS"})
+        } else {
+            json!({})
+        };
+        let (status, body) =
+            scope_request(&app, "POST", &format!("/memories/{id}/reinforce"), body).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, body) = scope_request(
+            &app,
+            "DELETE",
+            &format!("/memories/{id}{suffix}"),
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            f.record(id).unwrap().phase,
+            crate::model::DecayPhase::Tombstone
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scope_assertions_similarity_uses_canonical_source_scope_with_stale_cache() {
+    use crate::search::VectorIndex;
+    let f = Fixture::new();
+    let local = crate::model::NamespaceId::new(1);
+    let other = f.create_namespace("other");
+    let mut ids = vec![];
+    for namespace in [local, local, other] {
+        let id = f
+            .insert_memory_with(crate::test_support::MemorySpec {
+                embedding: Some(&[1.0, 0.0, 0.0, 0.0]),
+                ..crate::test_support::MemorySpec::new(namespace)
+            })
+            .await;
+        f.vector_index
+            .write()
+            .await
+            .add(
+                id,
+                &[1.0, 0.0, 0.0, 0.0],
+                crate::search::VectorMetadata {
+                    namespace_id: namespace,
+                    decay_phase: crate::model::DecayPhase::Full.as_u8(),
+                    tags: vec![],
+                },
+            )
+            .unwrap();
+        ids.push(id);
+    }
+    let mut cached = crate::model::CachedRecord::from(&f.record(ids[0]).unwrap());
+    cached.id = ids[0];
+    cached.namespace_id = other;
+    f.cache.insert(ids[0], cached).await;
+    let (_, mut bridge) = fixture_clients(&f);
+    bridge.default_namespace = "other".into();
+    for namespace in [None, Some("default")] {
+        let mut args = json!({"id":ids[0].to_string()});
+        if let Some(namespace) = namespace {
+            args["namespace"] = json!(namespace);
+        }
+        let result = crate::mcp::tools::dispatch_tool(&bridge, "find_similar_memories", args).await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let wire = serde_json::to_value(result).unwrap();
+        let data: Value =
+            serde_json::from_str(wire["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(data["count"], 1);
+        assert_eq!(data["memories"][0]["id"], ids[1].to_string());
     }
 }
