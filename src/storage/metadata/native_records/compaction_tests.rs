@@ -303,6 +303,51 @@ async fn compaction_prior_phase_failure_keeps_receipt_and_allocates_nothing() {
     ));
 }
 
+#[tokio::test]
+async fn compaction_caller_rejects_active_purge_without_resuming_or_allocating() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let engine =
+        RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([22; 32])))
+            .unwrap();
+    let f = crate::test_support::Fixture::from_open_engine(root, engine);
+    let c = completion(&f);
+    c.complete().await.unwrap();
+    let (progress, ids) = {
+        let mut engine = f.storage.write().unwrap();
+        let ctx = MutationContext {
+            store_id: Some(engine.control_state().unwrap().store_id),
+            scope: MutationScope::Namespace(d.ns),
+            idempotency_key: Some("unfinished-purge".into()),
+            expected_generation: None,
+            contract_version: 2,
+        };
+        let progress = engine.begin_namespace_purge(&ctx, true).unwrap();
+        assert_ne!(progress.stage, crate::storage::purge::PurgeStage::Complete);
+        (
+            progress,
+            engine.meta_store().id_source().checkpoint().unwrap(),
+        )
+    };
+    let before = files(&d.path);
+    let error = c.compact_text_with_work(None).await.unwrap_err();
+    assert!(
+        matches!(error, StorageError::RecoveryRequired(_)),
+        "{error}"
+    );
+    let engine = f.storage.read().unwrap();
+    assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
+    let after = engine
+        .lookup_namespace_purge(progress.store_id, d.ns, progress.start_receipt.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        control::encode(&after).unwrap(),
+        control::encode(&progress).unwrap()
+    );
+    assert_eq!(files(&d.path), before);
+}
+
 async fn fork(root: &Path) -> PathBuf {
     let d = fixture(root);
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));

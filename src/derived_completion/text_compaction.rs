@@ -29,6 +29,12 @@ impl DerivedCompletion {
         // A sweep may have just committed phase/deletion effects. Finish them
         // before starting a new physical mutation, so their known failure keeps
         // its original receipt and does not create an extra unreported commit.
+        // Reject an already unavailable/purging owner before completion could
+        // resume unrelated purge work. This read guard ends before the await.
+        {
+            let storage = self.storage.read().map_err(|e| failed(e.to_string()))?;
+            storage.ensure_available()?;
+        }
         self.complete_with_work(Some(work)).await?;
         let lease = publication_gate(&self.storage).await?.read_owned().await;
         let graph = self.graph.clone().read_owned().await;
