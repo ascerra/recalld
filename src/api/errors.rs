@@ -26,6 +26,11 @@ use crate::serialization::ApiError;
 /// human-readable message, and an optional field name for validation errors.
 #[derive(Debug)]
 pub enum AppError {
+    CommittedMutation {
+        receipt: crate::storage::control::WriteReceipt,
+        message: String,
+    },
+
     Observation(crate::decay::observation::ObservationError),
     /// 404 -- Memory, namespace, or resource not found.
     NotFound {
@@ -97,8 +102,13 @@ impl IntoResponse for AppError {
             )
                 .into_response();
         }
+        if let AppError::CommittedMutation { receipt, message } = self {
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+                "error": "INDEX_NOT_READY", "commitState": "committed", "ready": false, "receipt": receipt, "message": message,
+            }))).into_response();
+        }
         let (status, error_code, message, field) = match &self {
-            AppError::Observation(_) => unreachable!(),
+            AppError::Observation(_) | AppError::CommittedMutation { .. } => unreachable!(),
             AppError::NotFound { resource, id } => (
                 StatusCode::NOT_FOUND,
                 "NOT_FOUND".to_string(),
@@ -179,6 +189,14 @@ pub use crate::storage::StorageError;
 impl From<StorageError> for AppError {
     fn from(err: StorageError) -> Self {
         match &err {
+            StorageError::CommittedMutation { receipt, source } => AppError::CommittedMutation {
+                receipt: (**receipt).clone(),
+                message: source.to_string(),
+            },
+            StorageError::CommitOutcomeUnknown { .. }
+            | StorageError::ProviderVectorUnavailable(_) => AppError::ServiceUnavailable {
+                message: err.to_string(),
+            },
             StorageError::NamespaceMismatch { .. } => AppError::NamespaceMismatch {
                 message: err.to_string(),
             },
@@ -189,6 +207,15 @@ impl From<StorageError> for AppError {
             StorageError::NotFound(uuid) => AppError::NotFound {
                 resource: "memory",
                 id: uuid.to_string(),
+            },
+            StorageError::EdgeConflict(_) | StorageError::MutationNamespaceMismatch => {
+                AppError::Conflict {
+                    message: err.to_string(),
+                }
+            }
+            StorageError::InvalidMutation(_) => AppError::UnprocessableEntity {
+                message: err.to_string(),
+                field: None,
             },
             StorageError::DuplicateId(uuid) => AppError::Conflict {
                 message: format!("memory {} already exists", uuid),
@@ -218,11 +245,9 @@ impl From<StorageError> for AppError {
 impl From<EmbeddingError> for AppError {
     fn from(err: EmbeddingError) -> Self {
         match &err {
-            EmbeddingError::DimensionMismatch { expected, got } => AppError::UnprocessableEntity {
-                message: format!("embedding dimension mismatch: expected {expected}, got {got}"),
-                field: Some("embedding".to_string()),
-            },
             EmbeddingError::Unavailable(_)
+            | EmbeddingError::InvalidResponse(_)
+            | EmbeddingError::DimensionMismatch { .. }
             | EmbeddingError::RateLimited { .. }
             | EmbeddingError::Network(_) => AppError::ServiceUnavailable {
                 message: format!("embedding provider: {err}"),

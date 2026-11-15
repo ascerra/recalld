@@ -482,6 +482,15 @@ async fn dispatch(
             }
         }
 
+        "mutate_batch" => {
+            let input: crate::storage::batch::BatchInput = serde_json::from_value(params)
+                .map_err(|e| BridgeError::InvalidInput(format!("batch parameters: {e}")))?;
+            // Shared preparation rejects invalid outer shape before reservation.
+            let result = storage.mutate_batch(input).await?;
+            serde_json::to_value(result).map_err(|e| {
+                BridgeError::PartiallyApplied(format!("batch result serialization failed: {e}"))
+            })
+        }
         "store_memory" => {
             let input: StoreInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
@@ -528,8 +537,7 @@ async fn dispatch(
             let p: DeleteMemoriesParams = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
             // The socket is its own entry point: the tool layer's cap is
-            // not on this path, and an uncapped batch is one write
-            // transaction over an unbounded id list.
+            // not on this path. Bound the ordered independent child writes too.
             if p.ids.len() > crate::model::constants::MAX_BATCH_MEMORIES {
                 return Err(BridgeError::InvalidInput(format!(
                     "Too many ids ({}); the maximum is {} per call",
@@ -616,6 +624,250 @@ mod tests {
     /// Stub subsystems for the dispatch tests. Only the unknown-method path
     /// is exercised, which never reaches any of these.
     struct Unused;
+
+    #[tokio::test]
+    async fn actual_batch_socket_roundtrip_preserves_partial_outcome_and_rejects_foreign_resume() {
+        use crate::storage::batch::{BatchInput, BatchKind, BatchOutcome, BatchStatus};
+        let fx = crate::test_support::Fixture::new();
+        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let (tx, rx) = watch::channel(false);
+        let count = Arc::new(AtomicU32::new(1));
+        let task = tokio::spawn(handle_connection(
+            Arc::new(Unused),
+            Arc::new(fx.storage_adapter()),
+            Arc::new(Unused),
+            Arc::new(Unused),
+            server,
+            count.clone(),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            tx.clone(),
+        ));
+        let mut input = BatchInput {
+            result_version: 1,
+            kind: BatchKind::Insert,
+            items: vec![
+                serde_json::json!(false),
+                serde_json::json!({"summary":"socket batch","embedding":[1.,0.,0.,0.],"checkDuplicates":false}),
+            ],
+            default_namespace: "default".into(),
+            store_id: None,
+            idempotency_key: None,
+            batch_operation_id: None,
+        };
+        let request = DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            method: "mutate_batch".into(),
+            params: serde_json::to_value(&input).unwrap(),
+        };
+        write_framed_request(&mut client, &request, LEGACY_MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        let response = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert!(response.error.is_none());
+        let outcome: BatchOutcome = serde_json::from_value(response.result.unwrap()).unwrap();
+        assert_eq!(
+            (outcome.succeeded, outcome.failed, outcome.unresolved),
+            (1, 1, 0)
+        );
+        assert_eq!(outcome.items[1].status, BatchStatus::Ok);
+        assert!(outcome.items[1].receipt.is_some());
+        input.batch_operation_id = Some(outcome.batch_operation_id);
+        input.store_id = Some(Uuid::new_v4());
+        let before = fx.storage.read().unwrap().control_state().unwrap();
+        let request = DaemonRequest {
+            id: 2,
+            params: serde_json::to_value(input).unwrap(),
+            ..request
+        };
+        write_framed_request(&mut client, &request, LEGACY_MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        let rejected = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert!(rejected.result.is_none());
+        assert!(rejected.error.is_some());
+        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
+        tx.send(true).unwrap();
+        task.await.unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn actual_batch_rpc_resume_only_loads_existing_parent_and_rejects_changed_identity_without_write()
+     {
+        use crate::storage::batch::{BatchInput, BatchKind, BatchOutcome};
+        let fx = crate::test_support::Fixture::new();
+        let adapter = fx.storage_adapter();
+        let store_id = fx.storage.read().unwrap().control_state().unwrap().store_id;
+        let mut input = BatchInput {
+            result_version: 1,
+            kind: BatchKind::Insert,
+            items: vec![
+                serde_json::json!({"summary":"RPC batch","embedding":[1.,0.,0.,0.],"checkDuplicates":false}),
+            ],
+            default_namespace: "default".into(),
+            store_id: None,
+            idempotency_key: None,
+            batch_operation_id: None,
+        };
+        let outcome: BatchOutcome = serde_json::from_value(
+            dispatch(
+                &Unused,
+                &adapter,
+                &Unused,
+                &Unused,
+                "mutate_batch",
+                serde_json::to_value(&input).unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(outcome.all_ready());
+        assert_ne!(
+            Some(outcome.batch_operation_id),
+            outcome.items[0].operation_id
+        );
+        input.store_id = Some(store_id);
+        input.batch_operation_id = Some(outcome.batch_operation_id);
+        let before = fx.storage.read().unwrap().control_state().unwrap();
+        let replay: BatchOutcome = serde_json::from_value(
+            dispatch(
+                &Unused,
+                &adapter,
+                &Unused,
+                &Unused,
+                "mutate_batch",
+                serde_json::to_value(&input).unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(replay.reservation_receipt.unwrap().replayed);
+        assert_eq!(
+            replay.items[0].receipt.as_ref().unwrap().operation_id,
+            outcome.items[0].receipt.as_ref().unwrap().operation_id
+        );
+        for invalid in 0..5 {
+            let mut retry = input.clone();
+            match invalid {
+                0 => retry.store_id = Some(uuid::Uuid::new_v4()),
+                1 => retry.batch_operation_id = Some(uuid::Uuid::new_v4()),
+                2 => retry.items[0]["summary"] = serde_json::json!("changed"),
+                3 => retry.idempotency_key = Some("new key".into()),
+                _ => retry.batch_operation_id = outcome.items[0].operation_id,
+            }
+            assert!(
+                dispatch(
+                    &Unused,
+                    &adapter,
+                    &Unused,
+                    &Unused,
+                    "mutate_batch",
+                    serde_json::to_value(retry).unwrap()
+                )
+                .await
+                .is_err()
+            );
+            assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
+        }
+    }
+
+    #[tokio::test]
+    async fn actual_batch_rpc_keeps_reservation_and_current_unknown_child_separate() {
+        use crate::storage::batch::{BatchInput, BatchKind, BatchOutcome, BatchStatus};
+        let fx = crate::test_support::Fixture::new();
+        let adapter = fx.storage_adapter();
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .fail_batch_commit
+            .store(3, std::sync::atomic::Ordering::SeqCst);
+        let input = BatchInput {
+            result_version: 1,
+            kind: BatchKind::Insert,
+            items: vec![
+                serde_json::json!({"summary":"RPC unknown","embedding":[1.,0.,0.,0.],"checkDuplicates":false}),
+                serde_json::json!({"summary":"later","embedding":[1.,0.,0.,0.]}),
+            ],
+            default_namespace: "default".into(),
+            store_id: None,
+            idempotency_key: None,
+            batch_operation_id: None,
+        };
+        let value = dispatch(
+            &Unused,
+            &adapter,
+            &Unused,
+            &Unused,
+            "mutate_batch",
+            serde_json::to_value(input).unwrap(),
+        )
+        .await
+        .unwrap();
+        let outcome: BatchOutcome = serde_json::from_value(value).unwrap();
+        assert!(outcome.reservation_receipt.is_some());
+        assert_eq!(outcome.items[0].status, BatchStatus::Unknown);
+        assert_ne!(
+            outcome.items[0].operation_id,
+            Some(outcome.batch_operation_id)
+        );
+        assert_eq!(outcome.items[1].status, BatchStatus::NotAttempted);
+        assert_eq!(
+            outcome.total,
+            outcome.succeeded + outcome.failed + outcome.unresolved
+        );
+    }
+
+    #[tokio::test]
+    async fn actual_daemon_insertion_dispatch_keeps_committed_failure_distinct_from_success() {
+        use crate::storage::StorageEngine as _;
+        let fx = crate::test_support::Fixture::new();
+        *fx.vector_index.write().await =
+            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+        let error = dispatch(
+            &Unused,
+            &fx.storage_adapter(),
+            &Unused,
+            &Unused,
+            "store_memory",
+            serde_json::json!({
+                "summary":"daemon committed insertion", "namespace":"default", "tags":[],
+                "embedding":[1.,0.,0.,0.], "checkDuplicates":false
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, BridgeError::PartiallyApplied(_)), "{error}");
+        let message = error.to_string();
+        assert!(message.contains("commitState=committed"));
+        assert!(message.contains("ready=false"));
+        let pending = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(message.contains(&pending[0].receipt.operation_id.to_string()));
+        assert_eq!(fx.storage.read().unwrap().scan_all().unwrap().len(), 1);
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .effects_stamp()
+                .is_err()
+        );
+    }
 
     #[async_trait::async_trait]
     impl SearchPipeline for Unused {
@@ -982,6 +1234,10 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "batch_label_tests.rs"]
+mod batch_label_tests;
 
 #[cfg(test)]
 #[path = "read_only_tests.rs"]

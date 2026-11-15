@@ -305,12 +305,7 @@ fn read_namespace(
     tx: &redb::WriteTransaction,
     id: NamespaceId,
 ) -> Result<NamespaceConfig, StorageError> {
-    let table = tx.open_table(NAMESPACE_TABLE)?;
-    let value = table
-        .get(id.get())?
-        .ok_or(StorageError::NamespaceNotFound(id.get()))?;
-    let ns = NamespaceConfig::decode(value.value())
-        .map_err(|e| StorageError::Deserialize(e.to_string()))?;
+    let ns = super::namespace_state::require_namespace_active(tx, id)?;
     if ns.id != id {
         return Err(StorageError::MutationNamespaceMismatch);
     }

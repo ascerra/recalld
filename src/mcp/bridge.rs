@@ -69,6 +69,21 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Old implementations cannot manufacture durable receipts. The actual
+    /// direct and daemon adapters opt in; callers never fall back after a write.
+    fn supports_durable_batches(&self) -> bool {
+        false
+    }
+
+    async fn mutate_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {
+        Err(BridgeError::InvalidInput(
+            "durable batch protocol is not supported by this storage adapter".into(),
+        ))
+    }
+
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 
@@ -747,6 +762,9 @@ pub enum BridgeError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// A provider or required service cannot satisfy the operation.
+    #[error("Unavailable: {0}")]
+    Unavailable(String),
     /// An explicit by-ID namespace assertion failed.
     #[error("{0}")]
     NamespaceMismatch(String),

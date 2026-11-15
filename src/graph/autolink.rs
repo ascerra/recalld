@@ -634,9 +634,18 @@ mod entity_scope_tests {
     }
 
     #[tokio::test]
-    async fn accepted_multiword_unicode_and_possessive_names_still_link() {
-        use crate::mcp::bridge::{StorageEngine as _, StoreInput};
-        for name in ["John Smith", "José", "Alice's"] {
+    async fn legacy_entity_admission_rejects_lossy_names_and_links_encodable_names() {
+        use crate::mcp::bridge::{BridgeError, StorageEngine as _, StoreInput};
+        // PR68 rejects labels the legacy carrier cannot retain. Exact UTF-8
+        // canonical reader/native writer coverage belongs to their own consumers.
+        for (name, accepted) in [
+            ("John Smith", false),
+            ("José", false),
+            ("Alice's", false),
+            ("John-Smith", true),
+            ("JOSE", true),
+            ("Alice", true),
+        ] {
             let f = Fixture::new();
             let adapter = f.storage_adapter();
             let input = || StoreInput {
@@ -653,6 +662,31 @@ mod entity_scope_tests {
                 supersedes: None,
                 check_duplicates: None,
             };
+            if !accepted {
+                let before = f
+                    .storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .control_state()
+                    .unwrap();
+                let error = adapter.store_memory(input()).await.unwrap_err();
+                assert!(matches!(error, BridgeError::InvalidInput(ref message)
+                    if message.contains("cannot be represented by legacy storage")));
+                assert_eq!(
+                    before,
+                    f.storage
+                        .read()
+                        .unwrap()
+                        .meta_store()
+                        .control_state()
+                        .unwrap()
+                );
+                assert!(f.storage.read().unwrap().scan_all().unwrap().is_empty());
+                assert!(f.persisted_edges().is_empty());
+                assert!(f.entity_index.read().await.is_empty());
+                continue;
+            }
             adapter.store_memory(input()).await.unwrap();
             adapter.store_memory(input()).await.unwrap();
             let edges = f.persisted_edges();
