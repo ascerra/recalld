@@ -1,0 +1,40 @@
+
+running 14 tests
+
+thread 'mcp::legacy_lifecycle_tests::api1_public_legacy_missing_scope_terminal_and_old_alias_new_server' (39) panicked at src/mcp/legacy_lifecycle_tests.rs:1379:5:
+assertion `left == right` failed
+  left: "UNAVAILABLE"
+ right: "CONTENT_UNAVAILABLE"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test mcp::legacy_lifecycle_tests::api1_public_legacy_missing_scope_terminal_and_old_alias_new_server ... FAILED
+legacy MCP reinforce_memory: {"id":"01a1dcc8-1e8e-74d3-81b5-53605b8ce7e3","isPermastore":false,"phase":"Full","stability":4.436331748962402,"strength":1.0}
+legacy MCP forget_memory: {"deleted":true,"id":"01a1dcc8-1e8e-74d3-81b5-53605b8ce7e3"}
+legacy HTTP POST: {"data":{"id":"01a1dcc8-1ea4-7ca2-aa58-d42caff93276","isPermastore":false,"phase":"Full","stability":4.4363317,"strength":1.0},"tookUs":3010}
+legacy HTTP DELETE: {"data":{"deleted":true,"id":"01a1dcc8-1ea4-7ca2-aa58-d42caff93276"},"tookUs":9919}
+test mcp::legacy_lifecycle_tests::api1_public_legacy_projection_is_same_tx_under_later_accepted_write ... ok
+test mcp::legacy_lifecycle_tests::api1_public_legacy_success_shapes ... ok
+test serialization::lifecycle_api1::tests::api1_public_advertised_unknown_method_never_falls_back_and_frame_rejects_prewrite ... ok
+test serialization::lifecycle_api1::tests::api1_public_private_selector_validation_preserves_missing_nil_behavior ... ok
+test serialization::lifecycle_api1::tests::api1_public_reconnect_resets_capability_without_retrying_lost_mutation ... ok
+test serialization::lifecycle_api1::tests::api1_public_old_peer_selects_exact_scoped_unscoped_before_write ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_http_feedback ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_http_forget ... ok
+
+thread 'storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_failures_keep_receipts_and_unknown_identity' (56) panicked at src/storage/metadata/native_records/public_api1_tests.rs:134:17:
+assertion `left == right` failed
+  left: None
+ right: Some(true)
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_failures_keep_receipts_and_unknown_identity ... FAILED
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_legacy_policy_keeps_original1_and_configured_clock ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_mcp_feedback ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_mcp_forget ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_remote_decode_and_terminal_no_resurrection ... ok
+
+failures:
+
+failures:
+    mcp::legacy_lifecycle_tests::api1_public_legacy_missing_scope_terminal_and_old_alias_new_server
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_failures_keep_receipts_and_unknown_identity
+
+test result: FAILED. 12 passed; 2 failed; 0 ignored; 0 measured; 1192 filtered out; finished in 10.10s
+

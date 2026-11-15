@@ -119,5 +119,7 @@ read-only shared registry, offline Docker Rust1.94.1,2CPU/4GiB/jobs2. The releas
 source/results, then focused tests and appropriate full validation for this actual
 consumer change. Seal recorded results and release raw scratch after publication.
 
-The later PR135/native-compaction producer join remains Pascal's separate task
-once Feynman's actual parent is frozen; it is not a prerequisite here.
+The later PR135+145 native-compaction producer join is Feynman's task under the
+explicit ownership transfer. Pascal reviews lifecycle/manual-origin semantics
+source-only; there are no active consumer edits or hold here. It is not a
+prerequisite for this public API1 child.
