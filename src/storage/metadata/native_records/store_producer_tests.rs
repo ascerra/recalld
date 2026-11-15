@@ -262,6 +262,9 @@ async fn batch_publication_origin(contract: u32) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_root_before_provider_completes_graph_descendants_while_closing() {
+    batch_close_origin(2).await;
+}
+async fn batch_close_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
@@ -275,7 +278,9 @@ async fn linked_producer_root_before_provider_completes_graph_descendants_while_
     provider.entered = Some(entered.clone());
     provider.release = Some(release.clone());
     let a = adapter(&f, p, clock, Default::default());
-    let r = request(&f, "close");
+    let mut r = request(&f, "close");
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
     let tracker = f.storage.read().unwrap().meta_store().work_tracker();
     let task = tokio::spawn(async move { a.run_batch(r).await });
     tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
@@ -338,6 +343,9 @@ async fn linked_producer_root_before_provider_completes_graph_descendants_while_
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_unknown_child_reopens_exact_reserved_operation_without_provider() {
+    batch_unknown_origin(2).await;
+}
+async fn batch_unknown_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
@@ -346,7 +354,9 @@ async fn linked_producer_unknown_child_reopens_exact_reserved_operation_without_
     completion(&f).rebuild_all().await.unwrap();
     let p = provider(&d);
     let a = adapter(&f, p.clone(), clock.clone(), Default::default());
-    let r = request(&f, "unknown");
+    let mut r = request(&f, "unknown");
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
     f.storage
         .read()
         .unwrap()
@@ -865,6 +875,9 @@ async fn native_single_process_exit_reopens_one_receipt_and_frozen_links() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_unknown_commit_retains_identity_and_unresolved_work_until_reopen() {
+    single_unknown_origin(2).await;
+}
+async fn single_unknown_origin(contract: u32) {
     struct UnknownClock;
     impl Clock for UnknownClock {
         fn now_millis(&self) -> i64 {
@@ -881,7 +894,8 @@ async fn native_single_unknown_commit_retains_identity_and_unresolved_work_until
     let p = provider(&d);
     let a = adapter(&f, p.clone(), clock.clone(), Default::default())
         .with_clock(Arc::new(UnknownClock));
-    let key = single_context(&f, &d, "unknown-single");
+    let mut key = single_context(&f, &d, "unknown-single");
+    key.contract_version = contract;
     let original = single_input(&d, true);
     let error = a
         .store_native_single(

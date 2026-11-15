@@ -188,3 +188,58 @@ async fn native_origin_api1_publication_failures_keep_exact_receipts_then_recove
     batch_publication_origin(1).await;
     single_publication_origin(1).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_origin_api1_unknown_and_closing_work_keep_real_identities() {
+    batch_unknown_origin(1).await;
+    single_unknown_origin(1).await;
+    batch_close_origin(1).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_origin_api1_forget_batch_uses_same_reserved_child_and_replays_once() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let mut r = request(&f, "forget-origin");
+    r.mutation_version = 2;
+    r.kind = BatchKind::Forget;
+    r.request_context = RetainedRequestContext::from_contract(1).unwrap();
+    r.items = vec![json!(d.parent)];
+    let result = a.run_batch(r.clone()).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    let receipt = result.items[0].receipt.as_ref().unwrap();
+    assert_ne!(receipt.operation_id, result.batch_operation_id);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .get_record(d.parent)
+            .unwrap()
+            .unwrap()
+            .phase,
+        DecayPhase::Tombstone
+    );
+    let rows = receipt_rows(&f);
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let calls = clock.0.load(Ordering::SeqCst);
+    let replay = a.run_batch(r.clone()).await.unwrap();
+    assert_eq!(replay.items[0].receipt, Some(expected_replay(receipt)));
+    r.request_context = None;
+    assert!(matches!(
+        a.run_batch_typed(r).await,
+        Err(crate::mcp::bridge_adapters::StoreWriteError::Canonical(
+            StorageError::IdempotencyConflict
+        ))
+    ));
+    assert_eq!(receipt_rows(&f), rows);
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+}
