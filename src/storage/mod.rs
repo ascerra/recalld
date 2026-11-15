@@ -43,6 +43,7 @@ pub mod native_purge;
 mod native_purge_tests;
 pub mod native_records;
 pub mod native_store;
+pub mod native_text;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
 pub(crate) mod publication;

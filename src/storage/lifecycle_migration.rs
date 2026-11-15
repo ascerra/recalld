@@ -175,6 +175,7 @@ pub(crate) fn validate_policy_history(
             return Err(invalid("duplicate lifecycle generation"));
         }
         let namespace = match &receipt.outcome {
+            MutationOutcome::NativeTextGenerationSelected { .. } => None,
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 native_history.push((
                     receipt.clone(),
@@ -660,6 +661,9 @@ pub(crate) fn validate_policy_history(
     // assumption that every token increment was a namespace policy migration.
     for receipt in suffix.values().rev() {
         match &receipt.outcome {
+            MutationOutcome::NativeTextGenerationSelected { transition } => {
+                transition.validate_records(records.values().flat_map(|rows| rows.iter()))?;
+            }
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 let ns = configs
                     .get(&t.before_namespace.namespace_id.get())
