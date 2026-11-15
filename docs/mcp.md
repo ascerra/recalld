@@ -74,6 +74,12 @@ HTTP uses `?namespace=name` on `GET /memories/:id` and `DELETE /memories/:id`, a
 
 Daemon forwarding uses dedicated `*_scoped` RPC methods. Combining a namespace assertion with `recordAccess=false` uses `get_memory_scoped_read_only` or `find_similar_scoped_read_only`; these require a namespace and force nonobserving retrieval. Older daemons reject unknown methods, and the client never retries through a weaker method. Existing assertion-only RPCs reject `recordAccess` fields, and existing read-only RPCs reject namespace assertions. Assertion-only true mode omits the wire flag to remain compatible. These are additive v1 controls, not authentication, receipts, or a transactional whole-store contract. Batch assertions remain outside this slice.
 
+### Connection context
+
+Read the MCP resource `recalld://session` to inspect the connection's frozen default namespace, its canonical name/ID and configured dimension when it exists, current v1 limits, and bounded duplicate-scan semantics. A missing namespace is reported with `exists: false` and `resolved: null`; the read does not create it. `source: "bridge"` identifies the stored connection default, not whether it originally came from a configuration file or a fallback.
+
+Session resource reads carry `cacheScope: "private"` and `ttlMs: 0`; the public resource catalog contains only a static description. The resource advertises only application contract v1. It does not claim active embedding-profile compatibility, generations, receipts, idempotency, exact scans, or future read-only flags. The dimension is namespace configuration, not an active provider identity. HTTP REST `GET /capabilities` remains unimplemented.
+
 ### Other MCP-compatible tools
 
 Any MCP client can use recalld via either transport.

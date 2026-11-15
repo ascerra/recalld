@@ -41,20 +41,49 @@ pub trait SearchPipeline: Send + Sync {
 
     /// Scan a namespace for clusters of near-duplicate memories.
     ///
-    /// Samples up to `max_memories` from the namespace, runs pairwise
-    /// similarity checks, and groups memories whose similarity exceeds
-    /// `threshold` into clusters.
+    /// Samples up to `max_memories` and groups threshold-connected memories
+    /// found by bounded nearest-neighbor searches; not an exhaustive pair scan.
     async fn scan_duplicates(
         &self,
         namespace: &str,
         threshold: f32,
         max_memories: usize,
     ) -> Result<Vec<DuplicateCluster>, BridgeError>;
+
+    /// Same scan with observed coverage. Legacy implementations cannot report counts.
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<DuplicateScanReport, BridgeError> {
+        Ok(DuplicateScanReport {
+            clusters: self
+                .scan_duplicates(namespace, threshold, max_memories)
+                .await?,
+            coverage: None,
+        })
+    }
 }
 
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Old implementations cannot manufacture durable receipts. The actual
+    /// direct and daemon adapters opt in; callers never fall back after a write.
+    fn supports_durable_batches(&self) -> bool {
+        false
+    }
+
+    async fn mutate_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {
+        Err(BridgeError::InvalidInput(
+            "durable batch protocol is not supported by this storage adapter".into(),
+        ))
+    }
+
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 
@@ -267,6 +296,38 @@ pub struct SearchHit {
     /// Related memories connected by graph edges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<RelatedMemory>,
+}
+
+/// Public MCP sample cap and per-source vector candidate cap (including self).
+pub const DUPLICATE_SAMPLE_CAP: usize = 200;
+pub const DUPLICATE_NEIGHBOR_CAP: usize = 11;
+
+/// Legacy clusters plus optional coverage; None means an older bridge/daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanReport {
+    pub clusters: Vec<DuplicateCluster>,
+    pub coverage: Option<DuplicateScanCoverage>,
+}
+
+/// Observed scan counts, not a generation-consistent namespace snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanCoverage {
+    pub algorithm: String,
+    /// Live records before sampling; includes ghosts and records with missing vectors.
+    pub eligible_count: usize,
+    pub sampled_count: usize,
+    /// Sampled records whose vectors were absent at vector loading time.
+    pub skipped_vector_count: usize,
+    pub sample_cap: usize,
+    /// Vector candidates per source, including self when returned.
+    pub neighbor_cap: usize,
+    /// Whether the record sample was truncated; separate from neighbor limiting.
+    pub truncated: bool,
+    pub counts_available: bool,
+    /// Always false for this bounded, unpinned scan.
+    pub complete: bool,
 }
 
 /// A cluster of near-duplicate memories found during namespace scan.
@@ -701,6 +762,9 @@ pub enum BridgeError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// A provider or required service cannot satisfy the operation.
+    #[error("Unavailable: {0}")]
+    Unavailable(String),
     /// An explicit by-ID namespace assertion failed.
     #[error("{0}")]
     NamespaceMismatch(String),

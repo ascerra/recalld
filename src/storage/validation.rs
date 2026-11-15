@@ -61,6 +61,9 @@ pub(crate) fn preflight_text(path: &Path) -> Result<(), StorageError> {
     let (_copy, metadata) = inspect_database_copy(&path.join("meta.db"), true)?;
     let read = metadata.begin_read()?;
     let control = super::control::validate_existing(&read)?;
+    if let Some(control) = &control {
+        super::lineage::ensure_serving(&read, control)?;
+    }
     super::metadata::removal_ledger::read_export(&read, control.as_ref())?;
     // Valid pending effects are recoverable at startup; only malformed evidence fails here.
     let effects = super::metadata::effects::validate_existing(&read)?;
@@ -103,6 +106,21 @@ fn selected_text(path: &Path, read: &redb::ReadTransaction) -> Result<TextStore,
 /// Caller owns/quiesces the store, or supplies an inaccessible staging copy.
 /// Returns the required canonical inventory derived from validated metadata.
 pub(crate) fn validate_existing(path: &Path) -> Result<HashSet<String>, StorageError> {
+    validate_snapshot(path, false)
+}
+
+/// Only the logical importer may inspect its unpublished, explicitly importing
+/// stage. Ordinary inspection/export/backup must not treat partial imports as snapshots.
+pub(crate) fn validate_import_stage(path: &Path) -> Result<HashSet<String>, StorageError> {
+    validate_snapshot(path, true)
+}
+
+fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, StorageError> {
+    if !importing && std::fs::symlink_metadata(path.join(".recalld-importing")).is_ok() {
+        return Err(StorageError::RecoveryRequired(
+            "incomplete logical import; resume using its original export".into(),
+        ));
+    }
     recover_text_compaction(path)?;
     for name in ["meta.db", "edges.db", "fulltext.dat"] {
         require_file(&path.join(name))?;
@@ -110,6 +128,24 @@ pub(crate) fn validate_existing(path: &Path) -> Result<HashSet<String>, StorageE
     let (_meta_copy, meta) = inspect_database(&path.join("meta.db"))?;
     let read = meta.begin_read()?;
     let control = super::control::validate_existing(&read)?;
+    if super::metadata::batch::validate_existing(&read, control.as_ref())?
+        .iter()
+        .any(|p| p.unresolved() != 0)
+    {
+        return Err(StorageError::RecoveryRequired(
+            "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
+                .into(),
+        ));
+    }
+
+    if super::metadata::purge::validate_existing(&read, control.as_ref())?
+        .iter()
+        .any(|p| p.stage != super::purge::PurgeStage::Complete)
+    {
+        return Err(StorageError::RecoveryRequired(
+            "unfinished namespace purge; reopen and finish before offline inventory".into(),
+        ));
+    }
     super::metadata::removal_ledger::read_export(&read, control.as_ref())?;
     let schema_state = control
         .as_ref()

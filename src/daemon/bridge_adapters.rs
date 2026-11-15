@@ -80,11 +80,39 @@ impl SearchPipeline for RemoteSearchAdapter {
             namespace: namespace.to_string(),
             threshold,
             max_memories,
+            include_coverage: false,
         })
         .map_err(|e| BridgeError::Internal(e.to_string()))?;
         let result = self.client.call("scan_duplicates", params).await?;
         serde_json::from_value(result)
             .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
+    }
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<bridge::DuplicateScanReport, BridgeError> {
+        let params = serde_json::to_value(protocol::ScanDuplicatesParams {
+            namespace: namespace.to_string(),
+            threshold,
+            max_memories,
+            include_coverage: true,
+        })
+        .map_err(|e| BridgeError::Internal(e.to_string()))?;
+        let result = self.client.call("scan_duplicates", params).await?;
+        // Old daemons ignore the new flag and still return just clusters.
+        if result.is_array() {
+            let clusters = serde_json::from_value(result)
+                .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))?;
+            Ok(bridge::DuplicateScanReport {
+                clusters,
+                coverage: None,
+            })
+        } else {
+            serde_json::from_value(result)
+                .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
+        }
     }
 }
 
@@ -106,6 +134,26 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    fn supports_durable_batches(&self) -> bool {
+        true
+    }
+
+    async fn mutate_batch(
+        &self,
+        input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {
+        let params =
+            serde_json::to_value(input).map_err(|e| BridgeError::Internal(e.to_string()))?;
+        // This new method is mutating and never enters the client's read-only
+        // retry allowlist. An old daemon rejects it before doing any work.
+        let result = self.client.call("mutate_batch", params).await?;
+        serde_json::from_value(result).map_err(|e| {
+            BridgeError::PartiallyApplied(format!(
+                "batch response decode failed; reconcile the same request and key: {e}"
+            ))
+        })
+    }
+
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError> {
         let params =
             serde_json::to_value(&input).map_err(|e| BridgeError::Internal(e.to_string()))?;

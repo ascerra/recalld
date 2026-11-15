@@ -277,6 +277,7 @@ impl Fixture {
             .expect("tombstone memory");
     }
 
+    /// Real read/search adapter over the isolated fixture, with no external provider.
     pub(crate) fn search_adapter(&self) -> crate::mcp::bridge_adapters::McpSearchAdapter {
         use crate::search::adapters::*;
         let embedding = Arc::new(crate::embedding::PassthroughProvider::new(DIM));
@@ -530,6 +531,7 @@ fn clone_bridge_error(e: &crate::mcp::bridge::BridgeError) -> crate::mcp::bridge
         E::NotFound(m) => E::NotFound(m.clone()),
         E::InvalidInput(m) => E::InvalidInput(m.clone()),
         E::Storage(m) => E::Storage(m.clone()),
+        E::Unavailable(m) => E::Unavailable(m.clone()),
         E::Search(m) => E::Search(m.clone()),
         E::Internal(m) => E::Internal(m.clone()),
         E::TooLarge(m) => E::TooLarge(m.clone()),

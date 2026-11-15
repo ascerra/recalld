@@ -34,6 +34,7 @@ use crate::cache::CacheManager;
 use crate::graph::SharedGraph;
 use crate::graph::activation::{ActivationConfig, connection_bonus};
 use crate::model::{DecayPhase, MemoryId};
+use crate::storage::maintenance::{DecayMutationResult, DecaySkip};
 use crate::storage::{RedbStorageEngine, StorageEngine as _};
 
 // ── Decay Metadata ──────────────────────────────────────────────────
@@ -183,6 +184,18 @@ pub struct SweepResult {
     pub saved_by_connection_bonus: u64,
     /// Whether text compaction succeeded, including an empty generation selection.
     pub compaction_triggered: bool,
+    /// Final recheck found changed canonical inputs, policy, or saving graph evidence.
+    pub stale_skipped: u64,
+    /// Final phase/strength patch was byte-for-byte unchanged; no receipt committed.
+    pub unchanged_skipped: u64,
+    /// Final patch was exempt from materialization; no receipt committed.
+    pub exempt_skipped: u64,
+    /// Canonical changes may be committed even when derived publication fails.
+    pub publication_error: Option<String>,
+    /// First known committed mutation whose canonical application failed.
+    pub failed_commit: Option<(crate::storage::control::WriteReceipt, String)>,
+    /// First uncertain commit; reopening/reconciliation is required before retry.
+    pub uncertain_operation: Option<uuid::Uuid>,
     /// Wall-clock duration of the entire sweep.
     pub duration: Duration,
     /// All phase transitions emitted during this sweep.
@@ -190,6 +203,41 @@ pub struct SweepResult {
     /// Errors encountered during the sweep. The sweep continues
     /// past individual record failures; errors are collected here.
     pub errors: Vec<SweepRecordError>,
+}
+
+impl SweepResult {
+    fn retain_mutation_failure(&mut self, error: &SweepError) {
+        use crate::storage::StorageError;
+        match error {
+            SweepError::Mutation(StorageError::CommittedMutation { receipt, source }) => {
+                // Counts describe known canonical commits even when publication
+                // failed before the transition could return its ready event.
+                match receipt.outcome {
+                    crate::storage::control::MutationOutcome::LifecycleMaterialized {
+                        from_phase: DecayPhase::Full,
+                        to_phase: DecayPhase::Summary,
+                        ..
+                    } => self.full_to_summary += 1,
+                    crate::storage::control::MutationOutcome::LifecycleMaterialized {
+                        from_phase: DecayPhase::Summary,
+                        to_phase: DecayPhase::Ghost,
+                        ..
+                    } => self.summary_to_ghost += 1,
+                    crate::storage::control::MutationOutcome::GraphChanged {
+                        memories_removed,
+                        ..
+                    } => self.deletions += memories_removed as u64,
+                    _ => {}
+                }
+                self.failed_commit
+                    .get_or_insert(((**receipt).clone(), source.to_string()));
+            }
+            SweepError::Mutation(StorageError::CommitOutcomeUnknown { operation_id, .. }) => {
+                self.uncertain_operation.get_or_insert(*operation_id);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// An error encountered while processing a single record during sweep.
@@ -248,6 +296,9 @@ pub enum PhaseTransition {
 /// Errors that can occur during a decay sweep.
 #[derive(Debug, thiserror::Error)]
 pub enum SweepError {
+    /// Keep committed/unknown identity until the actual operator consumer handles it.
+    #[error("{0}")]
+    Mutation(#[source] crate::storage::StorageError),
     /// An I/O or storage-level error.
     #[error("storage error: {0}")]
     Storage(String),
@@ -454,7 +505,7 @@ impl DecaySweepRunner {
             // Optional startup sweep
             if config.sweep_on_startup {
                 info!("running startup decay sweep");
-                let result = Self::execute_sweep_at(
+                let mut result = Self::execute_sweep_at(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -467,6 +518,7 @@ impl DecaySweepRunner {
                 .await;
                 if let Some(completion) = &completion {
                     if let Err(error) = completion.complete().await {
+                        result.publication_error = Some(error.to_string());
                         tracing::error!(%error, "sweep effects remain pending; next sweep retries completion");
                     }
                 }
@@ -506,7 +558,7 @@ impl DecaySweepRunner {
                     return;
                 }
 
-                let result = Self::execute_sweep_at(
+                let mut result = Self::execute_sweep_at(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -519,6 +571,7 @@ impl DecaySweepRunner {
                 .await;
                 if let Some(completion) = &completion {
                     if let Err(error) = completion.complete().await {
+                        result.publication_error = Some(error.to_string());
                         tracing::error!(%error, "sweep effects remain pending; next sweep retries completion");
                     }
                 }
@@ -547,6 +600,10 @@ impl DecaySweepRunner {
     fn log_result(result: &SweepResult) {
         info!(
             scanned = result.memories_scanned,
+            stale_skipped = result.stale_skipped,
+            unchanged_skipped = result.unchanged_skipped,
+            exempt_skipped = result.exempt_skipped,
+            publication_error = ?result.publication_error,
             permastore_skipped = result.permastore_skipped,
             decay_disabled_skipped = result.decay_disabled_skipped,
             full_to_summary = result.full_to_summary,
@@ -1098,22 +1155,27 @@ impl DecaySweepRunner {
         // Always graph -> storage: never await a graph lock holding a storage lock.
         let mut graph = Arc::clone(graph).write_owned().await;
         let outcome = tokio::task::spawn_blocking(move || {
-            let storage = storage.write().map_err(|e| e.to_string())?;
-            let current = storage.get_record(memory_id).map_err(|e| e.to_string())?;
+            let storage = storage
+                .write()
+                .map_err(|e| SweepError::Storage(e.to_string()))?;
+            let current = storage
+                .get_record(memory_id)
+                .map_err(|e| SweepError::Storage(e.to_string()))?;
             if !current.as_ref().is_some_and(|r| expected.matches(r)) {
-                return Ok(());
+                return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
             }
             let current = current.expect("snapshot match requires a record");
             let Some(projection) = evaluation
                 .project_locked(memory_id, &expected, &storage, &graph)
-                .map_err(|e| e.to_string())?
+                .map_err(|e| SweepError::Storage(e.to_string()))?
             else {
-                return Ok(());
+                return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
             };
             let raw_r = projection.strength;
             let effective_r = projection.decay_strength;
-            if !storage
-                .apply_legacy_decay(
+            let outcome = storage
+                .apply_legacy_decay_with_receipt(
+                    &crate::storage::control::MutationContext::unkeyed(expected.namespace.id),
                     memory_id,
                     &current,
                     &expected.namespace,
@@ -1121,17 +1183,31 @@ impl DecaySweepRunner {
                     raw_r,
                     effective_r,
                 )
-                .map_err(|e| e.to_string())?
-            {
-                return Ok(());
+                .map_err(SweepError::Mutation)?;
+            if matches!(
+                outcome,
+                DecayMutationResult::Skipped(DecaySkip::Stale | DecaySkip::Exempt)
+            ) {
+                return Ok(outcome);
             }
             let _ = graph.update_node_state(memory_id, phase, effective_r);
-            Ok::<_, String>(())
+            Ok::<_, SweepError>(outcome)
         })
         .await;
         let error = match outcome {
-            Ok(Ok(())) => None,
-            Ok(Err(e)) => Some(e),
+            Ok(Ok(DecayMutationResult::Committed(_))) => None,
+            Ok(Ok(DecayMutationResult::Skipped(reason))) => {
+                match reason {
+                    DecaySkip::Stale => result.stale_skipped += 1,
+                    DecaySkip::Unchanged => result.unchanged_skipped += 1,
+                    DecaySkip::Exempt => result.exempt_skipped += 1,
+                }
+                None
+            }
+            Ok(Err(e)) => {
+                result.retain_mutation_failure(&e);
+                Some(e.to_string())
+            }
             Err(e) => Some(e.to_string()),
         };
         if let Some(error) = error {
@@ -1176,7 +1252,10 @@ impl DecaySweepRunner {
             // Even a partial storage failure may have changed the canonical phase.
             cache.invalidate(t.memory_id).await;
             match outcome {
-                Ok(None) => continue, // Snapshot changed: retry on the next sweep.
+                Ok(None) => {
+                    result.stale_skipped += 1;
+                    continue;
+                } // Final plan no longer applies.
                 Ok(Some(transition)) => {
                     // Update stats
                     match t.from_phase {
@@ -1189,6 +1268,7 @@ impl DecaySweepRunner {
                     result.transitions.push(transition);
                 }
                 Err(e) => {
+                    result.retain_mutation_failure(&e);
                     result.errors.push(SweepRecordError {
                         memory_id: t.memory_id,
                         phase: t.from_phase,
@@ -1233,7 +1313,7 @@ impl DecaySweepRunner {
             if projection.decay_strength > threshold {
                 return Ok(None);
             }
-            let map_error = |e: crate::storage::StorageError| SweepError::Storage(e.to_string());
+            let map_error = SweepError::Mutation;
             let new_phase = match t.from_phase {
                 DecayPhase::Full => DecayPhase::Summary,
                 DecayPhase::Summary => DecayPhase::Ghost,
@@ -1299,8 +1379,9 @@ impl DecaySweepRunner {
                     "missing_summary: retaining full text".into(),
                 ));
             }
-            if !storage
-                .apply_legacy_decay(
+            let outcome = storage
+                .apply_legacy_decay_with_receipt(
+                    &crate::storage::control::MutationContext::unkeyed(t.expected.namespace.id),
                     t.memory_id,
                     &current,
                     &t.expected.namespace,
@@ -1308,8 +1389,8 @@ impl DecaySweepRunner {
                     projection.strength,
                     projection.decay_strength,
                 )
-                .map_err(map_error)?
-            {
+                .map_err(map_error)?;
+            if !matches!(outcome, DecayMutationResult::Committed(_)) {
                 return Ok(None);
             }
             // Publish only after the atomic metadata phase/content commit.
@@ -1366,16 +1447,19 @@ mod tests {
         let missing = storage
             .create_memory(
                 namespace,
-                "",
+                "initial valid summary",
                 Some("only retained text"),
                 &[],
-                &[0.0; DIM],
+                &[1., 0., 0., 0.],
                 Some(1.0),
                 None,
             )
             .await
             .unwrap()
             .id;
+        // Model pre-existing content loss through the legacy storage patch;
+        // public insertion now rejects empty summaries at its own boundary.
+        f.storage.read().unwrap().strip_summary(missing).unwrap();
         assert_eq!(f.record(missing).unwrap().created_at, 0);
         let summary = f
             .insert_memory_with(MemorySpec {
@@ -1439,6 +1523,11 @@ mod tests {
             f.graph.clone(),
             Arc::new(crate::config::RecalldConfig::default()),
             false,
+        )
+        .with_indexes(
+            f.vector_index.clone(),
+            f.fts_index.clone(),
+            f.entity_index.clone(),
         )
         .with_clock(clock.clone());
         let full = f.insert_memory().await;
@@ -1602,6 +1691,11 @@ mod independent_review_regressions {
             Arc::new(crate::config::RecalldConfig::default()),
             false,
         )
+        .with_indexes(
+            f.vector_index.clone(),
+            f.fts_index.clone(),
+            f.entity_index.clone(),
+        )
         .with_clock(Arc::new(crate::time::ManualClock::new(now)))
     }
 
@@ -1690,6 +1784,10 @@ mod independent_review_regressions {
                 committed.phase
             )
         );
+        assert!(
+            result.stale_skipped > 0,
+            "final stale recheck must be counted"
+        );
     }
 
     #[tokio::test]
@@ -1717,7 +1815,7 @@ mod independent_review_regressions {
                     .committed_generation
                     .get(),
                 generation + 1 + u64::from(result.compaction_triggered),
-                "one phase/content commit plus an explicitly reported compaction"
+                "one lifecycle commit plus any separate text-compaction commit"
             );
         }
         assert_eq!(f.record(id).unwrap().phase, DecayPhase::Ghost);
@@ -1746,7 +1844,7 @@ mod independent_review_regressions {
                 "retained summary",
                 Some("retained full text"),
                 &["retained".into()],
-                &[0.; 4],
+                &[1., 0., 0., 0.],
                 Some(1.),
                 None,
             )
@@ -1757,19 +1855,8 @@ mod independent_review_regressions {
             storage.get_full_text(id).await.unwrap().as_deref(),
             Some("retained full text")
         );
-        // The storage adapter alone does not run graph/autolink orchestration.
-        let record = f.record(id).unwrap();
-        f.graph
-            .write()
-            .await
-            .add_node(
-                id,
-                crate::model::NamespaceId::new(record.namespace_id),
-                record.phase,
-                record.decay_strength,
-                record.vector_slot,
-            )
-            .unwrap();
+        // Actual insertion now completes graph/index publication itself.
+        assert!(f.graph.read().await.get_node(&id).is_some());
         let sweep = adapter(&f, i64::MAX);
         for phase in [DecayPhase::Summary, DecayPhase::Ghost] {
             let generation = f
