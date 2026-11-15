@@ -56,7 +56,10 @@ def capabilities(h):
     return value
 
 
-def run(args, h):
+def run(args, h, sweep=None):
+    checkpoint_track = sweep["CHECKPOINT_TRACK"] if sweep else CHECKPOINT_TRACK
+    fixture = (lambda base, future=False: sweep["fixtures"](base, h["NATIVE"], future)) if sweep else fixtures
+    expected_capabilities = sweep["capabilities"](h) if sweep else capabilities(h)
     manifest, actor, labels, cache, schedule, environment = h["validate"](args.manifest, args.binary, args.scorer, args.source_root)
     # Only validated artifacts can create output/provider/store side effects.
     args.out.mkdir()
@@ -92,7 +95,7 @@ document_prefix = "a6-document:"
 query_prefix = "a6-query:"
 [decay]
 disable_sweep = true
-decay_rate_multiplier = 0.0
+decay_rate_multiplier = {1.0 if sweep else 0.0}
 [rif]
 enabled = false
 [graph]
@@ -105,7 +108,7 @@ warm_file_enabled = false
         queryPreprocessing=dict(version="recalld-query-v1",prefix="a6-query:"),normalization="l2_unit_v1")
     seed=dict(fixtureVersion=1,profile=profile,attest=True,sources=[dict(sourceId=s["sourceId"],namespace=s["namespace"],summary=s["summary"],fullText=s.get("fullText"),embedding=s["embedding"]) for s in actor["sources"]])
     children=[]; negatives=[]; comparisons=[]
-    result=dict(status="running",track=TRACK,environmentHash=environment,independentNativeGenesis=False)
+    result=dict(status="running",track=sweep["TRACK"] if sweep else TRACK,environmentHash=environment,independentNativeGenesis=False)
     save=h["save"]
     def build_prefix(name, data):
         source=evaluator/(name+"-input.json"); report=evaluator/(name+"-provenance.json"); root=runtime/name
@@ -114,10 +117,10 @@ warm_file_enabled = false
             subprocess.run([str(args.binary.with_name("native_prefix_fixture")),"--input",str(source),"--root",str(root),"--report",str(report)],check=True,stdout=log,stderr=subprocess.STDOUT,env=dict(PATH="/usr/bin:/bin"))
         return root,json.loads(report.read_text())
     def child(name, root=None, checkpoint=None, prior=None, negative=False, native=False, cfg=None):
-        value=h["RESET"]["Child"](h,args,root or runtime/name,cfg or config,evaluator/name,checkpoint,prior,negative,native)
+        value=h["RESET"]["Child"](h,args,root or runtime/name,cfg or config,evaluator/name,checkpoint,prior,negative,native,native and sweep is not None)
         children.append(value);return value
     def snapshot(owner):
-        return h["RESET"]["checked_snapshot"](h,owner.control.call("snapshot",dict(deadlineMs=30000)),runtime,CHECKPOINT_TRACK)
+        return h["RESET"]["checked_snapshot"](h,owner.control.call("snapshot",dict(deadlineMs=30000)),runtime,checkpoint_track)
     def provider_rows(): return h["rows"](server.log) if server.log.exists() else []
     def reject(name, root=None, checkpoint=None, native=False, cfg=None):
         count=len(provider_rows()); owner=child("negative-"+name,root,checkpoint,negative=True,native=native,cfg=cfg)
@@ -134,9 +137,10 @@ warm_file_enabled = false
     def unchanged(folder,before):
         assert all((folder/name).is_file() and h["digest"]((folder/name).read_bytes())==sha for name,sha in before.items()),"source/checkpoint bytes changed"
     def admit(owner, expected=None, expected_state=None):
-        assert owner.control.call("capabilities",{})==capabilities(h)
-        owner.control.call("sweep",dict(deadlineMs=30000),error="UNSUPPORTED_CONTROL")
-        owner.control.call("sweepStatus",{},error="UNSUPPORTED_CONTROL")
+        assert owner.control.call("capabilities",{})==expected_capabilities
+        if not sweep:
+            owner.control.call("sweep",dict(deadlineMs=30000),error="UNSUPPORTED_CONTROL")
+            owner.control.call("sweepStatus",{},error="UNSUPPORTED_CONTROL")
         state,ready=owner.ready(); snap=snapshot(owner)
         if expected:
             assert snap["logicalHash"]==expected["logicalHash"] and snap["committed"]==expected["committed"]
@@ -145,6 +149,9 @@ warm_file_enabled = false
         owner.step(dict(phase="connect_native_prefix",startId=0,deliveryOrdinal=0))
         return state,snap
     def suffix(owner, mappings, current_labels, current_schedule, current_cache):
+        if sweep:
+            return sweep["suffix"](owner, mappings, h, args, manifest, actor, current_labels,
+                current_schedule, current_cache, server, runtime, snapshot, provider_rows)
         server.entries={}; first=len(provider_rows()); state,_=owner.ready(); start_id=100
         outputs=[]; receipts=[]; acks=[]; queries=[]
         for index,step in enumerate(current_schedule["steps"]):
@@ -218,7 +225,7 @@ warm_file_enabled = false
         for variant in ("labels","future"):
             folder=evaluator/("variant-"+variant);folder.mkdir()
             candidate=copy.deepcopy(manifest)
-            a,l,c,sc=fixtures(h["fixtures"],variant=="future")
+            a,l,c,sc=fixture(h["fixtures"],variant=="future")
             if variant=="labels":
                 l["relevant"]={"q0":["turn-2"],"q1":["turn-0"],"q3":[]}
                 l["labelCanary"]="CHANGED_NATIVE_EVALUATOR_LABEL_ONLY"
@@ -237,10 +244,11 @@ warm_file_enabled = false
                     assert filename.read_bytes()==(original.output/"actor-inputs"/filename.name).read_bytes()
             else:
                 first=next(i for i,step in enumerate(schedule["steps"]) if schedule["futureQueryCanary"] in json.dumps(step))
-                assert value["outputs"][:first]==baseline["outputs"][:first],"future question changed prior actor outputs"
-                for ordinal in [0,*range(100,100+first)]:
+                action_first=sum("control" not in step for step in schedule["steps"][:first])
+                assert value["outputs"][:action_first]==baseline["outputs"][:action_first],"future question changed prior actor outputs"
+                for ordinal in [0,*[100+i for i,step in enumerate(schedule["steps"][:first]) if "control" not in step]]:
                     assert (owner.output/"actor-inputs"/f"step-{ordinal}.json").read_bytes()==(original.output/"actor-inputs"/f"step-{ordinal}.json").read_bytes()
-                assert value["provider"][:3]==baseline["provider"][:3],"future question changed prior vectors"
+                assert value["provider"][:4 if sweep else 3]==baseline["provider"][:4 if sweep else 3],"future question changed prior vectors"
             base_keys={key for row in provider_rows() if row["environmentHash"]==environment for key in row["cacheKeys"]}
             variant_keys={key for row in provider_rows() if row["environmentHash"]==variant_environment for key in row["cacheKeys"]}
             assert base_keys and variant_keys and not base_keys & variant_keys,"environment identities did not separate replay keys"
@@ -281,7 +289,7 @@ warm_file_enabled = false
         for name,change in [("unbound",lambda v:v.update(attest=False)),("wrong-model",lambda v:v["profile"].update(modelId="synthetic-wrong-profile")),("wrong-revision",lambda v:v["profile"].update(modelRevision="synthetic-negative-only"))]:
             negative_seed=copy.deepcopy(seed);change(negative_seed)
             negative_root,_=build_prefix(name,negative_seed);reject(name,root=negative_root,native=True)
-        result.update(status="passed",restores=3,suffixes=4,actionsPerSuffix=len(schedule["steps"]),hashes=[v["logicalHash"] for v in comparisons],negativeCases=negatives,actorCurrentStepOnly=True,canaries=variants,sourceCheckpointBytesUnchanged=True,originalOwnerBytesUnchanged=True)
+        result.update(status="passed",restores=3,suffixes=4,actionsPerSuffix=sum("control" not in step for step in schedule["steps"]),hashes=[v["logicalHash"] for v in comparisons],negativeCases=negatives,actorCurrentStepOnly=True,canaries=variants,sourceCheckpointBytesUnchanged=True,originalOwnerBytesUnchanged=True)
     except BaseException as error:
         result.update(status="failed",error=str(error));raise
     finally:

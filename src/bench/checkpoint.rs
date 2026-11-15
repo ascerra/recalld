@@ -161,7 +161,7 @@ impl OwnedEvaluator {
         let manifest = Manifest {
             checkpoint_version: 1,
             track: if self.native_prefix {
-                super::native_prefix::TRACK
+                self.native_checkpoint_track()
             } else {
                 TRACK
             }
@@ -218,7 +218,8 @@ impl OwnedEvaluator {
             "checkpoint manifest digest/size mismatch"
         );
         let manifest: Manifest = serde_json::from_slice(&bytes)?;
-        let native_prefix = manifest.track == super::native_prefix::TRACK;
+        let native_sweep = manifest.track == super::native_prefix::SWEEP_TRACK;
+        let native_prefix = native_sweep || manifest.track == super::native_prefix::TRACK;
         anyhow::ensure!(
             if native_prefix {
                 manifest.canonical_schema_version == Some(2)
@@ -374,6 +375,7 @@ impl OwnedEvaluator {
             controls,
             fixture_ancestors: ancestor_roots,
             native_prefix,
+            native_sweep,
         };
         let cache = evaluator.core.cache().clone();
         let runtime = tokio::runtime::Handle::current();

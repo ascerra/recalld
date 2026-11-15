@@ -12,6 +12,7 @@ use crate::time::{Clock, ManualClock};
 use super::frozen::{FrozenControls, OwnedEvaluator};
 
 pub(crate) const TRACK: &str = "isolated-native-prefix-checkpoint-v1";
+pub(crate) const SWEEP_TRACK: &str = "isolated-native-sweep-checkpoint-v1";
 pub(crate) const HASH_CONTRACT: &str = "native-logical-export-v1";
 
 /// This named synthetic track supports only the actual configured OpenAI-shaped
@@ -93,7 +94,28 @@ impl OwnedEvaluator {
             controls,
             fixture_ancestors: Vec::new(),
             native_prefix: true,
+            native_sweep: false,
         })
+    }
+
+    /// Explicit manual native sweep consumer. Background sweeps remain disabled;
+    /// origin1 is fixed by this caller, never inferred from schema2 storage.
+    pub async fn from_native_sweep_prefix(config: RecalldConfig) -> anyhow::Result<Self> {
+        let mut evaluator = Self::from_native_prefix(config).await?;
+        evaluator.native_sweep = true;
+        Ok(evaluator)
+    }
+
+    pub(crate) fn native_sweep_enabled(&self) -> bool {
+        self.native_sweep
+    }
+
+    pub(crate) fn native_checkpoint_track(&self) -> &'static str {
+        if self.native_sweep {
+            SWEEP_TRACK
+        } else {
+            TRACK
+        }
     }
 
     pub fn is_native_prefix(&self) -> bool {

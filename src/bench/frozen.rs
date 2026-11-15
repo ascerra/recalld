@@ -16,6 +16,7 @@ pub struct OwnedEvaluator {
     pub(super) controls: FrozenControls,
     pub(super) fixture_ancestors: Vec<std::path::PathBuf>,
     pub(super) native_prefix: bool,
+    pub(super) native_sweep: bool,
 }
 
 impl OwnedEvaluator {
@@ -41,6 +42,7 @@ impl OwnedEvaluator {
             controls,
             fixture_ancestors: Vec::new(),
             native_prefix: false,
+            native_sweep: false,
         })
     }
 
