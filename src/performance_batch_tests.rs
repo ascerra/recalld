@@ -119,6 +119,43 @@ fn count(trace: &[serde_json::Value], kind: &str, phase: &str) -> usize {
         .filter(|e| e["kind"] == kind && e["phase"] == phase)
         .count()
 }
+fn assert_commits(
+    trace: &[serde_json::Value],
+    reservation: usize,
+    rejection: usize,
+    children: usize,
+) {
+    for (resource, expected) in [
+        ("batch_reservation", reservation),
+        ("batch_rejection", rejection),
+        ("metadata_effects", children),
+        ("edge_effects", children),
+    ] {
+        assert_eq!(
+            trace
+                .iter()
+                .filter(|e| e["kind"] == "commit_call"
+                    && e["phase"] == "attempt"
+                    && e["resource"] == resource)
+                .count(),
+            expected,
+            "{resource}: {trace:?}"
+        );
+    }
+    assert_eq!(
+        count(trace, "commit_call", "attempt"),
+        reservation + rejection + 2 * children
+    );
+}
+fn replayed_receipt(
+    receipt: &Option<crate::storage::control::WriteReceipt>,
+) -> Option<crate::storage::control::WriteReceipt> {
+    receipt.clone().map(|mut receipt| {
+        receipt.replayed = true;
+        receipt
+    })
+}
+
 fn assert_no_fresh_work(trace: &[serde_json::Value]) {
     assert!(
         !trace.iter().any(|e| matches!(
@@ -167,8 +204,10 @@ async fn legacy_batch_flush_failure_replays_inventory_without_fresh_work() {
         let trace = events(&capture);
         if failed_delivery {
             committed_generation = generation(&fx);
+            let mut identity = identity;
+            identity.1.replayed = true;
             prior = Some(identity);
-            assert_eq!(count(&trace, "commit_call", "attempt"), 2);
+            assert_commits(&trace, 1, 0, 1);
         } else {
             assert_eq!(Some(identity), prior);
             assert_eq!(generation(&fx), committed_generation);
@@ -385,7 +424,7 @@ async fn legacy_batch_rejection_bookkeeping_and_resume_count_actual_attempts() {
     assert_eq!(generation(&fx), before + 3);
     let trace = events(&capture);
     assert_eq!(count(&trace, "batch_child", "attempt"), 3);
-    assert_eq!(count(&trace, "commit_call", "attempt"), 3);
+    assert_commits(&trace, 1, 1, 1);
     assert!(
         trace
             .iter()
@@ -406,13 +445,16 @@ async fn legacy_batch_rejection_bookkeeping_and_resume_count_actual_attempts() {
         (resumed.succeeded, resumed.failed, resumed.unresolved),
         (3, 1, 0)
     );
-    assert_eq!(resumed.items[0].receipt, first.items[0].receipt);
+    assert_eq!(
+        resumed.items[0].receipt,
+        replayed_receipt(&first.items[0].receipt)
+    );
     assert_eq!(resumed.bookkeeping_receipts, first.bookkeeping_receipts);
     assert_eq!(generation(&fx), before + 5);
     assert_eq!(calls.load(Ordering::SeqCst), 3);
     let trace = events(&capture);
     assert_eq!(count(&trace, "batch_child", "attempt"), 2);
-    assert_eq!(count(&trace, "commit_call", "attempt"), 2);
+    assert_commits(&trace, 0, 0, 2);
     assert!(
         trace
             .iter()
@@ -456,7 +498,10 @@ async fn legacy_batch_committed_unready_keeps_receipt_and_repairs_on_replay() {
         .await
         .unwrap();
     assert!(replay.all_ready());
-    assert_eq!(replay.items[0].receipt, first.items[0].receipt);
+    assert_eq!(
+        replay.items[0].receipt,
+        replayed_receipt(&first.items[0].receipt)
+    );
     assert_eq!(generation(&fx), committed);
     assert_no_fresh_work(&events(&capture));
 }
