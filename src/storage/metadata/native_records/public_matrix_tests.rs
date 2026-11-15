@@ -324,10 +324,12 @@ async fn public_matrix_summary_extreme_clocks_sticky_permastore_and_forget() {
     for layout in LAYOUTS {
         for lane in LANES {
             let (f, d, clock, mut bridge, state) =
-                matrix_setup(layout, DecayPhase::Summary, 2., 0.01).await;
+                matrix_setup(layout, DecayPhase::Summary, 2., 5.).await;
             let remote = remote_lane(lane, &mut bridge).await;
             let original = f.record(d.parent).unwrap();
             assert_eq!(original.text_length, 0);
+            assert_eq!(original.is_permastore, 0);
+            assert!(original.stability < 5.);
             for (time, quality) in [(8 * DAY, 4), (min, 1), (max, 3)] {
                 let before = f.record(d.parent).unwrap();
                 clock.time.store(time, Ordering::SeqCst);
@@ -350,6 +352,17 @@ async fn public_matrix_summary_extreme_clocks_sticky_permastore_and_forget() {
                 assert_eq!(after.text_length, 0);
                 assert_eq!(after.summary, original.summary);
                 assert_eq!(after.is_permastore, 1);
+                if quality == 4 {
+                    assert!(
+                        after.stability >= 5.,
+                        "feedback must cross the actual threshold"
+                    );
+                } else if quality == 1 {
+                    assert!(
+                        after.stability < 5. && after.stability < before.stability,
+                        "lapse must fall below the threshold while exemption remains sticky"
+                    );
+                }
                 assert!(after.last_accessed_at >= before.last_accessed_at);
                 if let (Some(a), Some(b)) = (&after.schema, &before.schema) {
                     assert_eq!(a.lifecycle.observed_at, b.lifecycle.observed_at);
