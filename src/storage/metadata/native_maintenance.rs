@@ -6,9 +6,9 @@ use crate::storage::native_records::{NativeEdgeProof, NativeRecordChange, Native
 
 pub(crate) fn request_hash(ctx: &MutationContext, id: MemoryId) -> Result<[u8; 32], StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || !matches!(ctx.scope, MutationScope::Namespace(_)) {
+    if !matches!(ctx.scope, MutationScope::Namespace(_)) {
         return Err(StorageError::InvalidMutationContext(
-            "native maintenance requires contract2 namespace scope".into(),
+            "native maintenance requires namespace scope".into(),
         ));
     }
     Ok(control::request_hash(
@@ -40,11 +40,13 @@ impl MetadataStore {
             source: None,
         };
         let mut ids = Vec::new();
+        let mut phases = HashMap::new();
         for row in read.open_table(META_TABLE)?.iter()? {
             let (_, v) = row?;
             let record = DiskRecord::from_bytes(v.value())?;
             if record.namespace_id == namespace.get() {
                 ids.push(MemoryId::from_bytes(record.id));
+                phases.insert(MemoryId::from_bytes(record.id), record.phase);
             }
         }
         let captured = self.capture_at(&read, &scope, &ids, policy, false)?;
@@ -67,6 +69,7 @@ impl MetadataStore {
                 NativeDecayIntent {
                     scope: scope.clone(),
                     memory_id: *id,
+                    captured_phase: phases[id],
                     capture,
                     sampled_at,
                 }
@@ -106,6 +109,13 @@ impl MetadataStore {
             source: None,
         };
         let capture = self.capture_at(&read, &scope, &[id], policy, false)?;
+        let captured_phase = DiskRecord::from_bytes(
+            read.open_table(META_TABLE)?
+                .get(id.as_bytes().as_slice())?
+                .ok_or(StorageError::NotFound(id.into_inner()))?
+                .value(),
+        )?
+        .phase;
         if chrono::DateTime::from_timestamp_millis(sampled_at).is_none() {
             return Err(StorageError::InvalidMutation(
                 "invalid native maintenance clock".into(),
@@ -113,6 +123,7 @@ impl MetadataStore {
         }
         Ok(NativeDecayIntent {
             scope,
+            captured_phase,
             memory_id: id,
             capture,
             sampled_at,

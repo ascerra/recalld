@@ -20,6 +20,9 @@ mod readers;
 mod batches;
 #[path = "exact_scan_tests.rs"]
 mod exact_scan;
+#[path = "sweep_tests.rs"]
+mod sweep;
+
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 
