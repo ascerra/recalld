@@ -68,6 +68,93 @@ fn hit(r: &SemanticsResponse, id: u128) -> &SearchResult {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rif_explanations_follow_applied_own_and_inherited_scores() {
+    let mut records: Vec<_> = (1..=3).map(|i| rec(mid(i))).collect();
+    records[0].decay_strength = 1.0;
+    records[1].decay_strength = 0.2;
+    records[2].decay_strength = 0.9;
+    let (mut engine, _) = fixture(
+        records,
+        &[],
+        &[
+            (2, 1, EdgeType::Supersedes, 1.0),
+            (3, 1, EdgeType::Associative, 1.0),
+        ],
+    );
+    engine.clock = Arc::new(crate::time::ManualClock::new(123));
+    let mut q = metadata(3);
+    q.time_range_start = Some(1_699_999_000_000);
+    q.time_range_end = Some(1_700_001_000_000);
+    let off = engine
+        .search_with_semantics(q.clone(), history())
+        .await
+        .unwrap();
+    engine.rif_mode = RifMode::Shadow;
+    let shadow = engine
+        .search_with_semantics(q.clone(), history())
+        .await
+        .unwrap();
+    assert_eq!(values(&off), values(&shadow));
+    for row in &off.response.results {
+        assert_eq!(
+            off.diagnostics.provenance.as_ref().unwrap()[&row.memory_id].explanation,
+            shadow.diagnostics.provenance.as_ref().unwrap()[&row.memory_id].explanation,
+        );
+    }
+    engine.rif_mode = RifMode::Experimental;
+    let history = engine
+        .search_with_semantics(q.clone(), history())
+        .await
+        .unwrap();
+    assert!(hit(&history, 1).effective_r < hit(&off, 1).effective_r);
+    for row in &history.response.results {
+        let e = history.diagnostics.provenance.as_ref().unwrap()[&row.memory_id]
+            .explanation
+            .as_ref()
+            .unwrap();
+        let applied = history
+            .diagnostics
+            .rif
+            .as_ref()
+            .unwrap()
+            .returned_multipliers[&row.memory_id];
+        assert_eq!(
+            e.rif_multiplier, applied,
+            "returned record applied multiplier"
+        );
+        let own = e.own.unwrap();
+        assert_eq!(own.formula, ScoreFormula::Metadata);
+        assert_eq!(own.effective_retrievability, row.effective_r);
+        assert_eq!(own.temporal_factor, 1.5);
+        assert_eq!(own.base_score, row.effective_r * 0.1);
+        assert_eq!(own.score, own.base_score * own.temporal_factor);
+        assert_eq!(Some(own.score), row.composite_score);
+        assert!(e.inherited_sources.is_empty());
+    }
+    let current = engine.search_with_semantics(q, current()).await.unwrap();
+    let e = current.diagnostics.provenance.as_ref().unwrap()[&mid(2)]
+        .explanation
+        .as_ref()
+        .unwrap();
+    assert_eq!(e.rif_multiplier, 1.0); // Returned terminal is not a RIF target.
+    assert_eq!(e.own.unwrap().score, 0.2 * 0.1 * 1.5);
+    assert_eq!(e.inherited_sources.len(), 1);
+    let donor = &e.inherited_sources[0];
+    assert_eq!(donor.source, mid(1));
+    assert_eq!(
+        donor.own.effective_retrievability,
+        hit(&history, 1).effective_r
+    );
+    assert_eq!(
+        donor.own.score,
+        donor.own.effective_retrievability * 0.1 * 1.5
+    );
+    assert_eq!(e.inherited_floor, Some(donor.own.score));
+    assert_eq!(e.final_score, e.own.unwrap().score.max(donor.own.score));
+    assert_eq!(Some(e.final_score), hit(&current, 2).composite_score);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rif_modes_keep_shadow_bit_identical_and_v1_legacy_independent() {
     let (mut e, _) = fixture(
         vec![rec(mid(1)), rec(mid(2))],
