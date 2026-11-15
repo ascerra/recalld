@@ -31,7 +31,7 @@ fn legacy_semantic_core_fresh_rejects_before_payload() {
     let f = Fixture::new();
     let ctx = context(&f);
     let before = current(&f);
-    let bytes = files(f.path());
+    let bytes = file_hashes(f.path());
     let result =
         f.storage
             .write()
@@ -46,7 +46,7 @@ fn legacy_semantic_core_fresh_rejects_before_payload() {
         current(&f)
     );
     assert_eq!(current(&f), before);
-    assert_eq!(files(f.path()), bytes);
+    assert_eq!(file_hashes(f.path()), bytes);
 }
 
 async fn fresh_rpc(generated: bool) {
@@ -62,7 +62,7 @@ async fn fresh_rpc(generated: bool) {
     }
     let input = request(&f, "fresh-semantic-rpc", 4, vec![value]);
     let before = current(&f);
-    let bytes = files(f.path());
+    let bytes = file_hashes(f.path());
     let reply = crate::daemon::server::native_batch_test_rpc(Arc::new(adapter), &input).await;
     assert!(
         reply.error.is_some(),
@@ -73,7 +73,7 @@ async fn fresh_rpc(generated: bool) {
     );
     assert!(reply.result.is_none());
     assert_eq!(current(&f), before);
-    assert_eq!(files(f.path()), bytes);
+    assert_eq!(file_hashes(f.path()), bytes);
     assert_eq!(provider.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
 }
@@ -323,6 +323,13 @@ async fn legacy_semantic_export_genuine157_faults() {
     .unwrap();
 }
 
+fn file_hashes(root: &std::path::Path) -> Vec<(String, String)> {
+    use sha2::{Digest, Sha256};
+    files(root)
+        .into_iter()
+        .map(|(path, bytes)| (path, format!("{:x}", Sha256::digest(bytes))))
+        .collect()
+}
 pub(super) fn history() -> Value {
     serde_json::from_slice(include_bytes!(
         "fixtures/legacy-semantic-before/history.json"
@@ -376,7 +383,7 @@ async fn legacy_semantic_genuine_single_replay_precedes_profile_clock_and_cas() 
         h["single"]["input"]
     );
     let before = current(&f);
-    let bytes = files(f.path());
+    let bytes = file_hashes(f.path());
     let owner = f.storage_adapter().batch_completion();
     let replay = owner
         .insert(ctx.clone(), canonical(), vec![f32::NAN].into(), i64::MAX)
@@ -407,14 +414,14 @@ async fn legacy_semantic_genuine_single_replay_precedes_profile_clock_and_cas() 
         Err(crate::storage::StorageError::StoreLineageMismatch)
     ));
     assert_eq!(current(&f), before);
-    assert_eq!(files(f.path()), bytes);
+    assert_eq!(file_hashes(f.path()), bytes);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_semantic_genuine_completed_rpc_replays_all_receipts_no_work() {
     let (f, h) = completed();
     let before = current(&f);
-    let bytes = files(f.path());
+    let bytes = file_hashes(f.path());
     let spy = Arc::new(SpyProvider(Default::default()));
     let clock = Arc::new(SpyClock(Default::default()));
     let mut adapter = f.storage_adapter().with_clock(clock.clone());
@@ -444,7 +451,7 @@ async fn legacy_semantic_genuine_completed_rpc_replays_all_receipts_no_work() {
         }
     }
     assert_eq!(current(&f), before);
-    assert_eq!(files(f.path()), bytes);
+    assert_eq!(file_hashes(f.path()), bytes);
     assert_eq!(spy.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     drop(adapter);
@@ -459,7 +466,7 @@ async fn legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_comp
     ));
     let h = history();
     let before = current(&f);
-    let bytes = files(f.path());
+    let bytes = file_hashes(f.path());
     let spy = Arc::new(SpyProvider(Default::default()));
     let clock = Arc::new(SpyClock(Default::default()));
     let mut adapter = f.storage_adapter().with_clock(clock.clone());
@@ -520,7 +527,7 @@ async fn legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_comp
     assert_eq!(spy.0.load(Ordering::SeqCst), 0);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
     assert_eq!(current(&f), before);
-    assert_eq!(files(f.path()), bytes);
+    assert_eq!(file_hashes(f.path()), bytes);
     drop(adapter);
     let root = f.close();
     assert_eq!(historical_rows(root.path()), h["pendingRows"]);
