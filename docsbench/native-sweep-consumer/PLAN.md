@@ -30,6 +30,6 @@ source/destination/old-worker negatives, provider-profile rejection and label/
 future-query canaries remain. Missing annotations remain unknown; zero labels
 remain unscored; deleted annotated queries are not normalized away.
 
-Validation pending. This is an implementation plan, not runtime evidence. No
+Validation completed; see REPORT.md and validation.json for measured evidence. No
 independent native genesis, full A6, all-RNG control, ordinary native serving,
 native public writer, semantic quality or physical compaction claim.
