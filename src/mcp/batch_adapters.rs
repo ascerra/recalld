@@ -2,6 +2,7 @@
 //! second journal: successful child outcomes live in their canonical commit.
 use super::{McpStorageAdapter, StoreWriteError, bridge};
 use crate::mcp::batches::{self, PreparedItem};
+use crate::performance::{self, Hold, Timeline, Timer, Worker};
 use crate::storage::StorageError;
 use crate::storage::batch::*;
 use crate::storage::control::{MutationOutcome, WriteReceipt};
@@ -19,17 +20,42 @@ impl McpStorageAdapter {
         }
     }
 
-    pub(crate) async fn run_batch(
+    pub(crate) fn run_batch(
         &self,
         input: BatchInput,
-    ) -> Result<BatchOutcome, bridge::BridgeError> {
-        let completion = self.batch_completion();
-        let work = completion
-            .accept_work(None)
-            .map_err(super::map_mutation_error)?;
-        let result = self.run_batch_accepted(input, &work).await;
-        completion.finish_known_work(work);
-        result
+    ) -> impl std::future::Future<Output = Result<BatchOutcome, bridge::BridgeError>> + '_ {
+        performance::measure("mcp.batch", true, async move {
+            performance::event!(
+                kind = "batch_input",
+                operation = match input.kind {
+                    BatchKind::Insert => "insert",
+                    BatchKind::Forget => "forget",
+                },
+                supplied_items = input.items.len()
+            );
+            let completion = self.batch_completion();
+            let work = completion
+                .accept_work(None)
+                .map_err(super::map_mutation_error)?;
+            let result = self.run_batch_accepted(input, &work).await;
+            completion.finish_known_work(work);
+            match &result {
+                Ok(outcome) => performance::event!(
+                    kind = "batch_outcome",
+                    total = outcome.total,
+                    succeeded = outcome.succeeded,
+                    failed = outcome.failed,
+                    unresolved = outcome.unresolved,
+                    ready_items = outcome.items.iter().filter(|i| i.ready).count(),
+                    retained_child_receipts =
+                        outcome.items.iter().filter(|i| i.receipt.is_some()).count(),
+                    retained_bookkeeping_receipts = outcome.bookkeeping_receipts.len(),
+                    unknown_bookkeeping_operations = outcome.unknown_bookkeeping_operations.len()
+                ),
+                Err(_) => performance::event!(kind = "batch_error", state = "returned_error"),
+            }
+            result
+        })
     }
 
     async fn run_batch_accepted(
@@ -37,8 +63,10 @@ impl McpStorageAdapter {
         input: BatchInput,
         work: &crate::storage::work::WorkTicket,
     ) -> Result<BatchOutcome, bridge::BridgeError> {
+        let mut timeline = Timeline::new();
         // Prepare the entire ordered caller intent before policy/default reads.
         let prepared = batches::prepare(&input)?;
+        timeline.mark("batch.prepare");
         let plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
         let ctx = input.context();
         let kind = input.kind;
@@ -47,16 +75,29 @@ impl McpStorageAdapter {
         let worker = work
             .child()
             .map_err(|e| super::map_mutation_error(e.into()))?;
-        let reserved=tokio::task::spawn_blocking(move||{
-            let storage=storage.read().map_err(|e|StorageError::RecoveryRequired(e.to_string()))?;
-            let result=(|| {
-                let store_id=storage.meta_store().control_state()?.store_id;
-                Ok::<_,StorageError>((store_id,storage.meta_store().reserve_or_resume_batch_with_work(&ctx,kind,&plans,parent,Some(&worker))))
+        let trace_worker = Worker::new("batch.reservation.queue");
+        let reserved = tokio::task::spawn_blocking(move || trace_worker.run(move || {
+            let wait = Timer::new("batch.reservation.lock.wait");
+            let storage = storage.read().map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+            wait.complete();
+            let storage = Hold::new("batch.reservation.lock.hold", storage);
+            let result = (|| {
+                let store_id = storage.meta_store().control_state()?.store_id;
+                let timer = Timer::new("batch.reservation.call");
+                let reserved = storage.meta_store().reserve_or_resume_batch_with_work(&ctx, kind, &plans, parent, Some(&worker));
+                timer.outcome(reserved.is_ok());
+                match &reserved {
+                    Ok(progress) => performance::event!(kind = "batch_reservation", state = "committed", replayed = progress.reservation_receipt.replayed),
+                    Err(StorageError::CommitOutcomeUnknown { .. }) => performance::event!(kind = "batch_reservation", state = "unknown"),
+                    Err(_) => performance::event!(kind = "batch_reservation", state = "error"),
+                }
+                Ok::<_, StorageError>((store_id, reserved))
             })();
             storage.meta_store().finish_work(worker);
             result
-        }).await.map_err(|e|bridge::BridgeError::PartiallyApplied(format!("batch reservation worker outcome unknown; resubmit the same full request and key after recovery: {e}")))?
+        })).await.map_err(|e|bridge::BridgeError::PartiallyApplied(format!("batch reservation worker outcome unknown; resubmit the same full request and key after recovery: {e}")))?
             .map_err(super::map_mutation_error)?;
+        timeline.mark("batch.reservation");
         let (store_id, reserved) = reserved;
         let mut progress = match reserved {
             Ok(progress) => progress,
@@ -103,6 +144,7 @@ impl McpStorageAdapter {
             mark_unready(&mut outcome);
             return Ok(outcome);
         }
+        timeline.mark("batch.initial_publication");
         for (index, prepared) in prepared.iter().enumerate() {
             if !matches!(progress.items[index].state, BatchItemState::NotAttempted {}) {
                 continue;
@@ -113,6 +155,8 @@ impl McpStorageAdapter {
             let item_work = work
                 .child()
                 .map_err(|e| super::map_mutation_error(e.into()))?;
+            performance::event!(kind = "batch_child", phase = "attempt");
+            let child_timer = Timer::new("batch.child");
             let result = if let Some(input) = &prepared.store {
                 let mut input = input.clone();
                 input.namespace = progress.items[index]
@@ -144,8 +188,15 @@ impl McpStorageAdapter {
                 ));
             };
             self.batch_completion().finish_known_work(item_work);
+            child_timer.outcome(result.is_ok());
             match result {
                 Ok((receipt, result)) => {
+                    performance::event!(
+                        kind = "batch_child",
+                        phase = "return",
+                        state = "committed",
+                        replayed = receipt.replayed
+                    );
                     outcome.items[index].status = BatchStatus::Ok;
                     outcome.items[index].receipt = Some(receipt);
                     outcome.items[index].result = Some(result);
@@ -155,6 +206,12 @@ impl McpStorageAdapter {
                     receipt,
                     ..
                 })) => {
+                    performance::event!(
+                        kind = "batch_child",
+                        phase = "return",
+                        state = "committed_unready",
+                        replayed = receipt.replayed
+                    );
                     // Keep the actual current child, even if older items also
                     // committed. It is a success with readiness=false.
                     outcome.items[index].status = BatchStatus::Ok;
@@ -180,6 +237,7 @@ impl McpStorageAdapter {
                     operation_id,
                     ..
                 })) => {
+                    performance::event!(kind = "batch_child", phase = "return", state = "unknown");
                     outcome.items[index].status = BatchStatus::Unknown;
                     outcome.items[index].operation_id = Some(operation_id);
                     outcome.items[index].error = Some(BatchError::new("COMMIT_OUTCOME_UNKNOWN"));
@@ -189,6 +247,11 @@ impl McpStorageAdapter {
                 }
                 Err(error) => {
                     if let Some(mut final_error) = final_error(&error) {
+                        performance::event!(
+                            kind = "batch_child",
+                            phase = "return",
+                            state = "rejected"
+                        );
                         // A pre-correction pending manifest can now fail input
                         // admission. Keep its indexed field diagnostic too.
                         if let BatchItemPlan::Invalid { error, .. } = &prepared.plan {
@@ -198,17 +261,33 @@ impl McpStorageAdapter {
                         let worker = work
                             .child()
                             .map_err(|e| super::map_mutation_error(e.into()))?;
+                        let trace_worker = Worker::new("batch.rejection.queue");
                         let finalized = tokio::task::spawn_blocking(move || {
-                            let storage = storage
-                                .read()
-                                .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
-                            let result = storage.meta_store().finalize_batch_error_with_work(
-                                &child,
-                                final_error,
-                                Some(&worker),
-                            );
-                            storage.meta_store().finish_work(worker);
-                            result
+                            trace_worker.run(move || {
+                                let wait = Timer::new("batch.rejection.lock.wait");
+                                let storage = storage
+                                    .read()
+                                    .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+                                wait.complete();
+                                let storage = Hold::new("batch.rejection.lock.hold", storage);
+                                let timer = Timer::new("batch.rejection.call");
+                                let result = storage.meta_store().finalize_batch_error_with_work(
+                                    &child,
+                                    final_error,
+                                    Some(&worker),
+                                );
+                                timer.outcome(result.is_ok());
+                                performance::event!(
+                                    kind = "batch_bookkeeping",
+                                    state = match &result {
+                                        Ok(_) => "returned_progress",
+                                        Err(StorageError::CommitOutcomeUnknown { .. }) => "unknown",
+                                        Err(_) => "error",
+                                    }
+                                );
+                                storage.meta_store().finish_work(worker);
+                                result
+                            })
                         })
                         .await;
                         match finalized {
@@ -253,6 +332,15 @@ impl McpStorageAdapter {
                                     StorageError::ProviderVectorUnavailable(_)
                                 )
                         );
+                        performance::event!(
+                            kind = "batch_child",
+                            phase = "return",
+                            state = if unavailable {
+                                "provider_unavailable"
+                            } else {
+                                "reconciliation_required"
+                            }
+                        );
                         outcome.items[index].status = if unavailable {
                             BatchStatus::NotAttempted
                         } else {
@@ -269,6 +357,7 @@ impl McpStorageAdapter {
                 }
             }
         }
+        timeline.mark("batch.children");
         if self
             .batch_completion()
             .complete_with_work(Some(work))
@@ -282,14 +371,32 @@ impl McpStorageAdapter {
             let storage = self.storage.clone();
             let parent = outcome.batch_operation_id;
             let store_id = outcome.store_id;
+            timeline.mark("batch.final_publication");
+            let trace_worker = Worker::new("batch.progress.queue");
             let current = tokio::task::spawn_blocking(move || {
-                storage
-                    .read()
-                    .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?
-                    .meta_store()
-                    .lookup_batch(store_id, parent)
+                trace_worker.run(move || {
+                    let wait = Timer::new("batch.progress.lock.wait");
+                    let storage = storage
+                        .read()
+                        .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+                    wait.complete();
+                    let storage = Hold::new("batch.progress.lock.hold", storage);
+                    let timer = Timer::new("batch.progress.call");
+                    let result = storage.meta_store().lookup_batch(store_id, parent);
+                    timer.outcome(result.is_ok());
+                    performance::event!(
+                        kind = "batch_progress",
+                        state = match &result {
+                            Ok(Some(_)) => "present",
+                            Ok(None) => "missing",
+                            Err(_) => "error",
+                        }
+                    );
+                    result
+                })
             })
             .await;
+            timeline.mark("batch.final_progress");
             match current {
                 Ok(Ok(Some(current))) => {
                     for (index, prepared) in prepared.iter().enumerate() {

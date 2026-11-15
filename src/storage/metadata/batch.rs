@@ -541,7 +541,27 @@ impl MetadataStore {
         receipt: &WriteReceipt,
     ) -> Result<(), StorageError> {
         super::effects::crash_point("before_batch_commit");
+        let resource = match receipt.outcome {
+            MutationOutcome::BatchReserved { .. } => "batch_reservation",
+            MutationOutcome::BatchItemRejected { .. } => "batch_rejection",
+            _ => "batch_other",
+        };
+        crate::performance::event!(
+            kind = "commit_call",
+            resource,
+            phase = "attempt",
+            sync_coverage = "opaque_backend"
+        );
+        let timer = crate::performance::Timer::new("metadata.batch_commit");
         let result = tx.commit();
+        timer.outcome(result.is_ok());
+        crate::performance::event!(
+            kind = "commit_call",
+            resource,
+            phase = "return",
+            success = result.is_ok(),
+            sync_coverage = "opaque_backend"
+        );
         #[cfg(test)]
         let result = result.and_then(|()| {
             if super::effects::FAIL_AFTER_RECORD_COMMIT.with(|f| f.replace(false))
