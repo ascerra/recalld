@@ -757,7 +757,9 @@ async fn batch_wire_historical_oversize_completed_pending_retained_bytes_and_set
                     Api1Reply::Owned(Err(failure.clone())).response(Surface::Rest);
                 assert_eq!(api1_status, 400);
                 assert_eq!(api1_value["error"]["commitState"], "committed");
-                assert_eq!(api1_value["reservationReceipt"], canonical(&reservation));
+                let mut api1_expected = reservation.clone();
+                api1_expected.replayed = true;
+                assert_eq!(api1_value["reservationReceipt"], canonical(&api1_expected));
                 assert!(api1_value.get("batch").is_none());
                 assert!(api1_value.get("receipt").is_none());
                 assert!(api1_value.get("readiness").is_none());

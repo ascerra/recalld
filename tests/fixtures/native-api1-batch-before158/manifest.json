@@ -1,0 +1,359 @@
+{
+  "namespace": 1,
+  "outcome": {
+    "batchOperationId": "f3b0d6d9-6598-43e0-962f-024e4ec31398",
+    "bookkeepingReceipts": [],
+    "failed": 1,
+    "items": [
+      {
+        "error": {
+          "code": "INVALID_INPUT",
+          "field": "memories[0]"
+        },
+        "index": 0,
+        "operationId": "2da4609f-dc38-4d01-8097-d19ae86aeb7f",
+        "ready": true,
+        "retryable": false,
+        "status": "error"
+      }
+    ],
+    "readiness": {
+      "committedGeneration": "6",
+      "derived": [
+        {
+          "appliedGeneration": "6",
+          "name": "graph",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "6",
+          "name": "vectors",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "6",
+          "name": "fts",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "6",
+          "name": "entities",
+          "ready": true
+        }
+      ],
+      "observedWork": {
+        "admissionOpen": true,
+        "pendingBatchItems": 0,
+        "pendingEffects": 0,
+        "pendingPurges": 0,
+        "unresolvedWork": 0
+      },
+      "pendingWork": 0,
+      "pendingWorkScope": "acceptedTickets",
+      "ready": false,
+      "storeId": "0e5c2e32-beb6-45e3-90bf-3fecef28775a"
+    },
+    "reservationReceipt": {
+      "committedGeneration": "6",
+      "operationId": "f3b0d6d9-6598-43e0-962f-024e4ec31398",
+      "outcome": {
+        "batch_kind": "insert",
+        "caller_hash": [
+          111,
+          151,
+          194,
+          145,
+          203,
+          62,
+          205,
+          98,
+          180,
+          67,
+          220,
+          189,
+          224,
+          32,
+          111,
+          123,
+          34,
+          9,
+          253,
+          181,
+          60,
+          240,
+          61,
+          228,
+          191,
+          57,
+          185,
+          131,
+          217,
+          151,
+          112,
+          79
+        ],
+        "item_count": 1,
+        "kind": "batchReserved",
+        "resolution_hash": [
+          125,
+          174,
+          204,
+          32,
+          152,
+          97,
+          79,
+          79,
+          28,
+          104,
+          43,
+          120,
+          39,
+          24,
+          134,
+          15,
+          187,
+          188,
+          205,
+          104,
+          135,
+          7,
+          74,
+          35,
+          184,
+          201,
+          37,
+          132,
+          18,
+          69,
+          81,
+          26
+        ]
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "0e5c2e32-beb6-45e3-90bf-3fecef28775a"
+    },
+    "reservationState": "committed",
+    "resultVersion": 1,
+    "storeId": "0e5c2e32-beb6-45e3-90bf-3fecef28775a",
+    "succeeded": 0,
+    "total": 1,
+    "unknownBookkeepingOperations": [],
+    "unresolved": 0
+  },
+  "parent": "01a1dd19-5573-7790-a816-bc5e45f119ff",
+  "path": "/evidence/artifact/.tmpvPMasz/v2",
+  "profile": {
+    "dimension": 4,
+    "documentPreprocessing": {
+      "prefix": "",
+      "version": "recalld-document-v1"
+    },
+    "identityVersion": 1,
+    "modelId": "configured-model",
+    "modelRevision": null,
+    "normalization": "l2_unit_v1",
+    "providerKind": "ollama",
+    "queryPreprocessing": {
+      "prefix": "",
+      "version": "recalld-query-v1"
+    }
+  },
+  "progress": {
+    "bookkeepingReceipts": [],
+    "callerHash": [
+      111,
+      151,
+      194,
+      145,
+      203,
+      62,
+      205,
+      98,
+      180,
+      67,
+      220,
+      189,
+      224,
+      32,
+      111,
+      123,
+      34,
+      9,
+      253,
+      181,
+      60,
+      240,
+      61,
+      228,
+      191,
+      57,
+      185,
+      131,
+      217,
+      151,
+      112,
+      79
+    ],
+    "items": [
+      {
+        "canonicalHash": null,
+        "defaults": null,
+        "index": 0,
+        "operationId": "2da4609f-dc38-4d01-8097-d19ae86aeb7f",
+        "requestHash": [
+          104,
+          30,
+          5,
+          116,
+          153,
+          161,
+          85,
+          135,
+          62,
+          209,
+          244,
+          117,
+          92,
+          45,
+          223,
+          200,
+          60,
+          6,
+          88,
+          243,
+          132,
+          23,
+          14,
+          239,
+          225,
+          159,
+          99,
+          251,
+          217,
+          240,
+          95,
+          130
+        ],
+        "resolutionError": {
+          "code": "INVALID_INPUT",
+          "field": "memories[0]"
+        },
+        "state": {
+          "error": {
+            "code": "INVALID_INPUT",
+            "field": "memories[0]"
+          },
+          "status": "error"
+        }
+      }
+    ],
+    "kind": "insert",
+    "requestContext": {
+      "contractVersion": 1,
+      "proofVersion": 1
+    },
+    "reservationReceipt": {
+      "committedGeneration": "6",
+      "operationId": "f3b0d6d9-6598-43e0-962f-024e4ec31398",
+      "outcome": {
+        "batch_kind": "insert",
+        "caller_hash": [
+          111,
+          151,
+          194,
+          145,
+          203,
+          62,
+          205,
+          98,
+          180,
+          67,
+          220,
+          189,
+          224,
+          32,
+          111,
+          123,
+          34,
+          9,
+          253,
+          181,
+          60,
+          240,
+          61,
+          228,
+          191,
+          57,
+          185,
+          131,
+          217,
+          151,
+          112,
+          79
+        ],
+        "item_count": 1,
+        "kind": "batchReserved",
+        "resolution_hash": [
+          125,
+          174,
+          204,
+          32,
+          152,
+          97,
+          79,
+          79,
+          28,
+          104,
+          43,
+          120,
+          39,
+          24,
+          134,
+          15,
+          187,
+          188,
+          205,
+          104,
+          135,
+          7,
+          74,
+          35,
+          184,
+          201,
+          37,
+          132,
+          18,
+          69,
+          81,
+          26
+        ]
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "0e5c2e32-beb6-45e3-90bf-3fecef28775a"
+    },
+    "version": 3
+  },
+  "request": {
+    "batchOperationId": null,
+    "defaultNamespace": "native",
+    "idempotencyKey": "before-timestamp",
+    "items": [
+      {
+        "checkDuplicates": false,
+        "createdAt": 500,
+        "initialStability": 12.0,
+        "summary": "old private timestamp"
+      }
+    ],
+    "kind": "insert",
+    "mutationVersion": 3,
+    "requestContext": {
+      "contractVersion": 1,
+      "proofVersion": 1
+    },
+    "resultVersion": 1,
+    "storeId": "0e5c2e32-beb6-45e3-90bf-3fecef28775a"
+  }
+}

@@ -125,17 +125,34 @@ async fn api1_batch_private_before_timestamp_rejection_export() {
 
 #[tokio::test]
 async fn api1_batch_genuine_private_timestamp_history_replay() {
-    let Ok(root) = std::env::var("RECALLD_BATCH_API1_READ_BEFORE") else {
-        return;
+    let extracted;
+    let (artifact, source) = match std::env::var("RECALLD_BATCH_API1_READ_BEFORE") {
+        Ok(root) => {
+            let artifact = PathBuf::from(root);
+            let saved: Value =
+                serde_json::from_slice(&std::fs::read(artifact.join("manifest.json")).unwrap())
+                    .unwrap();
+            let source = artifact.join(
+                Path::new(saved["path"].as_str().unwrap())
+                    .strip_prefix("/evidence/artifact")
+                    .unwrap(),
+            );
+            (artifact, source)
+        }
+        Err(_) => {
+            let artifact = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/native-api1-batch-before158");
+            extracted = tempfile::tempdir().unwrap();
+            let source = extracted.path().join("source");
+            zip::ZipArchive::new(std::fs::File::open(artifact.join("store.zip")).unwrap())
+                .unwrap()
+                .extract(&source)
+                .unwrap();
+            (artifact, source)
+        }
     };
-    let artifact = PathBuf::from(root);
     let saved: Value =
         serde_json::from_slice(&std::fs::read(artifact.join("manifest.json")).unwrap()).unwrap();
-    let source = artifact.join(
-        Path::new(saved["path"].as_str().unwrap())
-            .strip_prefix("/evidence/artifact")
-            .unwrap(),
-    );
     let before_source = bytes(&source);
     let temp = tempfile::tempdir().unwrap();
     let target = temp.path().join("native");
