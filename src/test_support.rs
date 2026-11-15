@@ -220,6 +220,7 @@ impl Fixture {
     pub(crate) async fn insert_memory_with(&self, spec: MemorySpec<'_>) -> MemoryId {
         let id = MemoryId::new();
         let mut record = crate::model::DiskRecord {
+            schema: None,
             version: crate::model::DiskRecord::CURRENT_VERSION,
             id: *id.as_bytes(),
             namespace_id: spec.namespace.get(),
@@ -293,7 +294,10 @@ impl Fixture {
                 Arc::new(crate::rif::RifEngine::new(Default::default())),
                 self.graph.clone(),
             )),
-            Arc::new(StorageAccessRecorder::new(self.storage.clone())),
+            Arc::new(StorageAccessRecorder::new(
+                self.storage.clone(),
+                self.cache.clone(),
+            )),
         ));
         crate::mcp::bridge_adapters::McpSearchAdapter::new(
             engine,
@@ -409,6 +413,8 @@ impl crate::mcp::bridge::SearchPipeline for StubBridge {
         _: usize,
         _: Option<f32>,
         _: bool,
+        _record_access: bool,
+        _namespace: Option<&str>,
     ) -> Result<Vec<crate::mcp::bridge::SearchHit>, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before searching")
     }
@@ -433,10 +439,16 @@ impl crate::mcp::bridge::StorageEngine for StubBridge {
     async fn get_memory(
         &self,
         _: MemoryId,
+        _record_access: bool,
+        _namespace: Option<&str>,
     ) -> Result<Option<crate::mcp::bridge::MemoryRecord>, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before reading")
     }
-    async fn delete_memory(&self, _: MemoryId) -> Result<bool, crate::mcp::bridge::BridgeError> {
+    async fn delete_memory(
+        &self,
+        _: MemoryId,
+        _namespace: Option<&str>,
+    ) -> Result<bool, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before deleting")
     }
     async fn delete_memories(
@@ -454,6 +466,7 @@ impl crate::mcp::bridge::StorageEngine for StubBridge {
         &self,
         _: MemoryId,
         _: u8,
+        _namespace: Option<&str>,
     ) -> Result<crate::mcp::bridge::ReinforceResult, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before reinforcing")
     }
@@ -514,6 +527,7 @@ impl crate::mcp::bridge::HealthChecker for StubBridge {
 fn clone_bridge_error(e: &crate::mcp::bridge::BridgeError) -> crate::mcp::bridge::BridgeError {
     use crate::mcp::bridge::BridgeError as E;
     match e {
+        E::NamespaceMismatch(m) => E::NamespaceMismatch(m.clone()),
         E::NotFound(m) => E::NotFound(m.clone()),
         E::InvalidInput(m) => E::InvalidInput(m.clone()),
         E::Storage(m) => E::Storage(m.clone()),

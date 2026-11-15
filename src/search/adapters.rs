@@ -3,7 +3,7 @@
 //! Each adapter struct wraps a concrete subsystem type and implements
 //! the corresponding DI trait from `pipeline.rs`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -26,6 +26,57 @@ use super::pipeline::{
 };
 use super::{EntityIndex, FlatVectorIndex, FtsIndex, SearchFilter, VectorIndex};
 
+// Explicit offline harness adapter. Ordinary storage open still rejects schema
+// v2. Snapshot ownership pins canonical files; this adapter has no write API.
+#[async_trait]
+impl NamespaceResolver for crate::storage::offline_snapshot::OfflineSnapshot {
+    async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
+        self.namespaces()
+            .iter()
+            .find(|ns| ns.id == id)
+            .cloned()
+            .ok_or_else(|| SearchError::NamespaceNotFound(format!("id {}", id.get())))
+    }
+    async fn resolve(&self, name: &str) -> Result<NamespaceConfig> {
+        self.namespaces()
+            .iter()
+            .find(|ns| ns.name == name)
+            .cloned()
+            .ok_or_else(|| SearchError::NamespaceNotFound(name.into()))
+    }
+}
+
+#[async_trait]
+impl MetadataStore for crate::storage::offline_snapshot::OfflineSnapshot {
+    async fn get(&self, id: &MemoryId) -> Result<Option<CachedRecord>> {
+        self.record(*id)
+            .map(|item| item.map(|item| CachedRecord::from(&item.record)))
+            .map_err(|e| SearchError::MetadataError(e.to_string()))
+    }
+    async fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<CachedRecord>> {
+        let mut records = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(record) = self.get(id).await? {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+    async fn list_namespace_memories(&self, namespace: NamespaceId) -> Result<Vec<MemoryId>> {
+        // ponytail: complete offline scan; a serving adapter must use A1's
+        // certified namespace view. No claim of online enumeration performance.
+        let mut ids = Vec::new();
+        self.for_each_record(|item| {
+            if item.record.namespace_id == namespace.get() {
+                ids.push(MemoryId::from_bytes(item.record.id));
+            }
+            Ok(())
+        })
+        .map_err(|e| SearchError::MetadataError(e.to_string()))?;
+        Ok(ids)
+    }
+}
+
 // ── NamespaceResolver ──────────────────────────────────────────────
 
 /// Adapts `RedbStorageEngine` to the `NamespaceResolver` trait.
@@ -43,6 +94,20 @@ impl StorageNamespaceResolver {
 
 #[async_trait]
 impl NamespaceResolver for StorageNamespaceResolver {
+    async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            storage
+                .read()
+                .map_err(|e| SearchError::Internal(format!("storage lock poisoned: {e}")))?
+                .get_namespace(id)
+                .map_err(|e| SearchError::Internal(e.to_string()))?
+                .ok_or_else(|| SearchError::NamespaceNotFound(format!("id {}", id.get())))
+        })
+        .await
+        .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
+    }
+
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig> {
         let storage = self.storage.clone();
         let name = name.to_string();
@@ -166,19 +231,33 @@ impl FtsIndexRegistry for SharedFtsIndexRegistry {
         let index = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.index.lock())
         });
-        match index.search(namespace_id, query, k) {
-            Ok(results) => Ok(results
-                .into_iter()
-                .map(|(id, score)| FtsResult {
-                    memory_id: id,
-                    score,
-                })
-                .collect()),
-            Err(e) => {
-                tracing::warn!(%e, "FTS search failed, returning empty results");
-                Ok(Vec::new())
-            }
-        }
+        index
+            .search(namespace_id, query, k)
+            .map(|results| {
+                results
+                    .into_iter()
+                    .map(|(id, score)| FtsResult {
+                        memory_id: id,
+                        score,
+                    })
+                    .collect()
+            })
+            .map_err(|e| SearchError::Internal(format!("FTS search failed: {e}")))
+    }
+
+    fn search_eligible(
+        &self,
+        namespace_id: NamespaceId,
+        query: &str,
+        k: usize,
+        eligible_ids: &HashSet<MemoryId>,
+    ) -> Result<super::EligibleFtsResults> {
+        let index = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.index.lock())
+        });
+        index
+            .search_eligible(namespace_id, query, k, eligible_ids)
+            .map_err(|e| SearchError::Internal(format!("eligible FTS search failed: {e}")))
     }
 }
 
@@ -233,6 +312,20 @@ impl StorageMetadataAdapter {
 
 #[async_trait]
 impl MetadataStore for StorageMetadataAdapter {
+    async fn effects_stamp(&self) -> Result<u64> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            storage
+                .read()
+                .map_err(|e| SearchError::Unavailable(e.to_string()))?
+                .meta_store()
+                .effects_stamp()
+                .map_err(|e| SearchError::Unavailable(e.to_string()))
+        })
+        .await
+        .map_err(|e| SearchError::Internal(e.to_string()))?
+    }
+
     async fn get(&self, id: &MemoryId) -> Result<Option<CachedRecord>> {
         let storage = self.storage.clone();
         let id = *id;
@@ -265,6 +358,22 @@ impl MetadataStore for StorageMetadataAdapter {
                 }
             }
             Ok(results)
+        })
+        .await
+        .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
+    }
+
+    async fn namespace_records(&self, namespace_id: NamespaceId) -> Result<Vec<CachedRecord>> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let storage = storage
+                .read()
+                .map_err(|e| SearchError::MetadataError(format!("storage lock poisoned: {e}")))?;
+            storage
+                .meta_store()
+                .records_in_namespace(namespace_id)
+                .map(|records| records.iter().map(CachedRecord::from).collect())
+                .map_err(|e| SearchError::MetadataError(e.to_string()))
         })
         .await
         .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
@@ -367,48 +476,50 @@ impl RifProcessor for RifProcessorAdapter {
 /// Adapts `RedbStorageEngine` to `AccessRecorder`.
 pub struct StorageAccessRecorder {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    cache: Arc<CacheManager>,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl StorageAccessRecorder {
-    pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
-        Self { storage }
+    pub fn new(
+        storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+        cache: Arc<CacheManager>,
+    ) -> Self {
+        Self {
+            storage,
+            cache,
+            clock: Arc::new(crate::time::SystemClock),
+        }
+    }
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
 #[async_trait]
 impl AccessRecorder for StorageAccessRecorder {
-    async fn record_access(&self, id: MemoryId, kind: AccessKind) -> Result<()> {
-        let now = chrono::Utc::now().timestamp_millis();
-        let storage = self.storage.clone();
-        tokio::task::spawn_blocking(move || {
-            let storage_r = storage
-                .read()
-                .map_err(|e| SearchError::Internal(format!("storage lock poisoned: {e}")))?;
-            storage_r
-                .update_access(id, now, kind)
-                .map_err(|e| SearchError::Internal(e.to_string()))
-        })
-        .await
-        .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
+    async fn record_access(
+        &self,
+        id: MemoryId,
+        kind: AccessKind,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_access_batch(&[(id, kind)], None).await
     }
-
-    async fn record_access_batch(&self, accesses: &[(MemoryId, AccessKind)]) -> Result<()> {
-        let now = chrono::Utc::now().timestamp_millis();
-        let storage = self.storage.clone();
-        let accesses = accesses.to_vec();
-        tokio::task::spawn_blocking(move || {
-            let storage_r = storage
-                .read()
-                .map_err(|e| SearchError::Internal(format!("storage lock poisoned: {e}")))?;
-            for (id, kind) in &accesses {
-                storage_r
-                    .update_access(*id, now, *kind)
-                    .map_err(|e| SearchError::Internal(e.to_string()))?;
-            }
-            Ok(())
-        })
+    async fn record_access_batch(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        crate::decay::observation::record_exposures_scoped(
+            self.storage.clone(),
+            self.cache.clone(),
+            accesses.to_vec(),
+            self.clock.now_millis(),
+            scope.cloned(),
+        )
         .await
-        .map_err(|e| SearchError::Internal(format!("blocking task join error: {e}")))?
+        .map_err(Into::into)
     }
 }
 
@@ -426,6 +537,73 @@ impl SharedGraphReader {
 }
 
 impl GraphReader for SharedGraphReader {
+    fn connection_bonuses(
+        &self,
+        strengths: &HashMap<MemoryId, f32>,
+    ) -> Result<HashMap<MemoryId, f32>> {
+        let graph = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.graph.read())
+        });
+        let config = crate::graph::activation::ActivationConfig::default();
+        Ok(strengths
+            .keys()
+            .map(|&id| {
+                (
+                    id,
+                    crate::graph::activation::connection_bonus_with_strengths(
+                        id, &graph, &config, strengths,
+                    ),
+                )
+            })
+            .collect())
+    }
+
+    fn spreading_activation_canonical(
+        &self,
+        seeds: &[(MemoryId, f32)],
+        namespace: NamespaceId,
+        depth: u8,
+        records: &HashMap<MemoryId, CachedRecord>,
+    ) -> Result<Vec<(MemoryId, f32)>> {
+        let graph = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.graph.read())
+        });
+        Ok(crate::graph::activation::spreading_activation_with_records(
+            &graph,
+            seeds,
+            namespace,
+            &spreading_config(depth),
+            records,
+        ))
+    }
+
+    fn supersession_links(
+        &self,
+        id: MemoryId,
+        allowance: usize,
+    ) -> Result<crate::graph::query::SupersessionLinks> {
+        let graph = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.graph.read())
+        });
+        Ok(crate::graph::query::supersession_links(
+            &graph, id, allowance,
+        ))
+    }
+
+    fn expand_eligible(
+        &self,
+        seeds: &[(MemoryId, f32)],
+        namespace: NamespaceId,
+        depth: u8,
+        eligible: &std::collections::HashMap<MemoryId, CachedRecord>,
+    ) -> Result<crate::graph::query::GraphExpansion> {
+        let graph = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.graph.read())
+        });
+        crate::graph::query::expand(&graph, seeds, namespace, depth, eligible)
+            .map_err(|e| SearchError::Internal(e.into()))
+    }
+
     fn neighbors(&self, id: &MemoryId) -> Vec<MemoryId> {
         let graph = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.graph.read())
@@ -452,21 +630,7 @@ impl GraphReader for SharedGraphReader {
         let graph = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.graph.read())
         });
-        let mut config = crate::graph::activation::SpreadingActivationConfig::default();
-        match graph_depth {
-            2 => {
-                config.max_budget = 200;
-                config.firing_threshold = 0.02;
-                config.output_threshold = 0.015;
-            }
-            3 => {
-                config.max_budget = 400;
-                config.hop_decay = 0.85;
-                config.firing_threshold = 0.015;
-                config.output_threshold = 0.01;
-            }
-            _ => {}
-        }
+        let config = spreading_config(graph_depth);
         crate::graph::activation::spreading_activation(&graph, seeds, namespace_id, &config)
     }
 
@@ -526,6 +690,25 @@ impl EntityIndexReader for SharedEntityIndexReader {
     }
 }
 
+fn spreading_config(graph_depth: u8) -> crate::graph::activation::SpreadingActivationConfig {
+    let mut config = crate::graph::activation::SpreadingActivationConfig::default();
+    match graph_depth {
+        2 => {
+            config.max_budget = 200;
+            config.firing_threshold = 0.02;
+            config.output_threshold = 0.015;
+        }
+        3 => {
+            config.max_budget = 400;
+            config.hop_decay = 0.85;
+            config.firing_threshold = 0.015;
+            config.output_threshold = 0.01;
+        }
+        _ => {}
+    }
+    config
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,6 +736,19 @@ mod tests {
             .insert_memory_in(foreign_namespace, &["project/recalld"])
             .await;
         let adapter = StorageMetadataAdapter::new(fixture.storage.clone());
+        let snapshot = adapter.namespace_records(namespace).await.unwrap();
+        assert_eq!(
+            snapshot.iter().map(|r| r.id).collect::<HashSet<_>>(),
+            HashSet::from([live, ghost, removed])
+        );
+        assert!(snapshot.iter().all(|r| r.namespace_id == namespace));
+        assert!(
+            adapter
+                .namespace_records(NamespaceId::new(999))
+                .await
+                .unwrap()
+                .is_empty()
+        );
         let mut ids = adapter.list_namespace_memories(namespace).await.unwrap();
         assert_eq!(
             ids.iter().copied().collect::<HashSet<_>>(),
@@ -575,6 +771,17 @@ mod tests {
 
         // The batch read must observe canonical state, not treat an enumerated ID as eligible.
         fixture.tombstone(removed);
+        let after = adapter.namespace_records(namespace).await.unwrap();
+        assert_eq!(
+            after.iter().map(|r| r.id).collect::<HashSet<_>>(),
+            HashSet::from([live, ghost])
+        );
+        assert!(
+            after
+                .iter()
+                .any(|r| r.id == ghost && r.phase == DecayPhase::Ghost)
+        );
+
         ids.push(MemoryId::new()); // A missing canonical row is skipped.
         let records = adapter.get_batch(&ids).await.unwrap();
         assert_eq!(records.len(), 3);

@@ -7,6 +7,9 @@
 //!
 //! See Spec 04 Section 7 for the design rationale.
 
+mod effects;
+mod text_compaction;
+
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
@@ -112,6 +115,26 @@ pub trait StorageEngine: Send + Sync {
         is_permastore: bool,
     ) -> Result<(), StorageError>;
 
+    /// Atomic v1 feedback state/history patch; false rejects a stale snapshot.
+    fn apply_legacy_feedback(
+        &self,
+        id: MemoryId,
+        expected: &DiskRecord,
+        namespace: &NamespaceConfig,
+        plan: &crate::decay::lifecycle::FeedbackPlan,
+    ) -> Result<bool, StorageError>;
+
+    /// Atomic v1 strength/phase/content patch (same phase or one phase loss).
+    fn apply_legacy_decay(
+        &self,
+        id: MemoryId,
+        expected: &DiskRecord,
+        namespace: &NamespaceConfig,
+        phase: DecayPhase,
+        strength: f32,
+        decay_strength: f32,
+    ) -> Result<bool, StorageError>;
+
     /// Zero the full_text pointer on a memory record.
     ///
     /// Called during Full -> Summary phase transitions to mark the
@@ -199,6 +222,27 @@ pub trait StorageEngine: Send + Sync {
     /// Get a namespace by name.
     fn get_namespace_by_name(&self, name: &str) -> Result<Option<NamespaceConfig>, StorageError>;
 
+    /// Check an opt-in by-ID assertion using canonical rows, never a session default
+    /// or cache. Call under the same storage guard as the protected operation.
+    fn assert_memory_namespace(&self, id: MemoryId, namespace: &str) -> Result<(), StorageError> {
+        validate_namespace_name(namespace).map_err(|e| StorageError::InvalidNamespaceName {
+            name: namespace.to_owned(),
+            reason: e.to_string(),
+        })?;
+        let record = self
+            .get_record(id)?
+            .ok_or(StorageError::NotFound(id.into_inner()))?;
+        let asserted = self.get_namespace_by_name(namespace)?;
+        if asserted.is_some_and(|ns| ns.id.get() == record.namespace_id) {
+            Ok(())
+        } else {
+            Err(StorageError::NamespaceMismatch {
+                id: id.into_inner(),
+                namespace: namespace.to_owned(),
+            })
+        }
+    }
+
     // ── Text Compaction ─────────────────────────────────────────────
 
     /// Run fulltext.dat compaction, reclaiming dead space from decayed
@@ -283,6 +327,16 @@ pub struct RedbStorageEngine {
 }
 
 impl RedbStorageEngine {
+    /// Fail closed after an uncertain commit or failed derived publication.
+    /// Lock order for graph writers: graph -> storage -> metadata -> redb.
+    pub(crate) fn ensure_available(&self) -> Result<(), StorageError> {
+        self.meta_store.ensure_available()
+    }
+
+    pub(crate) fn mark_unavailable(&self) {
+        self.meta_store.mark_unavailable();
+    }
+
     /// Metadata lineage/generation foundation; not a whole-store read snapshot.
     pub fn control_state(&self) -> Result<ControlState, StorageError> {
         self.meta_store.control_state()
@@ -300,6 +354,30 @@ impl RedbStorageEngine {
     ) -> Result<WriteReceipt, StorageError> {
         self.meta_store
             .update_access_with_receipt(ctx, id, timestamp, kind)
+    }
+
+    /// Atomic per-namespace exposure batch; canonical commit only, not readiness.
+    pub fn record_exposure_batch(
+        &self,
+        ctx: &MutationContext,
+        accesses: &[(MemoryId, AccessKind)],
+        sampled_at: i64,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        self.meta_store
+            .record_exposure_batch(ctx, accesses, sampled_at)
+    }
+
+    /// Fresh-state legacy feedback and a payload-free receipt in one transaction.
+    pub fn record_legacy_feedback(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        quality: u8,
+        sampled_at: i64,
+        global_multiplier: f64,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.meta_store
+            .record_legacy_feedback(ctx, id, quality, sampled_at, global_multiplier)
     }
 
     pub fn lookup_operation(
@@ -323,7 +401,8 @@ impl RedbStorageEngine {
     /// 6. Opens vector files for all existing namespaces.
     /// 7. Runs startup validation (rebuilds phase index, cleans orphans).
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
-        let ownership = crate::storage::ownership::StoreOwnership::acquire(path.as_ref())?;
+        let ownership =
+            crate::storage::ownership::StoreOwnership::acquire_recovering(path.as_ref())?;
         let db_path = ownership.path.clone();
         std::fs::create_dir_all(&db_path)?;
         let lock_file = crate::storage::ownership::lock_directory(&db_path)?;
@@ -339,6 +418,7 @@ impl RedbStorageEngine {
             for name in ["meta.db", "edges.db", "fulltext.dat"] {
                 crate::storage::validation::require_file(&db_path.join(name))?;
             }
+            crate::storage::validation::preflight_text(&db_path)?;
         }
 
         // Step 2: Open meta.db.
@@ -349,11 +429,31 @@ impl RedbStorageEngine {
 
         // Legacy compaction was checked before opening any canonical file.
         // Step 5: Open fulltext.dat.
-        let text_store = TextStore::open(&db_path.join("fulltext.dat"))?;
+        if !existing {
+            let state = meta_store.control_state()?;
+            let (prepared, id) = TextStore::create_generation(&db_path, state.store_id)?;
+            let descriptor = prepared.seal(state.store_id, id, 2)?;
+            crate::storage::text::generation::write_rejection_gate(&db_path, &descriptor)?;
+            meta_store.select_text_generation(state.committed_generation, &descriptor, &vec![])?;
+        }
+        let selected_text = meta_store.text_selection_for_recovery()?;
+        let text_store = match &selected_text {
+            Some(selected) => TextStore::open_generation(&db_path, selected, true)?,
+            None => TextStore::open(&db_path.join("fulltext.dat"))?,
+        };
+        // Validate canonical text before effects replay or any cleanup.
+        for (_, record) in meta_store.scan_all_for_recovery()? {
+            if record.text_offset != 0 || record.text_length != 0 {
+                text_store.read(TextRef {
+                    file_offset: record.text_offset,
+                    length: record.text_length,
+                })?;
+            }
+        }
 
         // Step 6: Open vector files for each existing namespace.
         let mut vector_manager = VectorManager::new(db_path.clone());
-        let namespaces = meta_store.list_namespaces()?;
+        let namespaces = meta_store.list_namespaces_for_recovery()?;
         for ns in &namespaces {
             validate_namespace_name(&ns.name).map_err(|reason| {
                 StorageError::InvalidNamespaceName {
@@ -379,7 +479,15 @@ impl RedbStorageEngine {
         };
 
         // Step 7: Startup validation.
+        engine.recover_pending_effects()?;
         engine.startup_validation()?;
+        if let Some(selected) = selected_text {
+            if let Err(error) =
+                crate::storage::text::generation::cleanup_orphans(&engine.db_path, &selected)
+            {
+                tracing::warn!(%error, "text orphan cleanup pending");
+            }
+        }
 
         Ok(engine)
     }
@@ -845,43 +953,57 @@ impl RedbStorageEngine {
             "Purging namespace (destructive, irreversible)"
         );
 
-        // 1. Records. This is the pass that reaches tombstones.
-        let records = match self
+        let victims = self
             .meta_store
-            .purge_namespace_records(namespace_id, PURGE_CHUNK_SIZE)
-        {
-            Ok(records) => records,
-            Err(partial) => {
-                tracing::error!(
-                    namespace = %config.name,
-                    destroyed = partial.destroyed.len(),
-                    error = %partial.source,
-                    "Namespace purge failed part-way; the records it had already \
-                     committed are permanently gone"
-                );
-                return Err(NamespacePurgeError {
-                    destroyed: partial.destroyed,
-                    source: partial.source,
-                });
+            .scan_all()
+            .map_err(NamespacePurgeError::nothing_destroyed)?;
+        let ids: Vec<_> = victims
+            .iter()
+            .filter(|(_, r)| r.namespace_id == namespace_id.get())
+            .map(|(id, _)| *id)
+            .collect();
+        let mut records = Vec::new();
+        let mut edges_removed = 0;
+        let mut peer_counts = std::collections::HashMap::new();
+        for chunk in ids.chunks(PURGE_CHUNK_SIZE) {
+            let result = (|| {
+                let guard = self.meta_store.mutation_guard()?;
+                let result = self.meta_store.commit_graph_effects(
+                    &guard,
+                    namespace_id,
+                    &self.edge_store.load_all_edges()?,
+                    &[],
+                    chunk,
+                    true,
+                    false,
+                )?;
+                // Preserve known committed removals even if materialization fails.
+                records.extend(result.removed);
+                edges_removed += result.edges_removed;
+                peer_counts.extend(result.peer_counts);
+                effects::apply_pending(
+                    &self.meta_store,
+                    &self.edge_store,
+                    Some(&mut self.vector_manager),
+                )
+                .map_err(|source| StorageError::CommittedEffectsPending {
+                    operation_id: result.receipt.operation_id,
+                    source: Box::new(source),
+                })
+            })();
+            if let Err(source) = result {
+                return Err(NamespacePurgeError::partial(records, source));
             }
-        };
-
+        }
+        let peer_edge_counts = peer_counts
+            .into_iter()
+            .filter(|(id, _)| !ids.contains(id))
+            .collect();
         let live_removed = records
             .iter()
             .filter(|(_, r)| r.phase != DecayPhase::Tombstone)
             .count();
         let tombstones_removed = records.len() - live_removed;
-
-        // From here on every record in `records` is already destroyed,
-        // so any failure hands them back rather than dropping them.
-        // 2. Edges. `remove_all_edges` covers both directions, so an
-        //    edge from a surviving memory into a purged one goes too —
-        //    and the survivor's cached outgoing count has to follow it.
-        let ids: Vec<MemoryId> = records.iter().map(|(id, _)| *id).collect();
-        let (edges_removed, peer_edge_counts) = match self.remove_edges_and_repair_peers(&ids) {
-            Ok(pair) => pair,
-            Err(e) => return Err(NamespacePurgeError::partial(records, e)),
-        };
 
         // 3. Configuration row. Point of no return.
         if let Err(e) = self.meta_store.delete_namespace(namespace_id) {
@@ -936,40 +1058,6 @@ impl RedbStorageEngine {
     /// centrality and cache weight. Cross-namespace survivors are the
     /// visible case — a namespace purge is the one operation that
     /// removes edges from memories it is not deleting.
-    fn remove_edges_and_repair_peers(
-        &self,
-        ids: &[MemoryId],
-    ) -> Result<(usize, Vec<(MemoryId, u16)>), StorageError> {
-        let doomed: HashSet<MemoryId> = ids.iter().copied().collect();
-        let mut lost: HashMap<MemoryId, u16> = HashMap::new();
-        let mut edges_removed = 0usize;
-
-        for id in ids {
-            // Read before removing: these are the memories whose
-            // OUTGOING edge is about to vanish. A source that is itself
-            // doomed needs no repair — its record is going too.
-            for (source, _) in self.edge_store.get_incoming(*id)? {
-                if !doomed.contains(&source) {
-                    let entry = lost.entry(source).or_insert(0);
-                    *entry = entry.saturating_add(1);
-                }
-            }
-            edges_removed += self.edge_store.remove_all_edges(*id)?;
-        }
-
-        let mut repaired = Vec::with_capacity(lost.len());
-        for (peer, n) in lost {
-            let Some(record) = self.meta_store.get(peer)? else {
-                continue;
-            };
-            let new_count = record.edge_count.saturating_sub(n);
-            self.meta_store.update_edge_count(peer, new_count)?;
-            repaired.push((peer, new_count));
-        }
-
-        Ok((edges_removed, repaired))
-    }
-
     /// Resolve a namespace name to its directory under `db_path`,
     /// refusing anything that is not exactly one ordinary path
     /// component.
@@ -1158,6 +1246,13 @@ impl StorageEngine for RedbStorageEngine {
         embedding: &[f32],
         full_text: Option<&str>,
     ) -> Result<(), StorageError> {
+        self.ensure_available()?;
+        if record.version != 1 || record.schema.is_some() {
+            return Err(StorageError::RecoveryRequired(
+                "schema-v2 records require participating writers".into(),
+            ));
+        }
+        record.encode()?;
         // Reject identity conflicts before allocating or appending payloads.
         if record.id != *id.as_bytes() || record.namespace_id != namespace_id.get() {
             return Err(StorageError::InvalidMutation(
@@ -1175,6 +1270,7 @@ impl StorageEngine for RedbStorageEngine {
         self.meta_store
             .get_namespace(namespace_id)?
             .ok_or(StorageError::NamespaceNotFound(namespace_id.get()))?;
+        self.meta_store.ensure_uuid_not_terminal(id)?;
         // 1. Allocate vector slot and write embedding.
         let vector_store = self
             .vector_manager
@@ -1214,6 +1310,7 @@ impl StorageEngine for RedbStorageEngine {
     }
 
     fn get_record(&self, id: MemoryId) -> Result<Option<DiskRecord>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.get(id)
     }
 
@@ -1222,6 +1319,7 @@ impl StorageEngine for RedbStorageEngine {
         namespace_id: NamespaceId,
         slot: u32,
     ) -> Result<Option<Vec<f32>>, StorageError> {
+        self.ensure_available()?;
         let vector_store = self
             .vector_manager
             .get(namespace_id)
@@ -1230,6 +1328,7 @@ impl StorageEngine for RedbStorageEngine {
     }
 
     fn get_text(&self, text_ref: TextRef) -> Result<Option<String>, StorageError> {
+        self.ensure_available()?;
         if !text_ref.is_some() {
             return Ok(None);
         }
@@ -1237,27 +1336,13 @@ impl StorageEngine for RedbStorageEngine {
     }
 
     fn delete_memory(&mut self, id: MemoryId) -> Result<Option<DiskRecord>, StorageError> {
-        // 1. Delete from meta.db (also removes secondary indexes).
-        let record = match self.meta_store.delete(id)? {
-            Some(r) => r,
-            None => return Ok(None),
-        };
-
-        // Tombstones retain legacy slot numbers, but no longer own them.
-        if record.phase != DecayPhase::Tombstone {
-            self.free_vector_slot(NamespaceId::new(record.namespace_id), record.vector_slot)?;
-        }
-
-        // 3. Remove all edges involving this memory, repairing the
-        //    outgoing count of every survivor that pointed at it.
-        self.remove_edges_and_repair_peers(&[id])?;
-
-        // 4. Text.log space is reclaimed lazily via compaction.
-
-        Ok(Some(record))
+        Ok(self
+            .delete_memory_with_edges(id, &[])?
+            .and_then(|r| r.removed.into_iter().next().map(|(_, r)| r)))
     }
 
     fn tombstone_memory(&self, id: MemoryId) -> Result<(), StorageError> {
+        self.ensure_available()?;
         self.meta_store.tombstone(id)
     }
 
@@ -1272,6 +1357,7 @@ impl StorageEngine for RedbStorageEngine {
         stability: f32,
         is_permastore: bool,
     ) -> Result<(), StorageError> {
+        self.ensure_available()?;
         self.meta_store.update_decay_state(
             id,
             phase,
@@ -1282,15 +1368,44 @@ impl StorageEngine for RedbStorageEngine {
         )
     }
 
+    fn apply_legacy_feedback(
+        &self,
+        id: MemoryId,
+        expected: &DiskRecord,
+        namespace: &NamespaceConfig,
+        plan: &crate::decay::lifecycle::FeedbackPlan,
+    ) -> Result<bool, StorageError> {
+        self.ensure_available()?;
+        self.meta_store
+            .apply_legacy_feedback(id, expected, namespace, plan)
+    }
+
+    fn apply_legacy_decay(
+        &self,
+        id: MemoryId,
+        expected: &DiskRecord,
+        namespace: &NamespaceConfig,
+        phase: DecayPhase,
+        strength: f32,
+        decay_strength: f32,
+    ) -> Result<bool, StorageError> {
+        self.ensure_available()?;
+        self.meta_store
+            .apply_legacy_decay(id, expected, namespace, phase, strength, decay_strength)
+    }
+
     fn strip_full_text(&self, id: MemoryId) -> Result<(), StorageError> {
+        self.ensure_available()?;
         self.meta_store.strip_full_text(id)
     }
 
     fn strip_summary(&self, id: MemoryId) -> Result<(), StorageError> {
+        self.ensure_available()?;
         self.meta_store.strip_summary(id)
     }
 
     fn ids_in_phase(&self, phase: DecayPhase) -> Result<Vec<MemoryId>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.ids_in_phase(phase)
     }
 
@@ -1298,6 +1413,7 @@ impl StorageEngine for RedbStorageEngine {
         &self,
         phase: DecayPhase,
     ) -> Result<Vec<(MemoryId, DiskRecord)>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.scan_phase_records(phase)
     }
 
@@ -1305,6 +1421,7 @@ impl StorageEngine for RedbStorageEngine {
         &self,
         compute_new_state: &dyn Fn(&DiskRecord) -> Option<DiskRecord>,
     ) -> Result<usize, StorageError> {
+        self.ensure_available()?;
         self.meta_store.decay_sweep(compute_new_state)
     }
 
@@ -1316,6 +1433,7 @@ impl StorageEngine for RedbStorageEngine {
         timestamp: i64,
         kind: AccessKind,
     ) -> Result<(), StorageError> {
+        self.ensure_available()?;
         self.meta_store.update_access(id, timestamp, kind)
     }
 
@@ -1330,18 +1448,27 @@ impl StorageEngine for RedbStorageEngine {
         auto_created: bool,
         created_at: u64,
     ) -> Result<(), StorageError> {
-        self.edge_store
-            .add_edge(source, target, edge_type, weight, auto_created, created_at)
+        self.ensure_available()?;
+        self.batch_add_edges(&[PersistedEdge {
+            source,
+            target,
+            edge_type,
+            weight,
+            auto_created,
+            created_at,
+        }])
     }
 
     fn batch_add_edges(&self, edges: &[PersistedEdge]) -> Result<(), StorageError> {
-        self.edge_store.batch_add_edges(edges)
+        self.ensure_available()?;
+        self.put_edges_with_effects(edges).map(|_| ())
     }
 
     fn get_outgoing_edges(
         &self,
         source: MemoryId,
     ) -> Result<Vec<(MemoryId, EdgeType)>, StorageError> {
+        self.ensure_available()?;
         self.edge_store.get_outgoing(source)
     }
 
@@ -1349,14 +1476,36 @@ impl StorageEngine for RedbStorageEngine {
         &self,
         target: MemoryId,
     ) -> Result<Vec<(MemoryId, EdgeType)>, StorageError> {
+        self.ensure_available()?;
         self.edge_store.get_incoming(target)
     }
 
     fn remove_all_edges(&self, memory_id: MemoryId) -> Result<usize, StorageError> {
-        self.edge_store.remove_all_edges(memory_id)
+        self.ensure_available()?;
+        let guard = self.meta_store.mutation_guard()?;
+        let Some(record) = self.meta_store.get(memory_id)? else {
+            return Ok(0);
+        };
+        let result = self.meta_store.commit_graph_effects(
+            &guard,
+            NamespaceId::new(record.namespace_id),
+            &self.edge_store.load_all_edges()?,
+            &[],
+            &[memory_id],
+            false,
+            false,
+        )?;
+        effects::apply_pending(&self.meta_store, &self.edge_store, None).map_err(|source| {
+            StorageError::CommittedEffectsPending {
+                operation_id: result.receipt.operation_id,
+                source: Box::new(source),
+            }
+        })?;
+        Ok(result.edges_removed)
     }
 
     fn load_all_edges(&self) -> Result<Vec<PersistedEdge>, StorageError> {
+        self.ensure_available()?;
         self.edge_store.load_all_edges()
     }
 
@@ -1377,6 +1526,7 @@ impl StorageEngine for RedbStorageEngine {
     /// by another store or a full disk, and both wedge the boot in
     /// exactly the same way.
     fn create_namespace(&mut self, config: &NamespaceConfig) -> Result<NamespaceId, StorageError> {
+        self.ensure_available()?;
         validate_namespace_name(&config.name).map_err(|e| StorageError::InvalidNamespaceName {
             name: config.name.clone(),
             reason: e.to_string(),
@@ -1406,58 +1556,65 @@ impl StorageEngine for RedbStorageEngine {
     }
 
     fn list_namespaces(&self) -> Result<Vec<NamespaceConfig>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.list_namespaces()
     }
 
     fn get_namespace(&self, id: NamespaceId) -> Result<Option<NamespaceConfig>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.get_namespace(id)
     }
 
     fn get_namespace_by_name(&self, name: &str) -> Result<Option<NamespaceConfig>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.get_namespace_by_name(name)
     }
 
     // ── Text Compaction ─────────────────────────────────────────────
 
     fn compact_text_log(&mut self) -> Result<CompactionResult, StorageError> {
-        // ponytail: keep the append-only log until metadata can atomically
-        // select a durable text generation. Marker ordering cannot do this.
-        Err(StorageError::RecoveryRequired(
-            "text compaction is disabled until generation-selected recovery is implemented".into(),
-        ))
+        self.ensure_available()?;
+        self.compact_text_at(|_| Ok(()))
     }
 
     // ── Tags ────────────────────────────────────────────────────────
 
     fn memories_with_tag(&self, tag: &str) -> Result<Vec<MemoryId>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.memories_with_tag(tag)
     }
 
     fn list_tags(&self) -> Result<Vec<(String, u64)>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.list_tags()
     }
 
     // ── Edge Count ──────────────────────────────────────────────────
 
     fn update_edge_count(&self, id: MemoryId, edge_count: u16) -> Result<(), StorageError> {
+        self.ensure_available()?;
         self.meta_store.update_edge_count(id, edge_count)
     }
 
     // ── Bulk / Diagnostic ───────────────────────────────────────────
 
     fn scan_all(&self) -> Result<Vec<(MemoryId, DiskRecord)>, StorageError> {
+        self.ensure_available()?;
         self.meta_store.scan_all()
     }
 
     fn count(&self) -> Result<u64, StorageError> {
+        self.ensure_available()?;
         self.meta_store.count()
     }
 
     fn count_active(&self) -> Result<u64, StorageError> {
+        self.ensure_available()?;
         self.meta_store.count_active()
     }
 
     fn exists(&self, id: MemoryId) -> Result<bool, StorageError> {
+        self.ensure_available()?;
         self.meta_store.exists(id)
     }
 
@@ -1466,6 +1623,7 @@ impl StorageEngine for RedbStorageEngine {
         namespace_id: NamespaceId,
         slot: u32,
     ) -> Result<(), StorageError> {
+        self.ensure_available()?;
         // Legacy callers carry no allocation epoch. Reject any release of a
         // currently owned slot, including delayed releases after slot reuse.
         // ponytail: O(n) guard until canonical vector_owners replaces the scan.
@@ -1486,6 +1644,7 @@ impl StorageEngine for RedbStorageEngine {
     }
 
     fn sync(&mut self) -> Result<(), StorageError> {
+        self.ensure_available()?;
         // Sync fulltext.dat.
         self.text_store.sync_data()?;
 
@@ -1498,6 +1657,7 @@ impl StorageEngine for RedbStorageEngine {
     }
 
     fn persist_phase_index(&self) -> Result<(), StorageError> {
+        self.ensure_available()?;
         self.meta_store.persist_phase_index()
     }
 }
@@ -1510,6 +1670,402 @@ impl StorageEngine for RedbStorageEngine {
 mod tests {
     use super::*;
     use crate::model::EdgeType;
+
+    #[test]
+    fn effects_application_failure_returns_committed_id_and_denies_until_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "effects");
+        let a = add_memory(&mut engine, ns);
+        let b = add_memory(&mut engine, ns);
+        let store_id = engine.control_state().unwrap().store_id;
+        engine
+            .meta_store
+            .fail_effect_application
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let err = engine
+            .add_edge(a, b, EdgeType::Associative, 0.5, false, 10)
+            .unwrap_err();
+        let StorageError::CommittedEffectsPending { operation_id, .. } = err else {
+            panic!("missing commit evidence: {err}")
+        };
+        assert!(engine.get_record(a).is_err());
+        assert!(engine.delete_memory(a).is_err());
+        assert!(
+            engine
+                .meta_store
+                .update_access(a, 100, AccessKind::DirectRetrieval)
+                .is_err()
+        );
+        drop(engine);
+        let engine = open_engine(dir.path());
+        assert_eq!(engine.get_record(a).unwrap().unwrap().edge_count, 1);
+        assert_eq!(engine.load_all_edges().unwrap().len(), 1);
+        assert_eq!(
+            engine
+                .lookup_operation(store_id, MutationScope::Namespace(ns), operation_id)
+                .unwrap()
+                .unwrap()
+                .operation_id,
+            operation_id
+        );
+    }
+
+    #[test]
+    fn effects_process_child() {
+        let Ok(path) = std::env::var("RECALLD_TEST_EFFECT_STORE") else {
+            return;
+        };
+        let mut engine = open_engine(Path::new(&path));
+        let records = engine.scan_all().unwrap();
+        let [a, b, c] = records
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let bridge = PersistedEdge {
+            source: a,
+            target: c,
+            edge_type: EdgeType::ParentChild,
+            weight: 0.25,
+            auto_created: true,
+            created_at: 111,
+        };
+        if std::env::var_os("RECALLD_TEST_EFFECT_GRAPH").is_some() {
+            let mut graph = crate::graph::RelationshipGraph::new();
+            for (id, record) in &records {
+                graph
+                    .add_node(
+                        *id,
+                        NamespaceId::new(record.namespace_id),
+                        record.phase,
+                        record.decay_strength,
+                        record.vector_slot,
+                    )
+                    .unwrap();
+            }
+            crate::graph::rebuild_from_storage(
+                &mut graph,
+                engine.load_all_edges().unwrap().into_iter(),
+            );
+            let graph = std::sync::Arc::new(tokio::sync::RwLock::new(graph));
+            let storage = std::sync::Arc::new(std::sync::RwLock::new(engine));
+            let cache = std::sync::Arc::new(crate::cache::CacheManager::new(
+                crate::cache::CacheConfig::default(),
+                None,
+            ));
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    crate::graph::autolink::persist_edges(a, &[bridge], &graph, &storage, &cache)
+                        .await
+                        .unwrap();
+                });
+            panic!("graph crash boundary was not reached");
+        }
+        engine.delete_memory_with_edges(b, &[bridge]).unwrap();
+        panic!("crash boundary was not reached");
+    }
+
+    #[test]
+    fn effects_crash_reopen_replays_before_cleanup_once_logically() {
+        for point in [
+            "before_metadata_commit",
+            "after_metadata_commit",
+            "before_edge_commit",
+            "after_edge_commit",
+            "after_vector_sync",
+            "after_canonical_ack",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut engine = open_engine(dir.path());
+            let ns = make_namespace(&mut engine, "effects");
+            let a = add_memory(&mut engine, ns);
+            let b = add_memory(&mut engine, ns);
+            let c = add_memory(&mut engine, ns);
+            engine
+                .add_edge(a, b, EdgeType::ParentChild, 0.5, false, 5)
+                .unwrap();
+            engine
+                .add_edge(b, c, EdgeType::ParentChild, 0.5, false, 6)
+                .unwrap();
+            engine.meta_store.acknowledge_rebuilt_effects().unwrap();
+            let before = engine.control_state().unwrap();
+            let slot = engine.get_record(b).unwrap().unwrap().vector_slot;
+            drop(engine);
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::engine::tests::effects_process_child",
+                    "--nocapture",
+                ])
+                .env("RECALLD_TEST_EFFECT_STORE", dir.path())
+                .env("RECALLD_TEST_EFFECT_CRASH", point)
+                .output()
+                .unwrap();
+            assert_eq!(
+                child.status.code(),
+                Some(91),
+                "{point}: {}",
+                String::from_utf8_lossy(&child.stderr)
+            );
+            let committed = point != "before_metadata_commit";
+            let canonical_pending = committed && point != "after_canonical_ack";
+            {
+                let meta = MetadataStore::open(&dir.path().join("meta.db")).unwrap();
+                assert_eq!(meta.get(b).is_err(), canonical_pending, "{point}");
+                assert_eq!(
+                    matches!(
+                        meta.records_in_namespace(ns),
+                        Err(StorageError::RecoveryRequired(_))
+                    ),
+                    canonical_pending,
+                    "namespace read at {point}"
+                );
+            }
+            if canonical_pending {
+                assert!(
+                    crate::storage::validation::validate_existing(dir.path()).is_err(),
+                    "backup must refuse pending {point}"
+                );
+            }
+            let mut op = None;
+            for _ in 0..2 {
+                let engine = open_engine(dir.path());
+                assert_eq!(
+                    engine.get_record(b).unwrap().is_none(),
+                    committed,
+                    "{point}"
+                );
+                let edges = engine.load_all_edges().unwrap();
+                assert_eq!(edges.len(), if committed { 1 } else { 2 });
+                assert_eq!(engine.get_record(a).unwrap().unwrap().edge_count, 1);
+                assert_eq!(
+                    engine.vector_manager.get(ns).unwrap().is_free(slot),
+                    committed
+                );
+                let expected = if committed {
+                    before.committed_generation.next().unwrap()
+                } else {
+                    before.committed_generation
+                };
+                assert_eq!(
+                    engine.control_state().unwrap().committed_generation,
+                    expected
+                );
+                let pending = engine.meta_store.pending_effects().unwrap();
+                if committed {
+                    assert_eq!(
+                        edges[0],
+                        PersistedEdge {
+                            source: a,
+                            target: c,
+                            edge_type: EdgeType::ParentChild,
+                            weight: 0.25,
+                            auto_created: true,
+                            created_at: 111
+                        }
+                    );
+                    assert_eq!(pending.len(), 1);
+                    assert!(pending[0].canonical_applied);
+                    let id = pending[0].receipt.operation_id;
+                    assert_eq!(
+                        engine
+                            .lookup_operation(before.store_id, MutationScope::Namespace(ns), id)
+                            .unwrap(),
+                        Some(pending[0].receipt.clone())
+                    );
+                    if let Some(previous) = op {
+                        assert_eq!(previous, id);
+                    }
+                    op = Some(id);
+                    assert!(engine.meta_store.effects_stamp().is_err());
+                } else {
+                    assert!(pending.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn effects_graph_publication_crashes_remain_durable_and_unavailable() {
+        for point in ["before_graph_publish", "before_derived_ack"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut engine = open_engine(dir.path());
+            let ns = make_namespace(&mut engine, "effects");
+            let a = add_memory(&mut engine, ns);
+            let b = add_memory(&mut engine, ns);
+            let c = add_memory(&mut engine, ns);
+            engine
+                .add_edge(a, b, EdgeType::ParentChild, 0.5, false, 5)
+                .unwrap();
+            engine
+                .add_edge(b, c, EdgeType::ParentChild, 0.5, false, 6)
+                .unwrap();
+            engine.meta_store.acknowledge_rebuilt_effects().unwrap();
+            let before = engine.control_state().unwrap();
+            drop(engine);
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::engine::tests::effects_process_child",
+                    "--nocapture",
+                ])
+                .env("RECALLD_TEST_EFFECT_STORE", dir.path())
+                .env("RECALLD_TEST_EFFECT_CRASH", point)
+                .env("RECALLD_TEST_EFFECT_GRAPH", "1")
+                .output()
+                .unwrap();
+            assert_eq!(
+                child.status.code(),
+                Some(91),
+                "{point}: {}",
+                String::from_utf8_lossy(&child.stderr)
+            );
+            for _ in 0..2 {
+                let engine = open_engine(dir.path());
+                assert_eq!(engine.load_all_edges().unwrap().len(), 3);
+                assert_eq!(engine.get_record(a).unwrap().unwrap().edge_count, 2);
+                assert_eq!(
+                    engine.control_state().unwrap().committed_generation,
+                    before.committed_generation.next().unwrap()
+                );
+                assert_eq!(engine.meta_store.pending_effects().unwrap().len(), 1);
+                assert!(engine.meta_store.effects_stamp().is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn effects_final_guard_checks_phase_and_supersedes_structure() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "effects");
+        let old = add_memory(&mut engine, ns);
+        let newer = add_memory(&mut engine, ns);
+        let newest = add_memory(&mut engine, ns);
+        engine.tombstone_memory(old).unwrap();
+        let before = engine.control_state().unwrap();
+        for kind in [EdgeType::Associative, EdgeType::Entity, EdgeType::Temporal] {
+            assert!(engine.add_edge(newer, old, kind, 0.5, true, 0).is_err());
+        }
+        assert_eq!(engine.control_state().unwrap(), before);
+        // Legacy structural correction keeps a content-free old endpoint.
+        engine
+            .add_edge(newer, old, EdgeType::Supersedes, 1.0, false, 1)
+            .unwrap();
+        let before = engine.control_state().unwrap();
+        assert!(
+            engine
+                .add_edge(newest, old, EdgeType::Supersedes, 1.0, false, 2)
+                .is_err()
+        );
+        assert_eq!(engine.control_state().unwrap(), before);
+        engine
+            .add_edge(newest, newer, EdgeType::Supersedes, 1.0, false, 3)
+            .unwrap();
+        assert!(
+            engine
+                .add_edge(newer, newest, EdgeType::Supersedes, 1.0, false, 4)
+                .is_err()
+        );
+        engine
+            .add_edge(old, newest, EdgeType::ParentChild, 1.0, false, 5)
+            .unwrap();
+        assert_eq!(
+            engine.get_record(old).unwrap().unwrap().phase,
+            DecayPhase::Tombstone
+        );
+        assert!(engine.get_record(old).unwrap().unwrap().summary.is_empty());
+    }
+
+    #[test]
+    fn effects_prevalidation_is_atomic_and_counts_are_absolute() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "same");
+        let other = make_namespace(&mut engine, "other");
+        let a = add_memory(&mut engine, ns);
+        let b = add_memory(&mut engine, ns);
+        let c = add_memory(&mut engine, other);
+        let before = engine.control_state().unwrap();
+        let valid = PersistedEdge {
+            source: a,
+            target: b,
+            edge_type: EdgeType::Associative,
+            weight: 0.5,
+            auto_created: false,
+            created_at: 1,
+        };
+        let invalid = PersistedEdge {
+            target: c,
+            ..valid.clone()
+        };
+        assert!(engine.batch_add_edges(&[valid.clone(), invalid]).is_err());
+        assert_eq!(engine.control_state().unwrap(), before);
+        assert_eq!(engine.get_record(a).unwrap().unwrap().edge_count, 0);
+        assert!(engine.load_all_edges().unwrap().is_empty());
+        engine
+            .batch_add_edges(std::slice::from_ref(&valid))
+            .unwrap();
+        engine.batch_add_edges(&[valid]).unwrap();
+        assert_eq!(engine.get_record(a).unwrap().unwrap().edge_count, 1);
+        engine.remove_all_edges(b).unwrap();
+        assert_eq!(engine.get_record(a).unwrap().unwrap().edge_count, 0);
+        assert!(engine.meta_store.effects_stamp().is_err());
+        engine.meta_store.acknowledge_rebuilt_effects().unwrap();
+        assert!(engine.meta_store.effects_stamp().is_ok());
+        // The historical raw store admitted self edges. Removing one must not
+        // commit an outbox row that rejects its own cleanup during replay.
+        engine
+            .edge_store
+            .add_edge(a, a, EdgeType::Associative, 0.5, false, 0)
+            .unwrap();
+        engine.delete_memory(a).unwrap();
+        assert!(engine.load_all_edges().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unavailable_handle_blocks_payloads_metadata_and_writes_until_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "gate");
+        let id = add_memory(&mut engine, ns);
+        let record = engine.get_record(id).unwrap().unwrap();
+        engine.mark_unavailable();
+        assert!(engine.get_record(id).is_err());
+        assert!(engine.meta_store().get(id).is_err());
+        assert!(matches!(
+            engine.meta_store().records_in_namespace(ns),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        assert!(
+            engine
+                .get_text(TextRef {
+                    file_offset: record.text_offset,
+                    length: record.text_length
+                })
+                .is_err()
+        );
+        assert!(engine.get_vector(ns, record.vector_slot).is_err());
+        assert!(engine.load_all_edges().is_err());
+        assert!(engine.delete_memory(id).is_err());
+        assert!(engine.meta_store().update_edge_count(id, 9).is_err());
+        assert!(engine.sync().is_err());
+        drop(engine);
+        let engine = open_engine(dir.path());
+        assert_eq!(
+            engine.meta_store().records_in_namespace(ns).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            engine.get_record(id).unwrap().unwrap().to_bytes(),
+            record.to_bytes()
+        );
+    }
 
     #[test]
     fn containment_rejects_insert_identity_conflicts_before_payload_writes() {
@@ -1611,11 +2167,11 @@ mod tests {
     }
 
     #[test]
-    fn containment_disables_compaction_and_preserves_ambiguous_legacy_files() {
+    fn containment_preserves_ambiguous_legacy_files() {
         let dir = tempfile::tempdir().unwrap();
         let mut engine = open_engine(dir.path());
         let text = std::fs::read(dir.path().join("fulltext.dat")).unwrap();
-        assert!(engine.compact_text_log().is_err());
+        engine.compact_text_log().unwrap();
         assert_eq!(
             std::fs::read(dir.path().join("fulltext.dat")).unwrap(),
             text
@@ -1700,6 +2256,7 @@ mod tests {
     fn add_memory(engine: &mut RedbStorageEngine, namespace_id: NamespaceId) -> MemoryId {
         let id = MemoryId::new();
         let mut record = DiskRecord {
+            schema: None,
             version: DiskRecord::CURRENT_VERSION,
             id: *id.as_bytes(),
             namespace_id: namespace_id.get(),
@@ -1860,6 +2417,7 @@ mod tests {
         let survivor = add_memory(&mut engine, keep);
         let victim = add_memory(&mut engine, doomed);
         engine
+            .edge_store
             .add_edge(survivor, victim, EdgeType::Associative, 0.5, false, 0)
             .expect("add edge");
 
@@ -1935,7 +2493,18 @@ mod tests {
         // now fails closed instead (covered by the missing-payload regression).
         let older = tempfile::tempdir().unwrap();
         drop(open_engine(older.path()));
-        std::fs::copy(older.path().join("meta.db"), dir.path().join("meta.db")).unwrap();
+        // A selected text generation is part of the older catalog snapshot.
+        for entry in std::fs::read_dir(older.path()).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() == "meta.db"
+                || entry.file_name() == "fulltext.dat"
+                || crate::storage::metadata::text_generation::is_generation_filename(
+                    &entry.file_name().to_string_lossy(),
+                )
+            {
+                std::fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
+            }
+        }
 
         {
             let _engine = open_engine(dir.path());
@@ -2113,6 +2682,7 @@ mod tests {
         // Two edges into the doomed namespace and one that stays.
         for target in [doomed_a, doomed_b, other_survivor] {
             engine
+                .edge_store
                 .add_edge(survivor, target, EdgeType::Associative, 0.5, false, 0)
                 .expect("add edge");
         }
@@ -2458,5 +3028,174 @@ mod tests {
         db_path.join("meta.db").exists()
             && db_path.join("edges.db").exists()
             && db_path.join("fulltext.dat").exists()
+    }
+    fn independent_join_corrupt_peer_plan(path: &Path, applied: bool) {
+        use crate::storage::metadata::effects::{EFFECTS, PendingEffects};
+        use redb::ReadableTable;
+        let db = redb::Database::open(path.join("meta.db")).unwrap();
+        let tx = db.begin_write().unwrap();
+        {
+            let mut table = tx.open_table(EFFECTS).unwrap();
+            let (key, mut effect) = {
+                let row = table.iter().unwrap().next().unwrap().unwrap();
+                (
+                    row.0.value().to_vec(),
+                    crate::storage::control::decode::<PendingEffects>(row.1.value()).unwrap(),
+                )
+            };
+            assert!(!effect.peer_counts.is_empty());
+            effect.peer_counts[0].1 += 1;
+            effect.canonical_applied = applied;
+            table
+                .insert(
+                    key.as_slice(),
+                    crate::storage::control::encode(&effect).unwrap().as_slice(),
+                )
+                .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn independent_join_recovery_plan_preflight_preserves_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "review");
+        let a = add_memory(&mut engine, ns);
+        let b = add_memory(&mut engine, ns);
+        engine
+            .meta_store
+            .fail_effect_application
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(
+            engine.add_edge(a, b, EdgeType::Associative, 0.5, false, 10),
+            Err(StorageError::CommittedEffectsPending { .. })
+        ));
+        drop(engine);
+        independent_join_corrupt_peer_plan(dir.path(), false);
+        let before = std::fs::read(dir.path().join("meta.db")).unwrap();
+        let result = RedbStorageEngine::open(dir.path());
+        assert!(result.is_err());
+        eprintln!("corrupt-plan open rejected: {:?}", result.err());
+        let after = std::fs::read(dir.path().join("meta.db")).unwrap();
+        assert!(
+            before == after,
+            "malformed pending plan changed original metadata before rejection"
+        );
+    }
+
+    #[test]
+    fn independent_join_ledger_receipt_snapshot_and_pending_barrier() {
+        use crate::storage::offline_snapshot::OfflineSnapshot;
+        use crate::storage::schema_migration::{MigrationOptions, inspect_schema, migrate_schema};
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "review");
+        let a = add_memory(&mut engine, ns);
+        let b = add_memory(&mut engine, ns);
+        engine
+            .add_edge(a, b, EdgeType::Associative, 0.5, false, 10)
+            .unwrap();
+        engine.meta_store.acknowledge_rebuilt_effects().unwrap();
+        let before = engine.control_state().unwrap();
+        let effect = engine.delete_memory_with_edges(a, &[]).unwrap().unwrap();
+        let ledger = engine.meta_store.removal_ledger_export().unwrap();
+        let entry = ledger
+            .entries
+            .iter()
+            .find(|e| e.memory_uuid == a.into_inner())
+            .unwrap();
+        assert_eq!(entry.operation_id, effect.receipt.operation_id);
+        assert_eq!(entry.origin_lineage, effect.receipt.store_id);
+        assert_eq!(entry.generation, effect.receipt.committed_generation);
+        assert_eq!(
+            entry.generation,
+            before.committed_generation.next().unwrap()
+        );
+        let expected = engine.control_state().unwrap().generation_ref();
+        drop(engine);
+        let files = crate::storage::validation::canonical_files(dir.path()).unwrap();
+        let bytes: Vec<_> = files.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        let target_root = tempfile::tempdir().unwrap();
+        let target = target_root.path().join("schema");
+        let opts = MigrationOptions {
+            migration_now: 1234,
+            expected_source: expected,
+            attestations: vec![],
+        };
+        migrate_schema(dir.path(), &target, &opts).unwrap();
+        let view = OfflineSnapshot::open(&target).unwrap();
+        assert_eq!(view.control().generation_ref(), expected);
+        assert!(view.record(a).unwrap().is_none());
+        assert!(view.record(b).unwrap().is_some());
+        let read = view.metadata.begin_read().unwrap();
+        let copied =
+            crate::storage::metadata::removal_ledger::read_export(&read, Some(view.control()))
+                .unwrap()
+                .unwrap();
+        assert_eq!(copied, ledger);
+        let pending = crate::storage::metadata::effects::validate_existing(&read).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].receipt, effect.receipt);
+        assert!(pending[0].canonical_applied);
+        drop(read);
+        drop(view);
+        assert!(inspect_schema(&target).is_ok());
+        assert_eq!(
+            files
+                .iter()
+                .map(|p| std::fs::read(p).unwrap())
+                .collect::<Vec<_>>(),
+            bytes
+        );
+        // Flip only the pending status in a separate synthetic fixture: offline consumers must refuse replay.
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "review");
+        let a = add_memory(&mut engine, ns);
+        let b = add_memory(&mut engine, ns);
+        engine
+            .meta_store
+            .fail_effect_application
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            engine
+                .add_edge(a, b, EdgeType::Associative, 0.5, false, 10)
+                .is_err()
+        );
+        drop(engine);
+        let before = std::fs::read(dir.path().join("meta.db")).unwrap();
+        assert!(inspect_schema(dir.path()).is_err());
+        assert!(OfflineSnapshot::open(dir.path()).is_err());
+        assert!(migrate_schema(dir.path(), &target_root.path().join("blocked"), &opts).is_err());
+        assert!(!target_root.path().join("blocked").exists());
+        assert_eq!(std::fs::read(dir.path().join("meta.db")).unwrap(), before);
+    }
+
+    #[test]
+    fn preflight_preserves_valid_historical_applied_peer_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = open_engine(dir.path());
+        let ns = make_namespace(&mut engine, "history");
+        let a = add_memory(&mut engine, ns);
+        let b = add_memory(&mut engine, ns);
+        let c = add_memory(&mut engine, ns);
+        engine
+            .add_edge(a, b, EdgeType::Associative, 0.5, false, 10)
+            .unwrap();
+        engine
+            .add_edge(a, c, EdgeType::Associative, 0.5, false, 11)
+            .unwrap();
+        let effects = engine.meta_store.pending_effects().unwrap();
+        assert_eq!(effects.len(), 2);
+        assert!(effects.iter().all(|effect| effect.canonical_applied));
+        assert_eq!(effects[0].peer_counts[0].1, 1);
+        assert_eq!(engine.get_record(a).unwrap().unwrap().edge_count, 2);
+        let control = engine.control_state().unwrap();
+        drop(engine);
+        let reopened = open_engine(dir.path());
+        assert_eq!(reopened.control_state().unwrap(), control);
+        assert_eq!(reopened.get_record(a).unwrap().unwrap().edge_count, 2);
+        assert_eq!(reopened.meta_store.pending_effects().unwrap().len(), 2);
     }
 }

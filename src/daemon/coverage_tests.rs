@@ -36,6 +36,43 @@ async fn indexed_memory(f: &Fixture, phase: crate::model::DecayPhase) -> MemoryI
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scan_coverage_rejects_unavailable_storage_in_both_wire_modes() {
+    let f = Fixture::new();
+    let search = f.search_adapter();
+    // The empty-result fast path must obey the same admission as populated scans.
+    assert!(
+        search
+            .scan_duplicates_with_coverage("default", 0.85, DUPLICATE_SAMPLE_CAP)
+            .await
+            .is_ok()
+    );
+    f.storage.read().unwrap().mark_unavailable();
+    for include_coverage in [false, true] {
+        let unused = StubBridge::default();
+        let result = dispatch(
+            &search,
+            &unused,
+            &unused,
+            &unused,
+            "scan_duplicates",
+            json!({"namespace": "default", "threshold": 0.85,
+                   "maxMemories": DUPLICATE_SAMPLE_CAP, "includeCoverage": include_coverage}),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "unavailable scan returned success: {result:?}"
+        );
+    }
+    let mut bridge = StubBridge::default().into_bridge();
+    bridge.search = Arc::new(search);
+    let result =
+        crate::mcp::tools::dispatch_tool(&bridge, "find_similar_memories", json!({"mode": "scan"}))
+            .await;
+    assert_eq!(result.is_error, Some(true));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn scan_coverage_counts_live_sample_missing_vectors_and_dense_truncation() {
     use crate::model::DecayPhase;
     let f = Fixture::new();

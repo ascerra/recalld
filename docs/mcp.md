@@ -66,6 +66,14 @@ namespace = "my-project"
 
 When recalld starts in MCP mode, it walks up from the current working directory to find the nearest `.recalld.toml`. The `namespace` field sets the default namespace for scoped MCP operations (store, recall, lists, stats, and duplicate scans) in that directory tree. If no `.recalld.toml` is found, the default namespace is `"default"`.
 
+### Optional by-ID namespace assertions
+
+`get_memory`, `reinforce_memory`, `forget_memory`, and single-mode `find_similar_memories` accept an optional `namespace` string. It asserts the namespace of the canonical record; it does not select a different scope. Omission keeps UUID-based scope even when the session default differs. An explicit mismatch (including a nonexistent namespace) fails with `NAMESPACE_MISMATCH` before embedding, access recording, or mutation. Unknown UUIDs remain not found. Null, empty strings, and invalid names are rejected as assertions.
+
+HTTP uses `?namespace=name` on `GET /memories/:id` and `DELETE /memories/:id`, and a JSON `namespace` field on `POST /memories/:id/reinforce` and `POST /similar/:id`. Mismatches return HTTP 409 with error code `NAMESPACE_MISMATCH`.
+
+Daemon forwarding uses dedicated `*_scoped` RPC methods. Combining a namespace assertion with `recordAccess=false` uses `get_memory_scoped_read_only` or `find_similar_scoped_read_only`; these require a namespace and force nonobserving retrieval. Older daemons reject unknown methods, and the client never retries through a weaker method. Existing assertion-only RPCs reject `recordAccess` fields, and existing read-only RPCs reject namespace assertions. Assertion-only true mode omits the wire flag to remain compatible. These are additive v1 controls, not authentication, receipts, or a transactional whole-store contract. Batch assertions remain outside this slice.
+
 ### Connection context
 
 Read the MCP resource `recalld://session` to inspect the connection's frozen default namespace, its canonical name/ID and configured dimension when it exists, current v1 limits, and bounded duplicate-scan semantics. A missing namespace is reported with `exists: false` and `resolved: null`; the read does not create it. `source: "bridge"` identifies the stored connection default, not whether it originally came from a configuration file or a fallback.
@@ -547,6 +555,7 @@ Retrieve a specific memory by its ID.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory UUID |
+| `namespace` | string | no | record scope | Assert the canonical namespace before effects. Omit to use UUID scope; null is invalid. |
 
 #### Example
 
@@ -588,6 +597,7 @@ Strengthen a memory. Increases its stability so it decays more slowly.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory UUID to reinforce |
+| `namespace` | string | no | record scope | Assert the canonical namespace before effects. Omit to use UUID scope; null is invalid. |
 | `quality` | integer | no | `3` | Rating 1-4: 1=forgot (weakens), 2=hard, 3=good, 4=easy |
 
 Quality guide:
@@ -634,6 +644,7 @@ Use for incorrect, outdated or harmful information that must stop being recalled
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory UUID to forget. The memory moves to the Tombstone phase; its graph edges are kept and its UUID is never reused. |
+| `namespace` | string | no | record scope | Assert the canonical namespace before effects. Omit to use UUID scope; null is invalid. |
 
 #### Example
 
@@ -771,7 +782,7 @@ Find memories semantically similar to a given memory, or scan a namespace for du
 |-----------|------|----------|---------|-------------|
 | `mode` | string | no | `"single"` | `"single"` or `"scan"` |
 | `id` | string | single mode | -- | Source memory UUID (required for single mode) |
-| `namespace` | string/null | no | session default | Namespace to sample in scan mode. Ignored in single mode, which uses the source record namespace. |
+| `namespace` | string/null | no | session default | Scan mode: namespace to sample. Single mode: optional assertion against the source record namespace; omission uses record scope, null is invalid. |
 | `limit` | integer | no | `10` | Maximum results per source memory in single mode (1-100) |
 | `minScore` | number | no | -- | Minimum similarity threshold for single mode (0.0-1.0) |
 | `threshold` | number | no | `0.85` | Similarity threshold for scan mode duplicate detection (0.0-1.0) |
@@ -847,23 +858,19 @@ Response:
   "clusterCount": 1,
   "coverage": {
     "algorithm": "sampledNearestNeighbors",
-    "sampledCount": 200,
-    "eligibleCount": 203,
-    "skippedVectorCount": 1,
+    "sampledCount": null,
+    "eligibleCount": null,
+    "skippedVectorCount": null,
     "sampleCap": 200,
     "neighborCap": 11,
     "complete": false,
-    "truncated": true,
-    "countsAvailable": true
+    "truncated": null,
+    "countsAvailable": false
   }
 }
 ```
 
-MCP scan coverage comes from the scan itself, including when used through the daemon. `eligibleCount` counts live records before sampling (including ghosts and records with missing vectors); `sampledCount` counts selected live records; `skippedVectorCount` counts sampled records whose vectors were missing when loaded. Tombstones are excluded before sampling. `truncated` reports record sampling only: a false value does not remove the separate neighbor cap or establish that every qualifying pair was found. `neighborCap: 11` includes the extra candidate requested to allow for self-removal.
-
-Older daemons return only clusters. New clients preserve those clusters and report `countsAvailable: false` with null counts and `truncated`, rather than guessing. New daemons still return the legacy array to clients that omit the private `includeCoverage` flag. This flag does not select a public contract version.
-
-`complete` is always false, even for empty scans: the algorithm is bounded and has no generation-consistent read view. HTTP duplicate scans instead compare pairs within a capped sample (default 500, maximum 10,000), report observed counts and truncation, and use a null `neighborCap`. Neither endpoint proves there are no other duplicates. Exact paginated scans and coherent generations remain future work.
+MCP coverage counts and `truncated` are unknown (`null`) because the legacy bridge returns only clusters; cluster membership cannot reconstruct those counts. `complete` is always false, including for empty results. HTTP duplicate scans instead compare pairs within a capped sample (default 500, maximum 10,000), return observed live-record, sampled-record, and missing-vector counts, and report whether sampling was truncated. HTTP `neighborCap` is null because it has no neighbor cap. Its `complete` also remains false because reads are not pinned to a generation. Neither endpoint proves there are no other duplicates. Exact paginated scans and bridge/daemon count reporting remain future work.
 
 ---
 
