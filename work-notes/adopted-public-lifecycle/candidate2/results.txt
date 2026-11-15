@@ -1,0 +1,69 @@
+--- build.log ---
+    Finished `test` profile [unoptimized] target(s) in 43.34s
+--- focus-adopted_public_.log ---
+failures:
+
+failures:
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_explicit_override_ignores_unused_global_without_adoption
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_feedback_requires_actual_adoption_after_global_change
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_private_keyed_history_replays_before_new_policy_and_cas
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_unknown_feedback_rejects_but_structural_forget_is_unblocked
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 1323 filtered out; finished in 6.63s
+
+error: test failed, to rerun pass `--lib`
+
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.36s
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 1323 filtered out; finished in 6.63s
+error: test failed, to rerun pass `--lib`
+--- focus-api1_public_.log ---
+failures:
+
+failures:
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_feedback_uses_configured_policy_and_original1_hash
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_legacy_policy_keeps_original1_and_configured_clock
+
+test result: FAILED. 16 passed; 2 failed; 0 ignored; 0 measured; 1309 filtered out; finished in 21.36s
+
+error: test failed, to rerun pass `--lib`
+
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.15s
+test result: FAILED. 16 passed; 2 failed; 0 ignored; 0 measured; 1309 filtered out; finished in 21.36s
+error: test failed, to rerun pass `--lib`
+--- focus-inherited_policy_.log ---
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 1316 filtered out; finished in 25.83s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+--- focus-legacy_lifecycle.log ---
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 1.48s
+test result: ok. 21 passed; 0 failed; 1 ignored; 0 measured; 1305 filtered out; finished in 3.31s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+--- focus-serialization::native_lifecycle.log ---
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1327 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

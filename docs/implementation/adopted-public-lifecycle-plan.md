@@ -1,7 +1,10 @@
 # A3 acceptance reconciliation: adopted policy through public API1 lifecycle
 
-Status: source-only plan for review. No runtime/test edits, join, new build or
-executed consumer proof. PR162 is separately published/frozen; do not edit it.
+Status: implemented and validated in the bounded159+153 composition. See
+`work-notes/adopted-public-lifecycle/REPORT.md` for exact source/results, preserved
+failures and the outstanding published-head CI gate. The following is the
+approved pre-implementation plan, retained with its original scope limits.
+PR162 is separately published/frozen; do not edit it.
 Owner: Pascal/A3, with Feynman policy-proof and Huygens wire ownership retained.
 
 ## Actual remaining gap and minimal parents
