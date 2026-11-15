@@ -1440,17 +1440,43 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
+    completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     clock: Arc<dyn crate::time::Clock>,
 }
 
 impl NamespaceRegistryAdapter {
-    /// Creates a new adapter wrapping the storage engine for namespace operations.
+    /// Storage-only reads. Creation requires `from_system` to bind actual publishers.
     pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
         Self {
+            completion: None,
             storage,
             clock: Arc::new(crate::time::SystemClock),
         }
+    }
+    /// Bind creates to the same system's accepted work and derived publishers.
+    pub fn from_system(system: &crate::Recalld) -> Self {
+        Self::new(system.storage().clone())
+            .with_completion(crate::derived_completion::DerivedCompletion {
+                storage: system.storage().clone(),
+                cache: system.cache().clone(),
+                graph: system.graph().clone(),
+                vectors: system.vector_index().clone(),
+                fts: system.fts_index().clone(),
+                entities: system.entity_index().clone(),
+            })
+            .with_clock(system.clock().clone())
+    }
+    pub(crate) fn with_completion(
+        mut self,
+        completion: crate::derived_completion::DerivedCompletion,
+    ) -> Self {
+        assert!(
+            Arc::ptr_eq(&self.storage, &completion.storage),
+            "namespace completion belongs to another owner"
+        );
+        self.completion = Some(completion);
+        self
     }
     pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
         self.clock = clock;
@@ -1538,71 +1564,25 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         desired_retention: f32,
         decay_rate_multiplier: Option<f32>,
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
-        let work = crate::storage::work::accept_work(&self.storage, None)?;
-        let worker = work.child()?;
-        let now = self.clock.now_millis();
-        let storage = self.storage.clone();
-        let name_owned = name.to_string();
-
-        let result = tokio::task::spawn_blocking(move || {
-            let result = (|| {
-                // Resolve embedding_dim: use provided value, or inherit from
-                // the 'default' namespace, or fall back to 1536.
-                let dim = embedding_dim.unwrap_or_else(|| {
-                    storage
-                        .read()
-                        .ok()
-                        .and_then(|s| s.get_namespace_by_name("default").ok().flatten())
-                        .map(|ns| ns.embedding_dim)
-                        .unwrap_or(1536)
-                });
-
-                let ns_config = NamespaceConfig {
-                    schema: None,
-                    id: NamespaceId::UNSET,
-                    name: name_owned,
-                    embedding_dim: dim,
-                    initial_stability,
-                    default_difficulty: 5.0,
-                    phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
-                    permastore_threshold: 1500.0,
-                    created_at: now,
-                    desired_retention,
-                    decay_rate_multiplier,
-                };
-
-                crate::decay::lifecycle::resolve_policy(
-                    &ns_config,
-                    &crate::decay::DecayConfig::default(),
-                    1.0,
-                )?;
-
-                let mut storage_w = storage.write().map_err(|e| {
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("storage lock poisoned: {e}"),
-                    )) as Box<dyn std::error::Error + Send + Sync>
-                })?;
-                let assigned_id =
-                    storage_w.create_namespace_with_work(&ns_config, Some(&worker))?;
-                Ok(NamespaceConfig {
-                    schema: None,
-                    id: assigned_id,
-                    ..ns_config
-                })
-            })();
-            crate::storage::work::finish_work(&storage, worker);
-            result
-        })
-        .await
-        .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("blocking task join error: {e}"),
-            )) as Box<dyn std::error::Error + Send + Sync>
+        let completion = self.completion.as_ref().ok_or_else(|| {
+            crate::storage::StorageError::InvalidMutation("namespace creation requires an owner-bound registry; use NamespaceRegistryAdapter::from_system".into())
         })?;
-        crate::storage::work::finish_work(&self.storage, work);
-        result
+        let config = NamespaceConfig {
+            schema: None,
+            id: NamespaceId::UNSET,
+            name: name.into(),
+            embedding_dim: 1536,
+            initial_stability,
+            default_difficulty: 5.0,
+            phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
+            permastore_threshold: 1500.0,
+            created_at: 0,
+            desired_retention,
+            decay_rate_multiplier,
+        };
+        Ok(completion
+            .create_legacy_namespace(config, embedding_dim, self.clock.clone())
+            .await?)
     }
 }
 
@@ -1873,7 +1853,7 @@ mod tests {
         use crate::api::state::NamespaceRegistry as _;
         use crate::mcp::bridge::{BridgeError, CreateNamespaceInput, NamespaceRegistry as _};
         let f = Fixture::new();
-        let http = NamespaceRegistryAdapter::new(f.storage.clone());
+        let http = NamespaceRegistryAdapter::new(f.storage.clone()).with_completion(f.completion());
         let mcp = f.namespace_adapter();
         for (stability, multiplier) in [
             (0.0, None),

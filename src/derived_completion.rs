@@ -1,5 +1,6 @@
 //! Online completion of committed effects. Lock order is graph -> indexes ->
 //! storage; never hold storage while awaiting a derived lock.
+pub(crate) mod catalog;
 mod native_decay;
 mod native_graph;
 mod native_purge;
@@ -337,6 +338,22 @@ impl DerivedCompletion {
                         .swap(false, std::sync::atomic::Ordering::SeqCst)
                     {
                         return Err(failed("injected post-tombstone publication failure".into()));
+                    }
+                    #[cfg(test)]
+                    if storage
+                        .meta_store()
+                        .catalog_test_fault
+                        .compare_exchange(
+                            1,
+                            0,
+                            std::sync::atomic::Ordering::SeqCst,
+                            std::sync::atomic::Ordering::SeqCst,
+                        )
+                        .is_ok()
+                    {
+                        return Err(failed(
+                            "injected catalog derived publication failure".into(),
+                        ));
                     }
                     // ponytail: O(records + edges) rebuild under the publication locks.
                     // Replace with exact effect application when throughput warrants it.

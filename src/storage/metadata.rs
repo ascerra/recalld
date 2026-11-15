@@ -10,6 +10,8 @@
 pub(crate) mod batch;
 mod canonical_vector_snapshot;
 mod catalog;
+#[cfg(test)]
+mod catalog_completion_tests;
 pub(crate) mod effects;
 mod insertion;
 mod lifecycle_updates;
@@ -111,6 +113,8 @@ pub struct MetadataStore {
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub(crate) catalog_test_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
     pub(crate) fail_purge_child_commit: std::sync::atomic::AtomicBool,
     /// Store-local lost-ack probes: 1 reservation, 2 rejection, 3 child.
@@ -277,6 +281,8 @@ impl MetadataStore {
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            catalog_test_fault: std::sync::atomic::AtomicU8::new(0),
             #[cfg(test)]
             fail_purge_child_commit: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]

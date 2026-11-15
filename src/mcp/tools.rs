@@ -1472,6 +1472,19 @@ async fn handle_create_namespace(
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(message)) => {
+            match serde_json::from_str::<serde_json::Value>(&message)
+                .ok()
+                .filter(|v| v.is_object())
+            {
+                Some(evidence) => {
+                    let mut result = ToolCallResult::json(&evidence).expect("catalog failure JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(message),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to create namespace: {e}")),
     }
 }
