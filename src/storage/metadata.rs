@@ -995,6 +995,7 @@ impl MetadataStore {
         &self,
         namespace_id: NamespaceId,
     ) -> Result<Vec<DiskRecord>, StorageError> {
+        self.ensure_available()?;
         let read = self.db.begin_read()?;
         let namespaces = read.open_multimap_table(NAMESPACE_INDEX)?;
         let records = read.open_table(META_TABLE)?;
