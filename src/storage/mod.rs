@@ -31,8 +31,12 @@ pub mod maintenance;
 #[cfg(test)]
 mod maintenance_tests;
 pub mod metadata;
+pub mod native_lifecycle;
+pub mod native_records;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
+pub(crate) mod publication;
+pub use publication::{DerivedReadiness, Readiness};
 pub mod purge;
 #[cfg(test)]
 mod purge_tests;
@@ -45,6 +49,7 @@ pub mod tombstone;
 mod tombstone_tests;
 pub(crate) mod validation;
 pub mod vectors;
+pub mod work;
 
 // ── Re-exports ──────────────────────────────────────────────────────
 

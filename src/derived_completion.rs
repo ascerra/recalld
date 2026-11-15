@@ -2,10 +2,15 @@
 //! storage; never hold storage while awaiting a derived lock.
 use std::sync::{Arc, RwLock};
 
+#[path = "derived_readiness.rs"]
+mod readiness;
+
 use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, NamespaceId};
 use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, VectorIndex, VectorMetadata};
+use crate::storage::publication::{DerivedView, REQUIRED_VIEWS};
+use crate::storage::work::WorkTicket;
 use crate::storage::{RedbStorageEngine, StorageEngine, StorageError, TextRef};
 
 #[derive(Clone)]
@@ -19,48 +24,93 @@ pub(crate) struct DerivedCompletion {
 }
 
 impl DerivedCompletion {
+    // Register before any await/enqueue. Never hold this storage read lock while
+    // draining work: queued workers need the storage write lock to complete.
+    pub(crate) fn accept_work(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<WorkTicket, StorageError> {
+        crate::storage::work::accept_work(&self.storage, parent)
+    }
+
+    pub(crate) fn finish_known_work(&self, work: WorkTicket) {
+        crate::storage::work::finish_work(&self.storage, work);
+    }
+
     /// Actual insertion consumer: canonical commit under the store lease, then
     /// drain leases and rebuild every derived view before ready success.
     pub async fn insert(
         &self,
         ctx: crate::storage::control::MutationContext,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
         sampled_at: i64,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
-        self.insert_reserved(ctx, input, generated_embedding, sampled_at, None)
+        self.insert_reserved_with_work(ctx, input, generated_embedding, sampled_at, None, None)
             .await
     }
 
-    pub(crate) async fn insert_reserved(
+    pub(crate) async fn insert_reserved_with_work(
         &self,
         ctx: crate::storage::control::MutationContext,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
         sampled_at: i64,
-        child: Option<crate::storage::batch::BatchChild>,
+        reservation: Option<crate::storage::batch::BatchChild>,
+        parent: Option<&WorkTicket>,
+    ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
+        let work = self.accept_work(parent)?;
+        let result = self
+            .insert_accepted(
+                ctx,
+                input,
+                generated_embedding,
+                sampled_at,
+                reservation,
+                &work,
+            )
+            .await;
+        self.finish_known_work(work);
+        result
+    }
+
+    async fn insert_accepted(
+        &self,
+        ctx: crate::storage::control::MutationContext,
+        input: crate::storage::insertion::InsertMemory,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
+        sampled_at: i64,
+        reservation: Option<crate::storage::batch::BatchChild>,
+        work: &WorkTicket,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
         let gate = publication_gate(&self.storage).await?;
         let lease = gate.read_owned().await;
         let storage = self.storage.clone();
+        let child = work.child()?;
         let result = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            let receipt = storage.insert_memory_reserved(
-                &ctx,
-                &input,
-                &generated_embedding,
-                sampled_at,
-                child.as_ref(),
-            )?;
-            let id = crate::storage::insertion::inserted_id(&receipt)?;
-            let record = storage
-                .get_record(id)
-                .map_err(|source| StorageError::CommittedMutation {
-                    receipt: Box::new(receipt.clone()),
-                    source: Box::new(source),
-                })?
-                .map(|r| crate::model::CachedRecord::from(&r));
-            Ok::<_, StorageError>(crate::storage::insertion::InsertResult { receipt, record })
+            let result = (|| {
+                let receipt = storage.insert_memory_reserved_profile_with_work(
+                    &ctx,
+                    &input,
+                    &generated_embedding.values,
+                    generated_embedding.profile.as_ref(),
+                    sampled_at,
+                    reservation.as_ref(),
+                    Some(&child),
+                )?;
+                let id = crate::storage::insertion::inserted_id(&receipt)?;
+                let record = storage
+                    .get_record(id)
+                    .map_err(|source| StorageError::CommittedMutation {
+                        receipt: Box::new(receipt.clone()),
+                        source: Box::new(source),
+                    })?
+                    .map(|r| crate::model::CachedRecord::from(&r));
+                Ok::<_, StorageError>(crate::storage::insertion::InsertResult { receipt, record })
+            })();
+            storage.meta_store().finish_work(child);
+            result
         })
         .await
         .map_err(|e| {
@@ -70,7 +120,7 @@ impl DerivedCompletion {
         })?;
         drop(lease); // Complete takes this gate exclusively; never upgrade in place.
         let result = result?;
-        self.complete()
+        self.complete_with_work(Some(work))
             .await
             .map_err(|source| StorageError::CommittedMutation {
                 receipt: Box::new(result.receipt.clone()),
@@ -86,29 +136,58 @@ impl DerivedCompletion {
         id: crate::model::MemoryId,
         namespace: Option<&str>,
     ) -> Result<bool, StorageError> {
-        let namespace = namespace.map(str::to_owned);
+        self.forget_with_work(id, namespace, None).await
+    }
+
+    pub(crate) async fn forget_with_work(
+        &self,
+        id: crate::model::MemoryId,
+        namespace: Option<&str>,
+        parent: Option<&WorkTicket>,
+    ) -> Result<bool, StorageError> {
+        let work = self.accept_work(parent)?;
+        let result = self
+            .forget_accepted(id, namespace.map(str::to_owned), &work)
+            .await;
+        self.finish_known_work(work);
+        result
+    }
+
+    async fn forget_accepted(
+        &self,
+        id: crate::model::MemoryId,
+        namespace: Option<String>,
+        work: &WorkTicket,
+    ) -> Result<bool, StorageError> {
         let gate = publication_gate(&self.storage).await?;
         let lease = gate.read_owned().await;
         let storage = self.storage.clone();
+        let child = work.child()?;
         let receipt = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            if let Some(namespace) = namespace.as_deref() {
-                storage.assert_memory_namespace(id, namespace)?;
-            }
-            let Some(record) = storage.get_record(id)? else {
-                return Ok(None);
-            };
-            // Preserve a clean legacy no-op. A pending prior forget must still
-            // produce a receipt and finish publication, never claim ready here.
-            if record.phase == DecayPhase::Tombstone
-                && !storage.meta_store().needs_effects_rebuild()
-            {
-                return Ok(None);
-            }
-            let ctx = crate::storage::control::MutationContext::unkeyed(NamespaceId::new(
-                record.namespace_id,
-            ));
-            storage.tombstone_memory_with_receipt(&ctx, id).map(Some)
+            let result = (|| {
+                if let Some(namespace) = namespace.as_deref() {
+                    storage.assert_memory_namespace(id, namespace)?;
+                }
+                let Some(record) = storage.get_record(id)? else {
+                    return Ok(None);
+                };
+                // Preserve a clean legacy no-op. A pending prior forget must still
+                // produce a receipt and finish publication, never claim ready here.
+                if record.phase == DecayPhase::Tombstone
+                    && !storage.meta_store().needs_effects_rebuild()
+                {
+                    return Ok(None);
+                }
+                let ctx = crate::storage::control::MutationContext::unkeyed(NamespaceId::new(
+                    record.namespace_id,
+                ));
+                storage
+                    .tombstone_memory_with_work(&ctx, id, Some(&child))
+                    .map(Some)
+            })();
+            storage.meta_store().finish_work(child);
+            result
         })
         .await
         .map_err(|e| {
@@ -120,7 +199,7 @@ impl DerivedCompletion {
         let Some(receipt) = receipt? else {
             return Ok(false);
         };
-        self.complete()
+        self.complete_with_work(Some(work))
             .await
             .map_err(|source| StorageError::CommittedMutation {
                 receipt: Box::new(receipt.clone()),
@@ -135,23 +214,44 @@ impl DerivedCompletion {
         ))
     }
 
-    pub(crate) async fn forget_reserved(
+    pub(crate) async fn forget_reserved_with_work(
         &self,
-        child: crate::storage::batch::BatchChild,
+        reservation: crate::storage::batch::BatchChild,
         id: crate::model::MemoryId,
+        parent: Option<&WorkTicket>,
+    ) -> Result<crate::storage::control::WriteReceipt, StorageError> {
+        let work = self.accept_work(parent)?;
+        let result = self.forget_reserved_accepted(reservation, id, &work).await;
+        self.finish_known_work(work);
+        result
+    }
+
+    async fn forget_reserved_accepted(
+        &self,
+        reservation: crate::storage::batch::BatchChild,
+        id: crate::model::MemoryId,
+        work: &WorkTicket,
     ) -> Result<crate::storage::control::WriteReceipt, StorageError> {
         let gate = publication_gate(&self.storage).await?;
         let lease = gate.read_owned().await;
         let storage = self.storage.clone();
+        let child = work.child()?;
         let result = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            storage.tombstone_memory_reserved(&child.context(), id, Some(&child))
+            let result = storage.tombstone_memory_reserved_with_work(
+                &reservation.context(),
+                id,
+                Some(&reservation),
+                Some(&child),
+            );
+            storage.meta_store().finish_work(child);
+            result
         })
         .await
         .map_err(|e| failed(format!("batch forget worker outcome unknown: {e}")))?;
         drop(lease);
         let receipt = result?;
-        self.complete()
+        self.complete_with_work(Some(work))
             .await
             .map_err(|source| StorageError::CommittedMutation {
                 receipt: Box::new(receipt.clone()),
@@ -163,6 +263,29 @@ impl DerivedCompletion {
     /// Retrying is safe: no receipt is acknowledged until every view is ready.
     /// Canonical/uncertain-commit failures still require reopening the engine.
     pub async fn complete(&self) -> Result<(), StorageError> {
+        self.complete_with_work(None).await
+    }
+
+    pub(crate) async fn complete_with_work(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<(), StorageError> {
+        self.complete_impl(parent, false).await
+    }
+
+    /// Explicitly rebuild newly constructed private views after owner reopen,
+    /// even when earlier completion consumed every pending manifest. This does
+    /// not establish a whole-query ReadView or register generation watermarks.
+    pub(crate) async fn rebuild_all(&self) -> Result<(), StorageError> {
+        self.complete_impl(None, true).await
+    }
+
+    async fn complete_impl(
+        &self,
+        parent: Option<&WorkTicket>,
+        rebuild_all: bool,
+    ) -> Result<(), StorageError> {
+        let work = self.accept_work(parent)?;
         self.cache.bind_storage(&self.storage);
         let gate = publication_gate(&self.storage).await?;
         let _publication = gate.write_owned().await;
@@ -172,103 +295,151 @@ impl DerivedCompletion {
         let mut entities = self.entities.clone().write_owned().await;
         let storage = self.storage.clone();
         let cache = self.cache.clone();
-        tokio::task::spawn_blocking(move || {
+        let child = work.child()?;
+        let result = tokio::task::spawn_blocking(move || {
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            storage.resume_pending_purges()?;
-            storage.ensure_available()?;
-            if !storage.meta_store().needs_effects_rebuild() {
-                return Ok(());
-            }
-            let pending = storage.meta_store().pending_effects()?;
-            let receipt = pending
-                .first()
-                .ok_or_else(|| failed("dirty state without durable effects".into()))?
-                .receipt
-                .clone();
             let result = (|| {
-                // ponytail: O(records + edges) rebuild under the publication locks.
-                // Replace with exact effect application when throughput warrants it.
-                let records = storage.scan_all()?;
-                let mut next_graph = RelationshipGraph::with_capacity(records.len());
-                let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
-                let mut next_entities = EntityIndex::with_capacity(records.len());
-                fts.clear().map_err(|e| failed(e.to_string()))?;
-                for (id, record) in &records {
-                    let ns = NamespaceId::new(record.namespace_id);
-                    next_graph
-                        .add_node(
-                            *id,
-                            ns,
-                            record.phase,
-                            record.decay_strength,
-                            record.vector_slot,
+                storage.resume_pending_purges_with_work(Some(&child))?;
+                storage.ensure_available()?;
+                let publication = storage.meta_store().publication_state()?;
+                if !rebuild_all
+                    && !storage.meta_store().needs_effects_rebuild()
+                    && publication.matches_canonical()
+                {
+                    return Ok(());
+                }
+                let pending = storage.meta_store().pending_effects()?;
+                if storage.meta_store().needs_effects_rebuild() && pending.is_empty() {
+                    return Err(failed("dirty state without durable effects".into()));
+                }
+                let receipt = pending.first().map(|effect| effect.receipt.clone());
+                let result = (|| {
+                    // Instance-local fault is reached only after a real child
+                    // tombstone commit, not during batch reservation/preflight.
+                    #[cfg(test)]
+                    if pending.iter().any(|effect| {
+                        matches!(
+                            effect.receipt.outcome,
+                            crate::storage::control::MutationOutcome::MemoryTombstoned { .. }
                         )
-                        .map_err(|e| failed(e.to_string()))?;
-                    if record.phase == DecayPhase::Tombstone {
-                        continue;
+                    }) && storage
+                        .meta_store()
+                        .tombstone_publication_fault
+                        .swap(false, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        return Err(failed("injected post-tombstone publication failure".into()));
                     }
-                    let vector = storage
-                        .get_vector(ns, record.vector_slot)?
-                        .ok_or_else(|| failed(format!("missing vector for {id}")))?;
-                    let tags: Vec<String> = record.tags.iter().map(ToString::to_string).collect();
-                    next_vectors
-                        .add(
-                            *id,
-                            &vector,
-                            VectorMetadata {
-                                namespace_id: ns,
-                                decay_phase: record.phase.as_u8(),
-                                tags: tags.clone(),
-                            },
-                        )
-                        .map_err(|e| failed(e.to_string()))?;
-                    let text = if record.text_length > 0 {
-                        Some(
-                            storage
-                                .get_text(TextRef {
-                                    file_offset: record.text_offset,
-                                    length: record.text_length,
-                                })?
-                                .ok_or_else(|| failed(format!("missing text for {id}")))?,
-                        )
-                    } else {
-                        None
-                    };
-                    fts.add(ns, *id, &record.summary, text.as_deref(), &tags)
-                        .map_err(|e| failed(e.to_string()))?;
-                    next_entities.add(
-                        *id,
-                        &crate::model::parse_structured_tags(&record.tags).entities,
-                    );
-                }
-                let edges = storage.load_all_edges()?;
-                let count = edges.len();
-                if crate::graph::rebuild_from_storage(&mut next_graph, edges.into_iter()) != count {
-                    return Err(failed("graph rejected canonical edges".into()));
-                }
-                *graph = next_graph;
-                *vectors = next_vectors;
-                *entities = next_entities;
-                // Preserve unrelated cached candidates used by legacy temporal
-                // linking. Cache invalidation itself never acquires storage or
-                // graph locks; it is safe to finish its future on this blocking
-                // worker while publication is closed. Bound cache hits still
-                // reject any late stale refill against canonical metadata.
-                let invalidated: Vec<_> = pending
-                    .iter()
-                    .flat_map(|effect| effect.invalidated_ids.iter().copied())
-                    .collect();
-                tokio::runtime::Handle::current().block_on(cache.batch_invalidate(&invalidated));
-                crate::storage::metadata::effects::crash_point("before_online_derived_ack");
-                storage.meta_store().acknowledge_rebuilt_effects()
+                    // ponytail: O(records + edges) rebuild under the publication locks.
+                    // Replace with exact effect application when throughput warrants it.
+                    let records = storage.scan_all()?;
+                    let mut next_graph = RelationshipGraph::with_capacity(records.len());
+                    let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
+                    let next_entities = EntityIndex::from_records(&records);
+                    storage
+                        .meta_store()
+                        .invalidate_derived_view(DerivedView::Fts);
+                    fts.clear().map_err(|e| failed(e.to_string()))?;
+                    for (id, record) in &records {
+                        let ns = NamespaceId::new(record.namespace_id);
+                        next_graph
+                            .add_node(
+                                *id,
+                                ns,
+                                record.phase,
+                                record.decay_strength,
+                                record.vector_slot,
+                            )
+                            .map_err(|e| failed(e.to_string()))?;
+                        if record.phase == DecayPhase::Tombstone {
+                            continue;
+                        }
+                        let vector = storage
+                            .get_vector(ns, record.vector_slot)?
+                            .ok_or_else(|| failed(format!("missing vector for {id}")))?;
+                        let tags: Vec<String> =
+                            record.tags.iter().map(ToString::to_string).collect();
+                        next_vectors
+                            .add(
+                                *id,
+                                &vector,
+                                VectorMetadata {
+                                    namespace_id: ns,
+                                    decay_phase: record.phase.as_u8(),
+                                    tags: tags.clone(),
+                                },
+                            )
+                            .map_err(|e| failed(e.to_string()))?;
+                        let text = if record.text_length > 0 {
+                            Some(
+                                storage
+                                    .get_text(TextRef {
+                                        file_offset: record.text_offset,
+                                        length: record.text_length,
+                                    })?
+                                    .ok_or_else(|| failed(format!("missing text for {id}")))?,
+                            )
+                        } else {
+                            None
+                        };
+                        fts.add(ns, *id, &record.summary, text.as_deref(), &tags)
+                            .map_err(|e| failed(e.to_string()))?;
+                    }
+                    let edges = storage.load_all_edges()?;
+                    let count = edges.len();
+                    if crate::graph::rebuild_from_storage(&mut next_graph, edges.into_iter())
+                        != count
+                    {
+                        return Err(failed("graph rejected canonical edges".into()));
+                    }
+                    *graph = next_graph;
+                    *vectors = next_vectors;
+                    *entities = next_entities;
+                    // Every channel above was actually rebuilt from this captured
+                    // canonical state. This is not no-change advancement.
+                    for view in REQUIRED_VIEWS {
+                        storage
+                            .meta_store()
+                            .publish_derived_view(view, publication.canonical)?;
+                    }
+                    // Preserve unrelated cached candidates used by legacy temporal
+                    // linking. Cache invalidation itself never acquires storage or
+                    // graph locks; it is safe to finish its future on this blocking
+                    // worker while publication is closed. Bound cache hits still
+                    // reject any late stale refill against canonical metadata.
+                    let invalidated: Vec<_> = pending
+                        .iter()
+                        .flat_map(|effect| effect.invalidated_ids.iter().copied())
+                        .collect();
+                    tokio::runtime::Handle::current()
+                        .block_on(cache.batch_invalidate(&invalidated));
+                    // This probe targets an outstanding effect acknowledgement,
+                    // not a startup rebuild with no pending canonical mutation.
+                    #[cfg(test)]
+                    if !pending.is_empty() {
+                        crate::storage::metadata::effects::crash_point("before_online_derived_ack");
+                    }
+                    storage
+                        .meta_store()
+                        .acknowledge_rebuilt_effects_with_work(Some(&child))
+                })();
+                result.map_err(|source| match receipt {
+                    Some(receipt) => StorageError::CommittedMutation {
+                        receipt: Box::new(receipt),
+                        source: Box::new(source),
+                    },
+                    None => source,
+                })
             })();
-            result.map_err(|source| StorageError::CommittedMutation {
-                receipt: Box::new(receipt),
-                source: Box::new(source),
-            })
+            storage.meta_store().finish_work(child);
+            result
         })
         .await
-        .map_err(|e| failed(e.to_string()))?
+        .map_err(|e| failed(e.to_string()))?;
+        // The root remains active until the worker and its derived guards have
+        // returned, and this outer publication lease has also been released.
+        drop(_publication);
+        self.finish_known_work(work);
+        result
     }
 }
 
@@ -294,6 +465,329 @@ mod tests {
             fts: fx.fts_index.clone(),
             entities: fx.entity_index.clone(),
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn repeated_same_generation_rebuild_preserves_exact_fts_scores() {
+        let fx = Fixture::new();
+        fx.insert_memory_with(MemorySpec {
+            summary: "alpha alpha beta",
+            ..MemorySpec::new(NamespaceId::new(1))
+        })
+        .await;
+        fx.insert_memory_with(MemorySpec {
+            summary: "alpha gamma",
+            ..MemorySpec::new(NamespaceId::new(1))
+        })
+        .await;
+        let owner = publisher(&fx);
+        let generation = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .canonical;
+        let mut rounds = Vec::new();
+        for round in 0..4 {
+            owner.rebuild_all().await.unwrap();
+            let state = fx
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap();
+            assert_eq!(state.canonical, generation);
+            assert!(state.matches_canonical());
+            let fts = fx.fts_index.lock().await;
+            let results = fts.search(NamespaceId::new(1), "alpha beta", 10).unwrap();
+            eprintln!(
+                "SAME_G_REBUILD round={round} G={generation:?} stats={} results={results:?}",
+                fts.rebuild_statistics()
+            );
+            rounds.push(results);
+        }
+        for result in &rounds[1..] {
+            assert_eq!(&rounds[0], result);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_rebuild_publishes_exact_views_after_effect_free_catalog_commit() {
+        let fx = Fixture::new();
+        let id = fx
+            .insert_memory_in(NamespaceId::new(1), &["entity/alice"])
+            .await;
+        let completion = publisher(&fx);
+        completion.complete().await.unwrap();
+        let before = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap();
+        assert!(before.matches_canonical());
+        fx.create_namespace("publication-catalog");
+        let after = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap();
+        assert!(
+            !fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .needs_effects_rebuild()
+        );
+        assert_ne!(before.canonical, after.canonical);
+        assert!(!after.matches_canonical());
+        completion.complete().await.unwrap();
+        let rebuilt = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap();
+        assert_eq!(rebuilt.canonical, after.canonical);
+        assert!(rebuilt.matches_canonical());
+        assert!(fx.vector_index.read().await.get_vector(id).is_some());
+        assert_eq!(
+            fx.entity_index.read().await.find_by_entities(
+                NamespaceId::new(1),
+                &["Alice".into()],
+                MemoryId::new()
+            ),
+            vec![(id, 1)]
+        );
+        assert_eq!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .status()
+                .pending,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn entity_rebuild_online_completion_replaces_stale_namespace_postings() {
+        let fx = Fixture::new();
+        let local = NamespaceId::new(1);
+        let foreign = fx.create_namespace("foreign");
+        let live = fx.insert_memory_in(local, &["entity/alice"]).await;
+        let peer = fx
+            .insert_memory_in(foreign, &["entity/alice", "entity/bob"])
+            .await;
+        let dead = fx.insert_memory_in(local, &["entity/dead"]).await;
+        {
+            let mut index = fx.entity_index.write().await;
+            index.add(local, live, &["stale".into()]);
+            index.add(local, dead, &["dead".into()]);
+        }
+        // Real canonical deletion dirties every view and requires completion.
+        fx.storage.write().unwrap().delete_memory(dead).unwrap();
+        let query = vec!["Alice".into(), "Bob".into()];
+        for _ in 0..2 {
+            publisher(&fx).complete().await.unwrap();
+            let index = fx.entity_index.read().await;
+            assert_eq!(index.len(), 2);
+            assert_eq!(
+                index.find_by_entities(local, &query, MemoryId::new()),
+                vec![(live, 1)]
+            );
+            assert_eq!(
+                index.find_by_entities(foreign, &query, MemoryId::new()),
+                vec![(peer, 2)]
+            );
+            assert!(
+                index
+                    .find_by_entities(local, &["stale".into(), "dead".into()], MemoryId::new())
+                    .is_empty()
+            );
+            assert!(
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .effects_stamp()
+                    .is_ok()
+            );
+        }
+        fx.storage.write().unwrap().delete_memory(live).unwrap();
+        publisher(&fx).complete().await.unwrap();
+        let index = fx.entity_index.read().await;
+        assert_eq!(index.len(), 1);
+        assert!(
+            index
+                .find_by_entities(local, &query, MemoryId::new())
+                .is_empty()
+        );
+        assert_eq!(
+            index.find_by_entities(foreign, &query, MemoryId::new()),
+            vec![(peer, 2)]
+        );
+    }
+
+    async fn wait_for_work(
+        tracker: &crate::storage::work::WorkTracker,
+        predicate: impl Fn(crate::storage::work::WorkStatus) -> bool,
+    ) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !predicate(tracker.status()) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("work state was never reached");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accepted_insertion_and_transitive_publication_finish_after_admission_closes() {
+        use crate::storage::control::MutationContext;
+        use crate::storage::work::WorkError;
+        use std::time::{Duration, Instant};
+        let fx = Fixture::new();
+        let completion = publisher(&fx);
+        let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+        let gate = publication_gate(&fx.storage).await.unwrap();
+        let held = gate.write_owned().await;
+        let worker = completion.clone();
+        let insertion = tokio::spawn(async move {
+            worker
+                .insert(
+                    MutationContext::unkeyed(NamespaceId::new(1)),
+                    crate::storage::insertion::InsertMemory {
+                        id: None,
+                        summary: "accepted before freeze".into(),
+                        full_text: Some("published after close".into()),
+                        tags: vec![],
+                        initial_stability: None,
+                        created_at: None,
+                        embedding: Some(vec![1., 0., 0., 0.]),
+                        parent_id: None,
+                        supersedes: None,
+                    },
+                    vec![].into(),
+                    123,
+                )
+                .await
+        });
+        wait_for_work(&tracker, |s| s.pending == 1).await;
+        let closing = tracker.clone();
+        let drain = tokio::task::spawn_blocking(move || {
+            closing.close_and_drain(Instant::now() + Duration::from_secs(10))
+        });
+        wait_for_work(&tracker, |s| !s.admission_open).await;
+        assert!(matches!(
+            completion.complete().await,
+            Err(StorageError::Work(WorkError::AdmissionClosed))
+        ));
+        drop(held);
+        let result = tokio::time::timeout(Duration::from_secs(10), insertion)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let freeze = drain.await.unwrap().unwrap();
+        let id = crate::storage::insertion::inserted_id(&result.receipt).unwrap();
+        let storage = fx.storage.read().unwrap();
+        assert!(storage.get_record(id).unwrap().is_some());
+        assert!(storage.meta_store().pending_effects().unwrap().is_empty());
+        let capture = storage.meta_store().freeze_metadata(freeze).unwrap();
+        assert_eq!(
+            capture.generation(),
+            storage.control_state().unwrap().generation_ref()
+        );
+        assert_eq!(tracker.status().pending, 0);
+        assert_eq!(tracker.status().unresolved, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn queued_purge_completion_resumes_children_and_acks_while_closing() {
+        use crate::storage::control::MutationContext;
+        use std::time::{Duration, Instant};
+        let fx = Fixture::new();
+        let ns = fx.create_namespace("drain-purge");
+        let id = fx.insert_memory_in(ns, &[]).await;
+        let completion = publisher(&fx);
+        let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+        fx.storage
+            .write()
+            .unwrap()
+            .begin_namespace_purge(&MutationContext::unkeyed(ns), true)
+            .unwrap();
+        // Durable purge state alone must block capture, even if volatile flags
+        // were stale and every currently registered in-process task has ended.
+        {
+            let freeze = tracker
+                .close_and_drain(Instant::now() + Duration::from_secs(5))
+                .unwrap();
+            assert!(
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .freeze_metadata(freeze)
+                    .is_err()
+            );
+        }
+        let held = fx.graph.clone().write_owned().await;
+        let worker = completion.clone();
+        let completion_task = tokio::spawn(async move { worker.complete().await });
+        wait_for_work(&tracker, |s| s.pending == 1).await;
+        let closing = tracker.clone();
+        let drain = tokio::task::spawn_blocking(move || {
+            closing.close_and_drain(Instant::now() + Duration::from_secs(10))
+        });
+        wait_for_work(&tracker, |s| !s.admission_open).await;
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(10), completion_task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let freeze = drain.await.unwrap().unwrap();
+        let storage = fx.storage.read().unwrap();
+        assert!(storage.get_record(id).unwrap().is_none());
+        assert!(!fx.namespace_dir("drain-purge").exists());
+        assert!(storage.meta_store().pending_effects().unwrap().is_empty());
+        let _capture = storage.meta_store().freeze_metadata(freeze).unwrap();
+        assert_eq!(tracker.status().unresolved, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_accepted_action_leaves_unresolved_admission_without_mutation() {
+        use std::time::{Duration, Instant};
+        let fx = Fixture::new();
+        let completion = publisher(&fx);
+        let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+        let before = fx.storage.read().unwrap().control_state().unwrap();
+        let held = publication_gate(&fx.storage)
+            .await
+            .unwrap()
+            .write_owned()
+            .await;
+        let task = tokio::spawn(async move { completion.forget(MemoryId::new(), None).await });
+        wait_for_work(&tracker, |s| s.pending == 1).await;
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        drop(held);
+        assert_eq!(tracker.status().unresolved, 1);
+        assert!(
+            tracker
+                .close_and_drain(Instant::now() + Duration::from_millis(1))
+                .is_err()
+        );
+        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -332,7 +826,7 @@ mod tests {
             .committed_generation;
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
         let error = match publisher(&fx)
-            .insert(ctx.clone(), input.clone(), vec![], 123)
+            .insert(ctx.clone(), input.clone(), vec![].into(), 123)
             .await
         {
             Ok(_) => panic!("wrong-width derived rebuild succeeded"),
@@ -363,7 +857,7 @@ mod tests {
         );
         *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
         let replay = publisher(&fx)
-            .insert(ctx, input, vec![f32::NAN], i64::MAX)
+            .insert(ctx, input, vec![f32::NAN].into(), i64::MAX)
             .await
             .unwrap();
         assert!(replay.receipt.replayed);

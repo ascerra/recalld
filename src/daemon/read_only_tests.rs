@@ -33,6 +33,35 @@ struct ObservedAccess {
 }
 #[async_trait::async_trait]
 impl AccessRecorder for ObservedAccess {
+    async fn record_access_batch_at_with_work(
+        &self,
+        values: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        let receipts = self
+            .inner
+            .record_access_batch_at_with_work(values, scope, sampled_at, parent)
+            .await?;
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        self.notify.notify_one();
+        Ok(receipts)
+    }
+    async fn record_access_batch_with_work(
+        &self,
+        values: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        let receipts = self
+            .inner
+            .record_access_batch_with_work(values, scope, parent)
+            .await?;
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        self.notify.notify_one();
+        Ok(receipts)
+    }
     async fn record_access(
         &self,
         id: MemoryId,
@@ -119,7 +148,10 @@ impl Harness {
                 .await
                 .add(NamespaceId::new(1), id, "fixture", None, &[])
                 .unwrap();
-            f.entity_index.write().await.add(id, &["fixture".into()]);
+            f.entity_index
+                .write()
+                .await
+                .add(NamespaceId::new(1), id, &["fixture".into()]);
             ids.push(id);
         }
         f.graph
@@ -193,7 +225,12 @@ impl Harness {
                         config,
                         false,
                     )
-                    .with_clock(Arc::new(crate::time::ManualClock::new(NOW))),
+                    .with_clock(Arc::new(crate::time::ManualClock::new(NOW)))
+                    .with_indexes(
+                        f.vector_index.clone(),
+                        f.fts_index.clone(),
+                        f.entity_index.clone(),
+                    ),
                 ),
                 Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
                 Arc::new(NoopMetricsCollector),
@@ -1410,3 +1447,179 @@ async fn similarity_rest_full_text_failure_rejects_without_exposure() {
 
 #[path = "observed_join_tests.rs"]
 mod observed_join_tests;
+
+/// Actual HTTP handlers, MCP tool dispatch and framed daemon adapters must finish
+/// publication before returning a successful observation/feedback response.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_actual_wrappers_publish_before_ready_barrier() {
+    for transport in ["rest", "mcp", "daemon"] {
+        let mut h = Harness::new().await;
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: h.f.storage.clone(),
+            cache: h.f.cache.clone(),
+            graph: h.f.graph.clone(),
+            vectors: h.f.vector_index.clone(),
+            fts: h.f.fts_index.clone(),
+            entities: h.f.entity_index.clone(),
+        };
+        // Startup publication only. No test-side completion after any public call.
+        owner.rebuild_all().await.unwrap();
+        h.engine = Arc::new(Arc::try_unwrap(h.engine).ok().unwrap().with_coherent_owner(
+            owner.clone(),
+            Arc::new(crate::rif::RifEngine::new(Default::default())),
+        ));
+        let bridge = h.bridge();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe.sock");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let mut server = None;
+        let mut client = None;
+        if transport == "daemon" {
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            let b = h.bridge();
+            let tx = shutdown_tx.clone();
+            server = Some(tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                handle_connection(
+                    b.search,
+                    b.storage,
+                    b.namespaces,
+                    b.health,
+                    stream,
+                    Arc::new(AtomicU32::new(1)),
+                    Arc::new(AtomicI64::new(0)),
+                    shutdown_rx,
+                    tx,
+                )
+                .await;
+            }));
+            client = Some(
+                crate::daemon::client::DaemonClient::connect(&path)
+                    .await
+                    .unwrap(),
+            );
+        }
+        let id = h.ids[0].to_string();
+        for operation in ["get", "similar", "search", "feedback"] {
+            let before =
+                h.f.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .publication_state()
+                    .unwrap()
+                    .canonical;
+            let ready = owner
+                .readiness_barrier(before, std::time::Instant::now() + Duration::from_secs(10))
+                .await
+                .unwrap();
+            assert!(ready.ready && ready.pending_work == 0);
+            let records: Vec<_> = h.ids.iter().map(|id| h.f.record(*id).unwrap()).collect();
+            if transport == "rest" {
+                let (method, path, args) = match operation {
+                    "get" => (
+                        "GET",
+                        format!("/memories/{id}?recordAccess=true"),
+                        json!({}),
+                    ),
+                    "similar" => (
+                        "POST",
+                        format!("/similar/{id}"),
+                        json!({"recordAccess":true,"limit":10}),
+                    ),
+                    "search" => (
+                        "POST",
+                        "/search".into(),
+                        json!({"query":"fixture","depth":0,"recordAccess":true}),
+                    ),
+                    _ => (
+                        "POST",
+                        format!("/memories/{id}/reinforce"),
+                        json!({"quality":3}),
+                    ),
+                };
+                let (status, body) = http_call(h.http(), method, &path, args).await;
+                assert!(status.is_success(), "{transport}/{operation}: {body}");
+            } else if transport == "mcp" {
+                let (tool, args) = match operation {
+                    "get" => ("get_memory", json!({"id":id,"recordAccess":true})),
+                    "similar" => (
+                        "find_similar_memories",
+                        json!({"id":id,"recordAccess":true,"limit":10}),
+                    ),
+                    "search" => (
+                        "recall_memories",
+                        json!({"query":"fixture","depth":0,"recordAccess":true}),
+                    ),
+                    _ => ("reinforce_memory", json!({"id":id,"quality":3})),
+                };
+                let result = crate::mcp::tools::dispatch_tool(&bridge, tool, args).await;
+                assert_ne!(
+                    result.is_error,
+                    Some(true),
+                    "{transport}/{operation}: {result:?}"
+                );
+            } else {
+                let (method, args) = match operation {
+                    "get" => ("get_memory", json!({"id":id,"recordAccess":true})),
+                    "similar" => (
+                        "find_similar",
+                        json!({"id":id,"recordAccess":true,"limit":10,"sameNamespace":true}),
+                    ),
+                    "search" => ("search", serde_json::to_value(input(Some(true))).unwrap()),
+                    _ => ("reinforce_memory", json!({"id":id,"quality":3})),
+                };
+                client.as_ref().unwrap().call(method, args).await.unwrap();
+            }
+            let after =
+                h.f.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .publication_state()
+                    .unwrap()
+                    .canonical;
+            assert!(
+                after.generation > before.generation,
+                "{transport}/{operation}"
+            );
+            let ready = owner
+                .readiness_barrier(after, std::time::Instant::now() + Duration::from_secs(10))
+                .await
+                .unwrap();
+            assert!(
+                ready.ready && ready.pending_work == 0,
+                "{transport}/{operation}"
+            );
+            assert_eq!(ready.committed_generation, after.generation);
+            assert!(
+                ready
+                    .derived
+                    .iter()
+                    .all(|d| d.ready && d.applied_generation == after.generation)
+            );
+            // Feedback changes its target once; get only exposes its target;
+            // similarity excludes its source. Completion never adds exposures.
+            for (index, old) in records.iter().enumerate() {
+                let new = h.f.record(h.ids[index]).unwrap();
+                let expected = match operation {
+                    "get" | "feedback" => usize::from(index == 0),
+                    "similar" => usize::from(index != 0),
+                    _ => 1,
+                };
+                assert_eq!(
+                    new.access_history.len(),
+                    old.access_history.len() + expected,
+                    "{transport}/{operation}/{index}"
+                );
+            }
+        }
+        if let Some(server) = server {
+            shutdown_tx.send(true).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+}

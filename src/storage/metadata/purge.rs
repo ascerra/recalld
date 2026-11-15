@@ -290,8 +290,11 @@ fn save(tx: &redb::WriteTransaction, p: &PurgeProgress) -> Result<(), StorageErr
 impl MetadataStore {
     /// The purge recovery path alone may enter while durable deletion admission
     /// is closed. Uncertain commits/canonical effects still block it.
-    pub(super) fn purge_guard(&self) -> Result<std::sync::RwLockWriteGuard<'_, ()>, StorageError> {
-        let guard = self.publication.write().unwrap_or_else(|e| e.into_inner());
+    pub(crate) fn purge_guard(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<MutationGuard<'_>, StorageError> {
+        let guard = self.publication_guard(parent)?;
         self.ensure_handle_available()?;
         Ok(guard)
     }
@@ -313,7 +316,7 @@ impl MetadataStore {
             ));
         }
         let hash = control::request_hash(ctx, "namespace_purge_v1", &[&[u8::from(force)]]);
-        let _guard = self.purge_guard()?;
+        let _guard = self.purge_guard(None)?;
         let tx = self.db.begin_write()?;
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             if !matches!(
@@ -407,6 +410,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         super::effects::crash_point("after_purge_commit");
         Ok(())
     }
@@ -528,6 +532,7 @@ impl MetadataStore {
 
     pub(crate) fn advance_purge(
         &self,
+        guard: &MutationGuard<'_>,
         p: &PurgeProgress,
         limit: usize,
         edges: &[crate::storage::PersistedEdge],
@@ -537,7 +542,7 @@ impl MetadataStore {
                 "purge chunk limit must be 1..=1000".into(),
             ));
         }
-        let guard = self.purge_guard()?;
+        guard.check(self)?;
         let tx = self.db.begin_write()?;
         if load(&tx, p.start_receipt.operation_id)? != *p || p.stage != PurgeStage::Deleting {
             return Err(invalid("stale deletion progress"));
@@ -571,7 +576,7 @@ impl MetadataStore {
             }
             let ctx = MutationContext::unkeyed(p.namespace_id);
             let result = self.finish_record_effects(
-                &guard,
+                guard,
                 tx,
                 &ctx,
                 [0; 32],
@@ -603,10 +608,11 @@ impl MetadataStore {
 
     pub(crate) fn finish_purge_cleanup(
         &self,
+        guard: &MutationGuard<'_>,
         p: &PurgeProgress,
         cleanup: impl FnOnce() -> Result<(), StorageError>,
     ) -> Result<(), StorageError> {
-        let _guard = self.purge_guard()?;
+        guard.check(self)?;
         let tx = self.db.begin_write()?;
         if load(&tx, p.start_receipt.operation_id)? != *p || p.stage != PurgeStage::Cleanup {
             return Err(invalid("stale directory cleanup reservation"));
