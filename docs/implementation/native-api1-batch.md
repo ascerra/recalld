@@ -22,7 +22,9 @@ becomes public. No public whole-store CAS is added. REST stays unkeyed; existing
 MCP retry identity fields remain available.
 
 api1StoreBatchV1/store_batch_api1_v1 extends the existing single held-connection
-handshake independently of single-store/lifecycle flags. Old peers receive the
+handshake independently of single-store/lifecycle flags. Only mutation-version1
+insertion selects the new wrapper; the existing explicit private writer2 selector
+keeps its original route and does not activate public contract2. Old peers receive the
 exact legacy mutate_batch request only if representable, selected before sending.
 No error, lost reply or malformed reply triggers a second mutation. The new alias
 requires full receipt-frame negotiation before work; raw legacy insertion on a

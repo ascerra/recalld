@@ -1,0 +1,6 @@
+{
+  "src/mcp/tools.rs": {
+    "before": "f6599a8f7efb911f366411b4c3a55dfa3a531f99b396916a7b1e92144e5a6719",
+    "after": "601614952a53ef21a9ec4fe7f769457fb03b8a7b53516ad6363d9526fd945e4a"
+  }
+}
