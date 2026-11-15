@@ -26,6 +26,12 @@ The server's actual HTTP construction uses that method. This is an explicit
 source-level compatibility correction for standalone storage-only constructors.
 No public API2 activation or native catalog/profile behavior is introduced.
 
+The HTTP adapter retains its original pure lifecycle-policy validation before
+accepting work or sampling the clock, including the concrete LifecycleError type.
+The initial full run caught that compatibility regression; its assertion remains
+unchanged in the corrected run. See the [validation report](../evidence/legacy-catalog-completion/REPORT.md)
+for exact source identities, the 1272+2 final pass, and preserved failed evidence.
+
 Read-only evidence distinguishes canonical persistence from SQLite coordination.
 BundledSQLite3.49.1 can update fts.db-shm reader mark1 (104..108) during a read.
 Tests retain strict canonical/receipt/vector, FTS database/WAL bytes and logical
