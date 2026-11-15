@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 
+GROUPED = runpy.run_path(str(Path(__file__).with_name("grouped-mcp-evaluation.py")))
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 MODEL = "a6-public-synthetic-v1"
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = ("scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+         "scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl")
 
 
@@ -69,16 +71,14 @@ def fixtures():
     return actor, labels, cache, schedule
 
 
-def validate(manifest_path, binary, scorer, source_root):
-    # Complete input validation before creating episode output, provider, or store.
-    raw = manifest_path.read_bytes()
-    m = json.loads(raw)
-    exact_keys(m, ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
-                   "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
-                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
+COMMON_FIELDS = ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+                 "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "activeEmbedding", "scoringProfile")
+
+
+def validate_build(m, binary, scorer, source_root):
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
-    if m["track"] != TRACK or encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
+    if encoded(m["versions"]) != encoded(VERSIONS) or encoded(m["capabilities"]) != encoded(CAPABILITIES):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -96,15 +96,25 @@ def validate(manifest_path, binary, scorer, source_root):
         raise ValueError("missing source pins")
     if m["executables"] != {"recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}:
         raise ValueError("executable hash mismatch")
+    profile = json.loads(subprocess.check_output([str(scorer), "--profile"], env={"PATH": "/usr/bin:/bin"}))
+    if (profile["sourceCommit"] != m["sourceCommit"] or profile["containerImageId"] != m["containerImageId"] or
+            profile["sourceTreeSha256"] != digest(encoded(m["sourceFilesSha256"]))):
+        raise ValueError("compiled provenance mismatch")
+    if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
+        raise ValueError("configuration profile mismatch")
+
+
+def validate_artifacts(root, m, expected, prefix=""):
     artifacts = []
-    for key, name in (("actorInputs", "actor-inputs.json"), ("evaluatorLabels", "evaluator-labels.json"), ("replayCache", "evaluator-cache.json"), ("evaluatorSchedule", "evaluator-schedule.json")):
+    for key, name in GROUPED["ARTIFACTS"]:
         exact_keys(m[key], ("file", "sha256"))
-        p = manifest_path.parent / name
-        if m[key]["file"] != name or not p.is_file() or p.is_symlink() or digest(p.read_bytes()) != m[key]["sha256"]:
+        name = prefix + name
+        p = root / name
+        if m[key]["file"] != name or not p.is_file() or p.is_symlink() or not p.resolve().is_relative_to(root.resolve()) or digest(p.read_bytes()) != m[key]["sha256"]:
             raise ValueError("artifact hash/reference mismatch")
         artifacts.append(json.loads(p.read_text()))
     actor, labels, cache, schedule = artifacts
-    expected_actor, _, expected_cache, expected_schedule = fixtures()
+    expected_actor, _, expected_cache, expected_schedule = expected
     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
     exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
@@ -118,25 +128,34 @@ def validate(manifest_path, binary, scorer, source_root):
     if m["dataset"] != dict(kind="generated-synthetic", upstreamRevision=None, upstreamUrl=None, thirdPartyLicense=None,
                             actorArtifactSha256=m["actorInputs"]["sha256"], intendedUse="contract-diagnostic-only"):
         raise ValueError("unsupported dataset claim")
-    profile = json.loads(subprocess.check_output([str(scorer), "--profile"], env={"PATH": "/usr/bin:/bin"}))
-    if (profile["sourceCommit"] != m["sourceCommit"] or profile["containerImageId"] != m["containerImageId"] or
-            profile["sourceTreeSha256"] != digest(encoded(m["sourceFilesSha256"]))):
-        raise ValueError("compiled provenance mismatch")
-    if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
-        raise ValueError("configuration profile mismatch")
-    return m, actor, labels, cache, schedule, digest(raw)
+    return actor, labels, cache, schedule
+
+
+def validate(manifest_path, binary, scorer, source_root):
+    # Complete input validation before creating episode output, provider, or store.
+    raw = manifest_path.read_bytes(); m = json.loads(raw)
+    exact_keys(m, (*COMMON_FIELDS, "actorInputs", "evaluatorLabels", "evaluatorSchedule", "replayCache", "dataset"))
+    if m["track"] != TRACK:
+        raise ValueError("unsupported public/schema/control requirements")
+    validate_build(m, binary, scorer, source_root)
+    return m, *validate_artifacts(manifest_path.parent, m, fixtures()), digest(raw)
+
+
+def build_manifest(args, build):
+    return dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
+        capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
+        containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
+        executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
+        activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
 
 
 def prepare(args):
+    if getattr(args, "track", TRACK) == GROUPED["TRACK"]:
+        return GROUPED["prepare"](args, globals())
     args.out.mkdir()
-    build = json.loads(args.build.read_text())
     actor, labels, cache, schedule = fixtures()
-    m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
-             capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
-             containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
-             executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
-             activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
-    for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels), ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
+    m = build_manifest(args, json.loads(args.build.read_text()))
+    for (key, name), value in zip(GROUPED["ARTIFACTS"], (actor, labels, cache, schedule)):
         save(args.out / name, value)
         m[key] = dict(file=name, sha256=digest((args.out / name).read_bytes()))
     m["dataset"] = dict(kind="generated-synthetic", upstreamRevision=None, upstreamUrl=None, thirdPartyLicense=None,
@@ -161,7 +180,10 @@ class Replay(http.server.BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             status, body = 400, dict(error=dict(message="offline replay miss; no fallback"))
         with self.server.log.open("a") as log:
-            log.write(json.dumps(dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])])) + "\n")
+            row = dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])])
+            if self.server.grouped:
+                row["responseVectors"] = vectors if status == 200 else None
+            log.write(json.dumps(row) + "\n")
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -170,8 +192,10 @@ class Replay(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def run_episode(args):
-    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
+def run_episode(args, prepared=None):
+    if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == GROUPED["TRACK"]:
+        return GROUPED["run"](args, globals())
+    m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root)
     args.out.mkdir()
     evaluator = args.out / "evaluator"
     evaluator.mkdir()
@@ -181,6 +205,7 @@ def run_episode(args):
     # Cache server receives only the actor cache projection, never evaluator labels.
     stub = http.server.HTTPServer(("127.0.0.1", 0), Replay)
     stub.log, stub.environment, stub.delivery = args.out / "actor-provider.jsonl", environment, 0
+    stub.grouped = "groupContext" in m
     stub.key = lambda text: digest(encoded(dict(environmentHash=environment, model=MODEL, dimension=4, prefixedInput=text)))
     stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:")}
     threading.Thread(target=stub.serve_forever, daemon=True).start()
@@ -286,9 +311,11 @@ warm_file_enabled = false
         event_text = "".join(json.dumps(e) + "\n" for e in events)
         (evaluator / "source-events.jsonl").write_text(event_text)
         save(args.out / "source-mappings.json", dict(sourceMappingVersion=1, actorArtifactSha256=m["actorInputs"]["sha256"], mappings=mappings, sources=actor["sources"]))
+        if "groupContext" in m:
+            save(evaluator / "group-context.json", m["groupContext"])
         with (args.out / "trace.jsonl").open("w") as trace:
             for row in outcomes:
-                trace.write(json.dumps(dict(traceSchemaVersion=1, runId=environment, episodeId=args.out.name, groupId="synthetic-regression",
+                trace.write(json.dumps(dict(traceSchemaVersion=1, runId=environment, episodeId=args.out.name, groupId=m.get("groupContext", {}).get("groupId", "synthetic-regression"),
                     stepId=row["stepId"], environmentHash=environment, action=row["request"], outcome=row["response"],
                     readGeneration=None, readiness=dict(available=False), simulatedTimeMs=None, snapshot=None, reward=None)) + "\n")
         if runtime_failure:
@@ -395,6 +422,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
+    p.add_argument("--track", choices=(TRACK, GROUPED["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
