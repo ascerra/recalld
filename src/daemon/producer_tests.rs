@@ -35,11 +35,11 @@ async fn online_producer_actual_daemon_socket_frames_include_complete_delivery()
     write_framed_request(&mut client, &request, MAX_MESSAGE_SIZE)
         .await
         .unwrap();
-    let response = read_framed_response(&mut client, MAX_MESSAGE_SIZE)
-        .await
-        .unwrap();
+    let response_payload = read_frame(&mut client, MAX_MESSAGE_SIZE).await.unwrap();
+    let response: DaemonResponse = serde_json::from_slice(&response_payload).unwrap();
     assert!(response.error.is_none(), "{response:?}");
-    let response_bytes = serde_json::to_vec(&response).unwrap().len();
+    // Measure the actual wire bytes, not a second serialization of parsed JSON.
+    let response_bytes = response_payload.len();
     drop(client);
     let (_, rows) = tokio::time::timeout(Duration::from_secs(5), task)
         .await

@@ -6,6 +6,7 @@
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut};
+use std::pin::{Pin, pin};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -236,18 +237,52 @@ async fn measure_request<T, E>(
             sampled_roots_seen = decision.sampled_roots_seen)
         }
     };
+    let mut inner = pin!(Some(async move {
+        let mut timer = Timer::new(operation);
+        let result = future.await;
+        timer.end(if result.is_ok() { "ok" } else { "error" });
+        result
+    }));
+    let mut drop_context = RequestDrop {
+        inner: inner.as_mut(),
+        decision,
+        span: span.clone(),
+    };
     REQUEST
         .scope(
             decision,
-            async move {
-                let mut timer = Timer::new(operation);
-                let result = future.await;
-                timer.end(if result.is_ok() { "ok" } else { "error" });
-                result
-            }
-            .instrument(span),
+            std::future::poll_fn(|cx| drop_context.inner.as_mut().as_pin_mut().unwrap().poll(cx))
+                .instrument(span),
         )
         .await
+}
+
+// WithSubscriber restores its dispatcher for polling, but not for task abort.
+// Drop the stack-pinned future under the original decision/subscriber/span so
+// its timers and owned work guards retain context even when another task aborts
+// it. Pin::set drops in place: no unsafe projection, box or added dependency.
+struct RequestDrop<'a, F> {
+    inner: Pin<&'a mut Option<F>>,
+    decision: Decision,
+    span: tracing::Span,
+}
+impl<F> Drop for RequestDrop<'_, F> {
+    fn drop(&mut self) {
+        let Self {
+            inner,
+            decision,
+            span,
+        } = self;
+        let mut drop_inner = || REQUEST.sync_scope(*decision, || inner.set(None));
+        if span
+            .with_subscriber(|(_, dispatch)| {
+                tracing::dispatcher::with_default(dispatch, || span.in_scope(&mut drop_inner));
+            })
+            .is_none()
+        {
+            drop_inner();
+        }
+    }
 }
 
 /// Canonical receipt identities are isolated trace fields, never metric labels.
