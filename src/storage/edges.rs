@@ -222,7 +222,23 @@ impl EdgeStore {
             }
         }
         crate::storage::metadata::effects::crash_point("before_edge_commit");
-        tx.commit()?;
+        crate::performance::event!(
+            kind = "commit_call",
+            resource = "edge_effects",
+            phase = "attempt",
+            sync_coverage = "opaque_backend"
+        );
+        let timer = crate::performance::Timer::new("edge.effects_commit");
+        let result = tx.commit();
+        crate::performance::event!(
+            kind = "commit_call",
+            resource = "edge_effects",
+            phase = "return",
+            success = result.is_ok(),
+            sync_coverage = "opaque_backend"
+        );
+        timer.outcome(result.is_ok());
+        result?;
         Ok(())
     }
 

@@ -79,7 +79,15 @@ pub async fn generate(
             "provider dimension differs from namespace".into(),
         ));
     }
-    let values = provider.embed(text).await?;
+    crate::performance::event!(
+        kind = "embedding_request",
+        requested_vectors = 1,
+        source_bytes = text.len()
+    );
+    let call = crate::performance::Timer::new("embedding.request");
+    let result = provider.embed(text).await;
+    call.outcome(result.is_ok());
+    let values = result?;
     // Validate without replacing the raw result: advisory and final transaction
     // must each normalize the same original values (rounding is not idempotent).
     super::validation::normalize_vector(&mut values.clone(), namespace.embedding_dim as usize)
@@ -100,13 +108,83 @@ impl CheckedProvider {
 #[async_trait::async_trait]
 impl EmbeddingProvider for CheckedProvider {
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
-        self.checked(self.0.embed(text).await?)
+        crate::performance::event!(
+            kind = "provider_call",
+            task = "document",
+            phase = "attempt",
+            requested_vectors = 1,
+            source_bytes = text.len()
+        );
+        let call = crate::performance::Timer::new("provider.document");
+        let result = self.0.embed(text).await;
+        crate::performance::event!(
+            kind = "provider_return",
+            task = "document",
+            success = result.is_ok()
+        );
+        call.outcome(result.is_ok());
+        let values = result?;
+        crate::performance::event!(
+            kind = "provider_vectors",
+            task = "document",
+            returned_vectors = 1,
+            returned_dimensions = values.len()
+        );
+        let validation = crate::performance::Timer::new("provider.validate");
+        let result = self.checked(values);
+        validation.outcome(result.is_ok());
+        result
     }
     async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
-        self.checked(self.0.embed_query(text).await?)
+        crate::performance::event!(
+            kind = "provider_call",
+            task = "query",
+            phase = "attempt",
+            requested_vectors = 1,
+            source_bytes = text.len()
+        );
+        let call = crate::performance::Timer::new("provider.query");
+        let result = self.0.embed_query(text).await;
+        crate::performance::event!(
+            kind = "provider_return",
+            task = "query",
+            success = result.is_ok()
+        );
+        call.outcome(result.is_ok());
+        let values = result?;
+        crate::performance::event!(
+            kind = "provider_vectors",
+            task = "query",
+            returned_vectors = 1,
+            returned_dimensions = values.len()
+        );
+        let validation = crate::performance::Timer::new("provider.validate");
+        let result = self.checked(values);
+        validation.outcome(result.is_ok());
+        result
     }
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        let values = self.0.embed_batch(texts).await?;
+        crate::performance::event!(
+            kind = "provider_call",
+            task = "document_batch",
+            phase = "attempt",
+            requested_vectors = texts.len(),
+            source_bytes = texts.iter().map(|t| t.len()).sum::<usize>()
+        );
+        let call = crate::performance::Timer::new("provider.document_batch");
+        let result = self.0.embed_batch(texts).await;
+        crate::performance::event!(
+            kind = "provider_return",
+            task = "document_batch",
+            success = result.is_ok()
+        );
+        call.outcome(result.is_ok());
+        let values = result?;
+        crate::performance::event!(
+            kind = "provider_vectors",
+            task = "document_batch",
+            returned_vectors = values.len()
+        );
         if values.len() != texts.len() {
             return Err(EmbeddingError::InvalidResponse(
                 "embedding batch count mismatch".into(),

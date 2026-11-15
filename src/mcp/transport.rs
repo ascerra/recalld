@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::mcp::McpError;
 use crate::mcp::protocol::*;
@@ -29,28 +29,83 @@ pub(crate) async fn process_line(
     server: &Arc<tokio::sync::Mutex<McpServer>>,
     line: &str,
 ) -> Result<Option<String>, McpError> {
-    let line = line.trim();
-    if line.is_empty() {
-        return Ok(None);
-    }
-
-    let message: JsonRpcMessage = match serde_json::from_str(line) {
-        Ok(msg) => msg,
-        Err(e) => {
-            // We have no id to respond with, but JSON-RPC still wants a
-            // response -- so say so explicitly with a null id rather than
-            // fabricating `0` and colliding with a real request.
-            let err_resp =
-                JsonRpcResponse::error(JsonRpcId::Null, PARSE_ERROR, format!("Parse error: {e}"));
-            return Ok(Some(serde_json::to_string(&err_resp)?));
+    crate::performance::measure_transport("mcp.process_line", async {
+        let line = line.trim();
+        if line.is_empty() {
+            return Ok(None);
         }
-    };
 
-    let mut server = server.lock().await;
-    match server.handle_message(message).await {
-        Some(response) => Ok(Some(serde_json::to_string(&response)?)),
-        None => Ok(None),
-    }
+        let decode = crate::performance::Timer::new("mcp.decode");
+        let parsed = serde_json::from_str(line);
+        decode.outcome(parsed.is_ok());
+        let message: JsonRpcMessage = match parsed {
+            Ok(msg) => msg,
+            Err(e) => {
+                crate::performance::event!(
+                    kind = "transport_protocol",
+                    transport = "mcp_stdio",
+                    outcome = "parse_error"
+                );
+                // We have no id to respond with, but JSON-RPC still wants a
+                // response -- so say so explicitly with a null id rather than
+                // fabricating `0` and colliding with a real request.
+                let err_resp = JsonRpcResponse::error(
+                    JsonRpcId::Null,
+                    PARSE_ERROR,
+                    format!("Parse error: {e}"),
+                );
+                return Ok(Some(serde_json::to_string(&err_resp)?));
+            }
+        };
+
+        crate::performance::event!(
+            kind = "transport_operation",
+            operation = if message.method == "tools/call"
+                && message
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("name"))
+                    .and_then(|n| n.as_str())
+                    == Some("store_memory")
+            {
+                "store_memory"
+            } else {
+                "other"
+            }
+        );
+        let wait = crate::performance::Timer::new("mcp.server_lock.wait");
+        let server = server.lock().await;
+        wait.complete();
+        let mut server = crate::performance::Hold::new("mcp.server_lock.hold", server);
+        let dispatch = crate::performance::Timer::new("mcp.dispatch");
+        let response = server.handle_message(message).await;
+        dispatch.complete();
+        let encode = crate::performance::Timer::new("mcp.serialize");
+        let result = match response {
+            Some(response) => {
+                crate::performance::event!(
+                    kind = "transport_protocol",
+                    transport = "mcp_stdio",
+                    protocol_error = response.error.is_some()
+                );
+                if let Some(tool_error) = response
+                    .result
+                    .as_ref()
+                    .and_then(|r| r.get("isError"))
+                    .and_then(|v| v.as_bool())
+                {
+                    crate::performance::event!(kind = "transport_tool_result", tool_error);
+                }
+                serde_json::to_string(&response)
+                    .map(Some)
+                    .map_err(McpError::from)
+            }
+            None => Ok(None),
+        };
+        encode.outcome(result.is_ok());
+        result
+    })
+    .await
 }
 
 /// Run the MCP server over stdin/stdout.
@@ -61,21 +116,66 @@ pub(crate) async fn process_line(
 ///
 /// Returns when stdin is closed (EOF) or an I/O error occurs.
 pub async fn run_stdio(server: Arc<tokio::sync::Mutex<McpServer>>) -> Result<(), McpError> {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    let reader = BufReader::new(stdin);
+    serve_io(server, BufReader::new(io::stdin()), io::stdout()).await
+}
+
+/// Production stdio loop with injectable I/O for actual flush/error tests.
+pub(crate) async fn serve_io<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+    server: Arc<tokio::sync::Mutex<McpServer>>,
+    reader: R,
+    mut writer: W,
+) -> Result<(), McpError> {
     let mut lines = reader.lines();
-
     tracing::info!("MCP stdio transport started");
-
     while let Some(line) = lines.next_line().await? {
-        if let Some(json) = process_line(&server, &line).await? {
-            stdout.write_all(json.as_bytes()).await?;
-            stdout.write_all(b"\n").await?;
-            stdout.flush().await?;
-        }
+        crate::performance::measure_transport("mcp.stdio", async {
+            // Excludes the delimiter stripped by AsyncBufReadExt::lines.
+            crate::performance::event!(
+                kind = "transport_input",
+                transport = "mcp_stdio",
+                source_bytes = line.len()
+            );
+            let mut timeline = crate::performance::Timeline::new();
+            let output = process_line(&server, &line).await?;
+            timeline.mark("transport.decode_dispatch_serialize");
+            if let Some(json) = output {
+                crate::performance::event!(
+                    kind = "transport_output",
+                    transport = "mcp_stdio",
+                    phase = "attempt",
+                    source_bytes = json.len() + 1
+                );
+                let delivery = crate::performance::Timer::new("mcp.write_flush");
+                let result = async {
+                    writer.write_all(json.as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                    writer.flush().await
+                }
+                .await;
+                crate::performance::event!(
+                    kind = "transport_delivery",
+                    transport = "mcp_stdio",
+                    success = result.is_ok()
+                );
+                delivery.outcome(result.is_ok());
+                result?;
+                crate::performance::event!(
+                    kind = "transport_output",
+                    transport = "mcp_stdio",
+                    phase = "complete",
+                    source_bytes = json.len() + 1
+                );
+            } else {
+                crate::performance::event!(
+                    kind = "transport_notification",
+                    transport = "mcp_stdio"
+                );
+            }
+            timeline.mark("transport.write_flush");
+            Ok::<_, McpError>(())
+        })
+        .await?;
     }
-
     tracing::info!("MCP stdio transport closed (stdin EOF)");
     Ok(())
 }

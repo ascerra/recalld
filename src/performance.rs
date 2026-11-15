@@ -184,6 +184,23 @@ async fn measure_with_sampler<T, E>(
     future: impl Future<Output = Result<T, E>>,
     sampler_override: Option<&Sampler>,
 ) -> Result<T, E> {
+    measure_request(operation, Some(record_access), future, sampler_override).await
+}
+
+/// Transport intent is unknown before decoding, never implicitly read-only.
+pub(crate) async fn measure_transport<T, E>(
+    operation: &'static str,
+    future: impl Future<Output = Result<T, E>>,
+) -> Result<T, E> {
+    measure_request(operation, None, future, None).await
+}
+
+async fn measure_request<T, E>(
+    operation: &'static str,
+    record_access: Option<bool>,
+    future: impl Future<Output = Result<T, E>>,
+    sampler_override: Option<&Sampler>,
+) -> Result<T, E> {
     let decision = REQUEST.try_with(|d| *d).unwrap_or_else(|_| {
         if target_enabled() {
             sampler_override.unwrap_or_else(|| sampler()).decide()
@@ -202,12 +219,17 @@ async fn measure_with_sampler<T, E>(
     let trace_id = NEXT_TRACE.fetch_add(1, Ordering::Relaxed);
     // Full trace keeps its original event-v1 span fields. Sampled traces have
     // version 2 and explicit root-level counts (not whole-population metrics).
-    let span = if decision.every == 1 {
+    let span = if record_access.is_none() {
         tracing::trace_span!(target: "recalld::performance", "performance_request",
-            operation, record_access, trace_id, event_version = 1)
+            operation, intent = "unknown", trace_id, event_version = 3,
+            sample_every = decision.every, root_ordinal = decision.root_ordinal,
+            sampled_roots_seen = decision.sampled_roots_seen)
+    } else if decision.every == 1 {
+        tracing::trace_span!(target: "recalld::performance", "performance_request",
+            operation, record_access = record_access.unwrap(), trace_id, event_version = 1)
     } else {
         tracing::trace_span!(target: "recalld::performance", "performance_request",
-            operation, record_access, trace_id, event_version = 2,
+            operation, record_access = record_access.unwrap(), trace_id, event_version = 2,
             sample_every = decision.every, root_ordinal = decision.root_ordinal,
             sampled_roots_seen = decision.sampled_roots_seen)
     };
@@ -235,6 +257,29 @@ pub(crate) fn receipts(receipts: &[crate::storage::control::WriteReceipt]) {
                 committed_generation = receipt.committed_generation.get());
         }
     }
+}
+
+/// Counts this explicit Rust sync call, not opaque backend syscalls.
+pub(crate) fn sync_io<T>(
+    resource: &'static str,
+    method: &'static str,
+    sync: impl FnOnce() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    if !enabled() {
+        return sync();
+    }
+    event!(kind = "sync_call", resource, method, phase = "attempt");
+    let timer = Timer::new("storage.sync");
+    let result = sync();
+    event!(
+        kind = "sync_call",
+        resource,
+        method,
+        phase = "return",
+        success = result.is_ok()
+    );
+    timer.outcome(result.is_ok());
+    result
 }
 
 /// Carry the request's subscriber and span into a blocking worker. No capture

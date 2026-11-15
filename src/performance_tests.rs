@@ -662,3 +662,17 @@ pub(crate) async fn capture_sampled<T>(
 
 #[path = "performance_write_tests.rs"]
 mod writes;
+
+/// Actual producer tests capture without inventing an outer request intent.
+pub(crate) async fn capture_full<T>(
+    future: impl Future<Output = T>,
+) -> (T, Vec<serde_json::Value>) {
+    let capture = Capture::default();
+    let result = future.with_subscriber(subscriber(capture.clone())).await;
+    let rows = String::from_utf8(capture.0.lock().unwrap().clone())
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    (result, rows)
+}

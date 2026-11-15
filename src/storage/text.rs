@@ -230,7 +230,7 @@ impl TextStore {
             // Write header.
             let header = TextLogHeader::new();
             file.write_all(zerocopy::IntoBytes::as_bytes(&header))?;
-            file.sync_all()?;
+            crate::performance::sync_io("text", "sync_all", || file.sync_all())?;
 
             Ok(TextStore {
                 file,
@@ -371,7 +371,8 @@ impl TextStore {
 
     /// Flush pending writes to durable storage.
     pub fn sync_data(&self) -> Result<(), StorageError> {
-        self.file.sync_data().map_err(StorageError::Io)
+        crate::performance::sync_io("text", "sync_data", || self.file.sync_data())
+            .map_err(StorageError::Io)
     }
 
     /// Return the current file size in bytes.
