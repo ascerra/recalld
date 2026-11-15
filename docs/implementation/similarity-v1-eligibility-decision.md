@@ -43,8 +43,12 @@ Fixing only the new explicit V2 consumer would leave these legacy callers wrong.
    which checks membership before scoring/heap admission. No new trait or index
    implementation is needed. Retain its dot-product scores, signed-zero handling,
    score-descending/UUID comparator and the existing score threshold.
-4. Build results from the same projected canonical record map, preserving vector
-   order. Do not reread cache metadata as eligibility authority. Keep fallible
+4. Revalidate selected rows through the existing canonical `get_batch` and the
+   same clock/policy context, then build results preserving vector order. Missing
+   rows or changed scope/phase/policy fail closed before observation; they are not
+   silently dropped. This refines the initial map-reuse proposal after candidate4's
+   actual existing final-read regression (1,039 passed, one failed). Do not read
+   cache metadata as eligibility authority. Keep fallible
    hydration, returned-only exposure, original numeric API identity, deferred
    recording, worker scopes and existing read admission/readiness behavior.
 

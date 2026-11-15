@@ -62,4 +62,6 @@ returned-only IDs and per-namespace classification/time/policy/origin; later-gro
 commit failure retaining earlier receipts; false byte identity; actual legacy
 false-flag consumer; V1 eligible top-k against an exhaustive oracle; and unchanged
 V1 cosine scores/stored-version behavior on already eligible inputs. Freeze new source,
-use a separate candidate target, and run offline Rust tests before claiming a fix.
+reuse one private target with a recalld-only clean after source switches, and run
+offline Rust tests before claiming a fix. The implementation report records the
+actual failures, final canonical revalidation refinement and completed validation.
