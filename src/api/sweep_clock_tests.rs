@@ -76,6 +76,14 @@ async fn fixture(native: bool) -> (Fixture, crate::model::MemoryId, Arc<CountClo
         },
     )
     .unwrap();
+    // Positive manual-sweep fixture: use the actual adoption writer before
+    // sampling the request clock or recording the no-change baseline.
+    crate::test_support::explicitly_adopt_inherited_policy(
+        &destination,
+        NamespaceId::new(1),
+        1.0,
+        1000,
+    );
     let session =
         NativeLifecycleSession::open(&destination, NativePolicyInputs::default(), clock.clone())
             .unwrap();

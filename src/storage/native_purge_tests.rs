@@ -234,6 +234,7 @@ fn native_purge_mixed_chunks_restart_replay_policy_and_ledger() {
 async fn native_purge_complete_export_import_backup_fork_preserves_witness() {
     let root = tempfile::tempdir().unwrap();
     let (path, id, _) = fixture(root.path());
+    crate::test_support::explicitly_adopt_inherited_policy(&path, id, 1., 2000);
     let mut s = open(&path);
     policy(&mut s, id);
     let memory = s

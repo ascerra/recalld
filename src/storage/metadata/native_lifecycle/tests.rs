@@ -234,6 +234,11 @@ async fn fixture(
     } else {
         canonical
     };
+    if multiplier.is_none() {
+        // This dependent fixture deliberately adopts current inputs; it makes no
+        // claim about the unknown inputs preserved by the migration above.
+        crate::test_support::explicitly_adopt_inherited_policy(&path, ns, 1., 10);
+    }
     Data {
         path,
         legacy,
@@ -427,7 +432,7 @@ async fn replay_precedes_stale_tokens_policy_and_clock_but_not_lineage_or_payloa
         session
             .metadata()
             .apply_native_feedback(&newkey, &intent, &wrong_policy, clock.as_ref()),
-        Err(StorageError::LifecycleConflict(_))
+        Err(StorageError::InvalidMutation(message)) if message.contains("differs from canonical adoption")
     ));
     assert!(matches!(
         session.apply_feedback(&newkey, &intent),

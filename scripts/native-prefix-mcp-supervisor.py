@@ -108,7 +108,7 @@ warm_file_enabled = false
         documentPreprocessing=dict(version="recalld-document-v1",prefix="a6-document:"),
         queryPreprocessing=dict(version="recalld-query-v1",prefix="a6-query:"),normalization="l2_unit_v1")
     seed=dict(fixtureVersion=1,profile=profile,attest=True,sources=[dict(sourceId=s["sourceId"],namespace=s["namespace"],summary=s["summary"],fullText=s.get("fullText"),embedding=s["embedding"]) for s in actor["sources"]])
-    if sweep: seed.update(fixtureVersion=2, namespaceDecayMultipliers={"foreign":0.0})
+    if sweep: seed.update(fixtureVersion=3, namespaceDecayMultipliers={"foreign":0.0}, inheritedDecayAdoptions={"default":1.0})
     children=[]; negatives=[]; comparisons=[]
     result=dict(status="running",track=sweep["TRACK"] if sweep else TRACK,environmentHash=environment,independentNativeGenesis=False)
     save=h["save"]
@@ -139,6 +139,13 @@ warm_file_enabled = false
         return {str(p.relative_to(folder)):h["digest"](p.read_bytes()) for p in folder.rglob("*") if p.is_file() and not p.is_symlink()}
     def unchanged(folder,before):
         assert all((folder/name).is_file() and h["digest"]((folder/name).read_bytes())==sha for name,sha in before.items()),"source/checkpoint bytes changed"
+    def closed_inventory(root,name):
+        report=evaluator/(name+"-canonical.json")
+        with (evaluator/(name+"-canonical.log")).open("wb") as log:
+            subprocess.run([str(args.binary.with_name("native_prefix_fixture")),
+                "--inspect-existing","--root",str(root),"--report",str(report)],
+                check=True,stdout=log,stderr=subprocess.STDOUT,env=dict(PATH="/usr/bin:/bin"))
+        return json.loads(report.read_text())
     def admit(owner, expected=None, expected_state=None):
         assert owner.control.call("capabilities",{})==expected_capabilities
         if not sweep:
@@ -206,7 +213,103 @@ warm_file_enabled = false
         comparison=dict(outputs=outputs,state=state,logicalHash=snap["logicalHash"],provider=[dict(request=json.loads(v["requestBody"]),status=v["status"],vectors=v["responseVectors"]) for v in provider])
         save(owner.output/"suffix.json",comparison);return comparison
     try:
+        if sweep:
+            unknown=copy.deepcopy(seed);unknown.update(fixtureVersion=2);unknown.pop("inheritedDecayAdoptions")
+            unknown_root,unknown_provenance=build_prefix("unknown-inherited-prefix",unknown)
+            before_unknown=inventory(unknown_root)
+            before_canonical=closed_inventory(unknown_root,"unknown-before-open")
+            unchanged(unknown_root,before_unknown)
+            def unknown_files(phase):
+                values={str(p.relative_to(unknown_root)):dict(sha256=h["digest"](p.read_bytes()),size=p.stat().st_size)
+                    for p in unknown_root.rglob("*") if p.is_file() and not p.is_symlink()}
+                save(evaluator/("unknown-files-"+phase+".json"),values)
+                return values
+            unknown_files("before-open")
+            startup_owner=child("unknown-startup",root=unknown_root,native=True)
+            assert startup_owner.control.call("capabilities",{}) == expected_capabilities
+            startup_state,startup_readiness=startup_owner.ready()
+            unknown_files("after-startup-open")
+            startup_owner.close()
+            unknown_files("after-startup-close")
+            completed_canonical=closed_inventory(unknown_root,"unknown-after-startup")
+            # The first real publisher acknowledges the four already-applied
+            # fixture insert effects. Prove that exact transition, rather than
+            # excluding effects from later state comparisons.
+            table=None; expected_items=[]; acknowledged=[]
+            for item in before_canonical["items"]:
+                if item["kind"] == "table": table=item["data"]["name"]
+                if item["kind"] == "row" and table == "mutation_effects":
+                    effect=json.loads(bytes(item["data"]["value"]))
+                    assert effect["version"] == 1 and effect["canonical_applied"] is True
+                    assert effect["receipt"]["outcome"]["kind"] == "memoryInserted"
+                    assert bytes(item["data"]["key"]).hex() == effect["receipt"]["operationId"].replace("-", "")
+                    acknowledged.append(effect)
+                else:
+                    expected_items.append(item)
+            assert len(acknowledged) == 4
+            by_operation=lambda rows: {r["operationId"]:r for r in rows}
+            assert by_operation([v["receipt"] for v in acknowledged]) == by_operation(unknown_provenance["sourceReceipts"])
+            assert completed_canonical["items"] == expected_items
+            for key in ("inventoryVersion","source","control","namespaces","records"):
+                assert completed_canonical[key] == before_canonical[key]
+            save(evaluator/"unknown-startup-completion.json",dict(
+                acknowledgedEffects=acknowledged,state=startup_state,readiness=startup_readiness,
+                beforeLogicalSha256=before_canonical["logicalSha256"],
+                afterLogicalSha256=completed_canonical["logicalSha256"],
+                exactOtherCanonicalItemsUnchanged=True))
+            before_canonical=completed_canonical
+            unknown_owner=child("unknown-inherited-prefix",root=unknown_root,native=True)
+            assert unknown_owner.control.call("capabilities",{}) == expected_capabilities
+            before_state=unknown_owner.control.call("inspect",{})
+            assert before_state == startup_state
+            before_sweep=unknown_files("before-sweep")
+            provider_count=len(provider_rows())
+            try:
+                unknown_owner.control.call("sweep",dict(deadlineMs=30000))
+            except ValueError:
+                # Preserve the full typed failed-sweep wire rather than claiming
+                # that an unknown policy forbids every nonprojecting read/open.
+                wire=h["rows"](unknown_owner.output/"control-wire.jsonl")
+                failure=wire[-1]["response"]["error"]
+                assert failure["code"] == "SWEEP_FAILED" and "inherited" in json.dumps(failure)
+                assert failure["retryable"] is False
+            else:
+                raise AssertionError("unknown inherited policy sweep succeeded")
+            assert unknown_files("after-sweep") == before_sweep
+            unavailable=unknown_owner.control.call("inspect",{},error="CONTROL_UNAVAILABLE")
+            assert "sweep episode invalid" in unavailable["message"]
+            status=unknown_owner.control.call("sweepStatus",{})
+            assert status["episodeInvalidated"] is True
+            assert status["lastSweep"]["phase"] == "failed"
+            assert status["lastSweep"]["result"] == failure["sweep"]["result"]
+            assert status["lastSweep"]["error"]["code"] == "SWEEP_FAILED"
+            assert len(provider_rows()) == provider_count
+            assert unknown_files("before-close") == before_sweep
+            unknown_owner.close()
+            unknown_files("after-close")
+            after_canonical=closed_inventory(unknown_root,"unknown-after-close")
+            assert after_canonical == before_canonical
+            reopened=child("unknown-inherited-reopened",root=unknown_root,native=True)
+            assert reopened.control.call("capabilities",{}) == expected_capabilities
+            after_state=reopened.control.call("inspect",{})
+            assert after_state == before_state
+            assert len(provider_rows()) == provider_count
+            reopened.close()
+            unknown_files("after-fresh-owner-close")
+            reopened_canonical=closed_inventory(unknown_root,"unknown-after-fresh-owner-close")
+            assert reopened_canonical == before_canonical
+            save(evaluator/"unknown-inherited-sweep.json",dict(failure=failure,
+                invalidatedOwnerInspect=unavailable,sweepStatus=status,
+                beforeState=before_state,freshOwnerState=after_state,
+                sourceFilesSha256=before_unknown,canonicalInventoryUnchanged=True,
+                fileBytesUnchangedDuringSweep=True,stateUnchanged=True,providerCalls=0))
+            negatives.append(dict(case="unknown-inherited-prefix-sweep",code="SWEEP_FAILED",providerCalls=0))
         root,provenance=build_prefix("original",seed); mappings=provenance["mappings"]
+        if sweep:
+            adoption=provenance["inheritedPolicyAdoptions"]
+            assert len(adoption)==2 and adoption[1]["historicalReceiptBytesPreserved"] and adoption[1]["foreignNamespaceUnchanged"]
+            assert adoption[0]["request"]["preview"]["prior"] is None
+            save(evaluator/"explicit-policy-adoption.json",adoption)
         original=child("original",root=root,native=True); initial_state,checkpoint=admit(original)
         # This is the actual source-owner lock gate, before any clone is installed.
         reject("old-owner",checkpoint=checkpoint)

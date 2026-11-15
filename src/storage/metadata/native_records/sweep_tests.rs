@@ -51,6 +51,9 @@ fn row(f: &Fixture, id: MemoryId) -> DiskRecord {
     f.storage.read().unwrap().get_record(id).unwrap().unwrap()
 }
 fn setup() -> (Fixture, Data, MemoryId, Arc<CountingClock>) {
+    setup_with_multiplier(1.)
+}
+fn setup_with_multiplier(multiplier: f64) -> (Fixture, Data, MemoryId, Arc<CountingClock>) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let c = Arc::new(CountingClock::new(3000));
@@ -65,6 +68,19 @@ fn setup() -> (Fixture, Data, MemoryId, Arc<CountingClock>) {
             .insert_prepared(&key, &intent, &generated())
             .unwrap(),
     );
+    if multiplier != 1. {
+        drop(session);
+        crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, multiplier, 3000);
+        session = NativeLifecycleSession::open(
+            &d.path,
+            NativePolicyInputs {
+                multiplier,
+                ..Default::default()
+            },
+            c.clone(),
+        )
+        .unwrap();
+    }
     (Fixture::from_open_engine(root, session.engine), d, id, c)
 }
 async fn wait(tracker: &WorkTracker, predicate: impl Fn(WorkStatus) -> bool) {
@@ -504,6 +520,9 @@ async fn native_sweep_preserves_unknown_migration_marker_and_clamps_regressed_cl
     )
     .unwrap();
     d.path = destination;
+    // Explicit present-day policy adoption must not rewrite the unknown old
+    // phase timestamp: the assertions below retain that original marker.
+    crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 500 * DAY);
     let c = Arc::new(CountingClock::new(500 * DAY));
     let session =
         NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone()).unwrap();

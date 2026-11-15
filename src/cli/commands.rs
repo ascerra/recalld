@@ -39,6 +39,8 @@ pub enum OutputFormat {
 /// Top-level CLI commands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Explicit offline inherited-policy preview/adoption (no daemon).
+    Policy(PolicyArgs),
     /// Store a new memory
     Store(StoreArgs),
 
@@ -390,4 +392,42 @@ pub struct HealthArgs {
     /// Output format (overrides global --format).
     #[arg(long, value_enum)]
     pub format: Option<OutputFormat>,
+}
+
+#[derive(Debug, Args)]
+pub struct PolicyArgs {
+    #[command(subcommand)]
+    pub action: PolicyAction,
+}
+#[derive(Debug, Subcommand)]
+pub enum PolicyAction {
+    /// Offline, read-only complete preview; unknown old inputs remain unknown.
+    PreviewInherited {
+        #[arg(long)]
+        store: std::path::PathBuf,
+        #[arg(long)]
+        namespace_id: u32,
+        #[arg(long)]
+        multiplier: f64,
+        #[arg(long)]
+        expected_store_id: Uuid,
+        #[arg(long, value_parser = parse_policy_generation)]
+        expected_generation: crate::storage::control::Generation,
+    },
+    /// Explicitly accept a complete preview under exclusive store ownership.
+    AdoptInherited {
+        #[arg(long)]
+        store: std::path::PathBuf,
+        #[arg(long)]
+        request: std::path::PathBuf,
+    },
+}
+
+fn parse_policy_generation(
+    value: &str,
+) -> std::result::Result<crate::storage::control::Generation, String> {
+    value
+        .to_owned()
+        .try_into()
+        .map_err(|e: crate::storage::StorageError| e.to_string())
 }

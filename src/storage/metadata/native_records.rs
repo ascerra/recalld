@@ -136,7 +136,9 @@ impl MetadataStore {
             namespace_name: cfg.name,
             source: None,
         };
-        let capture = self.capture_at(&read, &scope, &[id], policy, false)?;
+        // Explicit forgetting does not project retention. Unknown inherited inputs
+        // remain unknown; namespace identity/revision and record tokens still bind.
+        let capture = self.capture_policy_at(&read, &scope, &[id], policy, false, false)?;
         Ok(NativeTombstoneIntent {
             scope,
             memory_id: id,
@@ -627,8 +629,14 @@ impl MetadataStore {
         } else if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }
-        let (state, ns, _, mut current) =
-            self.check_native_capture(&tx, &intent.scope, &intent.capture, policy, false)?;
+        let (state, ns, _, mut current) = self.check_native_policy_capture(
+            &tx,
+            &intent.scope,
+            &intent.capture,
+            policy,
+            false,
+            false,
+        )?;
         state.committed_generation.next()?;
         let mut record = current
             .remove(&intent.memory_id)
