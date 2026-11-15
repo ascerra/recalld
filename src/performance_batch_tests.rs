@@ -351,8 +351,19 @@ async fn legacy_batch_rejection_bookkeeping_and_resume_count_actual_attempts() {
     }
     let fx = Fixture::new();
     let calls = Arc::new(AtomicUsize::new(0));
-    let mut adapter = fx.storage_adapter();
-    adapter.embedding = Arc::new(FailSecond(calls.clone()));
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.autolink_enabled = false;
+    let adapter = McpStorageAdapter::new(
+        fx.storage.clone(),
+        fx.cache.clone(),
+        Arc::new(FailSecond(calls.clone())),
+        fx.vector_index.clone(),
+        fx.fts_index.clone(),
+        fx.entity_index.clone(),
+        fx.graph.clone(),
+        Arc::new(config),
+        chrono_tz::UTC,
+    );
     let mut invalid = explicit_item();
     invalid["embedding"] = serde_json::json!([0., 0., 0., 0.]);
     let generated =
