@@ -110,6 +110,18 @@ async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
     };
     let id = transition.namespace_id;
     let ns = session.engine.get_namespace(id).unwrap().unwrap();
+    let inherited = ns
+        .schema
+        .as_ref()
+        .unwrap()
+        .inherited_decay
+        .as_ref()
+        .unwrap();
+    assert!(inherited.matches_receipt(&receipt));
+    assert_eq!(inherited.multiplier_bits, 1f32.to_bits());
+    assert_eq!(transition.inherited_decay.as_ref(), Some(inherited));
+    assert!(crate::storage::inherited_policy::resolve_bound(&ns, &Default::default(), 1.).is_ok());
+    assert!(crate::storage::inherited_policy::resolve_bound(&ns, &Default::default(), 0.).is_err());
     assert_eq!(
         ns.schema.as_ref().unwrap().lifecycle_version,
         crate::model::schema::LifecycleVersion::LegacyAccessV1

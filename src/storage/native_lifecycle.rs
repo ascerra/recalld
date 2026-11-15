@@ -353,6 +353,14 @@ impl NativePolicyInputs {
         &self,
         ns: &NamespaceConfig,
     ) -> Result<EffectiveLifecyclePolicy, StorageError> {
+        super::inherited_policy::resolve_bound(ns, &self.global, self.multiplier)
+    }
+    /// Administrative numeric policy selection does not project dependent state.
+    pub(crate) fn resolve_unbound(
+        &self,
+        ns: &NamespaceConfig,
+    ) -> Result<EffectiveLifecyclePolicy, StorageError> {
+        super::inherited_policy::supported_inputs(&self.global)?;
         resolve_policy(ns, &self.global, self.multiplier)
             .map_err(|e| StorageError::InvalidMutation(e.to_string()))
     }

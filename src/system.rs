@@ -1847,3 +1847,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "system_inherited_policy_tests.rs"]
+mod inherited_policy_tests;
