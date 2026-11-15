@@ -367,10 +367,35 @@ impl MetadataStore {
         delete_records: bool,
         release_vectors: bool,
     ) -> Result<EffectResult, StorageError> {
+        self.commit_graph_effects_with_origin(
+            _guard,
+            namespace,
+            existing_edges,
+            puts,
+            incident_ids,
+            delete_records,
+            release_vectors,
+            1,
+        )
+    }
+
+    pub(crate) fn commit_graph_effects_with_origin(
+        &self,
+        _guard: &MutationGuard<'_>,
+        namespace: NamespaceId,
+        existing_edges: &[PersistedEdge],
+        puts: &[PersistedEdge],
+        incident_ids: &[MemoryId],
+        delete_records: bool,
+        release_vectors: bool,
+        original_contract_version: u32,
+    ) -> Result<EffectResult, StorageError> {
         _guard.check(self)?;
         self.ensure_available()?;
+        let mut ctx = MutationContext::unkeyed(namespace);
+        ctx.contract_version = original_contract_version;
+        ctx.validate()?;
         let tx = self.db.begin_write()?;
-        let ctx = MutationContext::unkeyed(namespace);
         let request = control::encode(&(puts, incident_ids, delete_records, release_vectors))?;
         let hash = control::request_hash(&ctx, "graph_effects", &[&request]);
         self.finish_record_effects(
