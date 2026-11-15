@@ -1,0 +1,73 @@
+   Compiling recalld v1.0.0 (/work)
+error[E0603]: module `archive` is private
+   --> src/mcp/legacy_compound_origin_tests.rs:611:9
+    |
+611 |         archive::create_archive,
+    |         ^^^^^^^ private module
+    |
+note: the module `archive` is defined here
+   --> src/backup/mod.rs:7:1
+    |
+  7 | mod archive;
+    | ^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1908:19
+     |
+1908 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0282]: type annotations needed for `std::sync::Arc<_>`
+   --> src/mcp/legacy_compound_origin_tests.rs:245:13
+    |
+245 |         let calls = Arc::new(Default::default());
+    |             ^^^^^
+...
+249 |             calls: calls.clone(),
+    |                    ----- type must be known at this point
+    |
+help: consider giving `calls` an explicit type, where the placeholders `_` are specified
+    |
+245 |         let calls: std::sync::Arc<T> = Arc::new(Default::default());
+    |                  +++++++++++++++++++
+
+error[E0609]: no field `scope` on type `storage::control::WriteReceipt`
+   --> src/mcp/legacy_compound_origin_tests.rs:330:61
+    |
+330 |                 .lookup_operation(receipt.store_id, receipt.scope, child_id)
+    |                                                             ^^^^^ unknown field
+    |
+    = note: available fields are: `store_id`, `operation_id`, `committed_generation`, `receipt_version`, `outcome`, `replayed`
+
+error[E0609]: no field `scope` on type `storage::control::WriteReceipt`
+   --> src/mcp/legacy_compound_origin_tests.rs:602:57
+    |
+602 |             .lookup_operation(receipt.store_id, receipt.scope, receipt.operation_id)
+    |                                                         ^^^^^ unknown field
+    |
+    = note: available fields are: `store_id`, `operation_id`, `committed_generation`, `receipt_version`, `outcome`, `replayed`
+
+warning: unused import: `StorageEngine`
+ --> src/search/origin_tests.rs:5:5
+  |
+5 |     StorageEngine as _,
+  |     ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1497:9
+     |
+1497 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+Some errors have detailed explanations: E0282, E0603, E0609.
+For more information about an error, try `rustc --explain E0282`.
+warning: `recalld` (lib test) generated 3 warnings
+error: could not compile `recalld` (lib test) due to 4 previous errors; 3 warnings emitted
