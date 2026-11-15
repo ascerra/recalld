@@ -703,7 +703,7 @@ pub(crate) fn check_child_context(
     child: &BatchChild,
 ) -> Result<(), StorageError> {
     if !matches!(child.version, 2 | 3)
-        || ctx.contract_version != 2
+        || ctx.contract_version != child.context().contract_version
         || ctx.store_id != Some(child.store_id)
         || ctx.scope != MutationScope::Namespace(child.namespace())
         || ctx.idempotency_key.is_some()

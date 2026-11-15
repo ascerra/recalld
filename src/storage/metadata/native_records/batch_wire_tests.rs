@@ -228,9 +228,18 @@ async fn native_origin_single_wire_wrong_vector_width_is_caller_422_without_muta
     let store_id = s.metadata().control_state().unwrap().store_id;
     let f = Fixture::from_open_engine(root, s.engine);
     let provider = Arc::new(RecoveringProvider {
-        profile: d.profile.clone(), unavailable: false.into(), calls: AtomicUsize::new(0), profiles: AtomicUsize::new(0), corrupt: Default::default(),
+        profile: d.profile.clone(),
+        unavailable: false.into(),
+        calls: AtomicUsize::new(0),
+        profiles: AtomicUsize::new(0),
+        corrupt: Default::default(),
     });
-    let a = Arc::new(adapter(&f, provider.clone(), clock.clone(), Default::default()));
+    let a = Arc::new(adapter(
+        &f,
+        provider.clone(),
+        clock.clone(),
+        Default::default(),
+    ));
     let request = json!({"namespaceId":d.ns,"storeId":store_id,"idempotencyKey":"width","summary":"caller width","embedding":[1.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap()});
     let before = readers::bytes(&d.path);
     let state = f.storage.read().unwrap().control_state().unwrap();

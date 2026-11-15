@@ -707,6 +707,7 @@ mod tests {
             tx.clone(),
         ));
         let mut input = BatchInput {
+            request_context: None,
             expected_generation: None,
             mutation_version: 1,
             result_version: 1,
@@ -793,6 +794,7 @@ mod tests {
         let adapter = fx.storage_adapter();
         let store_id = fx.storage.read().unwrap().control_state().unwrap().store_id;
         let mut input = BatchInput {
+            request_context: None,
             expected_generation: None,
             mutation_version: 1,
             result_version: 1,
@@ -881,6 +883,7 @@ mod tests {
             .fail_batch_commit
             .store(3, std::sync::atomic::Ordering::SeqCst);
         let input = BatchInput {
+            request_context: None,
             expected_generation: None,
             mutation_version: 1,
             result_version: 1,

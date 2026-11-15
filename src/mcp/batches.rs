@@ -410,6 +410,7 @@ mod tests {
     use super::*;
     fn request(namespace: &str, value: Value) -> BatchInput {
         BatchInput {
+            request_context: None,
             expected_generation: None,
             mutation_version: 1,
             result_version: 1,

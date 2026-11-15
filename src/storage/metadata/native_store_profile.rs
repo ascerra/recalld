@@ -21,8 +21,7 @@ impl MetadataStore {
         let MutationScope::Namespace(namespace_id) = ctx.scope else {
             return Err(StorageError::MutationNamespaceMismatch);
         };
-        if ctx.contract_version != 2
-            || input.insert.embedding_profile.is_some()
+        if input.insert.embedding_profile.is_some()
             || input.insert.memory.embedding.is_some() != supplied_profile_id.is_some()
         {
             return Err(StorageError::InvalidMutation("native wire vector requires only its profile ID; generated vectors omit the selector".into()));

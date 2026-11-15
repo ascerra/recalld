@@ -427,6 +427,7 @@ fn batch_offline_run(
     use batch::{BatchError, BatchInput, BatchItemPlan, BatchItemState};
     let mut engine = RedbStorageEngine::open(source).unwrap();
     let input = BatchInput {
+        request_context: None,
         expected_generation: None,
         mutation_version: 1,
         result_version: 1,

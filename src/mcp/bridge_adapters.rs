@@ -1731,6 +1731,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         }
         let outcome = self
             .run_batch(crate::storage::batch::BatchInput {
+                request_context: None,
                 expected_generation: None,
                 mutation_version: 1,
                 result_version: 1,

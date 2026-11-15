@@ -162,7 +162,7 @@ impl McpStorageAdapter {
                     let settings = crate::graph::native_selection::freeze_settings(&config.graph)?;
                     if let Some(budget) = budget { budget.fresh(&plans, &settings)?; }
                     Ok(settings)
-                })}else{storage.meta_store().reserve_or_resume_batch_with_work(&ctx,kind,&plans,parent,Some(&worker))};
+                })}else{storage.meta_store().reserve_batch_version_with_work(&ctx,version,kind,&plans,parent,Some(&worker),||Ok(None))};
                 Ok::<_,StorageError>((store_id,reservation))
             })();
             storage.meta_store().finish_work(worker);
@@ -578,6 +578,7 @@ mod tests {
 
     fn request(f: &Fixture, key: &str, items: Vec<serde_json::Value>) -> BatchInput {
         BatchInput {
+            request_context: None,
             expected_generation: None,
             mutation_version: 1,
             result_version: 1,

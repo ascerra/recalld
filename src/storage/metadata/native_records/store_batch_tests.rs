@@ -6,6 +6,7 @@ use serde_json::json;
 
 fn request(d: &Data, store_id: uuid::Uuid) -> BatchInput {
     BatchInput {
+        request_context: None,
         expected_generation: None,
         mutation_version: 3,
         result_version: 1,
@@ -269,13 +270,13 @@ fn linked_batch_forged_version_settings_or_outcome_rejects_on_reopen() {
 
 #[tokio::test]
 async fn linked_batch_export_import_retained_restore_preserves_version_and_proof() {
-    export_import_and_restore(false).await;
+    export_import_and_restore(false, 2).await;
 }
 #[tokio::test]
 async fn batch_cas_export_import_retained_restore_preserves_original_proof() {
-    export_import_and_restore(true).await;
+    export_import_and_restore(true, 2).await;
 }
-async fn export_import_and_restore(cas: bool) {
+async fn export_import_and_restore(cas: bool, contract: u32) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
@@ -283,6 +284,8 @@ async fn export_import_and_restore(cas: bool) {
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let mut r = request(&d, s.metadata().control_state().unwrap().store_id);
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
     if cas {
         r.expected_generation = Some(s.metadata().control_state().unwrap().committed_generation);
     }
@@ -312,6 +315,7 @@ async fn export_import_and_restore(cas: bool) {
         })
         .unwrap();
     assert_eq!(replay.version, 3);
+    assert_eq!(replay.request_context, p.request_context);
     assert_eq!(replay.reservation_precondition, p.reservation_precondition);
     assert_eq!(
         replay.items[0].state,
@@ -375,6 +379,7 @@ async fn export_import_and_restore(cas: bool) {
         p.reservation_precondition
     );
     assert_eq!(historical.reservation_receipt, p.reservation_receipt);
+    assert_eq!(historical.request_context, p.request_context);
     assert_eq!(
         historical.reservation_expected_generation().unwrap(),
         r.expected_generation
@@ -436,13 +441,13 @@ fn linked_batch_process_child() {
 }
 #[test]
 fn linked_batch_process_exit_before_after_child_commit_preserves_one_reserved_identity() {
-    process_child_boundaries(false);
+    process_child_boundaries(false, 2);
 }
 #[test]
 fn batch_cas_process_exit_before_after_child_commit_preserves_original_proof() {
-    process_child_boundaries(true);
+    process_child_boundaries(true, 2);
 }
-fn process_child_boundaries(cas: bool) {
+fn process_child_boundaries(cas: bool, contract: u32) {
     for point in [
         "before_metadata_commit",
         "after_metadata_commit",
@@ -453,6 +458,9 @@ fn process_child_boundaries(cas: bool) {
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let mut r = request(&d, s.metadata().control_state().unwrap().store_id);
+        r.request_context =
+            crate::storage::request_context::RetainedRequestContext::from_contract(contract)
+                .unwrap();
         if cas {
             r.expected_generation =
                 Some(s.metadata().control_state().unwrap().committed_generation);
@@ -507,3 +515,6 @@ mod cas;
 
 #[path = "batch_wire_tests.rs"]
 mod wire;
+
+#[path = "batch_origin_tests.rs"]
+mod origin;

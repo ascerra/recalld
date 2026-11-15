@@ -83,6 +83,7 @@ pub(crate) fn parse(
         ));
     }
     Ok(BatchInput {
+        request_context: None,
         result_version: 1,
         mutation_version: 3,
         kind: BatchKind::Insert,

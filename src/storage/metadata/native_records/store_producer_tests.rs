@@ -56,6 +56,7 @@ fn provider(d: &Data) -> Arc<Provider> {
 }
 fn request(f: &Fixture, key: &str) -> BatchInput {
     BatchInput {
+        request_context: None,
         expected_generation: None,
         mutation_version: 3,
         result_version: 1,
@@ -228,6 +229,9 @@ async fn linked_producer_checked_empty_and_disabled_have_distinct_outcomes_and_r
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_publication_failure_keeps_actual_child_receipt_then_replays_once() {
+    batch_publication_origin(2).await;
+}
+async fn batch_publication_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
@@ -237,7 +241,9 @@ async fn linked_producer_publication_failure_keeps_actual_child_receipt_then_rep
     let mut p = provider(&d);
     Arc::get_mut(&mut p).unwrap().corrupt = Some(f.vector_index.clone());
     let a = adapter(&f, p.clone(), clock, Default::default());
-    let r = request(&f, "publish");
+    let mut r = request(&f, "publish");
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
     let out = a.run_batch(r.clone()).await.unwrap();
     assert_eq!(out.items[0].status, BatchStatus::Ok);
     assert!(!out.items[0].ready);
@@ -1224,6 +1230,9 @@ async fn native_single_profile_id_replays_genuine_before_fixture_bytes() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_profile_id_publication_error_preserves_exact_committed_receipt() {
+    single_publication_origin(2).await;
+}
+async fn single_publication_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
@@ -1232,7 +1241,8 @@ async fn native_single_profile_id_publication_error_preserves_exact_committed_re
     completion(&f).rebuild_all().await.unwrap();
     let p = provider(&d);
     let a = adapter(&f, p.clone(), clock, Default::default());
-    let key = single_context(&f, &d, "profile-publication");
+    let mut key = single_context(&f, &d, "profile-publication");
+    key.contract_version = contract;
     let input = profile_wire_input(&d, false);
     let id = Some(d.profile.profile_id().unwrap());
     *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);

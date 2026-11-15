@@ -218,6 +218,12 @@ impl Reply {
             other => other,
         };
         let specific = match source {
+            crate::storage::StorageError::CallerVectorInvalid(_) => Some((
+                ErrorCategory::InvalidInput,
+                "OUT_OF_RANGE",
+                "/embedding",
+                "supplied vector must have the canonical dimension and a finite nonzero norm",
+            )),
             crate::storage::StorageError::EmbeddingProfileMismatch => Some((
                 ErrorCategory::Conflict,
                 "EMBEDDING_PROFILE_MISMATCH",

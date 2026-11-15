@@ -11,9 +11,9 @@ pub(super) fn replay_store(
     input: &NativeStoreInput,
 ) -> Result<Option<WriteReceipt>, StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || !matches!(ctx.scope, MutationScope::Namespace(_)) {
+    if !matches!(ctx.scope, MutationScope::Namespace(_)) {
         return Err(StorageError::InvalidMutationContext(
-            "native linked store requires contract 2 and namespace scope".into(),
+            "native linked store requires namespace scope".into(),
         ));
     }
     let Some(stored) = control::keyed_receipt(tx, ctx)? else {

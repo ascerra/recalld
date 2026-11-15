@@ -1,6 +1,7 @@
 //! Payload-free catalog batch manifests. Canonical child receipts remain in the
 //! ordinary receipt table; a manifest reserves identities, never another journal.
 use super::control::{Generation, MutationContext, MutationScope, WriteReceipt};
+use super::request_context::RetainedRequestContext;
 use crate::model::{MemoryId, NamespaceId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -65,6 +66,14 @@ pub struct BatchItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BatchProgress {
+    /// Original API identity, independent of the native writer codec. Historical
+    /// native 2/3 omit this field; their receipt and manifest bytes stay unchanged.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub request_context: Option<RetainedRequestContext>,
     /// Original reservation CAS, never a child precondition or current-fork G.
     /// Absence preserves every pre-extension manifest encoding and hash.
     #[serde(
@@ -97,6 +106,9 @@ fn present_precondition<'de, D: serde::Deserializer<'de>>(
     BatchReservationPrecondition::deserialize(d).map(Some)
 }
 impl BatchProgress {
+    pub(crate) fn original_contract(&self) -> Result<u32, super::StorageError> {
+        original_contract(self.version, self.request_context.as_ref())
+    }
     pub(crate) fn reservation_expected_generation(
         &self,
     ) -> Result<Option<Generation>, super::StorageError> {
@@ -164,6 +176,7 @@ impl BatchItemPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct BatchChild {
     pub(super) version: u32,
+    pub(super) request_context: Option<RetainedRequestContext>,
     pub(super) store_id: Uuid,
     pub(super) batch_operation_id: Uuid,
     pub(super) index: u32,
@@ -187,7 +200,8 @@ impl BatchChild {
             scope: MutationScope::Namespace(self.defaults.namespace_id),
             idempotency_key: None,
             expected_generation: None,
-            contract_version: contract_version(self.version).unwrap_or(0),
+            contract_version: original_contract(self.version, self.request_context.as_ref())
+                .unwrap_or(0),
         }
     }
     pub(crate) fn namespace_name(&self) -> &str {
@@ -219,6 +233,7 @@ impl BatchProgress {
         let item = self.items.get(index)?;
         Some(BatchChild {
             version: self.version,
+            request_context: self.request_context.clone(),
             store_id: self.reservation_receipt.store_id,
             batch_operation_id: self.reservation_receipt.operation_id,
             index: item.index,
@@ -314,6 +329,12 @@ impl BatchOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BatchInput {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub request_context: Option<RetainedRequestContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_generation: Option<Generation>,
     /// This negotiates only the additive batch envelope, not lifecycle/API v2.
@@ -349,7 +370,11 @@ impl BatchInput {
             scope: MutationScope::Catalog,
             idempotency_key: self.idempotency_key.clone(),
             expected_generation: self.expected_generation,
-            contract_version: contract_version(self.mutation_version).unwrap_or(0),
+            contract_version: original_contract(
+                self.mutation_version,
+                self.request_context.as_ref(),
+            )
+            .unwrap_or(0),
         }
     }
 }
@@ -366,9 +391,18 @@ pub(crate) fn caller_hash_version(
     kind: BatchKind,
     hashes: &[[u8; 32]],
 ) -> Result<[u8; 32], super::StorageError> {
+    caller_hash_origin(version, contract_version(version)?, kind, hashes)
+}
+pub(crate) fn caller_hash_origin(
+    version: u32,
+    contract: u32,
+    kind: BatchKind,
+    hashes: &[[u8; 32]],
+) -> Result<[u8; 32], super::StorageError> {
+    retained_context(version, contract)?;
     let ctx = MutationContext {
         scope: MutationScope::Catalog,
-        contract_version: contract_version(version)?,
+        contract_version: contract,
         ..MutationContext::unkeyed(NamespaceId::new(1))
     };
     Ok(super::control::request_hash(
@@ -389,6 +423,14 @@ pub(crate) fn resolution_hash_version(
     version: u32,
     items: &[BatchItem],
 ) -> Result<[u8; 32], super::StorageError> {
+    resolution_hash_origin(version, contract_version(version)?, items)
+}
+pub(crate) fn resolution_hash_origin(
+    version: u32,
+    contract: u32,
+    items: &[BatchItem],
+) -> Result<[u8; 32], super::StorageError> {
+    retained_context(version, contract)?;
     let rows: Vec<_> = items
         .iter()
         .map(|i| {
@@ -404,7 +446,7 @@ pub(crate) fn resolution_hash_version(
         .collect();
     let ctx = MutationContext {
         scope: MutationScope::Catalog,
-        contract_version: contract_version(version)?,
+        contract_version: contract,
         ..MutationContext::unkeyed(NamespaceId::new(1))
     };
     Ok(super::control::request_hash(
@@ -419,14 +461,38 @@ pub(crate) fn resolution_hash_version(
     ))
 }
 
-/// Manifest/writer versions are not public contract versions. Historical 1/2
-/// domains remain immutable; 3 selects same-insert native store under contract 2.
+/// Historical defaults only. Never derive a new native request's API from its
+/// writer codec: use the validated original context instead.
 pub(crate) fn contract_version(version: u32) -> Result<u32, super::StorageError> {
     match version {
         1 => Ok(1),
         2 | 3 => Ok(2),
         _ => Err(super::StorageError::InvalidControl(
             "unsupported batch version".into(),
+        )),
+    }
+}
+pub(crate) fn original_contract(
+    version: u32,
+    context: Option<&RetainedRequestContext>,
+) -> Result<u32, super::StorageError> {
+    match version {
+        1 if context.is_none() => Ok(1),
+        2 | 3 => RetainedRequestContext::native_contract(context),
+        _ => Err(super::StorageError::InvalidControl(
+            "invalid batch request context/version".into(),
+        )),
+    }
+}
+pub(crate) fn retained_context(
+    version: u32,
+    contract: u32,
+) -> Result<Option<RetainedRequestContext>, super::StorageError> {
+    match version {
+        1 if contract == 1 => Ok(None),
+        2 | 3 => RetainedRequestContext::from_contract(contract),
+        _ => Err(super::StorageError::InvalidMutationContext(
+            "unsupported batch writer/request contract".into(),
         )),
     }
 }
