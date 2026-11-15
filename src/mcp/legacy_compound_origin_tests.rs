@@ -68,7 +68,9 @@ async fn legacy_compound_origin_actual_single_insert_two() {
 async fn legacy_compound_origin_actual_batch_two() {
     let f = Fixture::new();
     let input = request(&f, "actual-legacy-batch2", 4, vec![item()]);
-    let result = f.storage_adapter().mutate_batch(input).await;
+    let mut adapter = f.storage_adapter();
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+    let result = adapter.mutate_batch(input).await;
     assert!(result.is_ok(), "actual legacy2 batch rejected: {result:?}");
     assert!(result.unwrap().all_ready());
 }
@@ -161,4 +163,199 @@ fn historical_rows(root: &std::path::Path) -> Value {
         rows.insert(name.into(), json!(items));
     }
     Value::Object(rows)
+}
+
+struct SpyProvider(std::sync::atomic::AtomicUsize);
+#[async_trait::async_trait]
+impl crate::embedding::EmbeddingProvider for SpyProvider {
+    async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(vec![1., 0., 0., 0.])
+    }
+    fn dimensions(&self) -> usize {
+        4
+    }
+    fn model_name(&self) -> &str {
+        "synthetic-legacy-origin"
+    }
+}
+struct SpyClock(std::sync::atomic::AtomicUsize);
+impl crate::time::Clock for SpyClock {
+    fn now_millis(&self) -> i64 {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        100
+    }
+}
+fn files(root: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    fn visit(base: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
+        for e in std::fs::read_dir(root).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                visit(base, &p, out)
+            } else if p.extension().is_none_or(|e| e != "lock") {
+                out.push((
+                    p.strip_prefix(base).unwrap().to_string_lossy().into(),
+                    std::fs::read(p).unwrap(),
+                ));
+            }
+        }
+    }
+    let mut out = vec![];
+    visit(root, root, &mut out);
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_compound_origin_genuine_old_one_replay_preserves_bytes() {
+    let root = tempfile::tempdir().unwrap();
+    zip::ZipArchive::new(std::io::Cursor::new(include_bytes!(
+        "fixtures/legacy-compound-before.zip"
+    )))
+    .unwrap()
+    .extract(root.path())
+    .unwrap();
+    let expected: Value =
+        serde_json::from_slice(include_bytes!("fixtures/legacy-compound-before.zip.json")).unwrap();
+    assert_eq!(historical_rows(root.path()), expected["rows"]);
+    let engine = RedbStorageEngine::open(root.path()).unwrap();
+    let f = Fixture::from_open_engine(root, engine);
+    let before = current(&f);
+    let spy = Arc::new(SpyProvider(Default::default()));
+    let clock = Arc::new(SpyClock(Default::default()));
+    let mut adapter = f.storage_adapter().with_clock(clock.clone());
+    adapter.embedding = spy.clone();
+    // Current settings differ deliberately; completed replay precedes selection.
+    assert!(adapter.config.graph.autolink_enabled);
+    for case in expected["cases"].as_array().unwrap() {
+        let input: BatchInput = serde_json::from_value(case["input"].clone()).unwrap();
+        let original: crate::storage::batch::BatchOutcome =
+            serde_json::from_value(case["outcome"].clone()).unwrap();
+        let replay = adapter.run_batch(input.clone()).await.unwrap();
+        let mut receipt = replay.reservation_receipt.unwrap();
+        assert!(receipt.replayed);
+        receipt.replayed = false;
+        assert_eq!(Some(receipt), original.reservation_receipt);
+        for (a, b) in replay.items.iter().zip(&original.items) {
+            let mut a = a.receipt.clone();
+            if let Some(r) = &mut a {
+                r.replayed = false
+            };
+            assert_eq!(a, b.receipt);
+        }
+        let mut changed = input;
+        changed.items[0] = json!({"summary":"different request"});
+        assert!(adapter.run_batch(changed).await.is_err());
+        assert_eq!(current(&f), before);
+    }
+    assert_eq!(spy.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    drop(adapter);
+    let root = f.close();
+    assert_eq!(historical_rows(root.path()), expected["rows"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_compound_origin_fresh_selection_gate_no_mutation_and_completed_replay_first() {
+    let f = Fixture::new();
+    let spy = Arc::new(SpyProvider(Default::default()));
+    let clock = Arc::new(SpyClock(Default::default()));
+    let mut adapter = f.storage_adapter().with_clock(clock.clone());
+    adapter.embedding = spy.clone();
+    for advisory in [false, true] {
+        Arc::make_mut(&mut adapter.config).graph.autolink_enabled = !advisory;
+        let mut value = item();
+        value.as_object_mut().unwrap().remove("embedding");
+        value["checkDuplicates"] = json!(advisory);
+        let input = request(&f, "gated", 4, vec![value]);
+        let before = current(&f);
+        let bytes = files(f.path());
+        let error = adapter.mutate_batch(input).await.unwrap_err();
+        assert!(
+            matches!(error, bridge::BridgeError::Unavailable(_)),
+            "{error}"
+        );
+        assert_eq!(current(&f), before);
+        assert_eq!(files(f.path()), bytes);
+        assert_eq!(spy.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
+    let mut value = item();
+    value.as_object_mut().unwrap().remove("embedding");
+    let mut input = request(&f, "complete", 4, vec![value]);
+    input.expected_generation = Some(current(&f).committed_generation);
+    let first = adapter.mutate_batch(input.clone()).await.unwrap();
+    assert!(first.all_ready());
+    let before = current(&f);
+    let calls = spy.0.load(std::sync::atomic::Ordering::SeqCst);
+    let clocks = clock.0.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(calls, 1);
+    Arc::make_mut(&mut adapter.config).graph.autolink_enabled = true;
+    let reply = crate::daemon::server::native_batch_test_rpc(Arc::new(adapter), &input).await;
+    assert!(reply.error.is_none(), "{:?}", reply.error);
+    let replay: crate::storage::batch::BatchOutcome =
+        serde_json::from_value(reply.result.unwrap()).unwrap();
+    assert!(replay.all_ready());
+    assert_eq!(replay.batch_operation_id, first.batch_operation_id);
+    let mut receipt = replay.items[0].receipt.clone().unwrap();
+    assert!(receipt.replayed);
+    receipt.replayed = false;
+    assert_eq!(Some(receipt), first.items[0].receipt);
+    assert_eq!(current(&f), before);
+    assert_eq!(spy.0.load(std::sync::atomic::Ordering::SeqCst), calls);
+    assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), clocks);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_compound_origin_pending_selection_gate_keeps_exact_parent_rpc() {
+    let f = Fixture::new();
+    let input = request(&f, "pending", 4, vec![item()]);
+    let plans: Vec<_> = crate::mcp::batches::prepare(&input)
+        .unwrap()
+        .into_iter()
+        .map(|p| p.plan)
+        .collect();
+    let p = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .reserve_batch_version_with_work(
+            &input.context(),
+            4,
+            input.kind,
+            &plans,
+            None,
+            None,
+            || Ok(None),
+        )
+        .unwrap();
+    let before = current(&f);
+    let adapter = f.storage_adapter();
+    assert!(adapter.config.graph.autolink_enabled);
+    let reply = crate::daemon::server::native_batch_test_rpc(Arc::new(adapter), &input).await;
+    assert!(reply.error.is_none(), "{:?}", reply.error);
+    let outcome: crate::storage::batch::BatchOutcome =
+        serde_json::from_value(reply.result.unwrap()).unwrap();
+    let mut receipt = outcome.reservation_receipt.unwrap();
+    receipt.replayed = false;
+    assert_eq!(receipt, p.reservation_receipt);
+    assert_eq!(
+        outcome.items[0].status,
+        crate::storage::batch::BatchStatus::NotAttempted
+    );
+    assert_eq!(outcome.items[0].operation_id, Some(p.items[0].operation_id));
+    assert!(outcome.items[0].receipt.is_none());
+    assert_eq!(outcome.items[0].error.as_ref().unwrap().code, "UNAVAILABLE");
+    assert_eq!(current(&f), before);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_batch_items()
+            .unwrap(),
+        1
+    );
 }

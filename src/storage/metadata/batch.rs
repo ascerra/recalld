@@ -32,8 +32,76 @@ fn load(tx: &redb::WriteTransaction, id: Uuid) -> Result<BatchProgress, StorageE
     let progress: BatchProgress = control::decode(bytes.value())?;
     progress.original_contract()?;
     progress.reservation_expected_generation()?;
+    let key = control::scoped_key(
+        progress.reservation_receipt.store_id,
+        MutationScope::Catalog,
+        id.as_bytes(),
+    );
+    let receipts = tx.open_table(control::RECEIPTS)?;
+    let value = receipts
+        .get(key.as_slice())?
+        .ok_or_else(|| invalid("missing reservation receipt"))?;
+    validate_parent_anchor(&progress, &control::validate_receipt(value.value())?)?;
     Ok(progress)
 }
+/// Validate the immutable receipt anchor at startup AND under the final write
+/// transaction. A mutable manifest is never authority for its own original API/CAS.
+fn validate_parent_anchor(
+    p: &BatchProgress,
+    stored: &control::StoredReceipt,
+) -> Result<(), StorageError> {
+    let contract_version = p.original_contract()?;
+    let expected_generation = p.reservation_expected_generation()?;
+    if stored.receipt != p.reservation_receipt {
+        return Err(invalid("reservation receipt mismatch"));
+    }
+    match &stored.receipt.outcome {
+        MutationOutcome::BatchReserved {
+            batch_kind,
+            item_count,
+            caller_hash,
+            resolution_hash,
+        } if *batch_kind == p.kind
+            && *item_count as usize == p.items.len()
+            && *caller_hash == p.caller_hash
+            && *caller_hash
+                == batch::caller_hash_origin(
+                    p.version,
+                    contract_version,
+                    p.kind,
+                    &p.items.iter().map(|i| i.request_hash).collect::<Vec<_>>(),
+                )?
+            && *resolution_hash
+                == batch::resolution_hash_origin(p.version, contract_version, &p.items)? => {}
+        _ => return Err(invalid("reservation disagrees with ordered manifest")),
+    }
+    let mut ctx = MutationContext {
+        contract_version,
+        expected_generation,
+        ..catalog_context()
+    };
+    let domain = batch::reservation_domain(p.version)?;
+    if stored.request_hash == control::request_hash(&ctx, domain, &[&p.caller_hash]) {
+        return Ok(());
+    }
+    if p.version == 1 {
+        // Genuine format1 writers checked fresh CAS and committed exactly one G
+        // in this transaction. Use ORIGINAL receipt G, never current/fork G.
+        // This is historical validation, not guessing the caller's retry input.
+        let prior = p
+            .reservation_receipt
+            .committed_generation
+            .get()
+            .checked_sub(1)
+            .ok_or_else(|| invalid("zero reservation generation"))?;
+        ctx.expected_generation = Some(prior.to_string().try_into()?);
+        if stored.request_hash == control::request_hash(&ctx, domain, &[&p.caller_hash]) {
+            return Ok(());
+        }
+    }
+    Err(invalid("reservation request hash mismatch"))
+}
+
 fn save(tx: &redb::WriteTransaction, p: &BatchProgress) -> Result<(), StorageError> {
     tx.open_table(BATCHES)?.insert(
         p.reservation_receipt.operation_id.as_bytes().as_slice(),
@@ -106,7 +174,7 @@ pub(crate) fn validate_existing(
         let (key, bytes) = row?;
         let p: BatchProgress = control::decode(bytes.value())?;
         let contract_version = p.original_contract()?;
-        let expected_generation = p.reservation_expected_generation()?;
+        p.reservation_expected_generation()?;
         let parent = &p.reservation_receipt;
         let latest = p
             .bookkeeping_receipts
@@ -125,7 +193,7 @@ pub(crate) fn validate_existing(
                 generation: latest,
             },
         )? && (parent.store_id == state.store_id || p.unresolved() == 0);
-        if !matches!(p.version, 1 | 2 | 3)
+        if !matches!(p.version, 1 | 2 | 3 | 4)
             || p.version == 3 && p.kind != BatchKind::Insert
             || matches!(p.version, 2 | 3) && state.control_schema_version != 2
             || !permitted_origin
@@ -147,43 +215,7 @@ pub(crate) fn validate_existing(
         {
             return Err(invalid("missing reservation receipt"));
         }
-        match parent.outcome {
-            MutationOutcome::BatchReserved {
-                batch_kind: kind,
-                item_count,
-                caller_hash,
-                resolution_hash,
-            } if kind == p.kind
-                && item_count as usize == p.items.len()
-                && caller_hash == p.caller_hash
-                && caller_hash
-                    == batch::caller_hash_origin(
-                        p.version,
-                        contract_version,
-                        p.kind,
-                        &p.items.iter().map(|i| i.request_hash).collect::<Vec<_>>(),
-                    )?
-                && resolution_hash
-                    == batch::resolution_hash_origin(p.version, contract_version, &p.items)? => {}
-            _ => return Err(invalid("reservation disagrees with ordered manifest")),
-        }
-        if matches!(p.version, 2 | 3) {
-            let ctx = MutationContext {
-                contract_version,
-                expected_generation,
-                ..catalog_context()
-            };
-            let stored = receipts.get(&parent_key).unwrap();
-            if stored.request_hash
-                != control::request_hash(
-                    &ctx,
-                    batch::reservation_domain(p.version)?,
-                    &[&p.caller_hash],
-                )
-            {
-                return Err(invalid("native reservation hash mismatch"));
-            }
-        }
+        validate_parent_anchor(&p, receipts.get(&parent_key).unwrap())?;
         claimed.insert(parent.operation_id);
         let mut rejections = std::collections::HashMap::new();
         for r in &p.bookkeeping_receipts {
@@ -214,7 +246,7 @@ pub(crate) fn validate_existing(
             {
                 return Err(invalid("duplicate or foreign rejection"));
             }
-            if matches!(p.version, 2 | 3) {
+            if matches!(p.version, 2 | 3 | 4) {
                 let ctx = MutationContext {
                     contract_version,
                     ..catalog_context()
@@ -595,6 +627,11 @@ impl MetadataStore {
         )?;
         tx.open_table(SCHEMA)?.insert("version", 1)?;
         let p = BatchProgress {
+            legacy_origin: (version == 4).then_some(batch::LegacyBatchOrigin {
+                proof_version: 1,
+                contract_version: ctx.contract_version,
+                expected_generation: ctx.expected_generation,
+            }),
             request_context,
             reservation_precondition: if version == 3 {
                 ctx.expected_generation.map(|expected_generation| {
@@ -713,7 +750,7 @@ impl MetadataStore {
                 native,
             };
             let hash = match (version, plan) {
-                (1, BatchItemPlan::Insert { input, .. }) => {
+                (1 | 4, BatchItemPlan::Insert { input, .. }) => {
                     input.request_hash(&ctx, stability, config.embedding_dim)?
                 }
                 (2, BatchItemPlan::NativeInsert { input, .. }) => {
@@ -749,7 +786,7 @@ impl MetadataStore {
                     };
                     batch::native::store_hash(&ctx, &resolved, &defaults)?
                 }
-                (1, BatchItemPlan::Forget { id, .. }) => {
+                (1 | 4, BatchItemPlan::Forget { id, .. }) => {
                     crate::storage::tombstone::request_hash(&ctx, *id)
                 }
                 (2, BatchItemPlan::Forget { id, .. }) => {
@@ -900,6 +937,7 @@ fn load_child(
         .get(child.index as usize)
         .ok_or_else(|| invalid("child index"))?;
     if p.version != child.version
+        || p.legacy_origin != child.legacy_origin
         || p.request_context != child.request_context
         || item.operation_id != child.operation_id
         || item.request_hash != child.request_hash
@@ -999,6 +1037,10 @@ pub(super) fn record_child(
 #[cfg(test)]
 #[path = "batch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "legacy_batch_origin_tests.rs"]
+mod legacy_origin_tests;
 
 /// Only the strict manifest validator may supply bookkeeping evidence to the
 /// native history dispatcher. This is an exact receipt reference, not an allowlist.

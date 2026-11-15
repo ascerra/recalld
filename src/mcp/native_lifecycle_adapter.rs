@@ -1,9 +1,7 @@
 //! One prepared lifecycle consumer for direct MCP, private RPC and REST adapters.
 use crate::{
     derived_completion::DerivedCompletion,
-    serialization::{
-        native_lifecycle::{Operation, Reply, Request},
-    },
+    serialization::native_lifecycle::{Operation, Reply, Request},
     storage::{
         StorageEngine, StorageError,
         control::{GenerationRef, MutationContext, MutationScope},

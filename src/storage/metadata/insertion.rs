@@ -196,11 +196,6 @@ impl MetadataStore {
     ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
         ctx.validate()?;
-        if ctx.contract_version != 1 {
-            return Err(StorageError::InvalidMutationContext(
-                "explicit-v2 insertion is not enabled".into(),
-            ));
-        }
         let MutationScope::Namespace(namespace) = ctx.scope else {
             return Err(StorageError::InvalidMutationContext(
                 "insertion requires namespace scope".into(),

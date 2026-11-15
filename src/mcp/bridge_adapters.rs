@@ -43,7 +43,8 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         | crate::storage::StorageError::RecoveryRequired(_) => {
             bridge::BridgeError::PartiallyApplied(error.to_string())
         }
-        crate::storage::StorageError::ProviderVectorUnavailable(_) => {
+        crate::storage::StorageError::ProviderVectorUnavailable(_)
+        | crate::storage::StorageError::UnsupportedMutation(_) => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
         crate::storage::StorageError::NamespaceMismatch { .. } => {
@@ -1230,6 +1231,19 @@ impl McpStorageAdapter {
             .await
     }
 
+    pub(super) fn legacy_api2_selection_blocker(
+        &self,
+        input: &bridge::StoreInput,
+    ) -> Option<&'static str> {
+        if self.config.graph.autolink_enabled {
+            Some("graph.autolinkEnabled")
+        } else if input.check_duplicates.unwrap_or(true) {
+            Some("checkDuplicates")
+        } else {
+            None
+        }
+    }
+
     pub(crate) async fn store_memory_reserved_with_work(
         &self,
         input: bridge::StoreInput,
@@ -1272,6 +1286,15 @@ impl McpStorageAdapter {
                         crate::mcp::batches::stored_from_receipt(&input, &receipt, self.timezone)?,
                         receipt,
                     ));
+                }
+            }
+
+            if child.as_ref().is_some_and(|c| c.is_legacy_api2()) {
+                if let Some(field) = self.legacy_api2_selection_blocker(&input) {
+                    return Err(bridge::BridgeError::Unavailable(format!(
+                        "legacy API2 {field} requires durable selection intent"
+                    ))
+                    .into());
                 }
             }
 
@@ -1682,7 +1705,9 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: crate::storage::batch::BatchInput,
     ) -> Result<crate::storage::batch::BatchOutcome, bridge::BridgeError> {
-        if input.mutation_version == 3 || input.expected_generation.is_some() {
+        if input.mutation_version == 3
+            || input.expected_generation.is_some() && input.mutation_version != 4
+        {
             return Err(bridge::BridgeError::Unavailable(
                 "linked native batch consumer remains gated pending transport validation".into(),
             ));
