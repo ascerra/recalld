@@ -107,3 +107,25 @@ impl PublicationState {
         })
     }
 }
+
+/// A guarded observation, not a drain/barrier certificate. Unknown component
+/// stamps stay None. Pending categories can overlap; do not sum as operations.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadinessObservation {
+    pub canonical: GenerationRef,
+    pub derived: Vec<ObservedDerived>,
+    pub accepted_work: usize,
+    pub unresolved_work: usize,
+    pub admission_open: bool,
+    pub pending_effects: u64,
+    pub pending_purges: usize,
+    pub pending_batch_items: usize,
+}
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservedDerived {
+    pub name: &'static str,
+    pub applied: Option<GenerationRef>,
+    pub matches_canonical: bool,
+}

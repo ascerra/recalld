@@ -46,16 +46,16 @@ struct Data {
 fn fixture(root: &Path) -> Data {
     fixture_with_seed(root, |_| {})
 }
-fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
-    fixture_with_seed_and_ghost(root, seed, false)
-}
 fn fixture_with_ghost(root: &Path, ghost: bool) -> Data {
-    fixture_with_seed_and_ghost(root, |_| {}, ghost)
+    fixture_with_seed_and_ghost(root, ghost, |_| {})
+}
+fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
+    fixture_with_seed_and_ghost(root, false, seed)
 }
 fn fixture_with_seed_and_ghost(
     root: &Path,
-    seed: impl FnOnce(&mut RedbStorageEngine),
     ghost: bool,
+    seed: impl FnOnce(&mut RedbStorageEngine),
 ) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
@@ -861,11 +861,13 @@ mod store;
 #[path = "store_batch_tests.rs"]
 mod store_batches;
 
+#[path = "mixed_history_tests.rs"]
+mod mixed_history;
 #[path = "store_producer_tests.rs"]
 mod store_producers;
 
-#[path = "mixed_history_tests.rs"]
-mod mixed_history;
-
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
+
+#[path = "request_context_tests.rs"]
+mod request_context;

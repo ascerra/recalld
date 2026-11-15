@@ -8,6 +8,82 @@ use crate::storage::control::{MutationOutcome, WriteReceipt};
 use serde_json::json;
 
 impl McpStorageAdapter {
+    /// The runner has finished its known root before this point. Unknown roots
+    /// remain tracked; failure observation never tries to drain them.
+    pub(super) async fn native_batch_readiness(
+        &self,
+        result: Result<BatchOutcome, crate::serialization::native_batch::BatchFailure>,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        use crate::serialization::{contract::Readiness, native_batch::NativeBatchOutcome};
+        let completion = self.batch_completion();
+        let deadline = || std::time::Instant::now() + std::time::Duration::from_secs(30);
+        match result {
+            Err(mut failure) => {
+                // Historical oversize reservation evidence is not a committed
+                // item receipt or a readiness claim. Do no completion for it.
+                if failure.receipt.is_some() {
+                    match completion
+                        .observe_readiness(deadline())
+                        .await
+                        .and_then(Readiness::observed)
+                    {
+                        Ok(observed) => failure.readiness = Some(observed),
+                        Err(_) => failure.warnings.push("READINESS_UNKNOWN".into()),
+                    }
+                }
+                Err(failure)
+            }
+            Ok(mut outcome) => {
+                if outcome.all_ready() {
+                    #[cfg(test)]
+                    match self
+                        .fail_native_batch_after_children
+                        .swap(0, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        1 => self
+                            .storage
+                            .read()
+                            .unwrap()
+                            .meta_store()
+                            .invalidate_derived_view(crate::storage::publication::DerivedView::Fts),
+                        2 => self.storage.read().unwrap().meta_store().mark_unavailable(),
+                        _ => {}
+                    }
+                    // Use actual current lineage/G, including a restored fork;
+                    // retained historical receipt G is not current readiness.
+                    let target = self
+                        .storage
+                        .read()
+                        .map_err(|e| StorageError::RecoveryRequired(e.to_string()))
+                        .and_then(|s| s.control_state().map(|c| c.generation_ref()));
+                    if let Ok(target) = target {
+                        if let Ok(ready) = completion.readiness_barrier(target, deadline()).await {
+                            return Ok(NativeBatchOutcome {
+                                outcome,
+                                readiness: Some(ready.into()),
+                                warnings: vec![],
+                            });
+                        }
+                    }
+                    mark_unready(&mut outcome);
+                }
+                let mut reply = NativeBatchOutcome::from(outcome);
+                match completion
+                    .observe_readiness(deadline())
+                    .await
+                    .and_then(Readiness::observed)
+                {
+                    Ok(observed) => reply.readiness = Some(observed),
+                    Err(_) => reply.warnings.push("READINESS_UNKNOWN".into()),
+                }
+                Ok(reply)
+            }
+        }
+    }
+
     pub(super) fn batch_completion(&self) -> crate::derived_completion::DerivedCompletion {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
@@ -23,11 +99,26 @@ impl McpStorageAdapter {
         &self,
         input: BatchInput,
     ) -> Result<BatchOutcome, bridge::BridgeError> {
+        self.run_batch_typed(input)
+            .await
+            .map_err(StoreWriteError::into_bridge)
+    }
+
+    pub(crate) async fn run_batch_typed(
+        &self,
+        input: BatchInput,
+    ) -> Result<BatchOutcome, StoreWriteError> {
+        self.run_batch_budgeted(input, None).await
+    }
+
+    pub(crate) async fn run_batch_budgeted(
+        &self,
+        input: BatchInput,
+        budget: Option<crate::mcp::batch_budget::BatchBudget>,
+    ) -> Result<BatchOutcome, StoreWriteError> {
         let completion = self.batch_completion();
-        let work = completion
-            .accept_work(None)
-            .map_err(super::map_mutation_error)?;
-        let result = self.run_batch_accepted(input, &work).await;
+        let work = completion.accept_work(None)?;
+        let result = self.run_batch_accepted(input, &work, budget).await;
         completion.finish_known_work(work);
         result
     }
@@ -36,13 +127,25 @@ impl McpStorageAdapter {
         &self,
         input: BatchInput,
         work: &crate::storage::work::WorkTicket,
-    ) -> Result<BatchOutcome, bridge::BridgeError> {
+        budget: Option<crate::mcp::batch_budget::BatchBudget>,
+    ) -> Result<BatchOutcome, StoreWriteError> {
         // Prepare the entire ordered caller intent before policy/default reads.
-        let prepared = if input.mutation_version == 3 {
+        let mut prepared = if input.mutation_version == 3 {
             batches::prepare_native_store(&input)?
         } else {
             batches::prepare(&input)?
         };
+        let budget_plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
+        if budget.is_some() {
+            for (index, (item, value)) in prepared.iter_mut().zip(&input.items).enumerate() {
+                if let Some(error) = crate::serialization::native_batch::item_error(value, index) {
+                    item.plan = BatchItemPlan::Invalid {
+                        request_hash: item.plan.request_hash(),
+                        error,
+                    };
+                }
+            }
+        }
         let plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
         let ctx = input.context();
         let kind = input.kind;
@@ -50,20 +153,22 @@ impl McpStorageAdapter {
         let version = input.mutation_version;
         let config = self.config.clone();
         let storage = self.storage.clone();
-        let worker = work
-            .child()
-            .map_err(|e| super::map_mutation_error(e.into()))?;
+        let worker = work.child().map_err(StorageError::from)?;
         let reserved=tokio::task::spawn_blocking(move||{
             let storage=storage.read().map_err(|e|StorageError::RecoveryRequired(e.to_string()))?;
             let result=(|| {
                 let store_id=storage.meta_store().control_state()?.store_id;
-                let reservation=if version==3 {storage.meta_store().reserve_native_store_batch_with_work(&ctx,&plans,parent,Some(&worker),||crate::graph::native_selection::freeze_settings(&config.graph))}else{storage.meta_store().reserve_or_resume_batch_with_work(&ctx,kind,&plans,parent,Some(&worker))};
+                let reservation=if version==3 {storage.meta_store().reserve_native_store_batch_with_work(&ctx,&plans,parent,Some(&worker),|| {
+                    let settings = crate::graph::native_selection::freeze_settings(&config.graph)?;
+                    if let Some(budget) = budget { budget.fresh(&plans, &settings)?; }
+                    Ok(settings)
+                })}else{storage.meta_store().reserve_batch_version_with_work(&ctx,version,kind,&plans,parent,Some(&worker),||Ok(None))};
                 Ok::<_,StorageError>((store_id,reservation))
             })();
             storage.meta_store().finish_work(worker);
             result
         }).await.map_err(|e|bridge::BridgeError::PartiallyApplied(format!("batch reservation worker outcome unknown; resubmit the same full request and key after recovery: {e}")))?
-            .map_err(super::map_mutation_error)?;
+            .map_err(StoreWriteError::Canonical)?;
         let (store_id, reserved) = reserved;
         let mut progress = match reserved {
             Ok(progress) => progress,
@@ -96,8 +201,11 @@ impl McpStorageAdapter {
                     unresolved: prepared.len(),
                 });
             }
-            Err(e) => return Err(super::map_mutation_error(e)),
+            Err(e) => return Err(e.into()),
         };
+        if let Some(budget) = budget {
+            budget.retained(&progress, &budget_plans)?;
+        }
         let mut outcome = outcome_from_progress(&progress, &prepared, self.timezone)?;
         // A previous attempt may have committed a child but failed publication.
         // Replay never calls a provider or allocates another payload/identity.
@@ -117,9 +225,7 @@ impl McpStorageAdapter {
             let child = progress.child(index).ok_or_else(|| {
                 bridge::BridgeError::Internal("pending batch item has no reservation".into())
             })?;
-            let item_work = work
-                .child()
-                .map_err(|e| super::map_mutation_error(e.into()))?;
+            let item_work = work.child().map_err(StorageError::from)?;
             let result = if input.mutation_version == 3 {
                 self.run_linked_batch_child(prepared, &child, &item_work)
                     .await
@@ -154,7 +260,8 @@ impl McpStorageAdapter {
             } else {
                 return Err(bridge::BridgeError::Internal(
                     "pending item has no prepared input".into(),
-                ));
+                )
+                .into());
             };
             self.batch_completion().finish_known_work(item_work);
             match result {
@@ -208,9 +315,7 @@ impl McpStorageAdapter {
                             final_error = error.clone();
                         }
                         let storage = self.storage.clone();
-                        let worker = work
-                            .child()
-                            .map_err(|e| super::map_mutation_error(e.into()))?;
+                        let worker = work.child().map_err(StorageError::from)?;
                         let finalized = tokio::task::spawn_blocking(move || {
                             let storage = storage
                                 .read()
@@ -340,7 +445,7 @@ impl McpStorageAdapter {
     }
 }
 
-fn mark_unready(outcome: &mut BatchOutcome) {
+pub(super) fn mark_unready(outcome: &mut BatchOutcome) {
     for item in &mut outcome.items {
         item.ready = false;
         if item.status == BatchStatus::Ok {
@@ -447,7 +552,8 @@ pub(super) fn forget_result(
 fn final_error(error: &StoreWriteError) -> Option<BatchError> {
     let code = match error {
         StoreWriteError::Bridge(bridge::BridgeError::InvalidInput(_))
-        | StoreWriteError::Canonical(StorageError::InvalidMutation(_)) => "INVALID_INPUT",
+        | StoreWriteError::Canonical(StorageError::InvalidMutation(_))
+        | StoreWriteError::Canonical(StorageError::CallerVectorInvalid(_)) => "INVALID_INPUT",
         StoreWriteError::Bridge(bridge::BridgeError::NotFound(_))
         | StoreWriteError::Canonical(StorageError::NotFound(_)) => "NOT_FOUND",
         StoreWriteError::Canonical(StorageError::NamespaceNotFound(_)) => "NAMESPACE_NOT_FOUND",
@@ -472,6 +578,8 @@ mod tests {
 
     fn request(f: &Fixture, key: &str, items: Vec<serde_json::Value>) -> BatchInput {
         BatchInput {
+            request_context: None,
+            expected_generation: None,
             mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
@@ -818,7 +926,10 @@ mod tests {
         let closing = tracker.clone();
         let drain = tokio::task::spawn_blocking(move || closing.close_and_drain(deadline()));
         tracker.wait_until_closed();
-        let result = adapter.run_batch_accepted(input, &work).await.unwrap();
+        let result = adapter
+            .run_batch_accepted(input, &work, None)
+            .await
+            .unwrap();
         assert!(result.all_ready(), "{result:?}");
         assert!(
             !drain.is_finished(),

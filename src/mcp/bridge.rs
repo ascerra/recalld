@@ -78,6 +78,97 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    fn supports_api1_store(&self) -> bool {
+        false
+    }
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::store_api1::Reply;
+        if request.require_native {
+            return Reply::unavailable();
+        }
+        if let Err(error) = request.validate_legacy() {
+            return Reply::Legacy(Err(error.to_string()));
+        }
+        Reply::Legacy(
+            self.store_memory(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+    async fn store_native_wire(
+        &self,
+        _request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        crate::serialization::native_single::Reply::failure(
+            crate::storage::StorageError::RecoveryRequired(
+                "native single consumer unavailable".into(),
+            ),
+        )
+    }
+    async fn mutate_native_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        Err(crate::serialization::native_batch::BatchFailure::unavailable())
+    }
+    fn supports_api1_lifecycle(&self) -> bool {
+        false
+    }
+    async fn api1_lifecycle(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+        operation: crate::serialization::native_lifecycle::Operation,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{Reply, Value},
+            native_lifecycle::{self, Operation},
+        };
+        if let Err(error) =
+            crate::serialization::lifecycle_api1::parse(&request.wire(operation), operation)
+        {
+            return Reply::failure(native_lifecycle::Reply::input(error));
+        }
+        // Old Rust implementations retain their API1 entry, selected before work.
+        let result = match operation {
+            Operation::Feedback => self
+                .reinforce_memory(request.id, request.quality, request.namespace.as_deref())
+                .await
+                .map(|result| Value::Feedback { result }),
+            Operation::Forget => self
+                .delete_memory(request.id, request.namespace.as_deref())
+                .await
+                .map(|deleted| Value::Forget { deleted }),
+        };
+        match result {
+            Ok(value) => Reply::compatibility(value),
+            Err(e) => Reply::bridge_error(e),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
     /// Old implementations cannot manufacture durable receipts. The actual
     /// direct and daemon adapters opt in; callers never fall back after a write.
     fn supports_durable_batches(&self) -> bool {

@@ -713,9 +713,18 @@ impl Recalld {
                 Arc::new(SharedGraphReader::new(graph.clone()));
             let rif_proc: Arc<dyn crate::search::RifProcessor> =
                 Arc::new(RifProcessorAdapter::new(rif_engine.clone(), graph.clone()));
+            let completion = crate::derived_completion::DerivedCompletion {
+                storage: storage.clone(),
+                cache: cache.clone(),
+                graph: graph.clone(),
+                vectors: vector_index.clone(),
+                fts: fts_index.clone(),
+                entities: entity_index.clone(),
+            };
             let access_rec: Arc<dyn crate::search::AccessRecorder> = Arc::new(
                 StorageAccessRecorder::new(storage.clone(), cache.clone())
-                    .with_clock(clock.clone()),
+                    .with_clock(clock.clone())
+                    .with_completion(completion.clone()),
             );
 
             let engine = QueryEngine::new(
@@ -735,17 +744,7 @@ impl Recalld {
                 DecayConfig::default(),
                 config.decay.decay_rate_multiplier,
             )
-            .with_coherent_owner(
-                crate::derived_completion::DerivedCompletion {
-                    storage: storage.clone(),
-                    cache: cache.clone(),
-                    graph: graph.clone(),
-                    vectors: vector_index.clone(),
-                    fts: fts_index.clone(),
-                    entities: entity_index.clone(),
-                },
-                rif_engine.clone(),
-            );
+            .with_coherent_owner(completion, rif_engine.clone());
             let engine = if native_prefix {
                 engine.with_native_query_admission()
             } else {
@@ -1005,6 +1004,25 @@ impl Recalld {
             entities: self.entity_index.clone(),
         }
         .readiness_barrier(target, deadline)
+        .await
+    }
+
+    /// Actual canonical/component/work observation for a committed-error
+    /// envelope. This never drains the caller's root or claims barrier readiness.
+    pub async fn readiness_observation(
+        &self,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<crate::storage::ReadinessObservation, crate::storage::StorageError>
+    {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .observe_readiness(deadline)
         .await
     }
 

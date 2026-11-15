@@ -229,7 +229,7 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
     // Extraction, type strictness, markup detection, and the shared
     // content limits all live in `args`, so this handler and the batch
     // one below cannot drift apart.
-    let input = match args::parse_store_input(&arguments, bridge.default_namespace()) {
+    let input = match args::parse_store_input_fields(&arguments, bridge.default_namespace()) {
         Ok(input) => input,
         Err(e) => {
             // Logged, never silently defaulted: a client whose
@@ -246,13 +246,18 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
         }
     };
 
-    match bridge.storage.store_memory(input).await {
-        Ok(stored) => match ToolCallResult::json(&stored) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to store memory: {e}")),
-    }
+    // The original single-tool embedding/initialStability fields remain ignored.
+    // Representation admission belongs to the actual owned backend format.
+    bridge
+        .storage
+        .store_api1(crate::serialization::store_api1::Request {
+            input,
+            profile_id: None,
+            created_at: None,
+            require_native: false,
+        })
+        .await
+        .mcp()
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -909,17 +914,14 @@ async fn handle_reinforce_memory(
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge
+    bridge
         .storage
-        .reinforce_memory(id, quality, namespace)
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+        )
         .await
-    {
-        Ok(result) => match ToolCallResult::json(&result) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to reinforce memory: {e}")),
-    }
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -982,19 +984,14 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
     };
     let id = crate::model::MemoryId::from_uuid(uuid);
 
-    match bridge.storage.delete_memory(id, namespace).await {
-        Ok(deleted) => {
-            let response = json!({
-                "id": id_str,
-                "deleted": deleted,
-            });
-            match ToolCallResult::json(&response) {
-                Ok(r) => r,
-                Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-            }
-        }
-        Err(e) => ToolCallResult::error(format!("Failed to delete memory: {e}")),
-    }
+    bridge
+        .storage
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+        )
+        .await
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1870,6 +1867,41 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if name == "store_memory" {
+        use crate::serialization::native_single::{Reply, Request, mcp_result};
+        let reply = match Request::parse(&arguments, false, None, bridge.default_namespace()) {
+            Ok(request) => bridge.storage.store_native_wire(request).await,
+            Err(error) => Reply::invalid(error),
+        };
+        return mcp_result(reply);
+    }
+    if name == "store_memories" {
+        let result = match crate::serialization::native_batch::parse(
+            &arguments,
+            true,
+            None,
+            bridge.default_namespace(),
+        ) {
+            Ok(input) => bridge.storage.mutate_native_batch(input).await,
+            Err(e) => Err(e.into()),
+        };
+        let (status, envelope) = crate::serialization::native_batch::response(result);
+        return crate::serialization::native_batch::mcp_result(status, &envelope);
+    }
+    let lifecycle = match name {
+        "forget_memory" => Some(crate::serialization::native_lifecycle::Operation::Forget),
+        "reinforce_memory" => Some(crate::serialization::native_lifecycle::Operation::Feedback),
+        _ => None,
+    };
+    if let Some(operation) = lifecycle {
+        return crate::mcp::native_lifecycle_adapter::dispatch(
+            bridge.storage.as_ref(),
+            operation,
+            arguments,
+        )
+        .await
+        .mcp();
+    }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{
         contract::{CommitState, Envelope, ErrorCategory, ExecutionError},

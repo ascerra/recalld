@@ -33,6 +33,13 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
+        Err(EmbeddingError::Unavailable(
+            "active embedding identity unavailable".into(),
+        ))
+    }
     /// Same owned core as the production pipeline, before provider/selection work.
     /// Immutable test adapters do not register work; they may not inherit a ticket.
     fn accept_work(&self) -> Result<Option<crate::storage::work::WorkTicket>, SearchError> {
@@ -62,6 +69,28 @@ pub trait SearchPipeline: Send + Sync {
         _include_embeddings: bool,
         _parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Option<crate::search::CoherentSearchResponse>, SearchError> {
+        Ok(None)
+    }
+
+    async fn prepare_coherent_get_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _requested_access: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentGetResponse>, SearchError> {
+        Ok(None)
+    }
+    async fn prepare_coherent_similar_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _limit: usize,
+        _min_score: Option<f32>,
+        _requested_access: bool,
+        _include_embeddings: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSimilarResponse>, SearchError> {
         Ok(None)
     }
 
@@ -120,13 +149,6 @@ pub trait SearchPipeline: Send + Sync {
         self.record_exposures(accesses, scope).await
     }
 
-    fn active_embedding(
-        &self,
-    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
-        Err(EmbeddingError::Unavailable(
-            "active embedding identity unavailable".into(),
-        ))
-    }
     /// Generate an embedding for the given text within a namespace.
     async fn embed_text(
         &self,
@@ -248,6 +270,47 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Physical control format, never inferred from API version or a namespace.
+    async fn native_store_format(&self) -> Result<bool, StorageError> {
+        Ok(false)
+    }
+    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "store identity unavailable".into(),
+        ))
+    }
+    /// Concrete canonical/vector capture; no legacy backend fallback.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+    async fn forget_api1(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{Reply, Value},
+            native_lifecycle,
+        };
+        match self.delete_memory(id, namespace).await {
+            Ok(deleted) => Reply::compatibility(Value::Forget { deleted }),
+            Err(e) => Reply::failure(native_lifecycle::Reply::storage(e)),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
     async fn insert_memory_with_work(
         &self,
         namespace_id: NamespaceId,
@@ -289,19 +352,6 @@ pub trait StorageEngine: Send + Sync {
             ));
         }
         self.delete_memory(id, namespace).await
-    }
-    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
-        Err(StorageError::RecoveryRequired(
-            "store identity unavailable".into(),
-        ))
-    }
-    /// Concrete canonical/vector capture; no legacy backend fallback.
-    async fn scan_duplicate_pairs(
-        &self,
-        _request: crate::serialization::scan::ExactScanRequest,
-    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
-    {
-        Err(crate::search::exact_scan::ExactScanError::Unavailable)
     }
 
     /// Drain in-flight create/index publication before online derived repair.
@@ -549,6 +599,27 @@ pub trait RelationshipGraph: Send + Sync {
 /// FSRS decay engine for reinforcement and strength recalculation.
 #[async_trait::async_trait]
 pub trait FsrsEngine: Send + Sync {
+    async fn feedback_api1(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        crate::serialization::lifecycle_api1::Reply::legacy_feedback(
+            self.reinforce(id, quality, namespace).await,
+            id,
+        )
+    }
+
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
     async fn reinforce_with_work(
         &self,
         id: MemoryId,
@@ -762,6 +833,9 @@ pub struct NamespaceListInfo {
 /// themselves -- they receive them through `AppState`.
 #[derive(Clone)]
 pub struct AppState {
+    /// Optional same-owner native batch producer. Absence fails closed.
+    pub native_batches: Option<Arc<dyn crate::mcp::bridge::StorageEngine>>,
+    pub default_namespace: String,
     /// The search pipeline: embedding, vector search, graph expansion.
     pub search: Arc<dyn SearchPipeline>,
 
@@ -788,6 +862,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn with_native_batches(
+        mut self,
+        producer: Arc<dyn crate::mcp::bridge::StorageEngine>,
+        default_namespace: String,
+    ) -> Self {
+        self.native_batches = Some(producer);
+        self.default_namespace = default_namespace;
+        self
+    }
+
     /// Construct a new `AppState` from pre-initialized subsystems.
     ///
     /// All subsystems must be fully initialized before the API server
@@ -802,6 +886,8 @@ impl AppState {
         metrics: Arc<dyn MetricsCollector>,
     ) -> Self {
         Self {
+            native_batches: None,
+            default_namespace: crate::model::constants::DEFAULT_NAMESPACE_NAME.into(),
             search,
             storage,
             cache,

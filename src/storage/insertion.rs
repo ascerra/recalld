@@ -81,7 +81,7 @@ pub(crate) fn normalize_embedding(
     crate::embedding::validation::normalize_vector(embedding, dimensions as usize).map_err(
         |message| {
             if supplied {
-                StorageError::InvalidMutation(message)
+                StorageError::CallerVectorInvalid(message)
             } else {
                 StorageError::ProviderVectorUnavailable(message)
             }
