@@ -1,0 +1,8 @@
+{
+  "docs/implementation/native-phase-clock.md": "2afa0778e1c5755194f7e97c59762fb259f38eb71b7268a1b4d809be4413521a",
+  "src/storage/metadata/native_records.rs": "f958fa27f19f4826ec39541b9697f1179fbfd563a61fc829b11161102665e0cd",
+  "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl": "c411d6abec5814d7467865f33b815a35aef8ba7c35a12f41edeb3f3c54738aaa",
+  "src/storage/metadata/native_records/phase_clock_tests.rs": "7d94aa93665da69a0591f4c7cfbb19abde09d374b8cb6b5ec18d18df8a063774",
+  "src/storage/metadata/native_records/tests.rs": "99a4147c723a40785f77d50a541af6f3e23858f32466a2e0bbb6614e815d629b",
+  "src/storage/native_records.rs": "054b679ee2d253f76918c8fce6015508b8d966854c7bdca72b1f52f225eff242"
+}

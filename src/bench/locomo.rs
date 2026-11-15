@@ -1239,131 +1239,142 @@ pub(super) async fn store_single_memory(
     ingested_memories: &[(MemoryId, i64)],
     supersedes: Option<MemoryId>,
 ) -> Result<MemoryId, Box<dyn std::error::Error>> {
-    let ns_config = {
-        let storage_r = harness
-            .system
-            .storage()
-            .read()
-            .map_err(|e| format!("storage lock poisoned: {e}"))?;
-        storage_r
-            .get_namespace_by_name("default")?
-            .ok_or("namespace 'default' not found")?
-    };
+    let work = crate::storage::work::accept_work(harness.system.storage(), None)?;
+    let result = async {
+        let ns_config = {
+            let storage_r = harness
+                .system
+                .storage()
+                .read()
+                .map_err(|e| format!("storage lock poisoned: {e}"))?;
+            storage_r
+                .get_namespace_by_name("default")?
+                .ok_or("namespace 'default' not found")?
+        };
 
-    let tags: Vec<crate::model::Tag> = tag_strings
-        .iter()
-        .map(|t| crate::model::Tag::new(t.clone()))
-        .collect::<Result<_, _>>()?;
+        let tags: Vec<crate::model::Tag> = tag_strings
+            .iter()
+            .map(|t| crate::model::Tag::new(t.clone()))
+            .collect::<Result<_, _>>()?;
 
-    let mut embed_text = match full_text {
-        Some(ft) => format!("{}\n\n{}", summary, ft),
-        None => summary.to_string(),
-    };
-    if !tag_strings.is_empty() {
-        embed_text = format!("{} {}", embed_text, tag_strings.join(" "));
-    }
-    let embedding = harness
-        .system
-        .embedding()
-        .embed(&embed_text)
-        .await
-        .map_err(|e| format!("embedding failed: {e}"))?;
-
-    let memory_id = MemoryId::new();
-
-    let result = crate::derived_completion::DerivedCompletion {
-        storage: harness.system.storage().clone(),
-        cache: harness.system.cache().clone(),
-        graph: harness.system.graph().clone(),
-        vectors: harness.system.vector_index().clone(),
-        fts: harness.system.fts_index().clone(),
-        entities: harness.system.entity_index().clone(),
-    }
-    .insert(
-        crate::storage::control::MutationContext::unkeyed(ns_config.id),
-        crate::storage::insertion::InsertMemory {
-            id: Some(memory_id),
-            summary: summary.into(),
-            full_text: full_text.map(str::to_owned),
-            tags,
-            embedding: None,
-            initial_stability: Some(ns_config.initial_stability),
-            created_at: Some(timestamp_ms),
-            parent_id: None,
-            supersedes,
-        },
-        embedding.clone().into(),
-        timestamp_ms,
-    )
-    .await?;
-    if result.record.is_none() {
-        return Err(crate::storage::StorageError::CommittedMutation {
-            receipt: Box::new(result.receipt),
-            source: Box::new(crate::storage::StorageError::InvalidMutation(
-                "committed benchmark insertion lacks its record".into(),
-            )),
+        let mut embed_text = match full_text {
+            Some(ft) => format!("{}\n\n{}", summary, ft),
+            None => summary.to_string(),
+        };
+        if !tag_strings.is_empty() {
+            embed_text = format!("{} {}", embed_text, tag_strings.join(" "));
         }
-        .into());
-    }
+        let embedding = harness
+            .system
+            .embedding()
+            .embed(&embed_text)
+            .await
+            .map_err(|e| format!("embedding failed: {e}"))?;
 
-    let entities = llm_entities.to_vec();
-    if harness.system.config().graph.autolink_enabled {
-        let threshold = harness.system.config().graph.auto_link_threshold as f32;
-        let max_links = harness.system.config().graph.max_auto_links;
+        let memory_id = MemoryId::new();
 
-        let _ = crate::graph::perform_autolink(
-            memory_id,
-            ns_config.id,
-            &embedding,
-            tag_strings,
-            threshold,
-            max_links,
-            harness.system.vector_index(),
-            harness.system.graph(),
-            harness.system.storage(),
-            harness.system.cache(),
+        let result = crate::derived_completion::DerivedCompletion {
+            storage: harness.system.storage().clone(),
+            cache: harness.system.cache().clone(),
+            graph: harness.system.graph().clone(),
+            vectors: harness.system.vector_index().clone(),
+            fts: harness.system.fts_index().clone(),
+            entities: harness.system.entity_index().clone(),
+        }
+        .insert_reserved_with_work(
+            crate::storage::control::MutationContext::unkeyed(ns_config.id),
+            crate::storage::insertion::InsertMemory {
+                id: Some(memory_id),
+                summary: summary.into(),
+                full_text: full_text.map(str::to_owned),
+                tags,
+                embedding: None,
+                initial_stability: Some(ns_config.initial_stability),
+                created_at: Some(timestamp_ms),
+                parent_id: None,
+                supersedes,
+            },
+            embedding.clone().into(),
+            timestamp_ms,
+            None,
+            Some(&work),
         )
-        .await;
+        .await?;
+        if result.record.is_none() {
+            return Err(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(result.receipt),
+                source: Box::new(crate::storage::StorageError::InvalidMutation(
+                    "committed benchmark insertion lacks its record".into(),
+                )),
+            }
+            .into());
+        }
 
-        if !entities.is_empty() {
-            let max_entity_links = harness.system.config().graph.max_entity_links;
-            let _ = crate::graph::perform_entity_link(
+        let entities = llm_entities.to_vec();
+        if harness.system.config().graph.autolink_enabled {
+            let threshold = harness.system.config().graph.auto_link_threshold as f32;
+            let max_links = harness.system.config().graph.max_auto_links;
+
+            let _ = crate::graph::perform_autolink_with_work(
                 memory_id,
                 ns_config.id,
-                &entities,
-                max_entity_links,
-                harness.system.entity_index(),
+                &embedding,
+                tag_strings,
+                threshold,
+                max_links,
+                harness.system.vector_index(),
                 harness.system.graph(),
                 harness.system.storage(),
                 harness.system.cache(),
+                Some(&work),
+            )
+            .await;
+
+            if !entities.is_empty() {
+                let max_entity_links = harness.system.config().graph.max_entity_links;
+                let _ = crate::graph::perform_entity_link_with_work(
+                    memory_id,
+                    ns_config.id,
+                    &entities,
+                    max_entity_links,
+                    harness.system.entity_index(),
+                    harness.system.graph(),
+                    harness.system.storage(),
+                    harness.system.cache(),
+                    Some(&work),
+                )
+                .await;
+            }
+
+            let temporal_window_ms = harness.system.config().graph.temporal_window_ms;
+            let max_temporal_links = harness.system.config().graph.max_temporal_links;
+            let _ = crate::graph::perform_temporal_link_with_work(
+                memory_id,
+                ns_config.id,
+                timestamp_ms,
+                temporal_window_ms,
+                max_temporal_links,
+                ingested_memories,
+                harness.system.graph(),
+                harness.system.storage(),
+                harness.system.cache(),
+                Some(&work),
             )
             .await;
         }
 
-        let temporal_window_ms = harness.system.config().graph.temporal_window_ms;
-        let max_temporal_links = harness.system.config().graph.max_temporal_links;
-        let _ = crate::graph::perform_temporal_link(
-            memory_id,
-            ns_config.id,
-            timestamp_ms,
-            temporal_window_ms,
-            max_temporal_links,
-            ingested_memories,
-            harness.system.graph(),
-            harness.system.storage(),
-            harness.system.cache(),
-        )
-        .await;
+        if !entities.is_empty() {
+            let mut idx = harness.system.entity_index().write().await;
+            idx.add(ns_config.id, memory_id, &entities);
+        }
+
+        harness.system.complete_pending_effects().await?;
+
+        Ok(memory_id)
     }
-
-    if !entities.is_empty() {
-        let mut idx = harness.system.entity_index().write().await;
-        idx.add(memory_id, &entities);
-    }
-
-    harness.system.complete_pending_effects().await?;
-
-    Ok(memory_id)
+    .await;
+    crate::storage::work::finish_work(harness.system.storage(), work);
+    result
 }
 
 async fn ingest_conversation(

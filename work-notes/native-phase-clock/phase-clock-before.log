@@ -1,0 +1,41 @@
+   Compiling recalld v1.0.0 (/work)
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> src/storage/metadata/native_records/phase_clock_tests.rs:55:9
+   |
+55 |         crate::storage::canonical_schema::read_state(&session.metadata().db.begin_read().unwrap())
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^---------------------------------------------- argument #2 of type `&storage::control::ControlState` is missing
+   |
+note: function defined here
+  --> src/storage/canonical_schema.rs:70:15
+   |
+70 | pub(crate) fn read_state(
+   |               ^^^^^^^^^^
+71 |     read: &redb::ReadTransaction,
+72 |     control: &ControlState,
+   |     ----------------------
+help: provide the argument
+   |
+55 |         crate::storage::canonical_schema::read_state(&session.metadata().db.begin_read().unwrap(), /* &storage::control::ControlState */)
+   |                                                                                                  +++++++++++++++++++++++++++++++++++++++
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> src/storage/metadata/native_records/phase_clock_tests.rs:80:9
+   |
+80 |         crate::storage::canonical_schema::read_state(&session.metadata().db.begin_read().unwrap(),)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^----------------------------------------------- argument #2 of type `&storage::control::ControlState` is missing
+   |
+note: function defined here
+  --> src/storage/canonical_schema.rs:70:15
+   |
+70 | pub(crate) fn read_state(
+   |               ^^^^^^^^^^
+71 |     read: &redb::ReadTransaction,
+72 |     control: &ControlState,
+   |     ----------------------
+help: provide the argument
+   |
+80 |         crate::storage::canonical_schema::read_state(&session.metadata().db.begin_read().unwrap(), /* &storage::control::ControlState */)
+   |                                                                                                    +++++++++++++++++++++++++++++++++++++
+
+For more information about this error, try `rustc --explain E0061`.
+error: could not compile `recalld` (lib test) due to 2 previous errors

@@ -228,6 +228,9 @@ pub struct RelatedMemory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NeighborMemory {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID of the neighbor.
     pub id: String,
     /// Short summary of the neighbor memory.
@@ -263,6 +266,9 @@ pub struct SearchResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Short summary of the memory.
@@ -441,6 +447,9 @@ pub struct StoredMemory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryRecord {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Namespace the memory belongs to.
@@ -569,6 +578,9 @@ pub struct ListTagsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMemoryEntry {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Short summary of the memory.

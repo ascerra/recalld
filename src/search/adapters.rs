@@ -24,6 +24,7 @@ use super::pipeline::{
     FtsIndexRegistry, FtsResult, GraphReader, MetadataStore, NamespaceResolver, RecordCache,
     RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
 };
+use super::read_handle::{FtsHandle, ReadHandle};
 use super::{EntityIndex, FlatVectorIndex, FtsIndex, SearchFilter, VectorIndex};
 
 // Explicit offline harness adapter. Ordinary storage open still rejects schema
@@ -144,6 +145,12 @@ impl SingleEmbeddingRegistry {
 
 #[async_trait]
 impl EmbeddingProviderRegistry for SingleEmbeddingRegistry {
+    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+        self.provider.profile()
+    }
+    fn dimensions(&self) -> Option<usize> {
+        Some(self.provider.dimensions())
+    }
     async fn embed(&self, _namespace: &str, text: &str) -> Result<Vec<f32>> {
         self.provider
             .embed(text)
@@ -166,12 +173,19 @@ impl EmbeddingProviderRegistry for SingleEmbeddingRegistry {
 /// All namespaces share one index; the namespace_id is passed through
 /// the search filter to the underlying `VectorIndex::search`.
 pub struct SharedVectorIndexRegistry {
-    index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    index: ReadHandle<FlatVectorIndex>,
 }
 
 impl SharedVectorIndexRegistry {
     pub fn new(index: Arc<tokio::sync::RwLock<FlatVectorIndex>>) -> Self {
-        Self { index }
+        Self {
+            index: ReadHandle::Live(index),
+        }
+    }
+    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<FlatVectorIndex>>) -> Self {
+        Self {
+            index: ReadHandle::Pinned(value),
+        }
     }
 }
 
@@ -184,9 +198,7 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
         eligible_ids: Option<&HashSet<MemoryId>>,
     ) -> Result<Vec<ScoredResult>> {
         let wait = crate::performance::Timer::new("vector.lock_wait");
-        let index = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.index.read())
-        });
+        let index = self.index.read();
         wait.complete();
         let index = crate::performance::Hold::new("vector.lock_hold", index);
         let filter = SearchFilter {
@@ -207,9 +219,7 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
 
     fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>> {
         let wait = crate::performance::Timer::new("vector.lock_wait");
-        let index = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.index.read())
-        });
+        let index = self.index.read();
         wait.complete();
         let index = crate::performance::Hold::new("vector.lock_hold", index);
         index.get_vector(id)
@@ -223,21 +233,26 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
 /// Wraps a single `FtsIndex` behind a `tokio::sync::Mutex`.
 /// Namespace filtering is handled inside `FtsIndex::search` via SQL.
 pub struct SharedFtsIndexRegistry {
-    index: Arc<tokio::sync::Mutex<FtsIndex>>,
+    index: FtsHandle,
 }
 
 impl SharedFtsIndexRegistry {
     pub fn new(index: Arc<tokio::sync::Mutex<FtsIndex>>) -> Self {
-        Self { index }
+        Self {
+            index: FtsHandle::Live(index),
+        }
+    }
+    pub(crate) fn pinned(value: tokio::sync::OwnedMutexGuard<FtsIndex>) -> Self {
+        Self {
+            index: FtsHandle::Pinned(std::sync::Mutex::new(value)),
+        }
     }
 }
 
 impl FtsIndexRegistry for SharedFtsIndexRegistry {
     fn search(&self, namespace_id: NamespaceId, query: &str, k: usize) -> Result<Vec<FtsResult>> {
         let wait = crate::performance::Timer::new("fts.lock_wait");
-        let index = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.index.lock())
-        });
+        let index = self.index.lock();
         wait.complete();
         let index = crate::performance::Hold::new("fts.lock_hold", index);
         index
@@ -262,9 +277,7 @@ impl FtsIndexRegistry for SharedFtsIndexRegistry {
         eligible_ids: &HashSet<MemoryId>,
     ) -> Result<super::EligibleFtsResults> {
         let wait = crate::performance::Timer::new("fts.lock_wait");
-        let index = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.index.lock())
-        });
+        let index = self.index.lock();
         wait.complete();
         let index = crate::performance::Hold::new("fts.lock_hold", index);
         index
@@ -324,6 +337,18 @@ impl StorageMetadataAdapter {
 
 #[async_trait]
 impl MetadataStore for StorageMetadataAdapter {
+    fn accept_work(
+        &self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::work::WorkTicket>> {
+        crate::storage::work::accept_work(&self.storage, parent)
+            .map(Some)
+            .map_err(|e| SearchError::Unavailable(e.to_string()))
+    }
+    fn finish_work(&self, work: crate::storage::work::WorkTicket) {
+        crate::storage::work::finish_work(&self.storage, work);
+    }
+
     async fn effects_stamp(&self) -> Result<u64> {
         let storage = self.storage.clone();
         let worker = crate::performance::Worker::new("storage.read.queue");
@@ -443,12 +468,24 @@ impl MetadataStore for StorageMetadataAdapter {
 /// constructs minimal `NeighborInfo` entries from the graph.
 pub struct RifProcessorAdapter {
     engine: Arc<RifEngine>,
-    graph: SharedGraph,
+    graph: ReadHandle<crate::graph::RelationshipGraph>,
 }
 
 impl RifProcessorAdapter {
     pub fn new(engine: Arc<RifEngine>, graph: SharedGraph) -> Self {
-        Self { engine, graph }
+        Self {
+            engine,
+            graph: ReadHandle::Live(graph),
+        }
+    }
+    pub(crate) fn pinned(
+        engine: Arc<RifEngine>,
+        graph: Arc<tokio::sync::OwnedRwLockReadGuard<crate::graph::RelationshipGraph>>,
+    ) -> Self {
+        Self {
+            engine,
+            graph: ReadHandle::Pinned(graph),
+        }
     }
 }
 
@@ -458,9 +495,7 @@ impl RifProcessor for RifProcessorAdapter {
         retrieved: &[MemoryId],
         neighbor_ids: &[MemoryId],
     ) -> Vec<RifSuppression> {
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         let mut suppressions = Vec::new();
         for &retrieved_id in retrieved {
             // Build NeighborInfo from graph data for each neighbor.
@@ -550,12 +585,41 @@ impl AccessRecorder for StorageAccessRecorder {
         accesses: &[(MemoryId, AccessKind)],
         scope: Option<&crate::storage::control::ExposureScope>,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
-        crate::decay::observation::record_exposures_scoped(
+        self.record_access_batch_with_work(accesses, scope, None)
+            .await
+    }
+
+    async fn record_access_batch_at_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        crate::decay::observation::record_exposures_scoped_with_work(
+            self.storage.clone(),
+            self.cache.clone(),
+            accesses.to_vec(),
+            sampled_at,
+            scope.cloned(),
+            parent,
+        )
+        .await
+        .map_err(Into::into)
+    }
+    async fn record_access_batch_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        crate::decay::observation::record_exposures_scoped_with_work(
             self.storage.clone(),
             self.cache.clone(),
             accesses.to_vec(),
             self.clock.now_millis(),
             scope.cloned(),
+            parent,
         )
         .await
         .map_err(Into::into)
@@ -566,12 +630,21 @@ impl AccessRecorder for StorageAccessRecorder {
 
 /// Adapts `SharedGraph` (`Arc<RwLock<RelationshipGraph>>`) to `GraphReader`.
 pub struct SharedGraphReader {
-    graph: SharedGraph,
+    graph: ReadHandle<crate::graph::RelationshipGraph>,
 }
 
 impl SharedGraphReader {
     pub fn new(graph: SharedGraph) -> Self {
-        Self { graph }
+        Self {
+            graph: ReadHandle::Live(graph),
+        }
+    }
+    pub(crate) fn pinned(
+        value: Arc<tokio::sync::OwnedRwLockReadGuard<crate::graph::RelationshipGraph>>,
+    ) -> Self {
+        Self {
+            graph: ReadHandle::Pinned(value),
+        }
     }
 }
 
@@ -581,9 +654,7 @@ impl GraphReader for SharedGraphReader {
         strengths: &HashMap<MemoryId, f32>,
     ) -> Result<HashMap<MemoryId, f32>> {
         let wait = crate::performance::Timer::new("graph.lock_wait");
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         wait.complete();
         let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         let config = crate::graph::activation::ActivationConfig::default();
@@ -608,9 +679,7 @@ impl GraphReader for SharedGraphReader {
         records: &HashMap<MemoryId, CachedRecord>,
     ) -> Result<Vec<(MemoryId, f32)>> {
         let wait = crate::performance::Timer::new("graph.lock_wait");
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         wait.complete();
         let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         Ok(crate::graph::activation::spreading_activation_with_records(
@@ -627,9 +696,7 @@ impl GraphReader for SharedGraphReader {
         id: MemoryId,
         allowance: usize,
     ) -> Result<crate::graph::query::SupersessionLinks> {
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         Ok(crate::graph::query::supersession_links(
             &graph, id, allowance,
         ))
@@ -643,9 +710,7 @@ impl GraphReader for SharedGraphReader {
         eligible: &std::collections::HashMap<MemoryId, CachedRecord>,
     ) -> Result<crate::graph::query::GraphExpansion> {
         let wait = crate::performance::Timer::new("graph.lock_wait");
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         wait.complete();
         let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         crate::graph::query::expand(&graph, seeds, namespace, depth, eligible)
@@ -653,9 +718,7 @@ impl GraphReader for SharedGraphReader {
     }
 
     fn neighbors(&self, id: &MemoryId) -> Vec<MemoryId> {
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         graph
             .outgoing_edges(id)
             .iter()
@@ -676,9 +739,7 @@ impl GraphReader for SharedGraphReader {
         graph_depth: u8,
     ) -> Vec<(MemoryId, f32)> {
         let wait = crate::performance::Timer::new("graph.lock_wait");
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         wait.complete();
         let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         let config = spreading_config(graph_depth);
@@ -686,9 +747,7 @@ impl GraphReader for SharedGraphReader {
     }
 
     fn superseded_by(&self, id: &MemoryId) -> Option<MemoryId> {
-        let graph = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.graph.read())
-        });
+        let graph = self.graph.read();
         // Chain-walking (and its cycle guard) lives on the graph itself,
         // where it can be unit-tested against real nodes and edges.
         graph.supersedes_terminal(id)
@@ -704,19 +763,26 @@ impl GraphReader for SharedGraphReader {
 /// crowd out eligible records. Namespace-partitioned postings can later avoid
 /// scanning those foreign postings without changing this admission contract.
 pub struct SharedEntityIndexReader {
-    entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
+    entity_index: ReadHandle<EntityIndex>,
 }
 
 impl SharedEntityIndexReader {
     pub fn new(entity_index: Arc<tokio::sync::RwLock<EntityIndex>>) -> Self {
-        Self { entity_index }
+        Self {
+            entity_index: ReadHandle::Live(entity_index),
+        }
+    }
+    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<EntityIndex>>) -> Self {
+        Self {
+            entity_index: ReadHandle::Pinned(value),
+        }
     }
 }
 
 impl EntityIndexReader for SharedEntityIndexReader {
     fn find_by_entities(
         &self,
-        _namespace_id: NamespaceId,
+        namespace_id: NamespaceId,
         entities: &[String],
         exclude_id: MemoryId,
         k: usize,
@@ -725,11 +791,10 @@ impl EntityIndexReader for SharedEntityIndexReader {
         if entities.is_empty() {
             return Ok(Vec::new());
         }
-        let index = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.entity_index.read())
+        let index = self.entity_index.read();
+        let results = index.find_by_entities_filtered(namespace_id, entities, exclude_id, |id| {
+            eligible_ids.contains(&id)
         });
-        let results =
-            index.find_by_entities_filtered(entities, exclude_id, |id| eligible_ids.contains(&id));
         Ok(results
             .into_iter()
             .take(k)
@@ -851,6 +916,37 @@ mod tests {
                 .into_iter()
                 .collect::<HashSet<_>>(),
             HashSet::from([live, ghost.id])
+        );
+    }
+}
+
+#[cfg(test)]
+mod entity_namespace_tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn entity_reader_selects_namespace_before_candidate_cap() {
+        let ns = NamespaceId::new(1);
+        let other = NamespaceId::new(2);
+        let mut index = EntityIndex::new();
+        let entities = vec!["John Smith".into(), "José".into()];
+        for _ in 0..100 {
+            index.add(other, MemoryId::new(), &entities);
+        }
+        let local = MemoryId::new();
+        index.add(ns, local, &["José".into()]);
+        let reader = SharedEntityIndexReader::new(Arc::new(tokio::sync::RwLock::new(index)));
+        let hits = reader
+            .find_by_entities(ns, &entities, MemoryId::new(), 1, &HashSet::from([local]))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].memory_id, local);
+        assert_eq!(hits[0].shared_count, 1);
+        assert!(
+            reader
+                .find_by_entities(ns, &entities, local, 1, &HashSet::from([local]))
+                .unwrap()
+                .is_empty()
         );
     }
 }
