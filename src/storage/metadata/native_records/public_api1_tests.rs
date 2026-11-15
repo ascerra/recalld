@@ -293,7 +293,7 @@ async fn api1_public_native_remote_decode_and_terminal_no_resurrection() {
             "old native-incompatible alias rejects before mutation"
         );
     }
-    let request = api1::request(d.parent, 4, None);
+    let request = api1::request(d.parent, 4, Some("NATIVE"));
     let reply = remote
         .api1_lifecycle(request.clone(), Operation::Feedback)
         .await;
@@ -335,7 +335,7 @@ async fn api1_public_native_remote_decode_and_terminal_no_resurrection() {
         assert_eq!(evidence.error.unwrap().commit_state, CommitState::Committed);
         assert_eq!(evidence.receipt, reply.lifecycle.as_ref().unwrap().receipt);
     }
-    let request = api1::request(d.parent, 3, None);
+    let request = api1::request(d.parent, 3, Some("NaTiVe"));
     let first = remote
         .api1_lifecycle(request.clone(), Operation::Forget)
         .await;
@@ -503,4 +503,44 @@ async fn api1_public_native_feedback_uses_configured_policy_and_original1_hash()
     let root = f.close();
     let reopened = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     drop((reopened, root));
+}
+
+async fn worker_join_unknown(operation: Operation) {
+    // Actual worker unwind at clock sampling, BEFORE canonical commit. This
+    // proves conservative JoinError classification, not postcommit durability.
+    struct PanicClock;
+    impl Clock for PanicClock {
+        fn now_millis(&self) -> i64 {
+            panic!("injected precommit clock panic");
+        }
+    }
+    let (f, d, _clock, mut bridge, _state) = setup().await;
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    bridge.storage = Arc::new(
+        f.storage_adapter()
+            .with_clock(Arc::new(PanicClock))
+            .with_native_lifecycle_policy(Default::default()),
+    );
+    let tool = if operation == Operation::Feedback {
+        "reinforce_memory"
+    } else {
+        "forget_memory"
+    };
+    let result = crate::mcp::tools::dispatch_tool(&bridge, tool, json!({"id":d.parent})).await;
+    assert_eq!(result.is_error, Some(true));
+    let wire = serde_json::to_value(result).unwrap();
+    let reply: Value = serde_json::from_str(wire["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(reply["error"]["commitState"], "unknown", "{reply}");
+    assert!(reply["receipt"].is_null());
+    assert!(reply["error"]["operationId"].is_null());
+    assert!(reply["readiness"].is_null());
+    assert!(tracker.status().unresolved > 0);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api1_public_native_worker_join_feedback_is_unknown() {
+    worker_join_unknown(Operation::Feedback).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api1_public_native_worker_join_forget_is_unknown() {
+    worker_join_unknown(Operation::Forget).await;
 }

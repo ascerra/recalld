@@ -1411,3 +1411,126 @@ async fn api1_public_legacy_missing_scope_terminal_and_old_alias_new_server() {
     task.abort();
     let _ = task.await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn api1_public_mixed_case_canonical_scope_through_public_and_remote() {
+    use crate::serialization::lifecycle_api1 as api1;
+    use tower::ServiceExt;
+    let f = Fixture::new();
+    let ns = f.create_namespace("MiXeD-Case");
+    f.create_namespace("Foreign");
+    let id = f.insert_memory_in(ns, &[]).await;
+    let clock = Arc::new(CountingClock::default());
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = Arc::new(f.storage_adapter().with_clock(clock.clone()));
+    bridge.default_namespace = "Foreign".into();
+    let (state, query) = state(&f, clock.clone());
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        bridge.storage.clone(),
+        &socket.path().join("mixed.sock"),
+    )
+    .await;
+    let before = snapshot(&f, id);
+    for assertion in ["missing", "FOREIGN"] {
+        for operation in [Operation::Feedback, Operation::Forget] {
+            let failed = remote
+                .api1_lifecycle(api1::request(id, 4, Some(assertion)), operation)
+                .await;
+            assert!(failed.value.is_none());
+            assert_eq!(
+                failed.lifecycle.unwrap().error.unwrap().code,
+                "NAMESPACE_MISMATCH"
+            );
+            assert_eq!(before, snapshot(&f, id));
+            assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        }
+    }
+    let missing = remote
+        .api1_lifecycle(
+            api1::request(MemoryId::new(), 4, Some("mixed-case")),
+            Operation::Forget,
+        )
+        .await;
+    assert!(missing.value.is_none());
+    assert_eq!(missing.lifecycle.unwrap().error.unwrap().code, "NOT_FOUND");
+    assert_eq!(before, snapshot(&f, id));
+    let success = crate::mcp::tools::dispatch_tool(
+        &bridge,
+        "reinforce_memory",
+        json!({"id":id,"namespace":"MIXED-case","quality":4}),
+    )
+    .await;
+    assert_ne!(success.is_error, Some(true), "{success:?}");
+    let response = crate::api::router(state.clone(), &Default::default())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/memories/{id}/reinforce"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(r#"{"namespace":"mixed-CASE"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let success = remote
+        .api1_lifecycle(
+            api1::request(id, 4, Some("mixed-case")),
+            Operation::Feedback,
+        )
+        .await;
+    assert!(
+        matches!(success.value, Some(api1::Value::Feedback { .. })),
+        "{success:?}"
+    );
+    assert_eq!(
+        success.lifecycle.unwrap().scope.unwrap(),
+        (ns, "MiXeD-Case".into())
+    );
+    let forgotten = remote
+        .api1_lifecycle(api1::request(id, 3, Some("mixed-CASE")), Operation::Forget)
+        .await;
+    assert!(
+        matches!(forgotten.value, Some(api1::Value::Forget { deleted: true })),
+        "{forgotten:?}"
+    );
+    let spelling = id.to_string().to_uppercase();
+    let again = crate::mcp::tools::dispatch_tool(
+        &bridge,
+        "forget_memory",
+        json!({"id":spelling,"namespace":"MIXED-CASE"}),
+    )
+    .await;
+    assert_ne!(again.is_error, Some(true), "{again:?}");
+    let wire = serde_json::to_value(again).unwrap();
+    let value: Value = serde_json::from_str(wire["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(value, json!({"id":spelling,"deleted":false}));
+    let id2 = f.insert_memory_in(ns, &[]).await;
+    let response = crate::api::router(state.clone(), &Default::default())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("DELETE")
+                .uri(format!("/memories/{id2}?namespace=MIXED-case"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .get_namespace(ns)
+            .unwrap()
+            .unwrap()
+            .name,
+        "MiXeD-Case"
+    );
+    task.abort();
+    let _ = task.await;
+    drop((remote, bridge, state, query));
+    let root = f.close();
+    drop(crate::storage::RedbStorageEngine::open(root.path()).unwrap());
+}

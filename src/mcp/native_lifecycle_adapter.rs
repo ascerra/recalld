@@ -26,7 +26,7 @@ pub(crate) async fn execute(
 
 pub(crate) async fn execute_with_projection(
     owner: &DerivedCompletion,
-    request: Request,
+    mut request: Request,
     operation: Operation,
     policy: &NativePolicyInputs,
     clock: Arc<dyn Clock>,
@@ -47,6 +47,7 @@ pub(crate) async fn execute_with_projection(
         }
     };
     let requested = request.clone();
+    let normalize_api1_assertion = legacy_projection.is_some();
     let resolved = tokio::task::spawn_blocking(move || {
         let storage = storage
             .read()
@@ -58,7 +59,7 @@ pub(crate) async fn execute_with_projection(
                     "native-only lifecycle entry requires native storage".into(),
                 ));
             }
-            let _guard = meta.lifecycle_guard_with_work(Some(&child))?;
+            let guard = meta.lifecycle_guard_with_work(Some(&child))?;
             let record = storage.get_record(requested.id)?;
             let canonical = if let Some(record) = record {
                 Some(crate::model::NamespaceId::new(record.namespace_id))
@@ -96,13 +97,32 @@ pub(crate) async fn execute_with_projection(
             let namespace = canonical
                 .or(requested.namespace_id)
                 .ok_or(StorageError::NotFound(requested.id.into_inner()))?;
-            Ok((namespace, meta.uses_native_lifecycle()))
+            let assertion = if normalize_api1_assertion {
+                match requested.namespace {
+                    Some(asserted) => {
+                        // API1's existing lookup is case-insensitive, while the
+                        // stable stored spelling and all private keyed hashes
+                        // remain unchanged. Resolve inside this accepted guard.
+                        let canonical = meta
+                            .lifecycle_namespace_name(&guard, namespace)?
+                            .ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
+                        if !canonical.eq_ignore_ascii_case(&asserted) {
+                            return Err(StorageError::MutationNamespaceMismatch);
+                        }
+                        Some(canonical)
+                    }
+                    None => None,
+                }
+            } else {
+                requested.namespace
+            };
+            Ok((namespace, meta.uses_native_lifecycle(), assertion))
         })();
         meta.finish_work(child);
         result
     })
     .await;
-    let (scope, native) = match resolved {
+    let (scope, native, assertion) = match resolved {
         Ok(Ok(scope)) => scope,
         other => {
             owner.finish_known_work(work);
@@ -113,6 +133,7 @@ pub(crate) async fn execute_with_projection(
             });
         }
     };
+    request.namespace = assertion;
     let context = MutationContext {
         store_id: request.options.store_id,
         scope: MutationScope::Namespace(scope),
