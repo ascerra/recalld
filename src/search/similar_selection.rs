@@ -51,6 +51,8 @@ pub(crate) enum SimilarityAlgorithm {
 pub(crate) enum SimilarityOwnAdmission {
     Missing,
     RejectedByMinScore,
+    /// Scored and passed minScore, but no independent version-resolved admission.
+    NotAdmitted,
     Admitted,
 }
 
@@ -75,6 +77,39 @@ pub(crate) struct SimilarityExplanation {
     pub version: Option<VersionStatus>,
 }
 
+impl SimilarityExplanation {
+    fn capture(
+        candidate: &Candidate,
+        own_cosine: Option<f32>,
+        min_score: Option<f32>,
+        origins: Vec<SimilarityOrigin>,
+        origin_count: usize,
+        version: Option<VersionStatus>,
+    ) -> Self {
+        let admitted_own = candidate.provenance.own_score;
+        let own_admission = match own_cosine {
+            None => SimilarityOwnAdmission::Missing,
+            Some(_) if admitted_own.is_some() => SimilarityOwnAdmission::Admitted,
+            Some(score) if min_score.is_some_and(|min| score < min) => {
+                SimilarityOwnAdmission::RejectedByMinScore
+            }
+            Some(_) => SimilarityOwnAdmission::NotAdmitted,
+        };
+        Self {
+            algorithm: SimilarityAlgorithm::CosineMax,
+            own_cosine,
+            own_admission,
+            min_score,
+            admitted_own,
+            inherited_floor: candidate.provenance.inherited_floor,
+            omitted_origins: origin_count - origins.len(),
+            origins,
+            final_similarity: candidate.composite_score,
+            version,
+        }
+    }
+}
+
 pub(crate) struct SelectedSimilarRow {
     pub explanation: Option<SimilarityExplanation>,
     pub result: SearchResult,
@@ -83,6 +118,9 @@ pub(crate) struct SelectedSimilarRow {
 }
 
 pub(crate) struct SelectedSimilarity {
+    pub source_id: MemoryId,
+    pub source_namespace: NamespaceConfig,
+    pub source_profile: EmbeddingProfile,
     pub read_generation: GenerationRef,
     pub evaluated_at: i64,
     pub rows: Vec<SelectedSimilarRow>,
@@ -250,6 +288,11 @@ impl QueryEngine {
             // Similarity does not perform associative expansion or RIF.
             diagnostics.rif_off = true;
             let mut candidates = BTreeMap::<MemoryId, (Candidate, NamespaceConfig)>::new();
+            // Retain actual scored own inputs before minScore; never recompute
+            // a terminal's cosine or relabel a donor's cosine as its own.
+            // This map is O(scored records), not bounded by the display limit.
+            let mut own_cosines = BTreeMap::new();
+            let mut inherited_origins = BTreeMap::<MemoryId, (usize, Vec<SimilarityOrigin>)>::new();
             let mut namespaces = canonical.namespaces().map_err(unavailable)?;
             namespaces.sort_by_key(|ns| ns.id);
             for ns in namespaces {
@@ -318,6 +361,7 @@ impl QueryEngine {
                     }
                     let score = if score == 0. { 0. } else { score };
                     coverage.scored_records += 1;
+                    own_cosines.insert(record.id, score);
                     if options.min_score.is_some_and(|min| score < min) {
                         continue;
                     }
@@ -380,6 +424,20 @@ impl QueryEngine {
                         candidate.provenance.own_vector_score = Some(score);
                         candidate.provenance.own_score = Some(score);
                     } else {
+                        // Canonical namespace enumeration yields each UUID once;
+                        // only admitted, validated origins reach this collector.
+                        let (count, origins) = inherited_origins.entry(target).or_default();
+                        *count += 1;
+                        origins.push(SimilarityOrigin {
+                            origin_id: record.id,
+                            cosine: score,
+                        });
+                        origins.sort_by(|a, b| {
+                            b.cosine
+                                .total_cmp(&a.cosine)
+                                .then(a.origin_id.cmp(&b.origin_id))
+                        });
+                        origins.truncate(64); // Display only; the exact maximum below sees every origin.
                         candidate
                             .provenance
                             .inherited_channels
@@ -445,12 +503,14 @@ impl QueryEngine {
                 canonical.at,
                 id,
                 &source_ns,
-                profile,
+                profile.clone(),
                 candidates.iter().map(|(c, ns)| (c.record.id, ns.clone())),
             );
             let at = canonical.at;
             let storage = owner.storage.clone();
             let include_embeddings = options.include_embeddings;
+            let min_score = options.min_score;
+            let versions = diagnostics.versions.clone();
             let child = work.child().map_err(unavailable)?;
             let rows = tokio::task::spawn_blocking(move || {
                 let storage = storage.read().map_err(unavailable)?;
@@ -468,12 +528,23 @@ impl QueryEngine {
                         if payload.len() != 1 {
                             return Err(unavailable("similarity hydration missing"));
                         }
+                        let (origin_count, origins) = inherited_origins
+                            .remove(&candidate.record.id)
+                            .unwrap_or_default();
+                        let explanation = SimilarityExplanation::capture(
+                            &candidate,
+                            own_cosines.get(&candidate.record.id).copied(),
+                            min_score,
+                            origins,
+                            origin_count,
+                            versions.get(&candidate.record.id).copied(),
+                        );
                         let mut result =
                             Self::build_results(&[candidate], &namespace.name).remove(0);
                         let payload = payload.remove(0);
                         result.full_text = payload.full_text.clone();
                         rows.push(SelectedSimilarRow {
-                            explanation: None,
+                            explanation: Some(explanation),
                             result,
                             namespace,
                             payload,
@@ -487,6 +558,9 @@ impl QueryEngine {
             .await
             .map_err(unavailable)??;
             Ok(SelectedSimilarity {
+                source_id: id,
+                source_namespace: source_ns,
+                source_profile: profile,
                 read_generation: at,
                 evaluated_at,
                 rows,
@@ -500,5 +574,33 @@ impl QueryEngine {
         let result = tokio::time::timeout(std::time::Duration::from_secs(30), result).await;
         owner.finish_known_work(work);
         result.map_err(|_| unavailable("similarity selection deadline expired"))?
+    }
+}
+
+#[cfg(test)]
+mod explanation_tests {
+    use super::*;
+
+    #[test]
+    fn similar_explanation_missing_own_is_not_a_zero_cosine_or_admission() {
+        let record = super::super::tests::rec(super::super::tests::mid(1));
+        let mut candidate = Candidate::new(record);
+        candidate.composite_score = 0.8;
+        candidate.provenance.inherited_floor = Some(0.8);
+        let e = SimilarityExplanation::capture(
+            &candidate,
+            None,
+            None,
+            vec![SimilarityOrigin {
+                origin_id: super::super::tests::mid(2),
+                cosine: 0.8,
+            }],
+            1,
+            Some(VersionStatus::Current),
+        );
+        assert_eq!(e.own_cosine, None);
+        assert_eq!(e.own_admission, SimilarityOwnAdmission::Missing);
+        assert_eq!(e.admitted_own, None);
+        assert_eq!(e.final_similarity, 0.8);
     }
 }
