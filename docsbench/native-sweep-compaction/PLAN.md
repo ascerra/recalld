@@ -86,8 +86,8 @@ after publication/results. Broader A6 scorer/grouping/token/trace and public
 native-writer implementation remain owned work outside this bounded PR.
 
 Validation resource amendment: the first library link at 4 GiB was OOM-killed,
-confirmed by the exact Docker container event. The user approved one retry at
-6 GiB with unchanged source/flags/profile and the same private cache. It passed
+confirmed by the exact Docker container event. The coordinator approved a bounded6 GiB adjustment under the existing isolated-
+testing authorization, with unchanged source/flags/profile and the same private cache. It passed
 the focused and actual-consumer checks with cgroup peak5.59 GiB and zero OOM
 events. The required full correctness run uses the same approved6 GiB cap.
 Retain the initial failure separately; no performance comparison is claimed.

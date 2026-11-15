@@ -96,8 +96,9 @@ with an OOM event, then exit 101. Its automatic removal precluded recovering tha
 container's cgroup counters. This is a confirmed build-resource failure, not
 an observed runtime failure.
 
-The user authorized one unchanged-source/flags/profile retry at 6 GiB, and the
-full correctness run retained that cap. Same single private Cargo/target cache,
+The coordinator approved a bounded 6 GiB adjustment under the existing
+isolated-testing authorization, with unchanged source/flags/profile; the full
+correctness run retained that cap. Same single private Cargo/target cache,
 2 CPUs, `-j1`, pinned image, offline network, immutable read-only source. The
 focused successful run's cgroup peak was 5,997,666,304 bytes (5.59 GiB), with
 zero oom/oom_kill/max events. The full run peaked at 5,294,837,760 bytes (4.93 GiB), also with zero
