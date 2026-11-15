@@ -659,3 +659,6 @@ pub(crate) async fn capture_sampled<T>(
         .collect();
     (result, rows)
 }
+
+#[path = "performance_write_tests.rs"]
+mod writes;
