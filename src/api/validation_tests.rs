@@ -15,10 +15,19 @@ use crate::storage::StorageEngine as _;
 use crate::test_support::Fixture;
 
 fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
+    fixture_clients_with_embedding(
+        f,
+        Arc::new(crate::embedding::PassthroughProvider::new(
+            crate::test_support::DIM,
+        )),
+    )
+}
+
+fn fixture_clients_with_embedding(
+    f: &Fixture,
+    embedding: Arc<dyn crate::embedding::EmbeddingProvider>,
+) -> (Router, crate::mcp::bridge::McpBridge) {
     use crate::search::adapters::*;
-    let embedding = Arc::new(crate::embedding::PassthroughProvider::new(
-        crate::test_support::DIM,
-    ));
     let engine = Arc::new(crate::search::QueryEngine::new(
         Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
         Arc::new(SingleEmbeddingRegistry::new(embedding.clone())),
@@ -655,4 +664,135 @@ async fn scope_assertions_similarity_uses_canonical_source_scope_with_stale_cach
         assert_eq!(data["count"], 1);
         assert_eq!(data["memories"][0]["id"], ids[1].to_string());
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn performance_sampling_actual_http_and_mcp_share_root_decision_and_keep_bytes() {
+    use crate::search::VectorIndex;
+    struct Fixed;
+    #[async_trait::async_trait]
+    impl crate::embedding::EmbeddingProvider for Fixed {
+        async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+            Ok(vec![1.0, 0.0, 0.0, 0.0])
+        }
+        fn dimensions(&self) -> usize {
+            4
+        }
+        fn model_name(&self) -> &str {
+            "test-fixed"
+        }
+    }
+    let f = Fixture::new();
+    let namespace = crate::model::NamespaceId::new(1);
+    let id = f
+        .insert_memory_with(crate::test_support::MemorySpec {
+            embedding: Some(&[1.0, 0.0, 0.0, 0.0]),
+            tags: &["entity/fixture"],
+            summary: "private-needle",
+            ..crate::test_support::MemorySpec::new(namespace)
+        })
+        .await;
+    f.vector_index
+        .write()
+        .await
+        .add(
+            id,
+            &[1.0, 0.0, 0.0, 0.0],
+            crate::search::VectorMetadata {
+                namespace_id: namespace,
+                decay_phase: 1,
+                tags: vec![],
+            },
+        )
+        .unwrap();
+    f.fts_index
+        .lock()
+        .await
+        .add(namespace, id, "private-needle", None, &[])
+        .unwrap();
+    let (app, bridge) = fixture_clients_with_embedding(&f, Arc::new(Fixed));
+    f.storage.write().unwrap().sync().unwrap();
+    let files = [
+        f.path().join("meta.db"),
+        f.path().join("fulltext.dat"),
+        f.namespace_dir("default").join("vectors.dat"),
+    ];
+    let before: Vec<_> = files.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    let mut sampled = 0;
+    let mut skipped = 0;
+    for ordinal in 1..=8 {
+        let ((status, body), http_events) = crate::performance::tests::capture_sampled(
+            ordinal,
+            post(
+                &app,
+                "/search",
+                json!({"query":"private-needle","tags":["entity/fixture"],"recordAccess":false}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.to_string().contains(&id.to_string()), "{body}");
+        let (response, mcp_events) = crate::performance::tests::capture_sampled(
+            ordinal,
+            crate::mcp::tools::dispatch_tool(
+                &bridge,
+                "recall_memories",
+                json!({"query":"private-needle", "tags":["entity/fixture"],"recordAccess":false}),
+            ),
+        )
+        .await;
+        assert_ne!(response.is_error, Some(true), "{response:?}");
+        assert!(
+            serde_json::to_string(&response)
+                .unwrap()
+                .contains(&id.to_string())
+        );
+        assert_eq!(http_events.is_empty(), mcp_events.is_empty());
+        if http_events.is_empty() {
+            skipped += 1;
+        } else {
+            sampled += 1;
+        }
+        for (operation, events) in [("rest.search", http_events), ("mcp.search", mcp_events)] {
+            if events.is_empty() {
+                continue;
+            }
+            assert!(events.iter().any(|e| e["fields"]["stage"] == operation));
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e["fields"]["stage"] == "engine.search")
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e["fields"]["kind"] == "canonical_read")
+            );
+            for event in &events {
+                for span in event["spans"].as_array().unwrap() {
+                    assert_eq!(span["root_ordinal"], ordinal);
+                    assert_eq!(span["sample_every"], 2);
+                }
+            }
+            assert!(
+                !serde_json::to_string(&events)
+                    .unwrap()
+                    .contains(&id.to_string())
+            );
+            assert!(
+                !serde_json::to_string(&events)
+                    .unwrap()
+                    .contains("entity/fixture")
+            );
+        }
+        tokio::task::yield_now().await;
+        assert_eq!(
+            before,
+            files
+                .iter()
+                .map(|p| std::fs::read(p).unwrap())
+                .collect::<Vec<_>>()
+        );
+    }
+    assert!(sampled > 0 && skipped > 0);
 }

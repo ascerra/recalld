@@ -790,6 +790,7 @@ mod entity_scope_tests {
         {
             let mut index = f.entity_index.write().await;
             index.add(ns, local, &["alice".into()]);
+            // Deliberately stale local postings still require canonical scope/phase checks.
             for id in [foreign, removed, MemoryId::new()] {
                 index.add(ns, id, &["alice".into(), "bob".into()]);
             }
