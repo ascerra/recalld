@@ -27,6 +27,15 @@ query_wire.rs remains byte-identical151. No runtime changes follow the merge;
 chronology implementation changes only test modules/helpers.
 
 Huygens source-reviewed the committed merge and the named query/observation/API
-seams: no blocker, no edits, no execution claim. Feynman inherited-policy/admission
-review is pending before the validation freeze. Validation results and any real
+seams: no blocker, no edits, no execution claim. Feynman also reviewed inherited/native/publication/system no-diff and the pinned
+lock/admission/clock/policy union: no blocker, no runtime or full151-audit claim. Validation results and any real
 composition failures will be recorded separately; source review is not a test.
+
+Frozen0101 first validation: all four new chronology cases passed. Existing strict
+query cases passed12/failed2; the unchanged-source similar_v2 diagnostic passed2/
+failed7 with explicit inherited-policy-unknown errors. Remaining focused public,
+adoption, legacy, decoder and historical replay groups passed; full was gated off.
+Source354/emitted executables15 were hash-verified before the test-only correction.
+Huygens reviewed the exact fixture helper: actually adopt default+other after real
+migration, preserve mismatch/unknown complete namespace bytes and unknown binding,
+and retain pre-adoption rejection assertions. No production guard is relaxed.
