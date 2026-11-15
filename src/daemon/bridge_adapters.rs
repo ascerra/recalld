@@ -139,6 +139,35 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::{native_single, store_api1::Reply};
+        let legacy = if request.validate_legacy().is_ok() {
+            serde_json::to_value(&request.input).ok()
+        } else {
+            None
+        };
+        let params = match serde_json::to_value(&request) {
+            Ok(params) => params,
+            Err(_) => {
+                return Reply::Owned(native_single::Reply::failure(
+                    crate::storage::StorageError::InvalidMutation(
+                        "invalid API1 store request".into(),
+                    ),
+                ));
+            }
+        };
+        match self.client.call_api1_store(params, legacy).await {
+            Ok((true, value)) => Reply::decode(value, &request),
+            Ok((false, value)) => match serde_json::from_value(value) {
+                Ok(data) => Reply::Legacy(Ok(data)),
+                Err(_) => Reply::Owned(native_single::Reply::uncertain()),
+            },
+            Err(_) => Reply::Owned(native_single::Reply::uncertain()),
+        }
+    }
     async fn store_native_wire(
         &self,
         request: crate::serialization::native_single::Request,

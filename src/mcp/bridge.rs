@@ -78,6 +78,9 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    fn supports_api1_store(&self) -> bool {
+        false
+    }
     async fn store_api1(
         &self,
         request: crate::serialization::store_api1::Request,

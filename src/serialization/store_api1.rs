@@ -110,7 +110,7 @@ impl Request {
         })
     }
     pub(crate) fn validate_legacy(&self) -> Result<(), crate::mcp::bridge::BridgeError> {
-        if self.require_native || self.profile_id.is_some() {
+        if self.require_native || self.profile_id.is_some() || self.created_at.is_some() {
             return Err(crate::mcp::bridge::BridgeError::InvalidInput(
                 "canonical embedding profile selection requires the native store consumer".into(),
             ));
@@ -142,6 +142,50 @@ pub enum Reply {
     Owned(native_single::Reply),
 }
 impl Reply {
+    pub(crate) fn decode(value: serde_json::Value, request: &Request) -> Self {
+        let retained = value
+            .get("result")
+            .and_then(|v| v.get("receipt"))
+            .and_then(|v| serde_json::from_value::<WriteReceipt>(v.clone()).ok());
+        match serde_json::from_value::<Self>(value) {
+            Ok(Self::Owned(mut reply)) => {
+                if reply.error.is_none()
+                    && (!reply
+                        .namespace
+                        .as_ref()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(&request.input.namespace))
+                        || !reply.readiness.as_ref().is_some_and(|r| r.ready)
+                        || memory_response(request, &reply).is_err())
+                {
+                    let source = StorageError::RecoveryRequired(
+                        "API1 store reply identity/content does not match the request".into(),
+                    );
+                    let source = match reply.receipt.clone() {
+                        Some(receipt) => StorageError::CommittedMutation {
+                            receipt: Box::new(receipt),
+                            source: Box::new(source),
+                        },
+                        None => source,
+                    };
+                    reply.error = native_single::Reply::failure(source).error;
+                    reply.data = None;
+                }
+                Self::Owned(reply)
+            }
+            Ok(Self::Legacy(result)) if !request.require_native && request.profile_id.is_none() => {
+                Self::Legacy(result)
+            }
+            _ => Self::Owned(match retained {
+                Some(receipt) => native_single::Reply::failure(StorageError::CommittedMutation {
+                    receipt: Box::new(receipt),
+                    source: Box::new(StorageError::RecoveryRequired(
+                        "API1 store reply is malformed; retained receipt preserved".into(),
+                    )),
+                }),
+                None => native_single::Reply::uncertain(),
+            }),
+        }
+    }
     pub(crate) fn unavailable() -> Self {
         Self::Owned(native_single::Reply::failure(
             StorageError::RecoveryRequired("API1 store consumer unavailable".into()),

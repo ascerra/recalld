@@ -1578,6 +1578,9 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    fn supports_api1_store(&self) -> bool {
+        true
+    }
     async fn store_native_wire(
         &self,
         request: crate::serialization::native_single::Request,
@@ -1747,6 +1750,19 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: bridge::StoreInput,
     ) -> Result<bridge::StoredMemory, bridge::BridgeError> {
+        // Historical RPCs cannot preserve full native receipts. Reject before
+        // provider work or owned reservation; current API1 uses store_api1.
+        if self
+            .storage
+            .read()
+            .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?
+            .control_state()
+            .map_err(bridge::BridgeError::from)?
+            .control_schema_version
+            == 2
+        {
+            return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreV1/store_api1_v1; upgrade the client capability before storing".into()));
+        }
         self.store_memory_reserved(input, None)
             .await
             .map(|(record, _)| record)

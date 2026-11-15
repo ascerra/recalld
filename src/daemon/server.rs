@@ -216,7 +216,7 @@ async fn handle_connection(
                             Err(BridgeError::InvalidInput(
                                 format!("native observed writes require ping negotiation with protocolVersion {PROTOCOL_VERSION} and maxMessageSize {MAX_MESSAGE_SIZE} before execution"),
                             ))
-                        } else if matches!(method.as_str(), "feedback_api1_v1" | "forget_api1_v1") && peer_limit < MAX_MESSAGE_SIZE {
+                        } else if matches!(method.as_str(), "feedback_api1_v1" | "forget_api1_v1" | "store_api1_v1") && peer_limit < MAX_MESSAGE_SIZE {
                             Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
                         } else {
                             dispatch(
@@ -451,7 +451,20 @@ async fn dispatch(
             "protocolVersion": PROTOCOL_VERSION,
             "maxMessageSize": MAX_MESSAGE_SIZE,
             "api1LifecycleV1": storage.supports_api1_lifecycle(),
+            "api1StoreV1": storage.supports_api1_store(),
         })),
+
+        "store_api1_v1" => {
+            if !storage.supports_api1_store() {
+                return Err(BridgeError::InvalidInput(
+                    "API1 store capability unavailable".into(),
+                ));
+            }
+            let request = serde_json::from_value(params)
+                .map_err(|_| BridgeError::InvalidInput("invalid API1 store request".into()))?;
+            serde_json::to_value(storage.store_api1(request).await)
+                .map_err(|e| BridgeError::Internal(e.to_string()))
+        }
 
         "feedback_api1_v1" | "forget_api1_v1" => {
             use crate::serialization::{

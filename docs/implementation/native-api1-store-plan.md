@@ -4,7 +4,9 @@ Approved next scope after PR151. This branch starts at published PR148
 `508d98c65b0f824bbcc0290812c63e0dea426edd`; do not merge the query branch or
 convenience startup/catalog ancestry. PR148 already supplies the actual original1
 single/compound producer, profile validation and document_v1 generation recipe.
-This plan is not an implementation or activation claim.
+The actual same-connection capability dependency is now joined from PR153
+`a2a8866dd898dff7eae01dd49b23d8cd18532980`. This plan is not a validation or
+activation claim.
 
 The current REST create handler and MCP store_memory_reserved path still invoke
 legacy insertion. The private native_single wire handler constructs original2,
@@ -44,10 +46,31 @@ original-context producer without selecting private4 or advertising it.
 Required proof: actual REST/MCP/daemon old/new single-store routes in both
 physical formats; native generated document recipe; explicit native vector
 binding and caller/provider error distinction; canonical UTF-8 labels through
-reopen; old successful shapes and ignored MCP single embedding; no provider,
-UUID, staging or bytes on fresh invalid requests; original1 immutable receipts;
+reopen; old successful shapes and ignored MCP single embedding; fresh-invalid preproducer provider/profile/clock/byte invariants; original1
+immutable receipts;
 full known receipts after actual completion failure; actual small/unnegotiated
 frame rejection before work and no mutating fallback. Public2 remains closed.
 Ordinary startup consumes validated adapters later, without depending on public2
 activation. Use the one protected private Cargo/target with source-specific
 package cleaning after executable provenance capture; no per-run cache clone.
+
+Fresh-invalid assertions are restricted to the cases actually probed before the
+producer: unchanged canonical files and provider/profile/clock counters. They do
+not imply that every failed request avoids owned reservations. Provider failures
+and uncertain workers retain their actual admission/commit evidence; never infer
+rollback or zero allocation merely from an error response.
+
+Transport compatibility is separate from API version. New Remote clients select
+`api1StoreV1` / `store_api1_v1` on the same locked connection as the handshake.
+Lifecycle and store capabilities remain independent and both reset on reconnect.
+An older peer gets exactly the historical `store_memory` request, including its
+namespace, only when the request is representable in that lane. No failure after
+sending the new method triggers a mutating fallback. Historical raw `store_memory`
+on a new native owner rejects before provider/reservation/staging and directs the
+caller to upgrade its client capability; this does not claim old native clients
+previously worked. Legacy owners retain the old no-profile/successful shapes.
+
+Existing Bound vectors remain subject to the separate unresolved producer
+certification gate: see [the source audit](bound-vector-certification-audit.md).
+This consumer exercises explicit owned native fixtures, not ordinary admission
+or automatic certification of older vectors.

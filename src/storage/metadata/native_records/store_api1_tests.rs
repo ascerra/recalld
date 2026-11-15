@@ -2,6 +2,26 @@
 use super::*;
 use readers::bytes;
 
+fn retained_insert(f: &Fixture, id: MemoryId) -> crate::storage::control::StoredReceipt {
+    use redb::ReadableTable;
+    let store = f.storage.read().unwrap();
+    let tx = store.meta_store().db.begin_read().unwrap();
+    for row in tx
+        .open_table(crate::storage::control::RECEIPTS)
+        .unwrap()
+        .iter()
+        .unwrap()
+    {
+        let (_, value) = row.unwrap();
+        let stored = crate::storage::control::validate_receipt(value.value()).unwrap();
+        if matches!(&stored.receipt.outcome,MutationOutcome::NativeMemoryInsertedWithLinks{transition} if transition.memory_id==id)
+        {
+            return stored;
+        }
+    }
+    panic!("creation receipt absent")
+}
+
 async fn setup() -> (
     Data,
     Fixture,
@@ -181,6 +201,46 @@ async fn native_api1_store_actual_http_supplied_profile_and_atomic_links() {
         ["John Smith", "José", "Alice's"]
     );
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        store
+            .get_outgoing_edges(d.parent)
+            .unwrap()
+            .iter()
+            .any(|(target, kind)| *target == id && *kind == crate::model::EdgeType::ParentChild)
+    );
+    drop(store);
+    let stored = retained_insert(&f, id);
+    let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &stored.receipt.outcome
+    else {
+        panic!()
+    };
+    let mut original=crate::mcp::args::parse_store_input_fields(&json!({"namespace":"native","summary":"API1 native HTTP","fullText":"native full payload","entities":["John Smith","José","Alice's"],"parentId":d.parent,"checkDuplicates":false}),"default").unwrap();
+    original.embedding = Some(vec![2., -0., 0., 0.]);
+    let request = crate::serialization::store_api1::Request {
+        input: original,
+        profile_id: Some(d.profile.profile_id().unwrap()),
+        created_at: None,
+        require_native: true,
+    };
+    let input = request.prepare_native().unwrap().input;
+    let primary = &transition.primary().unwrap().after;
+    let hash = |version| {
+        let mut ctx = MutationContext::unkeyed(d.ns);
+        ctx.contract_version = version;
+        input
+            .request_hash_with_profile_id(
+                &ctx,
+                primary.lifecycle.stability.get(),
+                primary.lifecycle.difficulty.get(),
+                transition.embedding_dim,
+                primary.content.profile_id.as_deref().unwrap(),
+                &transition.settings,
+                request.profile_id.as_deref(),
+            )
+            .unwrap()
+    };
+    assert_eq!(stored.request_hash, hash(1));
+    assert_ne!(stored.request_hash, hash(2));
 }
 
 #[tokio::test]
@@ -209,7 +269,7 @@ async fn native_api1_store_fresh_invalid_profile_and_vector_no_work() {
         ),
         (
             json!({"embeddingProfileId":profile,"embedding":[1.,0.,0.,0.],"initialStability":0}),
-            422,
+            400,
             "OUT_OF_RANGE",
         ),
     ] {
@@ -232,7 +292,7 @@ async fn native_api1_store_fresh_invalid_profile_and_vector_no_work() {
 
 #[tokio::test]
 async fn native_api1_store_publication_failure_keeps_full_receipt_and_projection_evidence() {
-    let (_d, f, a, provider, _clock) = setup().await;
+    let (d, f, a, provider, clock) = setup().await;
     *provider.corrupt.lock().unwrap() = Some(f.vector_index.clone());
     let api = router(&f, a, provider.clone());
     let (status,out)=public_http(&api,json!({"namespace":"native","summary":"committed before completion failure","checkDuplicates":false})).await;
@@ -260,6 +320,63 @@ async fn native_api1_store_publication_failure_keeps_full_receipt_and_projection
     assert_eq!(failure["readiness"], out["readiness"]);
     assert_eq!(failure["warnings"], json!(["retained warning"]));
     assert_eq!(failure["commitState"], "committed");
+    let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome else {
+        panic!()
+    };
+    let id = transition.memory_id;
+    assert_eq!(retained_insert(&f, id).receipt, receipt);
+    drop(api);
+    let root = f.close();
+    let reopened = open(&d, clock);
+    let f = Fixture::from_open_engine(root, reopened.engine);
+    assert_eq!(retained_insert(&f, id).receipt, receipt);
+}
+
+struct InputSpy {
+    inner: Arc<RecoveringProvider>,
+    texts: std::sync::Mutex<Vec<String>>,
+}
+#[async_trait::async_trait]
+impl crate::embedding::EmbeddingProvider for InputSpy {
+    fn dimensions(&self) -> usize {
+        4
+    }
+    fn model_name(&self) -> &str {
+        "input-spy"
+    }
+    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+        crate::embedding::EmbeddingProvider::profile(self.inner.as_ref())
+    }
+    async fn embed(&self, text: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        self.texts.lock().unwrap().push(text.to_owned());
+        crate::embedding::EmbeddingProvider::embed(self.inner.as_ref(), text).await
+    }
+}
+
+#[tokio::test]
+async fn native_api1_store_actual_generated_document_and_wrong_binding() {
+    let (d, f, a, provider, clock) = setup().await;
+    drop(a);
+    let spy = Arc::new(InputSpy {
+        inner: provider.clone(),
+        texts: Default::default(),
+    });
+    let a = Arc::new(adapter(&f, spy.clone(), clock, Default::default()));
+    let api = router(&f, a, spy.clone());
+    let mut wrong = d.profile.clone();
+    wrong.model_id.push_str("-different");
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let (status,out)=public_http(&api,json!({"namespace":"native","summary":"wrong binding","embedding":[1.,0.,0.,0.],"embeddingProfileId":wrong.profile_id().unwrap()})).await;
+    assert_eq!(status.as_u16(), 409, "{out}");
+    assert!(out.get("receipt").is_none());
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    let (status,out)=public_http(&api,json!({"namespace":"native","summary":"header","fullText":"body","tags":["raw"],"entities":["José","John Smith"],"topics":["Rust"],"emotions":["Calm"],"checkDuplicates":false})).await;
+    assert_eq!(status.as_u16(), 201, "{out}");
+    assert_eq!(
+        *spy.texts.lock().unwrap(),
+        ["header\n\nbody raw entity/josé entity/john smith topic/rust emotion/calm"]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -273,7 +390,7 @@ async fn native_api1_store_legacy_shapes_and_explicit_profile_constraint() {
     assert_eq!(status.as_u16(), 201, "{out}");
     assert!(out.get("contractVersion").is_none());
     assert!(out["data"].get("labels").is_none());
-    assert_eq!(out["data"]["entities"], json!(["alice"]));
+    assert_eq!(out["data"]["entities"], json!(["Alice"]));
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     let generation = f
         .storage
@@ -294,6 +411,22 @@ async fn native_api1_store_legacy_shapes_and_explicit_profile_constraint() {
             .committed_generation,
         generation
     );
+    let mut old_input = crate::mcp::args::parse_store_input_fields(
+        &json!({"summary":"old raw legacy RPC","checkDuplicates":false}),
+        "default",
+    )
+    .unwrap();
+    old_input.embedding = Some(vec![1., 0., 0., 0.]);
+    let old = crate::daemon::server::native_method_test_rpc_with_limit(
+        a.clone(),
+        serde_json::to_value(old_input).unwrap(),
+        "store_memory",
+        None,
+    )
+    .await;
+    assert!(old.error.is_none(), "{old:?}");
+    assert_eq!(old.result.unwrap()["namespace"], "default");
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     let mut b = bridge(a);
     b.default_namespace = "default".into();
     let r=crate::mcp::tools::dispatch_tool(&b,"store_memory",json!({"summary":"legacy generated","embedding":[0.],"embeddingProfileId":"still ignored","checkDuplicates":false})).await;
@@ -303,4 +436,80 @@ async fn native_api1_store_legacy_shapes_and_explicit_profile_constraint() {
     assert!(value.get("contractVersion").is_none());
     assert_eq!(value["namespace"], "default");
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_store_remote_negotiation_small_peer_and_native_reopen() {
+    let (d, f, a, provider, clock) = setup().await;
+    let request=crate::serialization::store_api1::Request{
+        input:crate::mcp::args::parse_store_input_fields(&json!({"summary":"RPC Unicode","entities":["José","John Smith"],"checkDuplicates":false}),"native").unwrap(),
+        profile_id:None,created_at:None,require_native:false,
+    };
+    let before = bytes(&d.path);
+    let ticks = clock.0.load(Ordering::SeqCst);
+    let old = crate::daemon::server::native_method_test_rpc_with_limit(
+        a.clone(),
+        serde_json::to_value(&request.input).unwrap(),
+        "store_memory",
+        None,
+    )
+    .await;
+    assert!(
+        old.error
+            .as_ref()
+            .is_some_and(|e| e.message.contains("api1StoreV1")),
+        "{old:?}"
+    );
+    assert_eq!(bytes(&d.path), before);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+    for limit in [None, Some(crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE)] {
+        let rejected = crate::daemon::server::native_method_test_rpc_with_limit(
+            a.clone(),
+            serde_json::to_value(&request).unwrap(),
+            "store_api1_v1",
+            limit,
+        )
+        .await;
+        assert!(rejected.error.is_some());
+        assert!(rejected.result.is_none());
+        assert_eq!(bytes(&d.path), before);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
+        assert_eq!(clock.0.load(Ordering::SeqCst), ticks);
+    }
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        a.clone(),
+        &socket.path().join("s.sock"),
+    )
+    .await;
+    let mut b = StubBridge::default().into_bridge();
+    b.default_namespace = "native".into();
+    b.storage = Arc::new(remote);
+    let result = crate::mcp::tools::dispatch_tool(
+        &b,
+        "store_memory",
+        json!({"summary":"RPC Unicode","entities":["José","John Smith"],"checkDuplicates":false}),
+    )
+    .await;
+    assert_ne!(result.is_error, Some(true), "{result:?}");
+    let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
+    let value: Value = serde_json::from_str(text).unwrap();
+    assert!(value.get("contractVersion").is_none());
+    let id: MemoryId = serde_json::from_value(value["id"].clone()).unwrap();
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+    drop(b);
+    task.abort();
+    let _ = task.await;
+    drop(a);
+    let root = f.close();
+    let reopened = open(&d, clock);
+    let record = reopened.engine.get_record(id).unwrap().unwrap();
+    assert_eq!(
+        record.schema.unwrap().labels.entities,
+        ["José", "John Smith"]
+    );
+    drop((reopened, root));
 }
