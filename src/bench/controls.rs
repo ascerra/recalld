@@ -145,7 +145,8 @@ async fn dispatch(
                 capabilities["writes"] = false.into();
                 if evaluator.is_some_and(|v| v.native_sweep_enabled()) {
                     capabilities["sweepOriginalContractVersion"] = 1.into();
-                    capabilities["nativePhysicalCompaction"] = false.into();
+                    capabilities["nativePhysicalCompaction"] = true.into();
+                    capabilities["physicalCompactionContractVersion"] = 1.into();
                 }
             }
             Ok(capabilities)

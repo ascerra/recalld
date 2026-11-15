@@ -15,7 +15,10 @@ class NativeSweepTests(unittest.TestCase):
         self.assertEqual(versions["publicContractVersion"], 1)
         self.assertEqual(versions["sweepOriginalContractVersion"], 1)
         self.assertTrue(caps["nativeSweep"])
-        for key in ("nativeWrites", "nativePhysicalCompaction", "automaticSweep", "fullA6", "ordinaryNativeStartup", "independentNativeGenesis"):
+        self.assertTrue(caps["nativePhysicalCompaction"])
+        self.assertEqual(versions["physicalCompactionContractVersion"], 1)
+        self.assertEqual(caps["namespaceDecayMultipliers"], {"foreign":0.0})
+        for key in ("nativeWrites", "automaticSweep", "fullA6", "ordinaryNativeStartup", "independentNativeGenesis"):
             self.assertFalse(caps[key])
         self.assertFalse(H["track_profile"](H["NATIVE"]["TRACK"])[1]["nativeSweep"])
 
@@ -50,12 +53,13 @@ class NativeSweepTests(unittest.TestCase):
             H["save"](base.root/name, value); base.manifest[key]["sha256"] = H["digest"]((base.root/name).read_bytes())
         base.manifest["dataset"]["actorArtifactSha256"] = base.manifest["actorInputs"]["sha256"]
         base.validate()
-        for change in (lambda v: v["capabilities"].update(nativePhysicalCompaction=True),
+        for change in (lambda v: v["capabilities"].update(nativePhysicalCompaction=False),
                        lambda v: v["capabilities"].update(nativeWrites=True),
                        lambda v: v["capabilities"].update(sweepDecayRateMultiplier=0),
                        lambda v: v["capabilities"].update(automaticSweep=True),
                        lambda v: v["versions"].update(sweepOriginalContractVersion=2),
-                       lambda v: v["versions"].update(canonicalSchemaVersion=1)):
+                       lambda v: v["versions"].update(canonicalSchemaVersion=1),
+                       lambda v: v.update(track="serialized-native-sweep-synthetic-diagnostic-v1")):
             candidate = copy.deepcopy(base.manifest); change(candidate)
             with self.assertRaises(ValueError):
                 base.validate(candidate)

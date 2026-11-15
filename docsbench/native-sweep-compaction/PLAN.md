@@ -1,10 +1,10 @@
 # Actual native sweep compaction consumer plan
 
-Source-only plan, before joining or implementing the consumer. Published #149
+Approved implementation plan. Published #149
 `25dd555db4d23253714a656dcd804210f937cb02` is the direct base; the only additional
 parent is published #147 `50da71abee66cea159988a203d286f570f091718`, which already
 contains actual #145 `22760a2` and #135 `24da9206`. Do not stack those parents
-again. #149 remains READY/FROZEN under Halley's ownership.
+again. #149 remains READY/FROZEN under Halley's ownership. Actual join `b3be1b9` had one mechanical exact-scan test-module conflict, retained in `join-conflicts.patch`; both test groups remain.
 
 ## Actual seam and ownership
 

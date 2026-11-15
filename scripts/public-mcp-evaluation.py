@@ -32,7 +32,8 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = ("scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
-         "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py", "scripts/native-sweep-mcp-supervisor.py", "scripts/test_native_sweep_episode.py")
+         "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py", "scripts/native-sweep-mcp-supervisor.py", "scripts/test_native_sweep_episode.py", "src/storage/engine/fixtures/text-compaction-before.zip",
+         *["docsbench/native-sweep-consumer/full-e1d4cea9/inputs/"+name for name in ("manifest.json","actor-inputs.json","evaluator-labels.json","evaluator-cache.json","evaluator-schedule.json")])
 
 
 def encoded(value):
@@ -59,8 +60,8 @@ def exact_keys(value, keys):
 def track_profile(track):
     if track == NATIVE_SWEEP["TRACK"]:
         versions, capabilities = track_profile(NATIVE["TRACK"])
-        return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1), dict(capabilities,
-            nativeSweep=True, nativePhysicalCompaction=False, sweepDecayRateMultiplier=1.0)
+        return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1, physicalCompactionContractVersion=1, nativePrefixFixtureVersion=2), dict(capabilities,
+            nativeSweep=True, nativePhysicalCompaction=True, sweepDecayRateMultiplier=1.0, namespaceDecayMultipliers={"foreign":0.0})
     if track == NATIVE["TRACK"]:
         versions, capabilities = track_profile(RESET["TRACK"])
         return dict(versions, canonicalSchemaVersion=2, canonicalRepresentation="strict-native-prefix", logicalHashContract=NATIVE["HASH_CONTRACT"], lifecycleVersion="legacy_access_v1"), dict(capabilities,

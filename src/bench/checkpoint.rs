@@ -221,6 +221,10 @@ impl OwnedEvaluator {
         let native_sweep = manifest.track == super::native_prefix::SWEEP_TRACK;
         let native_prefix = native_sweep || manifest.track == super::native_prefix::TRACK;
         anyhow::ensure!(
+            manifest.track == TRACK || native_prefix,
+            "unsupported checkpoint track"
+        );
+        anyhow::ensure!(
             if native_prefix {
                 manifest.canonical_schema_version == Some(2)
                     && manifest.logical_hash_contract.as_deref()

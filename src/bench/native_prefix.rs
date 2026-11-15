@@ -12,7 +12,7 @@ use crate::time::{Clock, ManualClock};
 use super::frozen::{FrozenControls, OwnedEvaluator};
 
 pub(crate) const TRACK: &str = "isolated-native-prefix-checkpoint-v1";
-pub(crate) const SWEEP_TRACK: &str = "isolated-native-sweep-checkpoint-v1";
+pub(crate) const SWEEP_TRACK: &str = "isolated-native-sweep-checkpoint-v2";
 pub(crate) const HASH_CONTRACT: &str = "native-logical-export-v1";
 
 /// This named synthetic track supports only the actual configured OpenAI-shaped

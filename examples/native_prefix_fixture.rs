@@ -27,6 +27,7 @@ struct Input {
     fixture_version: u32,
     profile: EmbeddingProfile,
     attest: bool,
+    namespace_decay_multipliers: Option<BTreeMap<String, f32>>,
     sources: Vec<Source>,
 }
 #[derive(Deserialize)]
@@ -40,9 +41,33 @@ struct Source {
 }
 fn main() -> Result<()> {
     let args = Args::parse();
-    let input: Input = serde_json::from_slice(&std::fs::read(&args.input)?)?;
+    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&args.input)?)?;
     ensure!(
-        input.fixture_version == 1 && input.sources.len() == 4,
+        raw["fixtureVersion"] != 1 || raw.get("namespaceDecayMultipliers").is_none(),
+        "fixture v1 does not support namespace policy fields"
+    );
+    let input: Input = serde_json::from_value(raw)?;
+    ensure!(
+        input.sources.len() == 4
+            && match input.fixture_version {
+                1 => input.namespace_decay_multipliers.is_none(),
+                2 =>
+                    input.namespace_decay_multipliers.as_ref()
+                        == Some(&BTreeMap::from([("foreign".to_string(), 0.0)]))
+                        && input
+                            .sources
+                            .iter()
+                            .filter(|s| s.namespace == "foreign")
+                            .count()
+                            == 1
+                        && input
+                            .sources
+                            .iter()
+                            .filter(|s| s.namespace == "default")
+                            .count()
+                            == 3,
+                _ => false,
+            },
         "unsupported synthetic fixture"
     );
     input.profile.validate().map_err(anyhow::Error::msg)?;
@@ -73,6 +98,11 @@ fn main() -> Result<()> {
             let mut ns = NamespaceConfig::default_namespace(1_767_225_600_000);
             ns.name = source.namespace.clone();
             ns.embedding_dim = 4;
+            ns.decay_rate_multiplier = input
+                .namespace_decay_multipliers
+                .as_ref()
+                .and_then(|v| v.get(&source.namespace))
+                .copied();
             let id = engine.create_namespace(&ns)?;
             namespaces.insert(source.namespace.clone(), id);
             id
@@ -123,8 +153,11 @@ fn main() -> Result<()> {
             attestations,
         },
     )?;
-    let value = json!({"fixtureVersion":1,"scope":"synthetic-migrated-prefix-not-independent-genesis",
+    let mut value = json!({"fixtureVersion":input.fixture_version,"scope":"synthetic-migrated-prefix-not-independent-genesis",
         "mappings":mappings,"sourceReceipts":receipts,"migration":report,"profile":input.profile});
+    if let Some(policy) = input.namespace_decay_multipliers {
+        value["namespaceDecayMultipliers"] = json!(policy);
+    }
     use std::io::Write;
     let mut out = std::fs::OpenOptions::new()
         .write(true)

@@ -64,6 +64,7 @@ def run(args, h, sweep=None):
     # Only validated artifacts can create output/provider/store side effects.
     args.out.mkdir()
     evaluator=args.out/"evaluator"; evaluator.mkdir()
+    if sweep: sweep["check_old_manifest"](args, h, manifest, evaluator)
     runtime=args.out/"runtime"; runtime.mkdir(mode=0o700)
     (runtime/"home").mkdir(mode=0o700)
     shutil.copyfile(args.source_root/"scripts/public-mcp-actor.py", runtime/"actor.py")
@@ -107,6 +108,7 @@ warm_file_enabled = false
         documentPreprocessing=dict(version="recalld-document-v1",prefix="a6-document:"),
         queryPreprocessing=dict(version="recalld-query-v1",prefix="a6-query:"),normalization="l2_unit_v1")
     seed=dict(fixtureVersion=1,profile=profile,attest=True,sources=[dict(sourceId=s["sourceId"],namespace=s["namespace"],summary=s["summary"],fullText=s.get("fullText"),embedding=s["embedding"]) for s in actor["sources"]])
+    if sweep: seed.update(fixtureVersion=2, namespaceDecayMultipliers={"foreign":0.0})
     children=[]; negatives=[]; comparisons=[]
     result=dict(status="running",track=sweep["TRACK"] if sweep else TRACK,environmentHash=environment,independentNativeGenesis=False)
     save=h["save"]
@@ -122,10 +124,11 @@ warm_file_enabled = false
     def snapshot(owner):
         return h["RESET"]["checked_snapshot"](h,owner.control.call("snapshot",dict(deadlineMs=30000)),runtime,checkpoint_track)
     def provider_rows(): return h["rows"](server.log) if server.log.exists() else []
-    def reject(name, root=None, checkpoint=None, native=False, cfg=None):
+    def reject(name, root=None, checkpoint=None, native=False, cfg=None, error_contains=None):
         count=len(provider_rows()); owner=child("negative-"+name,root,checkpoint,negative=True,native=native,cfg=cfg)
         try:
             assert owner.process.wait(timeout=30) != 0,name
+            if error_contains: assert error_contains in (owner.output/"runtime.log").read_text(),name
             assert len(provider_rows())==count,"rejected constructor called provider"
             if not native and root is None: assert not owner.root.exists(),"rejected restore created destination"
             negatives.append(dict(case=name,exitCode=owner.process.returncode,providerCalls=0))
@@ -248,7 +251,8 @@ warm_file_enabled = false
                 assert value["outputs"][:action_first]==baseline["outputs"][:action_first],"future question changed prior actor outputs"
                 for ordinal in [0,*[100+i for i,step in enumerate(schedule["steps"][:first]) if "control" not in step]]:
                     assert (owner.output/"actor-inputs"/f"step-{ordinal}.json").read_bytes()==(original.output/"actor-inputs"/f"step-{ordinal}.json").read_bytes()
-                assert value["provider"][:4 if sweep else 3]==baseline["provider"][:4 if sweep else 3],"future question changed prior vectors"
+                prior_queries=sum(step.get("tool")=="recall_memories" and step["arguments"].get("recordAccess") is False for step in schedule["steps"][:first])
+                assert value["provider"][:prior_queries]==baseline["provider"][:prior_queries],"future question changed prior vectors"
             base_keys={key for row in provider_rows() if row["environmentHash"]==environment for key in row["cacheKeys"]}
             variant_keys={key for row in provider_rows() if row["environmentHash"]==variant_environment for key in row["cacheKeys"]}
             assert base_keys and variant_keys and not base_keys & variant_keys,"environment identities did not separate replay keys"
@@ -281,6 +285,11 @@ warm_file_enabled = false
         reject("symlink-destination",root=link,checkpoint=checkpoint);assert link.is_symlink() and inventory(destination)==before
         reject("wrong-manifest-digest",checkpoint=dict(checkpoint,sha256="0"*64))
         checkpoint_manifest=json.loads(Path(checkpoint["manifest"]).read_text())
+        if sweep:
+            old_track=dict(checkpoint_manifest,track="isolated-native-sweep-checkpoint-v1")
+            path=checkpoint_root/"negative-old-track.json";save(path,old_track)
+            assert old_track["executableSha256"] == checkpoint_manifest["executableSha256"]
+            reject("old-sweep-track-valid-digest",checkpoint=dict(checkpoint,manifest=str(path),sha256=h["digest"](path.read_bytes())),error_contains="unsupported checkpoint track")
         bad_source=dict(checkpoint_manifest,sourceRoot=str(runtime/"absent-source"))
         path=checkpoint_root/"negative-source.json";save(path,bad_source)
         reject("wrong-source",checkpoint=dict(checkpoint,manifest=str(path),sha256=h["digest"](path.read_bytes())))

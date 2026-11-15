@@ -146,6 +146,9 @@ impl FrozenControls {
                 let mut report = initial;
                 report["result"] = describe(&result);
                 if required_schema == 2 {
+                    report["result"]["compactionReceipt"] = json!(result.compaction_receipt);
+                    report["result"]["compactionCleanupPending"] =
+                        json!(result.compaction_cleanup_pending);
                     report["result"]["missingSummarySkipped"] =
                         json!(result.missing_summary_skipped);
                 }
