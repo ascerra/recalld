@@ -1,4 +1,4 @@
-# Native single and profile-ID batch wire consumer (in progress)
+# Prepared native single and profile-ID batch wire consumer
 
 Actual dependencies: sealed native batch wire PR122 `abd0371`, profile consumer
 PR123 `d7c4d5f` (including PR118/96), and readiness observation `cc865c2`
@@ -16,8 +16,8 @@ must preserve an already known full receipt.
 An ancestry check of PR122 `abd0371`, PR123 `d7c4d5f`, observer `cc865c2`, and
 PR121 `3fa91d4` found no candidate head contained in another. Their shared PR96
 and other ancestors need no additional merge. PR121 is joined directly into
-this development composition. Frozen source `d12a9a3` is under validation; its
-results must be read separately from earlier focused passes. Curie's `e2b4f94` validation branch (join
+this development composition. Full source `4a6d04f` and final targeted source `b6873e3` passed the distinct
+checks recorded in `docs/evidence/native-insertion-wire/final-b6873e3/REPORT.md`. Curie's `e2b4f94` validation branch (join
 `866482da`, reported 1,152 library and two CLI tests) is resolution/reference
 evidence only; it is not a shipping parent or validation of this consumer.
 The quiet window ended before this join. Its conflict resolutions reuse the
