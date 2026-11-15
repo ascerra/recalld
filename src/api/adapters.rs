@@ -1580,6 +1580,13 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
             desired_retention,
             decay_rate_multiplier,
         };
+        // Preserve the existing concrete LifecycleError for standalone callers,
+        // before accepting work or sampling the create clock.
+        crate::decay::lifecycle::resolve_policy(
+            &config,
+            &crate::decay::DecayConfig::default(),
+            1.0,
+        )?;
         Ok(completion
             .create_legacy_namespace(config, embedding_dim, self.clock.clone())
             .await?)
