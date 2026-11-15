@@ -143,6 +143,14 @@ root; rebinding to forkG/current storeID must fail original hash/origin checks.
 The anchor does not claim authenticity against arbitrary rewriting of every
 canonical trust anchor, nor forensic erasure. It preserves the validated source
 proof through the actual restore boundary without retaining deleted payloads.
+The omission test removes foreign receipt rows while retaining the authoritative
+v2 anchor: its count/root must fail. Marker downgrade with a native outcome still
+present and removal of a required v2 anchor also fail. Removing every new native
+outcome, both version markers and the anchor is total trust-anchor removal,
+outside this guarantee. Do not add a restore-G1 receipt or per-origin coverage
+framework for that attack. Flattened ancestors do not prove native ordering or
+baseline1; no such inference is made. This boundary was clarified by the
+coordinating agent before implementation.
 
 No unknown table/variant is accepted merely to compose histories. Every logical
 export/import, backup, strict read/current reader and production restore path

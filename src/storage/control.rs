@@ -365,6 +365,9 @@ pub enum MutationOutcome {
         #[serde(rename = "attestedNamespaces")]
         attested_namespaces: u64,
     },
+    NativeTextGenerationSelected {
+        transition: super::native_text::NativeTextRelocation,
+    },
     TextGenerationSelected {
         #[serde(rename = "generationId")]
         generation_id: Uuid,
@@ -467,6 +470,7 @@ pub(crate) fn validate_existing(
             .value(),
     )?;
     let ancestry = super::lineage::read_lineage(tx, &state)?;
+    super::lineage::validate_text_anchor(tx, &state, ancestry.as_ref())?;
     super::canonical_schema::read_state(tx, &state)?;
     for entry in receipts.iter()? {
         let (key, value) = entry?;
@@ -482,7 +486,10 @@ pub(crate) fn validate_existing(
             MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::BatchReserved { .. }
             | MutationOutcome::BatchItemRejected { .. }
-            | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            | MutationOutcome::NativeNamespaceCreated { .. }
+            | MutationOutcome::NativeTextGenerationSelected { .. } => {
+                scope == MutationScope::Catalog
+            }
             MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
                 scope == MutationScope::Namespace(transition.namespace_id)
             }
@@ -519,7 +526,8 @@ pub(crate) fn validate_existing(
         // schema table is entirely absent. Legacy decode alone is not proof.
         if matches!(
             stored.receipt.outcome,
-            MutationOutcome::NativeNamespacePurgeStarted { .. }
+            MutationOutcome::NativeTextGenerationSelected { .. }
+                | MutationOutcome::NativeNamespacePurgeStarted { .. }
                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                 | MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
@@ -704,6 +712,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::NativeTextGenerationSelected { transition } => {
+            transition.validate_stored(&stored)?;
+        }
         MutationOutcome::NativeNamespacePurgeStarted { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -896,6 +907,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
+        | MutationOutcome::NativeTextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
         MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::BatchReserved { .. }

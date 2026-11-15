@@ -185,6 +185,9 @@ pub struct SweepResult {
     pub saved_by_connection_bonus: u64,
     /// Whether text compaction succeeded, including an empty generation selection.
     pub compaction_triggered: bool,
+    /// Exact physical-maintenance commit; record/lifecycle tokens are unchanged.
+    pub compaction_receipt: Option<crate::storage::control::WriteReceipt>,
+    pub compaction_cleanup_pending: bool,
     /// Final recheck found changed canonical inputs, policy, or saving graph evidence.
     pub stale_skipped: u64,
     /// Final phase/strength patch was byte-for-byte unchanged; no receipt committed.
@@ -726,6 +729,7 @@ impl DecaySweepRunner {
             global_decay_multiplier,
             as_of_millis,
             &work,
+            completion,
         )
         .await;
         // Keep the original canonical failure identity; completion may only add
@@ -761,6 +765,7 @@ impl DecaySweepRunner {
         global_decay_multiplier: f64,
         as_of_millis: Option<i64>,
         work: &WorkTicket,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
     ) -> SweepResult {
         let start = Instant::now();
         let now_millis = as_of_millis
@@ -824,29 +829,35 @@ impl DecaySweepRunner {
         // If neither occurred, there is no new fragmentation to compact
         // and we skip the expensive write-lock + I/O entirely.
         if result.deletions > 0 || result.full_to_summary > 0 {
-            let storage_clone = Arc::clone(storage);
-            let worker = work.child().expect("live sweep ticket");
-            let compaction_result = tokio::task::spawn_blocking(move || {
-                let outcome = (|| {
-                    let mut storage_w = storage_clone.write().unwrap_or_else(|e| {
-                        error!("storage lock poisoned during compaction check: {e}");
-                        e.into_inner()
-                    });
-                    storage_w.compact_text_log_with_work(Some(&worker))
-                })();
-                finish_work(&storage_clone, worker);
-                outcome
-            })
-            .await;
+            let compaction_result = if let Some(completion) = completion {
+                completion.compact_text_with_work(Some(work)).await
+            } else {
+                let storage_clone = Arc::clone(storage);
+                let worker = work.child().expect("live sweep ticket");
+                tokio::task::spawn_blocking(move || {
+                    let outcome = storage_clone
+                        .write()
+                        .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+                        .compact_text_log_with_work(Some(&worker));
+                    finish_work(&storage_clone, worker);
+                    outcome
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    Err(crate::storage::StorageError::RecoveryRequired(format!(
+                        "compaction worker outcome unknown: {e}"
+                    )))
+                })
+            };
             match compaction_result {
-                Ok(Ok(_)) => result.compaction_triggered = true,
-                Ok(Err(e)) => {
-                    result.retain_publication_failure(&e);
-                    error!(error = %e, "fulltext.dat compaction failed");
+                Ok(result_compaction) => {
+                    result.compaction_triggered = true;
+                    result.compaction_receipt = Some(result_compaction.receipt);
+                    result.compaction_cleanup_pending = result_compaction.cleanup_pending;
                 }
                 Err(e) => {
-                    result.publication_error = Some(e.to_string());
-                    error!(error = %e, "compaction task panicked");
+                    result.retain_publication_failure(&e);
+                    error!(error = %e, "fulltext.dat compaction failed");
                 }
             }
         }
