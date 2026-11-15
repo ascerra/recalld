@@ -1,0 +1,62 @@
+{
+  "environmentHash": "719747675863a63f468cc455c8d030509a04aa3d697791069299aab0316d9c0f",
+  "mappings": {
+    "01a1dcbe-6d4b-7020-9eb0-7b2f7fcb20bc": [
+      "turn-0"
+    ],
+    "01a1dcbe-6d50-7c63-8720-d0bfabd69ace": [
+      "turn-1"
+    ],
+    "01a1dcbe-6d53-7ed3-b3d0-c8fefdc9fb2d": [
+      "turn-2"
+    ],
+    "01a1dcbe-6d57-7c72-999e-c0128858b89e": [
+      "turn-3"
+    ]
+  },
+  "profile": "synthetic-unique-source-v1",
+  "queries": [
+    {
+      "memoryIds": [
+        "01a1dcbe-6d50-7c63-8720-d0bfabd69ace",
+        "01a1dcbe-6d53-7ed3-b3d0-c8fefdc9fb2d",
+        "01a1dcbe-6d4b-7020-9eb0-7b2f7fcb20bc"
+      ],
+      "queryId": "q0"
+    },
+    {
+      "memoryIds": [
+        "01a1dcbe-6d50-7c63-8720-d0bfabd69ace",
+        "01a1dcbe-6d53-7ed3-b3d0-c8fefdc9fb2d",
+        "01a1dcbe-6d4b-7020-9eb0-7b2f7fcb20bc"
+      ],
+      "queryId": "q1"
+    },
+    {
+      "memoryIds": [],
+      "queryId": "q2"
+    },
+    {
+      "memoryIds": [],
+      "queryId": "q3"
+    }
+  ],
+  "relevant": {
+    "q0": [
+      "turn-0",
+      "turn-1"
+    ],
+    "q1": [],
+    "q3": [
+      "turn-1"
+    ]
+  },
+  "sourceEvents": "{\"sourceId\": \"turn-0\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-0\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-0\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcbe-6d4b-7020-9eb0-7b2f7fcb20bc\"}\n{\"sourceId\": \"turn-1\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-1\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-1\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcbe-6d50-7c63-8720-d0bfabd69ace\"}\n{\"sourceId\": \"turn-2\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-2\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-2\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcbe-6d53-7ed3-b3d0-c8fefdc9fb2d\"}\n{\"sourceId\": \"turn-3\", \"status\": \"seen\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-3\", \"status\": \"attempted\", \"reason\": \"acknowledged-migrated-prefix\"}\n{\"sourceId\": \"turn-3\", \"status\": \"accepted\", \"reason\": \"acknowledged-migrated-prefix\", \"memoryId\": \"01a1dcbe-6d57-7c72-999e-c0128858b89e\"}\n",
+  "sourceEventsSha256": "f7aec9f874f27af571c0dba769672af658266ef31410903476f350cedd037e93",
+  "sourceIds": [
+    "turn-0",
+    "turn-1",
+    "turn-2",
+    "turn-3"
+  ]
+}

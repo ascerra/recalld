@@ -1,0 +1,23 @@
+[
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--lib",
+      "sweep",
+      "--",
+      "--test-threads=1"
+    ],
+    "exitCode": 101,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "/target/debug/deps/recalld-db4c01372257a80b": "a0808a23d20c0f213d256dc4ee1837406628b555125407fb9d35652e5f90bec8"
+    },
+    "finished": 1794706350.3522475
+  }
+]

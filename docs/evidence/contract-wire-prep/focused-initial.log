@@ -1,0 +1,79 @@
+   Compiling recalld v1.0.0 (/work)
+warning: unused import: `HashMap`
+  --> src/storage/engine.rs:14:24
+   |
+14 | use std::collections::{HashMap, HashSet};
+   |                        ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1920:19
+     |
+1920 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1509:9
+     |
+1509 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+warning: associated items `new_persistent` and `has_memories` are never used
+   --> src/bench/locomo.rs:337:25
+    |
+314 | impl BenchHarness {
+    | ----------------- associated items in this implementation
+...
+337 |     pub(super) async fn new_persistent(
+    |                         ^^^^^^^^^^^^^^
+...
+356 |     pub(super) fn has_memories(&self) -> bool {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `recalld` (lib) generated 4 warnings (run `cargo fix --lib -p recalld` to apply 3 suggestions)
+warning: `recalld` (lib test) generated 4 warnings (4 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 48.71s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-7025a4141187b374)
+
+running 8 tests
+test api::legacy_label_tests::contract_wire_tests::contract_http_v1_success_shape_and_unknown_fields_stay_legacy ... FAILED
+test api::legacy_label_tests::contract_wire_tests::contract_http_rejects_before_parsing_provider_and_all_mutations ... ok
+test api::legacy_label_tests::contract_wire_tests::contract_mcp_omitted_arguments_v1_and_legacy_eras_keep_success_payloads ... FAILED
+test api::legacy_label_tests::contract_wire_tests::contract_mcp_guards_every_tool_and_generic_dispatch_without_backend_work ... ok
+test serialization::contract::tests::contract_decimal_and_retry_options_reuse_a1_without_coercion_or_mutation ... ok
+test serialization::contract::tests::contract_partial_batch_classification_never_relabels_committed_items ... ok
+test serialization::contract::tests::contract_envelope_fixture_serializes_decimal_counters_and_identical_mcp_object ... ok
+test serialization::contract::tests::contract_selectors_are_strict_and_v2_is_unconditionally_closed ... ok
+
+failures:
+
+---- api::legacy_label_tests::contract_wire_tests::contract_http_v1_success_shape_and_unknown_fields_stay_legacy stdout ----
+
+thread 'api::legacy_label_tests::contract_wire_tests::contract_http_v1_success_shape_and_unknown_fields_stay_legacy' (994) panicked at src/api/adapters.rs:1281:9:
+can call blocking only when running on the multi-threaded runtime
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- api::legacy_label_tests::contract_wire_tests::contract_mcp_omitted_arguments_v1_and_legacy_eras_keep_success_payloads stdout ----
+
+thread 'api::legacy_label_tests::contract_wire_tests::contract_mcp_omitted_arguments_v1_and_legacy_eras_keep_success_payloads' (997) panicked at src/api/contract_wire_tests.rs:220:9:
+assertion `left == right` failed
+  left: Null
+ right: Array [Object {"createdAt": String("1970-01-01 00:00:00 UTC"), "embeddingDim": Number(4), "id": Number(1), "memoryCount": Number(0), "name": String("default")}]
+
+
+failures:
+    api::legacy_label_tests::contract_wire_tests::contract_http_v1_success_shape_and_unknown_fields_stay_legacy
+    api::legacy_label_tests::contract_wire_tests::contract_mcp_omitted_arguments_v1_and_legacy_eras_keep_success_payloads
+
+test result: FAILED. 6 passed; 2 failed; 0 ignored; 0 measured; 825 filtered out; finished in 0.36s
+
+error: test failed, to rerun pass `--lib`

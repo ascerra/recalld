@@ -74,6 +74,12 @@ HTTP uses `?namespace=name` on `GET /memories/:id` and `DELETE /memories/:id`, a
 
 Daemon forwarding uses dedicated `*_scoped` RPC methods. Combining a namespace assertion with `recordAccess=false` uses `get_memory_scoped_read_only` or `find_similar_scoped_read_only`; these require a namespace and force nonobserving retrieval. Older daemons reject unknown methods, and the client never retries through a weaker method. Existing assertion-only RPCs reject `recordAccess` fields, and existing read-only RPCs reject namespace assertions. Assertion-only true mode omits the wire flag to remain compatible. These are additive v1 controls, not authentication, receipts, or a transactional whole-store contract. Batch assertions remain outside this slice.
 
+### Connection context
+
+Read the MCP resource `recalld://session` to inspect the connection's frozen default namespace, its canonical name/ID and configured dimension when it exists, current v1 limits, and bounded duplicate-scan semantics. A missing namespace is reported with `exists: false` and `resolved: null`; the read does not create it. `source: "bridge"` identifies the stored connection default, not whether it originally came from a configuration file or a fallback.
+
+Session resource reads carry `cacheScope: "private"` and `ttlMs: 0`; the public resource catalog contains only a static description. The resource advertises only application contract v1. It does not claim active embedding-profile compatibility, generations, receipts, idempotency, exact scans, or future read-only flags. The dimension is namespace configuration, not an active provider identity. HTTP REST `GET /capabilities` remains unimplemented.
+
 ### Other MCP-compatible tools
 
 Any MCP client can use recalld via either transport.
@@ -1350,3 +1356,17 @@ When working in this repo, also store:
 **Decay tuning:**
 
 If you find memories disappearing too quickly or persisting too long, adjust `decayRateMultiplier` in your namespace or config. Values above 1.0 slow decay; below 1.0 speed it up; 0.0 disables decay entirely.
+
+## Application contract selection
+
+Tools currently support application contract version 1. Omit `contractVersion`
+or supply the integer `1`; explicit `2` and malformed selectors fail before
+handler work. This is separate from MCP transport protocol negotiation. Legacy
+success payloads remain unchanged, including unknown-field compatibility and
+missing arguments on no-argument tools. Modern object results also carry the
+same JSON in `structuredContent`; legacy-era results and array/scalar payloads
+retain text-only encoding. No v2 readiness or public retry/CAS support is advertised.
+
+REST uses `Recalld-Contract-Version: 1` or omission; other values and duplicate
+version headers fail before handler work. See
+[wire preparation and remaining prerequisites](implementation/contract-wire-prep.md).

@@ -1,0 +1,10 @@
+{
+  "committed": {
+    "generation": "8",
+    "storeId": "0734ab2a-1983-4ffe-928f-fe86ee11db97"
+  },
+  "logicalHash": "a04e951888ab369d019acbf2bee8a00f5f5a90ba6dcdddcd405c24559382badd",
+  "manifest": "/output/episode/runtime/recalld-frozen-canonical-HcTwOs/manifest.json",
+  "sha256": "606810aa4e1ecc6fec112b6d88405a90f433d6a3b35a5acbdcae8e369f451e1c",
+  "track": "isolated-native-sweep-checkpoint-v2"
+}

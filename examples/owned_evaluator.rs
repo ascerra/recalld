@@ -1,5 +1,5 @@
 //! Isolated legacy-v1 MCP actor with same-core evaluator-only inherited pipes.
-//! This launcher neither selects public v2 nor supplies deterministic reset.
+//! Supports bounded fresh-owner fixture replay; no public v2 or full A6 claim.
 use clap::Parser;
 use recalld::config::{EmbeddingProvider, RecalldConfig};
 use std::path::PathBuf;
@@ -10,12 +10,20 @@ use std::time::Duration;
 struct Args {
     #[arg(long)]
     config: PathBuf,
+    #[arg(long, conflicts_with = "restore_checkpoint")]
+    native_prefix: bool,
+    #[arg(long, requires = "native_prefix")]
+    native_sweep: bool,
     #[arg(long)]
     data_root: PathBuf,
     #[arg(long)]
     control_read_fd: i32,
     #[arg(long)]
     control_write_fd: i32,
+    #[arg(long, requires = "checkpoint_sha256")]
+    restore_checkpoint: Option<PathBuf>,
+    #[arg(long, requires = "restore_checkpoint")]
+    checkpoint_sha256: Option<String>,
 }
 
 #[cfg(unix)]
@@ -67,24 +75,39 @@ async fn run(args: Args, input: std::fs::File, output: std::fs::File) -> anyhow:
         "an explicit synthetic fixture key is required"
     );
     anyhow::ensure!(
-        !args.data_root.exists(),
+        args.native_prefix || !args.data_root.exists(),
         "data root must be a fresh destination"
     );
-    std::fs::create_dir(&args.data_root)?;
+    if args.restore_checkpoint.is_none() && !args.native_prefix {
+        std::fs::create_dir(&args.data_root)?;
+    }
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&args.data_root, std::fs::Permissions::from_mode(0o700))?;
-    config.storage.data_dir = std::fs::canonicalize(&args.data_root)?
+    if args.restore_checkpoint.is_none() && !args.native_prefix {
+        std::fs::set_permissions(&args.data_root, std::fs::Permissions::from_mode(0o700))?;
+    }
+    config.storage.data_dir = std::path::absolute(&args.data_root)?
         .to_string_lossy()
         .into_owned();
     config.decay.disable_sweep = true;
     config
         .validate()
         .map_err(|errors| anyhow::anyhow!("invalid explicit fixture config: {errors:?}"))?;
-    let evaluator = Arc::new(recalld::bench::frozen::OwnedEvaluator::new(config).await?);
-    let core = evaluator.core().clone();
-    let bridge = recalld::mcp::bridge_adapters::direct_bridge(&core, "default".into());
+    let evaluator = Arc::new(if let Some(manifest) = args.restore_checkpoint {
+        recalld::bench::frozen::OwnedEvaluator::from_checkpoint(
+            config,
+            &manifest,
+            args.checkpoint_sha256.as_deref().unwrap(),
+        )
+        .await?
+    } else if args.native_sweep {
+        recalld::bench::frozen::OwnedEvaluator::from_native_sweep_prefix(config).await?
+    } else if args.native_prefix {
+        recalld::bench::frozen::OwnedEvaluator::from_native_prefix(config).await?
+    } else {
+        recalld::bench::frozen::OwnedEvaluator::new(config).await?
+    });
     let server = Arc::new(tokio::sync::Mutex::new(recalld::mcp::McpServer::new(
-        Arc::new(bridge),
+        evaluator.actor_handler(),
     )));
     // EOF/error on either channel ends this child. It is never a successful
     // snapshot or a certificate about a request whose ACK was not received.

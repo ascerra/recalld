@@ -1,5 +1,5 @@
 //! Evaluator-only JSONL on caller-owned pipes, sharing the actor's actual core.
-//! This is a bounded v1 diagnostic control plane, not a snapshot/reset facility.
+//! Bounded v1 controls; checkpoint support requires the explicit owned track.
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -35,6 +35,59 @@ async fn dispatch(
     evaluator: Option<&super::frozen::OwnedEvaluator>,
     request: &Request,
 ) -> Result<Value, Value> {
+    if evaluator.is_some_and(|v| v.is_native_prefix() && !v.native_sweep_enabled())
+        && matches!(request.method.as_str(), "sweep" | "sweepStatus")
+    {
+        return Err(error(
+            "UNSUPPORTED_CONTROL",
+            "this native prefix track does not admit explicit sweep",
+        ));
+    }
+    if request.method == "snapshot" && evaluator.is_some_and(|v| v.checkpoint_supported()) {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Snapshot {
+            deadline_ms: u64,
+        }
+        let params: Snapshot = serde_json::from_value(request.params.clone())
+            .map_err(|e| error("INVALID_PARAMS", e))?;
+        if !(1..=30_000).contains(&params.deadline_ms) {
+            return Err(error("INVALID_PARAMS", "deadlineMs must be 1..30000"));
+        }
+        return evaluator
+            .unwrap()
+            .checkpoint(Instant::now() + Duration::from_millis(params.deadline_ms))
+            .await
+            .map_err(|e| error("CONTROL_UNAVAILABLE", e));
+    }
+    if request.method == "sweepStatus" {
+        if request.params != json!({}) {
+            return Err(error("INVALID_PARAMS", "sweepStatus requires empty params"));
+        }
+        return evaluator
+            .map(|owner| owner.sweep_status())
+            .ok_or_else(|| error("UNSUPPORTED_CONTROL", "owned legacy sweep required"));
+    }
+    if request.method == "sweep" {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Sweep {
+            deadline_ms: u64,
+        }
+        let params: Sweep = serde_json::from_value(request.params.clone())
+            .map_err(|e| error("INVALID_PARAMS", e))?;
+        if !(1..=30_000).contains(&params.deadline_ms) {
+            return Err(error("INVALID_PARAMS", "deadlineMs 1..30000 required"));
+        }
+        let owner =
+            evaluator.ok_or_else(|| error("UNSUPPORTED_CONTROL", "owned legacy sweep required"))?;
+        return owner
+            .sweep(
+                request.id,
+                Instant::now() + Duration::from_millis(params.deadline_ms),
+            )
+            .await;
+    }
     if request.method == "advance" {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -67,17 +120,36 @@ async fn dispatch(
                     "capabilities requires empty params",
                 ));
             }
-            Ok(json!({
+            let mut capabilities = json!({
                 "controlVersion":1,
-                "methods": if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance"] } else { vec!["capabilities","inspect","barrier"] },
+                "methods": if evaluator.is_some_and(|v| v.is_native_prefix() && !v.native_sweep_enabled()) { vec!["capabilities","inspect","barrier","advance","snapshot"] } else if evaluator.is_some_and(|v| v.checkpoint_supported()) { vec!["capabilities","inspect","barrier","advance","snapshot","sweep","sweepStatus"] } else if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance","sweep","sweepStatus"] } else { vec!["capabilities","inspect","barrier"] },
                 "publicContract":"legacy-v1",
+                "sweepControlVersion": if evaluator.is_some_and(|v| !v.is_native_prefix() || v.native_sweep_enabled()) { Some(1) } else { None },
                 "guarantees":{
                     "barrier":"owned-work-and-required-derived-generations",
-                    "logicalHash":false,"snapshot":false,"reset":false,
+                    "logicalHash":false,"snapshot":evaluator.is_some_and(|v| v.checkpoint_supported()),"reset":false,
+                    "freshOwnerCheckpointRestore":evaluator.is_some_and(|v| v.checkpoint_supported()),
                     "controlledClock":false,"lifecycleClockControlled":evaluator.is_some(),
+                    "explicitLegacySweep":evaluator.is_some_and(|v| !v.is_native_prefix()),"nativeSweep":evaluator.is_some_and(|v| v.native_sweep_enabled()),
                     "controlledIds":false,"canonicalAllocationControlled":evaluator.is_some(),"controlledRng":false
                 }
-            }))
+            });
+            if evaluator.is_some_and(|v| v.is_native_prefix()) {
+                capabilities["track"] = evaluator.unwrap().native_checkpoint_track().into();
+                capabilities["canonicalSchemaVersion"] = 2.into();
+                capabilities["logicalHashContract"] = super::native_prefix::HASH_CONTRACT.into();
+                capabilities["actorActions"] = json!([
+                    "get_memory:recordAccess=false",
+                    "recall_memories:recordAccess=false"
+                ]);
+                capabilities["writes"] = false.into();
+                if evaluator.is_some_and(|v| v.native_sweep_enabled()) {
+                    capabilities["sweepOriginalContractVersion"] = 1.into();
+                    capabilities["nativePhysicalCompaction"] = true.into();
+                    capabilities["physicalCompactionContractVersion"] = 1.into();
+                }
+            }
+            Ok(capabilities)
         }
         "inspect" => {
             if request.params != json!({}) {

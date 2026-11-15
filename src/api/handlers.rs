@@ -847,12 +847,12 @@ pub async fn search_memories(
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
     let work = state.search.accept_work()?;
-    let result = async {
+    let result = crate::performance::measure("rest.search", req.record_access, async {
         let stamp = state.storage.effects_stamp().await?;
         let observed =
             search_memories_admitted(State(state.clone()), Json(req), stamp, work.as_ref()).await;
         observed?.finish(check_read_admission(&state, stamp).await)
-    }
+    })
     .await;
     state.search.finish_work(work);
     result
@@ -944,8 +944,10 @@ async fn search_memories_admitted(
         .search
         .prepare_coherent_search_with_work(search_query.clone(), req.include_embeddings, parent)
         .await?;
+    let hydration = crate::performance::Timer::new("rest.hydration");
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
+            let hydration = crate::performance::Timer::new("rest.hydration");
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -998,6 +1000,7 @@ async fn search_memories_admitted(
                     score: selected.score.unwrap_or(0.0),
                 });
             }
+            hydration.complete();
             (hits, exposures, Some(prepared.evaluated_at))
         } else {
             let results = state
@@ -1005,6 +1008,7 @@ async fn search_memories_admitted(
                 .prepare_search_with_work(search_query, parent)
                 .await?;
 
+            let hydration = crate::performance::Timer::new("rest.hydration");
             // Batch-load embeddings with a single lock acquisition if requested.
             let embeddings = if req.include_embeddings {
                 let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
@@ -1052,6 +1056,7 @@ async fn search_memories_admitted(
                 });
             }
 
+            hydration.complete();
             (hits, exposures, None)
         };
 
@@ -2218,4 +2223,130 @@ async fn check_read_admission(state: &AppState, stamp: u64) -> Result<(), AppErr
         });
     }
     Ok(())
+}
+
+/// Route selection for duplicates. The shared middleware and this direct-call
+/// boundary both keep v2 closed until the native serving/wire contract is ready.
+pub async fn dispatch_duplicates(
+    State(state): State<super::state::AppState>,
+    Path(name): Path<String>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::{ContractVersion, Envelope};
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = super::middleware::request_contract_version(request.headers());
+    let version = match version {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version == ContractVersion::V1 {
+        // Preserve Axum's legacy JSON extractor rejection and successful shape.
+        return match Json::<super::models::ScanDuplicatesRequest>::from_request(request, &state)
+            .await
+        {
+            Ok(Json(body)) => scan_duplicates(State(state), Path(name), Json(body))
+                .await
+                .into_response(),
+            Err(rejection) => rejection.into_response(),
+        };
+    }
+    let body = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            let error = crate::search::exact_scan::ExactScanError::Input(
+                crate::serialization::contract::InputError {
+                    code: "INVALID_TYPE",
+                    field: String::new(),
+                    message: "body must be a JSON object",
+                },
+            )
+            .execution_error();
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(Envelope::<crate::search::exact_scan::ExactScanData>::failure(None, error)),
+            )
+                .into_response();
+        }
+    };
+    scan_duplicates_v2(state.storage.as_ref(), &name, &body).await
+}
+
+/// Actual gated handler logic, shared with native acceptance checks. The public
+/// route must still pass the version/serving gate before entering this function.
+pub(crate) async fn scan_duplicates_v2(
+    storage: &dyn super::state::StorageEngine,
+    name: &str,
+    body: &serde_json::Value,
+) -> axum::response::Response {
+    use crate::serialization::contract::Envelope;
+    use axum::response::IntoResponse;
+    let result = match crate::serialization::scan::ExactScanRequest::from_http(body, name) {
+        Ok(request) => storage.scan_duplicate_pairs(request).await,
+        Err(error) => Err(crate::search::exact_scan::ExactScanError::Input(error)),
+    };
+    match result {
+        Ok(page) => Json(page.into_envelope()).into_response(),
+        Err(error) => {
+            use crate::serialization::contract::ErrorCategory;
+            let error = error.execution_error();
+            let status = match error.category {
+                ErrorCategory::InvalidInput => axum::http::StatusCode::BAD_REQUEST,
+                ErrorCategory::NotFound => axum::http::StatusCode::NOT_FOUND,
+                ErrorCategory::Conflict => axum::http::StatusCode::CONFLICT,
+                _ => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (
+                status,
+                Json(Envelope::<crate::search::exact_scan::ExactScanData>::failure(None, error)),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Resolved v1 discovery only. Store/provider identity certifies no ReadView,
+/// native writer readiness or historical vector provenance.
+pub async fn capabilities(State(state): State<super::state::AppState>) -> axum::response::Response {
+    use crate::serialization::session::{BackendContext, document};
+    use axum::response::IntoResponse;
+    let unavailable = || AppError::ServiceUnavailable {
+        message: "backend context unavailable".into(),
+    };
+    let result = async {
+        let store_id = state
+            .storage
+            .store_identity()
+            .await
+            .map_err(|_| unavailable())?;
+        let active = state.search.active_embedding().map_err(|_| unavailable())?;
+        let backend = BackendContext::new(store_id, active).map_err(|_| unavailable())?;
+        let requested = crate::model::constants::DEFAULT_NAMESPACE_NAME;
+        let namespace = state.namespaces.resolve(requested);
+        Ok::<_, AppError>(Json(document(
+            requested,
+            "legacyHttpDefault",
+            namespace.map(|ns| (ns.name, ns.id.get(), ns.embedding_dim)),
+            Some(backend),
+        )))
+    }
+    .await;
+    let mut response = result.into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response
 }

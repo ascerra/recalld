@@ -11,6 +11,8 @@ use serde_json::{Value, json};
 mod feedback_consumer;
 #[path = "forget_consumer_tests.rs"]
 mod forget_consumer;
+#[path = "native_query_admission_tests.rs"]
+mod native_query_admission;
 #[path = "replay_consumer_tests.rs"]
 mod replay_consumer;
 
@@ -30,7 +32,7 @@ impl crate::embedding::EmbeddingProvider for NoProvider {
         panic!("read called provider")
     }
 }
-fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompletion {
+pub(super) fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompletion {
     crate::derived_completion::DerivedCompletion {
         storage: f.storage.clone(),
         cache: f.cache.clone(),
@@ -40,7 +42,7 @@ fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompletion {
         entities: f.entity_index.clone(),
     }
 }
-fn readers(
+pub(super) fn readers(
     f: &Fixture,
     clock: Arc<FixedClock>,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
@@ -166,7 +168,7 @@ async fn mcp(bridge: &McpBridge, name: &str, args: Value) -> Value {
     let result = serde_json::to_value(result).unwrap();
     serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap()
 }
-fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+pub(super) fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
     fn collect(root: &Path, at: &Path, out: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
         for entry in std::fs::read_dir(at).unwrap() {
             let path = entry.unwrap().path();

@@ -121,6 +121,10 @@ decay_rate_multiplier = 0.0
         assert capabilities['guarantees']['snapshot'] is False
         assert capabilities['guarantees']['controlledIds'] is False
         assert capabilities['guarantees']['lifecycleClockControlled'] is True
+        assert capabilities['guarantees']['explicitLegacySweep'] is True
+        assert capabilities['guarantees']['nativeSweep'] is False
+        assert capabilities['sweepControlVersion'] == 1
+        assert control.call('sweepStatus', {})['result'] == {'episodeInvalidated': False, 'lastSweep': None}
         assert control.call('advance', {'deltaMs': 0, 'deadlineMs': 30000})['result']['nowMillis'] == 1767225600000
         for params in [{'deltaMs': -1, 'deadlineMs': 100}, {'deltaMs': 1.5, 'deadlineMs': 100},
                        {'deltaMs': 1, 'deadlineMs': 0}, {'deltaMs': 1, 'deadlineMs': 30001},
@@ -133,6 +137,10 @@ decay_rate_multiplier = 0.0
         assert runtime_initial['runtimeState']['allocation']['version'] == 1
         initial = inspect()
         barrier(initial)
+        namespace = tool('create_namespace', {'name': 'owned-clock', 'embeddingDim': 4})
+        assert namespace['createdAt'] == '2026-01-01 00:01:00 UTC', namespace
+        # Namespace creation on this legacy parent does not itself publish all
+        # derived views. The actual store below publishes before inspection.
         # Real actor work is admitted before the fixture provider blocks. A
         # private barrier targeting the prior G must drain this accepted work
         # and its insertion/publication descendants before replying.
@@ -192,7 +200,7 @@ decay_rate_multiplier = 0.0
         before = files(root / 'data')
         tool('recall_memories', {'query': 'fixture-miss', 'recordAccess': False}, ok=False)
         assert inspect() == reinforced and files(root / 'data') == before
-        for method in ['snapshot', 'reset', 'sweep']:
+        for method in ['snapshot', 'reset']:
             assert control.call(method, {})['error']['code'] == 'UNSUPPORTED_CONTROL'
         for target in [dict(reinforced, storeId='00000000-0000-0000-0000-000000000000'),
                        dict(reinforced, generation=str(int(reinforced['generation']) + 1))]:
@@ -212,7 +220,7 @@ decay_rate_multiplier = 0.0
         assert child.returncode == 0, child.returncode
         return {'replay': index, 'passed': True, 'initial': initial, 'afterStore': after_store,
                 'afterExposure': exposed, 'afterFeedback': reinforced,
-                'storedId': stored['id'], 'runtimeInitial': runtime_initial['runtimeState'], 'runtimeAfterStore': runtime_after_store,
+                'namespaceCreatedAt': namespace['createdAt'], 'storedId': stored['id'], 'runtimeInitial': runtime_initial['runtimeState'], 'runtimeAfterStore': runtime_after_store,
                 'acceptedBarrierWaitedForStore': True, 'controlEofExitSeconds': time.monotonic() - started, 'command': command}
     finally:
         save(root / 'transcript.json', log)

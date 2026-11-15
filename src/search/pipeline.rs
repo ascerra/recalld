@@ -54,6 +54,17 @@ pub use semantics::{
 pub trait NamespaceResolver: Send + Sync {
     /// Look up a namespace by name, returning its configuration.
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
+    /// Only an actual owned native canonical view can grant this admission.
+    fn check_native_query_profile(
+        &self,
+        _namespace: &NamespaceConfig,
+        _profile: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<()> {
+        Err(SearchError::Unavailable(
+            "native query owner admission unavailable".into(),
+        ))
+    }
+
     /// Resolve canonical by-ID scope without guessing a session default.
     async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
         Err(SearchError::NamespaceNotFound(format!("id {}", id.get())))
@@ -437,6 +448,7 @@ const FTS_ONLY_RATE: f32 = 0.3;
 /// Holds `Arc` references to all subsystems. Cheap to clone, safe to
 /// share across request handlers.
 pub struct QueryEngine {
+    native_query_admission: bool,
     coherent_owner: Option<(
         crate::derived_completion::DerivedCompletion,
         Arc<crate::rif::RifEngine>,
@@ -467,6 +479,11 @@ pub struct QueryEngine {
 }
 
 impl QueryEngine {
+    pub(crate) fn with_native_query_admission(mut self) -> Self {
+        self.native_query_admission = true;
+        self
+    }
+
     pub(crate) fn accept_work(
         &self,
         parent: Option<&crate::storage::work::WorkTicket>,
@@ -524,6 +541,7 @@ impl QueryEngine {
         access_recorder: Arc<dyn AccessRecorder>,
     ) -> Self {
         Self {
+            native_query_admission: false,
             coherent_owner: None,
             clock: Arc::new(crate::time::SystemClock),
             decay_policy: crate::decay::DecayConfig::default(),
@@ -617,13 +635,13 @@ impl QueryEngine {
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<SemanticsResponse> {
         let work = self.accept_work(parent)?;
-        let result = async {
+        let result = crate::performance::measure("engine.search", query.record_access, async {
             let stamp = self.meta_store.effects_stamp().await?;
             let observed = self
                 .search_admitted(query, semantics, defer_recording, work.as_ref())
                 .await?;
             observed.finish(self.check_effects_stamp(stamp).await)
-        }
+        })
         .await;
         self.finish_work(work);
         result
@@ -651,6 +669,7 @@ impl QueryEngine {
     ) -> Result<Observed<SemanticsResponse>> {
         let mut diagnostics = SemanticsDiagnostics::new(semantics);
         let pipeline_start = Instant::now();
+        let mut performance = crate::performance::Timeline::new();
         let mut timings = StageTimings::default();
 
         // -- Stage 1: Parse & Validate -----------------------------------
@@ -672,6 +691,7 @@ impl QueryEngine {
             super::query::normalize_query_embedding(embedding, ns_config.embedding_dim as usize)?;
         }
         timings.parse_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("parse_namespace");
 
         // -- Stage 2: Embed ----------------------------------------------
         let stage_start = Instant::now();
@@ -681,8 +701,13 @@ impl QueryEngine {
             _ => {
                 let text = query.text.as_ref().ok_or(SearchError::EmptyQuery)?;
                 let profile = self.embedding_providers.profile();
-                crate::embedding::runtime::check_namespace(&ns_config, profile.as_ref())
-                    .map_err(|e| SearchError::Unavailable(e.to_string()))?;
+                if self.native_query_admission {
+                    self.namespace_resolver
+                        .check_native_query_profile(&ns_config, profile.as_ref())?;
+                } else {
+                    crate::embedding::runtime::check_namespace(&ns_config, profile.as_ref())
+                        .map_err(|e| SearchError::Unavailable(e.to_string()))?;
+                }
                 if self
                     .embedding_providers
                     .dimensions()
@@ -705,6 +730,7 @@ impl QueryEngine {
             }
         };
         timings.embed_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("embedding");
         if semantics != RetrievalSemantics::V1
             && query_embedding
                 .as_ref()
@@ -719,14 +745,24 @@ impl QueryEngine {
         // ponytail: load every namespace member until A1 supplies certified filtered views.
         let stage_start = Instant::now();
         let mut namespace_records = self.meta_store.namespace_records(ns_config.id).await?;
+        performance.mark("canonical_read");
+        let examined = namespace_records.len();
         strength_context.project_namespace(&mut namespace_records, self.graph.as_ref())?;
+        performance.mark("strength_projection");
         let eligible_records: HashMap<MemoryId, CachedRecord> = namespace_records
             .into_iter()
             .filter(|record| Self::passes_hard_filters(record, &query, ns_config.id))
             .map(|record| (record.id, record))
             .collect();
         let eligible_ids: HashSet<MemoryId> = eligible_records.keys().copied().collect();
+        crate::performance::event!(
+            kind = "eligibility",
+            examined,
+            eligible = eligible_ids.len(),
+            rejected = examined - eligible_ids.len()
+        );
         timings.eligibility_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("hard_filter");
         if semantics != RetrievalSemantics::V1 {
             for record in eligible_records.values() {
                 semantics::validate_record(record)?;
@@ -742,6 +778,7 @@ impl QueryEngine {
         let (scored_candidates, vector_search_us) =
             self.run_vector_search(&query_embedding, ns_config.id, fetch_k, &eligible_ids)?;
         timings.vector_search_us = vector_search_us;
+        performance.mark("vector");
 
         let (fts_results, fts_search_us) = self.run_fts_search(
             &query,
@@ -751,6 +788,7 @@ impl QueryEngine {
             &mut diagnostics,
         )?;
         timings.fts_search_us = fts_search_us;
+        performance.mark("fts");
         if semantics != RetrievalSemantics::V1
             && (scored_candidates.iter().any(|r| !r.score.is_finite())
                 || fts_results.iter().any(|r| !r.score.is_finite()))
@@ -773,6 +811,7 @@ impl QueryEngine {
             fts_results.iter().map(|s| (s.memory_id, s.score)).collect();
 
         timings.score_fusion_us = fusion_stage_start.elapsed().as_micros() as u64;
+        performance.mark("fusion");
 
         let query_entities = query.entities.clone();
 
@@ -822,6 +861,7 @@ impl QueryEngine {
             }
         }
         timings.entity_recall_us = entity_recall_start.elapsed().as_micros() as u64;
+        performance.mark("entity");
 
         for &(eid, _) in &entity_only_ids {
             all_candidate_ids.push(eid);
@@ -890,6 +930,7 @@ impl QueryEngine {
             );
         }
         timings.load_metadata_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("candidate_assembly");
 
         let total_matches;
         if matches!(semantics, RetrievalSemantics::V2(_)) {
@@ -918,12 +959,14 @@ impl QueryEngine {
                 )
                 .await?;
                 timings.graph_expansion_us = stage_start.elapsed().as_micros() as u64;
+                performance.mark("graph");
             }
 
             // -- Stage 5: Apply Filters (entity overlap + metadata filters) ---
             let stage_start = Instant::now();
             self.apply_filters(&mut candidates, &query, &query_entities, ns_config.id);
             timings.apply_filters_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("candidate_filter");
 
             // -- Stage 6: Calculate Effective R --------------------------------
             let stage_start = Instant::now();
@@ -931,11 +974,13 @@ impl QueryEngine {
                 candidate.effective_r = Self::compute_effective_r(&candidate.record);
             }
             timings.calculate_r_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("effective_strength");
 
             // -- Stage 7: Apply RIF -------------------------------------------
             let stage_start = Instant::now();
             self.apply_rif(&mut candidates);
             timings.apply_rif_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("rif");
 
             // -- Stage 8: Composite Score + Boosts + Sort ----------------------
             let stage_start = Instant::now();
@@ -950,6 +995,7 @@ impl QueryEngine {
                     .then_with(|| a.record.id.cmp(&b.record.id))
             });
             timings.rank_us = stage_start.elapsed().as_micros() as u64;
+            performance.mark("rank");
 
             // -- Stage 8c: Supersedes Resolution ------------------------------
             self.resolve_supersedes(
@@ -969,6 +1015,18 @@ impl QueryEngine {
             });
         }
 
+        performance.mark("graph_filter_rank_supersession");
+        if semantics != RetrievalSemantics::V1 {
+            crate::performance::event!(
+                kind = "graph_work",
+                known = true,
+                expanded_states = diagnostics.graph.expanded_states,
+                examined_edges = diagnostics.graph.examined_edges,
+                supersession_edges = diagnostics.supersession_edges_examined
+            );
+        } else {
+            crate::performance::event!(kind = "graph_work", known = false);
+        }
         // -- Stage 8d: Truncate -------------------------------------------
         diagnostics.result_limit_applied = candidates.len() > query.limit;
         candidates.truncate(query.limit);
@@ -978,6 +1036,7 @@ impl QueryEngine {
         let stage_start = Instant::now();
         let results = Self::build_results(&candidates, &query.namespace);
         timings.build_response_us = stage_start.elapsed().as_micros() as u64;
+        performance.mark("response");
 
         timings.total_us = pipeline_start.elapsed().as_micros() as u64;
         let query_time_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
@@ -996,6 +1055,17 @@ impl QueryEngine {
             Vec::new()
         };
 
+        performance.mark("exposure");
+        crate::performance::event!(
+            kind = "selection",
+            vector_admitted = vector_ids.len(),
+            fts_admitted = fts_ids.len(),
+            entity_admitted = entity_only_ids.len(),
+            union_candidates = all_candidate_ids.len(),
+            pre_limit = total_matches,
+            returned = results.len(),
+            receipt_count = receipts.len()
+        );
         let response = SearchResponse {
             results,
             total_matches,

@@ -154,6 +154,14 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn search(
         &self,
         query: bridge::SearchInput,
@@ -164,7 +172,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
             .query_engine
             .accept_work(None)
             .map_err(map_search_error)?;
-        let result = async {
+        let result = crate::performance::measure("mcp.search", query.record_access, async {
             let stamp = effects_stamp(&self.storage).await?;
             // Resolve namespace name to verify it exists.
             let ns_config = {
@@ -237,6 +245,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?
             {
+                let hydration = crate::performance::Timer::new("mcp.hydration");
                 let payload = prepared.payload.ok_or_else(|| {
                     bridge::BridgeError::Internal("coherent payload missing".into())
                 })?;
@@ -326,6 +335,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                         connected_to: neighbor.connected_to.to_string(),
                     });
                 }
+                hydration.complete();
                 check_read_admission(&self.storage, stamp).await?;
                 let receipts = if query.record_access {
                     self.query_engine
@@ -356,6 +366,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?;
 
+            let hydration = crate::performance::Timer::new("mcp.hydration");
             let mut exposures: Vec<_> = response
                 .results
                 .iter()
@@ -587,6 +598,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 })??
             };
 
+            hydration.complete();
             let receipts = if query.record_access {
                 for neighbor in &neighbors {
                     let id = neighbor
@@ -618,7 +630,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 receipts,
             }
             .finish(check_read_admission(&self.storage, stamp).await)
-        }
+        })
         .await;
         self.query_engine.finish_work(accepted);
         result
@@ -730,12 +742,24 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         threshold: f32,
         max_memories: usize,
     ) -> Result<Vec<bridge::DuplicateCluster>, bridge::BridgeError> {
+        Ok(self
+            .scan_duplicates_with_coverage(namespace, threshold, max_memories)
+            .await?
+            .clusters)
+    }
+
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<bridge::DuplicateScanReport, bridge::BridgeError> {
         let stamp = effects_stamp(&self.storage).await?;
         let result = async {
             // 1. Resolve namespace and get memory IDs.
             let storage = self.storage.clone();
             let ns_name = namespace.to_string();
-            let (ns_config, memory_ids) = tokio::task::spawn_blocking(move || {
+            let (ns_config, memory_ids, eligible_count) = tokio::task::spawn_blocking(move || {
                 let storage_r = storage.read().map_err(|e| {
                     bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
                 })?;
@@ -749,17 +773,27 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     .meta_store()
                     .memories_in_namespace(ns.id)
                     .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-                let ids: Vec<MemoryId> = all_ids.into_iter().take(max_memories).collect();
-                Ok::<_, bridge::BridgeError>((ns, ids))
+                let mut ids = Vec::new();
+                let mut eligible_count = 0;
+                for id in all_ids {
+                    let record = storage_r
+                        .get_record(id)
+                        .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
+                    if record.is_some_and(|r| {
+                        r.namespace_id == ns.id.get() && r.phase != DecayPhase::Tombstone
+                    }) {
+                        eligible_count += 1;
+                        if ids.len() < max_memories {
+                            ids.push(id);
+                        }
+                    }
+                }
+                Ok::<_, bridge::BridgeError>((ns, ids, eligible_count))
             })
             .await
             .map_err(|e| {
                 bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
             })??;
-
-            if memory_ids.len() < 2 {
-                return Ok(Vec::new());
-            }
 
             // 3. Load embeddings for all sampled memories via the vector index.
             let mut id_embeddings: Vec<(MemoryId, Vec<f32>)> = Vec::with_capacity(memory_ids.len());
@@ -769,8 +803,22 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 }
             }
 
+            let coverage = bridge::DuplicateScanCoverage {
+                algorithm: "sampledNearestNeighbors".into(),
+                eligible_count,
+                sampled_count: memory_ids.len(),
+                skipped_vector_count: memory_ids.len() - id_embeddings.len(),
+                sample_cap: max_memories,
+                neighbor_cap: bridge::DUPLICATE_NEIGHBOR_CAP,
+                truncated: memory_ids.len() < eligible_count,
+                counts_available: true,
+                complete: false,
+            };
             if id_embeddings.len() < 2 {
-                return Ok(Vec::new());
+                return Ok(bridge::DuplicateScanReport {
+                    clusters: Vec::new(),
+                    coverage: Some(coverage),
+                });
             }
 
             // 4. Union-Find based clustering: for each memory, find similar
@@ -808,14 +856,13 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 std::collections::HashMap::new();
 
             // For each memory, search for its K nearest neighbors and union
-            // those above threshold. Using K=10 is enough to find clusters
-            // without doing full O(n^2) pairwise comparison.
-            const NEIGHBORS_PER_QUERY: usize = 10;
+            // those above threshold. The bounded neighbor set can miss qualifying
+            // pairs even when all records fit in the sample.
 
             for (i, (_mid, embedding)) in id_embeddings.iter().enumerate() {
                 let scored = self
                     .query_engine
-                    .vector_search(ns_config.id, embedding, NEIGHBORS_PER_QUERY + 1)
+                    .vector_search(ns_config.id, embedding, bridge::DUPLICATE_NEIGHBOR_CAP)
                     .map_err(|e| bridge::BridgeError::Search(e.to_string()))?;
 
                 for result in scored {
@@ -900,14 +947,13 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            Ok(clusters)
+            Ok(bridge::DuplicateScanReport {
+                clusters,
+                coverage: Some(coverage),
+            })
         }
         .await;
-        if effects_stamp(&self.storage).await? != stamp {
-            return Err(bridge::BridgeError::Storage(
-                "unavailable: effects changed during read".into(),
-            ));
-        }
+        check_read_admission(&self.storage, stamp).await?;
         result
     }
 }
@@ -1448,6 +1494,27 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, bridge::BridgeError> {
+        use crate::serialization::session::{ActiveEmbedding, BackendContext};
+        let active = ActiveEmbedding::from_provider(self.embedding.as_ref()).map_err(|_| {
+            bridge::BridgeError::Unavailable("active embedding identity unavailable".into())
+        })?;
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            let control = engine.control_state().map_err(|_| {
+                bridge::BridgeError::Unavailable("store context unavailable".into())
+            })?;
+            BackendContext::new(control.store_id, active)
+                .map_err(|e| bridge::BridgeError::Unavailable(e.into()))
+        })
+        .await
+        .map_err(|_| bridge::BridgeError::Unavailable("store context unavailable".into()))?
+    }
     fn supports_durable_batches(&self) -> bool {
         true
     }
@@ -1956,6 +2023,7 @@ pub struct McpNamespaceAdapter {
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     graph: SharedGraph,
     timezone: chrono_tz::Tz,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl McpNamespaceAdapter {
@@ -1979,7 +2047,13 @@ impl McpNamespaceAdapter {
             entity_index,
             graph,
             timezone,
+            clock: Arc::new(crate::time::SystemClock),
         }
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     async fn complete_effects(&self) -> Result<(), bridge::BridgeError> {
@@ -2130,7 +2204,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         let work =
             crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
         let worker = work.child().map_err(|e| map_mutation_error(e.into()))?;
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = self.clock.now_millis();
         let storage = self.storage.clone();
         let tz = self.timezone;
         let input_name = input.name.clone();
@@ -4029,17 +4103,41 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn entity_postings_preserve_legacy_validation_and_survive_disabled_autolink() {
+    async fn legacy_entity_admission_and_disabled_autolink_postings_remain_scoped() {
         let fx = Fixture::new();
         let foreign = fx.create_namespace("foreign");
         let mut adapter = fx.storage_adapter();
         Arc::make_mut(&mut adapter.config).graph.autolink_enabled = false;
-        let before = fx.storage.read().unwrap().control_state().unwrap();
-        let mut invalid = store_input("unrepresentable legacy names", "default", unit_x());
-        invalid.entities = vec!["John Smith".into(), "José".into(), "Alice's".into()];
-        assert!(adapter.store_memory(invalid).await.is_err());
-        assert_eq!(fx.storage.read().unwrap().control_state().unwrap(), before);
-        let names = vec!["John_Smith".into(), "Jose".into(), "Alice".into()];
+        // PR68 rejects labels the legacy carrier cannot retain. Keep that
+        // actual writer contract; UTF-8 native persistence is a later consumer.
+        let before = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .control_state()
+            .unwrap();
+        for name in ["John Smith", "José", "Alice's"] {
+            let mut input = store_input("rejected legacy name", "default", unit_x());
+            input.entities = vec![name.into()];
+            let error = adapter.store_memory(input).await.unwrap_err();
+            assert!(
+                matches!(error, bridge::BridgeError::InvalidInput(ref message)
+                if message.contains("cannot be represented by legacy storage"))
+            );
+        }
+        assert_eq!(
+            before,
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .control_state()
+                .unwrap()
+        );
+        assert!(fx.storage.read().unwrap().scan_all().unwrap().is_empty());
+        assert!(fx.entity_index.read().await.is_empty());
+        let names = vec!["John-Smith".into(), "JOSE".into(), "Alice".into()];
         let mut ids = Vec::new();
         for namespace in ["default", "foreign"] {
             let mut input = store_input("accepted names", namespace, unit_x());
@@ -4061,6 +4159,12 @@ mod tests {
                 vec![(ids[1], 3)]
             );
         }
+        // A stale derived-only alias must also disappear on deletion; do not
+        // pretend the legacy writer admitted or persisted this spelling.
+        fx.entity_index
+            .write()
+            .await
+            .add(default_ns(), ids[0], &["José".into()]);
         assert!(adapter.delete_memory(ids[0], None).await.unwrap());
         let index = fx.entity_index.read().await;
         assert_eq!(index.len(), 1);
@@ -4139,8 +4243,8 @@ pub fn direct_bridge(
         )
         .with_clock(system.clock().clone()),
     );
-    let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> =
-        Arc::new(McpNamespaceAdapter::new(
+    let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> = Arc::new(
+        McpNamespaceAdapter::new(
             system.storage().clone(),
             system.cache().clone(),
             system.vector_index().clone(),
@@ -4148,7 +4252,9 @@ pub fn direct_bridge(
             system.entity_index().clone(),
             system.graph().clone(),
             tz,
-        ));
+        )
+        .with_clock(system.clock().clone()),
+    );
     let health: Arc<dyn crate::mcp::bridge::HealthChecker> =
         Arc::new(McpHealthAdapter::new(system.storage().clone()));
 

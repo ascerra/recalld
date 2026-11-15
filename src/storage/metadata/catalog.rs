@@ -345,3 +345,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "catalog/owned_clock_tests.rs"]
+mod owned_clock_tests;
