@@ -51,9 +51,10 @@ pub use pipeline::{
     CoherentSearchResponse, CoherentSimilarResponse, DirectScoreEvidence,
     EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, FtsAvailability,
     FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, InheritedScoreExplanation,
-    MAX_EXPLANATION_SOURCES, MetadataStore, MinScoreDisposition, NamespaceResolver,
-    OwnScoreExplanation, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
-    RetrievalSemantics, RifProcessor, RifSuppression, ScoreExplanation, ScoreFormula, ScoredResult,
+    MAX_EXPLANATION_SOURCES, MAX_RIF_EXAMINED_EDGES, MAX_RIF_PAIRS, MAX_RIF_TARGETS_PER_ANCHOR,
+    MetadataStore, MinScoreDisposition, NamespaceResolver, OwnScoreExplanation, QueryEngine,
+    RecordCache, ResultProvenance, RetrievalChannel, RetrievalSemantics, RifDiagnostics, RifMode,
+    RifProcessor, RifSuppression, ScoreExplanation, ScoreFormula, ScoredResult,
     SemanticsDiagnostics, SemanticsResponse, StrengthDiagnostics, UnresolvedReason,
     VectorIndexRegistry, VersionMode, VersionStatus,
 };
