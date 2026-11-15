@@ -22,6 +22,7 @@ CONFORMANCE = runpy.run_path(str(Path(__file__).with_name("public-mcp-conformanc
 OWNED = runpy.run_path(str(Path(__file__).with_name("owned-mcp-supervisor.py")))
 RESET = runpy.run_path(str(Path(__file__).with_name("reset-mcp-supervisor.py")))
 SWEEP = runpy.run_path(str(Path(__file__).with_name("sweep-mcp-supervisor.py")))
+NATIVE = runpy.run_path(str(Path(__file__).with_name("native-prefix-mcp-supervisor.py")))
 ROOT = Path(__file__).resolve().parents[1]
 CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadView=False,
                     barrier=False, reset=False, snapshot=False, clock="system-uncontrolled",
@@ -30,7 +31,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = ("scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
-         "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py")
+         "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py")
 
 
 def encoded(value):
@@ -55,6 +56,12 @@ def exact_keys(value, keys):
 
 
 def track_profile(track):
+    if track == NATIVE["TRACK"]:
+        versions, capabilities = track_profile(RESET["TRACK"])
+        return dict(versions, canonicalSchemaVersion=2, canonicalRepresentation="strict-native-prefix", logicalHashContract=NATIVE["HASH_CONTRACT"], lifecycleVersion="legacy_access_v1"), dict(capabilities,
+            canonicalSchemaAttested=True, nativeOwnedTextQueryAdmission=True, nativeWrites=False, nativeSweep=False,
+            ordinaryNativeStartup=False, independentNativeGenesis=False, automaticSweep=False, autolink=False, rif="off",
+            cache="fresh-per-owner-with-checkpoint-owned-restoration", provider="offline-replay-cache-fail-closed")
     if track == SWEEP["TRACK"]:
         versions, capabilities = track_profile(RESET["TRACK"])
         return dict(versions, sweepControlVersion=1), dict(capabilities, explicitLegacySweep=True, nativeSweep=False)
@@ -68,6 +75,8 @@ def track_profile(track):
 
 
 def fixtures(track=TRACK):
+    if track == NATIVE["TRACK"]:
+        return NATIVE["fixtures"](fixtures)
     if track == SWEEP["TRACK"]:
         return SWEEP["fixtures"](fixtures)
     if track == RESET["TRACK"]:
@@ -106,7 +115,7 @@ def validate(manifest_path, binary, scorer, source_root):
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
     versions, capabilities = track_profile(m["track"])
-    if m["track"] not in (TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
+    if m["track"] not in (TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -122,7 +131,10 @@ def validate(manifest_path, binary, scorer, source_root):
     required |= {"Cargo.toml", "Cargo.lock", *EXTRA}
     if not required <= m["sourceFilesSha256"].keys():
         raise ValueError("missing source pins")
-    if m["executables"] != {"ownedEvaluator" if m["track"] in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"]) else "recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}:
+    expected_executables = {"ownedEvaluator" if m["track"] in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]) else "recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}
+    if m["track"] == NATIVE["TRACK"]:
+        expected_executables["nativePrefixFixture"] = digest(binary.with_name("native_prefix_fixture").read_bytes())
+    if m["executables"] != expected_executables:
         raise ValueError("executable hash mismatch")
     artifacts = []
     for key, name in (("actorInputs", "actor-inputs.json"), ("evaluatorLabels", "evaluator-labels.json"), ("replayCache", "evaluator-cache.json"), ("evaluatorSchedule", "evaluator-schedule.json")):
@@ -132,7 +144,8 @@ def validate(manifest_path, binary, scorer, source_root):
             raise ValueError("artifact hash/reference mismatch")
         artifacts.append(json.loads(p.read_text()))
     actor, labels, cache, schedule = artifacts
-    expected_actor, _, expected_cache, expected_schedule = fixtures(m["track"])
+    expected_actor, _, expected_cache, expected_schedule = (NATIVE["fixtures"](fixtures, schedule.get("futureVariant") == "changed")
+        if m["track"] == NATIVE["TRACK"] else fixtures(m["track"]))
     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
     exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
@@ -162,8 +175,10 @@ def prepare(args):
     m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=args.track, versions=track_profile(args.track)[0],
              capabilities=track_profile(args.track)[1], sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
-             executables={"ownedEvaluator" if args.track in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
+             executables={"ownedEvaluator" if args.track in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
              activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
+    if args.track == NATIVE["TRACK"]:
+        m["executables"]["nativePrefixFixture"] = digest(args.binary.with_name("native_prefix_fixture").read_bytes())
     for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels), ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
         save(args.out / name, value)
         m[key] = dict(file=name, sha256=digest((args.out / name).read_bytes()))
@@ -199,6 +214,8 @@ class Replay(http.server.BaseHTTPRequestHandler):
 
 
 def run_episode(args):
+    if json.loads(args.manifest.read_text()).get("track") == NATIVE["TRACK"]:
+        return NATIVE["run"](args, globals())
     if json.loads(args.manifest.read_text()).get("track") in (RESET["TRACK"], SWEEP["TRACK"]):
         return RESET["run"](args, globals())
     m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
@@ -503,7 +520,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
-    p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"]), default=TRACK)
+    p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
