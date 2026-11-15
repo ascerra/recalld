@@ -961,6 +961,88 @@ fn assert_score_provenance(result: &SemanticsResponse) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn entity_total_budget_counts_vector_fts_overlap_before_union() {
+    use crate::search::{FtsIndex, adapters::SharedFtsIndexRegistry};
+    use RetrievalChannel::*;
+
+    for reverse in [false, true] {
+        let mut records: Vec<_> = (101..=108)
+            .map(|n| {
+                let mut record = rec(mid(n));
+                record.entities = vec!["Alice".into()];
+                record.tags = vec![Tag::new("type/eligible").unwrap()];
+                record
+            })
+            .collect();
+        // Higher shared counts and earlier UUIDs cannot consume eligibility or
+        // admission. The actual namespace-partitioned index sees these rows.
+        for n in 1..=100 {
+            let mut record = rec(mid(n));
+            record.entities = vec!["Alice".into(), "Bob".into()];
+            record.tags = vec![Tag::new("type/eligible").unwrap()];
+            match n % 4 {
+                0 => record.namespace_id = other_ns(),
+                1 => record.phase = DecayPhase::Ghost,
+                2 => record.phase = DecayPhase::Tombstone,
+                _ => record.tags.clear(),
+            }
+            records.push(record);
+        }
+        if reverse {
+            records.reverse();
+        }
+        // Zero, partial and complete overlap with the four admitted entity IDs.
+        for overlap in [2, 0, 4] {
+            let vectors: Vec<_> = (101..101 + overlap)
+                .map(|n| (mid(n), 0.7))
+                .chain([(mid(108), 0.99)])
+                .collect();
+            let dir = tempfile::tempdir().unwrap();
+            let index = FtsIndex::new(dir.path()).unwrap();
+            if overlap == 2 {
+                for n in [101, 103] {
+                    index.add(ns(), mid(n), "keyword", None, &[]).unwrap();
+                }
+            }
+            let (mut engine, _) = graph_engine(records.clone(), &vectors, &[]);
+            engine.fts_index = Arc::new(SharedFtsIndexRegistry::new(Arc::new(
+                tokio::sync::Mutex::new(index),
+            )));
+            let q = serde_json::json!({"text":"keyword", "entities":["Alice", "Bob"],
+                "limit":2, "graphDepth":0, "filter":{"requireTags":["type/eligible"]}});
+            for semantics in [current(), history()] {
+                let result = engine
+                    .search_with_semantics(query(q.clone()), semantics)
+                    .await
+                    .unwrap();
+                let channel = &result.diagnostics.channels.as_ref().unwrap()[&Entity];
+                assert_eq!(channel.offered, Some(4), "overlap={overlap}");
+                assert_eq!(channel.admitted, Some(4));
+                // This interface does not measure the uncapped scan. A full
+                // page alone proves neither exhaustion nor unseen candidates.
+                assert_eq!(channel.examined, None);
+                assert_eq!(channel.eligible, None);
+                assert_eq!(channel.exhausted, None);
+                assert_eq!(channel.candidate_limited, None);
+                assert_eq!(channel.budget_exhausted, None);
+                assert_eq!(result.response.total_matches, 5); // Four entities + vector 108.
+                assert_eq!(result.response.results[0].memory_id, mid(108));
+                let evidence = &result.diagnostics.provenance.as_ref().unwrap()[&mid(108)];
+                assert!(evidence.own_channels.contains(&Vector));
+                assert!(!evidence.own_channels.contains(&Entity));
+                assert_eq!(evidence.own_vector_score, Some(0.99));
+                assert_score_provenance(&result);
+            }
+            let legacy = engine.search(query(q)).await.unwrap();
+            // Named v1 allowance counts four novel entity IDs in addition to
+            // its direct union. Eligibility is shared, channel budgets differ.
+            assert_eq!(legacy.total_matches, if overlap == 0 { 5 } else { 8 });
+            assert_eq!(legacy.results[0].memory_id, mid(108));
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn diagnostics_capture_overlapping_sources_before_dedup_and_only_returned_ids() {
     use crate::search::{FtsIndex, adapters::SharedFtsIndexRegistry};
     use RetrievalChannel::*;

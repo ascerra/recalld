@@ -901,17 +901,24 @@ impl QueryEngine {
         }
 
         if !query_entities.is_empty() && query.query_mode != QueryMode::MetadataOnly {
+            // V2 budgets total entity-channel membership before union, including
+            // overlap with vector/FTS. V1 retains its novel-only allowance.
+            let entity_fetch_cap = if semantics == RetrievalSemantics::V1 {
+                entity_recall_cap + all_candidate_ids.len()
+            } else {
+                entity_recall_cap
+            };
             let entity_results = self.entity_index.find_by_entities(
                 ns_config.id,
                 &query_entities,
                 MemoryId::nil(),
-                entity_recall_cap + all_candidate_ids.len(),
+                entity_fetch_cap,
                 &eligible_ids,
             )?;
 
             if diagnostics.channels.is_some() {
-                // Observe overlap before the ranking path skips existing IDs
-                // and caps novel entity candidates. This never changes that path.
+                // Retain admitted channel overlap before union/deduplication.
+                // Unmeasured scan counts/exhaustion remain unknown.
                 entity_hit_ids.extend(entity_results.iter().map(|r| r.memory_id));
                 entity_offered = Some(entity_hit_ids.len());
             }
