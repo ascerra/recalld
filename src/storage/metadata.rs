@@ -13,6 +13,7 @@ mod catalog;
 pub(crate) mod effects;
 mod inherited_policy;
 mod insertion;
+mod legacy_lifecycle;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
 mod native_catalog;

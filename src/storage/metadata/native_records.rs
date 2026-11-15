@@ -11,11 +11,6 @@ use crate::time::Clock;
 
 fn context(ctx: &MutationContext, namespace: NamespaceId) -> Result<(), StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 {
-        return Err(StorageError::InvalidMutationContext(
-            "native records require contract version 2".into(),
-        ));
-    }
     if ctx.scope != MutationScope::Namespace(namespace) {
         return Err(StorageError::MutationNamespaceMismatch);
     }

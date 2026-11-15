@@ -1,0 +1,13 @@
+error: this file contains an unclosed delimiter
+   --> /work/src/search/read_view.rs:950:13
+    |
+561 | mod tests {
+    |           - unclosed delimiter
+...
+896 |     async fn coherent_barrier_waits_for_actual_query_root_and_preserves_false_bytes() {
+    |                                                                                       - unclosed delimiter
+...
+950 |         asse
+    |             ^
+
+Error writing files: failed to resolve mod `read_view`: cannot parse /work/src/search/read_view.rs
