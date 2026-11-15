@@ -1,0 +1,686 @@
+{
+  "claim": "public-v1 diagnostic; no v2/A1/A6 completion",
+  "conformancePassed": true,
+  "embeddingRequests": 144,
+  "episodes": [
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 1,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "stdio",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 2,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "stdio",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 3,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "stdio",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 1,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "http-mcp",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 2,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "http-mcp",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 3,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "http-mcp",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 0
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 1,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "rest",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion",
+            "wrong-dimension",
+            "zero-norm"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 3,
+          "vectorOnlyRanks": [
+            "turn-001",
+            "turn-005",
+            "turn-002",
+            "turn-004"
+          ]
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion",
+            "wrong-dimension",
+            "zero-norm"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 1,
+          "vectorOnlyRanks": [
+            "turn-001",
+            "turn-005",
+            "turn-004"
+          ]
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 2,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "rest",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion",
+            "wrong-dimension",
+            "zero-norm"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 3,
+          "vectorOnlyRanks": [
+            "turn-001",
+            "turn-005",
+            "turn-002",
+            "turn-004"
+          ]
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion",
+            "wrong-dimension",
+            "zero-norm"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 1,
+          "vectorOnlyRanks": [
+            "turn-001",
+            "turn-005",
+            "turn-004"
+          ]
+        }
+      }
+    },
+    {
+      "defaultScopeMatchesExplicit": true,
+      "deleteContentAbsent": true,
+      "exposure": {
+        "cases": 6,
+        "restartPublicStateEqual": true,
+        "violations": []
+      },
+      "extractionEvidenceRetention": 1.0,
+      "falseReadDurableFilesUnchanged": true,
+      "falseReadPublicStateUnchanged": true,
+      "fixtureVersion": 3,
+      "freshSources": 6,
+      "grade1WeakensWithoutDeleting": true,
+      "grade4PreservesStabilityAtZeroDecay": true,
+      "knownConformanceViolations": [],
+      "normalizedRanks": [
+        "turn-001",
+        "turn-005",
+        "turn-002",
+        "turn-004"
+      ],
+      "normalizedRanksAfterDeleteAndRestart": [
+        "turn-001",
+        "turn-005",
+        "turn-004"
+      ],
+      "rejectedRequestsWithoutDurableFileChanges": 8,
+      "replay": 3,
+      "restartPublicStateEqual": true,
+      "retrievalSourceRecallAt20": 1.0,
+      "semanticQuality": "not measured",
+      "transport": "rest",
+      "vectorWindows": {
+        "initial": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion",
+            "wrong-dimension",
+            "zero-norm"
+          ],
+          "similarityCalls": 3,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 3,
+          "vectorOnlyRanks": [
+            "turn-001",
+            "turn-005",
+            "turn-002",
+            "turn-004"
+          ]
+        },
+        "restart": {
+          "embeddingProviderCalls": 0,
+          "publicAndDurableStateUnchanged": true,
+          "rejectedCases": [
+            "foreign-namespace-assertion",
+            "wrong-dimension",
+            "zero-norm"
+          ],
+          "similarityCalls": 1,
+          "similarityNamespacesPassed": true,
+          "similarityRanks": [
+            "turn-005"
+          ],
+          "similarityScoreThresholdPassed": true,
+          "similarityWireNamespaces": [
+            "default"
+          ],
+          "vectorOnlyCalls": 1,
+          "vectorOnlyRanks": [
+            "turn-001",
+            "turn-005",
+            "turn-004"
+          ]
+        }
+      }
+    }
+  ],
+  "expectedFailClosedMisses": 9,
+  "fixtureVersion": 3,
+  "freshReplaysPerTransport": 3,
+  "status": "characterization-complete"
+}

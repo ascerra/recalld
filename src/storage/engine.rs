@@ -11,11 +11,14 @@ mod catalog;
 mod effects;
 mod insertion;
 mod maintenance;
+mod native_records;
 mod purge;
+mod read_payload;
+pub use read_payload::HydratedRecord;
 mod text_compaction;
 mod tombstone;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
@@ -415,6 +418,15 @@ impl RedbStorageEngine {
     /// 6. Opens vector files for all existing namespaces.
     /// 7. Runs startup validation (rebuilds phase index, cleans orphans).
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
+        Self::open_mode(path, false)
+    }
+    pub(crate) fn open_native(path: &Path) -> Result<Self, StorageError> {
+        if !path.is_dir() {
+            return Err(StorageError::InvalidPath);
+        }
+        Self::open_mode(path, true)
+    }
+    fn open_mode(path: impl AsRef<Path>, native: bool) -> Result<Self, StorageError> {
         let ownership =
             crate::storage::ownership::StoreOwnership::acquire_recovering(path.as_ref())?;
         let db_path = ownership.path.clone();
@@ -432,11 +444,19 @@ impl RedbStorageEngine {
             for name in ["meta.db", "edges.db", "fulltext.dat"] {
                 crate::storage::validation::require_file(&db_path.join(name))?;
             }
-            crate::storage::validation::preflight_text(&db_path)?;
+            if native {
+                crate::storage::validation::preflight_native(&db_path)?;
+            } else {
+                crate::storage::validation::preflight_text(&db_path)?;
+            }
         }
 
         // Step 2: Open meta.db.
-        let meta_store = MetadataStore::open(&db_path.join("meta.db"))?;
+        let meta_store = if native {
+            MetadataStore::open_native_lifecycle(&db_path.join("meta.db"))?
+        } else {
+            MetadataStore::open(&db_path.join("meta.db"))?
+        };
 
         // Step 3: Open edges.db.
         let edge_store = EdgeStore::open(&db_path.join("edges.db"))?;
@@ -1397,12 +1417,12 @@ impl StorageEngine for RedbStorageEngine {
             false,
             false,
         )?;
-        effects::apply_pending(&self.meta_store, &self.edge_store, None).map_err(|source| {
-            StorageError::CommittedEffectsPending {
+        effects::apply_pending(&self.meta_store, &guard, &self.edge_store, None).map_err(
+            |source| StorageError::CommittedEffectsPending {
                 operation_id: result.receipt.operation_id,
                 source: Box::new(source),
-            }
-        })?;
+            },
+        )?;
         Ok(result.edges_removed)
     }
 
@@ -1416,18 +1436,7 @@ impl StorageEngine for RedbStorageEngine {
     /// Publish durable namespace vectors before committing its row and receipt.
     /// The v1 wrapper retains its assigned-ID return shape.
     fn create_namespace(&mut self, config: &NamespaceConfig) -> Result<NamespaceId, StorageError> {
-        let ctx = MutationContext {
-            scope: MutationScope::Catalog,
-            ..MutationContext::unkeyed(NamespaceId::new(1))
-        };
-        match self.create_namespace_with_receipt(&ctx, config)?.outcome {
-            crate::storage::control::MutationOutcome::NamespaceCreated { namespace_id, .. } => {
-                Ok(namespace_id)
-            }
-            _ => Err(StorageError::InvalidControl(
-                "create receipt outcome mismatch".into(),
-            )),
-        }
+        self.create_namespace_with_work(config, None)
     }
 
     fn list_namespaces(&self) -> Result<Vec<NamespaceConfig>, StorageError> {
