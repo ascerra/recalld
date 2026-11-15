@@ -1,5 +1,6 @@
 // Included in read_view::tests: actual canonical migration/attestation and owner.
 use super::super::similar_selection::{SimilarityExclusion, SimilarityScope, SimilaritySelection};
+use crate::model::EdgeType;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct SimilarClock(AtomicUsize);
@@ -1036,6 +1037,7 @@ async fn similar_explanation_display_cap_preserves_true_max_in_both_iteration_or
                 .unwrap()
                 .value;
             assert_similarity_explanations(&selected);
+            assert_eq!(selected.coverage.scored_records, 71); // One original cosine per eligible row.
             assert_eq!(selected.rows.len(), 1);
             let row = &selected.rows[0];
             assert_eq!(row.result.memory_id, f.terminal);
