@@ -2104,24 +2104,29 @@ pub async fn metrics(
 
 /// POST /decay/sweep -- trigger an immediate decay sweep.
 ///
-/// Accepts an optional `as_of` field (milliseconds since epoch) to run
-/// the sweep as if the current time were the given timestamp. This is
-/// used by the replay driver to simulate time-appropriate decay during
-/// historical seeding.
+/// Uses the configured clock. Caller-supplied time overrides are rejected
+/// before accepting work; isolated replay controls its existing owned clock.
 pub async fn trigger_decay_sweep(
     State(state): State<AppState>,
     Json(req): Json<TriggerSweepRequest>,
 ) -> Result<Json<ApiResponse<TriggerSweepResponse>>, AppError> {
-    let result = state
-        .decay
-        .trigger_sweep(req.as_of)
-        .await
-        .map_err(
-            |error| match error.downcast::<crate::storage::StorageError>() {
-                Ok(storage) => AppError::from(*storage),
-                Err(source) => AppError::Internal { source },
-            },
-        )?;
+    if req.fields.contains_key("asOf") || req.fields.contains_key("as_of") {
+        return Err(AppError::BadRequest {
+            message: "Public sweeps use the configured clock; remove asOf/as_of".into(),
+            field: Some("asOf".into()),
+        });
+    }
+    let result =
+        state
+            .decay
+            .trigger_sweep(None)
+            .await
+            .map_err(
+                |error| match error.downcast::<crate::storage::StorageError>() {
+                    Ok(storage) => AppError::from(*storage),
+                    Err(source) => AppError::Internal { source },
+                },
+            )?;
 
     Ok(Json(ApiResponse {
         data: TriggerSweepResponse {
