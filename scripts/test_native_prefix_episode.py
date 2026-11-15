@@ -29,6 +29,31 @@ class NativePrefixTests(unittest.TestCase):
         self.assertNotIn(s["futureQueryCanary"],actor_code)
         self.assertNotIn(l["labelCanary"],actor_code)
         self.assertNotIn("fixtures(",actor_code)
+    def test_native_manifest_rejects_unsupported_guarantees(self):
+        # Reuse the existing preflight fixture; executable identity is mocked only
+        # in this unit test. Actual binaries/profiles are checked by the episode.
+        base=runpy.run_path(str(Path(__file__).with_name("test_public_mcp_evaluation.py")))["Preflight"]("runTest")
+        base.setUp();self.addCleanup(base.doCleanups)
+        base.manifest["track"]=N["TRACK"]
+        base.manifest["versions"],base.manifest["capabilities"]=H["track_profile"](N["TRACK"])
+        base.manifest["executables"]["ownedEvaluator"]=base.manifest["executables"].pop("recalld")
+        fixture=base.binary.with_name("native_prefix_fixture");fixture.write_bytes(b"unit-fixture-never-executed")
+        base.manifest["executables"]["nativePrefixFixture"]=H["digest"](fixture.read_bytes())
+        a,l,c,sc=N["fixtures"](H["fixtures"])
+        for key,name,value in (("actorInputs","actor-inputs.json",a),("evaluatorLabels","evaluator-labels.json",l),("replayCache","evaluator-cache.json",c),("evaluatorSchedule","evaluator-schedule.json",sc)):
+            H["save"](base.root/name,value);base.manifest[key]["sha256"]=H["digest"]((base.root/name).read_bytes())
+        base.manifest["dataset"]["actorArtifactSha256"]=base.manifest["actorInputs"]["sha256"]
+        base.validate()
+        for change in (lambda v:v.update(manifestVersion=2),lambda v:v["versions"].update(canonicalSchemaVersion=None),
+                       lambda v:v["versions"].update(canonicalSchemaVersion=0),lambda v:v["versions"].update(publicContractVersion=2),
+                       lambda v:v["capabilities"].update(fullA6=True),lambda v:v["capabilities"].update(reset=True),
+                       lambda v:v["capabilities"].update(clock="frozen"),lambda v:v["capabilities"].update(deterministicRng=True),
+                       lambda v:v["capabilities"].update(nativeWrites=True),lambda v:v["capabilities"].update(nativeSweep=True),
+                       lambda v:v["capabilities"].update(ordinaryNativeStartup=True),lambda v:v["capabilities"].update(rif="v1"),
+                       lambda v:v["executables"].pop("nativePrefixFixture")):
+            candidate=copy.deepcopy(base.manifest);change(candidate)
+            with self.assertRaises(ValueError):base.validate(candidate)
+
     def test_observation_negative_requests_are_not_rewritten(self):
         *_,schedule=N["fixtures"](H["fixtures"])
         mappings={f"turn-{i}":f"id-{i}" for i in range(4)}
