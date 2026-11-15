@@ -44,7 +44,9 @@ async fn legacy_batch_actual_partial_stdio_requires_parent_and_child_facts() {
     assert_eq!(outcome.items[1].status, BatchStatus::Error);
     assert!(outcome.items[0].receipt.is_some());
     assert!(outcome.items[1].receipt.is_none());
-    assert!(outcome.all_ready());
+    // all_ready additionally requires zero rejected items; this is partial.
+    assert!(!outcome.all_ready());
+    assert!(outcome.items.iter().all(|item| item.ready));
     let storage = fx.storage.read().unwrap();
     assert_eq!(storage.scan_all().unwrap().len(), 1);
     assert_eq!(
