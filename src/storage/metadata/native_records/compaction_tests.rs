@@ -32,6 +32,95 @@ fn files(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
 }
 
 #[test]
+fn compaction_current_proof_hash_catalog_references_and_record_root_reject_immutably() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
+    let result = s.engine.compact_text_log().unwrap();
+    drop(s);
+    let pristine = files(&d.path);
+    for case in [
+        "api",
+        "version",
+        "missing",
+        "before-owner",
+        "after-seal",
+        "after-refs",
+        "record-root",
+        "count",
+    ] {
+        let bad = root.path().join(case);
+        std::fs::create_dir(&bad).unwrap();
+        for (name, bytes) in &pristine {
+            let p = bad.join(name);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, bytes).unwrap();
+        }
+        let db = redb::Database::open(bad.join("meta.db")).unwrap();
+        let tx = db.begin_write().unwrap();
+        {
+            let key = control::scoped_key(
+                result.receipt.store_id,
+                MutationScope::Catalog,
+                result.receipt.operation_id.as_bytes(),
+            );
+            let mut table = tx.open_table(control::RECEIPTS).unwrap();
+            let raw = table.get(key.as_slice()).unwrap().unwrap().value().to_vec();
+            let mut value: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+            let proof = &mut value["receipt"]["outcome"]["transition"];
+            match case {
+                "api" => {}
+                "version" => proof["proofVersion"] = serde_json::json!(2),
+                "missing" => {
+                    proof.as_object_mut().unwrap().remove("source");
+                }
+                "before-owner" => proof["before"]["storeId"] = serde_json::json!(uuid::Uuid::nil()),
+                "after-seal" => {
+                    let n = proof["after"]["sealedLength"].as_u64().unwrap();
+                    proof["after"]["sealedLength"] = serde_json::json!(n + 1);
+                }
+                "after-refs" => {
+                    let n = proof["afterRefsSha256"][0].as_u64().unwrap();
+                    proof["afterRefsSha256"][0] = serde_json::json!(n ^ 1);
+                }
+                "record-root" => {
+                    let n = proof["recordsSha256"][0].as_u64().unwrap();
+                    proof["recordsSha256"][0] = serde_json::json!(n ^ 1);
+                }
+                _ => {
+                    let n = proof["recordCount"].as_u64().unwrap();
+                    proof["recordCount"] = serde_json::json!(n + 1);
+                }
+            }
+            if case == "api" {
+                let MutationOutcome::NativeTextGenerationSelected { transition } =
+                    &result.receipt.outcome
+                else {
+                    panic!()
+                };
+                let mut ctx = crate::storage::native_text::request_context(transition.source);
+                ctx.contract_version = 2;
+                value["request_hash"] =
+                    serde_json::json!(control::request_hash(&ctx, "compactText", &[]));
+            }
+            let changed = serde_json::to_vec(&value).unwrap();
+            assert_ne!(changed, raw);
+            table.insert(key.as_slice(), changed.as_slice()).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(db);
+        let before = files(&bad);
+        assert!(validation::canonical_files(&bad).is_err(), "{case}");
+        assert!(
+            RedbStorageEngine::open_with_ids(&bad, true, Box::new(crate::storage::ids::SystemIds))
+                .is_err(),
+            "{case}"
+        );
+        assert_eq!(files(&bad), before, "{case}");
+    }
+}
+
+#[test]
 fn compaction_owned_ids_logical_tokens_and_provenance_do_not_change() {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
@@ -71,10 +160,9 @@ fn compaction_owned_ids_logical_tokens_and_provenance_do_not_change() {
         expected.checkpoint().unwrap()
     );
     assert_eq!(clock.0.load(Ordering::SeqCst), clock_before);
-    for (id, mut before) in old {
+    for (id, before) in old {
         let mut after = s.engine.get_record(id).unwrap().unwrap();
-        before.text_offset = 0;
-        after.text_offset = 0;
+        after.text_offset = before.text_offset;
         assert_eq!(before.encode().unwrap(), after.encode().unwrap());
     }
     let again = s.engine.compact_text_log().unwrap();

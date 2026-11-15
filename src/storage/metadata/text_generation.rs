@@ -96,9 +96,65 @@ pub(crate) fn read_selection(
             selected = Some(descriptor);
         }
     }
-    selected
-        .map(Some)
-        .ok_or_else(|| StorageError::InvalidControl("selected text descriptor missing".into()))
+    let selected = selected
+        .ok_or_else(|| StorageError::InvalidControl("selected text descriptor missing".into()))?;
+    // A same-identity physical generation must match its committed descriptor.
+    // Import/restore may legitimately repack to a different generation UUID.
+    for row in read.open_table(control::RECEIPTS)?.iter()? {
+        let (_, value) = row?;
+        let stored = control::validate_receipt(value.value())?;
+        if let MutationOutcome::NativeTextGenerationSelected { transition } =
+            &stored.receipt.outcome
+            && transition.after.id == selected.id
+        {
+            if transition.after != selected || stored.receipt.store_id != state.store_id {
+                return Err(StorageError::InvalidControl(
+                    "selected descriptor differs from native relocation".into(),
+                ));
+            }
+            let before = table
+                .get(transition.before.id.to_string().as_str())?
+                .ok_or_else(|| {
+                    StorageError::InvalidControl("native relocation before catalog missing".into())
+                })?;
+            if control::decode::<TextGeneration>(before.value())? != transition.before {
+                return Err(StorageError::InvalidControl(
+                    "native relocation before descriptor mismatch".into(),
+                ));
+            }
+            if stored.receipt.committed_generation == state.committed_generation {
+                let refs = read
+                    .open_table(META_TABLE)?
+                    .iter()?
+                    .filter_map(|row| {
+                        let row = row.map_err(StorageError::from).and_then(|(_, v)| {
+                            DiskRecord::from_bytes(v.value()).map_err(StorageError::from)
+                        });
+                        match row {
+                            Err(e) => Some(Err(e)),
+                            Ok(r) if r.text_offset != 0 || r.text_length != 0 => Some(Ok((
+                                MemoryId::from_bytes(r.id),
+                                TextRef {
+                                    file_offset: r.text_offset,
+                                    length: r.text_length,
+                                },
+                            ))),
+                            Ok(_) => None,
+                        }
+                    })
+                    .collect::<Result<RefMapping, StorageError>>()?;
+                if refs.len() as u64 != transition.retained_count
+                    || crate::storage::native_text::reference_digest(&refs)?
+                        != transition.after_refs_sha256
+                {
+                    return Err(StorageError::InvalidControl(
+                        "current native relocation references mismatch".into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(Some(selected))
 }
 
 impl MetadataStore {

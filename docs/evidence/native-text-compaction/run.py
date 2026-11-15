@@ -50,6 +50,13 @@ RECALLD_COMPACTION_BEFORE_OUTPUT=/work/output/legacy-before /work/output/recalld
 sha256sum -c /work/output/source.sha256 --quiet > /work/output/source-after.txt
 cat /sys/fs/cgroup/memory.peak > /work/output/memory-peak.txt
 '''
+if mode != 'before':
+    script += 'test "$result" -eq 0\n'
+if mode == 'full':
+    cmd += ['--mount','type=bind,src=/tmp/recalld-native-context-validation/before/fixtures,dst=/before-context,readonly','--mount','type=bind,src=/tmp/recalld-native-context-validation/before/target/debug/deps/recalld-b2844bb1c4a63074,dst=/old/context-test,readonly','-e','RECALLD_CONTEXT_BEFORE_FIXTURES=/before-context','-e','RECALLD_CONTEXT_OLD_TEST_BINARY=/old/context-test']
+    script += 'cargo fmt --all --check > /work/output/fmt.log 2>&1\n'
+    script += 'cargo test --locked --offline --all-features --lib --bins --tests --examples -j 2 > /work/output/full.log 2>&1\n'
+    script += 'cargo clippy --locked --offline --all-features --all-targets -j 2 > /work/output/clippy.log 2>&1\n'
 cmd+=['sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef','sh','-c',script]
 (root/'output/command.json').write_text(json.dumps(cmd,indent=2))
 print(root,flush=True)
