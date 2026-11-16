@@ -1211,3 +1211,42 @@ async fn http_sweep_preexisting_pending_or_purge_has_no_receipt_authority() {
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_initial_broken_unpublished_view_rejects_without_canonical_work() {
+    let f = Fixture::new();
+    let id = f.insert_memory().await;
+    assert!(
+        !f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    let before = canonical(&f);
+    *f.vector_index.write().await =
+        crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
+    let clock = Arc::new(SweepClock(AtomicUsize::new(0)));
+    let router = app(&f, clock.clone());
+    let (status, body) = request(&router, "{}").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"], "SWEEP_UNAVAILABLE");
+    assert_eq!(body["commitState"], "notCommitted");
+    assert_eq!(body["ready"], false);
+    assert_eq!(body["receipts"], json!([]));
+    assert!(body["operationId"].is_null());
+    assert!(body.get("receipt").is_none());
+    assert_eq!(canonical(&f), before);
+    assert_eq!(f.record(id).unwrap().phase, DecayPhase::Full);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+    let status = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .work_tracker()
+        .status();
+    assert_eq!((status.pending, status.unresolved), (0, 0));
+}

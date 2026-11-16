@@ -151,7 +151,18 @@ async fn restart_case(override_value: Option<f32>) -> [f32; 2] {
                 },
             );
             let failed = adapter.trigger_sweep(None).await.unwrap_err();
-            assert!(failed.to_string().contains("inherited"));
+            let failure = failed
+                .downcast::<crate::decay::sweep::evidence::SweepFailure>()
+                .expect("bounded manual failure keeps typed no-commit evidence");
+            let body: serde_json::Value =
+                serde_json::from_slice(&serde_json::to_vec(&failure).unwrap()).unwrap();
+            assert_eq!(body["error"], "SWEEP_UNAVAILABLE");
+            assert_eq!(body["commitState"], "notCommitted");
+            assert_eq!(body["ready"], false);
+            assert_eq!(body["complete"], false);
+            assert_eq!(body["receipts"], serde_json::json!([]));
+            assert!(body["operationId"].is_null());
+            assert!(body.get("receipt").is_none());
             drop(adapter);
             core.shutdown().await.unwrap();
             assert_eq!(inspect_schema(&native).unwrap().control, before.control);
