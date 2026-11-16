@@ -100,24 +100,24 @@ impl McpStorageAdapter {
         &self,
         input: BatchInput,
     ) -> Result<BatchOutcome, bridge::BridgeError> {
-        self.run_batch_typed(input)
+        self.run_batch_with_surface(input, None, None)
             .await
             .map_err(StoreWriteError::into_bridge)
     }
 
-    pub(crate) async fn run_batch_typed(
+    pub(crate) fn run_batch_typed(
         &self,
         input: BatchInput,
-    ) -> Result<BatchOutcome, StoreWriteError> {
-        self.run_batch_budgeted(input, None).await
+    ) -> impl std::future::Future<Output = Result<BatchOutcome, StoreWriteError>> + '_ {
+        self.run_batch_with_surface(input, None, None)
     }
 
-    pub(crate) async fn run_batch_budgeted(
+    pub(crate) fn run_batch_budgeted(
         &self,
         input: BatchInput,
         budget: Option<crate::mcp::batch_budget::BatchBudget>,
-    ) -> Result<BatchOutcome, StoreWriteError> {
-        self.run_batch_with_surface(input, budget, None).await
+    ) -> impl std::future::Future<Output = Result<BatchOutcome, StoreWriteError>> + '_ {
+        self.run_batch_with_surface(input, budget, None)
     }
 
     pub(crate) fn run_batch_with_surface(
