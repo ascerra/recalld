@@ -407,6 +407,27 @@ async fn prepared_pages_remote_strict_peer_fields_identity_and_context() {
         drop(remote);
         task.await.unwrap();
     }
+    // A claimed Bound ID never makes an unsupported width a valid profile.
+    // This is authored peer evidence, not a genuine native namespace.
+    let mut bound = good.clone();
+    bound["result"]["data"]["namespaces"][0]["embeddingDim"] = json!(8193);
+    bound["result"]["data"]["namespaces"][0]["embeddingProfileId"] =
+        json!(format!("ep1:{}", "0".repeat(64)));
+    bound["result"]["data"]["namespaces"][0]["bindingProvenance"] = json!("operator_attestation");
+    bound["result"]["data"]["namespaces"][0]["profileCompatibility"] =
+        json!("unknownActiveProfile");
+    let (remote, task, _root) = malformed_peer(bound, wire::CATALOG).await;
+    assert!(matches!(
+        remote
+            .list_catalog_page(
+                CatalogPageRequest::from_mcp(&args, CatalogKind::Namespaces).unwrap()
+            )
+            .await,
+        Err(crate::catalog_page::CatalogError::Unavailable)
+    ));
+    remote.test_client().ping().await.unwrap();
+    drop(remote);
+    task.await.unwrap();
     assert_eq!(canonical(&f), before);
 }
 

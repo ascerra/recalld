@@ -316,6 +316,68 @@ struct ConfiguredProvider {
     descriptor: crate::model::schema::EmbeddingProfile,
     calls: AtomicUsize,
 }
+
+#[tokio::test]
+async fn catalog_page_authored_legacy_width_inventory_does_not_widen_creation() {
+    // Authored canonical-metadata reader fixture in an already-open legacy
+    // engine, NOT an old-writer/native-publication or reopen-validity proof.
+    let f = Fixture::new();
+    let before = readers::bytes(f.path());
+    let mut invalid = NamespaceConfig::default_namespace(0);
+    invalid.name = "new-wide".into();
+    invalid.embedding_dim = 8193;
+    assert!(
+        f.storage
+            .write()
+            .unwrap()
+            .create_namespace(&invalid)
+            .is_err()
+    );
+    assert_eq!(readers::bytes(f.path()), before);
+    {
+        let storage = f.storage.write().unwrap();
+        let mut config = storage.get_namespace(NamespaceId::new(1)).unwrap().unwrap();
+        assert!(config.schema.is_none());
+        config.embedding_dim = 8193;
+        let tx = storage.meta_store().db.begin_write().unwrap();
+        tx.open_table(NAMESPACE_TABLE)
+            .unwrap()
+            .insert(1, serde_json::to_vec(&config).unwrap().as_slice())
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    let owned = Arc::new(storage_adapter(&f, Arc::new(NoProvider)));
+    let before = readers::bytes(f.path());
+    let request =
+        CatalogPageRequest::from_mcp(&json!({"contractVersion":2}), CatalogKind::Namespaces)
+            .unwrap();
+    let local =
+        crate::mcp::bridge::StorageEngine::list_catalog_page(owned.as_ref(), request.clone())
+            .await
+            .unwrap();
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        owned,
+        &socket.path().join("wide.sock"),
+    )
+    .await;
+    let page = crate::mcp::bridge::StorageEngine::list_catalog_page(&remote, request)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&page.data).unwrap(),
+        serde_json::to_vec(&local.data).unwrap()
+    );
+    let value = serde_json::to_value(page.into_envelope()).unwrap();
+    assert_eq!(value["data"]["namespaces"][0]["embeddingDim"], 8193);
+    assert_eq!(
+        value["data"]["namespaces"][0]["profileCompatibility"],
+        "unknownNamespaceProfile"
+    );
+    drop(remote);
+    task.await.unwrap();
+    assert_eq!(readers::bytes(f.path()), before);
+}
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for ConfiguredProvider {
     fn dimensions(&self) -> usize {

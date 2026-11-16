@@ -168,8 +168,18 @@ impl CatalogPage {
         self
     }
     pub fn into_envelope(self) -> Envelope<CatalogData> {
+        #[cfg(test)]
+        let kind = match &self.data {
+            CatalogData::Namespaces(_) => CatalogKind::Namespaces,
+            CatalogData::Tags(_) => CatalogKind::Tags,
+        };
         let mut out = Envelope::success(self.scope, self.data);
         out.read_generation = Some(self.at);
+        #[cfg(test)]
+        crate::serialization::page_schema::record_fixture(
+            Some(kind),
+            &serde_json::to_value(&out).unwrap(),
+        );
         out
     }
 }

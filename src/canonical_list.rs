@@ -88,6 +88,11 @@ impl ListPage {
             self.data,
         );
         envelope.read_generation = Some(self.binding.at);
+        #[cfg(test)]
+        crate::serialization::page_schema::record_fixture(
+            None,
+            &serde_json::to_value(&envelope).unwrap(),
+        );
         envelope
     }
 }
@@ -174,7 +179,13 @@ pub fn response(result: Result<ListPage, ListError>) -> (u16, Envelope<ListData>
                 ListError::Stale => 409,
                 ListError::Unavailable => 503,
             };
-            (status, Envelope::failure(None, error.execution_error()))
+            let envelope = Envelope::failure(None, error.execution_error());
+            #[cfg(test)]
+            crate::serialization::page_schema::record_fixture(
+                None,
+                &serde_json::to_value(&envelope).unwrap(),
+            );
+            (status, envelope)
         }
     }
 }
