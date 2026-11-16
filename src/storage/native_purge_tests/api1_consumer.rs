@@ -707,7 +707,7 @@ async fn native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejec
             .to_bits(),
         0x406dba5e
     );
-    for change in 0..12 {
+    for change in 0..14 {
         let mut bad = good.clone();
         match change {
             0 => bad["ready"] = serde_json::json!(false),
@@ -739,7 +739,15 @@ async fn native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejec
                 bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["schema"]["extensions"] =
                     serde_json::json!({"x":1})
             }
-            _ => bad["receipt"]["committedGeneration"] = serde_json::json!("18446744073709551615"),
+            11 => bad["receipt"]["committedGeneration"] = serde_json::json!("18446744073709551615"),
+            12 => {
+                bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["policy"]["initialStability"] =
+                    serde_json::json!(1e39)
+            }
+            _ => {
+                bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["namespaceId"] =
+                    serde_json::json!(4294967296u64)
+            }
         }
         assert!(
             crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&bad.to_string())
@@ -749,6 +757,30 @@ async fn native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejec
         let mut bridge = crate::test_support::StubBridge::default().into_bridge();
         bridge.namespaces = Arc::new(crate::test_support::StubBridge {
             delete_namespace_error: Some(BridgeError::PartiallyApplied(bad.to_string())),
+            ..Default::default()
+        });
+        let result = crate::mcp::tools::dispatch_tool(
+            &bridge,
+            "delete_namespace",
+            serde_json::json!({"name":"doomed","force":true}),
+        )
+        .await;
+        assert_eq!(result.is_error, Some(true));
+        assert!(result.structured_content.is_none());
+    }
+    for token in ["1e400", "NaN", "Infinity", "-Infinity"] {
+        let mut bad = good.clone();
+        bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["policy"]["initialStability"] =
+            serde_json::json!("RAW_INVALID_NUMBER");
+        let raw = bad.to_string().replace("\"RAW_INVALID_NUMBER\"", token);
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&raw).is_err(),
+            "{token}"
+        );
+        assert!(crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&raw).is_none());
+        let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+        bridge.namespaces = Arc::new(crate::test_support::StubBridge {
+            delete_namespace_error: Some(BridgeError::PartiallyApplied(raw)),
             ..Default::default()
         });
         let result = crate::mcp::tools::dispatch_tool(
@@ -882,4 +914,127 @@ async fn native_api1_purge_lost_completion_preserves_start_without_invented_fina
         .unwrap();
     assert_eq!(p.stage, PurgeStage::Complete);
     assert!(p.last_receipt.committed_generation > start.last_receipt.committed_generation);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_actual_max_chunk_receipt_survives_legacy_frame() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let target = root.path().join("native");
+    let mut engine = RedbStorageEngine::open(&source).unwrap();
+    let mut config = NamespaceConfig::default_namespace(100);
+    config.name = "doomed".into();
+    config.embedding_dim = 4;
+    let namespace = engine.create_namespace(&config).unwrap();
+    for n in 0..crate::storage::metadata::purge::CHUNK_LIMIT {
+        engine
+            .insert_memory_with_receipt(
+                &MutationContext::unkeyed(namespace),
+                &insertion::InsertMemory {
+                    id: None,
+                    summary: format!("retained row {n}"),
+                    full_text: None,
+                    tags: vec![],
+                    initial_stability: None,
+                    created_at: Some(1000),
+                    embedding: Some(vec![1., 0., 0., 0.]),
+                    parent_id: None,
+                    supersedes: None,
+                },
+                &[],
+                1000,
+            )
+            .unwrap();
+    }
+    config.name = "kept".into();
+    let kept = engine.create_namespace(&config).unwrap();
+    engine
+        .insert_memory_with_receipt(
+            &MutationContext::unkeyed(kept),
+            &insertion::InsertMemory {
+                id: None,
+                summary: "surviving row".into(),
+                full_text: None,
+                tags: vec![],
+                initial_stability: None,
+                created_at: Some(1000),
+                embedding: Some(vec![1., 0., 0., 0.]),
+                parent_id: None,
+                supersedes: None,
+            },
+            &[],
+            1000,
+        )
+        .unwrap();
+    engine.sync().unwrap();
+    drop(engine);
+    schema_migration::migrate_schema(
+        &source,
+        &target,
+        &schema_migration::MigrationOptions {
+            migration_now: 2000,
+            expected_source: schema_migration::inspect_schema(&source)
+                .unwrap()
+                .control
+                .generation_ref(),
+            attestations: vec![],
+        },
+    )
+    .unwrap();
+    let session = open(&target);
+    let fx = crate::test_support::Fixture::from_open_engine(root, session.engine);
+    let publisher = crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    };
+    publisher.rebuild_all().await.unwrap();
+    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let response =
+        crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(fx.namespace_adapter())).await;
+    let p = fx
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .purge_progress()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.namespace_id == namespace)
+        .unwrap();
+    let first = fx
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .pending_effects()
+        .unwrap()
+        .first()
+        .unwrap()
+        .receipt
+        .clone();
+    let receipt_bytes = serde_json::to_vec(&first).unwrap().len();
+    eprintln!(
+        "ACTUAL_MAX_CHUNK_FRAME rows={} canonical={:?} full_receipt_bytes={} response={response:?}",
+        p.removed, p.stage, receipt_bytes
+    );
+    assert_eq!(p.stage, PurgeStage::Complete);
+    assert_eq!(
+        p.removed,
+        crate::storage::metadata::purge::CHUNK_LIMIT as u64
+    );
+    let error = response.error.unwrap();
+    assert_eq!(
+        error.code, -32006,
+        "full actual receipt lost at legacy frame boundary: {error:?}"
+    );
+    let result =
+        crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message).unwrap();
+    assert_eq!(
+        serde_json::from_value::<control::WriteReceipt>(result["receipt"].clone()).unwrap(),
+        first
+    );
 }
