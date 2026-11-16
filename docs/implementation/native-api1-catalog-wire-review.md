@@ -195,3 +195,46 @@ R2 is frozen at `8b5fae5cf9a6f49cd6c6339aa0f741283c4dabf0` with Halley for
 publication. No R2 WIP dependency, client/server/dispatcher edit or additional
 build follows from this proposal. Request literal shared-hunk ownership only
 against the actual queue-published composition, and coordinate O1 independently.
+
+## Remote source inventory on published 200a1
+
+Exact inspected composition: `200a1f10b9db52d8e5a758cab50c092ca2b07359`.
+`RemoteNamespaceAdapter::create_namespace` still uses ordinary
+`client.call("create_namespace", ...)` and `from_value`; that path is not a
+prepared native evidence contract. `call_api1_mutation` holds the connection
+mutex across capability negotiation and the selected operation, but returns a
+plain `Result<(bool, Value), BridgeError>` through `call_locked`. Its public
+return does not retain the new `TransmissionPhase` and admitted raw result.
+Do not classify a post-send parse failure as a fresh no-commit refusal.
+
+The existing `call_prepared` does retain `BeforeSend`, `SentUnattributed` and
+`MatchedReply`, and uses the shared request allocator, bounded stale-response
+handling and no post-send retry. It currently embeds query capability selection,
+query raw-shape admission and the query-specific `response_limit()`. These
+cannot simply be reused as catalog capacity or receipt admission. The next
+literal proposal must separate those method-specific inputs while preserving
+the existing single locked exchange and existing query behavior. This inventory
+does not authorize a generic RPC framework or changes to frozen query callers.
+
+Required native catalog classification remains:
+
+- Before-send refusal: no current commit or invented operation ID.
+- Sent but uncorrelated, drained oversize, invalid raw shape or lost response:
+  current outcome unknown; no retry or speculative receipt acquisition.
+- Correlated fully validated native reply: retain the exact declared evidence,
+  validate catalog outcome/request identity, and preserve unknown precedence
+  when a separately known receipt accompanies a later uncertain operation.
+- Admitted but invalid reply containing complete valid receipt fragments:
+  preserve them only as received, unverified evidence. They cannot establish
+  this operation's commit, readiness, namespace or scope. Never recursively
+  search arbitrary nested fields or turn unrelated evidence into a local receipt.
+
+Before implementation, the raw decoder allowance must prove that the entire
+received-evidence failure representation fits the actual upstream emitter,
+including pretty text, structured content, outer ID/era, stdio LF and any daemon
+error-string escaping. Reject unadmitted raw frames before acquiring typed
+receipts. Once typed evidence has been acquired, no later size fallback may
+discard or replace it. Query's fixed allowance and three-times-input argument
+are not asserted for this different catalog emitter. Exact catalog framing and
+raw-preflight proof remain open review items, including malformed peers and
+historical oversized evidence; there is no implementation or READY claim here.
