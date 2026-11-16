@@ -286,6 +286,34 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
         )
         .await
         .unwrap();
+    // Diagnostic only: resolve the exact failed fresh child's namespace with
+    // the same policy inputs as run_linked_batch_child/default adapter config.
+    let namespace = f
+        .storage
+        .read()
+        .unwrap()
+        .get_namespace(out.items[0].namespace_id.unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(namespace.id, d.ns);
+    let policy = crate::storage::native_lifecycle::NativePolicyInputs {
+        global: crate::decay::DecayConfig::default(),
+        multiplier: crate::config::RecalldConfig::default().decay.decay_rate_multiplier,
+    };
+    let resolution = policy.resolve(&namespace);
+    eprintln!(
+        "PR168_FRESH_POLICY_DIAGNOSTIC namespace={} explicit_multiplier={:?} inherited={:?} resolution={resolution:?}",
+        namespace.id.get(),
+        namespace.decay_rate_multiplier,
+        namespace.schema.as_ref().unwrap().inherited_decay,
+    );
+    assert!(namespace.decay_rate_multiplier.is_none());
+    assert!(namespace.schema.as_ref().unwrap().inherited_decay.is_none());
+    assert!(matches!(
+        &resolution,
+        Err(StorageError::InvalidMutation(message))
+            if message == "inherited policy is unknown; explicitly preview/adopt before dependent operations"
+    ));
     assert_eq!(out.succeeded, 1, "{out:?}");
     let id: MemoryId =
         serde_json::from_value(out.items[0].result.as_ref().unwrap()["id"].clone()).unwrap();
