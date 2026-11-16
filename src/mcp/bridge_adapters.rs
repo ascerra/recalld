@@ -2501,6 +2501,7 @@ fn build_list_tags_response(
 /// to splitting deletion onto `StorageEngine` because that is where the
 /// handles happen to be.
 pub struct McpNamespaceAdapter {
+    native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
@@ -2512,6 +2513,35 @@ pub struct McpNamespaceAdapter {
 }
 
 impl McpNamespaceAdapter {
+    #[cfg(test)]
+    pub(crate) fn with_catalog_fault(mut self, point: &'static str) -> Self {
+        self.native_catalog.as_mut().unwrap().failure = Some(point);
+        self
+    }
+
+    /// Bind actual provider, frozen inherited policy and clock from this owner.
+    pub fn with_native_catalog(
+        mut self,
+        provider: Arc<dyn EmbeddingProvider>,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+        clock: Arc<dyn crate::time::Clock>,
+    ) -> Self {
+        self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
+            crate::derived_completion::DerivedCompletion {
+                storage: self.storage.clone(),
+                cache: self.cache.clone(),
+                graph: self.graph.clone(),
+                vectors: self.vector_index.clone(),
+                fts: self.fts_index.clone(),
+                entities: self.entity_index.clone(),
+            },
+            provider,
+            policy,
+            clock,
+        ));
+        self
+    }
+
     /// Create a new namespace adapter wrapping the storage engine and
     /// the indexes a namespace deletion has to clean.
     pub fn new(
@@ -2525,6 +2555,7 @@ impl McpNamespaceAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_catalog: None,
             storage,
             cache,
             vector_index,
@@ -2626,6 +2657,32 @@ impl DeleteFailure {
 
 #[async_trait]
 impl bridge::NamespaceRegistry for McpNamespaceAdapter {
+    async fn update_native_policy(
+        &self,
+        request: crate::serialization::policy::PolicyRequest,
+    ) -> Result<
+        crate::native_catalog_adapter::PolicyOutcome,
+        crate::native_catalog_adapter::CatalogError,
+    > {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .update_policy(request)
+            .await
+    }
+
+    async fn create_native_namespace(
+        &self,
+        request: crate::serialization::catalog::CreateNamespaceRequest,
+    ) -> Result<crate::storage::control::WriteReceipt, crate::native_catalog_adapter::CatalogError>
+    {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .create(request)
+            .await
+    }
+
     async fn list_namespaces(&self) -> Result<Vec<bridge::NamespaceInfo>, bridge::BridgeError> {
         let stamp = effects_stamp(&self.storage).await?;
         let result = async {
@@ -4716,7 +4773,12 @@ pub fn direct_bridge(
             system.graph().clone(),
             tz,
         )
-        .with_clock(system.clock().clone()),
+        .with_clock(system.clock().clone())
+        .with_native_catalog(
+            system.embedding().clone(),
+            system.query_engine().native_policy_inputs(),
+            system.clock().clone(),
+        ),
     );
     let health: Arc<dyn crate::mcp::bridge::HealthChecker> =
         Arc::new(McpHealthAdapter::new(system.storage().clone()));

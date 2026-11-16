@@ -1,0 +1,1 @@
+Captured after formatting while focused compilation/test was running. No source edits during the run; verify hashes afterward.
