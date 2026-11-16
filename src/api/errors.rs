@@ -286,6 +286,9 @@ impl From<EmbeddingError> for AppError {
 
 impl From<SearchError> for AppError {
     fn from(err: SearchError) -> Self {
+        if let SearchError::CanonicalRead(error) = err {
+            return (*error).into();
+        }
         match &err {
             SearchError::Observation(error) => AppError::Observation(error.clone()),
             SearchError::Unavailable(message) => AppError::ServiceUnavailable {

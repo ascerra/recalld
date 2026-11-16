@@ -555,3 +555,47 @@ fn clone_bridge_error(e: &crate::mcp::bridge::BridgeError) -> crate::mcp::bridge
         E::PartiallyApplied(m) => E::PartiallyApplied(m.clone()),
     }
 }
+
+/// Explicit present-day adoption for a test that exercises dependent native work.
+/// This calls the real read-only preview and canonical writer; migration itself
+/// still leaves unknown inputs absent. No raw schema or provenance mutation.
+pub(crate) fn explicitly_adopt_inherited_policy(
+    path: &Path,
+    namespace: NamespaceId,
+    multiplier: f64,
+    sampled_at: i64,
+) -> crate::storage::control::WriteReceipt {
+    use crate::storage::control::{MutationContext, MutationScope};
+    use crate::storage::inherited_policy::{
+        AdoptInheritedDecay, adopt_inherited_decay, preview_inherited_decay,
+    };
+    let source = crate::storage::schema_migration::inspect_schema(path)
+        .unwrap()
+        .control
+        .generation_ref();
+    let preview = preview_inherited_decay(
+        path,
+        namespace,
+        multiplier,
+        source,
+        &crate::time::ManualClock::new(sampled_at),
+    )
+    .unwrap();
+    adopt_inherited_decay(
+        path,
+        &AdoptInheritedDecay {
+            context: MutationContext {
+                store_id: Some(source.store_id),
+                scope: MutationScope::Namespace(namespace),
+                idempotency_key: Some(format!(
+                    "explicit-fixture-adoption-{}",
+                    source.generation.get()
+                )),
+                expected_generation: Some(source.generation),
+                contract_version: 1,
+            },
+            preview,
+        },
+    )
+    .unwrap()
+}

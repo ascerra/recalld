@@ -254,8 +254,8 @@ pub enum Status {
 
 /// Wire representation only. Populating this requires A1's actual readiness
 /// interface; no conversion from an epoch, metadata lease, or latest counter.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Readiness {
     pub store_id: Uuid,
     pub committed_generation: Generation,
@@ -263,8 +263,8 @@ pub struct Readiness {
     pub pending_work: usize,
     pub derived: Vec<DerivedReadiness>,
 }
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DerivedReadiness {
     pub name: String,
     pub applied_generation: Generation,

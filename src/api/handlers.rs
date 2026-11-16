@@ -391,6 +391,59 @@ async fn get_memory_admitted(
     let start = Instant::now();
 
     let memory_id = parse_memory_id(&id)?;
+    if let Some(prepared) = state
+        .search
+        .prepare_coherent_get_with_work(
+            memory_id,
+            options.namespace.as_deref(),
+            options.record_access,
+            parent,
+        )
+        .await?
+    {
+        let (namespace, row) = prepared.payload.ok_or_else(|| AppError::NotFound {
+            resource: "memory",
+            id: id.clone(),
+        })?;
+        let mut response = MemoryResponse::from_cached(
+            &crate::model::CachedRecord::from(&row.record),
+            namespace.name,
+        );
+        if row.record.schema.as_ref().is_some_and(|s| {
+            s.lifecycle.lifecycle_version
+                == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+        }) {
+            if let Some(projected) = prepared.response {
+                response.strength = projected.strength;
+                response.decay_strength = projected.decay_strength;
+            }
+        }
+        response.full_text = row.full_text;
+        check_read_admission(&state, admitted_stamp).await?;
+        let receipts = if prepared.requested_access && row.record.phase != DecayPhase::Tombstone {
+            state
+                .search
+                .record_coherent_exposures_with_work(
+                    &[(memory_id, AccessKind::DirectRetrieval)],
+                    crate::storage::control::ExposureScope {
+                        namespace: response.namespace.clone(),
+                        source: Some(memory_id),
+                    },
+                    prepared.evaluated_at,
+                    parent,
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        return Ok(Observed {
+            receipts,
+            value: Json(ApiResponse {
+                data: response,
+                took_us: Some(start.elapsed().as_micros() as u64),
+            }),
+        });
+    }
     if let Some(namespace) = options.namespace.as_deref() {
         state
             .storage
@@ -462,67 +515,23 @@ pub async fn delete_memory(
     Path(id): Path<String>,
     Query(scope): Query<MemoryScopeQuery>,
 ) -> Result<Json<ApiResponse<DeleteResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-        if let Some(namespace) = scope.namespace.as_deref() {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-
-        // Read record first for entity index cleanup (Issue 14)
-        let existing_record = state.storage.get_record(memory_id).await;
-
-        let existed = state
-            .storage
-            .delete_memory_with_work(memory_id, scope.namespace.as_deref(), work.as_ref())
-            .await?;
-        if existed {
-            state.cache.remove(memory_id).await;
-            state.search.remove_from_index(memory_id).await;
-
-            // Issue 14: Clean up FTS5 index
-            state.search.fts_remove(memory_id).await;
-
-            // Issue 14: Clean up entity index
-            if let Some(ref record) = existing_record {
-                state
-                    .search
-                    .entity_index_remove(NamespaceId::new(record.namespace_id), memory_id)
-                    .await;
-            }
-
-            // Issue 13: Tombstone the graph node instead of removing it
-            if let Err(e) = state
-                .graph
-                .tombstone_node_with_work(memory_id, work.as_ref())
-                .await
-            {
-                tracing::warn!(
-                    memory_id = %memory_id,
-                    %e,
-                    "graph tombstone failed (non-fatal)"
-                );
-            }
-        }
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: DeleteResponse {
-                id: memory_id,
-                deleted: existed,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let mut reply = state
+        .storage
+        .forget_api1(memory_id, scope.namespace.as_deref())
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Forget { deleted }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: DeleteResponse {
+            id: memory_id,
+            deleted,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// POST /memories/:id/reinforce -- manual reinforcement.
@@ -538,44 +547,28 @@ pub async fn reinforce_memory(
     Path(id): Path<String>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<ApiResponse<ReinforceResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-
-        let namespace =
-            crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
-        if let Some(namespace) = namespace {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-        let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
-
-        let updated = state
-            .decay
-            .reinforce_with_work(memory_id, quality, namespace, work.as_ref())
-            .await
-            .map_err(|e| feedback_error(e, &id))?;
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: ReinforceResponse {
-                id: memory_id,
-                strength: updated.strength,
-                stability: updated.stability,
-                phase: format!("{:?}", updated.phase),
-                is_permastore: updated.is_permastore,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let namespace = crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
+    let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
+    let mut reply = state
+        .decay
+        .feedback_api1(memory_id, quality, namespace)
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Feedback { result }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: ReinforceResponse {
+            id: memory_id,
+            strength: result.strength,
+            stability: result.stability,
+            phase: result.phase,
+            is_permastore: result.is_permastore,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// Preserve typed lifecycle outcomes instead of classifying display strings.
@@ -1137,6 +1130,70 @@ async fn find_similar_admitted(
     let start = Instant::now();
 
     let memory_id = parse_memory_id(&id)?;
+
+    if let Some(prepared) = state
+        .search
+        .prepare_coherent_similar_with_work(
+            memory_id,
+            req.namespace.as_deref(),
+            req.limit.min(100) as usize,
+            req.min_score,
+            req.record_access,
+            req.include_embeddings,
+            parent,
+        )
+        .await?
+    {
+        let mut hits = Vec::with_capacity(prepared.results.len());
+        for (selected, row) in prepared.results.into_iter().zip(prepared.payload.rows) {
+            let mut memory = MemoryResponse::from_cached(
+                &crate::model::CachedRecord::from(&row.record),
+                prepared.payload.namespace.name.clone(),
+            );
+            if row.record.schema.as_ref().is_some_and(|s| {
+                s.lifecycle.lifecycle_version
+                    == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+            }) {
+                memory.strength = selected.retrievability;
+                memory.decay_strength = selected.effective_r;
+            }
+            memory.full_text = row.full_text;
+            memory.embedding = row.embedding;
+            hits.push(SearchHit {
+                memory,
+                score: selected.score.unwrap_or(0.0),
+            });
+        }
+        check_read_admission(&state, admitted_stamp).await?;
+        let accesses: Vec<_> = hits
+            .iter()
+            .map(|h| (h.memory.id, AccessKind::AssociativeRetrieval))
+            .collect();
+        let receipts = if prepared.requested_access {
+            state
+                .search
+                .record_coherent_exposures_with_work(
+                    &accesses,
+                    crate::storage::control::ExposureScope {
+                        namespace: prepared.payload.namespace.name,
+                        source: Some(memory_id),
+                    },
+                    prepared.evaluated_at,
+                    parent,
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        return Ok(Observed {
+            receipts,
+            value: Json(SearchResponse {
+                total: hits.len() as u64,
+                hits,
+                took_us: Some(start.elapsed().as_micros() as u64),
+            }),
+        });
+    }
 
     if let Some(namespace) = req.namespace.as_deref() {
         state

@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 thread_local! {
-    static FAIL_AFTER_NATIVE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(super) static FAIL_AFTER_NATIVE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static CAPTURE_CHECKED: std::cell::Cell<Option<std::sync::mpsc::Sender<()>>> = const { std::cell::Cell::new(None) };
 }
 
@@ -22,11 +22,6 @@ fn capture_checked() {
 
 fn native_context(ctx: &MutationContext, namespace: NamespaceId) -> Result<(), StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 {
-        return Err(StorageError::InvalidMutationContext(
-            "native lifecycle operations require contract version 2".into(),
-        ));
-    }
     if ctx.scope != MutationScope::Namespace(namespace) {
         return Err(StorageError::MutationNamespaceMismatch);
     }
@@ -239,6 +234,17 @@ impl MetadataStore {
         policy: &NativePolicyInputs,
         live_only: bool,
     ) -> Result<CapturedLifecycle, StorageError> {
+        self.capture_policy_at(read, scope, ids, policy, live_only, true)
+    }
+    pub(super) fn capture_policy_at(
+        &self,
+        read: &redb::ReadTransaction,
+        scope: &LifecycleScope,
+        ids: &[MemoryId],
+        policy: &NativePolicyInputs,
+        live_only: bool,
+        require_binding: bool,
+    ) -> Result<CapturedLifecycle, StorageError> {
         let state = self.native_control_at(read)?;
         let ns = {
             let table = read.open_table(NAMESPACE_TABLE)?;
@@ -254,7 +260,11 @@ impl MetadataStore {
             .schema
             .as_ref()
             .ok_or_else(|| invalid("native namespace schema missing"))?;
-        let resolved = policy.resolve(&ns)?;
+        let resolved = if require_binding {
+            policy.resolve(&ns)?
+        } else {
+            policy.resolve_unbound(&ns)?
+        };
         let mut records = Vec::new();
         let table = read.open_table(META_TABLE)?;
         for id in ids {
@@ -295,6 +305,25 @@ impl MetadataStore {
         ),
         StorageError,
     > {
+        self.check_native_policy_capture(tx, scope, capture, policy, live_only, true)
+    }
+    pub(super) fn check_native_policy_capture(
+        &self,
+        tx: &redb::WriteTransaction,
+        scope: &LifecycleScope,
+        capture: &CapturedLifecycle,
+        policy: &NativePolicyInputs,
+        live_only: bool,
+        require_binding: bool,
+    ) -> Result<
+        (
+            ControlState,
+            NamespaceConfig,
+            crate::decay::lifecycle::EffectiveLifecyclePolicy,
+            HashMap<MemoryId, DiskRecord>,
+        ),
+        StorageError,
+    > {
         let state = control::read_control(tx)?;
         if state.store_id != capture.generation.store_id {
             return Err(StorageError::StoreLineageMismatch);
@@ -312,7 +341,11 @@ impl MetadataStore {
             .schema
             .as_ref()
             .ok_or_else(|| invalid("native namespace schema missing"))?;
-        let resolved = policy.resolve(&ns)?;
+        let resolved = if require_binding {
+            policy.resolve(&ns)?
+        } else {
+            policy.resolve_unbound(&ns)?
+        };
         if schema.lifecycle_version != capture.version
             || schema.policy_revision != capture.revision
             || policy_hash(&ns, &resolved)? != capture.policy_hash
@@ -356,7 +389,18 @@ impl MetadataStore {
         policy: &NativePolicyInputs,
         clock: &dyn Clock,
     ) -> Result<Option<WriteReceipt>, StorageError> {
-        let guard = self.native_guard()?;
+        self.record_native_exposure_with_work(ctx, intent, policy, clock, None)
+    }
+
+    pub(crate) fn record_native_exposure_with_work(
+        &self,
+        ctx: &MutationContext,
+        intent: &ExposureIntent,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let guard = self.native_guard_with_work(parent)?;
         let (tx, receipt) = self.prepare_native(
             &guard,
             ctx,
@@ -367,6 +411,21 @@ impl MetadataStore {
             policy,
             clock,
         )?;
+        // Instance-local consumer regression: report I/O uncertainty after the
+        // real durable commit. Existing values 1/2 belong to legacy observation.
+        #[cfg(test)]
+        if self
+            .observation_fault
+            .compare_exchange(
+                3,
+                0,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            FAIL_AFTER_NATIVE_COMMIT.with(|flag| flag.set(true));
+        }
         self.commit_native(tx, receipt)
     }
     pub fn apply_native_feedback(

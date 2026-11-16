@@ -13,7 +13,9 @@ mod catalog;
 #[cfg(test)]
 mod catalog_completion_tests;
 pub(crate) mod effects;
+mod inherited_policy;
 mod insertion;
+mod legacy_lifecycle;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
 mod native_catalog;

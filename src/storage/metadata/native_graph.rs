@@ -28,11 +28,13 @@ impl MetadataStore {
             .iter()
             .flat_map(|e| [e.source, e.target])
             .collect();
-        let capture = self.capture_at(
+        // Pure structural mutation: no retention projection or inferred adoption.
+        let capture = self.capture_policy_at(
             &self.db.begin_read()?,
             &scope,
             &ids.into_iter().collect::<Vec<_>>(),
             policy,
+            false,
             false,
         )?;
         Ok(NativeGraphIntent {
@@ -72,8 +74,14 @@ impl MetadataStore {
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return replay_result(receipt).map(Some);
         }
-        let (state, ns, _, current) =
-            self.check_native_capture(&tx, &intent.scope, &intent.capture, policy, false)?;
+        let (state, ns, _, current) = self.check_native_policy_capture(
+            &tx,
+            &intent.scope,
+            &intent.capture,
+            policy,
+            false,
+            false,
+        )?;
         let mut changes = Vec::new();
         for e in &intent.original.edges {
             for (id, source) in [(e.source, true), (e.target, false)] {

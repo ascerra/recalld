@@ -242,7 +242,7 @@ async fn native_forget_scope_contract_and_stale_cas_reject_before_clock_or_bytes
         let mut ctx = context.clone();
         let mut name = None;
         match case {
-            "contract" => ctx.contract_version = 1,
+            "contract" => ctx.contract_version = 3,
             "scope" => ctx.scope = MutationScope::Namespace(NamespaceId::new(999)),
             "assertion" => name = Some("another-name".into()),
             "cas" => ctx.expected_generation = Some(Generation::default()),
@@ -261,6 +261,8 @@ async fn native_forget_scope_contract_and_stale_cas_reject_before_clock_or_bytes
             .unwrap_err();
         if case == "assertion" {
             assert!(matches!(error, StorageError::NamespaceMismatch { .. }));
+        } else if case == "contract" {
+            assert!(matches!(error, StorageError::InvalidMutationContext(_)));
         }
         assert_eq!(bytes(&d.path), before, "{case}");
         assert_eq!(clock.calls.load(Ordering::SeqCst), calls, "{case}");

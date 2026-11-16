@@ -1,0 +1,28 @@
+
+running 12 tests
+test mcp::legacy_lifecycle_tests::legacy_api2_generate_genuine_before_one_fixture ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_genuine_old_one_reopen_replays_without_rewriting_receipts ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_new_alias_old_handler_unknown_method_no_fallback ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_mcp_http_socket_replay_scope_cas_origin_and_one_clock ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_old_native_client_alias_rejects_before_any_write ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_feedback_reaches_actual_legacy_writer ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_forget_reaches_actual_legacy_writer ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_publication_failure_keeps_full_receipt_and_retry_completes ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_real_get_observer_false_and_original_hash_strict_reopen ... ok
+
+thread 'mcp::legacy_lifecycle_tests::legacy_api2_retired_scope_after_real_purge_and_name_reuse' (83) panicked at src/mcp/legacy_lifecycle_tests.rs:818:5:
+assertion `left == right` failed
+  left: "GENERATION_CONFLICT"
+ right: "NAMESPACE_MISMATCH"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test mcp::legacy_lifecycle_tests::legacy_api2_retired_scope_after_real_purge_and_name_reuse ... FAILED
+test mcp::legacy_lifecycle_tests::legacy_api2_real_unknown_tombstone_reopen_reconciles_original_operation ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_tombstone_metadata_admits_original_two ... ok
+
+failures:
+
+failures:
+    mcp::legacy_lifecycle_tests::legacy_api2_retired_scope_after_real_purge_and_name_reuse
+
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 1171 filtered out; finished in 1.96s
+

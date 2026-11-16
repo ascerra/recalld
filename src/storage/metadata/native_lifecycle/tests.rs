@@ -234,6 +234,11 @@ async fn fixture(
     } else {
         canonical
     };
+    if multiplier.is_none() {
+        // This dependent fixture deliberately adopts current inputs; it makes no
+        // claim about the unknown inputs preserved by the migration above.
+        crate::test_support::explicitly_adopt_inherited_policy(&path, ns, 1., 10);
+    }
     Data {
         path,
         legacy,
@@ -427,7 +432,7 @@ async fn replay_precedes_stale_tokens_policy_and_clock_but_not_lineage_or_payloa
         session
             .metadata()
             .apply_native_feedback(&newkey, &intent, &wrong_policy, clock.as_ref()),
-        Err(StorageError::LifecycleConflict(_))
+        Err(StorageError::InvalidMutation(message)) if message.contains("differs from canonical adoption")
     ));
     assert!(matches!(
         session.apply_feedback(&newkey, &intent),
@@ -1166,7 +1171,7 @@ async fn uncertain_real_commit_poisoning_requires_reopen_then_reconciles_without
 }
 
 #[tokio::test]
-async fn native_contract_one_rejects_feedback_and_exposure_without_bytes_or_time_change() {
+async fn native_unsupported_contracts_reject_feedback_and_exposure_without_bytes_or_time_change() {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(
         root.path(),
@@ -1182,16 +1187,18 @@ async fn native_contract_one_rejects_feedback_and_exposure_without_bytes_or_time
         .capture_exposure(scope(&d), &[(d.a, AccessKind::DirectRetrieval)])
         .unwrap();
     let mut context = ctx(&d, feedback.capture_generation(), "wrong-contract");
-    context.contract_version = 1;
     let before = std::fs::read(d.path.join("meta.db")).unwrap();
-    assert!(matches!(
-        session.apply_feedback(&context, &feedback),
-        Err(StorageError::InvalidMutationContext(_))
-    ));
-    assert!(matches!(
-        session.record_exposure(&context, &exposure),
-        Err(StorageError::InvalidMutationContext(_))
-    ));
+    for unsupported in [0, 3] {
+        context.contract_version = unsupported;
+        assert!(matches!(
+            session.apply_feedback(&context, &feedback),
+            Err(StorageError::InvalidMutationContext(_))
+        ));
+        assert!(matches!(
+            session.record_exposure(&context, &exposure),
+            Err(StorageError::InvalidMutationContext(_))
+        ));
+    }
     assert_eq!(std::fs::read(d.path.join("meta.db")).unwrap(), before);
     assert_eq!(clock.calls.load(Ordering::SeqCst), 0);
 }
@@ -1365,4 +1372,50 @@ async fn native_open_rejects_unknown_canonical_tables_before_writable_open() {
         tx.commit().unwrap();
         drop(db);
     }
+}
+
+#[tokio::test]
+async fn original_api_exposure_core_preserves_identity_and_replay_before_time() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(
+        root.path(),
+        LifecycleVersion::ExplicitFeedbackV2,
+        1500.,
+        Some(1.),
+    )
+    .await;
+    let clock = Arc::new(TestClock::new(DAY));
+    let session = open(&d, clock.clone());
+    let original = record(&session, d.a);
+    for api in [1, 2] {
+        let intent = session
+            .capture_exposure(scope(&d), &[(d.a, AccessKind::DirectRetrieval)])
+            .unwrap();
+        let mut key = ctx(
+            &d,
+            intent.capture_generation(),
+            &format!("original-api-{api}"),
+        );
+        key.contract_version = api;
+        let receipt = session.record_exposure(&key, &intent).unwrap().unwrap();
+        let after = logical(&session);
+        let replay = session.record_exposure(&key, &intent).unwrap().unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.operation_id, receipt.operation_id);
+        key.contract_version = 3 - api;
+        assert!(matches!(
+            session.record_exposure(&key, &intent),
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(logical(&session), after);
+        assert_eq!(clock.calls.load(Ordering::SeqCst), api as usize);
+        let row = record(&session, d.a);
+        assert_eq!(row.stability, original.stability);
+        assert_eq!(
+            row.schema.as_ref().unwrap().lifecycle.decay_anchor_at,
+            original.schema.as_ref().unwrap().lifecycle.decay_anchor_at
+        );
+    }
+    drop(session);
+    inspect_schema(&d.path).unwrap();
 }

@@ -909,17 +909,14 @@ async fn handle_reinforce_memory(
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge
+    bridge
         .storage
-        .reinforce_memory(id, quality, namespace)
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+        )
         .await
-    {
-        Ok(result) => match ToolCallResult::json(&result) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to reinforce memory: {e}")),
-    }
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -982,19 +979,14 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
     };
     let id = crate::model::MemoryId::from_uuid(uuid);
 
-    match bridge.storage.delete_memory(id, namespace).await {
-        Ok(deleted) => {
-            let response = json!({
-                "id": id_str,
-                "deleted": deleted,
-            });
-            match ToolCallResult::json(&response) {
-                Ok(r) => r,
-                Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-            }
-        }
-        Err(e) => ToolCallResult::error(format!("Failed to delete memory: {e}")),
-    }
+    bridge
+        .storage
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+        )
+        .await
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1883,6 +1875,20 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    let lifecycle = match name {
+        "forget_memory" => Some(crate::serialization::native_lifecycle::Operation::Forget),
+        "reinforce_memory" => Some(crate::serialization::native_lifecycle::Operation::Feedback),
+        _ => None,
+    };
+    if let Some(operation) = lifecycle {
+        return crate::mcp::native_lifecycle_adapter::dispatch(
+            bridge.storage.as_ref(),
+            operation,
+            arguments,
+        )
+        .await
+        .mcp();
+    }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{
         contract::{CommitState, Envelope, ErrorCategory, ExecutionError},

@@ -56,11 +56,21 @@ fn fixture_with_seed_and_ghost(
     seed: impl FnOnce(&mut RedbStorageEngine),
     ghost: bool,
 ) -> Data {
+    fixture_with_policy(root, seed, ghost, None, true)
+}
+fn fixture_with_policy(
+    root: &Path,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+    ghost: bool,
+    multiplier: Option<f32>,
+    adopt: bool,
+) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
     let mut config = NamespaceConfig::default_namespace(0);
     config.name = "native".into();
     config.embedding_dim = 4;
+    config.decay_rate_multiplier = multiplier;
     let ns = engine.create_namespace(&config).unwrap();
     let input = crate::storage::insertion::InsertMemory {
         id: None,
@@ -131,6 +141,11 @@ fn fixture_with_seed_and_ghost(
         },
     )
     .unwrap();
+    // Dependent native writer fixtures explicitly adopt present-day multiplier1.
+    // The actual migration above still preserves unknown historical inheritance.
+    if adopt {
+        crate::test_support::explicitly_adopt_inherited_policy(&path, ns, 1., 2000);
+    }
     Data {
         path,
         ns,
@@ -144,6 +159,17 @@ fn scope(d: &Data) -> LifecycleScope {
         namespace_name: "native".into(),
         source: None,
     }
+}
+fn policy_revision(d: &Data) -> Generation {
+    inspect_schema(&d.path)
+        .unwrap()
+        .namespaces
+        .into_iter()
+        .find(|n| n.id == d.ns)
+        .unwrap()
+        .schema
+        .unwrap()
+        .policy_revision
 }
 fn input(d: &Data) -> NativeInsert {
     NativeInsert {
@@ -197,6 +223,15 @@ fn actual_native_insert_feedback_tombstone_replay_and_reopen_preserve_proof() {
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let original = input(&d);
+    let parent_before = session
+        .engine
+        .get_record(d.parent)
+        .unwrap()
+        .unwrap()
+        .schema
+        .unwrap()
+        .lifecycle
+        .record_generation;
     let intent = session.capture_insert(scope(&d), &original).unwrap();
     let key = ctx(&session, &d, "create");
     let receipt = session
@@ -226,8 +261,8 @@ fn actual_native_insert_feedback_tombstone_replay_and_reopen_preserve_proof() {
             .lifecycle
             .record_generation
             .get(),
-        2
-    ); // policy migration 1, edge mutation 1
+        parent_before.next().unwrap().get()
+    ); // Exactly one edge mutation after the explicit fixture adoption.
     let feedback = session.capture_feedback(id, None, 3).unwrap();
     session
         .apply_feedback(&ctx(&session, &d, "feedback"), &feedback)
@@ -364,7 +399,7 @@ async fn original_expansion_replay_precedes_aborted_default_changes_and_real_pol
         &LifecycleMigrationOptions {
             expected_source: inspect_schema(&d.path).unwrap().control.generation_ref(),
             namespace_id: d.ns,
-            expected_policy_revision: "1".to_string().try_into().unwrap(),
+            expected_policy_revision: policy_revision(&d),
             target: LifecycleVersion::LegacyAccessV1,
             idempotency_key: "rollback".into(),
         },
@@ -845,6 +880,9 @@ mod mixed_history;
 
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
+
+#[path = "request_context_tests.rs"]
+mod request_context;
 
 #[path = "compaction_tests.rs"]
 mod compaction;
