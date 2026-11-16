@@ -1,0 +1,72 @@
+{
+  "status": "agreed seven-file/hunk source-only snapshot; unexecuted",
+  "helper_sha256": "6a218c446a543c9d0cd3f76236207db3e0a136bd1471eb46c35ed5dc64d0e88d",
+  "files": {
+    "src/storage/metadata/native_records/feedback_consumer_tests.rs": {
+      "before_sha256": "f56ed3b2fdb9323edeb9cfdad9b16f675f93f42c6ec6e43a2fc8774fe1d8f521",
+      "after_sha256": "e8f1a84add86bc50799cfe52a767a82fbfb73e0f36907ae02c5cab1e3cc3ebac"
+    },
+    "src/storage/metadata/native_records/exposure_consumer_tests.rs": {
+      "before_sha256": "d00e0ca8e264d84de2ab01800d2c6e91d0cb8582449940855cbcdb9eda5998d5",
+      "after_sha256": "86d90b4635c6be8ac5b8868a08765290165480f5c4f0c2e12e48c91a1e14b737"
+    },
+    "src/storage/metadata/native_records/forget_consumer_tests.rs": {
+      "before_sha256": "db4de5fa07e924971def0a36856bcd5c829cdfb63ecf05712084cb701ac5886a",
+      "after_sha256": "8b53777e55bfcfe666e427f8908e6d68dedccfb17d3e9e71aab02376d5f7f5fa"
+    },
+    "src/storage/metadata/native_records/sweep_tests.rs": {
+      "before_sha256": "0eb76ce41028e961072e34614323f59744ab9a3f856ce31e594ce7dfbd0f826b",
+      "after_sha256": "0c9e56a6859102e84660e31de5ff0d53d7577f3def6fbc56dfcfb0e1d466e200"
+    },
+    "src/storage/metadata/native_records/replay_consumer_tests.rs": {
+      "before_sha256": "df100701b740530037fb81c650448fab7de6586de66cf33f50e15161aef940a9",
+      "after_sha256": "b82621c16fbfc5c0e81154a5633a5f4241f118556a4a5f1b58a56523dca177a7"
+    },
+    "src/storage/metadata/native_records/phase_clock_tests.rs": {
+      "before_sha256": "793cc9ba6778560e0387106e65056fcc82937305c8bb191e69e7eabb5ef43e80",
+      "after_sha256": "752eeaa5903cbd4d8b50f5f593ca25e5fdc8a40fa9b6109d4598b594fd3fac68"
+    },
+    "src/storage/metadata/native_records/maintenance_tests.rs": {
+      "before_sha256": "e0cab7fa9e775a15656e4c24012a3997bb8497e81ed811cf17cf8681e7b049dc",
+      "after_sha256": "97a5f8f808be70d94311e224fde50b51e3c78ced331c088833cfd026de052c83"
+    }
+  },
+  "patch_sha256": "2d20893f59f667d6ad95825f70d4d649040d574fa825b1fc55093a5dc6c6ed59",
+  "changed_functions": {
+    "feedback_consumer_tests.rs": [
+      "setup_with_multiplier"
+    ],
+    "exposure_consumer_tests.rs": [
+      "setup"
+    ],
+    "forget_consumer_tests.rs": [
+      "setup"
+    ],
+    "sweep_tests.rs": [
+      "setup_with_multiplier",
+      "native_sweep_rechecks_donor_and_fan_after_capture_without_resampling_clock"
+    ],
+    "replay_consumer_tests.rs": [
+      "retired_replay"
+    ],
+    "phase_clock_tests.rs": [
+      "malformed_phase_rule_or_wrong_transition_rejects_without_open_mutation"
+    ],
+    "maintenance_tests.rs": [
+      "native_maintenance_one_phase_retains_ghost_vector_then_deletes_with_witness_peers_and_replay",
+      "native_maintenance_rechecks_canonical_donors_and_fan_with_original_clock_for_phase_and_strength_only",
+      "native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_without_receipts",
+      "native_harddelete_process_exit_recovers_exact_incident_edges_before_and_after_commit",
+      "native_maintenance_precommit_failure_and_unknown_commit_reconcile_real_transactions",
+      "native_maintenance_pass_pins_one_clock_and_never_advances_an_id_twice",
+      "native_harddelete_foreign_peer_requires_actual_policy_history",
+      "native_maintenance_export_import_fork_and_foreign_malformed_witnesses_remain_strict",
+      "native_harddelete_pending_recovery_rejects_unproven_dangling_edges_without_source_writes",
+      "native_maintenance_actual_policy_migration_invalidates_plan_but_replays_old_receipt_first",
+      "native_maintenance_pure_threshold_boundaries_are_inclusive_and_never_skip_phases",
+      "native_maintenance_missing_summary_permastore_and_unknown_phase_marker_are_preserved"
+    ]
+  },
+  "new_test": "native_maintenance_certified_permastore_exemption_and_forget",
+  "source_review_exclusion": "native_harddelete_zero_weight_pending_edge_rejects_signed_zero_change_without_source_writes remains byte-identical; legacy seed/remigration needs no fresh native insert certification"
+}

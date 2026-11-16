@@ -28,7 +28,7 @@ async fn invoke(
 
 async fn retired_replay(feedback: bool) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();

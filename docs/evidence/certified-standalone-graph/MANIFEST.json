@@ -1,0 +1,338 @@
+{
+  "COMPLETED-RUNS.json": {
+    "bytes": 4684,
+    "sha256": "c6d67af8d924fac473829e0a7aa503944cfd3f29c7bde850b2443142ba3a3a9a"
+  },
+  "HOME-COPY.json": {
+    "bytes": 966,
+    "sha256": "87a3ea7d575d260967c8b72baf0d2cb69fae4fcbdb94026fde5326e2ac090a41"
+  },
+  "OWNER-REVIEW.md": {
+    "bytes": 1389,
+    "sha256": "ae3ac56b7e135b16edebc13e10133a919ea71e597d774b440623f0c5f05da51f"
+  },
+  "RAW-MANIFEST.json": {
+    "bytes": 11093,
+    "sha256": "8d44b7f5bec06ca32b650cd850736628c6542ce42cb1efac9cf3e6dbe6dd13d3"
+  },
+  "REPORT.md": {
+    "bytes": 5988,
+    "sha256": "ff5edf7fbb5e7b4ab74101405c07520c10dca9d289ed94e9c5ea4d2b7eee61f7"
+  },
+  "SPEC-REFERENCES.json": {
+    "bytes": 322,
+    "sha256": "7246141b281ce6b516e0aa8afac4e00b8548dd88638c8af2fe7cd08756a58c7b"
+  },
+  "VALIDATION.json": {
+    "bytes": 1185,
+    "sha256": "44319612fb8cbbd9eb565705fa2c86b88a761d13c2e77f2a7bde7b36008d5d54"
+  },
+  "after003/boundary.excerpt.log": {
+    "bytes": 1734,
+    "sha256": "a85a32ca34da9d432f5c012d593c15299a424d7c194726266dff3d44419edf90"
+  },
+  "after003/boundary.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "after003/command.json": {
+    "bytes": 1407,
+    "sha256": "ae3a555ec3e861c47f07930273fae1b70bc30d2b8b78c241c4c64844da18775b"
+  },
+  "after003/driver.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "after003/executed-binaries.json": {
+    "bytes": 120,
+    "sha256": "6b8a3a2174ee5a18b68ad516e5d1d3e47087a85c0a0f290b453c5eb9e9e9abfd"
+  },
+  "after003/memory-events.txt": {
+    "bytes": 73,
+    "sha256": "86870662147a63bddde2d7128ae0d6516bea80979db337782be71ef08c0a46b0"
+  },
+  "after003/memory-peak.txt": {
+    "bytes": 11,
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb"
+  },
+  "after003/rustc.txt": {
+    "bytes": 197,
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+  },
+  "after003/source-unchanged.json": {
+    "bytes": 5,
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+  },
+  "after003/source.json": {
+    "bytes": 42477,
+    "sha256": "eba38870ecaf59df5ebb22d3ffd82278a7360cec5206f0ac26eeca47adffb65d"
+  },
+  "before001/boundary.excerpt.log": {
+    "bytes": 1276,
+    "sha256": "0f35676528d6e0444fc1e82098636f3d9bdbd2dccf579ebb3e575255c42535bc"
+  },
+  "before001/boundary.exit": {
+    "bytes": 4,
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+  },
+  "before001/clean.excerpt.log": {
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "before001/clean.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "before001/command.json": {
+    "bytes": 1594,
+    "sha256": "a40e94e8e764698305dc24cd6aae614d1c011524e7aaf92ef1e415a80d5b3e06"
+  },
+  "before001/driver.exit": {
+    "bytes": 2,
+    "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+  },
+  "before001/executed-binaries.json": {
+    "bytes": 3,
+    "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+  },
+  "before001/memory-events.txt": {
+    "bytes": 70,
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+  },
+  "before001/memory-peak.txt": {
+    "bytes": 11,
+    "sha256": "edd7a11b690e287971370431b3c32c18a53182f332e4575c1eaede86ba2d7cfe"
+  },
+  "before001/rustc.txt": {
+    "bytes": 197,
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+  },
+  "before001/source-unchanged.json": {
+    "bytes": 5,
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+  },
+  "before001/source.json": {
+    "bytes": 42477,
+    "sha256": "2e9727911c76c493a5fa1470fa616679a76984e978579833b0f11dde98afe6e4"
+  },
+  "before002/boundary.excerpt.log": {
+    "bytes": 18082,
+    "sha256": "130b6adf3ac73ad41d706e923ca79611088a2b794575ddd8f11c879504dc9f64"
+  },
+  "before002/boundary.exit": {
+    "bytes": 4,
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+  },
+  "before002/command.json": {
+    "bytes": 1409,
+    "sha256": "51a72375b018c73f1b7cf8dd742d85995124a42a920e44eb2b763851bf22a07c"
+  },
+  "before002/driver.exit": {
+    "bytes": 2,
+    "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+  },
+  "before002/executed-binaries.json": {
+    "bytes": 120,
+    "sha256": "ee400c348d4d3b96f51632b9eb91191b15a72b2a502a7602b19177b4cb66c155"
+  },
+  "before002/memory-events.txt": {
+    "bytes": 70,
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+  },
+  "before002/memory-peak.txt": {
+    "bytes": 11,
+    "sha256": "3f10d433df5deac165af6b8f1ebeb78a0a8ac99af4095d519f5630c0eaa2d039"
+  },
+  "before002/rustc.txt": {
+    "bytes": 197,
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+  },
+  "before002/source-unchanged.json": {
+    "bytes": 5,
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+  },
+  "before002/source.json": {
+    "bytes": 42477,
+    "sha256": "d89ad3892044f5b464de73393edb6325b93fad05ef0c167bcc30c6388913ed8e"
+  },
+  "focus004/boundary.excerpt.log": {
+    "bytes": 1734,
+    "sha256": "ec71698a5173e9991624adb0b6c6c0acb7e169b5d744b60976cedcb3e88bb215"
+  },
+  "focus004/boundary.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "focus004/command.json": {
+    "bytes": 1937,
+    "sha256": "4f0014e6a1bff9bfbf80a1417d47b7be89f13842663a161e35576a513ad43428"
+  },
+  "focus004/coregraph.excerpt.log": {
+    "bytes": 6826,
+    "sha256": "14f117f4107a5946ac5b71c1f530de89cb6ebb913fb1a6dcfc8adc80fc1f159d"
+  },
+  "focus004/coregraph.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "focus004/driver.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "focus004/executed-binaries.json": {
+    "bytes": 120,
+    "sha256": "6b8a3a2174ee5a18b68ad516e5d1d3e47087a85c0a0f290b453c5eb9e9e9abfd"
+  },
+  "focus004/memory-events.txt": {
+    "bytes": 70,
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+  },
+  "focus004/memory-peak.txt": {
+    "bytes": 10,
+    "sha256": "7f543e14a48ab4e181be58fdb0a753cb0c6e8eb421619dbabcc0f71d15fb86b2"
+  },
+  "focus004/producer.excerpt.log": {
+    "bytes": 3209,
+    "sha256": "c4dc38f1a32388c245ba50d5c8d71bcce11099f4ac909890f925b35ed2e93fc0"
+  },
+  "focus004/producer.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "focus004/rustc.txt": {
+    "bytes": 197,
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+  },
+  "focus004/source-unchanged.json": {
+    "bytes": 5,
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+  },
+  "focus004/source.json": {
+    "bytes": 42477,
+    "sha256": "eba38870ecaf59df5ebb22d3ffd82278a7360cec5206f0ac26eeca47adffb65d"
+  },
+  "full005/cli-binaries.json": {
+    "bytes": 263,
+    "sha256": "9ed8ff51b0e58119ca64090875127de6a6e3bf265192479643ba99d5d5c2b4b2"
+  },
+  "full005/clippy.excerpt.log": {
+    "bytes": 940,
+    "sha256": "d2984678f95cde13fb27194f094338ab6233e8ca939885c0086a699a0020863a"
+  },
+  "full005/clippy.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "full005/command.json": {
+    "bytes": 1617,
+    "sha256": "0322439ceb4cca4432a89c684eaa7131c694c59ca08e52be0ca857a5f5d1c676"
+  },
+  "full005/driver.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "full005/executed-binaries.json": {
+    "bytes": 1655,
+    "sha256": "946b10c2f89f88edd08894d8d3cdd1e9334c94969862f23697805afea4fd171f"
+  },
+  "full005/fmt.excerpt.log": {
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "full005/fmt.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "full005/full.excerpt.log": {
+    "bytes": 160023,
+    "sha256": "786e014645f2c9018abdf76e8b81d06338c62a56a9c7f8158484d11ec135b3c3"
+  },
+  "full005/full.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "full005/memory-events.txt": {
+    "bytes": 70,
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+  },
+  "full005/memory-peak.txt": {
+    "bytes": 11,
+    "sha256": "08942375c6443044ec26e388c5c8403aa6ee4e1ffd6ccaafdde8683a2b5e416d"
+  },
+  "full005/rustc.txt": {
+    "bytes": 197,
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+  },
+  "full005/source-unchanged.json": {
+    "bytes": 5,
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+  },
+  "full005/source.json": {
+    "bytes": 42477,
+    "sha256": "eba38870ecaf59df5ebb22d3ffd82278a7360cec5206f0ac26eeca47adffb65d"
+  },
+  "run.py": {
+    "bytes": 4467,
+    "sha256": "4ddf0d05fe49fad19cbf654030ede20428960364aeac597f94357771873650d1"
+  },
+  "tail006/cli-binaries.json": {
+    "bytes": 88,
+    "sha256": "cbb18c7aaab7b6b54da948dd973b957713f9af6d8e1925fd0a808e71b96354b5"
+  },
+  "tail006/cli.excerpt.log": {
+    "bytes": 424,
+    "sha256": "359c266cb652a63d5283b3133e52caee981ce78d1dfe46ede8a61fed30d5125f"
+  },
+  "tail006/cli.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "tail006/clippy.excerpt.log": {
+    "bytes": 968,
+    "sha256": "88acd34ced4cb5ab36f4510be93c50db0dd59f08b79bbd9ffe3435f09640cf33"
+  },
+  "tail006/clippy.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "tail006/command.json": {
+    "bytes": 1618,
+    "sha256": "3665b134197280ec932a288647d7461bfc6c0696fb7bedfa2e31103550fbe633"
+  },
+  "tail006/driver.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "tail006/executed-binaries.json": {
+    "bytes": 137,
+    "sha256": "f669a4badca50952d427ec3a0514c15c1a718c7a747144a318b5ba53d6ad33ed"
+  },
+  "tail006/fmt.excerpt.log": {
+    "bytes": 1,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "tail006/fmt.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "tail006/memory-events.txt": {
+    "bytes": 70,
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+  },
+  "tail006/memory-peak.txt": {
+    "bytes": 11,
+    "sha256": "9d24abc469715c720dbdb055069a308bee3bb521e680719107cf0e8ff89b410a"
+  },
+  "tail006/rustc.txt": {
+    "bytes": 197,
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+  },
+  "tail006/source-unchanged.json": {
+    "bytes": 5,
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+  },
+  "tail006/source.json": {
+    "bytes": 42477,
+    "sha256": "041fbc60e4d513ede27a2d2672aed31d9b266512ddfd3a711ec57fc3da66317f"
+  }
+}

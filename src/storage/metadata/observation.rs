@@ -387,6 +387,7 @@ impl MetadataStore {
         receipt: &WriteReceipt,
     ) -> Result<(), StorageError> {
         if !receipt.replayed {
+            let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
             tx.commit().map_err(|source| {
                 self.mark_unavailable();
                 StorageError::CommitOutcomeUnknown {
@@ -394,6 +395,7 @@ impl MetadataStore {
                     source,
                 }
             })?;
+            self.publish_vector_validation_commit(certification, receipt)?;
             self.view_publication.canonical_committed();
         }
         Ok(())

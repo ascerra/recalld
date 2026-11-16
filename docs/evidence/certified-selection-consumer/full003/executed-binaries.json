@@ -1,0 +1,15 @@
+{
+  "/target/debug/deps/inherited_policy_cli-8f4eb64f923f075f": "e17a724c7d5432bdec221323e3d8e36270d91238593fd98e21a0a74356378722",
+  "/target/debug/deps/lifecycle_cli-deffe0c58979bc70": "590a54060ff4928e273bfe2990ff0dc55fdf75a63f605fc50144eab31d33c2b2",
+  "/target/debug/deps/recalld-08988f66227b33f7": "de37992065517eaaeeb44ed035ba3ae24a7779266e83b578ea626903f3d545cd",
+  "/target/debug/deps/recalld-212d4a4f320696fe": "40730671542e10066fd7ee2e6a4c0407fd75ec146c0bcc405672486851a5da9e",
+  "/target/debug/deps/recalld_cli-8d07a58ae0104b99": "1f36dbbaa6f146b0d5c60aa1aad498eeeec5d62cbbe52d23d0ad3db13f13f460",
+  "/target/debug/deps/recalld_text_migrate-8d07f13a73aa26e5": "7a78448ca9c1c07995e2f308fb7aca43ab74a3a2c5b523cb28b041357f65b197",
+  "/target/debug/deps/text_migration_cli-55598fe3418b6f4f": "b210be4f7864eab237fab244b44f9be49fa80f09d3218270793d6860751ff888",
+  "/target/debug/deps/vector_certification_cli-2f72c905f2c41567": "e7e89943f1aac4fd241ffc9a781d45e225c28b5d0f4b277ce9947cd4cb4f8da0",
+  "/target/debug/examples/native_prefix_fixture-2081651d0b515e71": "d984602fbcd6ed40d8f3b8dd46ce1f98c9c5e335514aa76cc462b46d9b19d510",
+  "/target/debug/examples/offline_eval-86f97394a0b26227": "ad99d9f175d3d104ac5aa046dc1ee51fc019999a797b3e1832106d4ac1902997",
+  "/target/debug/examples/owned_evaluator-6603215d424f3046": "296e0fc8bff2d8bc5cc7b8d1c3dc79498a7762b524e70320622ad37e81986811",
+  "/target/debug/examples/performance_probe-2cf5882a43f2f66b": "5aa4a1042aa69e73ac2af24d4abcaadc2c690452754dbf83b79f7f1242736865",
+  "/target/debug/examples/score_mcp_episode-64bbb48cf1d9ce94": "115ea4f667bf97c088e599dffd0b9dd7644e1c9221c5c9a27d354284021529b0"
+}

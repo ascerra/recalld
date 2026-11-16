@@ -5,14 +5,14 @@
 use crate::cache::CacheManager;
 use crate::graph::SharedGraph;
 use crate::model::{DiskRecord, MemoryId, NamespaceId};
-use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex};
+use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner};
 
 /// Borrowed handles to the four out-of-storage indexes, plus the cache.
 pub(crate) struct IndexHandles<'a> {
     /// Record cache — entries for deleted memories must not be served.
     pub cache: &'a CacheManager,
     /// In-memory vector index used by semantic search.
-    pub vector_index: &'a tokio::sync::RwLock<FlatVectorIndex>,
+    pub vector_index: &'a tokio::sync::RwLock<VectorIndexOwner>,
     /// SQLite FTS5 index used by keyword search.
     pub fts_index: &'a tokio::sync::Mutex<FtsIndex>,
     /// Entity -> memory inverted index.
@@ -96,7 +96,6 @@ pub(crate) async fn purge_from_indexes(
 
     // 3. Vector index.
     {
-        use crate::search::VectorIndex;
         let mut vector_index = handles.vector_index.write().await;
         for id in &ids {
             match vector_index.remove(*id) {

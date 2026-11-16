@@ -15,6 +15,7 @@ mod catalog;
 #[cfg(test)]
 mod catalog_completion_tests;
 mod catalog_page;
+mod certification;
 pub(crate) mod effects;
 mod inherited_policy;
 mod insertion;
@@ -107,6 +108,10 @@ pub struct MetadataStore {
     db: Database,
     ids: Box<dyn super::ids::IdSource>,
     native_lifecycle_only: bool,
+    // A validated position in canonical history, never a generation allocator.
+    // Only this owner's guarded commit paths can move it to a committed receipt.
+    vector_validation:
+        std::sync::Arc<std::sync::RwLock<Option<certification::OwnedVectorValidation>>>,
     work_tracker: WorkTracker,
     view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
     unavailable: std::sync::atomic::AtomicBool,
@@ -123,6 +128,8 @@ pub struct MetadataStore {
     pub(crate) ack_test_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
+    pub(crate) vector_publication_failure_nth: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
@@ -297,6 +304,7 @@ impl MetadataStore {
             db,
             ids,
             native_lifecycle_only,
+            vector_validation: std::sync::Arc::new(std::sync::RwLock::new(None)),
             work_tracker: WorkTracker::new(store_id),
             view_publication: std::sync::Arc::new(
                 super::publication::PublicationRegistry::default(),
@@ -308,6 +316,8 @@ impl MetadataStore {
             effects_epoch: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             observation_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            vector_publication_failure_nth: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             tombstone_publication_fault: std::sync::atomic::AtomicBool::new(false),
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
@@ -335,6 +345,9 @@ impl MetadataStore {
                 .any(|p| p.stage != crate::storage::purge::PurgeStage::Complete),
             std::sync::atomic::Ordering::SeqCst,
         );
+        if native_lifecycle_only {
+            store.initialize_vector_validation()?;
+        }
         let records = store.scan_all_for_recovery()?;
         let phases: Vec<_> = records
             .iter()
@@ -395,7 +408,7 @@ impl MetadataStore {
         Ok(())
     }
 
-    fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
+    pub(crate) fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
         if self.native_lifecycle_only {
             return Err(StorageError::RecoveryRequired(
                 "operation does not participate in native lifecycle proof".into(),

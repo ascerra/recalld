@@ -57,7 +57,7 @@ fn native_graph_nochange_empty_cas_and_unkeyed_immutability() {
 fn native_graph_nochange_failures_reconcile_without_peer_or_clock_changes() {
     for unknown in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let id = add(&mut session, &d, "source");
@@ -116,7 +116,7 @@ fn native_graph_nochange_process_exit_recovers_key_once() {
         "after_canonical_ack",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let id = add(&mut session, &d, "source");
@@ -173,7 +173,7 @@ fn native_graph_nochange_process_exit_recovers_key_once() {
 fn native_graph_nochange_rejects_changed_witness_action_or_missing_key_immutably() {
     for case in 0..6 {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let id = add(&mut session, &d, "source");

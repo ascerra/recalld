@@ -33,12 +33,17 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
-    fn active_embedding(
+    async fn similar_contract(
         &self,
-    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
-        Err(EmbeddingError::Unavailable(
-            "active embedding identity unavailable".into(),
-        ))
+        _request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn query_contract(
+        &self,
+        _request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
     }
     /// Same owned core as the production pipeline, before provider/selection work.
     /// Immutable test adapters do not register work; they may not inherit a ticket.
@@ -149,6 +154,13 @@ pub trait SearchPipeline: Send + Sync {
         self.record_exposures(accesses, scope).await
     }
 
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
+        Err(EmbeddingError::Unavailable(
+            "active embedding identity unavailable".into(),
+        ))
+    }
     /// Generate an embedding for the given text within a namespace.
     async fn embed_text(
         &self,
@@ -512,6 +524,29 @@ pub trait RecordCache: Send + Sync {
 /// Relationship graph for edge traversal.
 #[async_trait::async_trait]
 pub trait RelationshipGraph: Send + Sync {
+    /// Standalone native edge intent. Ready success includes every derived view.
+    async fn put_native_edges(
+        &self,
+        _ctx: crate::storage::control::MutationContext,
+        _input: crate::storage::native_graph::NativeGraphInput,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "native graph completion owner is required".into(),
+        ))
+    }
+    /// Automatic selection is volatile and unkeyed. Never a creation callback.
+    async fn select_native_links(
+        &self,
+        _ctx: crate::storage::control::MutationContext,
+        _selection: crate::graph::native_producer::NativeLinkSelection,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "native graph completion owner is required".into(),
+        ))
+    }
+
     async fn tombstone_node_with_work(
         &self,
         id: MemoryId,

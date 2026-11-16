@@ -127,6 +127,7 @@ impl MetadataStore {
         tx: redb::WriteTransaction,
         receipt: &WriteReceipt,
     ) -> Result<(), StorageError> {
+        let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
         crate::storage::catalog::boundary("before_metadata_commit")?;
         let result = tx.commit();
         #[cfg(test)]
@@ -144,6 +145,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.publish_vector_validation_commit(certification, receipt)?;
         self.view_publication.canonical_committed();
         crate::storage::catalog::boundary("after_metadata_commit").map_err(|source| {
             self.mark_unavailable();

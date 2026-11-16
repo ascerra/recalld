@@ -6,9 +6,9 @@ use crate::time::Clock;
 
 fn context(ctx: &MutationContext, namespace: NamespaceId) -> Result<(), StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || ctx.scope != MutationScope::Namespace(namespace) {
+    if ctx.scope != MutationScope::Namespace(namespace) {
         return Err(StorageError::InvalidMutationContext(
-            "native graph requires contract 2 and its captured namespace".into(),
+            "native graph requires its captured namespace".into(),
         ));
     }
     Ok(())
@@ -41,6 +41,7 @@ impl MetadataStore {
             scope,
             original: original.clone(),
             capture,
+            selection_generation: None,
         })
     }
     pub(crate) fn lookup_native_graph(
@@ -82,6 +83,14 @@ impl MetadataStore {
             false,
             false,
         )?;
+        if intent
+            .selection_generation
+            .is_some_and(|at| at != state.generation_ref())
+        {
+            return Err(StorageError::LifecycleConflict(
+                "native graph selection generation changed".into(),
+            ));
+        }
         let mut changes = Vec::new();
         for e in &intent.original.edges {
             for (id, source) in [(e.source, true), (e.target, false)] {

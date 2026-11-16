@@ -417,6 +417,7 @@ impl McpStorageAdapter {
                         if let BatchItemPlan::Invalid { error, .. } = &prepared.plan {
                             final_error = error.clone();
                         }
+                        let expected_rejection = final_error.clone();
                         let storage = self.storage.clone();
                         let worker = work.child().map_err(StorageError::from)?;
                         let trace_worker = Worker::new_if("batch.rejection.queue", legacy_trace);
@@ -464,6 +465,41 @@ impl McpStorageAdapter {
                                 outcome.bookkeeping_receipts =
                                     progress.bookkeeping_receipts.clone();
                             }
+                            Ok(Err(error @ StorageError::CommittedMutation { .. })) => {
+                                let StorageError::CommittedMutation { receipt, .. } = &error else {
+                                    unreachable!()
+                                };
+                                let MutationOutcome::BatchItemRejected {
+                                    batch_operation_id,
+                                    index: rejected_index,
+                                    error: rejected,
+                                } = &receipt.outcome
+                                else {
+                                    return Err(error.into());
+                                };
+                                if receipt.store_id != outcome.store_id
+                                    || receipt.receipt_version != 1
+                                    || receipt.operation_id.is_nil()
+                                    || receipt.committed_generation
+                                        == crate::storage::control::Generation::default()
+                                    || *batch_operation_id != outcome.batch_operation_id
+                                    || *rejected_index as usize != index
+                                    || *rejected != expected_rejection
+                                {
+                                    // Preserve unexpected evidence as a typed failure;
+                                    // it cannot establish this item's rejection.
+                                    return Err(error.into());
+                                }
+                                // Rejection and bookkeeping receipt committed together.
+                                // This is not a successful child receipt. Do not read
+                                // progress back through the now-unavailable owner.
+                                outcome.items[index].status = BatchStatus::Error;
+                                outcome.items[index].error = Some(rejected.clone());
+                                outcome.items[index].retryable = false;
+                                outcome.bookkeeping_receipts.push((**receipt).clone());
+                                mark_unready(&mut outcome);
+                                return Ok(outcome);
+                            }
                             Ok(Err(StorageError::CommitOutcomeUnknown {
                                 operation_id, ..
                             })) => {
@@ -485,8 +521,15 @@ impl McpStorageAdapter {
                             }
                         }
                     } else {
-                        // Provider failure happened before canonical work; keep
-                        // its reserved child pending. No provider detail is stored.
+                        // Known precommit failures keep the reserved child
+                        // pending. Certification absence has no automatic retry
+                        // remedy for retained parents; provider outages may heal.
+                        let certification_required = matches!(
+                            error,
+                            StoreWriteError::Canonical(
+                                StorageError::VectorCertificationRequired { .. }
+                            )
+                        );
                         let unavailable = matches!(
                             error,
                             StoreWriteError::Bridge(bridge::BridgeError::Unavailable(_))
@@ -503,17 +546,18 @@ impl McpStorageAdapter {
                                 "reconciliation_required"
                             }
                         );
-                        outcome.items[index].status = if unavailable {
+                        outcome.items[index].status = if unavailable || certification_required {
                             BatchStatus::NotAttempted
                         } else {
                             BatchStatus::Unknown
                         };
                         outcome.items[index].retryable = unavailable;
-                        outcome.items[index].error = Some(BatchError::new(if unavailable {
-                            "UNAVAILABLE"
-                        } else {
-                            "RECONCILIATION_REQUIRED"
-                        }));
+                        outcome.items[index].error =
+                            Some(BatchError::new(if unavailable || certification_required {
+                                "UNAVAILABLE"
+                            } else {
+                                "RECONCILIATION_REQUIRED"
+                            }));
                         if unavailable {
                             outcome.items[index].error.as_mut().unwrap().field =
                                 self.native_store_blocker(prepared).map(str::to_owned);
@@ -1374,7 +1418,7 @@ mod tests {
         let f = Fixture::new();
         let adapter = f.storage_adapter();
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
         let input = request(&f, "publication", vec![item(), item()]);
         let outcome = adapter.mutate_batch(input.clone()).await.unwrap();
         assert_eq!(
@@ -1395,7 +1439,7 @@ mod tests {
             .unwrap();
         assert_eq!(pending[0].receipt.operation_id, current.operation_id);
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM);
         let replay = adapter.mutate_batch(input).await.unwrap();
         assert!(replay.all_ready());
         assert_eq!(replay.succeeded, 2);
@@ -1547,7 +1591,7 @@ mod tests {
         let mut bridge = crate::test_support::StubBridge::default().into_bridge();
         bridge.storage = Arc::new(f.storage_adapter());
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
         let result = crate::mcp::tools::dispatch_tool(
             &bridge,
             "store_memories",

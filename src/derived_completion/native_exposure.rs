@@ -16,6 +16,26 @@ impl DerivedCompletion {
         parent: Option<&WorkTicket>,
         original_contract_version: u32,
     ) -> Result<Vec<WriteReceipt>, ObservationError> {
+        self.record_native_exposures_with_scopes(
+            accesses,
+            crate::decay::similarity_scope::ExposureScopes::Existing(scope),
+            sampled_at,
+            policy,
+            parent,
+            original_contract_version,
+        )
+        .await
+    }
+
+    pub(crate) async fn record_native_exposures_with_scopes(
+        &self,
+        accesses: Vec<(MemoryId, AccessKind)>,
+        scope: crate::decay::similarity_scope::ExposureScopes,
+        sampled_at: i64,
+        policy: NativePolicyInputs,
+        parent: Option<&WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<WriteReceipt>, ObservationError> {
         if accesses.is_empty() {
             return Ok(Vec::new());
         }
@@ -39,7 +59,7 @@ impl DerivedCompletion {
     async fn native_exposures_accepted(
         &self,
         accesses: Vec<(MemoryId, AccessKind)>,
-        scope: Option<ExposureScope>,
+        scope: crate::decay::similarity_scope::ExposureScopes,
         sampled_at: i64,
         policy: NativePolicyInputs,
         work: &WorkTicket,
@@ -62,12 +82,34 @@ impl DerivedCompletion {
             let storage = storage.write().map_err(ObservationError::worker_failed)?;
             let result = (|| {
                 let groups = exposure_groups(&storage, &accesses)?;
+                let scopes = scope
+                    .validate(&storage, &groups)
+                    .map_err(|e| ObservationError::storage(e, vec![]))?;
                 // This is the already-sampled query time, not another time source.
                 let clock = crate::time::ManualClock::new(sampled_at);
                 let mut receipts = Vec::new();
                 for (namespace, batch) in groups {
+                    let scope = scopes.get(&namespace).expect("validated group").as_ref();
                     let namespace = NamespaceId::new(namespace);
                     let result = (|| {
+                        // Instance-local regression: fail a later group before
+                        // its commit, after a preceding real namespace commit.
+                        #[cfg(test)]
+                        if storage
+                            .meta_store()
+                            .observation_fault
+                            .compare_exchange(
+                                5,
+                                0,
+                                std::sync::atomic::Ordering::SeqCst,
+                                std::sync::atomic::Ordering::SeqCst,
+                            )
+                            .is_ok()
+                        {
+                            return Err(StorageError::InvalidMutation(
+                                "injected later exposure group failure".into(),
+                            ));
+                        }
                         let config = storage
                             .get_namespace(namespace)?
                             .ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
@@ -94,7 +136,16 @@ impl DerivedCompletion {
                         )
                     })();
                     match result {
-                        Ok(Some(receipt)) => receipts.push(receipt),
+                        Ok(Some(receipt)) => {
+                            receipts.push(receipt);
+                            #[cfg(test)]
+                            let _ = storage.meta_store().observation_fault.compare_exchange(
+                                4,
+                                5,
+                                std::sync::atomic::Ordering::SeqCst,
+                                std::sync::atomic::Ordering::SeqCst,
+                            );
+                        }
                         Ok(None) => {}
                         Err(error) => return Err(ObservationError::storage(error, receipts)),
                     }
