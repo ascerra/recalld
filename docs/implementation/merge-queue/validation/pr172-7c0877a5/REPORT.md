@@ -1,0 +1,9 @@
+# PR172 chronology regression coverage on actual main181
+
+Exact source `7c0877a563033cf7bd68a523ad9fee68a3d38755` normally merges original5267 with main18133865. The production tree/Cargo files match main; the only five Rust differences are test files listed by the driver. Pascal and Feynman reviewed the final source. Metadata-only/depth0 chronology deliberately uses NoProvider and does not require semantic certification; actual semantic similarity fixtures retain retained-document reembedding, native phase receipts and explicit policy adoption. No runtime guard or assertion was weakened.
+
+All18 stages PASS: **93 unique Rust tests / 97 executions** including **10 CLI tests**, affected chronology/similarity/strict-query/public lifecycle/adoption/origin controls, fmt,3Python suites,allfeature/alltargetClippy(warnings),CLIbuild and **9 actual publicAPI1 episodes /54 true-mode cases**. Focus overlaps are counted once in the unique total. This is bounded affected validation, **not a new full-suite result**. Original owner b0 full1368+3 attribution remains separate.
+
+Checks preserve query exposure then later public feedback sampled chronology, false-mode state, origin selection, actual inherited-policy adoption, certification and malformed-input rejection. No ordinary native constructor or public2 activation was implemented by these tests. Final exact-head CI and green main CI remain merge gates.
+
+Pinned Rust1.94.1 image,networknone,2CPU,actual6GiB,privateHOME/data,one serial cache and own-packageclean after verified prior-source binaries. All485 source inputs match commit/before/after. Executed test binaries and public binary were rehashed before any subsequent source switch. Peak6442450944bytes,maxevents5223,OOM0/kill0; no4GiB/resource-performance claim. Container retired. Raw scratch remains protected until publication/results and central cleanup release; no deletion claim.

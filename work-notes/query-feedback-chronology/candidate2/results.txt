@@ -1,0 +1,320 @@
+--- build.log ---
+    Finished `test` profile [unoptimized] target(s) in 38.65s
+--- clippy.log ---
+warning: `recalld` (lib) generated 1093 warnings (run `cargo clippy --fix --lib -p recalld` to apply 117 suggestions)
+warning: `recalld` (bin "recalld") generated 1 warning
+warning: `recalld` (bin "recalld" test) generated 1 warning (1 duplicate)
+warning: `recalld` (lib test) generated 1157 warnings (1044 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 10 suggestions)
+    Finished `dev` profile [unoptimized] target(s) in 18.03s
+--- focus-adopted_public_.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.15s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1365 filtered out; finished in 17.95s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_explicit_override_ignores_unused_global_without_adoption ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_private_keyed_history_replays_before_new_policy_and_cas ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_unknown_feedback_rejects_but_structural_forget_is_unblocked ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_feedback_requires_actual_adoption_after_global_change ... ok
+--- focus-api1_public_.log ---
+
+thread 'tokio-rt-worker' (248) panicked at src/storage/metadata/native_records/public_api1_tests.rs:527:13:
+injected precommit clock panic
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_worker_join_feedback_is_unknown ... ok
+
+thread 'tokio-rt-worker' (249) panicked at src/storage/metadata/native_records/public_api1_tests.rs:527:13:
+injected precommit clock panic
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_worker_join_forget_is_unknown ... ok
+
+
+thread 'tokio-rt-worker' (249) panicked at src/storage/metadata/native_records/public_api1_tests.rs:527:13:
+injected precommit clock panic
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_worker_join_forget_is_unknown ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1351 filtered out; finished in 23.25s
+
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+
+running 0 tests
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.31s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1351 filtered out; finished in 23.25s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test mcp::legacy_lifecycle_tests::api1_public_legacy_missing_scope_terminal_and_old_alias_new_server ... ok
+test mcp::legacy_lifecycle_tests::api1_public_legacy_projection_is_same_tx_under_later_accepted_write ... ok
+test mcp::legacy_lifecycle_tests::api1_public_legacy_success_shapes ... ok
+test serialization::lifecycle_api1::tests::api1_public_advertised_unknown_method_never_falls_back_and_frame_rejects_prewrite ... ok
+test mcp::legacy_lifecycle_tests::api1_public_mixed_case_canonical_scope_through_public_and_remote ... ok
+test serialization::lifecycle_api1::tests::api1_public_private_selector_validation_preserves_missing_nil_behavior ... ok
+test serialization::lifecycle_api1::tests::api1_public_reconnect_resets_capability_without_retrying_lost_mutation ... ok
+test serialization::lifecycle_api1::tests::api1_public_old_peer_selects_exact_scoped_unscoped_before_write ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_feedback_uses_configured_policy_and_original1_hash ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_http_feedback ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_http_forget ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_legacy_policy_keeps_original1_and_configured_clock ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_failures_keep_receipts_and_unknown_identity ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_mcp_feedback ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_mcp_forget ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_remote_decode_and_terminal_no_resurrection ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_worker_join_feedback_is_unknown ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::public_api1::api1_public_native_worker_join_forget_is_unknown ... ok
+--- focus-decoder_native_.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1366 filtered out; finished in 4.70s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_committed_requires_receipt_but_unknown_can_keep_allocated_id ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_feedback_quality_binds_success_error_and_malformed_receipts ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_namespace_binds_success_error_and_malformed_receipts ... ok
+--- focus-inherited_policy_.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.45s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 1358 filtered out; finished in 26.42s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test storage::inherited_policy_tests::inherited_policy_copy_to_live_open_retains_the_same_source_owner ... ok
+test storage::inherited_policy_tests::inherited_policy_codec_and_preview_tampering_fail_closed ... ok
+test storage::inherited_policy_tests::inherited_policy_keyed_noop_no_row_churn_and_some_to_none_requires_new_adoption ... ok
+test storage::inherited_policy_tests::inherited_policy_import_fork_preserves_original_binding_and_stripping_fails ... ok
+test storage::inherited_policy_tests::inherited_policy_postcommit_errors_keep_exact_receipt_unknown_ack_keeps_allocated_identity ... ok
+test storage::inherited_policy_tests::inherited_policy_unknown_history_can_be_forgotten_without_adoption ... ok
+test storage::inherited_policy_tests::inherited_policy_preview_ghost_neighbor_uses_real_maintenance_bonus_and_retains_payload_loss ... ok
+test storage::inherited_policy_tests::inherited_policy_unknown_structural_edge_preserves_strength_and_final_guards ... ok
+test storage::native_catalog::tests::native_catalog_review_invalid_inherited_policy_rejects_before_allocation ... ok
+test storage::inherited_policy_tests::inherited_policy_unknown_requires_real_adoption_replay_before_cas_and_restart ... ok
+test system::inherited_policy_tests::inherited_policy_actual_restart_requires_explicit_adoption_before_changed_projection ... ok
+--- focus-legacy_lifecycle.log ---
+
+thread 'tokio-rt-worker' (343) panicked at src/mcp/legacy_lifecycle_tests.rs:838:13:
+actual legacy worker interruption
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test mcp::legacy_lifecycle_tests::legacy_api2_actual_worker_panic_is_unknown_without_invented_receipt ... ok
+test mcp::legacy_lifecycle_tests::api1_public_mixed_case_canonical_scope_through_public_and_remote ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_generate_genuine_before_one_fixture ... ignored, fixture generator: only execute on the recorded pre-correction source
+test mcp::legacy_lifecycle_tests::legacy_api2_error_reply_cannot_claim_an_unrelated_or_future_receipt ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_malformed_new_socket_reply_retains_real_known_receipt ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_genuine_old_one_reopen_replays_without_rewriting_receipts ... ok
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.40s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 21 passed; 0 failed; 1 ignored; 0 measured; 1347 filtered out; finished in 2.98s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test mcp::legacy_lifecycle_tests::api1_public_legacy_missing_scope_terminal_and_old_alias_new_server ... ok
+test mcp::legacy_lifecycle_tests::api1_public_legacy_projection_is_same_tx_under_later_accepted_write ... ok
+test mcp::legacy_lifecycle_tests::api1_public_legacy_success_shapes ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_actual_worker_panic_is_unknown_without_invented_receipt ... ok
+test mcp::legacy_lifecycle_tests::api1_public_mixed_case_canonical_scope_through_public_and_remote ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_generate_genuine_before_one_fixture ... ignored, fixture generator: only execute on the recorded pre-correction source
+test mcp::legacy_lifecycle_tests::legacy_api2_error_reply_cannot_claim_an_unrelated_or_future_receipt ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_malformed_new_socket_reply_retains_real_known_receipt ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_genuine_old_one_reopen_replays_without_rewriting_receipts ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_native_reply_bytes_keep_exact_old_shape ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_new_alias_old_handler_unknown_method_no_fallback ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_old_native_client_alias_rejects_before_any_write ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_feedback_reaches_actual_legacy_writer ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_mcp_http_socket_replay_scope_cas_origin_and_one_clock ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_forget_reaches_actual_legacy_writer ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_mcp_tool_text_structured_http_parity_and_public_gate ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_publication_failure_keeps_full_receipt_and_retry_completes ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_real_get_observer_false_and_original_hash_strict_reopen ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_real_unknown_tombstone_reopen_reconciles_original_operation ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_retired_scope_after_real_purge_and_name_reuse ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_strict_private_validation_and_unkeyed_distinct_feedback ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_tombstone_metadata_admits_original_two ... ok
+--- focus-native_record_context_.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1367 filtered out; finished in 1.26s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test storage::metadata::native_records::tests::request_context::native_record_context_before_fixture ... ok
+test storage::metadata::native_records::tests::request_context::native_record_context_replays_genuine_before_api2_bytes ... ok
+--- focus-query_feedback_chronology_.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 1.28s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1365 filtered out; finished in 11.30s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_mcp_v1 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_mcp_v2 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_rest_v1 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_rest_v2 ... ok
+--- focus-similar_v.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.13s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 1359 filtered out; finished in 26.23s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test search::pipeline::read_view::tests::similar_v1_canonical_prefilter_matches_cosine_oracle_and_uuid_ties ... ok
+test search::pipeline::read_view::tests::similar_v2_actual_legacy_false_flag_uses_bound_scope_without_current_rewrite ... ok
+test search::pipeline::read_view::tests::similar_v2_actual_returned_exposure_per_namespace_policy_clock_and_origin ... ok
+test search::pipeline::read_view::tests::similar_v2_actual_chain_64_resolves_65_is_unresolved_history_stays_raw ... ok
+test search::pipeline::read_view::tests::similar_v2_bound_scope_exclusions_and_false_byte_identity ... ok
+test search::pipeline::read_view::tests::similar_v2_later_namespace_failure_keeps_earlier_receipt_and_publication ... ok
+test search::pipeline::read_view::tests::similar_v2_phase_refill_current_history_and_filtered_successor ... ok
+test search::pipeline::read_view::tests::similar_v2_origin_hashes_and_reopen_keep_per_namespace_scope ... ok
+test search::pipeline::read_view::tests::similar_v2_source_revalidation_rejects_before_any_exposure ... ok
+test search::pipeline::read_view::tests::similar_v2_target_removed_after_selection_fails_before_first_group ... ok
+--- focus-strict_query_.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.20s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 1355 filtered out; finished in 8.03s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test search::pipeline::read_view::tests::strict_query_actual_final_barrier_failure_keeps_full_receipt_and_identity ... ok
+test search::pipeline::read_view::tests::strict_query_actual_original2_observer_and_current_barrier ... ok
+test search::pipeline::read_view::tests::strict_query_actual_prepared_mcp_rest_current_history_and_false_bytes ... ok
+test search::pipeline::read_view::tests::strict_query_actual_native_bound_supplied_priority_unknown_and_metadata_only ... ok
+test search::pipeline::read_view::tests::strict_query_actual_similar_original2_true_preserves_all_namespace_receipts ... ok
+test search::pipeline::read_view::tests::strict_query_actual_supplemental_coverage_after_filter_and_cap ... ok
+test search::pipeline::read_view::tests::strict_query_actual_whole_response_budget_before_false_and_true_observation ... ok
+test search::pipeline::read_view::tests::strict_query_explanation_preserves_actual_exposure_classification ... ok
+test serialization::query::tests::strict_query_selectors_reject_before_work_and_preserve_defaults ... ok
+test serialization::query::tests::strict_query_single_schema_rejects_scan_and_conflicting_legacy_scope_selectors ... ok
+test serialization::query::tests::strict_query_vectors_require_pair_and_keep_original_f32_bits ... ok
+test serialization::query_response::tests::strict_query_valid_lifecycle_receipt_groups_fit_full_error_projection_reservation ... ok
+test serialization::query_schema::tests::strict_query_prepared_schema_documents ... ok
+test search::pipeline::read_view::tests::strict_query_actual_similar_scope_current_history_empty_identity_and_parity ... ok
+--- full.log ---
+warning: `recalld` (lib) generated 93 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-b5f6af44d2a89497)
+test result: ok. 1368 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 890.76s
+     Running unittests src/main.rs (/target/debug/deps/recalld-562f5ca8fdb44e42)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-c8bdd12cfba39b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-6b0e33911496ca22)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.94s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-2f292c1c7574ca84)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.08s
+     Running unittests examples/native_prefix_fixture.rs (/target/debug/examples/native_prefix_fixture-0698468f44601476)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests examples/offline_eval.rs (/target/debug/examples/offline_eval-32f8e5c1ba51aa5f)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+     Running unittests examples/owned_evaluator.rs (/target/debug/examples/owned_evaluator-3f3db38e68f268f3)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests examples/performance_probe.rs (/target/debug/examples/performance_probe-7820fe60b9f72409)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+     Running unittests examples/score_mcp_episode.rs (/target/debug/examples/score_mcp_episode-18ccb23a15c15679)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_mcp_v1 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_mcp_v2 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_rest_v1 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_rest_v2 ... ok

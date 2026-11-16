@@ -1,0 +1,26 @@
+{
+  "src/storage/control.rs": {
+    "unchanged_from": "3f3ca05d",
+    "sha256": "3edf2d3073f934bd2e50ca70537fe567c759d63b802eed280fa157e3d6e5d958"
+  },
+  "src/storage/inherited_policy.rs": {
+    "unchanged_from": "3f3ca05d",
+    "sha256": "0a046ec54a38bdb6bd1159eb8b5b0ce4f2cfe48cf1c716599903736a7288e607"
+  },
+  "src/storage/native_lifecycle.rs": {
+    "unchanged_from": "3f3ca05d",
+    "sha256": "715883956eba28cd59402f1f1f1bb11c28160a1e13eb4ead229eed8381d92f13"
+  },
+  "src/storage/metadata/native_lifecycle.rs": {
+    "unchanged_from": "3f3ca05d",
+    "sha256": "fb943bb16a797991e7250035a6081f97367c10a3167227e2d1767aa617455026"
+  },
+  "src/system.rs": {
+    "unchanged_from": "3f3ca05d",
+    "sha256": "3b9c12faead7d038a495d7584f8d0b37af06dc9f3a2bddc029f3c7d70da4797f"
+  },
+  "src/search/query_wire.rs": {
+    "unchanged_from": "2b256051",
+    "sha256": "792f260d1cf147787d38ff8a7d91951d820b2e0d11e456acf52226fb0c917674"
+  }
+}
