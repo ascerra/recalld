@@ -522,7 +522,7 @@ async fn api1_dispatch(
     let context = RequestContext { era, meta: None, legacy_version: None };
     let request: JsonRpcMessage = serde_json::from_value(json!({
         "jsonrpc":"2.0", "id":id, "method":"tools/call",
-        "params":{"name":"create_namespace", "arguments":{"name":name}}
+        "params":{"name":"create_namespace", "arguments":{"name":name,"initialStability":3.7145}}
     })).unwrap();
     let response = dispatcher.dispatch(&context, request).await.unwrap();
     serde_json::to_value(response).unwrap()
@@ -535,6 +535,14 @@ fn api1_bridge(f: &Fixture, provider: Arc<Provider>, fault: Option<&'static str>
     if let Some(fault) = fault { adapter = adapter.with_catalog_fault(fault); }
     bridge.namespaces = Arc::new(adapter);
     bridge
+}
+
+fn api1_seeded_fixture() -> (Fixture, std::path::PathBuf, Arc<Provider>) {
+    let (f, path, provider) = fixture();
+    let dir = f.close();
+    let engine = RedbStorageEngine::open_with_ids(&path, true,
+        Box::new(crate::storage::ids::SeededIds::new([81; 32]))).unwrap();
+    (Fixture::from_open_engine(dir, engine), path, provider)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -606,7 +614,19 @@ async fn native_catalog_api1_actual_known_and_unknown_frames_reopen() {
         let reopened = NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(FixedClock)).unwrap();
         let receipt = reopened.engine.meta_store().lookup_operation(before.store_id, MutationScope::Catalog, operation).unwrap().unwrap();
         assert_eq!(receipt.committed_generation, before.committed_generation.next().unwrap());
-        if point != "commit_unknown" { assert_eq!(serde_json::to_value(receipt).unwrap(), content["receipt"]); }
+        if point != "commit_unknown" {
+            // Preserve f32 bits independently of the Value decimal parses in
+            // the actual PartiallyApplied -> tool -> structured-content path.
+            let decoded: WriteReceipt = serde_json::from_value(content["receipt"].clone()).unwrap();
+            assert_eq!(crate::storage::control::encode(&decoded).unwrap(), crate::storage::control::encode(&receipt).unwrap());
+            let mut original = content.clone();
+            original["receipt"] = serde_json::to_value(&receipt).unwrap();
+            let admission = crate::serialization::catalog_api1::CatalogReplyAdmission::mcp(
+                crate::mcp::protocol::JsonRpcId::Number(17), Era::Modern);
+            let expected = admission.encoded_for_test(&original, true);
+            let mut actual = serde_json::to_vec(&out).unwrap(); actual.push(b'\n');
+            assert_eq!(expected, actual, "actual 3.7145 receipt full MCP emission");
+        }
         drop(reopened); drop(dir);
     }
 }
@@ -614,8 +634,10 @@ async fn native_catalog_api1_actual_known_and_unknown_frames_reopen() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_catalog_api1_oversized_outer_id_refuses_before_provider_legacy_unchanged() {
     use crate::mcp::protocol::Era;
-    let (f, path, provider) = fixture();
+    let (f, path, provider) = api1_seeded_fixture();
     let before = bytes(&path);
+    let ids = f.storage.read().unwrap().meta_store().id_source().checkpoint().unwrap();
+    assert!(ids.is_some());
     let out = api1_dispatch(api1_bridge(&f, provider.clone(), None), "refused", json!("x".repeat(8_388_608)), Era::Legacy).await;
     assert_eq!(out["result"]["isError"], true);
     let error: Value = serde_json::from_str(out["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -624,6 +646,7 @@ async fn native_catalog_api1_oversized_outer_id_refuses_before_provider_legacy_u
     assert!(error.get("receipt").is_none());
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     assert_eq!(bytes(&path), before);
+    assert_eq!(f.storage.read().unwrap().meta_store().id_source().checkpoint().unwrap(), ids);
     // The already supplied outer ID cannot itself be made to fit the native
     // policy. The proof is refusal before canonical work, not a small echo.
     let legacy = Fixture::new();
@@ -632,6 +655,116 @@ async fn native_catalog_api1_oversized_outer_id_refuses_before_provider_legacy_u
     let out = api1_dispatch(bridge, "legacy", json!("x".repeat(8_388_608)), Era::Legacy).await;
     assert!(out["result"].get("isError").is_none());
     assert!(serde_json::to_vec(&out).unwrap().len() > 8_388_608);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_foreign_pending_receipt_is_not_drained_or_returned() {
+    use crate::serialization::catalog_api1::{self, CatalogReplyAdmission};
+    let (f, path, provider) = api1_seeded_fixture();
+    let adapter = NativeCatalogAdapter::new(f.completion(), provider.clone(), Default::default(), Arc::new(FixedClock));
+    let input = |name: &str| crate::storage::native_catalog::NativeNamespaceInput {
+        name: name.into(), embedding_dim: None, embedding_profile_id: None,
+        initial_stability: None, desired_retention: None, decay_rate_multiplier: None,
+    };
+    let first = adapter.create_api1_bounded(input("prior"), CatalogReplyAdmission::http()).await.unwrap();
+    let ns = catalog_api1::namespace(&first).unwrap();
+    let prior = {
+        let mut engine = f.storage.write().unwrap();
+        let supplied = crate::storage::native_records::NativeInsert {
+            memory: crate::storage::insertion::InsertMemory {
+                id: None, summary: "retained foreign outbox witness".into(), full_text: None,
+                tags: vec![], initial_stability: None, created_at: None,
+                embedding: Some(vec![1., 0., 0., 0.]), parent_id: None, supersedes: None,
+            }, observed_at: None, entities: vec![], topics: vec![], emotions: vec![],
+            embedding_profile: Some(crate::embedding::runtime::tests::profile()),
+        };
+        let policy = NativePolicyInputs::default();
+        let intent = engine.meta_store().capture_native_insert(
+            crate::storage::native_lifecycle::LifecycleScope { namespace_id: ns.id, namespace_name: ns.name, source: None },
+            &supplied, &policy).unwrap();
+        let ctx = crate::storage::control::MutationContext::unkeyed(ns.id);
+        engine.insert_native_record(&ctx, &intent,
+            &crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], Some(crate::embedding::runtime::tests::profile())),
+            &policy, &FixedClock, None).unwrap()
+    };
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let original = bytes(&path);
+    let ids = f.storage.read().unwrap().meta_store().id_source().checkpoint().unwrap();
+    assert!(ids.is_some());
+    let error = adapter.create_api1_bounded(input("blocked"), CatalogReplyAdmission::http()).await.unwrap_err();
+    assert!(matches!(&error, CatalogError::Storage(StorageError::MaintenanceDependencyUnavailable)));
+    let (_, value) = catalog_api1::failure(&error);
+    assert_eq!(value["commitState"], "notCommitted");
+    assert!(value.get("receipt").is_none());
+    assert!(value.get("ready").is_none());
+    assert_eq!(bytes(&path), original);
+    let engine = f.storage.read().unwrap();
+    assert_eq!(engine.control_state().unwrap(), before);
+    assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
+    assert_eq!(engine.meta_store().lookup_operation(prior.store_id, MutationScope::Namespace(ns.id), prior.operation_id).unwrap().unwrap(), prior);
+    assert!(!engine.meta_store().publication_state().unwrap().matches_canonical());
+}
+
+struct PausedCatalogClock {
+    entered: tokio::sync::Notify,
+    released: std::sync::Mutex<bool>,
+    wake: std::sync::Condvar,
+}
+impl Clock for PausedCatalogClock {
+    fn now_millis(&self) -> i64 {
+        self.entered.notify_one();
+        let mut released = self.released.lock().unwrap();
+        while !*released { released = self.wake.wait(released).unwrap(); }
+        2000
+    }
+}
+impl PausedCatalogClock {
+    fn release(&self) { *self.released.lock().unwrap() = true; self.wake.notify_all(); }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_cancel_keeps_worker_publication_lease() {
+    use crate::serialization::catalog_api1::CatalogReplyAdmission;
+    let (f, path, provider) = fixture();
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let owner_count = Arc::strong_count(&f.storage);
+    let gate = crate::derived_completion::publication_gate(&f.storage).await.unwrap();
+    let clock = Arc::new(PausedCatalogClock {
+        entered: tokio::sync::Notify::new(), released: std::sync::Mutex::new(false), wake: std::sync::Condvar::new(),
+    });
+    let adapter = NativeCatalogAdapter::new(f.completion(), provider, Default::default(), clock.clone());
+    let worker = tokio::spawn(async move {
+        adapter.create_api1_bounded(crate::storage::native_catalog::NativeNamespaceInput {
+            name: "cancelled".into(), embedding_dim: None, embedding_profile_id: None,
+            initial_stability: None, desired_retention: None, decay_rate_multiplier: None,
+        }, CatalogReplyAdmission::http()).await
+    });
+    // Always release the deterministic pause before asserting, so a failed
+    // oracle cannot strand the runtime's blocking worker during test shutdown.
+    let entered = tokio::time::timeout(std::time::Duration::from_secs(10), clock.entered.notified()).await;
+    if entered.is_err() { clock.release(); panic!("catalog worker did not reach sampled clock"); }
+    worker.abort();
+    let cancelled = worker.await;
+    let held = gate.try_write().is_err();
+    clock.release();
+    assert!(cancelled.unwrap_err().is_cancelled());
+    assert!(held, "caller cancellation released the worker's publication lease");
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(10), gate.write()).await.unwrap();
+    {
+        let engine = f.storage.read().unwrap();
+        assert!(engine.get_namespace_by_name("cancelled").unwrap().is_some());
+        assert_eq!(engine.control_state().unwrap().committed_generation, before.committed_generation.next().unwrap());
+        assert!(!engine.meta_store().publication_state().unwrap().matches_canonical());
+    }
+    drop(completed); drop(gate);
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while Arc::strong_count(&f.storage) != owner_count { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    let dir = f.close();
+    let reopened = NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(FixedClock)).unwrap();
+    assert!(reopened.engine.get_namespace_by_name("cancelled").unwrap().is_some());
+    assert_eq!(reopened.engine.control_state().unwrap().committed_generation, before.committed_generation.next().unwrap());
+    drop(reopened); drop(dir);
 }
 fn rest_adapter(
     f: &Fixture,

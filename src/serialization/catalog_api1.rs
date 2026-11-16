@@ -78,9 +78,24 @@ impl CatalogReplyAdmission {
     }
 
     fn check_value(&self, value: &Value, failure: bool) -> Result<(), StorageError> {
-        let (value, limit) = match &self.surface {
+        let (value, limit) = self.wire_value(value, failure)?;
+        check_encoded(&value, limit)
+    }
+
+    fn wire_value(&self, value: &Value, failure: bool) -> Result<(Value, usize), StorageError> {
+        Ok(match &self.surface {
             Surface::Http => (value.clone(), self.limit),
             Surface::Mcp { id, era, .. } => {
+                // BridgeError::PartiallyApplied carries compact JSON text.
+                // The tool handler parses that text before making its pretty
+                // tool body. Reproduce this parse: f64 decimal decoding need
+                // not retain the same representation on every serde build.
+                let parsed;
+                let value = if failure {
+                    parsed = serde_json::from_str::<Value>(&value.to_string())
+                        .map_err(|_| StorageError::ReceiptBudgetExceeded)?;
+                    &parsed
+                } else { value };
                 let mut tool = ToolCallResult::json(value)
                     .map_err(|_| StorageError::ReceiptBudgetExceeded)?;
                 if failure { tool.is_error = Some(true); }
@@ -93,8 +108,15 @@ impl CatalogReplyAdmission {
                     .map_err(|_| StorageError::ReceiptBudgetExceeded)?;
                 (response, self.limit.checked_sub(1).ok_or(StorageError::ReceiptBudgetExceeded)?)
             }
-        };
-        check_encoded(&value, limit)
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encoded_for_test(&self, value: &Value, failure: bool) -> Vec<u8> {
+        let (value, _) = self.wire_value(value, failure).unwrap();
+        let mut bytes = serde_json::to_vec(&value).unwrap();
+        if matches!(self.surface, Surface::Mcp { .. }) { bytes.push(b'\n'); }
+        bytes
     }
 }
 
@@ -250,7 +272,8 @@ mod tests {
             Some(&receipt), None, &"\0".repeat(512));
         for era in [Era::Legacy, Era::Modern] {
             let id = JsonRpcId::String("\0\"\\é".repeat(64));
-            let mut tool = ToolCallResult::json(&value).unwrap();
+            let parsed: Value = serde_json::from_str(&value.to_string()).unwrap();
+            let mut tool = ToolCallResult::json(&parsed).unwrap();
             tool.is_error = Some(true);
             if era == Era::Legacy { tool.structured_content = None; }
             let response = JsonRpcResponse::success(id.clone(), serde_json::to_value(

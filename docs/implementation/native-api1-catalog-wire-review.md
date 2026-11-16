@@ -357,8 +357,11 @@ The source includes unexecuted tests for real MCP legacy/modern envelopes,
 original API1 hash versus API2, old unbounded native alias refusal, actual
 catalog fault/unknown reopen, oversized outer-ID refusal with legacy control,
 HTTP bodies, exact serialized-byte boundaries and unknown plus known receipt.
-Cancellation, foreign pending work and candidate refusal at a custom limit
-still need their final regression coverage. No compile, fmt, runtime GREEN,
+A test tail adds a deterministic worker-clock cancellation pause and a real
+supplied native insert left awaiting derived acknowledgment before catalog
+admission. The latter retains the foreign receipt and uses a seeded owner to
+check that refusal consumes no operation ID. Custom candidate refusal still
+needs its final consumer regression. No compile, fmt, runtime GREEN,
 full suite or activation is claimed for this source draft.
 
 Proposed validation resource plan after literal patch review: one existing
@@ -371,3 +374,12 @@ switching source roots; capture source and executable identities. Run fmt and
 focused `native_catalog_api1`/existing `native_catalog` controls first. Request
 the queue's resource slot before creating any container; E1 investigation and
 queue validation retain priority. No full run is scheduled by this draft.
+
+Huygens identified one additional source gap in draft `5a8e96ac`: MCP failures
+actually cross `Value.to_string -> PartiallyApplied -> from_str<Value>` before
+`ToolCallResult::json`. The candidate now models that exact extra parse only for
+MCP failure sizing. HTTP retains its different path. New assertions compare the
+actual emitted full MCP/HTTP bytes for a 3.7145 receipt against the corresponding
+candidate representation, and separately compare decoded canonical f32 receipt
+bytes after reopen. This is a source correction and unexecuted regression, not
+an observed N1 runtime failure. No global serde change or new transport format.

@@ -43,7 +43,13 @@ async fn native_catalog_api1_http_success_known_unknown_full_bodies() {
             let operation = uuid::Uuid::parse_str(value["operationId"].as_str().unwrap()).unwrap();
             let receipt = reopened.engine.meta_store().lookup_operation(initial.store_id, MutationScope::Catalog, operation).unwrap().unwrap();
             if point == Some("commit_unknown") { assert!(value.get("receipt").is_none()); }
-            else { assert_eq!(value["receipt"], serde_json::to_value(receipt).unwrap()); }
+            else {
+                let decoded: crate::storage::control::WriteReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
+                assert_eq!(crate::storage::control::encode(&decoded).unwrap(), crate::storage::control::encode(&receipt).unwrap());
+                let mut original = value.clone();
+                original["receipt"] = serde_json::to_value(&receipt).unwrap();
+                assert_eq!(body.as_ref(), serde_json::to_vec(&original).unwrap().as_slice(), "actual HTTP error Value encoding");
+            }
         }
         drop(reopened); drop(dir);
     }
