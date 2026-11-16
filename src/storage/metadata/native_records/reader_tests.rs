@@ -512,7 +512,7 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let failure = publisher.complete().await.unwrap_err();
     let StorageError::CommittedMutation { receipt, .. } = failure else {
         panic!("publication failure lost full committed receipt: {failure:?}");
@@ -535,7 +535,7 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
             .effects_stamp()
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     publisher.complete().await.unwrap();
     let before = bytes(&d.path);
     let (status, body) = http(
@@ -629,7 +629,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
     };
     let tracker = f.storage.read().unwrap().meta_store().work_tracker();
     let work = tracker.begin().unwrap();
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let result = publisher
         .apply_native_decay_accepted(context.clone(), capture.clone(), policy.clone(), &work)
         .await;
@@ -657,7 +657,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
             .effects_stamp()
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let NativeDecayResult::Committed(replay) = publisher
         .apply_native_decay_accepted(context, capture, policy.clone(), &work)
         .await

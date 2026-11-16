@@ -3,6 +3,7 @@ use super::*;
 use crate::embedding::{EmbeddingError, EmbeddingProvider};
 use crate::model::schema::{EmbeddingProfile, ProviderKind};
 use crate::model::{NamespaceConfig, NamespaceId};
+use crate::storage::TextRef;
 use crate::storage::control::{GenerationRef, MutationContext, MutationScope};
 use crate::storage::insertion::InsertMemory;
 use crate::storage::offline_snapshot::OfflineSnapshot;
@@ -10,7 +11,6 @@ use crate::storage::schema_migration::{
     MigrationOptions, ProfileAttestationInput, inspect_schema, migrate_schema,
 };
 use crate::storage::vector_certification::{ReembedVectors, reembed_fresh};
-use crate::storage::TextRef;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -193,7 +193,7 @@ fn retained(engine: &RedbStorageEngine) -> BTreeMap<String, Vec<u8>> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn heterogeneous_before_private_startup_profile_gate() {
+async fn heterogeneous_private_startup_profile_gate_remains_closed() {
     let root = tempfile::tempdir().unwrap();
     let (path, at) = fixture(root.path()).await;
     let mut config = RecalldConfig::default();
@@ -228,19 +228,18 @@ async fn heterogeneous_before_private_startup_profile_gate() {
     let engine = RedbStorageEngine::open_native(&path).unwrap();
     assert_eq!(engine.control_state().unwrap().generation_ref(), at);
     assert_eq!(retained(&engine), before);
-    // Desired ordinary usability is deliberately NOT implemented in partition work.
-    assert!(
-        error.is_none(),
-        "BEFORE private startup blocked at native_profile: {error:?}"
-    );
+    // The private profile restriction deliberately remains; no activation here.
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn heterogeneous_before_independent_publisher() {
+async fn heterogeneous_independent_publisher_covers_all_namespaces() {
     let root = tempfile::tempdir().unwrap();
     let (path, at) = fixture(root.path()).await;
     let engine = RedbStorageEngine::open_native(&path).unwrap();
     let before = retained(&engine);
+    let vector_owner =
+        crate::search::VectorIndexOwner::from_namespaces(&engine.list_namespaces().unwrap())
+            .unwrap();
     let fts_path = root.path().join("derived-fts");
     std::fs::create_dir(&fts_path).unwrap();
     let owner = crate::derived_completion::DerivedCompletion {
@@ -255,9 +254,7 @@ async fn heterogeneous_before_independent_publisher() {
         graph: Arc::new(tokio::sync::RwLock::new(
             crate::graph::RelationshipGraph::new(),
         )),
-        vectors: Arc::new(tokio::sync::RwLock::new(
-            crate::search::FlatVectorIndex::new(4),
-        )),
+        vectors: Arc::new(tokio::sync::RwLock::new(vector_owner)),
         fts: Arc::new(tokio::sync::Mutex::new(
             crate::search::FtsIndex::new(&fts_path).unwrap(),
         )),
@@ -270,9 +267,66 @@ async fn heterogeneous_before_independent_publisher() {
     assert_eq!(retained(&engine), before);
     let publication = engine.meta_store().publication_state().unwrap();
     eprintln!("ACTUAL_PUBLICATION_STATE {publication:?}");
-    assert!(!publication.matches_canonical());
+    assert!(publication.matches_canonical());
     assert!(
         result.is_ok(),
-        "BEFORE valid heterogeneous publisher failed: {result:?}"
+        "valid heterogeneous publisher failed: {result:?}"
     );
+    let rows = engine.scan_all().unwrap();
+    let wide = engine.get_namespace_by_name("wide").unwrap().unwrap();
+    drop(engine);
+    {
+        let vectors = owner.vectors.read().await;
+        assert_eq!(vectors.len(), 5);
+        for (id, _) in &rows {
+            let expected = before.get(&format!("vector/{id}")).unwrap();
+            let actual: Vec<u8> = vectors
+                .get_vector(*id)
+                .unwrap()
+                .iter()
+                .flat_map(|v| v.to_bits().to_le_bytes())
+                .collect();
+            assert_eq!(&actual, expected);
+        }
+    }
+    // The real native purge removes one width partition, then publishes all others.
+    let work = owner.accept_work(None).unwrap();
+    let progress = owner
+        .purge_native_accepted(MutationContext::unkeyed(wide.id), true, &work)
+        .await
+        .unwrap();
+    owner.finish_known_work(work);
+    assert_eq!(progress.stage, crate::storage::purge::PurgeStage::Complete);
+    assert_eq!(progress.removed, 1);
+    assert_eq!(owner.vectors.read().await.len(), 4);
+    {
+        let engine = owner.storage.read().unwrap();
+        let publication = engine.meta_store().publication_state().unwrap();
+        assert_eq!(
+            publication.canonical,
+            engine.control_state().unwrap().generation_ref()
+        );
+        assert!(publication.matches_canonical());
+        assert!(engine.get_namespace(wide.id).unwrap().is_none());
+    }
+    owner.rebuild_all().await.unwrap();
+    assert_eq!(owner.vectors.read().await.len(), 4);
+}
+
+#[tokio::test]
+async fn heterogeneous_corrupt_referenced_file_rejects_without_source_repair() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, _) = fixture(root.path()).await;
+    let vector_file = path.join("wide/vectors.dat");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&vector_file)
+        .unwrap()
+        .set_len(32)
+        .unwrap();
+    let meta = std::fs::read(path.join("meta.db")).unwrap();
+    let corrupt = std::fs::read(&vector_file).unwrap();
+    assert!(RedbStorageEngine::open_native(&path).is_err());
+    assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), meta);
+    assert_eq!(std::fs::read(vector_file).unwrap(), corrupt);
 }

@@ -1423,7 +1423,7 @@ async fn vector_certification_catalog_graph_lifecycle_and_real_derived_ack_carry
             crate::graph::RelationshipGraph::new(),
         )),
         vectors: Arc::new(tokio::sync::RwLock::new(
-            crate::search::FlatVectorIndex::new(4),
+            crate::search::VectorIndexOwner::uniform(4),
         )),
         fts: Arc::new(tokio::sync::Mutex::new(
             crate::search::FtsIndex::new(&root.path().join("fts")).unwrap(),

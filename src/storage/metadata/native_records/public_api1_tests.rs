@@ -142,7 +142,7 @@ async fn api1_public_native_failures_keep_receipts_and_unknown_identity() {
                 drop(engine);
                 completion(&f).rebuild_all().await.unwrap();
             }
-            *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+            *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
             let reply = if http {
                 let (status, body) = public_http(state.clone(), d.parent, operation).await;
                 assert_eq!(status, 503, "{body}");
@@ -170,7 +170,7 @@ async fn api1_public_native_failures_keep_receipts_and_unknown_identity() {
             assert_eq!(clock.0.load(Ordering::SeqCst), 1);
             assert!(reply.to_string().contains("committed"));
             assert!(reply["readiness"].is_null());
-            *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+            *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
             completion(&f).complete().await.unwrap();
             drop((bridge, state));
             let root = f.close();

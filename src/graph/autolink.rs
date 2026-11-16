@@ -10,7 +10,7 @@ use crate::cache::CacheManager;
 use crate::graph::SharedGraph;
 use crate::graph::structure::RelationshipGraph;
 use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
-use crate::search::{EntityIndex, FlatVectorIndex, SearchFilter, VectorIndex};
+use crate::search::{EntityIndex, SearchFilter, VectorIndex, VectorIndexOwner};
 use crate::storage::PersistedEdge;
 use crate::storage::engine::RedbStorageEngine;
 use crate::storage::work::WorkTicket;
@@ -329,7 +329,7 @@ pub async fn perform_autolink(
     tags: &[String],
     threshold: f32,
     max_links: usize,
-    vector_index: &Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: &Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     graph: &SharedGraph,
     storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: &Arc<CacheManager>,
@@ -357,7 +357,7 @@ pub(crate) async fn perform_autolink_with_work(
     tags: &[String],
     threshold: f32,
     max_links: usize,
-    vector_index: &Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: &Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     graph: &SharedGraph,
     storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: &Arc<CacheManager>,

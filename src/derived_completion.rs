@@ -19,7 +19,7 @@ mod native_forget;
 use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, NamespaceId};
-use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, VectorIndex, VectorMetadata};
+use crate::search::{EntityIndex, FtsIndex, VectorIndex, VectorIndexOwner, VectorMetadata};
 use crate::storage::publication::{DerivedView, REQUIRED_VIEWS};
 use crate::storage::work::WorkTicket;
 use crate::storage::{RedbStorageEngine, StorageEngine, StorageError, TextRef};
@@ -29,7 +29,7 @@ pub(crate) struct DerivedCompletion {
     pub storage: Arc<RwLock<RedbStorageEngine>>,
     pub cache: Arc<CacheManager>,
     pub graph: SharedGraph,
-    pub vectors: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    pub vectors: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     pub fts: Arc<tokio::sync::Mutex<FtsIndex>>,
     pub entities: Arc<tokio::sync::RwLock<EntityIndex>>,
 }
@@ -344,7 +344,10 @@ impl DerivedCompletion {
                     // Replace with exact effect application when throughput warrants it.
                     let records = storage.scan_all()?;
                     let mut next_graph = RelationshipGraph::with_capacity(records.len());
-                    let mut next_vectors = FlatVectorIndex::new(vectors.dimensions());
+                    let namespaces = storage.meta_store().list_namespaces()?;
+                    let mut next_vectors = vectors
+                        .empty_for_rebuild(&namespaces)
+                        .map_err(|e| failed(e.to_string()))?;
                     let next_entities = EntityIndex::from_records(&records);
                     storage
                         .meta_store()
@@ -835,7 +838,7 @@ mod tests {
             .control_state()
             .unwrap()
             .committed_generation;
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM + 1);
         let error = match publisher(&fx)
             .insert(ctx.clone(), input.clone(), vec![].into(), 123)
             .await
@@ -866,7 +869,7 @@ mod tests {
                 .receipt,
             *receipt
         );
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM);
         let replay = publisher(&fx)
             .insert(ctx, input, vec![f32::NAN].into(), i64::MAX)
             .await
@@ -955,7 +958,7 @@ mod tests {
 
         // A real vector rebuild failure after FTS clear must retain the receipt
         // and keep all public reads closed. A retry uses the same operation.
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM + 1);
         assert!(matches!(publisher(&fx).complete().await,
             Err(StorageError::CommittedMutation {receipt, ..}) if *receipt == pending[0].receipt));
         assert!(adapter.get_memory(live, false, None).await.is_err());
@@ -969,7 +972,7 @@ mod tests {
                 .receipt,
             pending[0].receipt
         );
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM);
         publisher(&fx).complete().await.unwrap();
         assert!(
             fx.storage

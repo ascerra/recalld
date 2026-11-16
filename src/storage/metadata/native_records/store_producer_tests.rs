@@ -14,7 +14,7 @@ struct Provider {
     calls: Arc<AtomicUsize>,
     entered: Option<Arc<tokio::sync::Notify>>,
     release: Option<Arc<tokio::sync::Notify>>,
-    corrupt: Option<Arc<tokio::sync::RwLock<crate::search::FlatVectorIndex>>>,
+    corrupt: Option<Arc<tokio::sync::RwLock<crate::search::VectorIndexOwner>>>,
 }
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for Provider {
@@ -38,7 +38,7 @@ impl crate::embedding::EmbeddingProvider for Provider {
             release.notified().await;
         }
         if let Some(index) = &self.corrupt {
-            *index.write().await = crate::search::FlatVectorIndex::new(8);
+            *index.write().await = crate::search::VectorIndexOwner::uniform(8);
         }
         Ok(vec![2., 0., 0., 0.])
     }
@@ -252,7 +252,7 @@ async fn batch_publication_origin(contract: u32) {
     assert_eq!(p.calls.load(Ordering::SeqCst), 1);
     assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 2);
     let before = f.storage.read().unwrap().control_state().unwrap();
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let replay = a.run_batch(r).await.unwrap();
     assert!(replay.all_ready(), "{replay:?}");
     assert_eq!(replay.items[0].receipt, Some(expected_replay(receipt)));
@@ -1267,7 +1267,7 @@ async fn single_publication_origin(contract: u32) {
     key.contract_version = contract;
     let input = profile_wire_input(&d, false);
     let id = Some(d.profile.profile_id().unwrap());
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let error = a
         .store_native_single_by_profile_id(
             key.clone(),
@@ -1296,7 +1296,7 @@ async fn single_publication_origin(contract: u32) {
         Some(*receipt.clone())
     );
     let rows = receipt_rows(&f);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let replay = a
         .store_native_single_by_profile_id(key, input, id, NativePolicyInputs::default(), None)
         .await

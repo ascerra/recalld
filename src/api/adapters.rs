@@ -18,7 +18,7 @@ use crate::model::{
     AccessKind, CachedRecord, DecayPhase, DiskRecord, MemoryId, NamespaceConfig, NamespaceId, Tag,
     structured_metadata,
 };
-use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex};
+use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner};
 use crate::storage::RedbStorageEngine;
 // Import the StorageEngine trait so its methods are in scope.
 use super::state;
@@ -60,7 +60,7 @@ impl From<crate::graph::LinkError> for super::errors::AppError {
 pub struct SearchPipelineAdapter {
     query_engine: Arc<crate::search::QueryEngine>,
     embedding: Arc<dyn EmbeddingProvider>,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
 }
@@ -70,7 +70,7 @@ impl SearchPipelineAdapter {
     pub fn new(
         query_engine: Arc<crate::search::QueryEngine>,
         embedding: Arc<dyn EmbeddingProvider>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     ) -> Self {
@@ -273,8 +273,15 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     ) -> Result<Vec<(MemoryId, f32)>, super::errors::AppError> {
         let stamp = self.query_engine.effects_stamp().await?;
         let index = self.vector_index.read().await;
-        let result =
-            crate::search::find_near_duplicates(&index, embedding, namespace_id, threshold, limit);
+        let result = crate::search::find_near_duplicates(
+            index
+                .uniform_index()
+                .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?,
+            embedding,
+            namespace_id,
+            threshold,
+            limit,
+        );
         drop(index);
         if self.query_engine.effects_stamp().await? != stamp {
             return Err(crate::storage::StorageError::RecoveryRequired(
@@ -404,7 +411,7 @@ pub struct StorageEngineAdapter {
     /// Held so `delete_memory` can clean the indexes storage cannot
     /// reach. Without them this adapter could tombstone a record and
     /// leave it indexed everywhere else.
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     /// See [`vector_index`](Self::vector_index).
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     /// See [`vector_index`](Self::vector_index).
@@ -427,7 +434,7 @@ impl StorageEngineAdapter {
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         graph: crate::graph::SharedGraph,
@@ -1081,7 +1088,7 @@ impl state::RecordCache for RecordCacheAdapter {
 /// Adapts `SharedGraph` to the API `RelationshipGraph` trait.
 pub struct RelationshipGraphAdapter {
     graph: SharedGraph,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
@@ -1093,7 +1100,7 @@ impl RelationshipGraphAdapter {
     /// subsystems needed for post-creation linking.
     pub fn new(
         graph: SharedGraph,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
@@ -1449,7 +1456,7 @@ impl FsrsEngineAdapter {
     /// Attach the live derived views so manual sweeps complete committed effects.
     pub fn with_indexes(
         mut self,
-        vectors: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vectors: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts: Arc<tokio::sync::Mutex<FtsIndex>>,
         entities: Arc<tokio::sync::RwLock<EntityIndex>>,
     ) -> Self {
@@ -1858,7 +1865,7 @@ mod tests {
     async fn actual_http_insertion_adapter_reports_durable_receipt_if_publication_fails() {
         use axum::response::IntoResponse;
         let fx = Fixture::new();
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM + 1);
         let error = match adapter(&fx)
             .insert_memory(
                 NamespaceId::new(1),
@@ -1903,7 +1910,7 @@ mod tests {
                 .effects_stamp()
                 .is_err()
         );
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM);
         adapter(&fx).complete_insertion(&receipt).await.unwrap();
         assert!(fx.vector_index.read().await.get_vector(id).is_some());
         assert!(

@@ -256,7 +256,7 @@ async fn native_sweep_partial_publication_failure_keeps_original_receipt_until_a
     let (f, _d, _id, _c) = setup();
     completion(&f).rebuild_all().await.unwrap();
     let before = target(&f);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let result = pass(&f, 10_000 * DAY).await;
     let (receipt, _) = result
         .failed_commit
@@ -286,7 +286,7 @@ async fn native_sweep_partial_publication_failure_keeps_original_receipt_until_a
             .await
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     completion(&f).complete().await.unwrap(); // Explicit repair test, not the successful-pass proof.
     ready(&f).await;
     assert_eq!(

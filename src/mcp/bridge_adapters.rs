@@ -23,7 +23,7 @@ use crate::config::RecalldConfig;
 use crate::embedding::EmbeddingProvider;
 use crate::graph::SharedGraph;
 use crate::model::{DecayPhase, MemoryId, NamespaceId};
-use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, QueryEngine};
+use crate::search::{EntityIndex, FtsIndex, QueryEngine, VectorIndexOwner};
 use crate::storage::RedbStorageEngine;
 use crate::time::format_timestamp;
 // Import the StorageEngine trait so its methods are in scope.
@@ -1034,7 +1034,7 @@ pub struct McpStorageAdapter {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     embedding: Arc<dyn EmbeddingProvider>,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     graph: SharedGraph,
@@ -1068,7 +1068,7 @@ impl McpStorageAdapter {
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
         embedding: Arc<dyn EmbeddingProvider>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         graph: SharedGraph,
@@ -1131,7 +1131,7 @@ impl McpStorageAdapter {
 
         // Summary AND phase. The phase is the load-bearing half: the
         // `decay_phases` filter `find_near_duplicates` passes to the
-        // vector index is INERT, because `FlatVectorIndex` writes each
+        // vector index is INERT, because `VectorIndexOwner` writes each
         // entry's `decay_phase` once at add time (always Full) and
         // `VectorIndex::update_metadata` has no callers. Without a check
         // here, a Ghost — which has no summary left — and a
@@ -1391,7 +1391,9 @@ impl McpStorageAdapter {
                 let candidates = {
                     let index = self.vector_index.read().await;
                     crate::search::find_near_duplicates(
-                        &index,
+                        index
+                            .uniform_index()
+                            .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?,
                         &embedding,
                         ns_config.id,
                         DUPLICATE_SIMILARITY_THRESHOLD as f32,
@@ -2247,7 +2249,7 @@ fn build_list_tags_response(
 pub struct McpNamespaceAdapter {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     graph: SharedGraph,
@@ -2261,7 +2263,7 @@ impl McpNamespaceAdapter {
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         graph: SharedGraph,
@@ -3598,7 +3600,7 @@ mod tests {
 
     /// The guarantee the docs make and the index could not keep.
     /// `find_near_duplicates` asks the vector index for Full and Summary
-    /// only, but `FlatVectorIndex` writes each entry's `decay_phase`
+    /// only, but `VectorIndexOwner` writes each entry's `decay_phase`
     /// once at add time — always Full — and `VectorIndex::update_metadata`
     /// has no callers, so that filter is inert in production. A ghosted
     /// memory was reported as a near-duplicate with an EMPTY summary,

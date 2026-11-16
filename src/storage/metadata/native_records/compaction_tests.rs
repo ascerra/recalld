@@ -480,7 +480,7 @@ async fn publication_failure(certified: bool) {
             .unwrap()
             .matches_canonical()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(5);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(5);
     let error = c.compact_text_with_work(None).await.unwrap_err();
     let StorageError::CommittedMutation { receipt, .. } = error else {
         panic!("lost receipt: {error}")
@@ -509,7 +509,7 @@ async fn publication_failure(certified: bool) {
         .publication_state()
         .unwrap();
     assert!(!state.matches_canonical());
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     c.complete().await.unwrap();
     let repaired = f
         .storage
@@ -573,7 +573,7 @@ async fn prior_failure(certified: bool) {
             engine.meta_store().text_selection().unwrap(),
         )
     };
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(5);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(5);
     let error = c.compact_text_with_work(None).await.unwrap_err();
     let StorageError::CommittedMutation { receipt, .. } = error else {
         panic!("{error}")
@@ -585,7 +585,7 @@ async fn prior_failure(certified: bool) {
         assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
         assert_eq!(engine.meta_store().text_selection().unwrap(), selected);
     }
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     c.complete().await.unwrap();
     assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
     let result = c.compact_text_with_work(None).await.unwrap();

@@ -158,7 +158,7 @@ mod observation_tests {
         assert!(ready.derived.iter().all(|v| v.matches_canonical));
         let root = publisher.accept_work(None).unwrap();
         fx.storage.write().unwrap().delete_memory(dead).unwrap();
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM + 1);
         let error = publisher.complete_with_work(Some(&root)).await.unwrap_err();
         let StorageError::CommittedMutation { receipt, .. } = error else {
             panic!("lost committed receipt: {error}")
@@ -246,7 +246,7 @@ mod observation_tests {
         assert_eq!(envelope.warnings, ["READINESS_UNKNOWN"]);
         assert_eq!(envelope.receipt.as_ref(), Some(receipt.as_ref()));
         let root = publisher.accept_work(None).unwrap();
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM);
         publisher.complete_with_work(Some(&root)).await.unwrap();
         let repaired = publisher.observe_readiness(deadline()).await.unwrap();
         assert_eq!(repaired.canonical, observation.canonical);

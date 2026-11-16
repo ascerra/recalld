@@ -95,7 +95,7 @@ async fn forget_reports_committed_not_ready_when_derived_publication_fails() {
     let forgotten = fixture.insert_memory().await;
     fixture.insert_memory().await;
     // The remaining live vector cannot be rebuilt into this mismatched view.
-    *fixture.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM + 1);
+    *fixture.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM + 1);
     let adapter = fixture.storage_adapter();
     assert!(
         adapter.delete_memory(forgotten, None).await.is_err(),
@@ -481,7 +481,7 @@ async fn http_forget_error_carries_committed_receipt_and_503() {
     let fixture = Fixture::new();
     let id = fixture.insert_memory().await;
     fixture.insert_memory().await;
-    *fixture.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM + 1);
+    *fixture.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM + 1);
     let adapter = crate::api::adapters::StorageEngineAdapter::new(
         fixture.storage.clone(),
         fixture.cache.clone(),
@@ -506,7 +506,7 @@ async fn http_forget_error_carries_committed_receipt_and_503() {
     assert_eq!(body["receipt"]["outcome"]["memoryId"], id.to_string());
     assert_eq!(fixture.record(id).unwrap().phase, DecayPhase::Tombstone);
     // Retrying the legacy operation completes the existing work before false.
-    *fixture.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM);
+    *fixture.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM);
     assert!(!adapter.delete_memory(id, None).await.unwrap());
     assert!(
         fixture
@@ -568,7 +568,7 @@ async fn actual_batch_invalid_starting_view_rejects_before_any_child_commit() {
     let fixture = Fixture::new();
     let first = fixture.insert_memory().await;
     let later = fixture.insert_memory().await;
-    *fixture.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM + 1);
+    *fixture.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM + 1);
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.storage = std::sync::Arc::new(fixture.storage_adapter());
     let result = crate::mcp::tools::dispatch_tool(

@@ -1231,7 +1231,7 @@ mod tests {
         let f = Fixture::new();
         let adapter = f.storage_adapter();
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
         let input = request(&f, "publication", vec![item(), item()]);
         let outcome = adapter.mutate_batch(input.clone()).await.unwrap();
         assert_eq!(
@@ -1252,7 +1252,7 @@ mod tests {
             .unwrap();
         assert_eq!(pending[0].receipt.operation_id, current.operation_id);
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM);
         let replay = adapter.mutate_batch(input).await.unwrap();
         assert!(replay.all_ready());
         assert_eq!(replay.succeeded, 2);
@@ -1404,7 +1404,7 @@ mod tests {
         let mut bridge = crate::test_support::StubBridge::default().into_bridge();
         bridge.storage = Arc::new(f.storage_adapter());
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
         let result = crate::mcp::tools::dispatch_tool(
             &bridge,
             "store_memories",

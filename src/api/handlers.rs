@@ -74,7 +74,7 @@ fn health_report_cache()
 ///
 /// The Full/Summary guarantee is enforced HERE, not by the
 /// `decay_phases` filter `find_near_duplicates` hands the vector index:
-/// `FlatVectorIndex` writes each entry's `decay_phase` once at add time
+/// `VectorIndexOwner` writes each entry's `decay_phase` once at add time
 /// (always Full) and `VectorIndex::update_metadata` has no callers, so
 /// that filter is inert in production. A candidate whose record is
 /// missing or past Summary is dropped here instead.

@@ -243,7 +243,7 @@ async fn native_exposure_partial_publication_keeps_receipt_and_repairs_without_r
     let owner = completion(&f);
     owner.rebuild_all().await.unwrap();
     let (_api, _bridge, engine) = readers_with_exposure(&f, clock, true);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let before = event_count(&f, id);
     let error = observation(
         engine
@@ -270,7 +270,7 @@ async fn native_exposure_partial_publication_keeps_receipt_and_repairs_without_r
             .unwrap()
             .matches_canonical()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     owner.complete().await.unwrap();
     assert_eq!(event_count(&f, id), before + 1);
     assert!(

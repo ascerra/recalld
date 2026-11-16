@@ -25,7 +25,7 @@ use super::pipeline::{
     RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
 };
 use super::read_handle::{FtsHandle, ReadHandle};
-use super::{EntityIndex, FlatVectorIndex, FtsIndex, SearchFilter, VectorIndex};
+use super::{EntityIndex, FtsIndex, SearchFilter, VectorIndex, VectorIndexOwner};
 
 // Explicit offline harness adapter. Ordinary storage open still rejects schema
 // v2. Snapshot ownership pins canonical files; this adapter has no write API.
@@ -168,21 +168,21 @@ impl EmbeddingProviderRegistry for SingleEmbeddingRegistry {
 
 // ── VectorIndexRegistry ────────────────────────────────────────────
 
-/// Adapts a shared `FlatVectorIndex` to `VectorIndexRegistry`.
+/// Adapts a shared `VectorIndexOwner` to `VectorIndexRegistry`.
 ///
 /// All namespaces share one index; the namespace_id is passed through
 /// the search filter to the underlying `VectorIndex::search`.
 pub struct SharedVectorIndexRegistry {
-    index: ReadHandle<FlatVectorIndex>,
+    index: ReadHandle<VectorIndexOwner>,
 }
 
 impl SharedVectorIndexRegistry {
-    pub fn new(index: Arc<tokio::sync::RwLock<FlatVectorIndex>>) -> Self {
+    pub fn new(index: Arc<tokio::sync::RwLock<VectorIndexOwner>>) -> Self {
         Self {
             index: ReadHandle::Live(index),
         }
     }
-    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<FlatVectorIndex>>) -> Self {
+    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<VectorIndexOwner>>) -> Self {
         Self {
             index: ReadHandle::Pinned(value),
         }
@@ -206,7 +206,7 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
             ..Default::default()
         };
         let results = index
-            .search_eligible(query_vec, k, &filter, eligible_ids)
+            .search_scoped(namespace_id, query_vec, k, &filter, eligible_ids)
             .map_err(|e| SearchError::VectorIndexError(e.to_string()))?;
         Ok(results
             .into_iter()

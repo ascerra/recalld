@@ -198,7 +198,7 @@ async fn owned_native_postcommit_repair_preserves_reserved_receipt_and_allocatio
     assert_eq!(Some(cursor(&f)), expected.checkpoint().unwrap());
     assert_eq!(clock.0.load(Ordering::SeqCst), 1);
     let before = cursor(&f);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let replay = a.run_batch(r).await.unwrap();
     assert!(replay.all_ready(), "{replay:?}");
     assert_eq!(

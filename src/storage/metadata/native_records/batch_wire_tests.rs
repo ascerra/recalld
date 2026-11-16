@@ -556,7 +556,7 @@ async fn native_single_wire_known_publication_failure_retains_full_receipt_and_r
     let calls = provider.calls.load(Ordering::SeqCst);
     let profiles = provider.profiles.load(Ordering::SeqCst);
     let ticks = clock.0.load(Ordering::SeqCst);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let (error, replay) = single_mcp(a.clone(), body).await;
     assert!(!error, "{replay}");
     assert_eq!(replay["readiness"]["ready"], true);
@@ -908,7 +908,7 @@ struct RecoveringProvider {
     unavailable: std::sync::atomic::AtomicBool,
     calls: AtomicUsize,
     profiles: AtomicUsize,
-    corrupt: std::sync::Mutex<Option<Arc<tokio::sync::RwLock<crate::search::FlatVectorIndex>>>>,
+    corrupt: std::sync::Mutex<Option<Arc<tokio::sync::RwLock<crate::search::VectorIndexOwner>>>>,
 }
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for RecoveringProvider {
@@ -931,7 +931,7 @@ impl crate::embedding::EmbeddingProvider for RecoveringProvider {
         } else {
             let corrupt = self.corrupt.lock().unwrap().take();
             if let Some(index) = corrupt {
-                *index.write().await = crate::search::FlatVectorIndex::new(8);
+                *index.write().await = crate::search::VectorIndexOwner::uniform(8);
             }
             Ok(vec![1., 0., 0., 0.])
         }
@@ -1043,7 +1043,7 @@ async fn batch_wire_actual_unavailable_all_failed_and_committed_publication_fail
     );
     let calls = provider.calls.load(Ordering::SeqCst);
     let ticks = clock.0.load(Ordering::SeqCst);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let (status, recovered) = http(&a, &body(&r)).await;
     assert_eq!(status, 200, "{recovered}");
     assert_eq!(recovered["readiness"]["ready"], true);

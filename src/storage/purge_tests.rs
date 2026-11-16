@@ -429,7 +429,7 @@ async fn purge_actual_consumer_publication_failure_retains_completion_receipt_th
     let ns = fx.create_namespace("publication");
     let removed = fx.insert_memory_in(ns, &[]).await;
     let survivor = fx.insert_memory().await;
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM + 1);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM + 1);
     let error = fx
         .namespace_adapter()
         .delete_namespace(crate::mcp::bridge::DeleteNamespaceInput {
@@ -458,7 +458,7 @@ async fn purge_actual_consumer_publication_failure_retains_completion_receipt_th
     };
     assert_eq!(progress.stage, PurgeStage::Complete);
     assert!(text.contains(&progress.last_receipt.operation_id.to_string()));
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM);
     publisher(&fx).complete().await.unwrap();
     assert!(
         fx.storage_adapter()

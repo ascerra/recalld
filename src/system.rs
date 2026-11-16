@@ -24,7 +24,7 @@ use crate::graph::{self, RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, DiskRecord, MemoryId, NamespaceId};
 use crate::rif::{RifConfig, RifEngine};
 use crate::search::{
-    EntityIndex, FlatVectorIndex, FtsIndex, QueryEngine, VectorError, VectorIndex as _,
+    EntityIndex, FtsIndex, QueryEngine, VectorError, VectorIndex as _, VectorIndexOwner,
     VectorMetadata,
 };
 use crate::storage::engine::RedbStorageEngine;
@@ -79,7 +79,7 @@ impl VectorLoadStats {
 
 /// Fill `index` from the vectors already on disk.
 ///
-/// [`FlatVectorIndex`] is pure RAM. It is created empty, and until this
+/// [`VectorIndexOwner`] is pure RAM. It is created empty, and until this
 /// existed nothing but the store path ever put anything in it — so every
 /// restart began with an empty index and stayed empty until the process
 /// stored its first memory. `find_similar_memories` failed outright
@@ -101,7 +101,7 @@ impl VectorLoadStats {
 fn load_vector_index(
     storage: &RedbStorageEngine,
     records: &[(MemoryId, DiskRecord)],
-    index: &mut FlatVectorIndex,
+    index: &mut VectorIndexOwner,
 ) -> VectorLoadStats {
     let mut stats = VectorLoadStats::default();
 
@@ -112,7 +112,11 @@ fn load_vector_index(
         .iter()
         .filter(|(_, r)| r.phase != DecayPhase::Tombstone)
         .count();
-    index.reserve(live);
+    if let Err(error) = index.reserve(live) {
+        tracing::warn!(%error, "vector reservation rejected");
+        stats.unreadable = live;
+        return stats;
+    }
 
     for (memory_id, record) in records {
         if record.phase == DecayPhase::Tombstone {
@@ -226,7 +230,7 @@ pub struct Recalld {
 
     // -- Search -------------------------------------------------------
     /// Flat vector index for SIMD similarity search.
-    vector_index: Arc<RwLock<FlatVectorIndex>>,
+    vector_index: Arc<RwLock<VectorIndexOwner>>,
 
     /// FTS5 full-text search index (single SQLite database for all namespaces).
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -513,9 +517,27 @@ impl Recalld {
             Arc::new(engine)
         };
 
-        // -- Step 6: Create FlatVectorIndex and load persisted vectors -
+        // -- Step 6: Create VectorIndexOwner and load persisted vectors -
         let vector_index = {
-            let mut index = FlatVectorIndex::new(config.embedding.dimensions);
+            let mut index = if native_prefix {
+                let storage = storage.read().map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: None,
+                })?;
+                let namespaces = storage.list_namespaces().map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: Some(Box::new(e)),
+                })?;
+                VectorIndexOwner::from_namespaces(&namespaces).map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: Some(Box::new(e)),
+                })?
+            } else {
+                VectorIndexOwner::uniform(config.embedding.dimensions)
+            };
 
             // The index lives in RAM only; without this the process
             // starts semantically blind and stays that way until it
@@ -933,7 +955,7 @@ impl Recalld {
     }
 
     /// Access the flat vector index.
-    pub fn vector_index(&self) -> &Arc<RwLock<FlatVectorIndex>> {
+    pub fn vector_index(&self) -> &Arc<RwLock<VectorIndexOwner>> {
         &self.vector_index
     }
 
@@ -1219,10 +1241,10 @@ mod tests {
 
     /// Run the startup load against a fixture's storage, into a fresh
     /// index of `dim` — which is what step 6 does, minus the logging.
-    fn load(fx: &Fixture, dim: usize) -> (FlatVectorIndex, VectorLoadStats) {
+    fn load(fx: &Fixture, dim: usize) -> (VectorIndexOwner, VectorLoadStats) {
         let storage_r = fx.storage.read().expect("storage lock");
         let records = storage_r.scan_all().expect("scan_all");
-        let mut index = FlatVectorIndex::new(dim);
+        let mut index = VectorIndexOwner::uniform(dim);
         let stats = load_vector_index(&storage_r, &records, &mut index);
         (index, stats)
     }
@@ -1512,7 +1534,7 @@ mod tests {
 
     // ── the regression ───────────────────────────────────────────────
 
-    /// THE bug. `FlatVectorIndex` is RAM-only and was only ever filled
+    /// THE bug. `VectorIndexOwner` is RAM-only and was only ever filled
     /// by the store path, so every restart came up with an empty index:
     /// `find_similar_memories` failed with "no embedding found for
     /// memory <id>" and `recall_memories` quietly fell back to FTS and
@@ -1627,7 +1649,7 @@ mod tests {
 
         let engine = RedbStorageEngine::open(dir.path()).expect("reopen engine");
         let records = engine.scan_all().expect("scan_all");
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&engine, &records, &mut index);
 
         assert_eq!(stats.loaded, 2);
@@ -1677,7 +1699,7 @@ mod tests {
             .expect("two records");
         orphan.1.vector_slot = 9_999;
 
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&storage_r, &records, &mut index);
 
         assert_eq!(stats.missing, 1);
@@ -1698,7 +1720,7 @@ mod tests {
         let mut records = storage_r.scan_all().expect("scan_all");
         records[0].1.namespace_id = 4_242;
 
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&storage_r, &records, &mut index);
 
         assert_eq!(stats.unreadable, 1);

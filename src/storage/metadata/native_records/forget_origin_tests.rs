@@ -123,7 +123,7 @@ async fn forget_origin_known_publication_failure_keeps_full_receipt_and_replays_
     completion(&f).rebuild_all().await.unwrap();
     assert_eq!(f.record(survivor).unwrap().phase, DecayPhase::Full);
     let value = original(&f, &d, 1, "forget-failed-publication");
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let reply = crate::mcp::native_lifecycle_adapter::dispatch_private(
         bridge.storage.as_ref(),
         Operation::Forget,
@@ -151,7 +151,7 @@ async fn forget_origin_known_publication_failure_keeps_full_receipt_and_replays_
         .work_tracker()
         .clone();
     assert_eq!(tracker.status().pending, 0);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let adapter = f
         .storage_adapter()
         .with_clock(Arc::new(NeverClock))

@@ -994,7 +994,7 @@ mod tests {
         use crate::storage::StorageEngine as _;
         let fx = crate::test_support::Fixture::new();
         *fx.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
         let error = dispatch(
             &Unused,
             &fx.storage_adapter(),

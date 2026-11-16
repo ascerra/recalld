@@ -381,7 +381,7 @@ async fn native_lifecycle_wire_strict_invalid_scope_and_public_gates_are_immutab
 async fn native_lifecycle_wire_publication_failure_retains_receipt_and_replay_recovers() {
     let (f, d, clock, bridge, state) = setup().await;
     let original = request(&f, &d, "publication");
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let (status, error) = prepared_http(
         state.clone(),
         d.parent,
@@ -394,7 +394,7 @@ async fn native_lifecycle_wire_publication_failure_retains_receipt_and_replay_re
     assert!(error["receipt"]["operationId"].is_string());
     assert!(error.get("readiness").is_none());
     assert_eq!(clock.0.load(Ordering::SeqCst), 1);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let retry = mcp(&bridge, Operation::Feedback, original).await;
     assert_eq!(retry["status"], "ok", "{retry}");
     assert_eq!(

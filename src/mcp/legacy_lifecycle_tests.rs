@@ -686,7 +686,7 @@ async fn legacy_api2_publication_failure_keeps_full_receipt_and_retry_completes(
         let id = f.insert_memory().await;
         f.insert_memory().await;
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
         let adapter = f
             .storage_adapter()
             .with_clock(Arc::new(CountingClock::default()))
@@ -702,7 +702,7 @@ async fn legacy_api2_publication_failure_keeps_full_receipt_and_retry_completes(
         let receipt = failed.receipt.unwrap();
         let after = snapshot(&f, id);
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM);
         let retry = f
             .storage_adapter()
             .with_clock(Arc::new(NeverClock))

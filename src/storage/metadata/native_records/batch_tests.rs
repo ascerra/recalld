@@ -454,7 +454,7 @@ async fn native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publica
             .with_clock(Arc::new(FixedClock(AtomicUsize::new(0)))),
         );
         let rows_before_reservation = f.storage.read().unwrap().scan_all().unwrap().len();
-        *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+        *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
         let reservation_failed = adapter.mutate_batch(r.clone()).await.unwrap();
         assert_eq!(
             reservation_failed.items[0].status,
@@ -486,7 +486,7 @@ async fn native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publica
                 .unwrap(),
             *reservation
         );
-        *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+        *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
         let pending = r.clone();
         let writer = adapter.clone();
         let task = tokio::spawn(async move { writer.mutate_batch(pending).await });
@@ -506,7 +506,7 @@ async fn native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publica
         let row_count = f.storage.read().unwrap().scan_all().unwrap().len();
         // Now the actual reservation publisher completed. The valid generated
         // vector lets the fresh child commit before its own publication fails.
-        *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+        *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
         release.notify_one();
         let failed = task.await.unwrap().unwrap();
         assert_eq!(failed.items[0].status, BatchStatus::Ok);
@@ -522,7 +522,7 @@ async fn native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publica
             f.storage.read().unwrap().scan_all().unwrap().len(),
             row_count + 1
         );
-        *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+        *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
         let recovered = adapter.mutate_batch(r).await.unwrap();
         assert!(recovered.all_ready(), "{recovered:?}");
         assert!(!committed.replayed);
