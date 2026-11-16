@@ -19,6 +19,22 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 
 #[path = "diagnostics.rs"]
 mod diagnostics;
+#[path = "explanation.rs"]
+mod explanation;
+pub use explanation::{
+    DirectScoreEvidence, InheritedScoreExplanation, MAX_EXPLANATION_SOURCES, MinScoreDisposition,
+    OwnScoreExplanation, ScoreExplanation, ScoreFormula,
+};
+#[path = "payload_selection.rs"]
+mod payload_selection;
+#[path = "query_wire.rs"]
+mod query_wire;
+#[path = "similar_selection.rs"]
+mod similar_selection;
+pub(crate) use similar_selection::{
+    SelectedSimilarity, SimilarityExclusion, SimilarityScope, SimilaritySelection,
+};
+
 #[path = "read_view.rs"]
 mod read_view;
 pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse};
@@ -26,6 +42,16 @@ pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilar
 mod strength;
 use strength::StrengthContext;
 pub use strength::StrengthDiagnostics;
+
+/// Request-local inputs retained for the coherent payload selector. The caller
+/// reuses the actual validated filters and lifecycle projection, not a second
+/// namespace scan, clock sample, or policy resolution.
+struct SearchSelectionContext {
+    query: SearchQuery,
+    namespace: NamespaceConfig,
+    strength: StrengthContext,
+    eligible: HashMap<MemoryId, CachedRecord>,
+}
 #[path = "semantics.rs"]
 mod semantics;
 #[cfg(test)]
@@ -34,6 +60,9 @@ mod strength_tests;
 pub use diagnostics::{
     ChannelDiagnostics, ChannelParticipation, ResultProvenance, RetrievalChannel,
 };
+#[cfg(test)]
+#[path = "explanation_tests.rs"]
+mod explanation_tests;
 #[cfg(test)]
 #[path = "semantics_tests.rs"]
 mod semantics_tests;
@@ -54,6 +83,16 @@ pub use semantics::{
 pub trait NamespaceResolver: Send + Sync {
     /// Look up a namespace by name, returning its configuration.
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
+    /// Actual storage-owner format authority, never a query feature selector.
+    /// Legacy/custom resolvers have no native authority by default.
+    fn is_native_owned(&self) -> Result<bool> {
+        Ok(false)
+    }
+    fn check_native_vector_namespace(&self, _namespace: &NamespaceConfig) -> Result<()> {
+        Err(SearchError::Unavailable(
+            "native vector certification requires a pinned canonical view".into(),
+        ))
+    }
     /// Only an actual owned native canonical view can grant this admission.
     fn check_native_query_profile(
         &self,
@@ -215,6 +254,20 @@ pub trait AccessRecorder: Send + Sync {
     /// Only a configured, owned native writer may admit observing v2 reads.
     fn supports_native_exposure(&self) -> bool {
         false
+    }
+
+    async fn record_similarity_for_publication(
+        &self,
+        _accesses: &[(MemoryId, AccessKind)],
+        _selection: &crate::decay::similarity_scope::SimilarityExposure,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+        _policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        _original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        Err(SearchError::Unavailable(
+            "similarity exposure selection unsupported".into(),
+        ))
     }
 
     /// Receives the query owner's configured policy and already sampled clock.
@@ -437,6 +490,11 @@ struct Candidate {
     seed_score: f32,
     /// Diagnostic evidence only; never read by ranking or source selection.
     provenance: ResultProvenance,
+    score_explanation: Option<OwnScoreExplanation>,
+    rejected_direct: Option<DirectScoreEvidence>,
+    // Deduplicate actual admitted origins across version-resolution passes.
+    // The response projection bounds details; this map is not a 64-entry cap.
+    inherited_score_sources: std::collections::BTreeMap<MemoryId, OwnScoreExplanation>,
 }
 
 impl Candidate {
@@ -455,6 +513,9 @@ impl Candidate {
             graph_depth: None,
             seed_score: 0.0,
             provenance: ResultProvenance::default(),
+            score_explanation: None,
+            rejected_direct: None,
+            inherited_score_sources: Default::default(),
         }
     }
 }
@@ -675,7 +736,7 @@ impl QueryEngine {
             .await
     }
 
-    /// Explicit original application contract; compatibility entry above means API1.
+    /// The original application contract is independent of retrieval semantics.
     pub(crate) async fn search_checked_with_origin_work(
         &self,
         query: SearchQuery,
@@ -684,10 +745,29 @@ impl QueryEngine {
         parent: Option<&crate::storage::work::WorkTicket>,
         original_contract_version: u32,
     ) -> Result<SemanticsResponse> {
+        self.search_checked_with_selection(
+            query,
+            semantics,
+            defer_recording,
+            parent,
+            original_contract_version,
+        )
+        .await
+        .map(|(response, _)| response)
+    }
+
+    async fn search_checked_with_selection(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<(SemanticsResponse, SearchSelectionContext)> {
         let work = self.accept_work(parent)?;
         let result = crate::performance::measure("engine.search", query.record_access, async {
             let stamp = self.meta_store.effects_stamp().await?;
-            let observed = self
+            let (observed, selection) = self
                 .search_admitted(
                     query,
                     semantics,
@@ -696,7 +776,8 @@ impl QueryEngine {
                     original_contract_version,
                 )
                 .await?;
-            observed.finish(self.check_effects_stamp(stamp).await)
+            let response = observed.finish(self.check_effects_stamp(stamp).await)?;
+            Ok((response, selection))
         })
         .await;
         self.finish_work(work);
@@ -723,7 +804,7 @@ impl QueryEngine {
         defer_recording: bool,
         parent: Option<&crate::storage::work::WorkTicket>,
         original_contract_version: u32,
-    ) -> Result<Observed<SemanticsResponse>> {
+    ) -> Result<(Observed<SemanticsResponse>, SearchSelectionContext)> {
         let mut diagnostics = SemanticsDiagnostics::new(semantics);
         let pipeline_start = Instant::now();
         let mut performance = crate::performance::Timeline::new();
@@ -754,7 +835,13 @@ impl QueryEngine {
         let stage_start = Instant::now();
         let query_embedding = match query.query_mode {
             QueryMode::MetadataOnly => None,
-            _ if query.query_embedding.is_some() => query.query_embedding.take(),
+            _ if query.query_embedding.is_some() => {
+                if self.namespace_resolver.is_native_owned()? {
+                    self.namespace_resolver
+                        .check_native_vector_namespace(&ns_config)?;
+                }
+                query.query_embedding.take()
+            }
             _ => {
                 let text = query.text.as_ref().ok_or(SearchError::EmptyQuery)?;
                 let profile = self.embedding_providers.profile();
@@ -890,17 +977,24 @@ impl QueryEngine {
         }
 
         if !query_entities.is_empty() && query.query_mode != QueryMode::MetadataOnly {
+            // V2 budgets total entity-channel membership before union, including
+            // overlap with vector/FTS. V1 retains its novel-only allowance.
+            let entity_fetch_cap = if semantics == RetrievalSemantics::V1 {
+                entity_recall_cap + all_candidate_ids.len()
+            } else {
+                entity_recall_cap
+            };
             let entity_results = self.entity_index.find_by_entities(
                 ns_config.id,
                 &query_entities,
                 MemoryId::nil(),
-                entity_recall_cap + all_candidate_ids.len(),
+                entity_fetch_cap,
                 &eligible_ids,
             )?;
 
             if diagnostics.channels.is_some() {
-                // Observe overlap before the ranking path skips existing IDs
-                // and caps novel entity candidates. This never changes that path.
+                // Retain admitted channel overlap before union/deduplication.
+                // Unmeasured scan counts/exhaustion remain unknown.
                 entity_hit_ids.extend(entity_results.iter().map(|r| r.memory_id));
                 entity_offered = Some(entity_hit_ids.len());
             }
@@ -1042,7 +1136,7 @@ impl QueryEngine {
             // -- Stage 8: Composite Score + Boosts + Sort ----------------------
             let stage_start = Instant::now();
             total_matches = candidates.len();
-            self.apply_boosts(&mut candidates, &query);
+            self.apply_boosts(&mut candidates, &query, false);
 
             // UUID ties make scan/cache insertion order irrelevant.
             candidates.sort_by(|a, b| {
@@ -1140,13 +1234,21 @@ impl QueryEngine {
             "search complete"
         );
 
-        Ok(Observed {
-            value: SemanticsResponse {
-                response,
-                diagnostics,
+        Ok((
+            Observed {
+                value: SemanticsResponse {
+                    response,
+                    diagnostics,
+                },
+                receipts,
             },
-            receipts,
-        })
+            SearchSelectionContext {
+                query,
+                namespace: ns_config,
+                strength: strength_context,
+                eligible: eligible_records,
+            },
+        ))
     }
 
     /// Stage 3a: Run vector similarity search.
@@ -1346,9 +1448,26 @@ impl QueryEngine {
     }
 
     /// Stage 8: Compute composite scores and apply temporal boost.
-    fn apply_boosts(&self, candidates: &mut Vec<Candidate>, query: &SearchQuery) {
+    fn apply_boosts(&self, candidates: &mut Vec<Candidate>, query: &SearchQuery, explain: bool) {
         for candidate in candidates.iter_mut() {
-            candidate.composite_score = Self::compute_composite_score(candidate);
+            let (formula, fts_signal, base_score) = Self::compute_composite_score(candidate);
+            candidate.composite_score = base_score;
+            if explain {
+                candidate.score_explanation = Some(OwnScoreExplanation {
+                    formula,
+                    direct: DirectScoreEvidence::capture(candidate, query.min_score),
+                    entity_overlap: candidate.entity_score,
+                    entity_recall: candidate.entity_recall_score,
+                    fts_signal,
+                    raw_retrievability: candidate.record.strength,
+                    effective_retrievability: candidate.effective_r,
+                    activation: candidate.activation_score,
+                    activation_depth: candidate.activation_score.and(candidate.graph_depth),
+                    base_score,
+                    temporal_factor: 1.0,
+                    score: base_score,
+                });
+            }
         }
 
         // Temporal boost: Gaussian falloff centered on the query's time range.
@@ -1362,6 +1481,10 @@ impl QueryEngine {
                 let distance = (candidate.record.created_at as f64 - range_mid).abs();
                 let boost = 1.0 + 0.5 * (-0.5 * (distance / sigma).powi(2)).exp();
                 candidate.composite_score *= boost as f32;
+                if let Some(evidence) = &mut candidate.score_explanation {
+                    evidence.temporal_factor = boost as f32;
+                    evidence.score = candidate.composite_score;
+                }
             }
         }
     }
@@ -1835,9 +1958,9 @@ impl QueryEngine {
                 "resolved namespace differs from canonical source".into(),
             ));
         }
-        let context = self
-            .by_id_strength_context(&namespace, record_access)
-            .await?;
+        let mut context = strength::StrengthContext::pin(self, &namespace, record_access)?;
+        let mut records = self.meta_store.namespace_records(namespace.id).await?;
+        context.project_namespace(&mut records, self.graph.as_ref())?;
         context.apply(&mut record)?;
 
         // Load the source memory's embedding from the vector index.
@@ -1850,10 +1973,22 @@ impl QueryEngine {
             namespace.embedding_dim as usize,
         )?;
 
-        // Over-fetch by 1 to account for self-match removal.
-        let scored =
-            self.vector_indexes
-                .search(record.namespace_id, &source_embedding, k + 1, None)?;
+        // Canonical phase and source exclusion precede the exact top-k allowance.
+        let eligible_ids: HashSet<MemoryId> = records
+            .into_iter()
+            .filter(|r| {
+                r.id != id
+                    && r.namespace_id == namespace.id
+                    && !matches!(r.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+            })
+            .map(|r| r.id)
+            .collect();
+        let scored = self.vector_indexes.search(
+            record.namespace_id,
+            &source_embedding,
+            k,
+            Some(&eligible_ids),
+        )?;
 
         // Remove the source memory from results.
         let filtered: Vec<ScoredResult> = scored
@@ -1862,14 +1997,22 @@ impl QueryEngine {
             .take(k)
             .collect();
 
-        let result_ids: Vec<MemoryId> = filtered.iter().map(|s| s.memory_id).collect();
-        let records = self.strength_records(&result_ids, Some(&context)).await?;
-
-        // Build a lookup map so we can iterate `filtered` (which preserves
-        // descending similarity order from the vector search) instead of
-        // `records` (whose order is scrambled by cache-hit / disk-load batching).
-        let record_map: std::collections::HashMap<MemoryId, &CachedRecord> =
-            records.iter().map(|r| (r.id, r)).collect();
+        // Preserve the canonical final-read invariant as well as pre-cap
+        // eligibility. A changed/missing selected row invalidates the page;
+        // silently dropping it would hide an incomplete or inconsistent read.
+        let selected_ids: Vec<_> = filtered.iter().map(|s| s.memory_id).collect();
+        let records = self.strength_records(&selected_ids, Some(&context)).await?;
+        let record_map: HashMap<_, _> = records.into_iter().map(|r| (r.id, r)).collect();
+        if selected_ids.iter().any(|id| {
+            record_map.get(id).is_none_or(|r| {
+                r.namespace_id != namespace.id
+                    || matches!(r.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+            })
+        }) {
+            return Err(SearchError::Unavailable(
+                "selected similarity record changed or disappeared".into(),
+            ));
+        }
 
         let results: Vec<SearchResult> = filtered
             .iter()
@@ -2150,7 +2293,7 @@ impl QueryEngine {
 
     /// Compute the final composite ranking score.
     ///
-    fn compute_composite_score(candidate: &Candidate) -> f32 {
+    fn compute_composite_score(candidate: &Candidate) -> (ScoreFormula, f32, f32) {
         const FTS_COMPOSITE_THRESHOLD: f32 = 0.5;
 
         const ACTIVATION_WEIGHT: f32 = 0.70;
@@ -2166,20 +2309,29 @@ impl QueryEngine {
             _ => 0.0,
         };
 
-        match candidate.relevance_score {
-            Some(rel) => 0.90 * rel + 0.05 * candidate.entity_score + 0.05 * fts_signal,
+        let (formula, score) = match candidate.relevance_score {
+            Some(rel) => (
+                ScoreFormula::Direct,
+                0.90 * rel + 0.05 * candidate.entity_score + 0.05 * fts_signal,
+            ),
             None if candidate.activation_score.is_some() => {
                 let activation = candidate.activation_score.unwrap();
-                ACTIVATION_WEIGHT * activation + ACTIVATION_ENTITY_WEIGHT * candidate.entity_score
+                (
+                    ScoreFormula::Graph,
+                    ACTIVATION_WEIGHT * activation
+                        + ACTIVATION_ENTITY_WEIGHT * candidate.entity_score,
+                )
             }
-            None if candidate.entity_recall_score > 0.0 => {
+            None if candidate.entity_recall_score > 0.0 => (
+                ScoreFormula::EntityRecall,
                 ENTITY_RECALL_WEIGHT * candidate.entity_recall_score
                     + ENTITY_RECALL_ENTITY_WEIGHT * candidate.entity_score
                     + ENTITY_RECALL_R_WEIGHT * candidate.effective_r
-                    + ENTITY_RECALL_FTS_WEIGHT * fts_signal
-            }
-            None => candidate.effective_r * 0.1,
-        }
+                    + ENTITY_RECALL_FTS_WEIGHT * fts_signal,
+            ),
+            None => (ScoreFormula::Metadata, candidate.effective_r * 0.1),
+        };
+        (formula, fts_signal, score)
     }
 
     /// Assemble SearchResult structs from ranked candidates.
@@ -3349,9 +3501,9 @@ mod tests {
         vectors: &[(MemoryId, f32)],
     ) -> QueryEngine {
         use crate::search::adapters::{SharedEntityIndexReader, SharedVectorIndexRegistry};
-        use crate::search::{EntityIndex, FlatVectorIndex, VectorIndex, VectorMetadata};
+        use crate::search::{EntityIndex, VectorIndexOwner, VectorMetadata};
 
-        let mut index = FlatVectorIndex::new(2);
+        let mut index = VectorIndexOwner::uniform(2);
         for &(id, cosine) in vectors {
             // Deliberately stale derived metadata: canonical records must decide eligibility.
             index

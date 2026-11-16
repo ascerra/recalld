@@ -96,9 +96,26 @@ impl MetadataStore {
                 operation_id,
             }
         });
+        let vector_certification = crate::storage::vector_certification::VectorCertification {
+            version: 1,
+            origin: control::GenerationRef {
+                store_id: state.store_id,
+                generation: state.committed_generation.next()?,
+            },
+            operation_id,
+            inventory_root: crate::storage::vector_certification::inventory_root(
+                &config,
+                std::iter::empty(),
+            )?,
+            vector_count: 0,
+        };
+        config.schema.as_mut().unwrap().vector_certification = Some(vector_certification.clone());
+        config.schema.as_mut().unwrap().required_features =
+            vec![crate::storage::vector_certification::REQUIRED_FEATURE.into()];
         tx.open_table(NAMESPACE_TABLE)?
             .insert(config.id.get(), control::encode(&config)?.as_slice())?;
         let transition = NativeNamespaceCreated {
+            vector_certification: Some(vector_certification),
             namespace_id: config.id,
             previous_max_id,
             previous_generation: state.committed_generation,

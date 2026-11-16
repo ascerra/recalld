@@ -25,7 +25,7 @@ use crate::config::RecalldConfig;
 use crate::embedding::EmbeddingProvider;
 use crate::graph::SharedGraph;
 use crate::model::{DecayPhase, MemoryId, NamespaceId};
-use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, QueryEngine};
+use crate::search::{EntityIndex, FtsIndex, QueryEngine, VectorIndexOwner};
 use crate::storage::RedbStorageEngine;
 use crate::time::format_timestamp;
 // Import the StorageEngine trait so its methods are in scope.
@@ -41,7 +41,8 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         | crate::storage::StorageError::RecoveryRequired(_) => {
             bridge::BridgeError::PartiallyApplied(error.to_string())
         }
-        crate::storage::StorageError::ProviderVectorUnavailable(_) => {
+        crate::storage::StorageError::ProviderVectorUnavailable(_)
+        | crate::storage::StorageError::VectorCertificationRequired { .. } => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
         crate::storage::StorageError::NamespaceMismatch { .. } => {
@@ -202,6 +203,18 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    async fn similar_contract(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.similar_contract(request).await
+    }
+    async fn query_contract(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.query_contract(request).await
+    }
     async fn scan_duplicate_pairs(
         &self,
         request: crate::serialization::scan::ExactScanRequest,
@@ -293,6 +306,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?
             {
+                let exposures = prepared.exposures(true).map_err(map_search_error)?;
                 let hydration = crate::performance::Timer::new("mcp.hydration");
                 let payload = prepared.payload.ok_or_else(|| {
                     bridge::BridgeError::Internal("coherent payload missing".into())
@@ -305,7 +319,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     ));
                 }
                 let mut hits = Vec::with_capacity(payload.rows.len());
-                let mut exposures = Vec::new();
                 for (selected, row) in prepared
                     .response
                     .response
@@ -335,14 +348,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    exposures.push((
-                        selected.memory_id,
-                        if selected.activation_score.is_some() {
-                            crate::model::AccessKind::AssociativeRetrieval
-                        } else {
-                            crate::model::AccessKind::DirectRetrieval
-                        },
-                    ));
                     hits.push(bridge::SearchHit {
                         labels,
                         id: selected.memory_id.to_string(),
@@ -370,7 +375,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     let id = crate::model::MemoryId::from_bytes(disk.id);
                     let labels = disk.schema.as_ref().map(|s| s.labels.clone());
                     let metadata = crate::model::structured_metadata(&disk.tags, labels.as_ref());
-                    exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));
                     neighbors.push(bridge::NeighborMemory {
                         labels,
                         id: id.to_string(),
@@ -689,10 +693,62 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         id: MemoryId,
         limit: usize,
         min_score: Option<f32>,
-        _same_namespace: bool,
+        same_namespace: bool,
         record_access: bool,
         namespace: Option<&str>,
     ) -> Result<Vec<bridge::SearchHit>, bridge::BridgeError> {
+        if !same_namespace {
+            let observed = self
+                .query_engine
+                .similar_selected_with_work(
+                    id,
+                    namespace,
+                    crate::search::SimilaritySelection {
+                        semantics: crate::search::RetrievalSemantics::V1,
+                        scope: crate::search::SimilarityScope::AllCompatible,
+                        filter: Default::default(),
+                        limit: limit.min(crate::search::SearchQuery::MAX_USER_LIMIT),
+                        min_score,
+                        record_access,
+                        include_embeddings: false,
+                        original_contract_version: 1,
+                    },
+                    None,
+                )
+                .await
+                .map_err(map_search_error)?;
+            let hits = observed
+                .value
+                .rows
+                .into_iter()
+                .map(|selected| {
+                    let r = selected.result;
+                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
+                    bridge::SearchHit {
+                        labels: r.labels.clone(),
+                        id: r.memory_id.to_string(),
+                        summary: r.summary.unwrap_or_default(),
+                        full_text: selected.payload.full_text,
+                        score: r.score.unwrap_or(0.0),
+                        namespace: selected.namespace.name,
+                        tags: r.tags.iter().map(|t| t.to_string()).collect(),
+                        entities: metadata.entities,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        phase: format!("{:?}", r.phase),
+                        strength: r.retrievability,
+                        created_at: format_timestamp(r.created_at, self.timezone),
+                        last_accessed_at: format_timestamp(r.last_accessed_at, self.timezone),
+                        related: Vec::new(),
+                    }
+                })
+                .collect();
+            return Observed {
+                value: hits,
+                receipts: observed.receipts,
+            }
+            .finish(Ok(()));
+        }
         // Admission follows the actual query metadata owner. Immutable offline
         // adapters have no mutable core; they cannot inherit a placeholder's ticket.
         let accepted = self
@@ -1070,7 +1126,7 @@ pub struct McpStorageAdapter {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     embedding: Arc<dyn EmbeddingProvider>,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     graph: SharedGraph,
@@ -1104,7 +1160,7 @@ impl McpStorageAdapter {
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
         embedding: Arc<dyn EmbeddingProvider>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         graph: SharedGraph,
@@ -1167,7 +1223,7 @@ impl McpStorageAdapter {
 
         // Summary AND phase. The phase is the load-bearing half: the
         // `decay_phases` filter `find_near_duplicates` passes to the
-        // vector index is INERT, because `FlatVectorIndex` writes each
+        // vector index is INERT, because `VectorIndexOwner` writes each
         // entry's `decay_phase` once at add time (always Full) and
         // `VectorIndex::update_metadata` has no callers. Without a check
         // here, a Ghost — which has no summary left — and a
@@ -1463,7 +1519,9 @@ impl McpStorageAdapter {
                     let candidates = {
                         let index = self.vector_index.read().await;
                         crate::search::find_near_duplicates(
-                            &index,
+                            index
+                                .uniform_index()
+                                .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?,
                             &embedding,
                             ns_config.id,
                             DUPLICATE_SIMILARITY_THRESHOLD as f32,
@@ -1915,6 +1973,7 @@ impl bridge::StorageEngine for McpStorageAdapter {
         .await
         .map_err(|_| bridge::BridgeError::Unavailable("store context unavailable".into()))?
     }
+
     fn supports_durable_batches(&self) -> bool {
         true
     }
@@ -2445,7 +2504,7 @@ pub struct McpNamespaceAdapter {
     native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     graph: SharedGraph,
@@ -2488,7 +2547,7 @@ impl McpNamespaceAdapter {
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         graph: SharedGraph,
@@ -3662,7 +3721,6 @@ mod tests {
 
     #[tokio::test]
     async fn insertion_adapter_rejects_bad_provider_and_caller_vectors_and_normalizes_advisory() {
-        use crate::search::VectorIndex as _;
         struct Provider(Vec<f32>);
         #[async_trait::async_trait]
         impl EmbeddingProvider for Provider {
@@ -3845,7 +3903,7 @@ mod tests {
 
     /// The guarantee the docs make and the index could not keep.
     /// `find_near_duplicates` asks the vector index for Full and Summary
-    /// only, but `FlatVectorIndex` writes each entry's `decay_phase`
+    /// only, but `VectorIndexOwner` writes each entry's `decay_phase`
     /// once at add time — always Full — and `VectorIndex::update_metadata`
     /// has no callers, so that filter is inert in production. A ghosted
     /// memory was reported as a near-duplicate with an EMPTY summary,
@@ -3992,10 +4050,7 @@ mod tests {
             "FTS row survived the delete"
         );
         assert_eq!(
-            {
-                use crate::search::VectorIndex;
-                fx.vector_index.read().await.len()
-            },
+            { fx.vector_index.read().await.len() },
             0,
             "vector index entry survived the delete"
         );
@@ -4057,13 +4112,7 @@ mod tests {
         assert_eq!(flags, vec![true, true]);
 
         assert!(fx.fts_index.lock().await.is_empty().expect("fts"));
-        assert_eq!(
-            {
-                use crate::search::VectorIndex;
-                fx.vector_index.read().await.len()
-            },
-            0
-        );
+        assert_eq!({ fx.vector_index.read().await.len() }, 0);
         assert_eq!(fx.entity_index.read().await.len(), 0);
         let graph_r = fx.graph.read().await;
         for id in &ids {
@@ -4247,13 +4296,7 @@ mod tests {
             vec![other],
             "completion rebuilds canonical survivors"
         );
-        assert_eq!(
-            {
-                use crate::search::VectorIndex;
-                fx.vector_index.read().await.len()
-            },
-            1
-        );
+        assert_eq!({ fx.vector_index.read().await.len() }, 1);
         assert_eq!(fx.entity_index.read().await.len(), 0);
         assert!(
             !fx.graph.read().await.contains(&id),

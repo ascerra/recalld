@@ -2,6 +2,7 @@
 use super::*;
 use crate::model::CachedRecord;
 use crate::storage::publication::{DerivedView, PublicationState};
+use std::sync::{Arc, RwLock};
 
 impl MetadataStore {
     pub(crate) fn publication_state(&self) -> Result<PublicationState, StorageError> {
@@ -125,6 +126,7 @@ pub(crate) struct CanonicalReadView {
     read: redb::ReadTransaction,
     pub at: control::GenerationRef,
     native_owned: bool,
+    vector_validation: Arc<RwLock<Option<super::certification::OwnedVectorValidation>>>,
 }
 
 impl MetadataStore {
@@ -165,6 +167,7 @@ impl MetadataStore {
             read,
             at: state.generation_ref(),
             native_owned: self.native_lifecycle_only,
+            vector_validation: self.vector_validation.clone(),
         })
     }
 
@@ -195,12 +198,17 @@ impl MetadataStore {
 }
 
 impl CanonicalReadView {
-    /// Owner-aware semantic admission on the same validated canonical snapshot.
-    /// A namespace descriptor or provider alone cannot grant native serving.
-    pub(crate) fn check_native_query_profile(
+    /// Constructor-validated owner format, never a request or profile inference.
+    pub(crate) fn is_native_owned(&self) -> bool {
+        self.native_owned
+    }
+
+    /// Semantic inventory admission on this exact owned canonical snapshot.
+    /// Supplied query vectors need this same scope/certification proof without
+    /// claiming that an active provider produced the caller's vector.
+    pub(crate) fn check_native_vector_namespace(
         &self,
         namespace: &NamespaceConfig,
-        active: Option<&crate::model::schema::EmbeddingProfile>,
     ) -> Result<(), StorageError> {
         if !self.native_owned {
             return Err(StorageError::RecoveryRequired(
@@ -217,10 +225,28 @@ impl CanonicalReadView {
                 "native query canonical scope mismatch".into(),
             ));
         }
+        self.vector_validation
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?
+            .as_ref()
+            .ok_or_else(|| {
+                StorageError::RecoveryRequired("owned vector validation missing".into())
+            })?
+            .require_namespace(self.at, &actual)
+    }
+
+    /// Generated queries additionally require the active provider's identity.
+    /// A namespace descriptor or provider alone cannot grant native serving.
+    pub(crate) fn check_native_query_profile(
+        &self,
+        namespace: &NamespaceConfig,
+        active: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<(), StorageError> {
+        self.check_native_vector_namespace(namespace)?;
         let active = active.ok_or_else(|| {
             StorageError::RecoveryRequired("native query provider identity missing".into())
         })?;
-        crate::embedding::profile::require_compatible(&actual, active)
+        crate::embedding::profile::require_compatible(namespace, active)
             .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
         Ok(())
     }

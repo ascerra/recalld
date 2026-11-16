@@ -1,0 +1,391 @@
+diff --git a/src/search/adapters.rs b/src/search/adapters.rs
+index cf382c8c..8103ca5c 100644
+--- a/src/search/adapters.rs
++++ b/src/search/adapters.rs
+@@ -95,6 +95,16 @@ impl StorageNamespaceResolver {
+ 
+ #[async_trait]
+ impl NamespaceResolver for StorageNamespaceResolver {
++    fn is_native_owned(&self) -> Result<bool> {
++        Ok(self
++            .storage
++            .read()
++            .map_err(|_| SearchError::Unavailable("storage owner poisoned".into()))?
++            .meta_store()
++            .uses_native_lifecycle())
++    }
++    // Native semantic admission still uses the trait's rejecting default here:
++    // only the pinned CanonicalReadView can validate namespace certification at G.
+     async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
+         let storage = self.storage.clone();
+         tokio::task::spawn_blocking(move || {
+diff --git a/src/search/pipeline.rs b/src/search/pipeline.rs
+index 34e035af..9ab8aca6 100644
+--- a/src/search/pipeline.rs
++++ b/src/search/pipeline.rs
+@@ -83,6 +83,16 @@ pub use semantics::{
+ pub trait NamespaceResolver: Send + Sync {
+     /// Look up a namespace by name, returning its configuration.
+     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
++    /// Actual storage-owner format authority, never a query feature selector.
++    /// Legacy/custom resolvers have no native authority by default.
++    fn is_native_owned(&self) -> Result<bool> {
++        Ok(false)
++    }
++    fn check_native_vector_namespace(&self, _namespace: &NamespaceConfig) -> Result<()> {
++        Err(SearchError::Unavailable(
++            "native vector certification requires a pinned canonical view".into(),
++        ))
++    }
+     /// Only an actual owned native canonical view can grant this admission.
+     fn check_native_query_profile(
+         &self,
+@@ -825,7 +835,13 @@ impl QueryEngine {
+         let stage_start = Instant::now();
+         let query_embedding = match query.query_mode {
+             QueryMode::MetadataOnly => None,
+-            _ if query.query_embedding.is_some() => query.query_embedding.take(),
++            _ if query.query_embedding.is_some() => {
++                if self.namespace_resolver.is_native_owned()? {
++                    self.namespace_resolver
++                        .check_native_vector_namespace(&ns_config)?;
++                }
++                query.query_embedding.take()
++            }
+             _ => {
+                 let text = query.text.as_ref().ok_or(SearchError::EmptyQuery)?;
+                 let profile = self.embedding_providers.profile();
+diff --git a/src/search/read_view.rs b/src/search/read_view.rs
+index ce8fb8b3..e4a6a92b 100644
+--- a/src/search/read_view.rs
++++ b/src/search/read_view.rs
+@@ -156,6 +156,12 @@ fn canonical_read_error(error: crate::storage::StorageError) -> SearchError {
+ 
+ #[async_trait::async_trait]
+ impl NamespaceResolver for CanonicalReadView {
++    fn is_native_owned(&self) -> Result<bool> {
++        Ok(CanonicalReadView::is_native_owned(self))
++    }
++    fn check_native_vector_namespace(&self, namespace: &NamespaceConfig) -> Result<()> {
++        CanonicalReadView::check_native_vector_namespace(self, namespace).map_err(unavailable)
++    }
+     fn check_native_query_profile(
+         &self,
+         namespace: &NamespaceConfig,
+diff --git a/src/search/similar_selection.rs b/src/search/similar_selection.rs
+index f6c7e9c3..62661263 100644
+--- a/src/search/similar_selection.rs
++++ b/src/search/similar_selection.rs
+@@ -204,6 +204,11 @@ impl QueryEngine {
+             let profile = bound_profile(&source_ns)?
+                 .cloned()
+                 .ok_or_else(|| unavailable("source embedding provenance is unknown"))?;
++            if canonical.is_native_owned() {
++                canonical
++                    .check_native_vector_namespace(&source_ns)
++                    .map_err(unavailable)?;
++            }
+             let mut vector = engine
+                 .vector_indexes
+                 .get_vector(id)
+@@ -237,6 +242,11 @@ impl QueryEngine {
+                     coverage.excluded.insert(ns.id, reason);
+                     continue;
+                 }
++                if canonical.is_native_owned() {
++                    canonical
++                        .check_native_vector_namespace(&ns)
++                        .map_err(unavailable)?;
++                }
+                 coverage.searched.push(ns.id);
+                 let mut filter = options.filter.clone();
+                 filter
+diff --git a/src/search/similar_selection_tests.rs b/src/search/similar_selection_tests.rs
+index 4268967d..62ce93e8 100644
+--- a/src/search/similar_selection_tests.rs
++++ b/src/search/similar_selection_tests.rs
+@@ -60,6 +60,53 @@ async fn similar_fixture() -> SimilarFixture {
+ }
+ 
+ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
++    similar_fixture_certification(chain_edges, true).await
++}
++
++// Declared synthetic document recipe, never a lookup of old vector bytes.
++struct SimilarRecipe(crate::model::schema::EmbeddingProfile);
++#[async_trait::async_trait]
++impl crate::embedding::EmbeddingProvider for SimilarRecipe {
++    fn dimensions(&self) -> usize { 4 }
++    fn model_name(&self) -> &str { &self.0.model_id }
++    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> { Some(self.0.clone()) }
++    async fn embed(&self, document: &str) -> std::result::Result<Vec<f32>, crate::embedding::EmbeddingError> {
++        let n = document.split_whitespace().find_map(|v| v.parse::<u128>().ok())
++            .expect("synthetic retained document must contain its declared fixture number");
++        Ok(match n {
++            2002 => vec![0.96,0.28,0.,0.],
++            2003 => vec![0.,1.,0.,0.],
++            2004 => vec![0.8,0.6,0.,0.],
++            2005 => vec![0.9,0.4358899,0.,0.],
++            3000 => vec![0.6,0.8,0.,0.],
++            3001..=8000 => vec![0.,1.,0.,0.],
++            2001 | 9001 | 9002 => vec![1.,0.,0.,0.],
++            _ => panic!("unknown synthetic document {n}"),
++        })
++    }
++}
++
++async fn certify_similar_namespace(source: &std::path::Path, ns: NamespaceId) -> tempfile::TempDir {
++    use crate::storage::{control::MutationScope, vector_certification::{ReembedVectors, reembed_fresh}};
++    let snapshot = crate::storage::offline_snapshot::OfflineSnapshot::open(source).unwrap();
++    let at = snapshot.control().generation_ref();
++    let namespace = snapshot.namespaces().iter().find(|n| n.id == ns).unwrap();
++    let crate::model::schema::EmbeddingBinding::Bound { descriptor, profile_id, .. } =
++        &namespace.schema.as_ref().unwrap().embedding_binding else { panic!("Bound fixture") };
++    let provider = SimilarRecipe(descriptor.clone());
++    let request = ReembedVectors {
++        source: at, namespace_id: ns, namespace_name: namespace.name.clone(), profile_id: profile_id.clone(),
++        context: MutationContext { store_id: Some(at.store_id), expected_generation: Some(at.generation),
++            scope: MutationScope::Namespace(ns), contract_version:1, idempotency_key:Some(format!("similar-fixture-remedy-{}",ns.get())) },
++    };
++    drop(snapshot);
++    let target = tempfile::tempdir().unwrap();
++    std::fs::remove_dir(target.path()).unwrap();
++    reembed_fresh(source, target.path(), &request, &provider).await.unwrap();
++    target
++}
++
++async fn similar_fixture_certification(chain_edges: usize, certify_donor: bool) -> SimilarFixture {
+     use crate::storage::lifecycle_migration::{LifecycleMigrationOptions, migrate_lifecycle};
+     use crate::storage::schema_migration::{
+         MigrationOptions, ProfileAttestationInput, inspect_schema, migrate_schema,
+@@ -129,15 +176,11 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
+             );
+         }
+     }
+-    for _ in 0..2 {
+-        legacy
+-            .insert_memory_with(crate::test_support::MemorySpec {
+-                phase: DecayPhase::Ghost,
+-                embedding: Some(&[1., 0., 0., 0.]),
+-                tags: &["allow"],
+-                ..crate::test_support::MemorySpec::new(NamespaceId::new(1))
+-            })
+-            .await;
++    // Retain documents until the real remedy finishes, then use real native
++    // phase transitions. Existing uncertified Ghosts cannot be re-embedded.
++    let mut ghosts = Vec::new();
++    for n in [9001, 9002] {
++        ghosts.push(similar_insert(&o, NamespaceId::new(1), n, [1.,0.,0.,0.], "allow", None).await);
+     }
+     legacy.storage.write().unwrap().sync().unwrap();
+     drop(o);
+@@ -176,7 +219,7 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
+         },
+     )
+     .unwrap();
+-    let native = tempfile::tempdir().unwrap();
++    let mut native = tempfile::tempdir().unwrap();
+     std::fs::remove_dir(native.path()).unwrap();
+     migrate_lifecycle(
+         canonical.path(),
+@@ -193,6 +236,25 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
+         },
+     )
+     .unwrap();
++    for ns in [NamespaceId::new(1), other] {
++        crate::test_support::explicitly_adopt_inherited_policy(native.path(), ns, 1., 2000);
++    }
++    native = certify_similar_namespace(native.path(), NamespaceId::new(1)).await;
++    if certify_donor {
++        native = certify_similar_namespace(native.path(), other).await;
++    }
++    {
++        let mut session = crate::storage::native_lifecycle::NativeLifecycleSession::open(
++            native.path(), Default::default(),
++            Arc::new(crate::time::ManualClock::new(864_000_000_000)),
++        ).unwrap();
++        for id in ghosts {
++            for expected in [DecayPhase::Summary, DecayPhase::Ghost] {
++                session.maintain(&MutationContext::unkeyed(NamespaceId::new(1)), id).unwrap();
++                assert_eq!(session.engine.get_record(id).unwrap().unwrap().phase, expected);
++            }
++        }
++    }
+     let storage = crate::storage::RedbStorageEngine::open_native(native.path()).unwrap();
+     let f = Fixture::from_open_engine(native, storage);
+     let owner = owner(&f);
+@@ -220,6 +282,24 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
+         unknown,
+     }
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn supplied_query_certification_all_compatible_donor_is_not_silently_dropped() {
++    let f = similar_fixture_certification(0, false).await;
++    let before = bytes(&f.f);
++    let local = f.engine.prepare_similar_selection(
++        f.source, None, similar_options(SimilarityScope::SameNamespace, VersionMode::Current, false), None,
++    ).await.unwrap();
++    assert!(!local.rows.is_empty());
++    let args = serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"recordAccess":false,"namespaceScope":"allCompatible"});
++    let request = crate::serialization::query::SimilarRequest::from_mcp(&args).unwrap();
++    let result = f.engine.similar_contract(request).await;
++    assert_eq!(result.http_status, 503, "{result:?}");
++    assert!(result.envelope.data.is_none());
++    assert!(result.observation_receipts.is_empty());
++    assert!(result.envelope.receipt.is_none());
++    assert_eq!(bytes(&f.f), before);
++}
+ fn similar_options(scope: SimilarityScope, mode: VersionMode, access: bool) -> SimilaritySelection {
+     SimilaritySelection {
+         scope,
+diff --git a/src/storage/metadata/native_records/supplied_query_certification_tests.rs b/src/storage/metadata/native_records/supplied_query_certification_tests.rs
+index 899578fb..88a2084a 100644
+--- a/src/storage/metadata/native_records/supplied_query_certification_tests.rs
++++ b/src/storage/metadata/native_records/supplied_query_certification_tests.rs
+@@ -160,3 +160,145 @@ async fn supplied_query_certification_mcp_rejects_uncertified_native() {
+ async fn supplied_query_certification_rest_rejects_uncertified_native() {
+     uncertified_boundary(2).await;
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn supplied_query_certification_real_remedy_all_boundaries_and_profile_controls() {
++    let root = tempfile::tempdir().unwrap();
++    // This invokes real reembed_fresh using retained documents, not policy adoption.
++    let d = certified_fixture(root.path());
++    let f = Fixture::from_open_engine(root, RedbStorageEngine::open_native(&d.path).unwrap());
++    completion(&f).rebuild_all().await.unwrap();
++    let query = engine(&f);
++    let before = bytes(&d.path);
++    let arguments = args(&d);
++    let request =
++        crate::serialization::query::QueryRequest::from_mcp(&arguments, "wrong-default").unwrap();
++    let result = query.query_contract(request).await;
++    assert_eq!(result.http_status, 200, "{result:?}");
++    assert_eq!(
++        result.envelope.data.as_ref().unwrap()["results"][0]["memoryId"],
++        json!(d.parent)
++    );
++    let mcp = McpSearchAdapter::new(
++        query.clone(),
++        Arc::new(NoProvider),
++        f.storage.clone(),
++        f.graph.clone(),
++        chrono_tz::UTC,
++    );
++    let result = crate::mcp::tools::prepared_query(&mcp, "wrong-default", &arguments).await;
++    assert_eq!(result.is_error, Some(false), "{result:?}");
++    let expected = Value::Object(result.structured_content.unwrap());
++    let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
++    assert_eq!(serde_json::from_str::<Value>(text).unwrap(), expected);
++    let http = SearchPipelineAdapter::new(
++        query.clone(),
++        Arc::new(NoProvider),
++        f.vector_index.clone(),
++        f.fts_index.clone(),
++        f.entity_index.clone(),
++    );
++    let mut body = arguments.clone();
++    body.as_object_mut().unwrap().remove("contractVersion");
++    let result = crate::api::search_v2(&http, "wrong-default", &body).await;
++    assert_eq!(result.status(), axum::http::StatusCode::OK);
++    let raw = axum::body::to_bytes(result.into_body(), 8 * 1024 * 1024)
++        .await
++        .unwrap();
++    assert_eq!(serde_json::from_slice::<Value>(&raw).unwrap(), expected);
++    for (field, value, status) in [
++        ("embedding", json!([1., 0., 0.]), 422),
++        ("embedding", json!([0., 0., 0., 0.]), 400),
++        (
++            "embeddingProfileId",
++            json!(format!("ep1:{}", "a".repeat(64))),
++            409,
++        ),
++    ] {
++        let mut bad = body.clone();
++        bad[field] = value;
++        assert_eq!(
++            crate::api::search_v2(&http, "wrong-default", &bad)
++                .await
++                .status()
++                .as_u16(),
++            status
++        );
++    }
++    assert_eq!(bytes(&d.path), before);
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn supplied_query_certification_metadata_and_fts_do_not_require_vector_certification() {
++    let root = tempfile::tempdir().unwrap();
++    let d = fixture(root.path());
++    let f = Fixture::from_open_engine(root, RedbStorageEngine::open_native(&d.path).unwrap());
++    completion(&f).rebuild_all().await.unwrap();
++    let before = bytes(&d.path);
++    let query = engine(&f);
++    let request = crate::serialization::query::QueryRequest::from_mcp(
++        &json!({"contractVersion":2,"namespace":"native","queryMode":"metadata_only","recordAccess":false}),
++        "wrong-default",
++    ).unwrap();
++    let result = query.query_contract(request).await;
++    assert_eq!(result.http_status, 200, "{result:?}");
++    assert_eq!(
++        result.envelope.data.as_ref().unwrap()["results"][0]["memoryId"],
++        json!(d.parent)
++    );
++    // Existing nonsemantic FTS reader, not a new public FTS-only query mode.
++    let fts = SharedFtsIndexRegistry::new(f.fts_index.clone());
++    let hits = crate::search::FtsIndexRegistry::search(&fts, d.ns, "original", 10).unwrap();
++    assert_eq!(hits[0].memory_id, d.parent);
++    assert_eq!(bytes(&d.path), before);
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn supplied_query_certification_scope_and_stale_view_fail_closed() {
++    let root = tempfile::tempdir().unwrap();
++    let d = certified_fixture(root.path());
++    let f = Fixture::from_open_engine(root, RedbStorageEngine::open_native(&d.path).unwrap());
++    completion(&f).rebuild_all().await.unwrap();
++    let view = f
++        .storage
++        .read()
++        .unwrap()
++        .meta_store()
++        .capture_read_view()
++        .unwrap();
++    let ns = f
++        .storage
++        .read()
++        .unwrap()
++        .get_namespace(d.ns)
++        .unwrap()
++        .unwrap();
++    view.check_native_vector_namespace(&ns).unwrap();
++    let mut wrong = ns.clone();
++    wrong.name.push_str("-wrong");
++    assert!(view.check_native_vector_namespace(&wrong).is_err());
++    wrong = ns.clone();
++    wrong.initial_stability += 1.;
++    assert!(view.check_native_vector_namespace(&wrong).is_err());
++    {
++        let mut storage = f.storage.write().unwrap();
++        let policy = crate::storage::native_lifecycle::NativePolicyInputs::default();
++        let intent = storage
++            .meta_store()
++            .capture_native_tombstone(d.parent, Some(d.ns), &policy)
++            .unwrap();
++        storage
++            .tombstone_native_record(
++                &MutationContext::unkeyed(d.ns),
++                &intent,
++                &policy,
++                &crate::time::ManualClock::new(3000),
++                None,
++            )
++            .unwrap();
++    }
++    assert!(
++        view.check_native_vector_namespace(&ns).is_err(),
++        "old pinned G must not borrow new owner certification"
++    );
++}

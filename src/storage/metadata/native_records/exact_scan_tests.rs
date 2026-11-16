@@ -19,7 +19,38 @@ async fn measured(f: &Fixture, body: &Value) -> crate::search::exact_scan::Exact
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exact_native_writer_205_pairs_transport_reopen_ghost_tombstone_and_stale_cursor() {
     let mut root = tempfile::tempdir().unwrap();
-    let d = fixture_with_ghost(root.path(), true);
+    // Certify a genuinely retained Full document, then lose content through
+    // actual native maintenance. The old-Ghost remedy negative stays separate.
+    let d = certified_fixture(root.path());
+    {
+        let mut session = NativeLifecycleSession::open(
+            &d.path,
+            NativePolicyInputs::default(),
+            Arc::new(crate::time::ManualClock::new(10_000 * 86_400_000)),
+        )
+        .unwrap();
+        let before = session.engine.get_record(d.parent).unwrap().unwrap();
+        assert_eq!(before.phase, DecayPhase::Full);
+        let vector = before.schema.as_ref().unwrap().vector.clone();
+        assert!(vector.is_some());
+        for (key, phase) in [
+            ("scan-parent-summary", DecayPhase::Summary),
+            ("scan-parent-ghost", DecayPhase::Ghost),
+        ] {
+            let result = session.maintain(&ctx(&session, &d, key), d.parent).unwrap();
+            let crate::storage::native_maintenance::NativeDecayResult::Committed(receipt) = result
+            else {
+                panic!("parent phase loss did not commit");
+            };
+            assert!(matches!(
+                receipt.outcome,
+                MutationOutcome::NativePhaseMaterialized { .. }
+            ));
+            let row = session.engine.get_record(d.parent).unwrap().unwrap();
+            assert_eq!(row.phase, phase);
+            assert_eq!(row.schema.as_ref().unwrap().vector, vector);
+        }
+    }
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let mut eligible = vec![d.parent];
@@ -194,10 +225,69 @@ async fn exact_native_writer_205_pairs_transport_reopen_ghost_tombstone_and_stal
     ));
 }
 
+#[tokio::test]
+async fn exact_native_old_ghost_cannot_manufacture_a_certification_document() {
+    struct NoDocumentProvider(crate::model::schema::EmbeddingProfile);
+    #[async_trait::async_trait]
+    impl crate::embedding::EmbeddingProvider for NoDocumentProvider {
+        fn dimensions(&self) -> usize {
+            4
+        }
+        fn model_name(&self) -> &str {
+            &self.0.model_id
+        }
+        fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+            Some(self.0.clone())
+        }
+        async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+            panic!("a genuine old Ghost has no retained document for the provider");
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture_with_ghost(root.path(), true);
+    let before = readers::bytes(&d.path);
+    let snapshot = crate::storage::offline_snapshot::OfflineSnapshot::open(&d.path).unwrap();
+    let source = snapshot.control().generation_ref();
+    let ghost = snapshot.record(d.parent).unwrap().unwrap();
+    assert_eq!(ghost.record.phase, DecayPhase::Ghost);
+    assert!(ghost.record.summary.is_empty() && ghost.full_text.is_none());
+    assert!(ghost.embedding.is_some()); // Retained vectors are not provider input.
+    drop(snapshot);
+    let request = crate::storage::vector_certification::ReembedVectors {
+        source,
+        namespace_id: d.ns,
+        namespace_name: "native".into(),
+        profile_id: d.profile.profile_id().unwrap(),
+        context: MutationContext {
+            store_id: Some(source.store_id),
+            expected_generation: Some(source.generation),
+            scope: MutationScope::Namespace(d.ns),
+            contract_version: 1,
+            idempotency_key: Some("old-ghost-remedy".into()),
+        },
+    };
+    let destination = root.path().join("must-not-certify-old-ghost");
+    let error = crate::storage::vector_certification::reembed_fresh(
+        &d.path,
+        &destination,
+        &request,
+        &NoDocumentProvider(d.profile.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(error, StorageError::InvalidMutation(ref reason)
+        if reason.contains("no complete retained document")),
+        "{error:?}"
+    );
+    assert_eq!(readers::bytes(&d.path), before);
+    assert!(!destination.exists());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exact_native_generation_change_after_capture_discards_computed_page() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();

@@ -1977,6 +1977,19 @@ pub(crate) async fn dispatch_v2(
         .await
         .mcp();
     }
+    if name == "recall_memories" {
+        return prepared_query(
+            bridge.search.as_ref(),
+            bridge.default_namespace(),
+            &arguments,
+        )
+        .await;
+    }
+    if name == "find_similar_memories"
+        && arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
+    {
+        return prepared_similar(bridge.search.as_ref(), &arguments).await;
+    }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{
         contract::{CommitState, Envelope, ErrorCategory, ExecutionError},
@@ -2018,6 +2031,30 @@ pub(crate) async fn dispatch_v2(
             .unwrap_or_else(|_| ToolCallResult::error("Serialization error")),
         Err(error) => failure(error.execution_error()),
     }
+}
+
+pub(crate) async fn prepared_query(
+    search: &dyn crate::mcp::bridge::SearchPipeline,
+    default_namespace: &str,
+    arguments: &serde_json::Value,
+) -> ToolCallResult {
+    let reply =
+        match crate::serialization::query::QueryRequest::from_mcp(arguments, default_namespace) {
+            Ok(request) => search.query_contract(request).await,
+            Err(error) => crate::serialization::query_response::QueryReply::input(error),
+        };
+    reply.mcp()
+}
+
+pub(crate) async fn prepared_similar(
+    search: &dyn crate::mcp::bridge::SearchPipeline,
+    arguments: &serde_json::Value,
+) -> ToolCallResult {
+    let reply = match crate::serialization::query::SimilarRequest::from_mcp(arguments) {
+        Ok(request) => search.similar_contract(request).await,
+        Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    reply.mcp()
 }
 
 // ═══════════════════════════════════════════════════════════════════════

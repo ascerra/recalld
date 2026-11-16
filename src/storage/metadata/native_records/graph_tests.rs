@@ -36,7 +36,7 @@ fn native_graph_rejects_real_foreign_endpoint_and_preserves_unknown_profile() {
     let root = tempfile::tempdir().unwrap();
     let mut foreign = MemoryId::nil();
     let mut foreign_target = MemoryId::nil();
-    let d = fixture_with_seed(root.path(), |engine| {
+    let d = certified_fixture_with_seed(root.path(), |engine| {
         let mut ns = NamespaceConfig::default_namespace(0);
         ns.name = "foreign".into();
         ns.embedding_dim = 4;
@@ -118,7 +118,7 @@ fn native_graph_rejects_real_foreign_endpoint_and_preserves_unknown_profile() {
 fn native_graph_committed_and_unknown_failures_reconcile_without_duplicate_tokens() {
     for unknown in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let id = add(&mut session, &d, "source");
@@ -194,7 +194,7 @@ fn native_graph_process_child() {
 #[test]
 fn native_graph_review_preserves_signed_zero_weight_bits() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
@@ -231,7 +231,7 @@ fn native_graph_review_preserves_signed_zero_weight_bits() {
 #[test]
 fn native_graph_keyed_noop_never_reports_unbound_success_then_reexecutes() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
@@ -329,6 +329,7 @@ fn native_graph_keyed_noop_never_reports_unbound_success_then_reexecutes() {
 #[test]
 fn native_graph_ghost_cannot_activate_but_retained_parent_can_gain_structural_edge() {
     let root = tempfile::tempdir().unwrap();
+    let mut live = None;
     let d = fixture_with_seed(root.path(), |engine| {
         let (id, row) = engine.scan_all().unwrap().remove(0);
         let ns = engine
@@ -346,10 +347,55 @@ fn native_graph_ghost_cannot_activate_but_retained_parent_can_gain_structural_ed
                 .apply_legacy_decay(id, &row, &ns, DecayPhase::Ghost, 0.1, 0.1)
                 .unwrap()
         );
+        // A real pre-migration peer lets this structural test retain its genuine
+        // uncertified old Ghost, without fresh semantic insertion or lost text.
+        let peer = crate::storage::insertion::InsertMemory {
+            id: None,
+            summary: "retained live peer".into(),
+            full_text: None,
+            tags: vec![],
+            initial_stability: None,
+            created_at: Some(1000),
+            embedding: Some(vec![1., 0., 0., 0.]),
+            parent_id: None,
+            supersedes: None,
+        };
+        live = Some(
+            crate::storage::insertion::inserted_id(
+                &engine
+                    .insert_memory_with_receipt(
+                        &MutationContext::unkeyed(NamespaceId::new(row.namespace_id)),
+                        &peer,
+                        &[],
+                        1000,
+                    )
+                    .unwrap(),
+            )
+            .unwrap(),
+        );
     });
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
-    let id = add(&mut session, &d, "live");
+    let id = live.unwrap();
+    assert!(
+        session
+            .engine
+            .get_namespace(d.ns)
+            .unwrap()
+            .unwrap()
+            .schema
+            .unwrap()
+            .vector_certification
+            .is_none()
+    );
+    assert_eq!(
+        session.engine.get_record(id).unwrap().unwrap().phase,
+        DecayPhase::Full
+    );
+    assert_eq!(
+        session.engine.get_record(d.parent).unwrap().unwrap().phase,
+        DecayPhase::Ghost
+    );
     for (source, target) in [(id, d.parent), (d.parent, id)] {
         let before = session.metadata().control_state().unwrap();
         assert!(matches!(
@@ -405,7 +451,7 @@ async fn native_graph_review_rejects_wrong_foreign_profile_binding() {
 async fn reject_foreign_profile_commitment(profile: String, well_formed: bool, nochange: bool) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
@@ -530,7 +576,7 @@ fn native_graph_process_exit_recovery_before_after_metadata_and_edges() {
         "after_canonical_ack",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let id = add(&mut session, &d, "source");
@@ -607,7 +653,7 @@ fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
 fn native_graph_corrupt_proof_outbox_and_physical_edges_reject_before_live_open() {
     for case in 0..4 {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let id = add(&mut session, &d, "source");
@@ -702,7 +748,7 @@ async fn native_graph_export_import_restore_preserves_history_and_foreign_lineag
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
@@ -789,7 +835,7 @@ async fn native_graph_export_import_restore_preserves_history_and_foreign_lineag
 #[test]
 fn native_graph_multi_edge_updates_noops_replay_and_history() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
@@ -872,7 +918,7 @@ fn native_graph_multi_edge_updates_noops_replay_and_history() {
 #[test]
 fn native_graph_capture_cas_scope_eligibility_and_input_bounds_reject_without_write() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let id = add(&mut session, &d, "source");
@@ -938,7 +984,7 @@ fn native_graph_capture_cas_scope_eligibility_and_input_bounds_reject_without_wr
 #[test]
 fn native_graph_supersedes_cycle_branch_and_multi_source_token_once() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock);
     let a = add(&mut session, &d, "a");

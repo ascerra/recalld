@@ -176,6 +176,12 @@ pub struct NativeAdvisoryMatch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeStoreWrite {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub vector_execution: Option<super::vector_certification::VectorExecution>,
     pub namespace_id: NamespaceId,
     pub memory_id: MemoryId,
     pub lifecycle_version: LifecycleVersion,
@@ -222,6 +228,9 @@ impl NativeStoreWrite {
         Ok(())
     }
     pub(crate) fn validate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
+        if let Some(execution) = &self.vector_execution {
+            execution.validate(&self.primary()?.after, receipt)?;
+        }
         self.settings
             .validate()
             .map_err(|_| invalid("invalid linked creation settings"))?;

@@ -140,6 +140,9 @@ impl Request {
 pub enum Reply {
     Legacy(Result<StoredMemory, String>),
     Owned(native_single::Reply),
+    /// A malformed Remote wrapper cannot bind this received receipt to the
+    /// current single operation. Preserve evidence without claiming commitment.
+    Uncertain(WriteReceipt),
 }
 impl Reply {
     pub(crate) fn decode(value: serde_json::Value, request: &Request) -> Self {
@@ -148,6 +151,7 @@ impl Reply {
             .and_then(|v| v.get("receipt"))
             .and_then(|v| serde_json::from_value::<WriteReceipt>(v.clone()).ok());
         match serde_json::from_value::<Self>(value) {
+            Ok(Self::Uncertain(receipt)) => Self::Uncertain(receipt),
             Ok(Self::Owned(mut reply)) => {
                 if reply.error.is_none()
                     && (!reply
@@ -175,15 +179,10 @@ impl Reply {
             Ok(Self::Legacy(result)) if !request.require_native && request.profile_id.is_none() => {
                 Self::Legacy(result)
             }
-            _ => Self::Owned(match retained {
-                Some(receipt) => native_single::Reply::failure(StorageError::CommittedMutation {
-                    receipt: Box::new(receipt),
-                    source: Box::new(StorageError::RecoveryRequired(
-                        "API1 store reply is malformed; retained receipt preserved".into(),
-                    )),
-                }),
-                None => native_single::Reply::uncertain(),
-            }),
+            _ => match retained {
+                Some(receipt) => Self::Uncertain(receipt),
+                None => Self::Owned(native_single::Reply::uncertain()),
+            },
         }
     }
     pub(crate) fn unavailable() -> Self {
@@ -197,6 +196,7 @@ impl Reply {
             Self::Legacy(Ok(data)) => ToolCallResult::json(&data)
                 .unwrap_or_else(|e| ToolCallResult::error(format!("Serialization error: {e}"))),
             Self::Legacy(Err(e)) => ToolCallResult::error(format!("Failed to store memory: {e}")),
+            Self::Uncertain(receipt) => failure_mcp(uncertain_evidence(receipt).1),
             Self::Owned(reply) => {
                 if reply.error.is_none()
                     && reply.namespace_id.is_some()
@@ -209,15 +209,24 @@ impl Reply {
                     }
                 }
                 let (_, error) = failure(reply);
-                let text = serde_json::to_string(&error).expect("finite API1 failure");
-                let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-                let mut result = ToolCallResult::text(text);
-                result.structured_content = value.as_object().cloned();
-                result.is_error = Some(true);
-                result
+                failure_mcp(error)
             }
         }
     }
+}
+
+fn failure_mcp(error: Failure) -> crate::mcp::protocol::ToolCallResult {
+    let text = serde_json::to_string(&error).expect("finite API1 failure");
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let mut result = crate::mcp::protocol::ToolCallResult::text(text);
+    result.structured_content = value.as_object().cloned();
+    result.is_error = Some(true);
+    result
+}
+
+#[derive(Serialize)]
+struct ReceivedEvidence {
+    receipt: WriteReceipt,
 }
 
 #[derive(Serialize)]
@@ -232,12 +241,24 @@ pub(crate) struct Failure {
     #[serde(skip_serializing_if = "Option::is_none")]
     receipt: Option<WriteReceipt>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    received_evidence: Option<ReceivedEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     readiness: Option<Readiness>,
     #[serde(skip_serializing_if = "Option::is_none")]
     operation_id: Option<uuid::Uuid>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
 }
+pub(crate) fn uncertain_evidence(receipt: WriteReceipt) -> (u16, Failure) {
+    let (status, mut body) = failure(native_single::Reply::uncertain());
+    body.received_evidence = Some(ReceivedEvidence { receipt });
+    body.warnings.extend([
+        "UNVERIFIED_RECEIVED_EVIDENCE".into(),
+        "READINESS_UNKNOWN".into(),
+    ]);
+    (status, body)
+}
+
 pub(crate) fn failure(reply: native_single::Reply) -> (u16, Failure) {
     let (mut status, envelope) = reply.response();
     let error = envelope.error.unwrap_or(ExecutionError {
@@ -276,6 +297,7 @@ pub(crate) fn failure(reply: native_single::Reply) -> (u16, Failure) {
                 .operation_id
                 .or_else(|| envelope.receipt.as_ref().map(|r| r.operation_id)),
             receipt: envelope.receipt,
+            received_evidence: None,
             readiness: envelope.readiness,
             warnings: envelope.warnings,
         },

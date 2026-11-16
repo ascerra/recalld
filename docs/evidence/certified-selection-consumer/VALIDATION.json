@@ -1,0 +1,29 @@
+{
+  "runtime": "eca9e0edd7c6303a703b3bd776169d1c4e67b8b4",
+  "parents": [
+    "7283a700c4eca5f8d1d8907b33c867b1d1e3a6bb",
+    "1b7fd01b810c15c62ef2fe4e01f6cf6263b789a0"
+  ],
+  "source_inputs": 388,
+  "source_unchanged": true,
+  "focused_executions": 33,
+  "all_features_all_targets": {
+    "library_pass": 1420,
+    "library_ignored": 2,
+    "cli_pass": 5,
+    "example_pass": 10,
+    "library_seconds": 1177.64
+  },
+  "fmt_exit": 0,
+  "clippy_exit": 0,
+  "clippy_warnings": true,
+  "peak_memory_bytes": 3960991744,
+  "memory_max_events": 0,
+  "oom": 0,
+  "oom_kill": 0,
+  "test_harness_binaries": 13,
+  "cli_application_binaries": 3,
+  "source_manifest_sha256": "cfddc1a0f122aecee2ed9bd50dc54c42656f83fadc0ff3f1cda82f512a88215c",
+  "publication": "awaiting exact-head review",
+  "activation": false
+}

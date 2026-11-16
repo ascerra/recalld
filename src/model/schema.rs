@@ -332,6 +332,12 @@ pub struct NamespaceSchemaV2 {
         deserialize_with = "crate::storage::request_context::deserialize_present"
     )]
     pub inherited_decay: Option<crate::storage::inherited_policy::InheritedDecayBinding>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::storage::request_context::deserialize_present"
+    )]
+    pub vector_certification: Option<crate::storage::vector_certification::VectorCertification>,
     pub required_features: Vec<String>,
     pub extensions: BTreeMap<String, serde_json::Value>,
 }
@@ -343,13 +349,22 @@ impl NamespaceSchemaV2 {
             policy_revision: Generation::default(),
             embedding_binding: EmbeddingBinding::UnknownLegacy,
             inherited_decay: None,
+            vector_certification: None,
             required_features: vec![],
             extensions: BTreeMap::new(),
         }
     }
     pub fn validate(&self, namespace: &NamespaceConfig) -> Result<(), String> {
         if self.namespace_schema_version != NAMESPACE_SCHEMA_VERSION
-            || !self.required_features.is_empty()
+            || match &self.vector_certification {
+                None => !self.required_features.is_empty(),
+                Some(binding) => {
+                    self.required_features
+                        != [crate::storage::vector_certification::REQUIRED_FEATURE]
+                        || binding.validate().is_err()
+                        || !matches!(self.embedding_binding, EmbeddingBinding::Bound { .. })
+                }
+            }
         {
             return Err("unsupported namespace schema/features".into());
         }

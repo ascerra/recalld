@@ -1222,6 +1222,31 @@ async fn similarity_threshold_namespace_and_returned_only_exposure() {
             members.push(id);
             h.ids.push(id);
         }
+        // Higher-cosine ghosts must not consume the similarity allowance. The
+        // index deliberately says Full: canonical phase is the authority.
+        for _ in 0..3 {
+            let id =
+                h.f.insert_memory_with(MemorySpec {
+                    phase: crate::model::DecayPhase::Ghost,
+                    embedding: Some(&VECTOR),
+                    ..MemorySpec::new(namespace)
+                })
+                .await;
+            h.f.vector_index
+                .write()
+                .await
+                .add(
+                    id,
+                    &VECTOR,
+                    VectorMetadata {
+                        namespace_id: namespace,
+                        decay_phase: 1,
+                        tags: vec![],
+                    },
+                )
+                .unwrap();
+            h.ids.push(id);
+        }
         let bridge = h.bridge(); // default differs from canonical source scope
         let before = h.snapshot().await;
         // /search must still filter strength: the low-strength closest neighbor

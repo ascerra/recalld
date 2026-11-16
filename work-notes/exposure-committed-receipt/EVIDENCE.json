@@ -1,0 +1,170 @@
+{
+  "base": "01dc414e311b2a35aed35dd443cfe100ce80563a",
+  "runtime": "1f6a80c3059dbc11390c18bb95bfb812d093423b",
+  "runs": [
+    {
+      "candidate": "red",
+      "source": "e84eab9ada375dcc32e06093cbf7a74cb050438f",
+      "attribution": "compile-only; four inherited fixture E0308; no tests",
+      "log_sha256": "6421b3636ebb8fa6db4b6e30d0ff043fc49e69cd5f2468ba3e9b64e33c8e9bca",
+      "source_manifest_sha256": "2dbc7b1b1be5e72c26684eee8dfaeb8a9167c60e3a3197a1471d889fa148e9a7",
+      "source_file_count": 8666
+    },
+    {
+      "candidate": "red2",
+      "source": "b58f08713c21fbaf6cf7c797ab64139043fe7808",
+      "attribution": "six setup failures before hook; not defect proof",
+      "log_sha256": "30ae38899f7d0f03f304fd7483e912f9473f861ce6b4bd578e2d779bb66c1297",
+      "executable": {
+        "file": "recalld-c75914fe89248715",
+        "sha256": "b30774ba0d1727dcf45cb76d2407b8f8ce1ea77bab2995ce43476da06aa08550",
+        "mtime_ns": 1794802912819648939,
+        "size": 519009832
+      },
+      "source_manifest_sha256": "bb8cf64f92b7f4b6cca3c9c51bbcb24c3fbb87eef251fe619e32185c87d370c4",
+      "source_file_count": 8666
+    },
+    {
+      "candidate": "red3",
+      "source": "2fc4695c9fe13f4dfad2d4cc348dcf76cb1dc2c5",
+      "attribution": "six actual postcommit missing-receipt failures after strict reopen proof",
+      "log_sha256": "a32e8d5fc1c13a68bff0ba7b16cd1b860be372474af1ef2d2d77eabe19384c1e",
+      "executable": {
+        "file": "recalld-c75914fe89248715",
+        "sha256": "94a2085a24fc71109cb84facf922112b9c5264b6ba16297bcf5849f82a621bfd",
+        "mtime_ns": 1794803013916703171,
+        "size": 518978640
+      },
+      "source_manifest_sha256": "609d30b81e728966010516b8defe6060049b52383e58d02ced62b969fa4f7a67",
+      "source_file_count": 8666
+    },
+    {
+      "candidate": "green",
+      "source": "1f6a80c3059dbc11390c18bb95bfb812d093423b",
+      "attribution": "eight new and 24 existing affected tests pass; no full suite",
+      "log_sha256": "db61fed478aa682d1a5c3f06d8b8b173acea05aee23fff26cc0f7f6070bc5819",
+      "executable": {
+        "file": "recalld-c75914fe89248715",
+        "sha256": "ad1bd786bac1626ca187a0ae4f1469474c5cd63915c54209473068454eced645",
+        "mtime_ns": 1794803230225398999,
+        "size": 518286192
+      },
+      "source_manifest_sha256": "7bf353425bc20d92cd194b53106ba3bede8c41e811ad67faad02590189ddab42",
+      "source_file_count": 8666
+    }
+  ],
+  "green_results": [
+    {
+      "log": "focused.log",
+      "passed": 8,
+      "sha256": "db61fed478aa682d1a5c3f06d8b8b173acea05aee23fff26cc0f7f6070bc5819",
+      "tests": [
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_first_group_api1",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_first_group_api2",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_later_group_api1",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_keyed_core_replays_after_reopen_without_time_or_history",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_later_group_api2",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_prepared_query_returns_only_failure_and_full_receipt",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_whole_query_page_api1",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_whole_query_page_api2"
+      ]
+    },
+    {
+      "log": "native-consumer.log",
+      "passed": 11,
+      "sha256": "b175e075bda16b872ab6b837cf14ab812056f17848c8c45daf34848b5bc61602",
+      "tests": [
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_deferred_selection_never_writes_and_unsupported_recorder_stays_closed",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_http_mcp_get_similar_true_and_false_use_real_observer",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_accepted_root_completes_closed_admission_and_cancelled_worker_keeps_leases",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_partial_publication_keeps_receipt_and_repairs_without_reobservation",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_invalid_configured_policy_fails_without_writes_and_empty_has_no_work",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_query_deduplicates_returned_ids_preserves_anchor_and_reopens",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_per_namespace_failure_publishes_preceding_receipts_without_terminal_access",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_unknown_commit_keeps_operation_and_requires_reopen",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::origin::exposure_origin_native_similar_and_explicit_sample_use_original_version",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::origin::exposure_origin_storage_recorder_preserves_both_versions_on_legacy_storage",
+        "storage::metadata::native_records::tests::readers::exposure_consumer::origin::exposure_origin_native_matrix_keeps_api_policy_semantics_independent"
+      ]
+    },
+    {
+      "log": "core-replay.log",
+      "passed": 1,
+      "sha256": "6b0f1c59f55351917849cd82d2e62ba1e44efb9abb3afa0d704b1237dbbd4063",
+      "tests": [
+        "storage::metadata::native_lifecycle::tests::original_api_exposure_core_preserves_identity_and_replay_before_time"
+      ]
+    },
+    {
+      "log": "query-barrier.log",
+      "passed": 1,
+      "sha256": "e077ddd18c26faeddb43adb2e52fd7817bd41c3f075998772b0b69ae225655c2",
+      "tests": [
+        "search::pipeline::read_view::tests::strict_query_actual_final_barrier_failure_keeps_full_receipt_and_identity"
+      ]
+    },
+    {
+      "log": "query-groups.log",
+      "passed": 1,
+      "sha256": "73ba98a617e5ce9b50ed04f734887fb05f75873605b96772cc7acce892d81fc7",
+      "tests": [
+        "search::pipeline::read_view::tests::strict_query_actual_similar_original2_true_preserves_all_namespace_receipts"
+      ]
+    },
+    {
+      "log": "query-projection.log",
+      "passed": 1,
+      "sha256": "ac3d689f5467a4346784bb2cfb5ec701d16d639828f22fd66996cf7fc539ac88",
+      "tests": [
+        "serialization::query_response::tests::strict_query_valid_lifecycle_receipt_groups_fit_full_error_projection_reservation"
+      ]
+    },
+    {
+      "log": "prereq-performance.log",
+      "passed": 1,
+      "sha256": "eb1c02e80f6cf6e356f2915b722bac823579adab8442bec967dca60f42f75e02",
+      "tests": [
+        "performance::tests::writes::online_producer_actual_committed_publication_failure_and_keyed_replay_keep_receipt"
+      ]
+    },
+    {
+      "log": "prereq-graph.log",
+      "passed": 1,
+      "sha256": "1b6031a89d521711971e8ca89c7a6ca29f5bb2dbffba060a68c28246f83b54fc",
+      "tests": [
+        "storage::metadata::native_records::tests::graph_producers::native_graph_producer_publication_failure_preserves_exact_receipt_then_replays_without_clock_policy"
+      ]
+    },
+    {
+      "log": "legacy-observer-corrected.log",
+      "passed": 7,
+      "sha256": "dac141e66c9d65a83a8b8ecf2d65017c691284bc6bdbf3bbfbaa8b76d74a0dc5",
+      "tests": [
+        "decay::observation::tests::actual_feedback_consumer_commits_one_receipt_and_invalidates_before_return",
+        "decay::observation::tests::accepted_observation_and_feedback_finish_after_root_admission_closes",
+        "decay::observation::tests::cancelled_queued_observation_retains_root_and_registered_child",
+        "decay::observation::tests::later_namespace_failure_reports_prior_receipts_and_publishes_them",
+        "decay::observation::tests::namespace_batches_deduplicate_direct_wins_publish_and_survive_reopen",
+        "decay::observation::tests::publication_panic_is_committed_not_ready_and_reopen_retains_receipt",
+        "decay::observation::tests::same_namespace_failure_is_atomic_and_no_success_receipt"
+      ]
+    }
+  ],
+  "distinct_tests": 32,
+  "zero_match": {
+    "log": "legacy-observer.log",
+    "sha256": "00fee3af1ebed70fd1243d703797a5dfec1f23da6b078cfe6a07f5ad362dd0ee",
+    "tests": 0,
+    "coverage": false
+  },
+  "checks": {
+    "fmt": {
+      "exit": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "clippy": {
+      "exit": 0,
+      "sha256": "de92d8e731fec2da0689b4c7c3a3701776a066556cc78afe055de23fa311f576"
+    }
+  }
+}

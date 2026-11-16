@@ -1,0 +1,26 @@
+{
+  "runtime_commit": "2d1cb99ac985ead3931bccc51b24dd646d4b99d3",
+  "source_manifest_sha256": "d1f4032ecce546b068a2444577cb2720950af9ab4c008b575321d610a7ff2454",
+  "source_files": 235,
+  "snapshot_worktree_match": true,
+  "binary_sha256": "236034dee51eac7dc21964c78d324b2690c2e81f45bf493d2f331d33c3660c34",
+  "log_sha256": "3059829187c5c1e0f605dc18f79f14e8ae9cce52092593681e92ba2ad3f86cc5",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 101,
+    "Error": "",
+    "StartedAt": "2026-11-15T00:40:27.660558803Z",
+    "FinishedAt": "2026-11-15T00:41:08.283402628Z"
+  },
+  "result_lines": [
+    "test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 1042 filtered out; finished in 0.05s"
+  ],
+  "failure": "Metadata-only formula fixture omitted required filter and returned EmptyQuery; no full suite or later focused checks ran."
+}

@@ -24,6 +24,18 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    async fn similar_contract(
+        &self,
+        _request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn query_contract(
+        &self,
+        _request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
     /// Exact canonical/vector page. Public application v2 remains gated.
     async fn scan_duplicate_pairs(
         &self,

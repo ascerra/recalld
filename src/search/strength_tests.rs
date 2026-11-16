@@ -247,8 +247,8 @@ fn engine(
     edges: &[(usize, usize, EdgeType)],
 ) -> QueryEngine {
     use crate::search::adapters::*;
-    use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, VectorIndex, VectorMetadata};
-    let mut vectors = FlatVectorIndex::new(4);
+    use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner, VectorMetadata};
+    let mut vectors = VectorIndexOwner::uniform(4);
     let fts = FtsIndex::new(f._directory.path()).unwrap();
     let mut entities = EntityIndex::new();
     let mut graph = crate::graph::RelationshipGraph::new();
@@ -704,7 +704,10 @@ impl InvalidRevalidation {
                     LifecycleVersion::LegacyAccessV1
             }
             2 => record.lifecycle.as_mut().unwrap().policy_revision = revision("3"),
-            _ => record.stability = f32::NAN,
+            3 => record.stability = f32::NAN,
+            4 => record.phase = DecayPhase::Ghost,
+            5 => record.namespace_id = NamespaceId::new(999),
+            _ => {}
         }
     }
 }
@@ -721,6 +724,9 @@ impl MetadataStore for InvalidRevalidation {
         let mut records = MetadataStore::get_batch(self.source.as_ref(), ids).await?;
         // Initial complete namespace read stays valid; replacement batch has one ID.
         if ids.len() == 1 {
+            if self.corruption == 6 {
+                records.retain(|r| r.id != self.target);
+            }
             for record in &mut records {
                 self.corrupt(record);
             }
@@ -877,13 +883,13 @@ async fn returned_graph_result_uses_the_same_projection_as_admission_and_ranking
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_retrieval_graph_formulas_also_consume_explicit_policy_projection() {
     use crate::search::adapters::SharedVectorIndexRegistry;
-    use crate::search::{FlatVectorIndex, VectorIndex, VectorMetadata};
+    use crate::search::{VectorIndexOwner, VectorMetadata};
     let f = offline(2, LifecycleVersion::ExplicitFeedbackV2, |_, _| {}).await;
     let clock = CountingClock::new(DAY);
     let mut engine = engine(&f, clock.clone(), &[(0, 1, EdgeType::Associative)]);
     // Only the seed has a direct channel hit; the neighbor is graph-discovered.
     let item = f.view.record(f.ids[0]).unwrap().unwrap();
-    let mut index = FlatVectorIndex::new(4);
+    let mut index = VectorIndexOwner::uniform(4);
     index
         .add(
             f.ids[0],
@@ -1205,6 +1211,33 @@ async fn by_id_scope_and_record_policy_mismatches_fail_closed() {
         );
     }
     assert_eq!(file_bytes(&f.files), bytes);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn by_id_selected_phase_scope_or_missing_row_fails_before_observer() {
+    let f = offline(2, LifecycleVersion::LegacyAccessV1, |_, _| {}).await;
+    let before = file_bytes(&f.files);
+    for corruption in 4..7 {
+        for access in [false, true] {
+            let clock = CountingClock::new(DAY);
+            let mut engine = engine(&f, clock.clone(), &[]);
+            engine.meta_store = Arc::new(InvalidRevalidation {
+                source: f.view.clone(),
+                target: f.ids[1],
+                corruption,
+            });
+            // NoSideEffects panics if the true request reaches an observer.
+            let result = engine
+                .similar_filtered_with_access(f.ids[0], 10, None, access)
+                .await;
+            assert!(
+                matches!(result, Err(SearchError::Unavailable(_))),
+                "{corruption}: {result:?}"
+            );
+            assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
+        }
+    }
+    assert_eq!(file_bytes(&f.files), before);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1045,6 +1045,7 @@ impl MetadataStore {
                 "injected precommit abandonment".into(),
             ));
         }
+        let certification = self.prepare_vector_validation_commit(&tx, &receipt)?;
         crash_point("before_metadata_commit");
         // Publish dirty before advancing the epoch. Admission samples the
         // epoch twice; it cannot accept a new stamp with an old clean flag.
@@ -1097,6 +1098,7 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.publish_vector_validation_commit(certification, &receipt)?;
         self.view_publication.canonical_committed();
         crash_point("after_metadata_commit");
         let mut phases = self.phase_index.write().unwrap_or_else(|e| e.into_inner());

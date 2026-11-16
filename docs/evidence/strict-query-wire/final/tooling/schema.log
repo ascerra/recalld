@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "/work/tests/query_schema_conformance.py", line 13, in <module>
+    from jsonschema import Draft202012Validator, FormatChecker
+  File "/schema/jsonschema/__init__.py", line 13, in <module>
+    from jsonschema._format import FormatChecker
+  File "/schema/jsonschema/_format.py", line 11, in <module>
+    from jsonschema.exceptions import FormatError
+  File "/schema/jsonschema/exceptions.py", line 15, in <module>
+    from referencing.exceptions import Unresolvable as _Unresolvable
+  File "/schema/referencing/__init__.py", line 5, in <module>
+    from referencing._core import Anchor, Registry, Resource, Specification
+  File "/schema/referencing/_core.py", line 18, in <module>
+    from referencing.typing import URI, Anchor as AnchorType, D, Mapping, Retrieve
+  File "/schema/referencing/typing.py", line 22, in <module>
+    D = TypeVar("D", default=Any)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: TypeVar.__init__() got an unexpected keyword argument 'default'

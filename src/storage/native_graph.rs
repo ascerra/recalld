@@ -82,6 +82,8 @@ pub struct NativeGraphIntent {
     pub(crate) scope: LifecycleScope,
     pub(crate) original: NativeGraphInput,
     pub(crate) capture: CapturedLifecycle,
+    /// Automatic selection also binds absence/new candidates, not only endpoints.
+    pub(crate) selection_generation: Option<GenerationRef>,
 }
 impl NativeGraphIntent {
     pub fn capture_generation(&self) -> GenerationRef {

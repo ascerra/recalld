@@ -110,6 +110,11 @@ pub enum StorageError {
 
     #[error("active embedding profile does not match {field}")]
     NamespaceEmbeddingProfileMismatch { field: &'static str },
+    /// Exact owned canonical state proves the namespace has no certificate.
+    /// This is a known precommit admission failure, never a commit outcome.
+    #[error("namespace {namespace_id} vectors require explicit offline re-embedding certification")]
+    VectorCertificationRequired { namespace_id: u32 },
+
     /// Caller-supplied vector failed the shared numeric boundary. Keep the
     /// legacy diagnostic text while allowing typed transport classification.
     #[error("invalid storage mutation: {0}")]

@@ -21,15 +21,6 @@ pub(crate) const RECEIPTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("mutation_receipts");
 pub(crate) const KEYS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("mutation_keys");
 
-/// Final exposure assertion, checked with canonical records in the write transaction.
-/// Namespace is the name pinned during selection; a by-ID source must still
-/// belong to that same namespace even when it is not itself exposed.
-#[derive(Debug, Clone, Serialize)]
-pub struct ExposureScope {
-    pub namespace: String,
-    pub source: Option<crate::model::MemoryId>,
-}
-
 // Per-test-thread work counts, not timing or a process-wide instrumentation
 // switch. Count receipt decoding as well as full proof entry so a regression
 // cannot hide a history scan behind a different validation helper.
@@ -38,16 +29,35 @@ pub struct ExposureScope {
 pub(crate) struct ValidationWork {
     pub full_validations: usize,
     pub receipt_decodes: usize,
+    pub certification_scans: usize,
 }
 #[cfg(test)]
 thread_local! {
     static VALIDATION_WORK: std::cell::Cell<ValidationWork> = const {
-        std::cell::Cell::new(ValidationWork { full_validations: 0, receipt_decodes: 0 })
+        std::cell::Cell::new(ValidationWork { full_validations: 0, receipt_decodes: 0, certification_scans: 0 })
     };
 }
 #[cfg(test)]
 pub(crate) fn take_validation_work() -> ValidationWork {
     VALIDATION_WORK.with(|work| work.replace(ValidationWork::default()))
+}
+
+#[cfg(test)]
+pub(crate) fn certification_scan() {
+    VALIDATION_WORK.with(|work| {
+        let mut count = work.get();
+        count.certification_scans += 1;
+        work.set(count);
+    });
+}
+
+/// Final exposure assertion, checked with canonical records in the write transaction.
+/// Namespace is the name pinned during selection; a by-ID source must still
+/// belong to that same namespace even when it is not itself exposed.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExposureScope {
+    pub namespace: String,
+    pub source: Option<crate::model::MemoryId>,
 }
 
 /// Canonical decimal-string u63. JSON numbers, signs and leading zeros fail.
@@ -237,6 +247,9 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    VectorsReembedded {
+        transition: super::vector_certification::VectorsReembedded,
+    },
     InheritedDecayAdopted {
         transition: super::inherited_policy::InheritedDecayAdopted,
     },
@@ -282,6 +295,17 @@ pub enum MutationOutcome {
     LifecycleFeedbackApplied {
         transition: super::native_lifecycle::NativeLifecycleWrite,
     },
+    BatchReserved {
+        batch_kind: super::batch::BatchKind,
+        item_count: u32,
+        caller_hash: [u8; 32],
+        resolution_hash: [u8; 32],
+    },
+    BatchItemRejected {
+        batch_operation_id: Uuid,
+        index: u32,
+        error: super::batch::BatchError,
+    },
     LifecycleMaterialized {
         #[serde(rename = "memoryId")]
         memory_id: MemoryId,
@@ -295,17 +319,6 @@ pub enum MutationOutcome {
         decay_strength_bits: u32,
         #[serde(rename = "removedFieldsMask")]
         removed_fields_mask: u8,
-    },
-    BatchReserved {
-        batch_kind: super::batch::BatchKind,
-        item_count: u32,
-        caller_hash: [u8; 32],
-        resolution_hash: [u8; 32],
-    },
-    BatchItemRejected {
-        batch_operation_id: Uuid,
-        index: u32,
-        error: super::batch::BatchError,
     },
     NamespacePurgeStarted {
         namespace_id: NamespaceId,
@@ -486,6 +499,9 @@ pub(crate) fn validate_existing(
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
+            MutationOutcome::VectorsReembedded { transition } => {
+                scope == MutationScope::Namespace(transition.before_namespace.namespace_id)
+            }
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 scope == MutationScope::Namespace(t.before_namespace.namespace_id)
             }
@@ -527,6 +543,7 @@ pub(crate) fn validate_existing(
                     stored.receipt.outcome,
                     MutationOutcome::MemoryInserted { .. }
                         | MutationOutcome::MemoryTombstoned { .. }
+                        | MutationOutcome::LifecycleMaterialized { .. }
                 ) {
                     "record mutation receipt has catalog scope"
                 } else {
@@ -539,8 +556,9 @@ pub(crate) fn validate_existing(
         // schema table is entirely absent. Legacy decode alone is not proof.
         if matches!(
             stored.receipt.outcome,
-            MutationOutcome::NativeTextGenerationSelected { .. }
-                | MutationOutcome::NativeNamespacePurgeStarted { .. }
+            MutationOutcome::NativeNamespacePurgeStarted { .. }
+                | MutationOutcome::VectorsReembedded { .. }
+                | MutationOutcome::NativeTextGenerationSelected { .. }
                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                 | MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
@@ -726,6 +744,35 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::VectorsReembedded { transition } => {
+            transition.validate(&stored.receipt)?;
+            let namespace = transition.before_namespace.namespace()?;
+            let request = super::vector_certification::ReembedVectors {
+                context: MutationContext {
+                    store_id: Some(stored.receipt.store_id),
+                    scope: MutationScope::Namespace(namespace.id),
+                    expected_generation: Some(transition.source.generation),
+                    contract_version: transition.contract_version,
+                    idempotency_key: None,
+                },
+                source: transition.source,
+                namespace_id: namespace.id,
+                namespace_name: namespace.name.clone(),
+                profile_id: super::native_records::profile_id(&namespace).ok_or_else(|| {
+                    StorageError::InvalidControl("cutover profile missing".into())
+                })?,
+            };
+            if request.hash(
+                &transition.source_origins,
+                transition.before_inventory_root,
+                transition.documents_root()?,
+            )? != stored.request_hash
+            {
+                return Err(StorageError::InvalidControl(
+                    "vector cutover original request hash mismatch".into(),
+                ));
+            }
+        }
         MutationOutcome::InheritedDecayAdopted { transition } => {
             transition.validate(&stored.receipt)?;
             let request = super::inherited_policy::AdoptInheritedDecay {
@@ -814,13 +861,13 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::LifecycleFeedbackApplied { transition } => {
             transition.validate(&stored.receipt, true)?
         }
-        MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
-        | MutationOutcome::LifecycleMaterialized { .. }
+        MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::BatchReserved { .. }
         | MutationOutcome::BatchItemRejected { .. }
         | MutationOutcome::ExposuresRecorded { .. }
         | MutationOutcome::LegacyFeedbackRecorded { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
@@ -939,6 +986,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
             }
         }
         MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::VectorsReembedded { .. }
         | MutationOutcome::NativeNamespacePurgeStarted { .. }
         | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
         | MutationOutcome::NativeNamespacePolicyUnchanged { .. }

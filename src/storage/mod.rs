@@ -62,6 +62,7 @@ pub mod tombstone;
 #[cfg(test)]
 mod tombstone_tests;
 pub(crate) mod validation;
+pub mod vector_certification;
 pub mod vectors;
 pub mod work;
 

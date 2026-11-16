@@ -97,7 +97,12 @@ impl MetadataStore {
             return Err(SnapshotError::Stale);
         }
         crate::storage::lineage::ensure_serving(&tx, &state)?;
-        let schema = canonical_schema::read_state(&tx, &state)?;
+        let schema = if self.native_lifecycle_only {
+            self.require_certified_namespace(state.generation_ref(), &namespace)?;
+            Some(self.owned_schema_at(&tx, state.generation_ref())?)
+        } else {
+            canonical_schema::read_state(&tx, &state)?
+        };
         let store = vectors
             .get(namespace.id)
             .ok_or_else(|| unavailable("namespace vector store missing"))?;
