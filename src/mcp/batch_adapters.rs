@@ -741,27 +741,6 @@ mod tests {
             batch_operation_id: None,
         }
     }
-    // Temporary source-attributed layout diagnostic; never constructs or polls
-    // the measured futures. Actual default-stack regressions remain the gate.
-    #[tokio::test]
-    async fn queue_batch_future_layout_probe() {
-        fn size<F: std::future::Future>(_: impl FnOnce() -> F) -> usize {
-            std::mem::size_of::<F>()
-        }
-        let f = Fixture::new();
-        let adapter = f.storage_adapter();
-        let common = size(|| {
-            adapter.run_batch_with_surface(request(&f, "layout", vec![item()]), None, None)
-        });
-        let typed = size(|| adapter.run_batch_typed(request(&f, "layout", vec![item()])));
-        let budgeted =
-            size(|| adapter.run_batch_budgeted(request(&f, "layout", vec![item()]), None));
-        let legacy = size(|| adapter.run_batch(request(&f, "layout", vec![item()])));
-        eprintln!(
-            "QUEUE_FUTURE_LAYOUT common={common} typed={typed} budgeted={budgeted} legacy={legacy}"
-        );
-    }
-
     fn item() -> serde_json::Value {
         json!({"summary":"batch fixture","embedding":[1.,0.,0.,0.],"checkDuplicates":false})
     }
