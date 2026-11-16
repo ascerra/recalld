@@ -45,6 +45,17 @@ serializer on the same complete immutable `WriteReceipt` type. Cache its encoded
 bytes once for cost and exact identity; this preserves negative-zero spellings,
 replay flags and all other fields. Do not compare only IDs or normalize receipts.
 
+Compatibility boundary: the old known-failure `json!(receipt)` path promotes f32
+numbers into Value spellings (for example `0.020643016442656517`); direct typed
+serialization can emit the shorter same-f32 spelling `0.020643016`. This is an
+intentional failure-response encoding change, not a wrong old fixture or a stored
+receipt modification. Preserve the sealed old raw response. The updated known
+control must assert exact decoded `WriteReceipt` equality plus the new body's
+receipt representation against `from_slice(to_vec(retained_receipt))`, rather
+than silently retaining the old Value-conversion expectation. Never round/cast
+the stored receipt, change its request hash or rewrite historical bytes. Success
+responses remain unchanged.
+
 Failure body fields are fixed: error code, commitState, ready=false,
 complete=false, retryable=false, ordered full receipts, operationId UUID-or-null,
 and a fixed code-selected message. Only the existing known-failed case has the
