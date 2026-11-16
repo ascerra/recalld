@@ -32,7 +32,9 @@ mod query_wire;
 #[path = "similar_selection.rs"]
 mod similar_selection;
 pub(crate) use similar_selection::{
-    SelectedSimilarity, SimilarityExclusion, SimilarityScope, SimilaritySelection,
+    SelectedSimilarity, SimilarityExclusion,
+    SimilarityAlgorithm, SimilarityExplanation, SimilarityOrigin, SimilarityOwnAdmission,
+    SimilarityScope, SimilaritySelection,
 };
 
 #[path = "read_view.rs"]

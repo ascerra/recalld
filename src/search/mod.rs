@@ -60,7 +60,9 @@ pub use pipeline::{
     VectorIndexRegistry, VersionMode, VersionStatus,
 };
 pub(crate) use pipeline::{
-    SelectedSimilarity, SimilarityExclusion, SimilarityScope, SimilaritySelection,
+    SelectedSimilarity, SimilarityExclusion,
+    SimilarityAlgorithm, SimilarityExplanation, SimilarityOrigin, SimilarityOwnAdmission,
+    SimilarityScope, SimilaritySelection,
 };
 pub use query::SearchFilter as PipelineSearchFilter;
 pub use query::{QueryMode, SearchQuery};
