@@ -17,6 +17,13 @@ async fn prepared_evidence_rejects_operator_rif_before_work_on_actual_transports
         ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
             panic!("prepared non-Off query must reject before observation");
         }
+        async fn record_access_batch(
+            &self,
+            _: &[(MemoryId, AccessKind)],
+            _: Option<&crate::storage::control::ExposureScope>,
+        ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+            panic!("prepared non-Off query must reject before batch observation");
+        }
     }
     for mode in [RifMode::Shadow, RifMode::Experimental] {
         for access in [false, true] {
@@ -279,7 +286,10 @@ async fn prepared_evidence_actual_operator_origin_rif_projection() {
         .unwrap();
     assert_eq!(typed.rif_multiplier, 1.0);
     assert!(typed.inherited_sources[0].own.rif_multiplier < 1.0);
-    let value = crate::serialization::query_explanation::project(typed);
+    let projected = crate::serialization::query_response::project(&prepared, true).unwrap();
+    let row = projected.envelope.data.as_ref().unwrap()["results"].as_array().unwrap()
+        .iter().find(|r| r["memoryId"] == terminal.to_string()).unwrap();
+    let value = &row["explanation"];
     assert_eq!(value["inheritedSources"][0]["source"], old.to_string());
     assert_eq!(
         value["inheritedSources"][0]["own"]["rifMultiplier"],
