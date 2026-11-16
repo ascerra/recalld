@@ -127,42 +127,41 @@ impl McpStorageAdapter {
         surface: Option<crate::serialization::batch_api1::Surface>,
     ) -> impl std::future::Future<Output = Result<BatchOutcome, StoreWriteError>> + '_ {
         let legacy_trace = input.mutation_version == 1;
-        let run = async move {
-            performance::event!(legacy_trace;
-                kind = "batch_input",
-                operation = match input.kind {
-                    BatchKind::Insert => "insert",
-                    BatchKind::Forget => "forget",
-                },
-                supplied_items = input.items.len()
-            );
-            let completion = self.batch_completion();
-            let work = completion.accept_work(None)?;
-            let result = self.run_batch_accepted(input, &work, budget, surface).await;
-            completion.finish_known_work(work);
-            match &result {
-                Ok(outcome) => performance::event!(legacy_trace;
-                    kind = "batch_outcome",
-                    total = outcome.total,
-                    succeeded = outcome.succeeded,
-                    failed = outcome.failed,
-                    unresolved = outcome.unresolved,
-                    ready_items = outcome.items.iter().filter(|i| i.ready).count(),
-                    retained_child_receipts =
-                        outcome.items.iter().filter(|i| i.receipt.is_some()).count(),
-                    retained_bookkeeping_receipts = outcome.bookkeeping_receipts.len(),
-                    unknown_bookkeeping_operations = outcome.unknown_bookkeeping_operations.len()
-                ),
-                Err(_) => {
-                    performance::event!(legacy_trace; kind = "batch_error", state = "returned_error")
-                }
-            }
-            result
-        };
         async move {
-            // Keep the large typed batch future in one place, including budgeted
-            // and API1 surface callers. Native versions inherit context only.
-            let mut run = std::pin::pin!(run);
+            // Construct the large body in its pinned slot instead of capturing
+            // an already-constructed copy in the outer future.
+            let mut run = std::pin::pin!(async move {
+                performance::event!(legacy_trace;
+                    kind = "batch_input",
+                    operation = match input.kind {
+                        BatchKind::Insert => "insert",
+                        BatchKind::Forget => "forget",
+                    },
+                    supplied_items = input.items.len()
+                );
+                let completion = self.batch_completion();
+                let work = completion.accept_work(None)?;
+                let result = self.run_batch_accepted(input, &work, budget, surface).await;
+                completion.finish_known_work(work);
+                match &result {
+                    Ok(outcome) => performance::event!(legacy_trace;
+                        kind = "batch_outcome",
+                        total = outcome.total,
+                        succeeded = outcome.succeeded,
+                        failed = outcome.failed,
+                        unresolved = outcome.unresolved,
+                        ready_items = outcome.items.iter().filter(|i| i.ready).count(),
+                        retained_child_receipts =
+                            outcome.items.iter().filter(|i| i.receipt.is_some()).count(),
+                        retained_bookkeeping_receipts = outcome.bookkeeping_receipts.len(),
+                        unknown_bookkeeping_operations = outcome.unknown_bookkeeping_operations.len()
+                    ),
+                    Err(_) => {
+                        performance::event!(legacy_trace; kind = "batch_error", state = "returned_error")
+                    }
+                }
+                result
+            });
             if legacy_trace {
                 performance::measure("mcp.batch", true, run.as_mut()).await
             } else {
@@ -751,11 +750,16 @@ mod tests {
         }
         let f = Fixture::new();
         let adapter = f.storage_adapter();
-        let common = size(|| adapter.run_batch_with_surface(request(&f, "layout", vec![item()]), None, None));
+        let common = size(|| {
+            adapter.run_batch_with_surface(request(&f, "layout", vec![item()]), None, None)
+        });
         let typed = size(|| adapter.run_batch_typed(request(&f, "layout", vec![item()])));
-        let budgeted = size(|| adapter.run_batch_budgeted(request(&f, "layout", vec![item()]), None));
+        let budgeted =
+            size(|| adapter.run_batch_budgeted(request(&f, "layout", vec![item()]), None));
         let legacy = size(|| adapter.run_batch(request(&f, "layout", vec![item()])));
-        eprintln!("QUEUE_FUTURE_LAYOUT common={common} typed={typed} budgeted={budgeted} legacy={legacy}");
+        eprintln!(
+            "QUEUE_FUTURE_LAYOUT common={common} typed={typed} budgeted={budgeted} legacy={legacy}"
+        );
     }
 
     fn item() -> serde_json::Value {
