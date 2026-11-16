@@ -1,0 +1,19 @@
+E.......
+======================================================================
+ERROR: test_exact_policy_asset_identity_and_old_boundary (__main__.ContextPreflight.test_exact_policy_asset_identity_and_old_boundary)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/source/scripts/test_context_mcp_evaluation.py", line 95, in test_exact_policy_asset_identity_and_old_boundary
+    self.assertEqual(self.old.validate()[0]['track'],h['TRACK'])
+                     ^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/test_public_mcp_evaluation.py", line 43, in validate
+    return m["validate"](self.root / "manifest.json", self.binary, self.scorer, self.root)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/public-mcp-evaluation.py", line 107, in validate
+    raise ValueError("artifact hash/reference mismatch")
+ValueError: artifact hash/reference mismatch
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.502s
+
+FAILED (errors=1)

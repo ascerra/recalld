@@ -1,0 +1,570 @@
+{
+  "actualActions": 86,
+  "actualEpisodes": 6,
+  "actualForgedPayloadRejected": true,
+  "answerQuality": null,
+  "canary": {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "evidenceIdentityOnly": true,
+    "perRunComparison": [
+      {
+        "left": {
+          "evidenceTokens": 32,
+          "fullTokens": 55,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q0",
+          "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+        },
+        "queryId": "q0",
+        "right": {
+          "evidenceTokens": 35,
+          "fullTokens": 58,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q0",
+          "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+        },
+        "selectedPrefixDiverged": false
+      },
+      {
+        "left": {
+          "evidenceTokens": 32,
+          "fullTokens": 55,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q1",
+          "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+        },
+        "queryId": "q1",
+        "right": {
+          "evidenceTokens": 35,
+          "fullTokens": 58,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q1",
+          "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+        },
+        "selectedPrefixDiverged": false
+      },
+      {
+        "left": {
+          "evidenceTokens": 32,
+          "fullTokens": 55,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q2",
+          "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+        },
+        "queryId": "q2",
+        "right": {
+          "evidenceTokens": 35,
+          "fullTokens": 58,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q2",
+          "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+        },
+        "selectedPrefixDiverged": false
+      },
+      {
+        "left": {
+          "evidenceTokens": 32,
+          "fullTokens": 60,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q3",
+          "renderedSha256": "514a9af970db68275c9fa512f15847e3d2fa8c7bc16ce7d870ca6011988c8a32"
+        },
+        "queryId": "q3",
+        "right": {
+          "evidenceTokens": 35,
+          "fullTokens": 63,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q3",
+          "renderedSha256": "bd980523452348b07862713f70f6c4b8895e7712e359e08e8e5674d8f5239baa"
+        },
+        "selectedPrefixDiverged": false
+      }
+    ],
+    "providerInputsVectorsEqual": true,
+    "rawRenderOrTokenEqualityClaim": false,
+    "requestsEqual": true
+  },
+  "contextQueries": 20,
+  "contextSummaries": {
+    "boundary": {
+      "actions": 15,
+      "packedScoring": {
+        "allRequiredEvidenceRate": 0.0,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 0.3065735963827292,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.25,
+          "retrievalRecallAt20": 0.25,
+          "retrievalRecallAt5": 0.25
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "2",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "1"
+      },
+      "queries": [
+        {
+          "evidenceTokens": 32,
+          "fullTokens": 55,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q0",
+          "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+        },
+        {
+          "evidenceTokens": 32,
+          "fullTokens": 55,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q1",
+          "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+        },
+        {
+          "evidenceTokens": 32,
+          "fullTokens": 55,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q2",
+          "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+        },
+        {
+          "evidenceTokens": 32,
+          "fullTokens": 60,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q3",
+          "renderedSha256": "514a9af970db68275c9fa512f15847e3d2fa8c7bc16ce7d870ca6011988c8a32"
+        }
+      ],
+      "retrievalScoring": {
+        "allRequiredEvidenceRate": 0.5,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 0.6934264036172708,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.75,
+          "retrievalRecallAt20": 0.75,
+          "retrievalRecallAt5": 0.75
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "2",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "1"
+      }
+    },
+    "changed-label": {
+      "actions": 15,
+      "packedScoring": {
+        "allRequiredEvidenceRate": 0.0,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": -0.0,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.0,
+          "retrievalRecallAt20": 0.0,
+          "retrievalRecallAt5": 0.0
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "1",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "3",
+        "zeroLabelUnscored": "0"
+      },
+      "queries": [
+        {
+          "evidenceTokens": 35,
+          "fullTokens": 58,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q0",
+          "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+        },
+        {
+          "evidenceTokens": 35,
+          "fullTokens": 58,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q1",
+          "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+        },
+        {
+          "evidenceTokens": 35,
+          "fullTokens": 58,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q2",
+          "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+        },
+        {
+          "evidenceTokens": 35,
+          "fullTokens": 63,
+          "includedSources": [
+            "turn-0"
+          ],
+          "omittedSources": [
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q3",
+          "renderedSha256": "bd980523452348b07862713f70f6c4b8895e7712e359e08e8e5674d8f5239baa"
+        }
+      ],
+      "retrievalScoring": {
+        "allRequiredEvidenceRate": 0.0,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": -0.0,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.0,
+          "retrievalRecallAt20": 0.0,
+          "retrievalRecallAt5": 0.0
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "1",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "3",
+        "zeroLabelUnscored": "0"
+      }
+    },
+    "default": {
+      "actions": 15,
+      "packedScoring": {
+        "allRequiredEvidenceRate": 0.5,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 0.6934264036172708,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.75,
+          "retrievalRecallAt20": 0.75,
+          "retrievalRecallAt5": 0.75
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "2",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "1"
+      },
+      "queries": [
+        {
+          "evidenceTokens": 313,
+          "fullTokens": 336,
+          "includedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "omittedSources": [],
+          "queryId": "q0",
+          "renderedSha256": "5fef9ae909371d0da425ddc848e64336db5532a2154ce9ba68ebc7777e069749"
+        },
+        {
+          "evidenceTokens": 313,
+          "fullTokens": 336,
+          "includedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "omittedSources": [],
+          "queryId": "q1",
+          "renderedSha256": "5fef9ae909371d0da425ddc848e64336db5532a2154ce9ba68ebc7777e069749"
+        },
+        {
+          "evidenceTokens": 313,
+          "fullTokens": 336,
+          "includedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "omittedSources": [],
+          "queryId": "q2",
+          "renderedSha256": "5fef9ae909371d0da425ddc848e64336db5532a2154ce9ba68ebc7777e069749"
+        },
+        {
+          "evidenceTokens": 313,
+          "fullTokens": 341,
+          "includedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "omittedSources": [],
+          "queryId": "q3",
+          "renderedSha256": "db18386356e07ece9adcccc8efaf148039d9b51de3bcb8168878d8eb2c565338"
+        }
+      ],
+      "retrievalScoring": {
+        "allRequiredEvidenceRate": 0.5,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 0.6934264036172708,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.75,
+          "retrievalRecallAt20": 0.75,
+          "retrievalRecallAt5": 0.75
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "2",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "1"
+      }
+    },
+    "empty": {
+      "actions": 11,
+      "packedScoring": {
+        "allRequiredEvidenceRate": null,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": null,
+          "extractionEvidenceRetention": null,
+          "retrievalRecallAt10": null,
+          "retrievalRecallAt20": null,
+          "retrievalRecallAt5": null
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "0",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "3"
+      },
+      "queries": [
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 23,
+          "includedSources": [],
+          "omittedSources": [],
+          "queryId": "q0",
+          "renderedSha256": "e4b5044dd2c2f65fb3202d8d13a1c20a1595541b7059ceae9f07c1a49541a706"
+        },
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 23,
+          "includedSources": [],
+          "omittedSources": [],
+          "queryId": "q1",
+          "renderedSha256": "e4b5044dd2c2f65fb3202d8d13a1c20a1595541b7059ceae9f07c1a49541a706"
+        },
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 23,
+          "includedSources": [],
+          "omittedSources": [],
+          "queryId": "q2",
+          "renderedSha256": "e4b5044dd2c2f65fb3202d8d13a1c20a1595541b7059ceae9f07c1a49541a706"
+        },
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 28,
+          "includedSources": [],
+          "omittedSources": [],
+          "queryId": "q3",
+          "renderedSha256": "574d552d85f9e167dbc24e9ee0cdecc86aa1e57a023a8c1acd9e140604d89782"
+        }
+      ],
+      "retrievalScoring": {
+        "allRequiredEvidenceRate": null,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": null,
+          "extractionEvidenceRetention": null,
+          "retrievalRecallAt10": null,
+          "retrievalRecallAt20": null,
+          "retrievalRecallAt5": null
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "0",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "3"
+      }
+    },
+    "oversized-first": {
+      "actions": 15,
+      "packedScoring": {
+        "allRequiredEvidenceRate": 0.0,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": -0.0,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.0,
+          "retrievalRecallAt20": 0.0,
+          "retrievalRecallAt5": 0.0
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "2",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "1"
+      },
+      "queries": [
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 23,
+          "includedSources": [],
+          "omittedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q0",
+          "renderedSha256": "e4b5044dd2c2f65fb3202d8d13a1c20a1595541b7059ceae9f07c1a49541a706"
+        },
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 23,
+          "includedSources": [],
+          "omittedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q1",
+          "renderedSha256": "e4b5044dd2c2f65fb3202d8d13a1c20a1595541b7059ceae9f07c1a49541a706"
+        },
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 23,
+          "includedSources": [],
+          "omittedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q2",
+          "renderedSha256": "e4b5044dd2c2f65fb3202d8d13a1c20a1595541b7059ceae9f07c1a49541a706"
+        },
+        {
+          "evidenceTokens": 0,
+          "fullTokens": 28,
+          "includedSources": [],
+          "omittedSources": [
+            "turn-0",
+            "turn-1",
+            "turn-2"
+          ],
+          "queryId": "q3",
+          "renderedSha256": "574d552d85f9e167dbc24e9ee0cdecc86aa1e57a023a8c1acd9e140604d89782"
+        }
+      ],
+      "retrievalScoring": {
+        "allRequiredEvidenceRate": 0.5,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 0.6934264036172708,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.75,
+          "retrievalRecallAt20": 0.75,
+          "retrievalRecallAt5": 0.75
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "2",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "1",
+        "zeroLabelUnscored": "1"
+      }
+    }
+  },
+  "cost": null,
+  "manifestAssetNegatives": 7,
+  "modelTokenIdentity": null,
+  "status": "passed"
+}
