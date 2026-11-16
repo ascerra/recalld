@@ -1,5 +1,10 @@
 # E1 correction: guarded completion and bounded typed HTTP evidence
 
+Historical proposal and review contract. The subsequent implementation and
+source-specific validation are recorded in
+[the correction report](../../work-notes/sweep-failure-fix/REPORT.md); the
+proposal-stage release language below is retained for attribution.
+
 Proposed implementation child of sealed RED `530f3bfc3c2ef777aacf7cf55d2bcfbf68633280`,
 whose sole runtime base is actual main `33865ca0d19599a13ba999d31a1ec736c89db233`.
 Worktree `/tmp/recalld-implementation/sweep-failure-fix`, branch
