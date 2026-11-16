@@ -1,0 +1,111 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794867046.9425538
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_conformance.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794867047.0391674
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_offline_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794867047.122434
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794867047.2801483
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "legacy_semantic_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "5806773b848489d274205ed1f7133672dcc69607eb1bca5d6b6c6cc79abb25f5"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794867122.972768
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "legacy_compound_origin_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "5806773b848489d274205ed1f7133672dcc69607eb1bca5d6b6c6cc79abb25f5"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794867133.3108912
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "native_single_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 101,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "5806773b848489d274205ed1f7133672dcc69607eb1bca5d6b6c6cc79abb25f5"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794867167.2317498
+  }
+]
