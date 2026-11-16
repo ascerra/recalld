@@ -1,3 +1,5 @@
+Current integration note: the original probe and drivers are preserved under [historical-source](historical-source/README.md), outside current Cargo/example discovery. Their old paths below describe the frozen67274c5 execution; current runtime compatibility or new measurements are not claimed.
+
 # Actual legacy online insertion diagnostic
 
 This diagnostic is based solely on PR #75 (`8ecdd5a4b20c1f1555b98c84bd0771625e51c67d`). It exercises the production single-insert and DerivedCompletion path. It neither changes durability/publication nor imports native or batch serving.
