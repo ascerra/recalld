@@ -5,6 +5,86 @@ use crate::search::adapters::*;
 use crate::test_support::{Fixture, MemorySpec};
 use serde_json::json;
 
+fn query_input(access: bool, namespace: &str) -> crate::serialization::query::QueryRequest {
+    crate::serialization::query::QueryRequest::from_mcp(
+        &json!({"contractVersion":2,"namespace":namespace,"queryMode":"metadata_only",
+            "tags":["allow"],"recordAccess":access,"limit":2,"explain":true}),
+        "wrong-default",
+    ).unwrap()
+}
+
+async fn peer_query(
+    input: crate::serialization::query::QueryRequest,
+    result: serde_json::Value,
+) -> crate::serialization::query_response::QueryReply {
+    use crate::daemon::protocol::{read_framed_message, write_framed_message};
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("peer.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let ping = read_framed_message(&mut stream, MAX_MESSAGE_SIZE).await.unwrap();
+        assert_eq!(ping.method, "ping");
+        let caps = json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"preparedQueriesV1":true});
+        write_framed_message(&mut stream, &DaemonResponse::success(ping.id,caps.clone()),MAX_MESSAGE_SIZE).await.unwrap();
+        let query = read_framed_message(&mut stream, MAX_MESSAGE_SIZE).await.unwrap();
+        assert_eq!(query.method, crate::daemon::prepared_query::QUERY);
+        write_framed_message(&mut stream,&DaemonResponse::success(query.id,result),MAX_MESSAGE_SIZE).await.unwrap();
+        let next = read_framed_message(&mut stream,MAX_MESSAGE_SIZE).await.unwrap();
+        assert_eq!(next.method,"ping","no replay/fallback after malformed reply");
+        write_framed_message(&mut stream,&DaemonResponse::success(next.id,caps),MAX_MESSAGE_SIZE).await.unwrap();
+    });
+    let client=Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+    let reply=RemoteSearchAdapter::new(client.clone()).query_contract(input).await;
+    client.ping().await.unwrap();
+    task.await.unwrap();
+    reply
+}
+
+#[tokio::test]
+async fn prepared_remote_decoder_binds_actual_success_scope_and_exposure_coverage() {
+    let f=Fixture::new();
+    for _ in 0..2 {
+        f.insert_memory_with(MemorySpec {summary:"prepared evidence",tags:&["allow"],
+            embedding:Some(&[1.,0.,0.,0.]),..MemorySpec::new(crate::model::NamespaceId::new(1))}).await;
+    }
+    f.completion().rebuild_all().await.unwrap();
+    let search=search(&f);
+    let mut failures=vec![];
+    for access in [false,true] {
+        let local=search.query_contract(query_input(access,"default")).await;
+        assert_eq!(local.http_status,200,"actual owned producer control: {local:?}");
+        let original:serde_json::Value=serde_json::from_slice(&serde_json::to_vec(&local).unwrap()).unwrap();
+        assert_eq!(original["data"]["results"].as_array().unwrap().len(),2);
+        if access { assert_eq!(local.observation_receipts.len(),1); }
+        let normal=peer_query(query_input(access,"default"),json!({"wireVersion":1,"httpStatus":200,"reply":original})).await;
+        assert_eq!(normal.http_status,200,"unmodified actual producer must decode: {normal:?}");
+        let cases=if access {
+            let mut missing=original.clone();
+            for key in ["receipt","observationReceipts","readiness"] { missing.as_object_mut().unwrap().remove(key); }
+            let mut partial=original.clone();
+            partial["observationReceipts"][0]["outcome"]["accesses"].as_array_mut().unwrap().pop();
+            partial["receipt"]=partial["observationReceipts"][0].clone();
+            let mut readiness=original.clone();
+            readiness["readiness"]["derived"][0]["name"]=json!("fabricated");
+            vec![("missing exposures",missing),("partial exposures",partial),("invalid readiness owner",readiness)]
+        } else {
+            let mut scope=original.clone();
+            scope["data"]["results"][0]["namespaceId"]=json!(2);
+            vec![("foreign row scope",scope)]
+        };
+        for (case,value) in cases {
+            let result=peer_query(query_input(access,"default"),json!({"wireVersion":1,"httpStatus":200,"reply":value})).await;
+            eprintln!("R1_DECODE_NEGATIVE {case}: status={}",result.http_status);
+            if result.http_status!=503 { failures.push(case); }
+        }
+        let canonical=peer_query(query_input(access,"DeFaUlT"),json!({"wireVersion":1,"httpStatus":200,"reply":original})).await;
+        eprintln!("R1_CASE_CONTROL access={access}: status={}",canonical.http_status);
+        if canonical.http_status!=200 { failures.push("canonical namespace casing"); }
+    }
+    assert!(failures.is_empty(),"actual producer/malformed peer cases: {failures:?}");
+}
+
 fn search(f: &Fixture) -> Arc<McpSearchAdapter> {
     let provider = Arc::new(crate::embedding::PassthroughProvider::new(4));
     let rif = Arc::new(crate::rif::RifEngine::new(crate::rif::RifConfig {
