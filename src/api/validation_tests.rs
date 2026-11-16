@@ -106,7 +106,7 @@ fn fixture_state_with_embedding(
             config,
             false,
         )),
-        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone()).with_completion(f.completion())),
         Arc::new(NoopMetricsCollector),
     );
     (state, bridge)
