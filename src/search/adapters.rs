@@ -25,7 +25,7 @@ use super::pipeline::{
     RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
 };
 use super::read_handle::{FtsHandle, ReadHandle};
-use super::{EntityIndex, FlatVectorIndex, FtsIndex, SearchFilter, VectorIndex};
+use super::{EntityIndex, FtsIndex, SearchFilter, VectorIndexOwner};
 
 // Explicit offline harness adapter. Ordinary storage open still rejects schema
 // v2. Snapshot ownership pins canonical files; this adapter has no write API.
@@ -95,6 +95,16 @@ impl StorageNamespaceResolver {
 
 #[async_trait]
 impl NamespaceResolver for StorageNamespaceResolver {
+    fn is_native_owned(&self) -> Result<bool> {
+        Ok(self
+            .storage
+            .read()
+            .map_err(|_| SearchError::Unavailable("storage owner poisoned".into()))?
+            .meta_store()
+            .uses_native_lifecycle())
+    }
+    // Native semantic admission still uses the trait's rejecting default here:
+    // only the pinned CanonicalReadView can validate namespace certification at G.
     async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
         let storage = self.storage.clone();
         tokio::task::spawn_blocking(move || {
@@ -168,21 +178,21 @@ impl EmbeddingProviderRegistry for SingleEmbeddingRegistry {
 
 // ── VectorIndexRegistry ────────────────────────────────────────────
 
-/// Adapts a shared `FlatVectorIndex` to `VectorIndexRegistry`.
+/// Adapts a shared `VectorIndexOwner` to `VectorIndexRegistry`.
 ///
 /// All namespaces share one index; the namespace_id is passed through
 /// the search filter to the underlying `VectorIndex::search`.
 pub struct SharedVectorIndexRegistry {
-    index: ReadHandle<FlatVectorIndex>,
+    index: ReadHandle<VectorIndexOwner>,
 }
 
 impl SharedVectorIndexRegistry {
-    pub fn new(index: Arc<tokio::sync::RwLock<FlatVectorIndex>>) -> Self {
+    pub fn new(index: Arc<tokio::sync::RwLock<VectorIndexOwner>>) -> Self {
         Self {
             index: ReadHandle::Live(index),
         }
     }
-    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<FlatVectorIndex>>) -> Self {
+    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<VectorIndexOwner>>) -> Self {
         Self {
             index: ReadHandle::Pinned(value),
         }
@@ -206,7 +216,7 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
             ..Default::default()
         };
         let results = index
-            .search_eligible(query_vec, k, &filter, eligible_ids)
+            .search_scoped(namespace_id, query_vec, k, &filter, eligible_ids)
             .map_err(|e| SearchError::VectorIndexError(e.to_string()))?;
         Ok(results
             .into_iter()
@@ -581,20 +591,11 @@ impl StorageAccessRecorder {
     }
 }
 
-#[async_trait]
-impl AccessRecorder for StorageAccessRecorder {
-    fn supports_native_exposure(&self) -> bool {
-        self.completion.is_some()
-            && self
-                .storage
-                .read()
-                .is_ok_and(|s| s.meta_store().uses_native_lifecycle())
-    }
-
-    async fn record_access_batch_for_publication(
+impl StorageAccessRecorder {
+    async fn record_with_scopes(
         &self,
         accesses: &[(MemoryId, AccessKind)],
-        scope: Option<&crate::storage::control::ExposureScope>,
+        scopes: crate::decay::similarity_scope::ExposureScopes,
         sampled_at: Option<i64>,
         parent: Option<&crate::storage::work::WorkTicket>,
         policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
@@ -628,9 +629,9 @@ impl AccessRecorder for StorageAccessRecorder {
                 )
             })?;
             completion
-                .record_native_exposures_with_work(
+                .record_native_exposures_with_scopes(
                     accesses.to_vec(),
-                    scope.cloned(),
+                    scopes.clone(),
                     sampled_at.unwrap_or_else(|| self.clock.now_millis()),
                     policy.clone(),
                     parent,
@@ -638,12 +639,12 @@ impl AccessRecorder for StorageAccessRecorder {
                 )
                 .await?
         } else {
-            crate::decay::observation::record_exposures_scoped_with_origin_work(
+            crate::decay::observation::record_exposures_with_scopes(
                 self.storage.clone(),
                 self.cache.clone(),
                 accesses.to_vec(),
                 sampled_at.unwrap_or_else(|| self.clock.now_millis()),
-                scope.cloned(),
+                scopes.clone(),
                 parent,
                 original_contract_version,
             )
@@ -653,6 +654,57 @@ impl AccessRecorder for StorageAccessRecorder {
         Ok(crate::decay::observation::AccessObservation::from_receipts(
             receipts,
         ))
+    }
+}
+
+#[async_trait]
+impl AccessRecorder for StorageAccessRecorder {
+    fn supports_native_exposure(&self) -> bool {
+        self.completion.is_some()
+            && self
+                .storage
+                .read()
+                .is_ok_and(|s| s.meta_store().uses_native_lifecycle())
+    }
+
+    async fn record_access_batch_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        self.record_with_scopes(
+            accesses,
+            crate::decay::similarity_scope::ExposureScopes::Existing(scope.cloned()),
+            sampled_at,
+            parent,
+            policy,
+            original_contract_version,
+        )
+        .await
+    }
+
+    async fn record_similarity_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        selection: &crate::decay::similarity_scope::SimilarityExposure,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        self.record_with_scopes(
+            accesses,
+            crate::decay::similarity_scope::ExposureScopes::Similarity(selection.clone()),
+            Some(sampled_at),
+            parent,
+            Some(policy),
+            original_contract_version,
+        )
+        .await
     }
 
     async fn record_access(

@@ -1,0 +1,42 @@
+[
+  {
+    "path": "/target/debug/deps/recalld-212d4a4f320696fe",
+    "sha256": "36ba05e3c1a09c6bda846613ae94e1ce3480e2d7420f40999ce859a5f42b577b",
+    "evidence": "cargo Running log"
+  },
+  {
+    "path": "/target/debug/deps/recalld-08988f66227b33f7",
+    "sha256": "de37992065517eaaeeb44ed035ba3ae24a7779266e83b578ea626903f3d545cd",
+    "evidence": "cargo Running log"
+  },
+  {
+    "path": "/target/debug/deps/recalld_cli-8d07a58ae0104b99",
+    "sha256": "1f36dbbaa6f146b0d5c60aa1aad498eeeec5d62cbbe52d23d0ad3db13f13f460",
+    "evidence": "cargo Running log"
+  },
+  {
+    "path": "/target/debug/deps/recalld_text_migrate-8d07f13a73aa26e5",
+    "sha256": "7a78448ca9c1c07995e2f308fb7aca43ab74a3a2c5b523cb28b041357f65b197",
+    "evidence": "cargo Running log"
+  },
+  {
+    "path": "/target/debug/deps/lifecycle_cli-deffe0c58979bc70",
+    "sha256": "f9a247642664140219fbb19a86ed408a4436d81e1ef97c8b0bc13ffe9199dd5e",
+    "evidence": "cargo Running log"
+  },
+  {
+    "path": "/target/debug/deps/text_migration_cli-55598fe3418b6f4f",
+    "sha256": "f02b82a73f17bcaefd144f6d9c2dc227e88bd4b7531b904dff7866eee1901892",
+    "evidence": "cargo Running log"
+  },
+  {
+    "path": "/target/debug/recalld",
+    "sha256": "bc113f68be168df313c4bb3d7836b2ebb8e0628495dcfb424b1e37317e5bbae3",
+    "evidence": "tests lifecycle_cli/text_migration_cli actual Command::new(CARGO_BIN_EXE)"
+  },
+  {
+    "path": "/target/debug/recalld-text-migrate",
+    "sha256": "43eebd630f6f5ff9c0715e79d9c90c7009ceb3ea40f7a2f646efc35730fd6e02",
+    "evidence": "tests lifecycle_cli/text_migration_cli actual Command::new(CARGO_BIN_EXE)"
+  }
+]

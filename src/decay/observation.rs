@@ -116,15 +116,25 @@ impl ObservationError {
         }
     }
 
-    pub(crate) fn storage(error: StorageError, receipts: Vec<WriteReceipt>) -> Self {
-        let unknown = match &error {
-            StorageError::CommitOutcomeUnknown { operation_id, .. } => Some(*operation_id),
-            _ => None,
-        };
-        let mut result = Self::failed(error, receipts);
-        if unknown.is_some() {
-            result.commit_state = "unknown";
-            result.unknown_operation_id = unknown;
+    pub(crate) fn storage(error: StorageError, mut receipts: Vec<WriteReceipt>) -> Self {
+        let mut cause = &error;
+        while let StorageError::CommittedMutation { receipt, source } = cause {
+            // Keep prior groups followed by the exact returned commit evidence.
+            // Nested wrappers may repeat it; never reconstruct it from storage.
+            if !receipts.contains(receipt.as_ref()) {
+                receipts.push((**receipt).clone());
+            }
+            cause = source;
+        }
+        // Receipts belong in their typed field, not duplicated in the message.
+        let mut result = Self::failed(cause, receipts);
+        match cause {
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => {
+                result.commit_state = "unknown";
+                result.unknown_operation_id = Some(*operation_id);
+            }
+            StorageError::WorkerOutcomeUnknown(_) => result.commit_state = "unknown",
+            _ => {}
         }
         result
     }
@@ -189,6 +199,27 @@ pub(crate) async fn record_exposures_scoped_with_origin_work(
     parent: Option<&crate::storage::work::WorkTicket>,
     original_contract_version: u32,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
+    record_exposures_with_scopes(
+        storage,
+        cache,
+        accesses,
+        sampled_at,
+        crate::decay::similarity_scope::ExposureScopes::Existing(scope),
+        parent,
+        original_contract_version,
+    )
+    .await
+}
+
+pub(crate) async fn record_exposures_with_scopes(
+    storage: Arc<RwLock<RedbStorageEngine>>,
+    cache: Arc<CacheManager>,
+    accesses: Vec<(MemoryId, AccessKind)>,
+    sampled_at: i64,
+    scope: crate::decay::similarity_scope::ExposureScopes,
+    parent: Option<&crate::storage::work::WorkTicket>,
+    original_contract_version: u32,
+) -> Result<Vec<WriteReceipt>, ObservationError> {
     if accesses.is_empty() {
         return Ok(Vec::new());
     }
@@ -209,11 +240,11 @@ pub(crate) async fn record_exposures_scoped_with_origin_work(
             let storage = crate::performance::Hold::new("storage.write.hold", storage);
             let result = (|| {
                 let transaction = crate::performance::Timer::new("exposure.canonical_commit");
-                let result = record_locked_scoped_with_work(
+                let result = record_locked_with_scopes(
                     &storage,
                     &accesses,
                     sampled_at,
-                    scope.as_ref(),
+                    &scope,
                     Some(&child),
                     original_contract_version,
                 );
@@ -278,9 +309,31 @@ fn record_locked_scoped_with_work(
     parent: Option<&crate::storage::work::WorkTicket>,
     original_contract_version: u32,
 ) -> Result<Vec<WriteReceipt>, ObservationError> {
+    record_locked_with_scopes(
+        storage,
+        accesses,
+        sampled_at,
+        &crate::decay::similarity_scope::ExposureScopes::Existing(scope.cloned()),
+        parent,
+        original_contract_version,
+    )
+}
+
+fn record_locked_with_scopes(
+    storage: &RedbStorageEngine,
+    accesses: &[(MemoryId, AccessKind)],
+    sampled_at: i64,
+    scope: &crate::decay::similarity_scope::ExposureScopes,
+    parent: Option<&crate::storage::work::WorkTicket>,
+    original_contract_version: u32,
+) -> Result<Vec<WriteReceipt>, ObservationError> {
     let groups = exposure_groups(storage, accesses)?;
+    let scopes = scope
+        .validate(storage, &groups)
+        .map_err(|e| ObservationError::storage(e, vec![]))?;
     let mut receipts = Vec::new();
     for (namespace, batch) in groups {
+        let scope = scopes.get(&namespace).expect("validated group").as_ref();
         let mut ctx = MutationContext::unkeyed(NamespaceId::new(namespace));
         ctx.contract_version = original_contract_version;
         match storage

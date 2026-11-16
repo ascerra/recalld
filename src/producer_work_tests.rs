@@ -393,7 +393,7 @@ async fn sweep_publication_failure_preserves_receipt_and_can_repair_without_reop
         })
         .await;
     *f.vector_index.write().await =
-        crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+        crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
     let adapter = crate::api::adapters::FsrsEngineAdapter::new(
         f.storage.clone(),
         f.cache.clone(),
@@ -435,7 +435,8 @@ async fn sweep_publication_failure_preserves_receipt_and_can_repair_without_reop
             .freeze_metadata(freeze)
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(crate::test_support::DIM);
+    *f.vector_index.write().await =
+        crate::search::VectorIndexOwner::uniform(crate::test_support::DIM);
     completion(&f).complete().await.unwrap();
     let freeze = close(&tracker).await.unwrap().unwrap();
     assert!(

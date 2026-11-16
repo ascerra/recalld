@@ -1,0 +1,11 @@
+{
+  "scope": "test-only isolated patch; no build/format/commit/shared edits",
+  "source_root": "/tmp/recalld-implementation/vector-certification",
+  "files": {
+    "src/storage/metadata/native_records/graph_tests.rs": "327e6d5ace611b6fa26f8af30c74e3f179de50ffbded82a61b8bb5cec1e6f2a9",
+    "src/storage/metadata/native_records/graph_nochange_tests.rs": "98e17b74aee9fd1c2410b7fc2aeb12e35932ca5931e08be76a6494db30c124a8",
+    "src/storage/metadata/native_records/graph_producer_tests.rs": "545689c7ff1a63192f315cb1d50803a580f0ffdd4960e18fcdc3a876fa2be738",
+    "src/storage/metadata/native_records/exact_scan_tests.rs": "a46f1b7a953797be9fa98b9ae105d1b6bafb4eb9d99b26f6d9ad0942e025b956"
+  },
+  "helper_sha256": "6a218c446a543c9d0cd3f76236207db3e0a136bd1471eb46c35ed5dc64d0e88d"
+}

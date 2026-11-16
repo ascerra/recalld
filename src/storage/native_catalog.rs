@@ -167,6 +167,12 @@ impl NamespacePolicyState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeNamespaceCreated {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub vector_certification: Option<super::vector_certification::VectorCertification>,
     pub namespace_id: NamespaceId,
     pub previous_max_id: u32,
     pub previous_generation: Generation,
@@ -195,6 +201,11 @@ impl NativeNamespaceCreated {
         ns.id = self.namespace_id;
         self.policy.apply(&mut ns);
         ns.schema.as_mut().unwrap().inherited_decay = self.inherited_decay.clone();
+        if let Some(certification) = &self.vector_certification {
+            ns.schema.as_mut().unwrap().vector_certification = Some(certification.clone());
+            ns.schema.as_mut().unwrap().required_features =
+                vec![super::vector_certification::REQUIRED_FEATURE.into()];
+        }
         super::catalog::NamespacePolicy::from(&ns).validate()?;
         ns.schema
             .as_ref()
@@ -210,7 +221,19 @@ impl NativeNamespaceCreated {
         {
             return Err(invalid("invalid native namespace creation boundary"));
         }
-        self.namespace()?;
+        let namespace = self.namespace()?;
+        if let Some(certification) = &self.vector_certification {
+            certification.validate()?;
+            if !certification.matches(receipt)
+                || certification.vector_count != 0
+                || certification.inventory_root
+                    != super::vector_certification::inventory_root(&namespace, std::iter::empty())?
+            {
+                return Err(invalid(
+                    "new namespace certification is not its empty creation inventory",
+                ));
+            }
+        }
         if let Some(binding) = &self.inherited_decay {
             binding.validate()?;
             if !binding.matches_receipt(receipt) || self.policy.decay_rate_multiplier.is_some() {

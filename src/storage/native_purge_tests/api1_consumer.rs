@@ -17,7 +17,7 @@ async fn native_api1_purge_retains_known_receipt_on_publication_failure() {
         entities: fx.entity_index.clone(),
     };
     publisher.rebuild_all().await.unwrap();
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let result = fx
         .namespace_adapter()
         .delete_namespace(DeleteNamespaceInput {
@@ -616,7 +616,7 @@ async fn native_api1_purge_full_start_and_child_errors_survive_actual_frames() {
         let (fx, namespace, publisher, _) = setup();
         publisher.rebuild_all().await.unwrap();
         if child {
-            *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+            *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
         } else {
             fx.storage
                 .read()
@@ -1011,7 +1011,7 @@ async fn native_api1_purge_max_chunk_refuses_legacy_before_work_and_preserves_ne
         entities: fx.entity_index.clone(),
     };
     publisher.rebuild_all().await.unwrap();
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let before = counters(&fx);
     let bytes = std::fs::read(target.join("meta.db")).unwrap();
     let edge_bytes = std::fs::read(target.join("edges.db")).unwrap();
@@ -1098,7 +1098,7 @@ async fn native_api1_purge_actual_receipt_frames_obey_streamed_wire_bound() {
     use crate::derived_completion::PurgeApi1Failure;
     let (fx, namespace, publisher, _) = setup();
     publisher.rebuild_all().await.unwrap();
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let error = fx
         .namespace_adapter()
         .delete_namespace(DeleteNamespaceInput {
@@ -1405,7 +1405,7 @@ async fn native_api1_purge_single_target_high_peer_and_max_history_full_frame() 
         bounded_frame_fixture(400, crate::model::constants::ACCESS_HISTORY_MAX, None);
     let publisher = publication(&fx);
     publisher.rebuild_all().await.unwrap();
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let before = counters(&fx);
     let bytes = std::fs::read(path.join("meta.db")).unwrap();
     let refused =

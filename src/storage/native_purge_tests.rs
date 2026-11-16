@@ -548,7 +548,7 @@ async fn native_purge_accepted_completion_failure_retains_latest_receipt_then_re
     publisher.rebuild_all().await.unwrap();
     let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
     let root = tracker.begin().unwrap();
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let result = publisher
         .purge_native_accepted(key.clone(), true, &root)
         .await;
@@ -650,7 +650,7 @@ async fn native_purge_accepted_completion_failure_retains_latest_receipt_then_re
         target
     );
     let root = tracker.begin().unwrap();
-    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let completed = publisher
         .purge_native_accepted(key, true, &root)
         .await

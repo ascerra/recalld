@@ -20,7 +20,9 @@ fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Value>, D::E
     Value::deserialize(d).map(Some)
 }
 fn error(reply: native_single::Reply) -> Response {
-    let (status, body) = store_api1::failure(reply);
+    failure_response(store_api1::failure(reply))
+}
+fn failure_response((status, body): (u16, store_api1::Failure)) -> Response {
     (
         axum::http::StatusCode::from_u16(status).unwrap(),
         Json(body),
@@ -88,8 +90,12 @@ pub(super) async fn create(state: AppState, body: Request) -> Response {
         created_at: r.created_at,
         require_native: true,
     };
-    let store_api1::Reply::Owned(mut reply) = producer.store_api1(request.clone()).await else {
-        return error(native_single::Reply::uncertain());
+    let mut reply = match producer.store_api1(request.clone()).await {
+        store_api1::Reply::Owned(reply) => reply,
+        store_api1::Reply::Uncertain(receipt) => {
+            return failure_response(store_api1::uncertain_evidence(receipt));
+        }
+        store_api1::Reply::Legacy(_) => return error(native_single::Reply::uncertain()),
     };
     if reply.error.is_some() {
         return error(reply);

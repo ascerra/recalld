@@ -2,6 +2,280 @@ use super::*;
 use crate::storage::ids::{IdKind, IdSource, SeededIds};
 use crate::storage::{logical_export, validation};
 
+#[test]
+fn certified_compaction_actual_owned_dispatch_participates() {
+    let root = tempfile::tempdir().unwrap();
+    let d = certified_fixture(root.path());
+    let mut engine = RedbStorageEngine::open_native(&d.path).unwrap();
+    let before = engine.control_state().unwrap();
+    let result = engine.compact_text_log();
+    eprintln!("actual certified text selection result: {result:?}");
+    if result.is_err() {
+        assert_eq!(engine.control_state().unwrap(), before);
+    }
+    let result = result.expect(
+        "native physical relocation must participate in the owned certification generation",
+    );
+    assert_eq!(
+        result.receipt.committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    let mut session = NativeLifecycleSession {
+        engine,
+        policy: NativePolicyInputs::default(),
+        clock: Arc::new(FixedClock(AtomicUsize::new(0))),
+    };
+    control::take_validation_work();
+    let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
+    session
+        .insert_prepared(
+            &ctx(&session, &d, "after-compaction"),
+            &intent,
+            &generated(),
+        )
+        .unwrap();
+    let work = control::take_validation_work();
+    assert_eq!(work.full_validations, 0, "{work:?}");
+    assert_eq!(work.certification_scans, 0, "{work:?}");
+    drop(session);
+    inspect_schema(&d.path).unwrap();
+    RedbStorageEngine::open_native(&d.path).unwrap();
+}
+
+fn limits() -> crate::storage::canonical_vector_snapshot::SnapshotLimits {
+    crate::storage::canonical_vector_snapshot::SnapshotLimits {
+        max_records: 100,
+        max_bytes: 1024 * 1024,
+    }
+}
+
+// Exact retained bytes, including signed-zero f32 bits and actual document input.
+// Only the physical offset is excluded; all logical tokens/provenance stay in
+// the encoded record. This comparison is deliberately independent of the proof.
+fn logical_bytes(engine: &RedbStorageEngine) -> std::collections::BTreeMap<MemoryId, Vec<u8>> {
+    engine
+        .scan_all()
+        .unwrap()
+        .into_iter()
+        .map(|(id, mut row)| {
+            let text = if row.text_offset != 0 || row.text_length != 0 {
+                engine
+                    .get_text(crate::storage::TextRef {
+                        file_offset: row.text_offset,
+                        length: row.text_length,
+                    })
+                    .unwrap()
+            } else {
+                None
+            };
+            let vector = engine
+                .get_vector(NamespaceId::new(row.namespace_id), row.vector_slot)
+                .unwrap()
+                .map(|v| v.into_iter().map(f32::to_bits).collect::<Vec<_>>());
+            let document =
+                crate::storage::vector_certification::retained_document(&row, text.as_deref())
+                    .unwrap()
+                    .text;
+            // Keep presence valid while normalizing location for comparison.
+            row.text_offset = if text.is_some() { 48 } else { 0 };
+            (
+                id,
+                control::encode(&(row.encode().unwrap(), text, vector, document)).unwrap(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn certified_compaction_mixed_namespaces_preserve_bits_documents_and_exact_owner_without_query_scans()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let d = certified_fixture_with_seed(root.path(), |engine| {
+        let mut ns = NamespaceConfig::default_namespace(0);
+        ns.name = "uncertified".into();
+        ns.embedding_dim = 4;
+        let id = engine.create_namespace(&ns).unwrap();
+        let memory = crate::storage::insertion::InsertMemory {
+            id: None,
+            summary: "retained peer é中🙂".into(),
+            full_text: Some("unchanged full document\nsecond line".into()),
+            tags: vec![crate::model::Tag::new("topic/retained").unwrap()],
+            initial_stability: None,
+            created_at: Some(123),
+            embedding: Some(vec![0.6, -0.0, 0.8, 0.0]),
+            parent_id: None,
+            supersedes: None,
+        };
+        engine
+            .insert_memory_with_receipt(&MutationContext::unkeyed(id), &memory, &[], 123)
+            .unwrap();
+    });
+    let mut engine = RedbStorageEngine::open_native(&d.path).unwrap();
+    let payloads = logical_bytes(&engine);
+    assert_eq!(payloads.len(), 2);
+    let namespaces = control::encode(&engine.list_namespaces().unwrap()).unwrap();
+    for _ in 0..2 {
+        let before = engine.control_state().unwrap();
+        let result = engine.compact_text_log().unwrap();
+        assert_eq!(
+            result.receipt.committed_generation,
+            before.committed_generation.next().unwrap()
+        );
+        assert_eq!(logical_bytes(&engine), payloads);
+        assert_eq!(
+            control::encode(&engine.list_namespaces().unwrap()).unwrap(),
+            namespaces
+        );
+        control::take_validation_work();
+        for _ in 0..3 {
+            let snapshot = engine
+                .canonical_vector_snapshot("native", None, limits())
+                .unwrap();
+            assert_eq!(
+                snapshot.binding.at.generation,
+                result.receipt.committed_generation
+            );
+            assert_eq!(snapshot.binding.at.store_id, before.store_id);
+        }
+        assert_eq!(
+            control::take_validation_work(),
+            control::ValidationWork::default()
+        );
+        // Physical relocation cannot certify an unrelated old namespace.
+        assert!(
+            engine
+                .canonical_vector_snapshot("uncertified", None, limits())
+                .is_err()
+        );
+    }
+    drop(engine);
+    let old_receipts = mixed_history::receipts(&d.path);
+    let stream = root.path().join("mixed.jsonl");
+    let manifest = logical_export::export_store(&d.path, &stream).unwrap();
+    let imported = root.path().join("mixed-imported");
+    assert_eq!(
+        logical_export::import_store(&stream, &imported).unwrap(),
+        manifest
+    );
+    assert_eq!(mixed_history::receipts(&imported), old_receipts);
+    let engine = RedbStorageEngine::open_native(&imported).unwrap();
+    assert_eq!(logical_bytes(&engine), payloads);
+    engine
+        .canonical_vector_snapshot("native", None, limits())
+        .unwrap();
+    assert!(
+        engine
+            .canonical_vector_snapshot("uncertified", None, limits())
+            .is_err()
+    );
+}
+
+#[test]
+fn certified_compaction_unknown_commit_disables_owner_until_strict_reopen() {
+    let root = tempfile::tempdir().unwrap();
+    let d = certified_fixture(root.path());
+    let mut engine = RedbStorageEngine::open_native(&d.path).unwrap();
+    let before = engine.control_state().unwrap();
+    let payloads = logical_bytes(&engine);
+    crate::storage::metadata::text_generation::FAIL_AFTER_TEXT_COMMIT.with(|f| f.set(true));
+    let StorageError::CommitOutcomeUnknown { operation_id, .. } =
+        engine.compact_text_log().unwrap_err()
+    else {
+        panic!("unknown commit lost its classification")
+    };
+    assert!(
+        engine
+            .canonical_vector_snapshot("native", None, limits())
+            .is_err()
+    );
+    assert!(engine.compact_text_log().is_err());
+    drop(engine);
+    let engine = RedbStorageEngine::open_native(&d.path).unwrap();
+    let receipt = engine
+        .lookup_operation(before.store_id, MutationScope::Catalog, operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        receipt.committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    assert!(matches!(
+        receipt.outcome,
+        MutationOutcome::NativeTextGenerationSelected { .. }
+    ));
+    assert_eq!(logical_bytes(&engine), payloads);
+    assert_eq!(
+        engine
+            .canonical_vector_snapshot("native", None, limits())
+            .unwrap()
+            .binding
+            .at,
+        engine.control_state().unwrap().generation_ref()
+    );
+}
+
+#[test]
+fn certified_compaction_process_crashes_reopen_exact_selection_and_certification() {
+    for (stage, committed) in [
+        ("EntriesWritten", false),
+        ("FileSynced", false),
+        ("DirectorySynced", false),
+        ("Selected", true),
+        ("Published", true),
+        ("Cleanup", true),
+        ("Unlinked", true),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let d = certified_fixture(root.path());
+        let engine = RedbStorageEngine::open_native(&d.path).unwrap();
+        let before = engine.control_state().unwrap();
+        let payloads = logical_bytes(&engine);
+        let selected = engine.meta_store().text_selection().unwrap().unwrap();
+        drop(engine);
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "storage::engine::text_compaction::tests::compaction_native_process_child",
+                "--nocapture",
+            ])
+            .env("RECALLD_NATIVE_TEXT_CRASH_PATH", &d.path)
+            .env("RECALLD_NATIVE_TEXT_CRASH_STAGE", stage)
+            .output()
+            .unwrap();
+        assert_eq!(
+            child.status.code(),
+            Some(73),
+            "{stage}: {}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        for _ in 0..2 {
+            let engine = RedbStorageEngine::open_native(&d.path).unwrap();
+            let at = engine.control_state().unwrap().generation_ref();
+            assert_eq!(
+                at.generation,
+                if committed {
+                    before.committed_generation.next().unwrap()
+                } else {
+                    before.committed_generation
+                }
+            );
+            assert_eq!(
+                engine.meta_store().text_selection().unwrap().unwrap().id == selected.id,
+                !committed
+            );
+            assert_eq!(logical_bytes(&engine), payloads);
+            assert_eq!(
+                engine
+                    .canonical_vector_snapshot("native", None, limits())
+                    .unwrap()
+                    .binding
+                    .at,
+                at
+            );
+        }
+    }
+}
+
 fn completion(f: &crate::test_support::Fixture) -> crate::derived_completion::DerivedCompletion {
     crate::derived_completion::DerivedCompletion {
         storage: f.storage.clone(),
@@ -123,7 +397,7 @@ fn compaction_current_proof_hash_catalog_references_and_record_root_reject_immut
 #[test]
 fn compaction_owned_ids_logical_tokens_and_provenance_do_not_change() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let engine =
         RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([19; 32])))
             .unwrap();
@@ -177,8 +451,19 @@ fn compaction_owned_ids_logical_tokens_and_provenance_do_not_change() {
 
 #[tokio::test]
 async fn compaction_caller_retains_receipt_on_real_publication_failure_and_repairs_same_g() {
+    publication_failure(false).await;
+}
+#[tokio::test]
+async fn certified_compaction_caller_retains_new_receipt_and_repairs_same_g() {
+    publication_failure(true).await;
+}
+async fn publication_failure(certified: bool) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = if certified {
+        certified_fixture(root.path())
+    } else {
+        fixture(root.path())
+    };
     let engine =
         RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([20; 32])))
             .unwrap();
@@ -195,7 +480,7 @@ async fn compaction_caller_retains_receipt_on_real_publication_failure_and_repai
             .unwrap()
             .matches_canonical()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(5);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(5);
     let error = c.compact_text_with_work(None).await.unwrap_err();
     let StorageError::CommittedMutation { receipt, .. } = error else {
         panic!("lost receipt: {error}")
@@ -224,7 +509,7 @@ async fn compaction_caller_retains_receipt_on_real_publication_failure_and_repai
         .publication_state()
         .unwrap();
     assert!(!state.matches_canonical());
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     c.complete().await.unwrap();
     let repaired = f
         .storage
@@ -239,8 +524,19 @@ async fn compaction_caller_retains_receipt_on_real_publication_failure_and_repai
 
 #[tokio::test]
 async fn compaction_prior_phase_failure_keeps_receipt_and_allocates_nothing() {
+    prior_failure(false).await;
+}
+#[tokio::test]
+async fn certified_compaction_prior_phase_failure_keeps_receipt_and_allocates_nothing() {
+    prior_failure(true).await;
+}
+async fn prior_failure(certified: bool) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = if certified {
+        certified_fixture(root.path())
+    } else {
+        fixture(root.path())
+    };
     let engine =
         RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([21; 32])))
             .unwrap();
@@ -277,7 +573,7 @@ async fn compaction_prior_phase_failure_keeps_receipt_and_allocates_nothing() {
             engine.meta_store().text_selection().unwrap(),
         )
     };
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(5);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(5);
     let error = c.compact_text_with_work(None).await.unwrap_err();
     let StorageError::CommittedMutation { receipt, .. } = error else {
         panic!("{error}")
@@ -289,7 +585,7 @@ async fn compaction_prior_phase_failure_keeps_receipt_and_allocates_nothing() {
         assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
         assert_eq!(engine.meta_store().text_selection().unwrap(), selected);
     }
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     c.complete().await.unwrap();
     assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
     let result = c.compact_text_with_work(None).await.unwrap();
@@ -349,7 +645,7 @@ async fn compaction_caller_rejects_active_purge_without_resuming_or_allocating()
 }
 
 async fn fork(root: &Path) -> PathBuf {
-    let d = fixture(root);
+    let d = certified_fixture(root);
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let id = mixed_history::linked(&mut s, &d, "compaction-linked");
     mixed_history::graph(&mut s, &d, id);

@@ -5,7 +5,7 @@ use crate::storage::control::ExposureScope;
 
 fn setup() -> (Fixture, Data, Arc<FixedClock>, MemoryId) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
@@ -243,7 +243,7 @@ async fn native_exposure_partial_publication_keeps_receipt_and_repairs_without_r
     let owner = completion(&f);
     owner.rebuild_all().await.unwrap();
     let (_api, _bridge, engine) = readers_with_exposure(&f, clock, true);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let before = event_count(&f, id);
     let error = observation(
         engine
@@ -270,7 +270,7 @@ async fn native_exposure_partial_publication_keeps_receipt_and_repairs_without_r
             .unwrap()
             .matches_canonical()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     owner.complete().await.unwrap();
     assert_eq!(event_count(&f, id), before + 1);
     assert!(
@@ -695,3 +695,6 @@ async fn native_exposure_invalid_configured_policy_fails_without_writes_and_empt
 
 #[path = "exposure_origin_tests.rs"]
 mod origin;
+
+#[path = "exposure_postcommit_tests.rs"]
+mod postcommit;

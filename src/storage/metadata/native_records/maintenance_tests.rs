@@ -65,7 +65,7 @@ fn immutable_lifecycle(a: &DiskRecord, b: &DiskRecord) {
 #[test]
 fn native_maintenance_one_phase_retains_ghost_vector_then_deletes_with_witness_peers_and_replay() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let c = Arc::new(Clock::new(3000));
     let mut s = session(&d, c.clone());
     let id = create(&mut s, &d, "create", input(&d));
@@ -211,7 +211,7 @@ fn native_maintenance_rechecks_canonical_donors_and_fan_with_original_clock_for_
  {
     for days in [2.0, 4.5] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let c = Arc::new(Clock::new(3000));
         let mut s = session(&d, c.clone());
         let mut target = input(&d);
@@ -272,7 +272,7 @@ fn native_maintenance_rechecks_canonical_donors_and_fan_with_original_clock_for_
 #[test]
 fn native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_without_receipts() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let c = Arc::new(Clock::new(3000));
     let mut s = session(&d, c.clone());
     let mut original = input(&d);
@@ -373,7 +373,7 @@ fn native_maintenance_process_child() {
 fn native_harddelete_process_exit_recovers_exact_incident_edges_before_and_after_commit() {
     for point in ["before_metadata_commit", "after_metadata_commit"] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let c = Arc::new(Clock::new(3000));
         let mut s = session(&d, c.clone());
         let id = create(&mut s, &d, "target", input(&d));
@@ -447,7 +447,7 @@ fn native_harddelete_process_exit_recovers_exact_incident_edges_before_and_after
 fn native_maintenance_precommit_failure_and_unknown_commit_reconcile_real_transactions() {
     for unknown in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let c = Arc::new(Clock::new(3000));
         let mut s = session(&d, c.clone());
         let id = create(&mut s, &d, "target", input(&d));
@@ -488,7 +488,7 @@ fn native_maintenance_precommit_failure_and_unknown_commit_reconcile_real_transa
 #[test]
 fn native_maintenance_pass_pins_one_clock_and_never_advances_an_id_twice() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let c = Arc::new(Clock::new(3000));
     let mut s = session(&d, c.clone());
     let id = create(&mut s, &d, "target", input(&d));
@@ -611,6 +611,18 @@ fn native_maintenance_missing_summary_permastore_and_unknown_phase_marker_are_pr
         500 * DAY
     );
     immutable_lifecycle(&before, &after);
+    drop(s);
+    inspect_schema(&d.path).unwrap();
+}
+
+#[test]
+fn native_maintenance_certified_permastore_exemption_and_forget() {
+    // Only the fresh pinned insertion needs certification. The original
+    // missing-summary and unknown-marker checks remain uncertified above.
+    let root = tempfile::tempdir().unwrap();
+    let d = certified_fixture(root.path());
+    let c = Arc::new(Clock::new(500 * DAY));
+    let mut s = session(&d, c.clone());
     let mut original = input(&d);
     original.memory.parent_id = None;
     original.memory.initial_stability = Some(2000.);
@@ -681,7 +693,7 @@ async fn native_harddelete_foreign_peer_requires_actual_policy_history() {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::ownership::{StoreOwnership, lock_directory};
     let root = tempfile::tempdir().unwrap();
-    let mut d = fixture(root.path());
+    let mut d = certified_fixture(root.path());
     let c = Arc::new(Clock::new(3000));
     let mut s = session(&d, c.clone());
     let id = create(&mut s, &d, "target", input(&d));
@@ -787,7 +799,7 @@ async fn native_maintenance_export_import_fork_and_foreign_malformed_witnesses_r
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let c = Arc::new(Clock::new(3000));
     let mut s = session(&d, c.clone());
     let id = create(&mut s, &d, "target", input(&d));
@@ -1010,7 +1022,7 @@ async fn native_maintenance_export_import_fork_and_foreign_malformed_witnesses_r
 fn native_harddelete_pending_recovery_rejects_unproven_dangling_edges_without_source_writes() {
     for changed_weight in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let c = Arc::new(Clock::new(3000));
         let mut s = session(&d, c.clone());
         let id = create(&mut s, &d, "target", input(&d));
@@ -1063,7 +1075,7 @@ fn native_harddelete_pending_recovery_rejects_unproven_dangling_edges_without_so
 #[test]
 fn native_maintenance_actual_policy_migration_invalidates_plan_but_replays_old_receipt_first() {
     let root = tempfile::tempdir().unwrap();
-    let mut d = fixture(root.path());
+    let mut d = certified_fixture(root.path());
     let c = Arc::new(Clock::new(3000));
     let mut s = session(&d, c.clone());
     let id = create(&mut s, &d, "target", input(&d));
@@ -1112,7 +1124,7 @@ fn native_maintenance_pure_threshold_boundaries_are_inclusive_and_never_skip_pha
     use crate::storage::native_maintenance::{NativeDecayEvidence, PlannedDecay, plan};
     use crate::storage::native_records::NativeRecordState;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let c = Arc::new(Clock::new(3000));
     let mut s = session(&d, c);
     let mut input = input(&d);
