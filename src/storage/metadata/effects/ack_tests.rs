@@ -379,6 +379,61 @@ async fn startup_ack_cancelled_waiter_cannot_cancel_owned_worker_or_claim_draine
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_ack_accepted_completion_finishes_after_root_admission_closes() {
+    let f = seeded(3);
+    let owner = publisher(&f);
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    *f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .ack_test_hook
+        .lock()
+        .unwrap() = Some(Box::new(move |_| {
+        entered_tx.send(()).unwrap();
+        release_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+    }));
+    let task = tokio::spawn(async move { owner.rebuild_all().await });
+    tokio::task::spawn_blocking(move || {
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    let closing = tracker.clone();
+    let drain = tokio::task::spawn_blocking(move || {
+        closing.close_and_drain(std::time::Instant::now() + std::time::Duration::from_secs(10))
+    });
+    let waiting = tracker.clone();
+    tokio::task::spawn_blocking(move || waiting.wait_until_closed())
+        .await
+        .unwrap();
+    assert!(tracker.begin().is_err());
+    assert!(!drain.is_finished());
+    release_tx.send(()).unwrap();
+    task.await.unwrap().unwrap();
+    let freeze = drain.await.unwrap().unwrap();
+    assert_eq!(tracker.status().pending, 0);
+    assert_eq!(tracker.status().unresolved, 0);
+    let storage = f.storage.read().unwrap();
+    assert!(storage.meta_store().pending_effects().unwrap().is_empty());
+    assert!(
+        storage
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    drop(storage);
+    drop(freeze);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn startup_ack_crash_child() {
     let Ok(path) = std::env::var("RECALLD_ACK_CRASH_STORE") else {
         return;
