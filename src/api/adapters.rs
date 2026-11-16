@@ -1726,7 +1726,7 @@ impl NamespaceRegistryAdapter {
         clock: Arc<dyn crate::time::Clock>,
         cache: Arc<CacheManager>,
         graph: crate::graph::SharedGraph,
-        vectors: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vectors: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts: Arc<tokio::sync::Mutex<FtsIndex>>,
         entities: Arc<tokio::sync::RwLock<EntityIndex>>,
     ) -> Self {

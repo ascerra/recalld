@@ -742,7 +742,7 @@ async fn native_policy_wire_real_completion_failures_keep_original_receipt_and_r
         }
         // Real coordinator dimension failure, not injected success stamps.
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM + 1);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
         let (status, error) = if catalog {
             rest(&adapter, &body, None).await
         } else {
@@ -819,7 +819,7 @@ async fn native_policy_wire_real_completion_failures_keep_original_receipt_and_r
             after
         );
         *f.vector_index.write().await =
-            crate::search::FlatVectorIndex::new(crate::test_support::DIM);
+            crate::search::VectorIndexOwner::uniform(crate::test_support::DIM);
         provider.available.store(false, Ordering::SeqCst);
         let (status, replayed) = if catalog {
             rest(&adapter, &body, None).await
