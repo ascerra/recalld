@@ -10,7 +10,7 @@ use std::path::Path;
 /// Used for files not held open (e.g., the `.compacting` marker).
 pub fn fsync_file(path: &Path) -> io::Result<()> {
     let f = File::open(path)?;
-    f.sync_all()
+    crate::performance::sync_io("file", "sync_all", || f.sync_all())
 }
 
 /// Fsync a directory to ensure rename/unlink/create durability.
@@ -20,5 +20,5 @@ pub fn fsync_file(path: &Path) -> io::Result<()> {
 /// On Linux, this is an `fsync()` on the directory fd.
 pub fn fsync_dir(path: &Path) -> io::Result<()> {
     let d = File::open(path)?;
-    d.sync_all()
+    crate::performance::sync_io("directory", "sync_all", || d.sync_all())
 }

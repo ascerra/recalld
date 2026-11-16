@@ -1,0 +1,20 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/native-prefix-regression/runtime/config.toml",
+    "--data-root",
+    "/output/native-prefix-regression/runtime/unbound",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--native-prefix"
+  ],
+  "exitCode": 1,
+  "forced": false,
+  "negativeConstructorProbe": true,
+  "pid": 4384,
+  "priorJoined": null,
+  "status": "joined"
+}

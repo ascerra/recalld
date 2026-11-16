@@ -1,0 +1,262 @@
+[
+  {
+    "case": "physical-contract",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-physical-contract.json",
+      "--out",
+      "/output/negative-output-physical-contract"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "fixture-version",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-fixture-version.json",
+      "--out",
+      "/output/negative-output-fixture-version"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "foreign-policy",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-foreign-policy.json",
+      "--out",
+      "/output/negative-output-foreign-policy"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "manifest-version",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-manifest-version.json",
+      "--out",
+      "/output/negative-output-manifest-version"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "sweep-origin",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-sweep-origin.json",
+      "--out",
+      "/output/negative-output-sweep-origin"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "native-writes",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-native-writes.json",
+      "--out",
+      "/output/negative-output-native-writes"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "physical-compaction",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-physical-compaction.json",
+      "--out",
+      "/output/negative-output-physical-compaction"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "canonical-schema",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-canonical-schema.json",
+      "--out",
+      "/output/negative-output-canonical-schema"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "multiplier",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-multiplier.json",
+      "--out",
+      "/output/negative-output-multiplier"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "rng",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-rng.json",
+      "--out",
+      "/output/negative-output-rng"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "full-reset",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-full-reset.json",
+      "--out",
+      "/output/negative-output-full-reset"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "source-hash",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-source-hash.json",
+      "--out",
+      "/output/negative-output-source-hash"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  },
+  {
+    "case": "binary-hash",
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-binary-hash.json",
+      "--out",
+      "/output/negative-output-binary-hash"
+    ],
+    "exitCode": 1,
+    "outputExists": false
+  }
+]

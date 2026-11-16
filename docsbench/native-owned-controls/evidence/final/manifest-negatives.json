@@ -1,0 +1,202 @@
+[
+  {
+    "case": "manifest-version",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-manifest-version.json",
+      "--out",
+      "/output/must-not-exist-manifest-version"
+    ]
+  },
+  {
+    "case": "schema-absence",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-schema-absence.json",
+      "--out",
+      "/output/must-not-exist-schema-absence"
+    ]
+  },
+  {
+    "case": "schema-zero",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-schema-zero.json",
+      "--out",
+      "/output/must-not-exist-schema-zero"
+    ]
+  },
+  {
+    "case": "public-v2",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-public-v2.json",
+      "--out",
+      "/output/must-not-exist-public-v2"
+    ]
+  },
+  {
+    "case": "all-rng",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-all-rng.json",
+      "--out",
+      "/output/must-not-exist-all-rng"
+    ]
+  },
+  {
+    "case": "full-a6",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-full-a6.json",
+      "--out",
+      "/output/must-not-exist-full-a6"
+    ]
+  },
+  {
+    "case": "native-writes",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-native-writes.json",
+      "--out",
+      "/output/must-not-exist-native-writes"
+    ]
+  },
+  {
+    "case": "native-sweep",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-native-sweep.json",
+      "--out",
+      "/output/must-not-exist-native-sweep"
+    ]
+  },
+  {
+    "case": "ordinary-startup",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-ordinary-startup.json",
+      "--out",
+      "/output/must-not-exist-ordinary-startup"
+    ]
+  },
+  {
+    "case": "executable-pin",
+    "exitCode": 1,
+    "outputExists": false,
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/negative-executable-pin.json",
+      "--out",
+      "/output/must-not-exist-executable-pin"
+    ]
+  }
+]

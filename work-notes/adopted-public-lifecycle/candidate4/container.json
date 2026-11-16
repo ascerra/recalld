@@ -1,0 +1,7 @@
+{
+  "container": "4fa4bb7c3de8b9e71f3ebdee0fb60ab7db47b79b0e5880d7f4d23183285336de",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "network": "none",
+  "nano_cpus": 2000000000,
+  "memory_bytes": 4294967296
+}

@@ -29,7 +29,7 @@ pub struct OfflineSnapshot {
     text: TextStore,
     _meta_copy: tempfile::TempDir,
     _edges_copy: tempfile::TempDir,
-    _source_lock: std::fs::File,
+    _source_lock: super::ownership::OwnedFileLock,
     _owner: StoreOwnership,
 }
 
@@ -96,6 +96,11 @@ impl OfflineSnapshot {
         })
     }
 
+    pub(crate) fn into_owner(self) -> StoreOwnership {
+        // All disposable databases/payload handles and the source directory lock
+        // drop before the receiver opens live handles; process ownership persists.
+        self._owner
+    }
     pub fn control(&self) -> &ControlState {
         &self.control
     }

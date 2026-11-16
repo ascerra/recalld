@@ -1,0 +1,1433 @@
+//! Explicit offline policy cutover into a fresh destination. No serving writer.
+//! Original schema publication and historical receipt identities stay immutable.
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
+
+use redb::ReadableTable;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use super::canonical_schema::CanonicalSchemaState;
+use super::control::{
+    self, ControlState, Generation, GenerationRef, MutationContext, MutationOutcome, MutationScope,
+    WriteReceipt,
+};
+use super::metadata::{META_TABLE, NAMESPACE_TABLE};
+use super::offline_snapshot::OfflineSnapshot;
+use super::ownership::{StoreOwnership, lock_directory};
+use super::{StorageError, fsync::fsync_dir};
+use crate::decay::{
+    DecayConfig,
+    lifecycle::{project, resolve_policy},
+};
+use crate::graph::{
+    RelationshipGraph,
+    activation::{ActivationConfig, connection_bonus_with_strengths},
+};
+use crate::model::{
+    DecayPhase, DiskRecord, MemoryId, NamespaceConfig, NamespaceId, schema::LifecycleVersion,
+};
+use crate::time::Clock;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PolicyTransition {
+    pub namespace_id: NamespaceId,
+    pub from: LifecycleVersion,
+    pub to: LifecycleVersion,
+    pub previous_revision: Generation,
+    pub next_revision: Generation,
+    pub previous_generation: Generation,
+    pub record_count: u64,
+    /// SHA-256 over sorted UUID bytes followed by each post-commit u63 token (BE).
+    pub record_token_digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LifecycleMigrationOptions {
+    pub expected_source: GenerationRef,
+    pub namespace_id: NamespaceId,
+    pub expected_policy_revision: Generation,
+    pub target: LifecycleVersion,
+    pub idempotency_key: String,
+}
+impl LifecycleMigrationOptions {
+    fn context(&self) -> MutationContext {
+        MutationContext {
+            store_id: Some(self.expected_source.store_id),
+            scope: MutationScope::Namespace(self.namespace_id),
+            idempotency_key: Some(self.idempotency_key.clone()),
+            expected_generation: Some(self.expected_source.generation),
+            contract_version: 1,
+        }
+    }
+    fn hash(&self, destination: &Path) -> Result<[u8; 32], StorageError> {
+        // Physical destination is intentional: retry reconciliation is local to
+        // this cutover, not a global key promise across independently copied stores.
+        let bytes = control::encode(&(
+            self.namespace_id,
+            self.expected_policy_revision,
+            self.target,
+            destination,
+        ))?;
+        Ok(control::request_hash(
+            &self.context(),
+            "lifecycle_policy_migrate",
+            &[&bytes],
+        ))
+    }
+}
+
+fn invalid(message: &str) -> StorageError {
+    StorageError::InvalidControl(message.into())
+}
+fn token_digest(records: &[DiskRecord], rewind: u64) -> Result<String, StorageError> {
+    let tokens = records
+        .iter()
+        .map(|r| {
+            let token = r
+                .schema
+                .as_ref()
+                .ok_or_else(|| invalid("record lacks lifecycle schema"))?
+                .lifecycle
+                .record_generation
+                .get()
+                .checked_sub(rewind)
+                .ok_or_else(|| invalid("lifecycle record token underflow"))?;
+            Ok((r.id, token))
+        })
+        .collect::<Result<Vec<_>, StorageError>>()?;
+    Ok(token_digest_values(tokens))
+}
+pub(crate) fn token_digest_values(values: impl IntoIterator<Item = ([u8; 16], u64)>) -> String {
+    let mut tokens = values.into_iter().collect::<Vec<_>>();
+    tokens.sort_unstable();
+    let mut digest = Sha256::new();
+    for (id, token) in tokens {
+        digest.update(id);
+        digest.update(token.to_be_bytes());
+    }
+    digest
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Recognized in-place lifecycle operations and explicit policy migrations are
+/// validated in their actual commit order. Other operation types fail closed.
+/// Historical counters remain ancestry-bounded, never compared across origins.
+pub(crate) fn validate_policy_history(
+    read: &redb::ReadTransaction,
+    control: &ControlState,
+    schema: &CanonicalSchemaState,
+) -> Result<(), StorageError> {
+    let baseline = if schema.source.store_id == control.store_id {
+        schema.publication_generation
+    } else {
+        Generation::default().next()?
+    };
+    if baseline > control.committed_generation {
+        return Err(invalid("lifecycle baseline exceeds current generation"));
+    }
+    let keys = read
+        .open_table(control::KEYS)?
+        .iter()?
+        .map(|row| {
+            let (_, v) = row?;
+            Ok(v.value().to_vec())
+        })
+        .collect::<Result<std::collections::HashSet<_>, StorageError>>()?;
+    // This API first validates complete manifest/receipt/origin bindings. It
+    // returns only native-v2 bookkeeping, never a table or variant allowlist.
+    let native_bookkeeping = super::metadata::batch::validated_native_bookkeeping(read)?;
+    let is_native_bookkeeping = |receipt: &WriteReceipt| {
+        native_bookkeeping.iter().any(|entry| {
+            entry.generation
+                == GenerationRef {
+                    store_id: receipt.store_id,
+                    generation: receipt.committed_generation,
+                }
+                && entry.operation_id == receipt.operation_id
+        })
+    };
+    let mut suffix = BTreeMap::new();
+    let mut policies: HashMap<u32, BTreeMap<Generation, (WriteReceipt, PolicyTransition)>> =
+        HashMap::new();
+    let mut numeric_policies: HashMap<
+        u32,
+        BTreeMap<Generation, super::native_policy::NativeNamespacePolicyUpdated>,
+    > = HashMap::new();
+    let mut policy_noops = Vec::new();
+    let mut inherited_updates: HashMap<
+        u32,
+        BTreeMap<Generation, super::inherited_policy::InheritedDecayAdopted>,
+    > = HashMap::new();
+    let mut inherited_noops = Vec::new();
+    let mut native_history = Vec::new();
+    let mut namespace_creations = HashMap::new();
+    for row in read.open_table(control::RECEIPTS)?.iter()? {
+        let (key, value) = row?;
+        let receipt = control::validate_receipt(value.value())?.receipt;
+        let active =
+            receipt.store_id == control.store_id && receipt.committed_generation > baseline;
+        if active
+            && suffix
+                .insert(receipt.committed_generation, receipt.clone())
+                .is_some()
+        {
+            return Err(invalid("duplicate lifecycle generation"));
+        }
+        let namespace = match &receipt.outcome {
+            MutationOutcome::NativeTextGenerationSelected { .. } => None,
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.before_namespace.namespace_id,
+                    t.before_namespace.schema.lifecycle_version,
+                    t.before_namespace.schema.policy_revision,
+                ));
+                Some(t.before_namespace.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => Some(t.namespace_id),
+            MutationOutcome::NativeNamespaceCreated { transition: t } => {
+                if key.value()
+                    != control::scoped_key(
+                        receipt.store_id,
+                        MutationScope::Catalog,
+                        receipt.operation_id.as_bytes(),
+                    )
+                    || !control::permits_generation_origin(
+                        read,
+                        control,
+                        GenerationRef {
+                            store_id: receipt.store_id,
+                            generation: receipt.committed_generation,
+                        },
+                    )?
+                    || namespace_creations
+                        .insert(t.namespace_id.get(), t.clone())
+                        .is_some()
+                {
+                    return Err(invalid("invalid native namespace receipt origin/identity"));
+                }
+                None
+            }
+            MutationOutcome::InheritedDecayAdopted { transition: t } => {
+                if t.changed() {
+                    if policies
+                        .entry(t.preview.namespace_id.get())
+                        .or_default()
+                        .insert(t.next_revision, (receipt.clone(), t.revision_transition()))
+                        .is_some()
+                        || inherited_updates
+                            .entry(t.preview.namespace_id.get())
+                            .or_default()
+                            .insert(t.next_revision, t.clone())
+                            .is_some()
+                    {
+                        return Err(invalid("ambiguous inherited policy revision"));
+                    }
+                } else {
+                    inherited_noops.push(t.clone());
+                    native_history.push((
+                        receipt.clone(),
+                        t.preview.namespace_id,
+                        t.preview.lifecycle_version,
+                        t.preview.policy_revision,
+                    ));
+                }
+                Some(t.preview.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePolicyUpdated { transition: t } => {
+                if policies
+                    .entry(t.namespace_id.get())
+                    .or_default()
+                    .insert(t.next_revision, (receipt.clone(), t.revision_transition()))
+                    .is_some()
+                    || numeric_policies
+                        .entry(t.namespace_id.get())
+                        .or_default()
+                        .insert(t.next_revision, t.clone())
+                        .is_some()
+                {
+                    return Err(invalid("ambiguous numeric policy revision"));
+                }
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeNamespacePolicyUnchanged { transition: t } => {
+                if !keys.contains(key.value()) {
+                    return Err(invalid("policy no-change receipt lacks retry key"));
+                }
+                policy_noops.push(t.clone());
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
+                if !keys.contains(key.value())
+                    || t.namespace_id.is_unset()
+                    || t.from == t.to
+                    || t.next_revision != t.previous_revision.next()?
+                    || receipt.committed_generation != t.previous_generation.next()?
+                    || t.record_token_digest.len() != 64
+                    || !t
+                        .record_token_digest
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err(invalid("invalid lifecycle transition evidence"));
+                }
+                if policies
+                    .entry(t.namespace_id.get())
+                    .or_default()
+                    .insert(t.next_revision, (receipt.clone(), t.clone()))
+                    .is_some()
+                {
+                    return Err(invalid("ambiguous lifecycle policy revision"));
+                }
+                Some(t.namespace_id)
+            }
+            MutationOutcome::LifecycleExposureRecorded { transition: t }
+            | MutationOutcome::LifecycleFeedbackApplied { transition: t } => {
+                // validate_receipt already verifies the exact numeric transition.
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeGraphUnchanged { transition: t } => {
+                if !keys.contains(key.value()) {
+                    return Err(invalid("native graph no-change lacks key reservation"));
+                }
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeGraphChanged { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeMemoryInserted { transition: t }
+            | MutationOutcome::NativeMemoryTombstoned { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(&receipt) =>
+            {
+                None
+            }
+            MutationOutcome::NativePhaseMaterialized { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.namespace_id,
+                    t.lifecycle_version,
+                    t.policy_revision,
+                ));
+                Some(t.namespace_id)
+            }
+            _ if active => return Err(invalid("unrecognized operation after schema publication")),
+            _ => None,
+        };
+        if let Some(ns) = namespace {
+            if key.value()
+                != control::scoped_key(
+                    receipt.store_id,
+                    MutationScope::Namespace(ns),
+                    receipt.operation_id.as_bytes(),
+                )
+                || !control::permits_generation_origin(
+                    read,
+                    control,
+                    GenerationRef {
+                        store_id: receipt.store_id,
+                        generation: receipt.committed_generation,
+                    },
+                )?
+            {
+                return Err(invalid("invalid lifecycle receipt origin/scope"));
+            }
+        }
+    }
+    let mut expected = baseline;
+    for generation in suffix.keys() {
+        expected = expected.next()?;
+        if *generation != expected {
+            return Err(invalid("gap in lifecycle receipt suffix"));
+        }
+    }
+    if expected != control.committed_generation {
+        return Err(invalid("missing lifecycle receipt suffix"));
+    }
+    // Retained historical native operations still require an explicit policy
+    // selection. Their record sets need not survive a deletion-aware restore.
+    let purge_progress = super::metadata::purge::validate_existing(read, Some(control))?;
+    let before_purge =
+        |receipt: &WriteReceipt, namespace: NamespaceId| -> Result<(), StorageError> {
+            if purge_progress.iter().any(|p| {
+                p.version == 2
+                    && p.namespace_id == namespace
+                    && p.store_id == receipt.store_id
+                    && receipt.committed_generation > p.start_receipt.committed_generation
+            }) {
+                return Err(invalid(
+                    "native namespace mutation ordered after purge start",
+                ));
+            }
+            Ok(())
+        };
+    for history in policies.values() {
+        for (receipt, t) in history.values() {
+            before_purge(receipt, t.namespace_id)?;
+        }
+    }
+    let check_record_policy = |receipt: &WriteReceipt,
+                               namespace_id: NamespaceId,
+                               lifecycle_version: LifecycleVersion,
+                               policy_revision: Generation|
+     -> Result<(), StorageError> {
+        let version = if policy_revision == Generation::default() {
+            LifecycleVersion::LegacyAccessV1
+        } else {
+            policies
+                .get(&namespace_id.get())
+                .and_then(|h| h.get(&policy_revision))
+                .map(|(_, p)| p.to)
+                .ok_or_else(|| invalid("native receipt lacks policy history"))?
+        };
+        if version != lifecycle_version {
+            return Err(invalid("native receipt policy version mismatch"));
+        }
+        if let Some(history) = policies.get(&namespace_id.get()) {
+            for (revision, (policy_receipt, _)) in history {
+                // Only compare generations from the same origin. Ancestry
+                // bounds establish the retained foreign-origin proof instead.
+                if policy_receipt.store_id == receipt.store_id
+                    && ((*revision <= policy_revision)
+                        != (policy_receipt.committed_generation < receipt.committed_generation))
+                {
+                    return Err(invalid(
+                        "native receipt contradicts policy order in its origin",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    };
+    // Graph/store proofs outlive live catalog removal. Bind every origin to
+    // the same strictly validated retired namespace used by policy history.
+    let mut configs = read
+        .open_table(NAMESPACE_TABLE)?
+        .iter()?
+        .map(|row| {
+            let (_, value) = row?;
+            let ns = NamespaceConfig::decode(value.value())?;
+            Ok((ns.id.get(), ns))
+        })
+        .collect::<Result<HashMap<_, _>, StorageError>>()?;
+    let live_namespaces: std::collections::HashSet<_> = configs.keys().copied().collect();
+    let retired = super::native_purge::retired_namespace_bindings(&purge_progress)?;
+    for proof in retired.values() {
+        let ns = proof.namespace()?;
+        if let Some(existing) = configs.get(&ns.id.get()) {
+            if super::native_purge::NativeNamespaceProof::capture(existing)? != **proof {
+                return Err(invalid("retired namespace witness differs"));
+            }
+        } else {
+            configs.insert(ns.id.get(), ns);
+        }
+    }
+    let historical_configs = configs.clone();
+    for (receipt, namespace_id, lifecycle_version, policy_revision) in native_history {
+        if let MutationOutcome::NativeGraphUnchanged { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
+            )?;
+        }
+        if let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("linked creation namespace binding missing"))?,
+            )?;
+        }
+        if let MutationOutcome::NativeGraphChanged { transition } = &receipt.outcome {
+            transition.validate_namespace_profiles(
+                configs
+                    .get(&namespace_id.get())
+                    .ok_or_else(|| invalid("native graph namespace binding missing"))?,
+            )?;
+        }
+        before_purge(&receipt, namespace_id)?;
+        check_record_policy(&receipt, namespace_id, lifecycle_version, policy_revision)?;
+    }
+    let creations = super::native_records::creation_proofs(read)?;
+    // Numeric policy is mutable, including on restored stores. Rewind its
+    // complete retained revision chain before checking immutable creation state.
+    let mut creation_configs = configs.clone();
+    for (id, history) in &numeric_policies {
+        let ns = creation_configs
+            .get_mut(id)
+            .ok_or_else(|| invalid("numeric policy namespace missing"))?;
+        for t in history.values().rev() {
+            if super::native_catalog::NamespacePolicyState::capture(ns)? != t.after {
+                return Err(invalid("numeric policy configuration chain mismatch"));
+            }
+            t.before.apply(ns);
+        }
+    }
+    // Rewind every origin's immutable inherited binding by policy revision.
+    // A fork retains original adoption store/G/opID; its local counter is irrelevant.
+    let mut binding_changes: HashMap<
+        u32,
+        BTreeMap<
+            Generation,
+            (
+                Option<super::inherited_policy::InheritedDecayBinding>,
+                Option<super::inherited_policy::InheritedDecayBinding>,
+            ),
+        >,
+    > = HashMap::new();
+    for (id, history) in &inherited_updates {
+        for (revision, t) in history {
+            binding_changes
+                .entry(*id)
+                .or_default()
+                .insert(*revision, (t.preview.prior.clone(), Some(t.after.clone())));
+        }
+    }
+    for (id, history) in &numeric_policies {
+        for (revision, t) in history {
+            if t.before.decay_rate_multiplier.is_some() && t.after.decay_rate_multiplier.is_none() {
+                if binding_changes
+                    .entry(*id)
+                    .or_default()
+                    .insert(*revision, (t.cleared_inherited_decay.clone(), None))
+                    .is_some()
+                {
+                    return Err(invalid("ambiguous inherited binding change"));
+                }
+            }
+        }
+    }
+    for (id, history) in &binding_changes {
+        let schema = creation_configs
+            .get_mut(id)
+            .and_then(|ns| ns.schema.as_mut())
+            .ok_or_else(|| invalid("inherited binding namespace missing"))?;
+        for (before, after) in history.values().rev() {
+            if &schema.inherited_decay != after {
+                return Err(invalid("inherited binding history mismatch"));
+            }
+            schema.inherited_decay = before.clone();
+        }
+    }
+    for t in &inherited_noops {
+        let mut binding = configs
+            .get(&t.preview.namespace_id.get())
+            .and_then(|ns| ns.schema.as_ref())
+            .ok_or_else(|| invalid("inherited no-change namespace missing"))?
+            .inherited_decay
+            .clone();
+        if let Some(history) = binding_changes.get(&t.preview.namespace_id.get()) {
+            for (_, (before, _)) in history
+                .range((
+                    std::ops::Bound::Excluded(t.preview.policy_revision),
+                    std::ops::Bound::Unbounded,
+                ))
+                .rev()
+            {
+                binding = before.clone();
+            }
+        }
+        if binding.as_ref() != Some(&t.after) {
+            return Err(invalid("inherited no-change history mismatch"));
+        }
+    }
+    // No migrated baseline can manufacture an adoption. Its old binding was absent.
+    for (id, ns) in &creation_configs {
+        if !namespace_creations.contains_key(id)
+            && ns
+                .schema
+                .as_ref()
+                .ok_or_else(|| invalid("namespace lacks lifecycle schema"))?
+                .inherited_decay
+                .is_some()
+        {
+            return Err(invalid("inherited binding lacks creation/adoption receipt"));
+        }
+    }
+    // A restored historical no-op must identify the numeric state at its own
+    // revision, not merely any well-formed policy under the same lifecycle version.
+    for t in &policy_noops {
+        let mut ns = configs
+            .get(&t.namespace_id.get())
+            .ok_or_else(|| invalid("policy no-change namespace missing"))?
+            .clone();
+        if let Some(history) = numeric_policies.get(&t.namespace_id.get()) {
+            for (_, update) in history
+                .range((
+                    std::ops::Bound::Excluded(t.policy_revision),
+                    std::ops::Bound::Unbounded,
+                ))
+                .rev()
+            {
+                update.before.apply(&mut ns);
+            }
+        }
+        if super::native_catalog::NamespacePolicyState::capture(&ns)? != t.policy {
+            return Err(invalid(
+                "policy no-change differs from its historical revision",
+            ));
+        }
+    }
+    for (id, creation) in &namespace_creations {
+        let ns = creation_configs
+            .get(id)
+            .ok_or_else(|| invalid("native namespace creation lacks retained namespace"))?;
+        if !creation.matches_namespace(ns)? {
+            return Err(invalid("native namespace differs from creation proof"));
+        }
+    }
+    for ns in configs.values() {
+        if matches!(
+            ns.schema.as_ref().map(|s| &s.embedding_binding),
+            Some(crate::model::schema::EmbeddingBinding::Bound {
+                provenance: crate::model::schema::BindingProvenance::NativeV2,
+                ..
+            })
+        ) && !namespace_creations.contains_key(&ns.id.get())
+        {
+            return Err(invalid("native namespace binding lacks creation proof"));
+        }
+    }
+    let ledger = super::metadata::removal_ledger::read_export(read, Some(control))?;
+    for row in read.open_table(control::RECEIPTS)?.iter()? {
+        let (_, bytes) = row?;
+        let receipt = control::validate_receipt(bytes.value())?.receipt;
+        if let MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } = &receipt.outcome {
+            if let Some(chunk) = &t.chunk {
+                for peer in &chunk.peers {
+                    let fields = &peer
+                        .change
+                        .before
+                        .as_ref()
+                        .ok_or_else(|| invalid("purge peer before missing"))?
+                        .lifecycle
+                        .lifecycle;
+                    check_record_policy(
+                        &receipt,
+                        peer.namespace_id,
+                        fields.lifecycle_version,
+                        fields.policy_revision,
+                    )?;
+                    // A chunk may update its own remaining rows. Foreign peers
+                    // must still precede their own namespace's purge boundary.
+                    if peer.namespace_id != t.namespace_id {
+                        before_purge(&receipt, peer.namespace_id)?;
+                    }
+                }
+            }
+        }
+        super::native_purge::validate_evidence(&receipt, &configs, ledger.as_ref())?;
+        super::native_maintenance::validate_ledger(&receipt, ledger.as_ref())?;
+        super::native_maintenance::validate_namespace_profiles(&receipt, &configs)?;
+        if let MutationOutcome::NativeMemoryHardDeleted { transition } = &receipt.outcome {
+            // Local proof already requires before/after policy equality. Bind
+            // every peer to its own history, including retained foreign origins.
+            for peer in &transition.peers {
+                before_purge(&receipt, peer.namespace_id)?;
+                let lifecycle = &peer.change.after.lifecycle.lifecycle;
+                check_record_policy(
+                    &receipt,
+                    peer.namespace_id,
+                    lifecycle.lifecycle_version,
+                    lifecycle.policy_revision,
+                )?;
+            }
+        }
+    }
+    let mut records: HashMap<u32, Vec<super::native_records::ProofRecord>> = HashMap::new();
+    for row in read.open_table(META_TABLE)?.iter()? {
+        let (_, v) = row?;
+        let r = DiskRecord::from_bytes(v.value())?;
+        let ns = configs
+            .get(&r.namespace_id)
+            .ok_or_else(|| invalid("record namespace missing"))?;
+        let creation = creations.get(&MemoryId::from_bytes(r.id));
+        super::native_records::validate_retained_creation(&r, ns, creation, ledger.as_ref())?;
+        let text_hash = creation
+            .map(|c| c.primary().map(|p| p.after.content.text_sha256))
+            .transpose()?
+            .flatten();
+        records.entry(r.namespace_id).or_default().push(
+            super::native_records::ProofRecord::capture(&r, ns, text_hash)?,
+        );
+    }
+    let mut current_policy = HashMap::new();
+    for ns in configs.values() {
+        let fields = ns
+            .schema
+            .as_ref()
+            .ok_or_else(|| invalid("namespace lacks lifecycle schema"))?;
+        let mut version = LifecycleVersion::LegacyAccessV1;
+        let mut revision = Generation::default();
+        let mut last_in_origin = HashMap::new();
+        if let Some(history) = policies.get(&ns.id.get()) {
+            if history
+                .keys()
+                .next_back()
+                .is_some_and(|revision| *revision > fields.policy_revision)
+            {
+                return Err(invalid("policy proof exceeds retained namespace revision"));
+            }
+
+            for (_, (receipt, t)) in history.range(..=fields.policy_revision) {
+                if t.previous_revision != revision || t.from != version {
+                    return Err(invalid("gap in namespace policy history"));
+                }
+                if last_in_origin
+                    .insert(receipt.store_id, receipt.committed_generation)
+                    .is_some_and(|previous| previous >= receipt.committed_generation)
+                {
+                    return Err(invalid(
+                        "policy revisions contradict receipt order in their origin",
+                    ));
+                }
+                revision = t.next_revision;
+                version = t.to;
+            }
+        }
+        if revision != fields.policy_revision || version != fields.lifecycle_version {
+            return Err(invalid("namespace policy lacks transition evidence"));
+        }
+        for record in records.entry(ns.id.get()).or_default().iter() {
+            let t = &record.state.lifecycle.lifecycle;
+            if t.policy_revision != revision || t.lifecycle_version != version {
+                return Err(invalid("record policy does not match migration"));
+            }
+        }
+        current_policy.insert(ns.id.get(), (version, revision));
+    }
+    if records.keys().any(|ns| !current_policy.contains_key(ns)) {
+        return Err(invalid("record namespace missing"));
+    }
+    current_policy.retain(|id, _| live_namespaces.contains(id));
+    configs.retain(|id, _| live_namespaces.contains(id));
+    records.retain(|id, _| live_namespaces.contains(id));
+    let mut namespace_highwater = read
+        .open_table(super::metadata::NAMESPACE_COUNTER)?
+        .get("max_id")?
+        .map(|v| v.value())
+        .unwrap_or(0);
+    if namespace_creations
+        .keys()
+        .any(|id| *id > namespace_highwater)
+    {
+        return Err(invalid("native namespace exceeds allocation highwater"));
+    }
+    // Reverse exactly the recognized active operations. This replaces the old
+    // assumption that every token increment was a namespace policy migration.
+    for receipt in suffix.values().rev() {
+        match &receipt.outcome {
+            MutationOutcome::NativeTextGenerationSelected { transition } => {
+                transition.validate_records(records.values().flat_map(|rows| rows.iter()))?;
+            }
+            MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
+                let ns = configs
+                    .get(&t.before_namespace.namespace_id.get())
+                    .ok_or_else(|| invalid("purge start namespace absent"))?;
+                let mut expected = t.before_namespace.clone();
+                // Lifecycle revision fields are tracked separately during reverse replay.
+                let (version, revision) = current_policy
+                    .get(&ns.id.get())
+                    .copied()
+                    .ok_or_else(|| invalid("purge start policy absent"))?;
+                expected.schema.lifecycle_version = version;
+                expected.schema.policy_revision = revision;
+                if expected != t.before_namespace
+                    || super::native_purge::NativeNamespaceProof::capture(ns)? != t.before_namespace
+                {
+                    return Err(invalid("purge start namespace proof mismatch"));
+                }
+            }
+            MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => match t.stage {
+                super::purge::PurgeStage::Complete => {
+                    if configs.contains_key(&t.namespace_id.get()) {
+                        return Err(invalid("completed purge namespace still present"));
+                    }
+                }
+                super::purge::PurgeStage::Cleanup => {
+                    let ns = historical_configs
+                        .get(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("purge namespace witness absent"))?
+                        .clone();
+                    let schema = ns
+                        .schema
+                        .as_ref()
+                        .ok_or_else(|| invalid("purge schema missing"))?;
+                    if configs.insert(ns.id.get(), ns.clone()).is_some()
+                        || records.get(&ns.id.get()).is_some_and(|rs| !rs.is_empty())
+                    {
+                        return Err(invalid("purge cleanup canonical state mismatch"));
+                    }
+                    current_policy.insert(
+                        ns.id.get(),
+                        (schema.lifecycle_version, schema.policy_revision),
+                    );
+                    records.entry(ns.id.get()).or_default();
+                }
+                super::purge::PurgeStage::Deleting => {
+                    if !configs.contains_key(&t.namespace_id.get()) {
+                        return Err(invalid("purge chunk namespace absent"));
+                    }
+                    t.chunk
+                        .as_ref()
+                        .ok_or_else(|| invalid("purge chunk witness absent"))?
+                        .rewind(&mut records)?;
+                }
+            },
+            MutationOutcome::NativeNamespaceCreated { transition: t } => {
+                if current_policy.remove(&t.namespace_id.get())
+                    != Some((LifecycleVersion::LegacyAccessV1, Generation::default()))
+                    || records
+                        .get(&t.namespace_id.get())
+                        .is_some_and(|rows| !rows.is_empty())
+                    || namespace_highwater != t.namespace_id.get()
+                {
+                    return Err(invalid(
+                        "native namespace creation is out of canonical order",
+                    ));
+                }
+                namespace_highwater = t.previous_max_id;
+                records.remove(&t.namespace_id.get());
+            }
+            MutationOutcome::InheritedDecayAdopted { transition: t } => {
+                let policy = current_policy
+                    .get_mut(&t.preview.namespace_id.get())
+                    .ok_or_else(|| invalid("inherited policy namespace absent"))?;
+                let rows = records.entry(t.preview.namespace_id.get()).or_default();
+                let ns = configs
+                    .get_mut(&t.preview.namespace_id.get())
+                    .ok_or_else(|| invalid("inherited policy configuration absent"))?;
+                if *policy != (t.preview.lifecycle_version, t.next_revision)
+                    || ns.schema.as_ref().unwrap().inherited_decay.as_ref() != Some(&t.after)
+                    || rows.len() as u64 != t.preview.record_count
+                    || token_digest_values(rows.iter().map(|r| {
+                        (
+                            *r.id.as_bytes(),
+                            r.state.lifecycle.lifecycle.record_generation.get(),
+                        )
+                    })) != t.record_token_digest
+                {
+                    return Err(invalid("inherited policy affected-record proof mismatch"));
+                }
+                if t.changed() {
+                    for row in rows {
+                        let fields = &mut row.state.lifecycle.lifecycle;
+                        fields.record_generation = Generation::try_from(
+                            fields
+                                .record_generation
+                                .get()
+                                .checked_sub(1)
+                                .ok_or_else(|| invalid("inherited policy token underflow"))?
+                                .to_string(),
+                        )?;
+                        fields.policy_revision = t.preview.policy_revision;
+                    }
+                    ns.schema.as_mut().unwrap().inherited_decay = t.preview.prior.clone();
+                    *policy = (t.preview.lifecycle_version, t.preview.policy_revision);
+                }
+            }
+            MutationOutcome::NativeNamespacePolicyUnchanged { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                    || super::native_catalog::NamespacePolicyState::capture(
+                        configs
+                            .get(&t.namespace_id.get())
+                            .ok_or_else(|| invalid("policy no-change namespace absent"))?,
+                    )? != t.policy
+                {
+                    return Err(invalid(
+                        "policy no-change proof differs from historical policy",
+                    ));
+                }
+            }
+            MutationOutcome::NativeNamespacePolicyUpdated { transition: t } => {
+                let policy = current_policy
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("numeric policy namespace absent"))?;
+                let rows = records
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("numeric policy record set absent"))?;
+                let ns = configs
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("numeric policy configuration absent"))?;
+                if *policy != (t.lifecycle_version, t.next_revision)
+                    || super::native_catalog::NamespacePolicyState::capture(ns)? != t.after
+                    || t.record_count != rows.len() as u64
+                    || t.record_token_digest
+                        != token_digest_values(rows.iter().map(|r| {
+                            (
+                                *r.id.as_bytes(),
+                                r.state.lifecycle.lifecycle.record_generation.get(),
+                            )
+                        }))
+                {
+                    return Err(invalid("numeric policy affected-record proof mismatch"));
+                }
+                for row in rows {
+                    let fields = &mut row.state.lifecycle.lifecycle;
+                    fields.record_generation = Generation::try_from(
+                        fields
+                            .record_generation
+                            .get()
+                            .checked_sub(1)
+                            .ok_or_else(|| invalid("numeric policy token underflow"))?
+                            .to_string(),
+                    )?;
+                    fields.policy_revision = t.previous_revision;
+                }
+                if t.before.decay_rate_multiplier.is_some()
+                    && t.after.decay_rate_multiplier.is_none()
+                {
+                    if ns.schema.as_ref().unwrap().inherited_decay.is_some() {
+                        return Err(invalid("inherited binding was not cleared"));
+                    }
+                    ns.schema.as_mut().unwrap().inherited_decay = t.cleared_inherited_decay.clone();
+                }
+                t.before.apply(ns);
+                *policy = (t.lifecycle_version, t.previous_revision);
+            }
+            MutationOutcome::LifecyclePolicyMigrated { transition: t } => {
+                let policy = current_policy
+                    .get_mut(&t.namespace_id.get())
+                    .ok_or_else(|| invalid("policy receipt namespace absent"))?;
+                let rows = records.get_mut(&t.namespace_id.get()).unwrap();
+                if *policy != (t.to, t.next_revision)
+                    || t.record_count != rows.len() as u64
+                    || t.record_token_digest
+                        != token_digest_values(rows.iter().map(|r| {
+                            (
+                                *r.id.as_bytes(),
+                                r.state.lifecycle.lifecycle.record_generation.get(),
+                            )
+                        }))
+                {
+                    return Err(invalid("lifecycle affected-record proof mismatch"));
+                }
+                for r in rows {
+                    let fields = &mut r.state.lifecycle.lifecycle;
+                    fields.record_generation = Generation::try_from(
+                        fields
+                            .record_generation
+                            .get()
+                            .checked_sub(1)
+                            .ok_or_else(|| invalid("policy token underflow"))?
+                            .to_string(),
+                    )?;
+                    fields.lifecycle_version = t.from;
+                    fields.policy_revision = t.previous_revision;
+                }
+                *policy = (t.from, t.previous_revision);
+            }
+            MutationOutcome::LifecycleExposureRecorded { transition: t }
+            | MutationOutcome::LifecycleFeedbackApplied { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native receipt namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("linked creation out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("linked creation namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeGraphUnchanged { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native graph receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native graph namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeGraphChanged { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native graph receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native graph namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::NativeMemoryInserted { transition: t }
+            | MutationOutcome::NativeMemoryTombstoned { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                {
+                    return Err(invalid("native record receipt is out of policy order"));
+                }
+                t.rewind(
+                    records
+                        .get_mut(&t.namespace_id.get())
+                        .ok_or_else(|| invalid("native record namespace absent"))?,
+                )?;
+            }
+            MutationOutcome::BatchReserved { .. } | MutationOutcome::BatchItemRejected { .. }
+                if is_native_bookkeeping(receipt) => {}
+            MutationOutcome::NativePhaseMaterialized { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                    || !t.policy.matches_namespace(
+                        configs
+                            .get(&t.namespace_id.get())
+                            .ok_or_else(|| invalid("phase namespace absent"))?,
+                    )
+                {
+                    return Err(invalid("phase policy proof mismatch"));
+                }
+                t.rewind(records.entry(t.namespace_id.get()).or_default())?;
+            }
+            MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                if current_policy.get(&t.namespace_id.get())
+                    != Some(&(t.lifecycle_version, t.policy_revision))
+                    || !t.policy.matches_namespace(
+                        configs
+                            .get(&t.namespace_id.get())
+                            .ok_or_else(|| invalid("delete namespace absent"))?,
+                    )
+                {
+                    return Err(invalid("deletion policy proof mismatch"));
+                }
+                t.rewind(&mut records)?;
+            }
+            _ => return Err(invalid("unrecognized operation in lifecycle proof")),
+        }
+    }
+    if schema.source.store_id == control.store_id
+        && current_policy
+            .values()
+            .any(|p| *p != (LifecycleVersion::LegacyAccessV1, Generation::default()))
+    {
+        return Err(invalid(
+            "active policy receipt has no matching namespace transition",
+        ));
+    }
+    if schema.source.store_id == control.store_id
+        && records
+            .values()
+            .flatten()
+            .any(|r| r.state.lifecycle.lifecycle.record_generation != Generation::default())
+    {
+        return Err(invalid("unproven record token before lifecycle suffix"));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LifecyclePreview {
+    pub source: GenerationRef,
+    pub namespace_id: NamespaceId,
+    pub from: LifecycleVersion,
+    pub to: LifecycleVersion,
+    pub policy_revision: Generation,
+    pub evaluated_at: i64,
+    pub record_count: usize,
+    pub full_to_summary: usize,
+    pub summary_to_ghost: usize,
+    pub ghost_to_delete: usize,
+    pub missing_summary: usize,
+}
+
+/// Diagnostic only. Retained phase, content and all clocks remain unchanged.
+/// The supplied global policy/enable flag must be the operator's intended config.
+pub fn preview_lifecycle(
+    source: &Path,
+    options: &LifecycleMigrationOptions,
+    clock: &dyn Clock,
+    global: &DecayConfig,
+    multiplier: f64,
+    decay_enabled: bool,
+) -> Result<LifecyclePreview, StorageError> {
+    let snapshot = OfflineSnapshot::open(source)?;
+    check_source(snapshot.control(), options)?;
+    let ns = snapshot
+        .namespaces()
+        .iter()
+        .find(|n| n.id == options.namespace_id)
+        .ok_or(StorageError::NamespaceNotFound(options.namespace_id.get()))?;
+    check_policy(ns, options)?;
+    let policy = resolve_policy(ns, global, multiplier)
+        .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
+    let now = clock.now_millis();
+    if chrono::DateTime::from_timestamp_millis(now).is_none() {
+        return Err(StorageError::InvalidMutation(
+            "unrepresentable preview clock".into(),
+        ));
+    }
+    let mut graph = RelationshipGraph::new();
+    let mut rows = Vec::new();
+    let read = snapshot.metadata.begin_read()?;
+    for row in read.open_table(META_TABLE)?.iter()? {
+        let (_, bytes) = row?;
+        let r = DiskRecord::from_bytes(bytes.value())?;
+        graph
+            .add_node(
+                MemoryId::from_bytes(r.id),
+                NamespaceId::new(r.namespace_id),
+                r.phase,
+                r.strength,
+                r.vector_slot,
+            )
+            .map_err(|e| StorageError::InvalidControl(e.to_string()))?;
+        if r.namespace_id == ns.id.get() {
+            rows.push(r);
+        }
+    }
+    snapshot.for_each_edge(|e| {
+        graph
+            .add_edge(e.source, e.target, e.edge_type, e.weight, e.auto_created)
+            .map_err(|e| StorageError::InvalidControl(e.to_string()))?;
+        Ok(())
+    })?;
+    let raw = |r: &DiskRecord, bonus| {
+        let fields = &r.schema.as_ref().unwrap().lifecycle;
+        project(
+            r.stability,
+            fields.decay_anchor_at,
+            &policy,
+            now.max(fields.lifecycle_updated_at),
+            bonus,
+        )
+        .map_err(|e| StorageError::InvalidMutation(e.to_string()))
+    };
+    let mut donors = HashMap::new();
+    for r in &rows {
+        if matches!(r.phase, DecayPhase::Full | DecayPhase::Summary) {
+            donors.insert(MemoryId::from_bytes(r.id), raw(r, 0.)?.strength);
+        }
+    }
+    let mut result = LifecyclePreview {
+        source: snapshot.control().generation_ref(),
+        namespace_id: ns.id,
+        from: ns.schema.as_ref().unwrap().lifecycle_version,
+        to: options.target,
+        policy_revision: options.expected_policy_revision,
+        evaluated_at: now,
+        record_count: rows.len(),
+        full_to_summary: 0,
+        summary_to_ghost: 0,
+        ghost_to_delete: 0,
+        missing_summary: 0,
+    };
+    for r in &rows {
+        if !decay_enabled
+            || policy.decay_rate_multiplier == 0.
+            || r.is_permastore != 0
+            || r.phase == DecayPhase::Tombstone
+        {
+            continue;
+        }
+        let bonus = if r.phase == DecayPhase::Ghost {
+            0.
+        } else {
+            connection_bonus_with_strengths(
+                MemoryId::from_bytes(r.id),
+                &graph,
+                &ActivationConfig::default(),
+                &donors,
+            )
+        };
+        let strength = raw(r, bonus)?.decay_strength;
+        match r.phase {
+            DecayPhase::Full if strength <= policy.config.phase_1_threshold => {
+                if r.summary.is_empty() {
+                    result.missing_summary += 1;
+                } else {
+                    result.full_to_summary += 1;
+                }
+            }
+            DecayPhase::Summary if strength <= policy.config.phase_2_threshold => {
+                result.summary_to_ghost += 1
+            }
+            DecayPhase::Ghost if strength <= policy.config.phase_3_threshold => {
+                result.ghost_to_delete += 1
+            }
+            _ => {}
+        }
+    }
+    Ok(result)
+}
+
+fn check_source(
+    control: &ControlState,
+    options: &LifecycleMigrationOptions,
+) -> Result<(), StorageError> {
+    options.context().validate()?;
+    if control.control_schema_version != 2 {
+        return Err(StorageError::InvalidMutation(
+            "explicit canonical schema migration is required first".into(),
+        ));
+    }
+    if control.store_id != options.expected_source.store_id {
+        return Err(StorageError::StoreLineageMismatch);
+    }
+    if control.committed_generation != options.expected_source.generation {
+        return Err(StorageError::GenerationConflict {
+            expected: options.expected_source.generation.into(),
+            actual: control.committed_generation.into(),
+        });
+    }
+    Ok(())
+}
+fn check_policy(
+    ns: &NamespaceConfig,
+    options: &LifecycleMigrationOptions,
+) -> Result<(), StorageError> {
+    let schema = ns
+        .schema
+        .as_ref()
+        .ok_or_else(|| invalid("namespace schema missing"))?;
+    if schema.policy_revision != options.expected_policy_revision
+        || schema.lifecycle_version == options.target
+    {
+        return Err(StorageError::InvalidMutation(
+            "policy revision conflict or policy already selected".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Copied,
+    BeforeCommit,
+    Committed,
+    Validated,
+    Published,
+}
+
+pub fn migrate_lifecycle(
+    source: &Path,
+    destination: &Path,
+    options: &LifecycleMigrationOptions,
+) -> Result<WriteReceipt, StorageError> {
+    migrate_at(source, destination, options, |_| Ok(()))
+}
+
+fn migrate_at(
+    source: &Path,
+    destination: &Path,
+    options: &LifecycleMigrationOptions,
+    mut boundary: impl FnMut(Stage) -> Result<(), StorageError>,
+) -> Result<WriteReceipt, StorageError> {
+    options.context().validate()?;
+    let absolute = std::path::absolute(destination)?;
+    let parent = absolute
+        .parent()
+        .ok_or(StorageError::InvalidPath)?
+        .canonicalize()?;
+    let target = parent.join(absolute.file_name().ok_or(StorageError::InvalidPath)?);
+    let source = if source.exists() {
+        source.canonicalize()?
+    } else {
+        std::path::absolute(source)?
+    };
+    if target.starts_with(&source) || source.starts_with(&target) {
+        return Err(StorageError::InvalidPath);
+    }
+    let target_owner = StoreOwnership::acquire(&target)?;
+    let target = &target_owner.path;
+    let hash = options.hash(target)?;
+    // Existing exact destination: read a disposable copy, never open it writable.
+    if target.try_exists()? {
+        let _lock = lock_directory(target)?;
+        super::validation::canonical_files(target)?;
+        let (_copy, db) = super::validation::inspect_database(&target.join("meta.db"))?;
+        let tx = db.begin_write()?;
+        return control::replay_or_check(&tx, &options.context(), hash)?.ok_or_else(|| {
+            StorageError::InvalidMutation(
+                "destination exists without this migration receipt".into(),
+            )
+        });
+    }
+    let owner = StoreOwnership::acquire(&source)?;
+    let _source_lock = lock_directory(&owner.path)?;
+    let files = super::validation::canonical_files(&source)?;
+    let stage = tempfile::Builder::new()
+        .prefix(".recalld-lifecycle-migration-")
+        .tempdir_in(&parent)?;
+    for file in files {
+        let copied = stage.path().join(
+            file.strip_prefix(&source)
+                .map_err(|_| StorageError::InvalidPath)?,
+        );
+        std::fs::create_dir_all(copied.parent().ok_or(StorageError::InvalidPath)?)?;
+        std::fs::copy(file, &copied)?;
+        std::fs::File::open(&copied)?.sync_all()?;
+        fsync_dir(copied.parent().unwrap())?;
+    }
+    boundary(Stage::Copied)?;
+    let receipt = convert_staging(stage.path(), options, hash, &mut boundary)?;
+    boundary(Stage::Committed)?;
+    for file in super::validation::canonical_files(stage.path())? {
+        std::fs::File::open(file)?.sync_all()?;
+    }
+    fsync_dir(stage.path())?;
+    boundary(Stage::Validated)?;
+    if target.try_exists()? {
+        return Err(StorageError::InvalidMutation(
+            "destination appeared during staging".into(),
+        ));
+    }
+    std::fs::rename(stage.path(), target)?;
+    fsync_dir(&parent).map_err(|e| {
+        StorageError::RecoveryRequired(format!(
+            "policy migration {} published at {}; reconcile this exact destination: {e}",
+            receipt.operation_id,
+            target.display()
+        ))
+    })?;
+    boundary(Stage::Published)?;
+    Ok(receipt)
+}
+
+fn convert_staging(
+    path: &Path,
+    options: &LifecycleMigrationOptions,
+    hash: [u8; 32],
+    boundary: &mut impl FnMut(Stage) -> Result<(), StorageError>,
+) -> Result<WriteReceipt, StorageError> {
+    let db = redb::Database::open(path.join("meta.db"))?;
+    {
+        let read = db.begin_read()?;
+        let control =
+            control::validate_existing(&read)?.ok_or_else(|| invalid("control missing"))?;
+        check_source(&control, options)?;
+        if super::metadata::text_generation::read_selection(&read)?.is_none() {
+            return Err(invalid("lifecycle migration requires selected-text fence"));
+        }
+    }
+    let tx = db.begin_write()?;
+    if control::replay_or_check(&tx, &options.context(), hash)?.is_some() {
+        return Err(StorageError::InvalidMutation(
+            "source already contains this operation; reconcile its exact destination".into(),
+        ));
+    }
+    let mut ns = {
+        let table = tx.open_table(NAMESPACE_TABLE)?;
+        let bytes = table
+            .get(options.namespace_id.get())?
+            .ok_or(StorageError::NamespaceNotFound(options.namespace_id.get()))?;
+        NamespaceConfig::decode(bytes.value())?
+    };
+    check_policy(&ns, options)?;
+    let schema = ns.schema.as_mut().unwrap();
+    let from = schema.lifecycle_version;
+    schema.policy_revision = schema.policy_revision.next()?;
+    schema.lifecycle_version = options.target;
+    let next_revision = schema.policy_revision;
+    let mut records = Vec::new();
+    {
+        let mut table = tx.open_table(META_TABLE)?;
+        for row in table.iter()? {
+            let (_, bytes) = row?;
+            let mut record = DiskRecord::from_bytes(bytes.value())?;
+            if record.namespace_id == ns.id.get() {
+                let fields = &mut record.schema.as_mut().unwrap().lifecycle;
+                fields.lifecycle_version = options.target;
+                fields.policy_revision = next_revision;
+                fields.record_generation = fields.record_generation.next()?;
+                records.push(record);
+            }
+        }
+        for record in &records {
+            table.insert(record.id.as_slice(), record.encode()?.as_slice())?;
+        }
+    }
+    tx.open_table(NAMESPACE_TABLE)?
+        .insert(ns.id.get(), control::encode(&ns)?.as_slice())?;
+    let outcome = MutationOutcome::LifecyclePolicyMigrated {
+        transition: PolicyTransition {
+            namespace_id: ns.id,
+            from,
+            to: options.target,
+            previous_revision: options.expected_policy_revision,
+            next_revision,
+            previous_generation: options.expected_source.generation,
+            record_count: records.len() as u64,
+            record_token_digest: token_digest(&records, 0)?,
+        },
+    };
+    let receipt = control::record_receipt(&tx, &options.context(), hash, outcome)?;
+    boundary(Stage::BeforeCommit)?;
+    tx.commit()?;
+    Ok(receipt)
+}
+
+#[cfg(test)]
+mod tests;

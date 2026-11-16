@@ -1,0 +1,27 @@
+{
+  "head": "441e7b939de4c45e940c9ffdb99d042eeb831bf3",
+  "merge_head": "a6087ca8dd4983a8120f9a48abaf1135eaea4116",
+  "reason": "Actual 98+83 prerequisite join conflicts; no implementation edits, tests or binaries from this attempt. Superseded by requested actual96 readiness consumer +98 fresh child.",
+  "files": {
+    "src/api/adapters.rs": "7b54bd91f79d81f788c0e29dba98d8ea8bf031cd5b701e99edb73ce05ec205c7",
+    "src/api/errors.rs": "563c10cc2470c1dcedc503ce723e31770be6b338c04887961e6e59d9386e817b",
+    "src/api/mod.rs": "fb7598f373ffb2a6a1417af332e96b469a6bde981b89b0c8e6fb03537d91083a",
+    "src/backup/restore.rs": "a2d45683b38f049639b3011e9ef6d318b85a41393e28e6f2f97bd55a770ff76d",
+    "src/bench/locomo.rs": "4ba5cfda1ad76a676166c65d77baee4b283ddc07ad264efb3f9310afed5185f9",
+    "src/derived_completion.rs": "ce8bef0b3cc849872df6e2fe6eb4f93a68a0d1901f64124078b46b682ecf177b",
+    "src/graph/activation.rs": "a9785f0a2ace8b6d545f59e1ff5993938d4584c9351909065fe2e097b1aa067b",
+    "src/graph/autolink.rs": "999c062357f040e1885922f0cf1289a0882ac9d573673397573bfbe6fc58effe",
+    "src/mcp/bridge.rs": "a2d1bf49b42293bb8806ad131d511bac291810c55ae6fd04ac98833a1b9c974a",
+    "src/mcp/bridge_adapters.rs": "014041c085d382d2ee688a6286280d00998f1abc8a4998f7822071590c8307b0",
+    "src/search/by_id_transport_tests.rs": "9000d1929c6f017e2d056f5cc4e90f24e1365d22f99c4139a8699f53f7226985",
+    "src/storage/control.rs": "ce917779eb17c0cbc3c1f4213fe03f6a1796f6ae00b6bba2628d68aef1727dcd",
+    "src/storage/engine.rs": "91d685ea1e819a94fd568e26198fbee78b896e6092a33ca0e755d8d3671c14ca",
+    "src/storage/engine/insertion.rs": "9f5856b6303aba5fd78230256b1b5826f5e97f5fc2218a6308594a884b2c1b6e",
+    "src/storage/metadata.rs": "adb2100b392c710bbde7c4a6031f12c0c56d3e5213fc027563fc8f211caaa8bd",
+    "src/storage/metadata/effects.rs": "8d39f993f88deb9014a49f81be6868f63c858e9dc30e5acac765def36656016c",
+    "src/storage/metadata/observation_tests.rs": "3cbd4be7162430b557f31596e6760e3f2b6d695f7da7b526b07741f2175098cf",
+    "src/storage/metadata/work.rs": "a02c4587dd6d8f1632610e6a0bb04424fc957f462f7d9f32182f6bbd62a702fc",
+    "src/storage/mod.rs": "2421758ee379823bfa1707137b576fea650a779f7b910ea4536bafad514b4f3f",
+    "src/storage/validation.rs": "4ba15e43fbe7ad3bff1257968b8836e356bb4c2a7da94dc34ce8f57490a4b744"
+  }
+}

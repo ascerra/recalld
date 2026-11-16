@@ -1,0 +1,16 @@
+{
+  "source": "611083caa789a9fb11966dc7eeba74ef2608900a",
+  "tree": "b783b78fe215ad5a652e87a1d6dfddad1fd548dd",
+  "exit_code": 0,
+  "log_sha256": "1bf69819e4ba2ced597cecdd66116539293ac5106e2573386172fc8c039f6f40",
+  "executables": [
+    {
+      "path": "debug/deps/recalld-b2844bb1c4a63074",
+      "sha256": "a4c7e9996ab14a65fef8c88ae43c0ef0b7cd76844be7cef25d2ebb597f8f3d74"
+    }
+  ],
+  "result_lines": [
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1090 filtered out; finished in 2.61s"
+  ]
+}

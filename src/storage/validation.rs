@@ -54,26 +54,41 @@ pub(crate) fn inspect_database_copy(
 }
 
 /// Canonical text preflight on a disposable metadata copy. This precedes any
-/// writable canonical open; pending graph effects are deliberately not inspected.
+/// writable canonical open; pending plans are checked without applying effects.
 pub(crate) fn preflight_text(path: &Path) -> Result<(), StorageError> {
     // An unclean process exit may require redb free-list recovery. Perform it
     // only on the disposable copy before touching the original database.
     let (_copy, metadata) = inspect_database_copy(&path.join("meta.db"), true)?;
     let read = metadata.begin_read()?;
-    if super::control::validate_existing(&read)?.is_some_and(|c| c.control_schema_version == 2) {
+    let control = super::control::validate_existing(&read)?;
+    if let Some(control) = &control {
+        super::lineage::ensure_serving(&read, control)?;
+    }
+    super::metadata::removal_ledger::read_export(&read, control.as_ref())?;
+    // Valid pending effects are recoverable at startup; only malformed evidence fails here.
+    let effects = super::metadata::effects::validate_existing(&read)?;
+    if control
+        .as_ref()
+        .is_some_and(|c| c.control_schema_version == 2)
+    {
         return Err(StorageError::RecoveryRequired("schema v2 remains offline until participating writers are enabled; use schema inspect/export".into()));
     }
     let text = selected_text(path, &read)?;
     let records = read.open_table(META_TABLE)?;
+    let mut decoded = Vec::new();
     for row in records.iter()? {
         let (_, bytes) = row?;
         let record = DiskRecord::from_bytes(bytes.value())?;
+        decoded.push((MemoryId::from_bytes(record.id), record.clone()));
         if record.text_offset != 0 || record.text_length != 0 {
             text.read(TextRef {
                 file_offset: record.text_offset,
                 length: record.text_length,
             })?;
         }
+    }
+    for effect in effects.iter().filter(|effect| !effect.canonical_applied) {
+        super::metadata::effects::validate_plan(effect, &decoded)?;
     }
     Ok(())
 }
@@ -91,16 +106,34 @@ fn selected_text(path: &Path, read: &redb::ReadTransaction) -> Result<TextStore,
 /// Caller owns/quiesces the store, or supplies an inaccessible staging copy.
 /// Returns the required canonical inventory derived from validated metadata.
 pub(crate) fn validate_existing(path: &Path) -> Result<HashSet<String>, StorageError> {
-    validate_snapshot(path, false)
+    validate_snapshot(path, false, false)
 }
-
-/// Only the logical importer may inspect its unpublished, explicitly importing
-/// stage. Ordinary inspection/export/backup must not treat partial imports as snapshots.
+/// Only the logical importer may inspect its unpublished, explicitly importing stage.
 pub(crate) fn validate_import_stage(path: &Path) -> Result<HashSet<String>, StorageError> {
-    validate_snapshot(path, true)
+    validate_snapshot(path, true, false)
+}
+/// Strict private-native preflight admits only validated native recovery plans.
+pub(crate) fn preflight_native(path: &Path) -> Result<(), StorageError> {
+    let result = validate_snapshot(path, false, true).map(|_| ());
+    #[cfg(test)]
+    NATIVE_PREFLIGHT_PROBE.with(|probe| {
+        if let Some(check) = probe.borrow().as_ref() {
+            check(path);
+        }
+    });
+    result
 }
 
-fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, StorageError> {
+#[cfg(test)]
+thread_local! {
+    pub(crate) static NATIVE_PREFLIGHT_PROBE:
+        std::cell::RefCell<Option<Box<dyn Fn(&Path)>>> = const { std::cell::RefCell::new(None) };
+}
+fn validate_snapshot(
+    path: &Path,
+    importing: bool,
+    native_recovery: bool,
+) -> Result<HashSet<String>, StorageError> {
     if !importing && std::fs::symlink_metadata(path.join(".recalld-importing")).is_ok() {
         return Err(StorageError::RecoveryRequired(
             "incomplete logical import; resume using its original export".into(),
@@ -110,9 +143,55 @@ fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, St
     for name in ["meta.db", "edges.db", "fulltext.dat"] {
         require_file(&path.join(name))?;
     }
-    let (_meta_copy, meta) = inspect_database(&path.join("meta.db"))?;
+    // Only native startup permits redb recovery, and only on disposable copies.
+    // All canonical validation still precedes writable opens of the originals.
+    let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
     let read = meta.begin_read()?;
     let control = super::control::validate_existing(&read)?;
+    if native_recovery {
+        let state = control
+            .as_ref()
+            .ok_or_else(|| StorageError::InvalidControl("native control missing".into()))?;
+        if state.control_schema_version != 2
+            || super::metadata::text_generation::read_selection(&read)?.is_none()
+        {
+            return Err(StorageError::InvalidControl(
+                "native entry requires gated schema 2".into(),
+            ));
+        }
+        super::lineage::ensure_serving(&read, state)?;
+        super::metadata::restoration::validate_inventory(&read)?;
+        super::canonical_schema::validate_metadata_format(&read, Some(state))?;
+    }
+    if super::metadata::batch::validate_existing(&read, control.as_ref())?
+        .iter()
+        .any(|p| p.unresolved() != 0 && (!native_recovery || !matches!(p.version, 2 | 3)))
+    {
+        return Err(StorageError::RecoveryRequired(
+            "unfinished batch needs matching caller resubmission; offline inventory is unavailable"
+                .into(),
+        ));
+    }
+
+    if super::metadata::purge::validate_existing(&read, control.as_ref())?
+        .iter()
+        .any(|p| {
+            p.stage != super::purge::PurgeStage::Complete && (!native_recovery || p.version != 2)
+        })
+    {
+        return Err(StorageError::RecoveryRequired(
+            "unfinished namespace purge; reopen and finish before offline inventory".into(),
+        ));
+    }
+    super::metadata::removal_ledger::read_export(&read, control.as_ref())?;
+    let native_creations = if control
+        .as_ref()
+        .is_some_and(|c| c.control_schema_version == 2)
+    {
+        super::native_records::creation_proofs(&read)?
+    } else {
+        HashMap::new()
+    };
     let schema_state = control
         .as_ref()
         .map(|c| super::canonical_schema::read_state(&read, c))
@@ -120,6 +199,26 @@ fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, St
         .flatten();
     if control.is_some() {
         read.open_table(super::metadata::NAMESPACE_COUNTER)?;
+    }
+    let effects = super::metadata::effects::validate_existing(&read)?;
+    if effects.iter().any(|e| {
+        !e.canonical_applied
+            && (!native_recovery
+                || !matches!(
+                    e.receipt.outcome,
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                        | super::control::MutationOutcome::NativePhaseMaterialized { .. }
+                        | super::control::MutationOutcome::NativeMemoryHardDeleted { .. }
+                        | super::control::MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+                        | super::control::MutationOutcome::NativeMemoryInserted { .. }
+                        | super::control::MutationOutcome::NativeMemoryTombstoned { .. }
+                        | super::control::MutationOutcome::NativeGraphChanged { .. }
+                        | super::control::MutationOutcome::NativeGraphUnchanged { .. }
+                ))
+    }) {
+        return Err(StorageError::RecoveryRequired(
+            "pending canonical effects; reopen before backup".into(),
+        ));
     }
     let namespaces = read.open_table(NAMESPACE_TABLE)?;
     let mut inventory: HashSet<String> = ["meta.db", "edges.db", "fulltext.dat"]
@@ -171,6 +270,7 @@ fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, St
     let records = read.open_table(META_TABLE)?;
     let mut ids = HashSet::new();
     let mut owners = HashSet::new();
+    let mut decoded = Vec::new();
     for item in records.iter()? {
         let (key, value) = item?;
         let record = DiskRecord::from_bytes(value.value())?;
@@ -180,6 +280,7 @@ fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, St
             ));
         }
         let id = MemoryId::from_bytes(record.id);
+        decoded.push((id, record.clone()));
         ids.insert(id);
         let namespace = configs
             .get(&record.namespace_id)
@@ -229,13 +330,21 @@ fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, St
             }
         }
         if record.text_offset != 0 || record.text_length != 0 {
-            text.read(TextRef {
+            let retained = text.read(TextRef {
                 file_offset: record.text_offset,
                 length: record.text_length,
             })?;
+            super::native_records::validate_retained_text(
+                &record,
+                native_creations.get(&id),
+                &retained,
+            )?;
         }
     }
-    let (_edges_copy, edges) = inspect_database(&path.join("edges.db"))?;
+    for effect in effects.iter().filter(|e| !e.canonical_applied) {
+        super::metadata::effects::validate_plan(effect, &decoded)?;
+    }
+    let (_edges_copy, edges) = inspect_database_copy(&path.join("edges.db"), native_recovery)?;
     let read = edges.begin_read()?;
     let forward = read.open_table(FORWARD_EDGES)?;
     let reverse = read.open_table(REVERSE_EDGES)?;
@@ -244,6 +353,7 @@ fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, St
             "edge index counts disagree".into(),
         ));
     }
+    let mut decoded_edges = Vec::new();
     for item in forward.iter()? {
         let (key, value) = item?;
         let edge = PersistedEdge::from_forward(key.value(), value.value())?;
@@ -251,14 +361,56 @@ fn validate_snapshot(path: &Path, importing: bool) -> Result<HashSet<String>, St
         reverse_key[..16].copy_from_slice(edge.target.as_bytes());
         reverse_key[16] = edge.edge_type.as_u8();
         reverse_key[17..].copy_from_slice(edge.source.as_bytes());
-        if !ids.contains(&edge.source)
-            || !ids.contains(&edge.target)
+        // A committed native hard deletion can precede its separate edge-DB
+        // replay. Admit only the exact, already validated pending deletion;
+        // unrelated dangling edges and missing reverse entries still fail.
+        let pending_delete = native_recovery
+            && effects.iter().any(|effect| {
+                let permitted_deleted = |id: &MemoryId| match &effect.receipt.outcome {
+                    super::control::MutationOutcome::NativeMemoryHardDeleted { transition: t } => {
+                        *id == t.memory_id
+                    }
+                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced {
+                        transition: t,
+                    } => t
+                        .chunk
+                        .as_ref()
+                        .is_some_and(|c| c.deletions.iter().any(|d| d.memory_id == *id)),
+                    _ => false,
+                };
+                !effect.canonical_applied
+                    && effect.deletes.iter().any(|deleted| {
+                        super::native_records::NativeEdgeProof::from(deleted)
+                            == super::native_records::NativeEdgeProof::from(&edge)
+                    })
+                    && [edge.source, edge.target]
+                        .iter()
+                        .all(|id| permitted_deleted(id) || ids.contains(id))
+            });
+        if ((!ids.contains(&edge.source) || !ids.contains(&edge.target)) && !pending_delete)
             || reverse.get(reverse_key.as_slice())?.is_none()
         {
             return Err(StorageError::CorruptIndex(
                 "dangling or inconsistent edge".into(),
             ));
         }
+        if schema_state.is_some() {
+            decoded_edges.push(edge);
+        }
+    }
+    if let (Some(state), Some(schema)) = (control.as_ref(), schema_state.as_ref()) {
+        let baseline = if schema.source.store_id == state.store_id {
+            schema.publication_generation
+        } else {
+            super::control::Generation::default().next()?
+        };
+        super::native_graph::validate_edge_history(
+            &meta.begin_read()?,
+            state,
+            baseline,
+            &decoded_edges,
+            &effects,
+        )?;
     }
     Ok(inventory)
 }

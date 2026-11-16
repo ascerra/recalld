@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "/work/source/scripts/public-mcp-evaluation.py", line 806, in <module>
+    main()
+  File "/work/source/scripts/public-mcp-evaluation.py", line 802, in main
+    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+  File "/work/source/scripts/public-mcp-evaluation.py", line 467, in run_episode
+    m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root, getattr(args, "beir_reference", None))
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/public-mcp-evaluation.py", line 353, in validate
+    exact_keys(m, (*(("accountingPolicy",) if accounted else ()), *(("metricPolicy", "referenceBundleSha256") if m.get("track") == BEIR["TRACK"] else ()), "manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+  File "/work/source/scripts/public-mcp-evaluation.py", line 59, in exact_keys
+    raise ValueError("unsupported or missing fields")
+ValueError: unsupported or missing fields

@@ -8,6 +8,21 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error("LIFECYCLE_CONFLICT: {0}")]
+    LifecycleConflict(String),
+    #[error("CONTENT_UNAVAILABLE")]
+    LifecycleContentUnavailable,
+    #[error(transparent)]
+    Work(#[from] crate::storage::work::WorkError),
+
+    /// Canonical mutation exists; retry publication, never retry as a new write.
+    #[error("INDEX_NOT_READY commitState=committed ready=false receipt={} cause={source}", serde_json::to_string(receipt).unwrap_or_default())]
+    CommittedMutation {
+        receipt: Box<crate::storage::control::WriteReceipt>,
+        #[source]
+        source: Box<StorageError>,
+    },
+
     /// Invalid lineage, key, version, or generation encoding.
     #[error("invalid mutation context: {0}")]
     InvalidMutationContext(String),
@@ -38,6 +53,19 @@ pub enum StorageError {
         source: redb::CommitError,
     },
 
+    /// A worker was lost without returning its canonical outcome. No operation
+    /// ID or receipt can be invented; recover and reconcile the original intent.
+    #[error("worker outcome unknown: {0}")]
+    WorkerOutcomeUnknown(String),
+
+    /// Canonical metadata is durable; materialization must resume after reopen.
+    #[error("operation {operation_id} committed; canonical effects unavailable: {source}")]
+    CommittedEffectsPending {
+        operation_id: Uuid,
+        #[source]
+        source: Box<StorageError>,
+    },
+
     // ── redb errors (from metadata.rs and edges.rs) ──────────────────
     /// A generic redb error.
     #[error("redb error: {0}")]
@@ -63,8 +91,20 @@ pub enum StorageError {
     #[error("redb commit error: {0}")]
     RedbCommit(#[from] redb::CommitError),
 
+    /// Provider output failed vector validation; the store remains usable.
+    #[error("EMBEDDING_UNAVAILABLE: invalid provider vector: {0}")]
+    ProviderVectorUnavailable(String),
+
+    #[error("EDGE_CONFLICT: {0}")]
+    EdgeConflict(String),
+
     #[error("invalid storage mutation: {0}")]
     InvalidMutation(String),
+
+    #[error(
+        "operation too large for this response transport or its bounded admission scan; no new purge was started"
+    )]
+    PurgeResponseTooLarge,
 
     #[error("storage recovery required: {0}")]
     RecoveryRequired(String),
@@ -97,6 +137,15 @@ pub enum StorageError {
     /// No namespace exists for the given ID.
     #[error("namespace not found: {0}")]
     NamespaceNotFound(u32),
+
+    /// An explicit namespace assertion does not match the record's immutable scope.
+    #[error("NAMESPACE_MISMATCH: memory {id} does not belong to namespace '{namespace}'")]
+    NamespaceMismatch {
+        /// Memory being addressed.
+        id: Uuid,
+        /// Caller asserted namespace.
+        namespace: String,
+    },
 
     /// A secondary index is corrupt or inconsistent.
     #[error("corrupt index: {0}")]

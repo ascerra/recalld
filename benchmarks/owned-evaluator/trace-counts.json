@@ -1,0 +1,20 @@
+[
+  {
+    "replay": 1,
+    "frames": 38,
+    "controlErrors": 15,
+    "readyBarriers": 8
+  },
+  {
+    "replay": 2,
+    "frames": 38,
+    "controlErrors": 15,
+    "readyBarriers": 8
+  },
+  {
+    "replay": 3,
+    "frames": 38,
+    "controlErrors": 15,
+    "readyBarriers": 8
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/native-prefix-regression/runtime/config.toml",
+    "--data-root",
+    "/output/native-prefix-regression/runtime/symlink-destination",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--restore-checkpoint",
+    "/output/native-prefix-regression/runtime/recalld-frozen-canonical-q6HUBX/manifest.json",
+    "--checkpoint-sha256",
+    "4f10f566fb714b34c7ed297e6634bd064425725daeaa524d6a4c088da0e0dd88"
+  ],
+  "exitCode": 1,
+  "forced": false,
+  "negativeConstructorProbe": true,
+  "pid": 4500,
+  "priorJoined": null,
+  "status": "joined"
+}

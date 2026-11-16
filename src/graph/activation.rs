@@ -194,6 +194,26 @@ pub fn connection_bonus(
     graph: &RelationshipGraph,
     config: &ActivationConfig,
 ) -> f32 {
+    connection_bonus_resolved(memory_id, graph, config, None)
+}
+
+/// Query-local donors must already be canonical, same-scope and live. Missing
+/// donors cannot relay a two-hop bonus. Legacy callers retain their old path.
+pub fn connection_bonus_with_strengths(
+    memory_id: MemoryId,
+    graph: &RelationshipGraph,
+    config: &ActivationConfig,
+    strengths: &HashMap<MemoryId, f32>,
+) -> f32 {
+    connection_bonus_resolved(memory_id, graph, config, Some(strengths))
+}
+
+fn connection_bonus_resolved(
+    memory_id: MemoryId,
+    graph: &RelationshipGraph,
+    config: &ActivationConfig,
+    strengths: Option<&HashMap<MemoryId, f32>>,
+) -> f32 {
     let Some(&node_key) = graph.id_index.get(&memory_id) else {
         return 0.0;
     };
@@ -205,7 +225,7 @@ pub fn connection_bonus(
 
     // 1-hop neighbors
     let hop1: Vec<(NodeKey, f32)> =
-        collect_neighbor_contributions(graph, node_key, node, config.s_max);
+        collect_neighbor_contributions(graph, node_key, node, config.s_max, strengths);
 
     for (_, contribution) in &hop1 {
         bonus += contribution * config.scale;
@@ -225,6 +245,7 @@ pub fn connection_bonus(
                     *neighbor_key,
                     neighbor_node,
                     config.s_max,
+                    strengths,
                 );
                 for (hop2_key, contribution) in hop2 {
                     // Skip if hop-2 is the original node (would double-count)
@@ -242,7 +263,11 @@ pub fn connection_bonus(
             }
         }
 
-        for (_, contribution) in &hop2_best {
+        let mut hop2: Vec<_> = hop2_best.into_iter().collect();
+        if strengths.is_some() {
+            hop2.sort_by_key(|(key, _)| graph.nodes[*key].memory_id);
+        }
+        for (_, contribution) in &hop2 {
             bonus += contribution * config.scale * HOP_2_DECAY;
         }
     }
@@ -270,6 +295,7 @@ fn collect_neighbor_contributions(
     node_key: NodeKey,
     node: &GraphNode,
     s_max: f32,
+    strengths: Option<&HashMap<MemoryId, f32>>,
 ) -> Vec<(NodeKey, f32)> {
     let mut results = Vec::new();
 
@@ -296,19 +322,35 @@ fn collect_neighbor_contributions(
             continue;
         };
 
+        let strength = match strengths {
+            Some(values) => match values.get(&neighbor.memory_id) {
+                Some(value) => *value,
+                None => continue,
+            },
+            None => neighbor.strength,
+        };
+
         // Fan = total degree of the NEIGHBOR (not the source node)
         let fan_j = (neighbor.outgoing.len() + neighbor.incoming.len()) as f32;
         let s_ji = (s_max - (fan_j + 1.0).ln()).max(0.0);
 
         if s_ji > 0.0 {
             let contribution = s_ji
-                * neighbor.strength // R_j: neighbor's retrievability
+                * strength // R_j: canonical projected strength when supplied
                 * edge.weight // edge associative strength
                 * edge_factor; // edge type modifier
             results.push((neighbor_key, contribution));
         }
     }
 
+    if strengths.is_some() {
+        results.sort_by(|(a, x), (b, y)| {
+            graph.nodes[*a]
+                .memory_id
+                .cmp(&graph.nodes[*b].memory_id)
+                .then(x.total_cmp(y))
+        });
+    }
     results
 }
 
@@ -474,6 +516,35 @@ pub fn spreading_activation(
     namespace_id: NamespaceId,
     config: &SpreadingActivationConfig,
 ) -> Vec<(MemoryId, f32)> {
+    spreading_activation_resolved(graph, seeds, namespace_id, config, None)
+}
+
+pub fn spreading_activation_with_records(
+    graph: &RelationshipGraph,
+    seeds: &[(MemoryId, f32)],
+    namespace_id: NamespaceId,
+    config: &SpreadingActivationConfig,
+    records: &HashMap<MemoryId, crate::model::CachedRecord>,
+) -> Vec<(MemoryId, f32)> {
+    spreading_activation_resolved(graph, seeds, namespace_id, config, Some(records))
+}
+
+fn spreading_activation_resolved(
+    graph: &RelationshipGraph,
+    seeds: &[(MemoryId, f32)],
+    namespace_id: NamespaceId,
+    config: &SpreadingActivationConfig,
+    records: Option<&HashMap<MemoryId, crate::model::CachedRecord>>,
+) -> Vec<(MemoryId, f32)> {
+    let canonical_strength = |node: &GraphNode| {
+        records
+            .and_then(|values| values.get(&node.memory_id))
+            .filter(|r| {
+                r.namespace_id == namespace_id
+                    && !matches!(r.phase, DecayPhase::Ghost | DecayPhase::Tombstone)
+            })
+            .map(|r| r.strength)
+    };
     // -- Accumulated activation per node --
     let mut activation: HashMap<NodeKey, f32> = HashMap::with_capacity(seeds.len() * 4);
     // -- Nodes that have already been expanded --
@@ -501,14 +572,17 @@ pub fn spreading_activation(
 
         // Ghost/Tombstone gate: ghosts and tombstones don't seed activation.
         // Tombstones have no content relevance; ghosts are nearly forgotten.
-        // Both can still relay activation when they're encountered as
-        // neighbors during spreading.
-        if node.decay_phase == DecayPhase::Ghost || node.decay_phase == DecayPhase::Tombstone {
+        // Terminal identities remain structural only; canonical projections govern v2.
+        if (records.is_none()
+            && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
+            || (records.is_some() && canonical_strength(node).is_none())
+        {
             continue;
         }
 
         // Initial activation = similarity * FSRS retrievability
-        let initial = (similarity_score * node.strength).clamp(0.0, 1.0);
+        let initial =
+            (similarity_score * canonical_strength(node).unwrap_or(node.strength)).clamp(0.0, 1.0);
         if initial < config.firing_threshold {
             continue; // too weak to fire
         }
@@ -551,12 +625,11 @@ pub fn spreading_activation(
             continue;
         };
 
-        // Ghost gate: don't fire ghost nodes.
-        // NOTE: Tombstone nodes ARE allowed to fire — they serve as
-        // relay nodes that propagate activation through the graph even
-        // though their content has been stripped. This preserves
-        // relationship chain continuity after user-initiated deletion.
-        if node.decay_phase == DecayPhase::Ghost {
+        // Terminal identities remain structural only; canonical projections govern v2.
+        if (records.is_none()
+            && matches!(node.decay_phase, DecayPhase::Ghost | DecayPhase::Tombstone))
+            || (records.is_some() && canonical_strength(node).is_none())
+        {
             continue;
         }
 
@@ -606,10 +679,14 @@ pub fn spreading_activation(
                 continue;
             }
 
-            // Ghost gate: ghosts don't receive activation.
-            // NOTE: Tombstone nodes DO receive activation so they can
-            // relay it to their neighbors, preserving relationship chains.
-            if neighbor.decay_phase == DecayPhase::Ghost {
+            // Terminal identities remain structural only; canonical projections govern v2.
+            if (records.is_none()
+                && matches!(
+                    neighbor.decay_phase,
+                    DecayPhase::Ghost | DecayPhase::Tombstone
+                ))
+                || (records.is_some() && canonical_strength(neighbor).is_none())
+            {
                 continue;
             }
 
@@ -619,7 +696,7 @@ pub fn spreading_activation(
                 * edge_factor           // edge type modifier [0,1]
                 * fan_attenuation       // ACT-R fan effect [0, s_max]
                 * config.hop_decay      // per-hop signal decay
-                * neighbor.strength; // FSRS retrievability gate
+                * canonical_strength(neighbor).unwrap_or(neighbor.strength); // FSRS retrievability gate
 
             // Drop negligible increments
             if spread < config.min_spread {
@@ -658,7 +735,9 @@ pub fn spreading_activation(
             // Exclude tombstone nodes from output — they served as
             // relay nodes during spreading but have no content to
             // return to the caller.
-            if node.decay_phase == DecayPhase::Tombstone {
+            if (records.is_none() && node.decay_phase == DecayPhase::Tombstone)
+                || (records.is_some() && canonical_strength(node).is_none())
+            {
                 return None;
             }
             Some((node.memory_id, act))
@@ -932,5 +1011,43 @@ mod spreading_tests {
             results.iter().all(|(id, _)| *id != c),
             "node beyond ghost should not be activated (ghost blocks propagation)"
         );
+    }
+
+    #[test]
+    fn terminal_nodes_neither_seed_nor_relay_retained_structural_edges() {
+        for phase in [DecayPhase::Ghost, DecayPhase::Tombstone] {
+            let mut graph = RelationshipGraph::new();
+            let first = add_node(&mut graph, test_ns());
+            // A stale positive strength must never make a terminal identity live.
+            let terminal = add_node_with(&mut graph, test_ns(), DecayPhase::Full, 1.0);
+            let last = add_node(&mut graph, test_ns());
+            link(&mut graph, first, terminal, EdgeType::Supersedes);
+            link(&mut graph, first, terminal, EdgeType::Associative);
+            link(&mut graph, terminal, last, EdgeType::ParentChild);
+            let config = SpreadingActivationConfig::default();
+            assert!(
+                spreading_activation(&graph, &[(first, 1.)], test_ns(), &config)
+                    .iter()
+                    .any(|(id, _)| *id == last),
+                "the live control path must relay before its middle identity becomes terminal"
+            );
+            graph.update_node_state(terminal, phase, 1.).unwrap();
+            assert!(spreading_activation(&graph, &[(terminal, 1.)], test_ns(), &config).is_empty());
+            assert!(
+                spreading_activation(&graph, &[(first, 1.)], test_ns(), &config).is_empty(),
+                "{phase:?} must not receive/fire activation through retained version edges"
+            );
+            assert_eq!(graph.edge_count(), 3);
+            assert!(
+                graph
+                    .outgoing_edges(&first)
+                    .iter()
+                    .any(|e| e.edge_type == EdgeType::Supersedes)
+            );
+            assert_eq!(
+                graph.outgoing_edges(&terminal)[0].edge_type,
+                EdgeType::ParentChild
+            );
+        }
     }
 } // mod spreading_tests

@@ -63,9 +63,13 @@ fn is_retry_safe(method: &str) -> bool {
     matches!(
         method,
         "ping"
+            | "session_context_v1"
             | "check_health"
             | "scan_duplicates"
             | "get_memory"
+            | "search_read_only"
+            | "get_memory_read_only"
+            | "find_similar_read_only"
             | "list_namespaces"
             | "namespace_stats"
             | "list_memories"
@@ -109,6 +113,7 @@ struct ClientState {
     /// Largest frame the daemon is known to accept. Held at the protocol v1
     /// limit until a `ping` negotiates something larger.
     frame_limit: usize,
+    api1_lifecycle: Option<bool>,
 }
 
 /// A failed exchange, plus whether the connection survived it.
@@ -160,6 +165,7 @@ impl DaemonClient {
                 conn: Some(Connection::new(stream)),
                 next_id: 1,
                 frame_limit: LEGACY_MAX_MESSAGE_SIZE,
+                api1_lifecycle: None,
             }),
             connected: AtomicBool::new(true),
         })
@@ -192,6 +198,49 @@ impl DaemonClient {
         self.connected
             .store(state.conn.is_some(), AtomicOrdering::Relaxed);
         outcome
+    }
+
+    /// Choose the old/new API1 mutation route on the negotiated connection,
+    /// before writing. A reconnect after a lost mutation never retries it.
+    pub(crate) async fn call_api1_lifecycle(
+        &self,
+        new_method: &str,
+        new_params: serde_json::Value,
+        old_method: &str,
+        old_params: serde_json::Value,
+    ) -> Result<(bool, serde_json::Value), BridgeError> {
+        let mut state = self.state.lock().await;
+        let result = async {
+            if state.conn.is_none() {
+                self.reconnect(&mut state).await?;
+            }
+            if state.api1_lifecycle.is_none() {
+                if let Err(error) = state.negotiate().await {
+                    if state.conn.is_none() {
+                        self.reconnect(&mut state).await?;
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            let capable = state.api1_lifecycle == Some(true);
+            if capable && state.frame_limit < MAX_MESSAGE_SIZE {
+                return Err(BridgeError::TooLarge(
+                    "API1 lifecycle requires negotiated full receipt frames before work".into(),
+                ));
+            }
+            let (method, params) = if capable {
+                (new_method, new_params)
+            } else {
+                (old_method, old_params)
+            };
+            let value = self.call_locked(&mut state, method, params).await?;
+            Ok((capable, value))
+        }
+        .await;
+        self.connected
+            .store(state.conn.is_some(), AtomicOrdering::Relaxed);
+        result
     }
 
     async fn call_locked(
@@ -280,7 +329,14 @@ impl DaemonClient {
         self.connected
             .store(state.conn.is_some(), AtomicOrdering::Relaxed);
         // The answer describes the connection the lock is still protecting.
-        state.frame_limit = negotiated_limit(&outcome?);
+        let outcome = outcome?;
+        state.frame_limit = negotiated_limit(&outcome);
+        state.api1_lifecycle = Some(
+            outcome
+                .get("api1LifecycleV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
         Ok(())
     }
 
@@ -291,6 +347,7 @@ impl DaemonClient {
     async fn reconnect(&self, state: &mut ClientState) -> Result<(), BridgeError> {
         state.conn = None;
         state.frame_limit = LEGACY_MAX_MESSAGE_SIZE;
+        state.api1_lifecycle = None;
         let mut last: Option<String> = None;
 
         for (attempt, backoff_ms) in RECONNECT_BACKOFF_MS.iter().enumerate() {
@@ -298,6 +355,7 @@ impl DaemonClient {
                 Ok(stream) => {
                     state.conn = Some(Connection::new(stream));
                     state.frame_limit = LEGACY_MAX_MESSAGE_SIZE;
+                    state.api1_lifecycle = None;
                     match state.negotiate().await {
                         Ok(()) => return Ok(()),
                         Err(e) => {
@@ -343,6 +401,12 @@ impl ClientState {
         };
         let result = self.exchange(&mut request).await.map_err(|e| e.error)?;
         self.frame_limit = negotiated_limit(&result);
+        self.api1_lifecycle = Some(
+            result
+                .get("api1LifecycleV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
         Ok(())
     }
 
@@ -1001,6 +1065,12 @@ mod tests {
             "reinforce_memory",
             "delete_memory",
             "delete_memories",
+            "forget_native_v1",
+            "feedback_native_v1",
+            "forget_lifecycle_v1",
+            "feedback_lifecycle_v1",
+            "feedback_api1_v1",
+            "forget_api1_v1",
             "shutdown",
             // Not mutations, but not effect-free either: both record an
             // access per result, which moves the decay schedule.
