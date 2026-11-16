@@ -796,6 +796,15 @@ async fn native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejec
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_api1_purge_cancelled_completion_retains_worker_publication_lease() {
+    cancelled_completion(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_bounded_cancelled_completion_retains_worker_publication_lease() {
+    cancelled_completion(true).await;
+}
+
+async fn cancelled_completion(bounded: bool) {
     use std::time::Duration;
     let (fx, namespace, publisher, _) = setup();
     publisher.rebuild_all().await.unwrap();
@@ -806,12 +815,17 @@ async fn native_api1_purge_cancelled_completion_retains_worker_publication_lease
     let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
     let adapter = fx.namespace_adapter();
     let task = tokio::spawn(async move {
-        adapter
-            .delete_namespace(DeleteNamespaceInput {
-                name: "doomed".into(),
-                force: true,
-            })
-            .await
+        let input = DeleteNamespaceInput {
+            name: "doomed".into(),
+            force: true,
+        };
+        if bounded {
+            adapter
+                .delete_namespace_bounded(input, crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE)
+                .await
+        } else {
+            adapter.delete_namespace(input).await
+        }
     });
     let start = tokio::time::timeout(Duration::from_secs(5), started)
         .await
@@ -1105,38 +1119,129 @@ async fn native_api1_purge_actual_receipt_frames_obey_streamed_wire_bound() {
         .into_iter()
         .find(|p| p.namespace_id == namespace)
         .unwrap();
-    for receipt in [p.start_receipt, child, p.last_receipt] {
+    // E is the actual outer envelope, independent of a receipt's representation.
+    // The placeholder null overcounts four bytes. No arbitrary safety margin.
+    let envelope = serde_json::json!({
+        "error": "PURGE_METRICS_UNAVAILABLE", "commitState": "committed",
+        "commitEvidenceScope": "purgeComplete", "operationId": uuid::Uuid::from_u128(u128::MAX),
+        "receipt": null, "message": "\0".repeat(512),
+    });
+    let e = serde_json::to_vec(&DaemonResponse::error(
+        u64::MAX,
+        DaemonRpcError {
+            code: -32006,
+            message: envelope.to_string(),
+        },
+    ))
+    .unwrap()
+    .len();
+    let check = |failure, expected: Option<&control::WriteReceipt>| {
+        let error = crate::mcp::bridge_adapters::native_purge_api1::project(failure);
+        let rpc_error = DaemonRpcError::from(&error);
+        let original = payload(error);
+        let n = if let Some(receipt) = expected {
+            assert_eq!(
+                serde_json::from_value::<control::WriteReceipt>(original["receipt"].clone())
+                    .unwrap(),
+                *receipt
+            );
+            // EXACT project() Value representation, including f32 widening.
+            serde_json::to_vec(&serde_json::to_value(receipt).unwrap())
+                .unwrap()
+                .len()
+        } else {
+            assert!(original.get("receipt").is_none());
+            0
+        };
+        assert!(original["message"].as_str().unwrap().len() <= 512);
+        let frame = serde_json::to_vec(&DaemonResponse::error(u64::MAX, rpc_error)).unwrap();
+        let exact_bound = e.checked_add(n.checked_mul(2).unwrap()).unwrap();
+        assert!(
+            frame.len() <= exact_bound,
+            "frame={} E={e} N={n}",
+            frame.len()
+        );
+        assert!(frame.len() <= LEGACY_MAX_MESSAGE_SIZE);
+        if n > 0 {
+            assert_eq!(
+                crate::mcp::bridge_adapters::native_purge_api1::receipt_budget(exact_bound)
+                    .unwrap(),
+                n
+            );
+            assert_eq!(
+                crate::mcp::bridge_adapters::native_purge_api1::receipt_budget(exact_bound - 1)
+                    .unwrap(),
+                n - 1
+            );
+        }
+        frame.len()
+    };
+    for (label, receipt) in [
+        ("start", &p.start_receipt),
+        ("child", &child),
+        ("final", &p.last_receipt),
+    ] {
+        let mut largest = 0;
         for diagnostic in ["\0".repeat(600), "\\\"".repeat(600), "界".repeat(600)] {
-            for unknown in [false, true] {
-                let error = crate::mcp::bridge_adapters::native_purge_api1::project(
+            let sources = [
+                StorageError::RecoveryRequired(diagnostic.clone()),
+                StorageError::InvalidControl(diagnostic.clone()),
+                StorageError::Io(std::io::Error::other(diagnostic.clone())),
+                StorageError::WorkerOutcomeUnknown(diagnostic.clone()),
+                StorageError::CommitOutcomeUnknown {
+                    operation_id: uuid::Uuid::from_u128(u128::MAX),
+                    source: redb::CommitError::Storage(redb::StorageError::Io(
+                        std::io::Error::other(diagnostic.clone()),
+                    )),
+                },
+                StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(StorageError::RecoveryRequired(diagnostic)),
+                },
+            ];
+            for source in sources {
+                largest = largest.max(check(
                     PurgeApi1Failure::Storage {
-                        source: if unknown {
-                            StorageError::WorkerOutcomeUnknown(diagnostic.clone())
-                        } else {
-                            StorageError::RecoveryRequired(diagnostic.clone())
-                        },
+                        source,
                         known_receipt: Some(Box::new(receipt.clone())),
                     },
-                );
-                let rpc_error = DaemonRpcError::from(&error);
-                let original = payload(error);
-                assert_eq!(
-                    serde_json::from_value::<control::WriteReceipt>(original["receipt"].clone())
-                        .unwrap(),
-                    receipt
-                );
-                assert!(original["message"].as_str().unwrap().len() <= 512);
-                let bytes =
-                    serde_json::to_vec(&DaemonResponse::error(u64::MAX, rpc_error)).unwrap();
-                let budget = crate::mcp::bridge_adapters::native_purge_api1::receipt_budget(
-                    LEGACY_MAX_MESSAGE_SIZE,
-                )
-                .unwrap();
-                assert!(serde_json::to_vec(&receipt).unwrap().len() <= budget);
-                assert!(bytes.len() <= LEGACY_MAX_MESSAGE_SIZE);
+                    Some(receipt),
+                ));
             }
         }
+        largest = largest.max(check(
+            PurgeApi1Failure::WorkerUnknown {
+                known_receipt: Some(Box::new(receipt.clone())),
+            },
+            Some(receipt),
+        ));
+        if label == "final" {
+            largest = largest.max(check(
+                PurgeApi1Failure::MetricsUnavailable {
+                    receipt: Box::new(receipt.clone()),
+                },
+                Some(receipt),
+            ));
+        }
+        let n = serde_json::to_vec(&serde_json::to_value(receipt).unwrap())
+            .unwrap()
+            .len();
+        eprintln!(
+            "ACTUAL_RECEIPT_INEQUALITY scope={label} max_frame={largest} envelope={e} projected_receipt={n} upper_bound={}",
+            e + 2 * n
+        );
     }
+    let unknown = check(
+        PurgeApi1Failure::WorkerUnknown {
+            known_receipt: None,
+        },
+        None,
+    );
+    eprintln!(
+        "ACTUAL_RECEIPT_INEQUALITY scope=unknown_without_receipt frame={unknown} envelope={e}"
+    );
+    assert!(crate::mcp::bridge_adapters::native_purge_api1::receipt_budget(e).is_err());
+    assert!(crate::mcp::bridge_adapters::native_purge_api1::receipt_budget(0).is_err());
 }
 
 /// Historical cross-namespace edges use the same pre-migration fixture seam as
@@ -1691,6 +1796,7 @@ async fn native_api1_purge_unknown_outcomes_survive_actual_bounded_frames() {
     for fault in 1..=3 {
         let (fx, namespace, publisher, path) = setup();
         publisher.rebuild_all().await.unwrap();
+        let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
         if fault == 3 {
             fx.storage
                 .read()
@@ -1746,16 +1852,7 @@ async fn native_api1_purge_unknown_outcomes_survive_actual_bounded_frames() {
             assert!(result["operationId"].is_null());
         }
         no_readiness(&result);
-        assert!(
-            fx.storage
-                .read()
-                .unwrap()
-                .meta_store()
-                .work_tracker()
-                .status()
-                .unresolved
-                > 0
-        );
+        assert!(tracker.status().unresolved > 0);
         drop(publisher);
         let _root = fx.close();
         let reopened = open(&path);
