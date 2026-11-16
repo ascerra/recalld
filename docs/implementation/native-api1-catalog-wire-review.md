@@ -130,3 +130,51 @@ private dispatcher capability signature and malformed-Remote evidence projection
 remain unresolved; no transport implementation or serving activation is approved
 by this source review. Refusing an oversized echoed ID before canonical work
 does not establish that its own error response fits the response policy.
+
+## Concrete local-policy proposal after R2 freeze
+
+Proposal for review, not an implemented limit or a transport ownership release:
+use an explicit native-only **8,388,608 encoded-byte** response policy for local
+MCP and HTTP catalog creation. This is an application resource policy, not a
+negotiated capacity and not inferred from the daemon limit. Legacy creation keeps
+its current behavior. Native admission must count every actual success/failure
+representation described above against this policy before preparation/commit.
+
+Proposed endpoint capability: `CatalogReplyAdmission`, with private fields and
+crate-controlled constructors, carries the response surface and the existing E1
+`ReceiptAdmission`. It is not deserializable from public tool arguments. Local
+MCP construction requires the actual `JsonRpcId` and `Era`; HTTP construction
+selects its actual success/error serializer. The capability exposes only a pure,
+capped candidate check and the existing receipt authority to the producer.
+No new work registry, generic serialization framework or receipt collector is
+introduced. Its candidate check must include unknown outcomes with separately
+known evidence, not only ordinary known-commit failures.
+
+The proposed forwarding signatures are an additional handler entry accepting
+`Option<CatalogReplyAdmission>` and a bounded namespace-creation entry accepting
+the capability. Existing legacy handler/registry methods remain the fallback for
+legacy storage only. A native invocation without endpoint admission refuses
+before work. Exact public Rust trait visibility and the default method behavior
+need review against the released transport composition; these signatures are
+not implemented by this document.
+
+For MCP, `dispatch` owns the actual ID and must pass it, together with era, to
+the catalog-specific admission constructor before `call_tool`. The bounded
+serializer applies legacy structured-content removal, `ResultEnvelope::complete`
+and `JsonRpcResponse::success` exactly as the final emitter does. The ID alone
+can exhaust the policy: refuse canonical work, without promising that an error
+echoing an arbitrarily large ID itself fits. Do not reduce or rewrite the ID.
+
+Remote forwarding is a separate, still-unresolved private-protocol handoff. It
+must preserve the upstream complete-response constraint and the actual daemon
+peer constraint through precommit admission on the same connection, including
+malformed-reply evidence expansion. A numerical minimum of two frame capacities
+does not alone account for different encodings. Public arguments cannot raise
+either bound; an unsupported peer refuses before send, never retries or falls
+back after send. No capability spelling, decoder allowance or new private alias
+is approved here before Huygens reviews the exact representation.
+
+R2 is frozen at `8b5fae5cf9a6f49cd6c6339aa0f741283c4dabf0` with Halley for
+publication. No R2 WIP dependency, client/server/dispatcher edit or additional
+build follows from this proposal. Request literal shared-hunk ownership only
+against the actual queue-published composition, and coordinate O1 independently.
