@@ -97,7 +97,7 @@ impl DerivedCompletion {
         ctx.validate()?;
         let work = self.accept_work(Some(parent))?;
         let result = self
-            .native_purge_work(PurgeSelector::Context(ctx), force, false, &work)
+            .native_purge_work(PurgeSelector::Context(ctx), force, false, &work, None)
             .await;
         if !result.as_ref().is_err_and(PurgeApi1Failure::ambiguous) {
             self.finish_known_work(work);
@@ -107,14 +107,24 @@ impl DerivedCompletion {
             .map_err(PurgeApi1Failure::into_storage)
     }
 
+    #[cfg(test)]
     pub(crate) async fn purge_native_api1(
         &self,
         name: String,
         force: bool,
     ) -> Result<PurgeApi1Success, PurgeApi1Failure> {
+        self.purge_native_api1_bounded(name, force, None).await
+    }
+
+    pub(crate) async fn purge_native_api1_bounded(
+        &self,
+        name: String,
+        force: bool,
+        receipt_limit: Option<usize>,
+    ) -> Result<PurgeApi1Success, PurgeApi1Failure> {
         let work = self.accept_work(None)?;
         let result = self
-            .native_purge_work(PurgeSelector::Name(name), force, true, &work)
+            .native_purge_work(PurgeSelector::Name(name), force, true, &work, receipt_limit)
             .await;
         if !result.as_ref().is_err_and(PurgeApi1Failure::ambiguous) {
             self.finish_known_work(work);
@@ -140,6 +150,7 @@ impl DerivedCompletion {
         force: bool,
         observe: bool,
         work: &WorkTicket,
+        receipt_limit: Option<usize>,
     ) -> Result<(PurgeProgress, PurgePhysicalObservation), PurgeApi1Failure> {
         let gate = publication_gate(&self.storage).await?;
         let lease = gate.read_owned().await;
@@ -175,7 +186,7 @@ impl DerivedCompletion {
                     }
                 };
                 storage
-                    .begin_namespace_purge_with_work(&ctx, force, Some(&child))
+                    .begin_namespace_purge_admitted(&ctx, force, Some(&child), receipt_limit)
                     .map_err(PurgeApi1Failure::from)
             })();
             storage.meta_store().finish_work(child);

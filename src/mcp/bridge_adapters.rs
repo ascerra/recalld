@@ -2522,6 +2522,24 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         &self,
         input: bridge::DeleteNamespaceInput,
     ) -> Result<bridge::DeleteNamespaceResult, bridge::BridgeError> {
+        self.delete_namespace_with_budget(input, None).await
+    }
+    async fn delete_namespace_bounded(
+        &self,
+        input: bridge::DeleteNamespaceInput,
+        frame_limit: usize,
+    ) -> Result<bridge::DeleteNamespaceResult, bridge::BridgeError> {
+        self.delete_namespace_with_budget(input, Some(frame_limit))
+            .await
+    }
+}
+
+impl McpNamespaceAdapter {
+    async fn delete_namespace_with_budget(
+        &self,
+        input: bridge::DeleteNamespaceInput,
+        frame_limit: Option<usize>,
+    ) -> Result<bridge::DeleteNamespaceResult, bridge::BridgeError> {
         use crate::model::constants::DEFAULT_NAMESPACE_NAME;
 
         // Validated before anything else, and for a blunter reason than
@@ -2566,7 +2584,9 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             .meta_store()
             .uses_native_lifecycle();
         if native {
-            return self.delete_native_namespace(input.name, input.force).await;
+            return self
+                .delete_native_namespace(input.name, input.force, frame_limit)
+                .await;
         }
 
         // Lookup, refuse-check and purge all happen inside ONE

@@ -7,6 +7,63 @@ use crate::storage::purge::PurgeStage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+/// Prove a compact receipt fits inside the actual escaped daemon error frame.
+/// A serialized JSON value has no literal control bytes: escaping it as part of
+/// error.message adds at most one byte per byte (quotes/backslashes), hence 2*N.
+/// The independently serialized envelope includes the longest fields, all
+/// optional fields, max-width response ID, and 512 maximally escaped text bytes.
+pub(crate) fn receipt_budget(frame_limit: usize) -> Result<usize, bridge::BridgeError> {
+    use crate::daemon::protocol::{DaemonResponse, DaemonRpcError};
+    let too_large =
+        || bridge::BridgeError::TooLarge(StorageError::PurgeResponseTooLarge.to_string());
+    let envelope = json!({
+        "error": "PURGE_METRICS_UNAVAILABLE",
+        "commitState": "committed",
+        "commitEvidenceScope": "purgeComplete",
+        "operationId": Uuid::from_u128(u128::MAX),
+        "receipt": null,
+        "message": "\0".repeat(512),
+    });
+    let frame = DaemonResponse::error(
+        u64::MAX,
+        DaemonRpcError {
+            code: -32006,
+            message: envelope.to_string(),
+        },
+    );
+    let envelope_bytes = serde_json::to_vec(&frame)
+        .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
+        .len();
+    let success = bridge::DeleteNamespaceResult {
+        name: "\0".repeat(crate::model::constants::NAMESPACE_NAME_MAX_BYTES),
+        id: u32::MAX,
+        deleted: true,
+        memories_deleted: u64::MAX,
+        tombstones_purged: u64::MAX,
+        edges_removed: u64::MAX,
+        fts_rows_removed: u64::MAX,
+        vector_file_removed: false,
+    };
+    let success = DaemonResponse::success(
+        u64::MAX,
+        serde_json::to_value(success).map_err(|e| bridge::BridgeError::Internal(e.to_string()))?,
+    );
+    if serde_json::to_vec(&success)
+        .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
+        .len()
+        > frame_limit
+    {
+        return Err(too_large());
+    }
+    // Keeping the four placeholder null bytes also overcounts, rather than
+    // depending on a subtraction or silently excluding an envelope field.
+    frame_limit
+        .checked_sub(envelope_bytes)
+        .map(|n| n / 2)
+        .filter(|n| *n > 0)
+        .ok_or_else(too_large)
+}
+
 fn identity(receipt: &WriteReceipt) -> Option<(Uuid, crate::model::NamespaceId, Uuid)> {
     if receipt.receipt_version != 1
         || receipt.store_id.is_nil()
@@ -121,6 +178,9 @@ pub(crate) fn project(failure: PurgeApi1Failure) -> bridge::BridgeError {
             source,
             known_receipt,
         } => {
+            if known_receipt.is_none() && matches!(source, StorageError::PurgeResponseTooLarge) {
+                return bridge::BridgeError::TooLarge(source.to_string());
+            }
             let receipt =
                 matched_receipt(source, known_receipt.as_deref()).or(known_receipt.as_deref());
             if let Some(operation) = unknown(source) {
@@ -246,7 +306,9 @@ impl McpNamespaceAdapter {
         &self,
         name: String,
         force: bool,
+        frame_limit: Option<usize>,
     ) -> Result<bridge::DeleteNamespaceResult, bridge::BridgeError> {
+        let receipt_limit = frame_limit.map(receipt_budget).transpose()?;
         let completion = DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -256,7 +318,7 @@ impl McpNamespaceAdapter {
             entities: self.entity_index.clone(),
         };
         let result = completion
-            .purge_native_api1(name, force)
+            .purge_native_api1_bounded(name, force, receipt_limit)
             .await
             .map_err(project)?;
         let p = result.progress;

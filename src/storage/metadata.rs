@@ -30,6 +30,7 @@ mod observation;
 mod publication;
 pub(crate) use publication::CanonicalReadView;
 pub(crate) mod purge;
+mod purge_budget;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
 pub(crate) mod text_generation;

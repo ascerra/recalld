@@ -22,6 +22,22 @@ impl RedbStorageEngine {
         self.meta_store.begin_purge_with_work(ctx, force, parent)
     }
 
+    pub(crate) fn begin_namespace_purge_admitted(
+        &mut self,
+        ctx: &MutationContext,
+        force: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        receipt_limit: Option<usize>,
+    ) -> Result<PurgeProgress, StorageError> {
+        self.meta_store.ensure_handle_available()?;
+        self.meta_store.begin_purge_admitted(
+            ctx,
+            force,
+            parent,
+            receipt_limit.map(|limit| (&self.edge_store, limit)),
+        )
+    }
+
     pub fn lookup_namespace_purge(
         &self,
         store_id: Uuid,

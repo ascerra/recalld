@@ -917,7 +917,7 @@ async fn native_api1_purge_lost_completion_preserves_start_without_invented_fina
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn native_api1_purge_actual_max_chunk_receipt_survives_legacy_frame() {
+async fn native_api1_purge_max_chunk_refuses_legacy_before_work_and_preserves_negotiated_receipt() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source");
     let target = root.path().join("native");
@@ -981,8 +981,13 @@ async fn native_api1_purge_actual_max_chunk_receipt_survives_legacy_frame() {
         },
     )
     .unwrap();
-    let session = open(&target);
-    let fx = crate::test_support::Fixture::from_open_engine(root, session.engine);
+    let engine = RedbStorageEngine::open_with_ids(
+        &target,
+        true,
+        Box::new(crate::storage::ids::SeededIds::new([72; 32])),
+    )
+    .unwrap();
+    let fx = crate::test_support::Fixture::from_open_engine(root, engine);
     let publisher = crate::derived_completion::DerivedCompletion {
         storage: fx.storage.clone(),
         cache: fx.cache.clone(),
@@ -993,8 +998,38 @@ async fn native_api1_purge_actual_max_chunk_receipt_survives_legacy_frame() {
     };
     publisher.rebuild_all().await.unwrap();
     *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
-    let response =
-        crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(fx.namespace_adapter())).await;
+    let before = counters(&fx);
+    let bytes = std::fs::read(target.join("meta.db")).unwrap();
+    let edge_bytes = std::fs::read(target.join("edges.db")).unwrap();
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    let refused = crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(
+        fx.namespace_adapter().with_clock(Arc::new(NoClock)),
+    ))
+    .await;
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, -32005);
+    assert!(error.message.contains("operation too large"));
+    assert!(!error.message.contains("get_memory"));
+    assert!(!error.message.contains("retry"));
+    assert_eq!(counters(&fx), before);
+    assert_eq!(std::fs::read(target.join("meta.db")).unwrap(), bytes);
+    assert_eq!(std::fs::read(target.join("edges.db")).unwrap(), edge_bytes);
+    assert!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .purge_progress()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(target.join("doomed").exists());
+    assert_eq!(tracker.status().unresolved, 0);
+    let response = crate::daemon::server::native_purge_test_rpc(
+        Arc::new(fx.namespace_adapter().with_clock(Arc::new(NoClock))),
+        crate::daemon::protocol::MAX_MESSAGE_SIZE,
+    )
+    .await;
     let p = fx
         .storage
         .read()
@@ -1037,4 +1072,65 @@ async fn native_api1_purge_actual_max_chunk_receipt_survives_legacy_frame() {
         serde_json::from_value::<control::WriteReceipt>(result["receipt"].clone()).unwrap(),
         first
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_actual_receipt_frames_obey_streamed_wire_bound() {
+    use crate::daemon::protocol::{DaemonResponse, DaemonRpcError, LEGACY_MAX_MESSAGE_SIZE};
+    use crate::derived_completion::PurgeApi1Failure;
+    let (fx, namespace, publisher, _) = setup();
+    publisher.rebuild_all().await.unwrap();
+    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let error = fx
+        .namespace_adapter()
+        .delete_namespace(DeleteNamespaceInput {
+            name: "doomed".into(),
+            force: true,
+        })
+        .await
+        .unwrap_err();
+    let child: control::WriteReceipt =
+        serde_json::from_value(payload(error)["receipt"].clone()).unwrap();
+    let p = fx
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .purge_progress()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.namespace_id == namespace)
+        .unwrap();
+    for receipt in [p.start_receipt, child, p.last_receipt] {
+        for diagnostic in ["\0".repeat(600), "\\\"".repeat(600), "界".repeat(600)] {
+            for unknown in [false, true] {
+                let error = crate::mcp::bridge_adapters::native_purge_api1::project(
+                    PurgeApi1Failure::Storage {
+                        source: if unknown {
+                            StorageError::WorkerOutcomeUnknown(diagnostic.clone())
+                        } else {
+                            StorageError::RecoveryRequired(diagnostic.clone())
+                        },
+                        known_receipt: Some(Box::new(receipt.clone())),
+                    },
+                );
+                let rpc_error = DaemonRpcError::from(&error);
+                let original = payload(error);
+                assert_eq!(
+                    serde_json::from_value::<control::WriteReceipt>(original["receipt"].clone())
+                        .unwrap(),
+                    receipt
+                );
+                assert!(original["message"].as_str().unwrap().len() <= 512);
+                let bytes =
+                    serde_json::to_vec(&DaemonResponse::error(u64::MAX, rpc_error)).unwrap();
+                let budget = crate::mcp::bridge_adapters::native_purge_api1::receipt_budget(
+                    LEGACY_MAX_MESSAGE_SIZE,
+                )
+                .unwrap();
+                assert!(serde_json::to_vec(&receipt).unwrap().len() <= budget);
+                assert!(bytes.len() <= LEGACY_MAX_MESSAGE_SIZE);
+            }
+        }
+    }
 }

@@ -556,6 +556,16 @@ impl MetadataStore {
         force: bool,
         parent: Option<&WorkTicket>,
     ) -> Result<PurgeProgress, StorageError> {
+        self.begin_purge_admitted(ctx, force, parent, None)
+    }
+
+    pub(crate) fn begin_purge_admitted(
+        &self,
+        ctx: &MutationContext,
+        force: bool,
+        parent: Option<&WorkTicket>,
+        response: Option<(&crate::storage::edges::EdgeStore, usize)>,
+    ) -> Result<PurgeProgress, StorageError> {
         ctx.validate()?;
         let MutationScope::Namespace(namespace) = ctx.scope else {
             return Err(StorageError::InvalidMutationContext(
@@ -607,6 +617,9 @@ impl MetadataStore {
             p.start_receipt = receipt;
             return Ok(p);
         }
+        if native && let Some((_, limit)) = response {
+            super::purge_budget::check_namespace_size(&tx, namespace, limit)?;
+        }
         let config = super::namespace_state::require_namespace_active(&tx, namespace)?;
         if config.id != namespace
             || native != config.schema.is_some()
@@ -620,7 +633,7 @@ impl MetadataStore {
         }
         crate::model::validation::validate_namespace_name(&config.name)
             .map_err(|_| StorageError::InvalidPath)?;
-        if !force || native {
+        if (!force || native) && !(native && response.is_some()) {
             for row in tx.open_table(META_TABLE)?.iter()? {
                 let (_, value) = row?;
                 let r = DiskRecord::from_bytes(value.value())?;
@@ -639,8 +652,6 @@ impl MetadataStore {
                 }
             }
         }
-        tx.open_table(SCHEMA)?.insert("version", 1)?;
-        tx.open_table(PROGRESS)?;
         let outcome = if native {
             let state = ControlState::decode(
                 tx.open_table(control::CONTROL)?
@@ -676,6 +687,11 @@ impl MetadataStore {
                 name_hash: Sha256::digest(config.name.as_bytes()).into(),
             }
         };
+        if native && let Some((edges, limit)) = response {
+            super::purge_budget::admit(&tx, namespace, &outcome, edges, limit, force)?;
+        }
+        tx.open_table(SCHEMA)?.insert("version", 1)?;
+        tx.open_table(PROGRESS)?;
         let receipt = self.record_receipt(&tx, ctx, hash, outcome)?;
         let p = PurgeProgress {
             version: if native { 2 } else { 1 },
