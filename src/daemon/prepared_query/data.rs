@@ -87,8 +87,12 @@ pub(super) struct Hit<E> {
     pub embedding: Option<Vec<f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explanation: Option<E>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<Version>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version: Option<Option<Version>>,
     // Ranked payloads require these two fields even when graphDepth is null;
     // the exact-shape check below treats them separately from similar payloads.
     #[serde(
@@ -100,8 +104,10 @@ pub(super) struct Hit<E> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub related: Option<Vec<Related>>,
 }
-fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<u64>>, D::Error> {
-    Option::<u64>::deserialize(d).map(Some)
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(d).map(Some)
 }
 wire!(Neighbor { memory_id: MemoryId, namespace_id: NamespaceId, namespace: String,
     summary: String, full_text: Option<String>, labels: Option<StructuredLabels>, tags: Vec<String>,

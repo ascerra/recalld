@@ -67,7 +67,7 @@ pub(super) fn decode(
         || request
             .namespace
             .as_ref()
-            .is_some_and(|n| n != &page.namespace)
+            .is_some_and(|n| !n.eq_ignore_ascii_case(&page.namespace))
         || c.algorithm != "exactPairs"
         || c.read_generation.store_id.is_nil()
         || !crate::embedding::profile::valid_profile_id(&c.embedding_profile_id)

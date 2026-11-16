@@ -1582,7 +1582,7 @@ mod producer_tests;
 
 #[cfg(test)]
 #[path = "prepared_query_tests.rs"]
-mod prepared_query_tests;
+pub(crate) mod prepared_query_tests;
 
 #[cfg(test)]
 pub(crate) async fn native_lifecycle_test_remote(

@@ -1,5 +1,73 @@
 // Real owned fixture consumers; included in read_view::tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_remote_native_query_similar_exact_and_known_publication_failure() {
+    use crate::mcp::bridge::SearchPipeline as _;
+    use crate::daemon::server::prepared_query_tests::PreparedDaemon;
+    let f=similar_fixture().await;
+    let engine=Arc::new(f.engine);
+    let provider=Arc::new(crate::embedding::PassthroughProvider::new(4));
+    let adapter=Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(engine.clone(),provider,
+        f.f.storage.clone(),f.f.graph.clone(),chrono_tz::UTC));
+    let daemon=PreparedDaemon::start(adapter.clone()).await;
+    let remote=crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+    let before=bytes(&f.f);
+    for mode in ["metadata_only","fts_only","embedding_only"] {
+        let mut args=serde_json::json!({"contractVersion":2,"namespace":"DeFaUlT","queryMode":mode,
+            "tags":["allow"],"recordAccess":false,"explain":true,"compact":false,"includeEmbeddings":true});
+        if mode=="fts_only" {args["ftsQuery"]=serde_json::json!("similar");}
+        if mode=="embedding_only" {
+            args["query"]=serde_json::json!("provider must not run");
+            args["embedding"]=serde_json::json!([1.,0.,0.,0.]);
+            args["embeddingProfileId"]=serde_json::json!(crate::embedding::runtime::tests::profile().profile_id().unwrap());
+        }
+        let input=||crate::serialization::query::QueryRequest::from_mcp(&args,"wrong-default").unwrap();
+        let local=adapter.query_contract(input()).await;
+        assert_eq!(local.http_status,200,"{mode}: {local:?}");
+        let received=remote.query_contract(input()).await;
+        assert_eq!(serde_json::to_value(&received).unwrap(),serde_json::to_value(&local).unwrap(),"{mode}: {received:?}");
+    }
+    for scope in ["sameNamespace","allCompatible"] {
+        for version in ["current","history"] {
+            let args=serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"namespace":"DeFaUlT",
+                "recordAccess":false,"namespaceScope":scope,"versionMode":version,"explain":true,"includeEmbeddings":true});
+            let input=||crate::serialization::query::SimilarRequest::from_mcp(&args).unwrap();
+            let local=adapter.similar_contract(input()).await;
+            assert_eq!(local.http_status,200,"{local:?}");
+            let received=remote.similar_contract(input()).await;
+            assert_eq!(serde_json::to_value(&received).unwrap(),serde_json::to_value(&local).unwrap(),"{received:?}");
+        }
+    }
+    let mut input=crate::serialization::scan::ExactScanRequest::from_http(&serde_json::json!({"pairBudget":2,"threshold":0.}),"DeFaUlT").unwrap();
+    loop {
+        let local=adapter.scan_duplicate_pairs(input.clone()).await.unwrap();
+        let received=remote.scan_duplicate_pairs(input.clone()).await.unwrap();
+        assert_eq!(serde_json::to_value(&received).unwrap(),serde_json::to_value(&local).unwrap());
+        assert!(received.diagnostics.is_none(),"Remote must not fabricate capture metrics");
+        input.cursor=received.data.next_cursor;
+        if input.cursor.is_none() {break;}
+    }
+    assert_eq!(bytes(&f.f),before,"all false/scan calls preserve canonical bytes");
+    // Fault occurs in actual certification publication after native exposure TX.
+    f.f.storage.read().unwrap().meta_store().vector_publication_failure_nth.store(1,Ordering::SeqCst);
+    let args=serde_json::json!({"contractVersion":2,"namespace":"default","queryMode":"metadata_only","tags":["allow"],"recordAccess":true});
+    let failed=remote.query_contract(crate::serialization::query::QueryRequest::from_mcp(&args,"wrong-default").unwrap()).await;
+    assert_eq!(failed.http_status,503,"{failed:?}");
+    assert_eq!(failed.envelope.error.as_ref().unwrap().commit_state,crate::serialization::contract::CommitState::Committed);
+    assert!(failed.envelope.scope.is_some() && failed.envelope.read_generation.is_some());
+    assert!(failed.envelope.readiness.is_none() && failed.received_evidence.is_none());
+    assert_eq!(failed.observation_receipts.len(),1);
+    let receipt=failed.envelope.receipt.as_ref().unwrap();
+    assert_eq!(failed.observation_receipts[0],*receipt);
+    let crate::storage::control::MutationOutcome::LifecycleExposureRecorded {transition}=&receipt.outcome else {panic!("full native exposure receipt");};
+    transition.validate(receipt,false).unwrap();
+    assert_eq!(transition.records.len(),1);
+    assert_eq!(transition.records[0].memory_id,f.live);
+    assert_eq!(f.f.record(f.live).unwrap().access_history.last().unwrap().timestamp,10_000);
+    drop(remote);
+    daemon.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_evidence_rejects_operator_rif_before_work_on_actual_transports() {
     struct NoProviderOrObservation;
     #[async_trait::async_trait]

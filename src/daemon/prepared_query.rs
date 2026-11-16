@@ -163,10 +163,9 @@ pub(crate) async fn dispatch(
         .ok_or_else(|| BridgeError::InvalidInput("missing prepared arguments".into()))?;
     if method == PAIRS {
         use crate::search::exact_scan::ExactScanError as Error;
-        let outcome = match crate::serialization::scan::ExactScanRequest::from_mcp(arguments) {
-            Ok(request) => search.scan_duplicate_pairs(request).await,
-            Err(error) => Err(Error::Input(error)),
-        };
+        let request = crate::serialization::scan::ExactScanRequest::from_mcp(arguments)
+            .map_err(|error| BridgeError::InvalidInput(error.to_string()))?;
+        let outcome = search.scan_duplicate_pairs(request).await;
         let error = match outcome {
             Ok(page) => {
                 let value = compact_value(&Reply {
@@ -194,6 +193,11 @@ pub(crate) async fn dispatch(
             Err(Error::Unavailable) => "unavailable",
         };
         return Ok(serde_json::json!({"wireVersion":1,"httpStatus":400,"error":error}));
+    }
+    if method == QUERY && arguments.get("namespace").and_then(Value::as_str).is_none() {
+        return Err(BridgeError::InvalidInput(
+            "prepared query requires resolved namespace".into(),
+        ));
     }
     let reply = match method {
         QUERY => match crate::serialization::query::QueryRequest::from_mcp(arguments, "default") {
@@ -234,10 +238,14 @@ pub(crate) fn response_limit() -> usize {
                             .warnings
                             .push("UNVERIFIED_RECEIVED_EVIDENCE".into());
                     }
+                    let result = serde_json::to_value(reply.mcp()).expect("fixed error shape");
                     overhead = overhead.max(
-                        serde_json::to_vec(&reply.mcp())
-                            .expect("fixed error shape")
-                            .len(),
+                        serde_json::to_vec(&super::protocol::DaemonResponse::success(
+                            u64::MAX,
+                            result,
+                        ))
+                        .expect("fixed framed error shape")
+                        .len(),
                     );
                 }
             }

@@ -1,4 +1,5 @@
 use super::data::*;
+use crate::model::{AccessKind, MemoryId, NamespaceId};
 use crate::search::{RetrievalSemantics, SimilarityScope, VersionMode};
 use crate::serialization::contract::{CommitState, Scope, Status};
 use crate::serialization::query::{QueryRequest, SimilarRequest};
@@ -7,6 +8,11 @@ use crate::storage::control::{MutationOutcome, WriteReceipt};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+
+// Ranked rows do not expose complete channel provenance unless requested, so
+// their exact direct/associative classification cannot be inferred here. IDs
+// and namespaces must still match fully; similarity/neighbor kinds are known.
+type Returned = BTreeMap<MemoryId, (NamespaceId, bool)>;
 
 pub(super) struct Expected {
     pub similar: bool,
@@ -17,6 +23,7 @@ pub(super) struct Expected {
     pub embeddings: bool,
     pub explain: bool,
     pub history: bool,
+    pub neighbors: bool,
 }
 impl Expected {
     pub(super) fn query(r: &QueryRequest) -> Self {
@@ -29,6 +36,7 @@ impl Expected {
             embeddings: r.include_embeddings,
             explain: r.explain,
             history: r.version_mode == VersionMode::History,
+            neighbors: r.include_neighbors,
         }
     }
     pub(super) fn similar(r: &SimilarRequest) -> Self {
@@ -44,6 +52,7 @@ impl Expected {
                 r.options.semantics,
                 RetrievalSemantics::V2(VersionMode::History)
             ),
+            neighbors: false,
         }
     }
 }
@@ -69,7 +78,16 @@ fn reasons(map: &BTreeMap<String, u64>) -> Result<(), ()> {
     for key in map.keys() {
         one(
             key,
-            &["branch", "cycle", "hopLimit", "workLimit", "ineligible"],
+            &[
+                "missingRecord",
+                "missingStructure",
+                "foreignNamespace",
+                "branch",
+                "cycle",
+                "hopLimit",
+                "workLimit",
+                "ineligible",
+            ],
         )?;
     }
     Ok(())
@@ -78,7 +96,16 @@ fn version(v: &Version) -> Result<(), ()> {
     if let Version::Unresolved { reason } = v {
         one(
             reason,
-            &["branch", "cycle", "hopLimit", "workLimit", "ineligible"],
+            &[
+                "missingRecord",
+                "missingStructure",
+                "foreignNamespace",
+                "branch",
+                "cycle",
+                "hopLimit",
+                "workLimit",
+                "ineligible",
+            ],
         )?;
     }
     Ok(())
@@ -133,14 +160,20 @@ fn hit<E>(
     } else {
         require(hit.version.is_none() && hit.graph_depth.is_none() && hit.related.is_none())?;
     }
-    if let Some(v) = &hit.version {
+    if let Some(Some(v)) = &hit.version {
         version(v)?;
     }
     Ok(())
 }
 
-fn data(v: &Value, e: &Expected) -> Result<BTreeSet<crate::model::MemoryId>, ()> {
+fn data(
+    v: &Value,
+    e: &Expected,
+    scope_ids: &[NamespaceId],
+    scope_name: Option<&str>,
+) -> Result<Returned, ()> {
     let mut ids = BTreeSet::new();
+    let mut returned = BTreeMap::new();
     let wanted_version = if e.history { "history" } else { "current" };
     if e.similar {
         let data: SimilarData = typed(v)?;
@@ -151,7 +184,7 @@ fn data(v: &Value, e: &Expected) -> Result<BTreeSet<crate::model::MemoryId>, ()>
         require(
             e.namespace
                 .as_ref()
-                .is_none_or(|n| *n == data.source_namespace.namespace),
+                .is_none_or(|n| n.eq_ignore_ascii_case(&data.source_namespace.namespace)),
         )?;
         let searched: BTreeSet<_> = c.searched_namespace_ids.iter().copied().collect();
         require(
@@ -159,6 +192,10 @@ fn data(v: &Value, e: &Expected) -> Result<BTreeSet<crate::model::MemoryId>, ()>
                 && searched.iter().all(|n| !n.is_unset()),
         )?;
         require(searched.contains(&data.source_namespace.namespace_id))?;
+        require(c.searched_namespace_ids == scope_ids)?;
+        if !e.all {
+            require(scope_name == Some(data.source_namespace.namespace.as_str()))?;
+        }
         let mut excluded = BTreeSet::new();
         for item in &c.excluded_namespaces {
             require(
@@ -175,6 +212,10 @@ fn data(v: &Value, e: &Expected) -> Result<BTreeSet<crate::model::MemoryId>, ()>
         for row in &data.results {
             hit(row, e, &mut ids)?;
             require(searched.contains(&row.namespace_id))?;
+            if row.namespace_id == data.source_namespace.namespace_id {
+                require(row.namespace == data.source_namespace.namespace)?;
+            }
+            returned.insert(row.memory_id, (row.namespace_id, true));
             if let Some(x) = &row.explanation {
                 require(x.algorithm == "cosineMax" && x.origins.len() <= 64)?;
                 one(
@@ -233,7 +274,8 @@ fn data(v: &Value, e: &Expected) -> Result<BTreeSet<crate::model::MemoryId>, ()>
         reasons(&c.supplemental.unresolved_neighbors)?;
         for row in &data.results {
             hit(row, e, &mut ids)?;
-            require(e.namespace.as_ref() == Some(&row.namespace))?;
+            require(scope_ids == [row.namespace_id] && scope_name == Some(row.namespace.as_str()))?;
+            returned.insert(row.memory_id, (row.namespace_id, false));
             if let Some(x) = &row.explanation {
                 require(
                     x.ranking_profile == "baseline-v1"
@@ -255,12 +297,23 @@ fn data(v: &Value, e: &Expected) -> Result<BTreeSet<crate::model::MemoryId>, ()>
                 }
             }
         }
+        require(e.neighbors || data.neighbors.is_empty())?;
+        let ranked = ids.clone();
         for n in &data.neighbors {
-            require(n.memory_id.as_bytes() != &[0; 16] && !n.namespace_id.is_unset())?;
-            ids.insert(n.memory_id);
+            require(
+                n.memory_id.as_bytes() != &[0; 16]
+                    && ids.insert(n.memory_id)
+                    && ranked.contains(&n.connected_to)
+                    && scope_ids == [n.namespace_id]
+                    && scope_name == Some(n.namespace.as_str()),
+            )?;
+            if let Some(labels) = &n.labels {
+                labels.validate().map_err(|_| ())?;
+            }
+            returned.insert(n.memory_id, (n.namespace_id, true));
         }
     }
-    Ok(ids)
+    Ok(returned)
 }
 
 pub(super) fn receipt(v: &Value) -> Result<WriteReceipt, ()> {
@@ -291,18 +344,20 @@ pub(super) fn query(v: &Value, status: u16, e: &Expected) -> Result<QueryReply, 
             && reply.envelope.error.is_some()
             && reply.envelope.data.is_none()
     })?;
-    let ids = if ok {
-        Some(data(reply.envelope.data.as_ref().ok_or(())?, e)?)
-    } else {
-        None
-    };
+    let mut scope_name = None;
     let scope_ids = match &reply.envelope.scope {
         Some(Scope::Namespace {
             namespace_id,
             namespace,
         }) => {
             require(!namespace_id.is_unset() && !e.all)?;
-            require(e.namespace.as_ref().is_none_or(|n| n == namespace))?;
+            crate::model::validation::validate_namespace_name(namespace).map_err(|_| ())?;
+            require(
+                e.namespace
+                    .as_ref()
+                    .is_none_or(|n| n.eq_ignore_ascii_case(namespace)),
+            )?;
+            scope_name = Some(namespace.as_str());
             vec![*namespace_id]
         }
         Some(Scope::Namespaces { namespace_ids }) => {
@@ -313,6 +368,16 @@ pub(super) fn query(v: &Value, status: u16, e: &Expected) -> Result<QueryReply, 
         }
         Some(Scope::Catalog { .. }) => return Err(()),
         None => vec![],
+    };
+    let returned = if ok {
+        Some(data(
+            reply.envelope.data.as_ref().ok_or(())?,
+            e,
+            &scope_ids,
+            scope_name,
+        )?)
+    } else {
+        None
     };
     require(
         e.access
@@ -329,6 +394,8 @@ pub(super) fn query(v: &Value, status: u16, e: &Expected) -> Result<QueryReply, 
             },
     )?;
     let mut seen = BTreeSet::new();
+    let mut exposed = BTreeSet::new();
+    let mut previous_generation = reply.envelope.read_generation.map(|g| g.generation);
     let mut lineage = reply.envelope.read_generation.map(|g| g.store_id);
     if let Some(id) = lineage {
         require(!id.is_nil())?;
@@ -338,9 +405,14 @@ pub(super) fn query(v: &Value, status: u16, e: &Expected) -> Result<QueryReply, 
             !r.store_id.is_nil()
                 && !r.operation_id.is_nil()
                 && r.receipt_version == 1
+                && !r.replayed
                 && r.committed_generation.get() > 0
                 && seen.insert(r.operation_id),
         )?;
+        if let Some(previous) = previous_generation {
+            require(r.committed_generation > previous)?;
+        }
+        previous_generation = Some(r.committed_generation);
         if let Some(id) = lineage {
             require(id == r.store_id)?;
         } else {
@@ -350,33 +422,51 @@ pub(super) fn query(v: &Value, status: u16, e: &Expected) -> Result<QueryReply, 
             MutationOutcome::LifecycleExposureRecorded { transition } => {
                 transition.validate(r, false).map_err(|_| ())?;
                 require(scope_ids.contains(&transition.namespace_id))?;
-                if let Some(ids) = &ids {
-                    require(
-                        transition
-                            .records
-                            .iter()
-                            .all(|step| ids.contains(&step.memory_id)),
-                    )?;
+                for step in &transition.records {
+                    require(exposed.insert(step.memory_id))?;
+                    if let Some(rows) = &returned {
+                        let (ns, associative) = rows.get(&step.memory_id).ok_or(())?;
+                        require(
+                            *ns == transition.namespace_id
+                                && (!associative || step.kind == AccessKind::AssociativeRetrieval),
+                        )?;
+                    }
                 }
             }
             MutationOutcome::ExposuresRecorded { accesses } => {
                 require(!accesses.is_empty())?;
                 let mut seen = BTreeSet::new();
                 for a in accesses {
-                    require(a.memory_id.as_bytes() != &[0; 16] && seen.insert(a.memory_id))?;
+                    require(
+                        a.memory_id.as_bytes() != &[0; 16]
+                            && seen.insert(a.memory_id)
+                            && exposed.insert(a.memory_id),
+                    )?;
                     require(matches!(
                         a.kind,
                         crate::model::AccessKind::DirectRetrieval
                             | crate::model::AccessKind::AssociativeRetrieval
                     ))?;
                     require(chrono::DateTime::from_timestamp_millis(a.accessed_at).is_some())?;
-                    if let Some(ids) = &ids {
-                        require(ids.contains(&a.memory_id))?;
+                    if let Some(rows) = &returned {
+                        let (_, associative) = rows.get(&a.memory_id).ok_or(())?;
+                        require(!associative || a.kind == AccessKind::AssociativeRetrieval)?;
                     }
                 }
             }
             _ => return Err(()),
         }
+    }
+    if ok && e.access {
+        require(
+            returned
+                .as_ref()
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<BTreeSet<_>>()
+                == exposed,
+        )?;
     }
     if let Some(error) = &reply.envelope.error {
         require(!error.retryable)?;
@@ -402,6 +492,7 @@ pub(super) fn query(v: &Value, status: u16, e: &Expected) -> Result<QueryReply, 
         )?;
         let mut names = BTreeSet::new();
         for d in &r.derived {
+            one(&d.name, &["graph", "vectors", "fts", "entities"])?;
             require(
                 names.insert(d.name.as_str())
                     && d.ready
