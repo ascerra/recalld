@@ -162,7 +162,7 @@ fn native_selection_invalid_vectors_and_temporal_extremes_do_not_mutate_or_sampl
     intent.original.memory.embedding = Some(vec![0.; 4]);
     assert!(matches!(
         capture(&s.engine, &intent, &generated()),
-        Err(StorageError::InvalidMutation(_))
+        Err(StorageError::CallerVectorInvalid(_))
     ));
     intent.original.memory.embedding = None;
     intent.original.embedding_profile = None;

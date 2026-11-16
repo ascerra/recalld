@@ -1,0 +1,24 @@
+running 2 tests
+
+thread 'storage::metadata::native_records::tests::store_producers::native_document_recipe_actual_single_provider_input' (987) panicked at src/storage/metadata/native_records/store_producer_tests.rs:1308:5:
+assertion `left == right` failed
+  left: ["body"]
+ right: ["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::metadata::native_records::tests::store_producers::native_document_recipe_actual_single_provider_input ... FAILED
+
+thread 'storage::metadata::native_records::tests::store_producers::native_document_recipe_actual_batch_provider_input' (986) panicked at src/storage/metadata/native_records/store_producer_tests.rs:1330:5:
+assertion `left == right` failed
+  left: ["body"]
+ right: ["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
+test storage::metadata::native_records::tests::store_producers::native_document_recipe_actual_batch_provider_input ... FAILED
+
+failures:
+
+failures:
+    storage::metadata::native_records::tests::store_producers::native_document_recipe_actual_batch_provider_input
+    storage::metadata::native_records::tests::store_producers::native_document_recipe_actual_single_provider_input
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1155 filtered out; finished in 4.53s
+
+error: test failed, to rerun pass `--lib`

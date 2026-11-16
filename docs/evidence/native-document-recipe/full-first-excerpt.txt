@@ -1,0 +1,15 @@
+
+failures:
+
+---- storage::metadata::native_records::tests::store_producers::native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation stdout ----
+
+thread 'storage::metadata::native_records::tests::store_producers::native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation' (2048) panicked at src/storage/metadata/native_records/store_producer_tests.rs:1155:13:
+CallerVectorInvalid("embedding must have a finite positive norm")
+
+
+failures:
+    storage::metadata::native_records::tests::store_producers::native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation
+
+test result: FAILED. 1246 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 820.07s
+
+error: test failed, to rerun pass `--lib`

@@ -157,6 +157,96 @@ async fn near_duplicate_report(
 /// 7. Insert into RAM cache and vector index.
 /// 8. Create the `parent_id` and `supersedes` edges in the graph.
 /// 9. Return 201 with the created memory.
+pub async fn single_store_versioned(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::{
+        contract::{ContractVersion, InputError, KEY_HEADER},
+        native_single::Reply,
+    };
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return single_reply_response(Reply::invalid(error));
+    }
+    if version == ContractVersion::V1 {
+        return match Json::<super::store_api1::Request>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::create(state, body).await,
+            Err(error) => error.into_response(),
+        };
+    }
+    let mut keys = request.headers().get_all(KEY_HEADER).iter();
+    let key = keys
+        .next()
+        .map(|v| v.to_str().map(str::to_owned))
+        .transpose();
+    if keys.next().is_some() || key.is_err() {
+        return single_reply_response(Reply::invalid(InputError {
+            code: "INVALID_TYPE",
+            field: "/idempotencyKey".into(),
+            message: "at most one ASCII idempotency key header is allowed",
+        }));
+    }
+    let body = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            return single_reply_response(Reply::invalid(InputError {
+                code: "INVALID_TYPE",
+                field: String::new(),
+                message: "body must be a JSON object",
+            }));
+        }
+    };
+    let Some(producer) = state.native_batches.as_deref() else {
+        return single_reply_response(Reply::failure(
+            crate::storage::StorageError::RecoveryRequired(
+                "native single consumer unavailable".into(),
+            ),
+        ));
+    };
+    single_store_v2(
+        producer,
+        &state.default_namespace,
+        &body,
+        key.unwrap().as_deref(),
+    )
+    .await
+}
+fn single_reply_response(
+    reply: crate::serialization::native_single::Reply,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (status, envelope) = reply.response();
+    (
+        StatusCode::from_u16(status).expect("fixed single status"),
+        Json(envelope),
+    )
+        .into_response()
+}
+pub(crate) async fn single_store_v2(
+    producer: &dyn crate::mcp::bridge::StorageEngine,
+    default_namespace: &str,
+    body: &serde_json::Value,
+    key: Option<&str>,
+) -> axum::response::Response {
+    use crate::serialization::native_single::{Reply, Request};
+    let reply = match Request::parse(body, true, key, default_namespace) {
+        Ok(request) => producer.store_native_wire(request).await,
+        Err(error) => Reply::invalid(error),
+    };
+    single_reply_response(reply)
+}
+
 pub async fn create_memory(
     State(state): State<AppState>,
     Json(req): Json<CreateMemoryApiRequest>,
@@ -1974,6 +2064,108 @@ pub async fn batch_store(
             took_us: Some(took),
         }),
     ))
+}
+
+/// Preserve the v1 typed extractor/shape; v2 uses the same native runner as MCP.
+pub async fn batch_store_versioned(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::{ContractVersion, KEY_HEADER};
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(v) => v,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(e) = version.require_supported() {
+        return AppError::BadRequest {
+            message: e.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version == ContractVersion::V1 {
+        return match Json::<super::store_api1::BatchRequest>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::batch(state, body).await,
+            Err(e) => e.into_response(),
+        };
+    }
+    let mut keys = request.headers().get_all(KEY_HEADER).iter();
+    let key = keys
+        .next()
+        .map(|v| v.to_str().map(str::to_owned))
+        .transpose();
+    if keys.next().is_some() || key.is_err() {
+        return batch_failure_response(
+            crate::serialization::contract::InputError {
+                code: "INVALID_TYPE",
+                field: "/idempotencyKey".into(),
+                message: "one ASCII idempotency key header is required",
+            }
+            .into(),
+        );
+    }
+    let body = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            return batch_failure_response(
+                crate::serialization::contract::InputError {
+                    code: "INVALID_TYPE",
+                    field: String::new(),
+                    message: "body must be a JSON object",
+                }
+                .into(),
+            );
+        }
+    };
+    let Some(producer) = state.native_batches.as_deref() else {
+        return batch_failure_response(
+            crate::serialization::native_batch::BatchFailure::unavailable(),
+        );
+    };
+    batch_store_v2(
+        producer,
+        &state.default_namespace,
+        &body,
+        key.unwrap().as_deref(),
+    )
+    .await
+}
+fn batch_failure_response(
+    error: crate::serialization::native_batch::BatchFailure,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (status, envelope) = crate::serialization::native_batch::response(Err(error));
+    (
+        StatusCode::from_u16(status).expect("fixed batch status"),
+        Json(envelope),
+    )
+        .into_response()
+}
+pub(crate) async fn batch_store_v2(
+    producer: &dyn crate::mcp::bridge::StorageEngine,
+    default_namespace: &str,
+    body: &serde_json::Value,
+    key: Option<&str>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let result =
+        match crate::serialization::native_batch::parse(body, false, key, default_namespace) {
+            Ok(input) => producer.mutate_native_batch(input).await,
+            Err(e) => Err(e.into()),
+        };
+    let (status, envelope) = crate::serialization::native_batch::response(result);
+    (
+        StatusCode::from_u16(status).expect("fixed batch status"),
+        Json(envelope),
+    )
+        .into_response()
 }
 
 /// POST /namespaces/:name/duplicates -- scan for duplicate memories (Issue 16).

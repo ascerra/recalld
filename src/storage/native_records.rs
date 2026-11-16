@@ -30,6 +30,35 @@ pub struct NativeInsert {
     pub embedding_profile: Option<EmbeddingProfile>,
 }
 impl NativeInsert {
+    /// Fresh provider input for the declared recalld-document-v1 recipe.
+    /// Keep caller fields untouched for identity, and perform replay before this.
+    pub(crate) fn document_v1(&self) -> String {
+        use crate::model::constants::{EMOTION_TAG_PREFIX, ENTITY_TAG_PREFIX, TOPIC_TAG_PREFIX};
+        let mut tags: Vec<String> = self.memory.tags.iter().map(ToString::to_string).collect();
+        for (values, prefix) in [
+            (&self.entities, ENTITY_TAG_PREFIX),
+            (&self.topics, TOPIC_TAG_PREFIX),
+            (&self.emotions, EMOTION_TAG_PREFIX),
+        ] {
+            for value in values {
+                let tag = format!("{prefix}{}", value.to_lowercase());
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        let mut text = self.memory.summary.clone();
+        if let Some(full_text) = &self.memory.full_text {
+            text.push_str("\n\n");
+            text.push_str(full_text);
+        }
+        if !tags.is_empty() {
+            text.push(' ');
+            text.push_str(&tags.join(" "));
+        }
+        text
+    }
+
     pub(crate) fn labels(&self) -> StructuredLabels {
         StructuredLabels {
             entities: self.entities.clone(),
@@ -94,13 +123,34 @@ impl NativeInsert {
     ) -> Result<[u8; 32], StorageError> {
         // Reuse exact original caller float bits/default expansion. The v2
         // operation tag and additional fields keep its identity distinct.
-        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let supplied_profile = self
             .embedding_profile
             .as_ref()
             .map(|p| p.profile_id())
             .transpose()
             .map_err(StorageError::InvalidMutation)?;
+        self.request_hash_with_profile_id(
+            ctx,
+            stability,
+            difficulty,
+            dimensions,
+            profile_id,
+            supplied_profile.as_deref(),
+        )
+    }
+
+    /// The wire supplies an ID, not a descriptor. Preserve the existing hash
+    /// encoding so historical replay needs no live descriptor or provider.
+    pub(crate) fn request_hash_with_profile_id(
+        &self,
+        ctx: &MutationContext,
+        stability: f32,
+        difficulty: f32,
+        dimensions: u32,
+        profile_id: &str,
+        supplied_profile: Option<&str>,
+    ) -> Result<[u8; 32], StorageError> {
+        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let extra = super::control::encode(&(
             self.observed_at,
             &self.entities,
@@ -781,11 +831,7 @@ impl super::native_lifecycle::NativeLifecycleSession {
             crate::embedding::runtime::generate_native(
                 provider,
                 &intent.namespace,
-                input
-                    .memory
-                    .full_text
-                    .as_deref()
-                    .unwrap_or(&input.memory.summary),
+                &input.document_v1(),
             )
             .await
             .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?

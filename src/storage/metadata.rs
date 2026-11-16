@@ -26,6 +26,8 @@ mod native_namespace_binding;
 mod native_policy;
 pub(crate) mod native_records;
 mod native_store;
+mod native_store_profile;
+pub(crate) use native_store_profile::NativeStoreProfileResolution;
 mod observation;
 mod publication;
 pub(crate) use publication::CanonicalReadView;

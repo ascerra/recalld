@@ -4,7 +4,11 @@ use crate::storage::batch::{BatchInput, BatchKind, BatchStatus};
 use crate::test_support::Fixture;
 use serde_json::json;
 
+#[path = "insertion_origin_tests.rs"]
+mod insertion_origin_tests;
+
 struct Provider {
+    texts: std::sync::Mutex<Vec<String>>,
     profile: Option<crate::model::schema::EmbeddingProfile>,
     profiles: Arc<AtomicUsize>,
     calls: Arc<AtomicUsize>,
@@ -24,7 +28,8 @@ impl crate::embedding::EmbeddingProvider for Provider {
     fn model_name(&self) -> &str {
         "synthetic-linked-batch"
     }
-    async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+    async fn embed(&self, text: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        self.texts.lock().unwrap().push(text.to_owned());
         self.calls.fetch_add(1, Ordering::SeqCst);
         if let Some(entered) = &self.entered {
             entered.notify_one();
@@ -40,6 +45,7 @@ impl crate::embedding::EmbeddingProvider for Provider {
 }
 fn provider(d: &Data) -> Arc<Provider> {
     Arc::new(Provider {
+        texts: std::sync::Mutex::new(Vec::new()),
         profile: Some(d.profile.clone()),
         profiles: Arc::new(AtomicUsize::new(0)),
         calls: Arc::new(AtomicUsize::new(0)),
@@ -50,6 +56,8 @@ fn provider(d: &Data) -> Arc<Provider> {
 }
 fn request(f: &Fixture, key: &str) -> BatchInput {
     BatchInput {
+        request_context: None,
+        expected_generation: None,
         mutation_version: 3,
         result_version: 1,
         kind: BatchKind::Insert,
@@ -226,6 +234,9 @@ async fn linked_producer_checked_empty_and_disabled_have_distinct_outcomes_and_r
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_publication_failure_keeps_actual_child_receipt_then_replays_once() {
+    batch_publication_origin(2).await;
+}
+async fn batch_publication_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
@@ -235,7 +246,9 @@ async fn linked_producer_publication_failure_keeps_actual_child_receipt_then_rep
     let mut p = provider(&d);
     Arc::get_mut(&mut p).unwrap().corrupt = Some(f.vector_index.clone());
     let a = adapter(&f, p.clone(), clock, Default::default());
-    let r = request(&f, "publish");
+    let mut r = request(&f, "publish");
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
     let out = a.run_batch(r.clone()).await.unwrap();
     assert_eq!(out.items[0].status, BatchStatus::Ok);
     assert!(!out.items[0].ready);
@@ -254,6 +267,9 @@ async fn linked_producer_publication_failure_keeps_actual_child_receipt_then_rep
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_root_before_provider_completes_graph_descendants_while_closing() {
+    batch_close_origin(2).await;
+}
+async fn batch_close_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
@@ -267,7 +283,9 @@ async fn linked_producer_root_before_provider_completes_graph_descendants_while_
     provider.entered = Some(entered.clone());
     provider.release = Some(release.clone());
     let a = adapter(&f, p, clock, Default::default());
-    let r = request(&f, "close");
+    let mut r = request(&f, "close");
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
     let tracker = f.storage.read().unwrap().meta_store().work_tracker();
     let task = tokio::spawn(async move { a.run_batch(r).await });
     tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
@@ -330,6 +348,9 @@ async fn linked_producer_root_before_provider_completes_graph_descendants_while_
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_unknown_child_reopens_exact_reserved_operation_without_provider() {
+    batch_unknown_origin(2).await;
+}
+async fn batch_unknown_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
@@ -338,7 +359,9 @@ async fn linked_producer_unknown_child_reopens_exact_reserved_operation_without_
     completion(&f).rebuild_all().await.unwrap();
     let p = provider(&d);
     let a = adapter(&f, p.clone(), clock.clone(), Default::default());
-    let r = request(&f, "unknown");
+    let mut r = request(&f, "unknown");
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
     f.storage
         .read()
         .unwrap()
@@ -857,6 +880,9 @@ async fn native_single_process_exit_reopens_one_receipt_and_frozen_links() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_unknown_commit_retains_identity_and_unresolved_work_until_reopen() {
+    single_unknown_origin(2).await;
+}
+async fn single_unknown_origin(contract: u32) {
     struct UnknownClock;
     impl Clock for UnknownClock {
         fn now_millis(&self) -> i64 {
@@ -873,7 +899,8 @@ async fn native_single_unknown_commit_retains_identity_and_unresolved_work_until
     let p = provider(&d);
     let a = adapter(&f, p.clone(), clock.clone(), Default::default())
         .with_clock(Arc::new(UnknownClock));
-    let key = single_context(&f, &d, "unknown-single");
+    let mut key = single_context(&f, &d, "unknown-single");
+    key.contract_version = contract;
     let original = single_input(&d, true);
     let error = a
         .store_native_single(
@@ -945,6 +972,773 @@ async fn native_single_scope_lineage_controls_do_not_replay_other_namespace_or_c
     }
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+}
+
+// Run against the pre-profile-resolver runtime to retain a genuine historical
+// descriptor-input receipt. The later resolver must replay these exact bytes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_before_fixture() {
+    let Ok(output) = std::env::var("RECALLD_WRITE_PROFILE_BEFORE") else {
+        return;
+    };
+    let output = std::path::PathBuf::from(output);
+    std::fs::create_dir_all(&output).unwrap();
+    let root = tempfile::tempdir_in(&output).unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let a = adapter(&f, provider(&d), clock, Default::default());
+    let out = a
+        .store_native_single(
+            single_context(&f, &d, "profile-before"),
+            single_input(&d, false),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    let manifest = serde_json::json!({"path":d.path,"namespace":d.ns.get(),"parent":d.parent.to_string(),"profile":d.profile,"receipt":out.receipt});
+    std::fs::write(
+        output.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    drop(a);
+    let _retained = f.close().keep();
+}
+
+fn profile_wire_input(d: &Data, generated: bool) -> crate::storage::native_store::NativeStoreInput {
+    let mut input = single_input(d, generated);
+    input.insert.embedding_profile = None;
+    input
+}
+fn receipt_rows(f: &Fixture) -> Vec<(Vec<u8>, Vec<u8>)> {
+    use redb::ReadableTable;
+    let engine = f.storage.read().unwrap();
+    let tx = engine.meta_store().db.begin_read().unwrap();
+    tx.open_table(crate::storage::control::RECEIPTS)
+        .unwrap()
+        .iter()
+        .unwrap()
+        .map(|row| {
+            let (k, v) = row.unwrap();
+            (k.value().to_vec(), v.value().to_vec())
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_fresh_binding_replay_and_original_bits() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let mut key = single_context(&f, &d, "wire-profile");
+    key.expected_generation = Some(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+    );
+    let input = profile_wire_input(&d, false);
+    let profile_id = d.profile.profile_id().unwrap();
+    let out = a
+        .store_native_single_by_profile_id(
+            key.clone(),
+            input.clone(),
+            Some(profile_id.clone()),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &out.receipt.outcome else {
+        panic!()
+    };
+    let engine = f.storage.read().unwrap();
+    let row = engine.get_record(transition.memory_id).unwrap().unwrap();
+    assert_eq!(
+        engine.get_vector(d.ns, row.vector_slot).unwrap().unwrap(),
+        vec![1., 0., 0., 0.]
+    );
+    drop(engine);
+    let rows = receipt_rows(&f);
+    let calls = clock.0.load(Ordering::SeqCst);
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    let replay_adapter = adapter(&f, p.clone(), clock.clone(), config);
+    let replay = replay_adapter
+        .store_native_single_by_profile_id(
+            key.clone(),
+            input.clone(),
+            Some(profile_id.clone()),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&out.receipt));
+    assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+    assert_eq!(receipt_rows(&f), rows);
+    for case in 0..4 {
+        let mut changed = input.clone();
+        let mut changed_id = profile_id.clone();
+        match case {
+            0 => changed.insert.memory.embedding = Some(vec![1., 0., 0., 0.]),
+            1 => changed.insert.memory.embedding = Some(vec![2., -0., 0., 0.]),
+            2 => changed_id = format!("ep1:{}", "0".repeat(64)),
+            _ => changed.check_duplicates = false,
+        }
+        assert!(matches!(
+            replay_adapter
+                .store_native_single_by_profile_id(
+                    key.clone(),
+                    changed,
+                    Some(changed_id),
+                    NativePolicyInputs::default(),
+                    None
+                )
+                .await,
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(receipt_rows(&f), rows);
+    }
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    let rows = receipt_rows(&f);
+    let id = d.profile.profile_id().unwrap();
+    for case in 0..7 {
+        let mut input = profile_wire_input(&d, false);
+        let mut selector = Some(id.clone());
+        match case {
+            0 => selector = None,
+            1 => input.insert.memory.embedding = None,
+            2 => input.insert.embedding_profile = Some(d.profile.clone()),
+            3 => selector = Some(format!("ep1:{}", "0".repeat(64))),
+            4 => selector = Some("not-a-profile".into()),
+            5 => input.insert.memory.embedding = Some(vec![0.; 4]),
+            _ => input.insert.memory.embedding = Some(vec![1.; 3]),
+        }
+        let error = a
+            .store_native_single_by_profile_id(
+                single_context(&f, &d, "bad-profile"),
+                input,
+                selector,
+                NativePolicyInputs::default(),
+                None,
+            )
+            .await
+            .err()
+            .unwrap();
+        if case == 3 {
+            assert!(matches!(error, StorageError::EmbeddingProfileMismatch));
+            assert_eq!(error.to_string(), "EMBEDDING_PROFILE_MISMATCH");
+        } else if case >= 5 {
+            assert!(
+                matches!(error, StorageError::CallerVectorInvalid(_)),
+                "{error:?}"
+            );
+        } else {
+            assert!(
+                matches!(error, StorageError::InvalidMutation(_)),
+                "{error:?}"
+            );
+        }
+        assert_eq!(state, f.storage.read().unwrap().control_state().unwrap());
+        assert_eq!(receipt_rows(&f), rows);
+        assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 1);
+    }
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    let generated = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "generated-profile"),
+            profile_wire_input(&d, true),
+            None,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(!generated.receipt.replayed);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_replays_genuine_before_fixture_bytes() {
+    let Ok(manifest) = std::env::var("RECALLD_READ_PROFILE_BEFORE") else {
+        return;
+    };
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(manifest).unwrap()).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("copied-native");
+    fn copy_dir(source: &std::path::Path, target: &std::path::Path) {
+        std::fs::create_dir(target).unwrap();
+        for entry in std::fs::read_dir(source).unwrap() {
+            let entry = entry.unwrap();
+            let to = target.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &to);
+            } else {
+                std::fs::copy(entry.path(), to).unwrap();
+            }
+        }
+    }
+    copy_dir(
+        std::path::Path::new(saved["path"].as_str().unwrap()),
+        &target,
+    );
+    let d = Data {
+        path: target,
+        ns: NamespaceId::new(saved["namespace"].as_u64().unwrap() as u32),
+        parent: MemoryId::from_uuid(saved["parent"].as_str().unwrap().parse().unwrap()),
+        profile: serde_json::from_value(saved["profile"].clone()).unwrap(),
+    };
+    let old: WriteReceipt = serde_json::from_value(saved["receipt"].clone()).unwrap();
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    let a = adapter(&f, p.clone(), clock.clone(), config);
+    let rows = receipt_rows(&f);
+    let state = f.storage.read().unwrap().control_state().unwrap();
+    let replay = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "profile-before"),
+            profile_wire_input(&d, false),
+            Some(d.profile.profile_id().unwrap()),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&old));
+    assert_eq!(
+        receipt_rows(&f),
+        rows,
+        "old receipt bytes must not be rewritten"
+    );
+    assert_eq!(state, f.storage.read().unwrap().control_state().unwrap());
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_profile_id_publication_error_preserves_exact_committed_receipt() {
+    single_publication_origin(2).await;
+}
+async fn single_publication_origin(contract: u32) {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let mut key = single_context(&f, &d, "profile-publication");
+    key.contract_version = contract;
+    let input = profile_wire_input(&d, false);
+    let id = Some(d.profile.profile_id().unwrap());
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let error = a
+        .store_native_single_by_profile_id(
+            key.clone(),
+            input.clone(),
+            id.clone(),
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .err()
+        .unwrap();
+    let StorageError::CommittedMutation { receipt, .. } = error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .lookup_operation(
+                receipt.store_id,
+                MutationScope::Namespace(d.ns),
+                receipt.operation_id
+            )
+            .unwrap(),
+        Some(*receipt.clone())
+    );
+    let rows = receipt_rows(&f);
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    let replay = a
+        .store_native_single_by_profile_id(key, input, id, NativePolicyInputs::default(), None)
+        .await
+        .unwrap();
+    assert_eq!(replay.receipt, expected_replay(&receipt));
+    assert_eq!(receipt_rows(&f), rows);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn batch_profile_id_actual_wire_preserves_identity_and_current_generation_readiness() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let a = adapter(&f, p.clone(), clock.clone(), Default::default());
+    let mut r = request(&f, "batch-id-selector");
+    r.expected_generation = Some(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+    );
+    r.items = vec![
+        json!({"summary":"profile ID supplied", "embedding":[2.,0.,0.,0.], "embeddingProfileId":d.profile.profile_id().unwrap()}),
+    ];
+    let original = r.items.clone();
+    let prepared = crate::mcp::batches::prepare_native_store(&r).unwrap();
+    let mut old = r.clone();
+    old.mutation_version = 2;
+    let historical = crate::mcp::batches::prepare(&old).unwrap();
+    assert!(matches!(
+        historical[0].plan,
+        crate::storage::batch::BatchItemPlan::Invalid { .. }
+    ));
+    assert_eq!(
+        prepared[0].plan.request_hash(),
+        crate::storage::control::request_hash(
+            &r.context(),
+            "batch_item_intent_v3",
+            &[&historical[0].plan.request_hash()]
+        )
+    );
+    let out = a.mutate_native_batch(r.clone()).await.unwrap();
+    assert!(out.outcome.all_ready(), "{out:?}");
+    let receipt = out.outcome.items[0].receipt.as_ref().unwrap().clone();
+    assert_eq!(r.items, original);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    let current = completion(&f)
+        .observe_readiness(std::time::Instant::now() + std::time::Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(current.derived.iter().all(|v| v.matches_canonical));
+    let rows = receipt_rows(&f);
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    config.graph.max_auto_links = usize::MAX;
+    let replay_adapter = adapter(&f, p.clone(), clock.clone(), config);
+    let replay = replay_adapter.mutate_native_batch(r.clone()).await.unwrap();
+    assert!(replay.outcome.all_ready(), "{replay:?}");
+    let replay_receipt = replay.outcome.items[0].receipt.as_ref().unwrap();
+    assert_eq!(replay_receipt.operation_id, receipt.operation_id);
+    assert_eq!(replay_receipt.outcome, receipt.outcome);
+    assert_eq!(receipt_rows(&f), rows);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    for replacement in [json!([4., 0., 0., 0.]), json!([2., -0.0, 0., 0.])] {
+        let mut changed = r.clone();
+        changed.items[0]["embedding"] = replacement;
+        let err = replay_adapter
+            .mutate_native_batch(changed)
+            .await
+            .unwrap_err();
+        assert_eq!(err.error.code, "IDEMPOTENCY_CONFLICT");
+        assert_eq!(receipt_rows(&f), rows);
+    }
+    let mut changed = r;
+    changed.items[0]["embeddingProfileId"] = json!(format!("ep1:{}", "0".repeat(64)));
+    assert_eq!(
+        replay_adapter
+            .mutate_native_batch(changed)
+            .await
+            .unwrap_err()
+            .error
+            .code,
+        "IDEMPOTENCY_CONFLICT"
+    );
+    assert_eq!(receipt_rows(&f), rows);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn batch_profile_id_mismatch_and_invalid_pair_are_retained_without_provider() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let mut r = request(&f, "batch-id-errors");
+    r.items = vec![
+        json!({"summary":"mismatch", "embedding":[1.,0.,0.,0.],"embeddingProfileId":format!("ep1:{}", "0".repeat(64))}),
+        json!({"summary":"null", "embedding":[1.,0.,0.,0.],"embeddingProfileId":null}),
+        json!({"summary":"unpaired", "embeddingProfileId":d.profile.profile_id().unwrap()}),
+    ];
+    let out = a.mutate_native_batch(r.clone()).await.unwrap();
+    assert_eq!(out.outcome.failed, 3);
+    assert_eq!(
+        out.outcome.items[0].error.as_ref().unwrap().code,
+        "CONFLICT"
+    );
+    assert_eq!(
+        out.outcome.items[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .field
+            .as_deref(),
+        Some("embeddingProfileId")
+    );
+    let (status, envelope) = crate::serialization::native_batch::response(Ok(out.clone()));
+    assert_eq!(status, 422);
+    let value = serde_json::to_value(envelope).unwrap();
+    assert_eq!(
+        value["data"]["outcomes"][0]["error"]["code"],
+        "EMBEDDING_PROFILE_MISMATCH"
+    );
+    let rows = receipt_rows(&f);
+    let replay = a.mutate_native_batch(r).await.unwrap();
+    assert_eq!(replay.outcome.items[0].error, out.outcome.items[0].error);
+    assert_eq!(receipt_rows(&f), rows);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn batch_profile_id_pending_reopen_uses_retained_binding_and_original_cas() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    let mut r = request(&f, "batch-id-pending");
+    r.expected_generation = Some(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+    );
+    r.items = vec![
+        json!({"summary":"retained profile", "embedding":[2.,0.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap()}),
+    ];
+    let plans = crate::mcp::batches::prepare_native_store(&r)
+        .unwrap()
+        .into_iter()
+        .map(|p| p.plan)
+        .collect::<Vec<_>>();
+    let retained = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .reserve_native_store_batch_with_work(&r.context(), &plans, None, None, || {
+            crate::graph::native_selection::freeze_settings(&Default::default())
+        })
+        .unwrap();
+    let child = retained.child(0).unwrap();
+    let resolved = match &plans[0] {
+        crate::storage::batch::BatchItemPlan::NativeStore {
+            input,
+            supplied_profile_id,
+            ..
+        } => crate::storage::batch::native::resolve_store_profile(
+            input,
+            supplied_profile_id.as_deref(),
+            &child.defaults,
+        )
+        .unwrap(),
+        _ => panic!(),
+    };
+    assert_eq!(resolved.insert.embedding_profile, Some(d.profile.clone()));
+    let root = f.close();
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    config.graph.max_auto_links = usize::MAX;
+    let a = adapter(&f, p.clone(), clock, config);
+    let out = a.mutate_native_batch(r).await.unwrap();
+    assert!(out.outcome.all_ready(), "{out:?}");
+    assert_eq!(
+        out.outcome.batch_operation_id,
+        retained.reservation_receipt.operation_id
+    );
+    assert_eq!(out.outcome.items[0].operation_id, Some(child.operation_id));
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    let current = completion(&f)
+        .observe_readiness(std::time::Instant::now() + std::time::Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(current.derived.iter().all(|v| v.matches_canonical));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_actual_single_provider_input() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let input = document_recipe_input(&d);
+    let result = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "document-single"),
+            input,
+            None,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        result.receipt.outcome,
+        MutationOutcome::NativeMemoryInsertedWithLinks { .. }
+    ));
+    assert_eq!(
+        *p.texts.lock().unwrap(),
+        vec!["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_actual_batch_provider_input() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let mut input = request(&f, "document-batch");
+    input.items = vec![json!({"summary":"header", "fullText":"body",
+        "tags":["raw", "entity/alice", "raw"], "entities":["Alice", "Bob"],
+        "topics":["Rust"], "emotions":["Calm"]})];
+    let result = a.run_batch(input).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    assert_eq!(
+        *p.texts.lock().unwrap(),
+        vec!["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
+    );
+}
+
+fn document_recipe_input(d: &Data) -> crate::storage::native_store::NativeStoreInput {
+    let mut input = profile_wire_input(d, true);
+    input.insert.memory.summary = "header".into();
+    input.insert.memory.full_text = Some("body".into());
+    input.insert.memory.tags = ["raw", "entity/alice", "raw"]
+        .into_iter()
+        .map(|v| crate::model::Tag::new(v).unwrap())
+        .collect();
+    input.insert.entities = vec!["Alice".into(), "Bob".into()];
+    input.insert.topics = vec!["Rust".into()];
+    input.insert.emotions = vec!["Calm".into()];
+    input
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_export_old_fixture() {
+    let Some(output) = std::env::var_os("RECALLD_DOCUMENT_FIXTURE_OUT") else {
+        return;
+    };
+    let output = PathBuf::from(output);
+    std::fs::create_dir_all(&output).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock, Default::default());
+    let single = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "document-single"),
+            document_recipe_input(&d),
+            None,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    let mut batch = request(&f, "document-batch");
+    batch.items = vec![json!({"summary":"header", "fullText":"body",
+        "tags":["raw", "entity/alice", "raw"], "entities":["Alice", "Bob"],
+        "topics":["Rust"], "emotions":["Calm"]})];
+    let result = a.run_batch(batch).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    // This artifact documents the actual old bug; it is not certified recipe output.
+    assert_eq!(*p.texts.lock().unwrap(), vec!["body", "body"]);
+    let receipts = json!({"single":single.receipt, "batch":result,
+        "namespaceId":d.ns, "parent":d.parent, "profile":d.profile});
+    std::fs::write(
+        output.join("receipts.json"),
+        serde_json::to_vec(&receipts).unwrap(),
+    )
+    .unwrap();
+    drop(a);
+    let _root = f.close();
+    crate::storage::logical_export::export_store(&d.path, &output.join("store.jsonl")).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_old_receipts_replay_without_provider_or_rewriting() {
+    let root = tempfile::tempdir().unwrap();
+    let export = root.path().join("old.jsonl");
+    std::fs::write(
+        &export,
+        include_bytes!("fixtures/document-recipe-legacy.jsonl"),
+    )
+    .unwrap();
+    let path = root.path().join("imported");
+    crate::storage::logical_export::import_store(&export, &path).unwrap();
+    let historical: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "fixtures/document-recipe-legacy-receipts.json"
+    ))
+    .unwrap();
+    let d = Data {
+        path,
+        ns: serde_json::from_value(historical["namespaceId"].clone()).unwrap(),
+        parent: serde_json::from_value(historical["parent"].clone()).unwrap(),
+        profile: serde_json::from_value(historical["profile"].clone()).unwrap(),
+    };
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.auto_link_threshold = f64::NAN;
+    let a = adapter(&f, p.clone(), clock.clone(), config);
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let rows = receipt_rows(&f);
+    let original: WriteReceipt = serde_json::from_value(historical["single"].clone()).unwrap();
+    let result = a
+        .store_native_single_by_profile_id(
+            single_context(&f, &d, "document-single"),
+            document_recipe_input(&d),
+            None,
+            NativePolicyInputs::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.receipt, expected_replay(&original));
+    let mut batch = request(&f, "document-batch");
+    batch.items = vec![json!({"summary":"header", "fullText":"body",
+        "tags":["raw", "entity/alice", "raw"], "entities":["Alice", "Bob"],
+        "topics":["Rust"], "emotions":["Calm"]})];
+    let result = a.run_batch(batch).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    let child: WriteReceipt =
+        serde_json::from_value(historical["batch"]["items"][0]["receipt"].clone()).unwrap();
+    assert_eq!(result.items[0].receipt, Some(expected_replay(&child)));
+    assert_eq!(receipt_rows(&f), rows);
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+    assert!(p.texts.lock().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_offline_actual_api1_and_api2() {
+    for api in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let d = fixture(root.path());
+        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+        let mut session = open(&d, clock);
+        let p = provider(&d);
+        let mut key = ctx(&session, &d, "offline-document");
+        key.contract_version = api;
+        let mut input = document_recipe_input(&d).insert;
+        input.memory.full_text = None;
+        input.entities.push("José".into());
+        let receipt = session
+            .insert_generated(&key, scope(&d), &input, p.as_ref())
+            .await
+            .unwrap();
+        assert!(matches!(
+            receipt.outcome,
+            MutationOutcome::NativeMemoryInserted { .. }
+        ));
+        assert_eq!(
+            *p.texts.lock().unwrap(),
+            vec!["header raw entity/alice raw entity/bob entity/josé topic/rust emotion/calm"]
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_document_recipe_plain_batch_with_explicit_auxiliary_disable() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.autolink_enabled = false;
+    let a = adapter(&f, p.clone(), clock, config);
+    let mut input = request(&f, "plain-document-batch");
+    input.mutation_version = 2;
+    input.items = vec![json!({"summary":"header", "fullText":"body",
+        "tags":["raw", "entity/alice", "raw"], "entities":["Alice", "Bob"],
+        "topics":["Rust"], "emotions":["Calm"], "checkDuplicates":false})];
+    let result = a.run_batch(input).await.unwrap();
+    assert!(result.all_ready(), "{result:?}");
+    assert_eq!(
+        *p.texts.lock().unwrap(),
+        vec!["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
+    );
 }
 
 #[path = "owned_ids_producer_tests.rs"]
