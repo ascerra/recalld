@@ -234,6 +234,17 @@ impl MetadataStore {
         policy: &NativePolicyInputs,
         live_only: bool,
     ) -> Result<CapturedLifecycle, StorageError> {
+        self.capture_policy_at(read, scope, ids, policy, live_only, true)
+    }
+    pub(super) fn capture_policy_at(
+        &self,
+        read: &redb::ReadTransaction,
+        scope: &LifecycleScope,
+        ids: &[MemoryId],
+        policy: &NativePolicyInputs,
+        live_only: bool,
+        require_binding: bool,
+    ) -> Result<CapturedLifecycle, StorageError> {
         let state = self.native_control_at(read)?;
         let ns = {
             let table = read.open_table(NAMESPACE_TABLE)?;
@@ -249,7 +260,11 @@ impl MetadataStore {
             .schema
             .as_ref()
             .ok_or_else(|| invalid("native namespace schema missing"))?;
-        let resolved = policy.resolve(&ns)?;
+        let resolved = if require_binding {
+            policy.resolve(&ns)?
+        } else {
+            policy.resolve_unbound(&ns)?
+        };
         let mut records = Vec::new();
         let table = read.open_table(META_TABLE)?;
         for id in ids {
@@ -290,6 +305,25 @@ impl MetadataStore {
         ),
         StorageError,
     > {
+        self.check_native_policy_capture(tx, scope, capture, policy, live_only, true)
+    }
+    pub(super) fn check_native_policy_capture(
+        &self,
+        tx: &redb::WriteTransaction,
+        scope: &LifecycleScope,
+        capture: &CapturedLifecycle,
+        policy: &NativePolicyInputs,
+        live_only: bool,
+        require_binding: bool,
+    ) -> Result<
+        (
+            ControlState,
+            NamespaceConfig,
+            crate::decay::lifecycle::EffectiveLifecyclePolicy,
+            HashMap<MemoryId, DiskRecord>,
+        ),
+        StorageError,
+    > {
         let state = control::read_control(tx)?;
         if state.store_id != capture.generation.store_id {
             return Err(StorageError::StoreLineageMismatch);
@@ -307,7 +341,11 @@ impl MetadataStore {
             .schema
             .as_ref()
             .ok_or_else(|| invalid("native namespace schema missing"))?;
-        let resolved = policy.resolve(&ns)?;
+        let resolved = if require_binding {
+            policy.resolve(&ns)?
+        } else {
+            policy.resolve_unbound(&ns)?
+        };
         if schema.lifecycle_version != capture.version
             || schema.policy_revision != capture.revision
             || policy_hash(&ns, &resolved)? != capture.policy_hash
@@ -605,7 +643,7 @@ impl MetadataStore {
         } else {
             MutationOutcome::LifecycleExposureRecorded { transition }
         };
-        let receipt = control::record_receipt(&tx, ctx, hash, outcome)?;
+        let receipt = self.record_receipt(&tx, ctx, hash, outcome)?;
         Ok((tx, Some(receipt)))
     }
 }

@@ -70,10 +70,42 @@ impl FtsIndex {
     /// Drop all derived rows before a recovery rebuild, including deleted IDs.
     pub(crate) fn clear(&self) -> Result<(), FtsError> {
         let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM fts_content", [])?;
+        // Contentless row DELETEs retain aggregate corpus statistics in the
+        // bundled SQLite. Reset the whole index before canonical rehydration.
+        tx.execute(
+            "INSERT INTO fts_content(fts_content) VALUES('delete-all')",
+            [],
+        )?;
         tx.execute("DELETE FROM id_map", [])?;
         tx.commit()?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rebuild_statistics(&self) -> serde_json::Value {
+        self.conn.execute_batch("CREATE VIRTUAL TABLE IF NOT EXISTS temp.rebuild_vocab USING fts5vocab(main, fts_content, row)").unwrap();
+        let scalar = |sql| {
+            self.conn
+                .query_row(sql, [], |r| r.get::<_, i64>(0))
+                .unwrap()
+        };
+        let totals: String = self
+            .conn
+            .query_row(
+                "SELECT hex(block) FROM fts_content_data WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let terms: Vec<(String, i64, i64)> = self
+            .conn
+            .prepare("SELECT term, doc, cnt FROM rebuild_vocab ORDER BY term")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        serde_json::json!({"sqlite": rusqlite::version(), "id_map_rows": scalar("SELECT count(*) FROM id_map"), "live_fts_rows": scalar("SELECT count(*) FROM fts_content"), "docsize_rows": scalar("SELECT count(*) FROM fts_content_docsize"), "totals_hex": totals, "terms": terms})
     }
 
     /// Open or create the FTS5 index database.
@@ -234,8 +266,11 @@ impl FtsIndex {
             },
         )?;
 
+        let instrumented = crate::performance::enabled();
+        let mut examined = 0usize;
         let mut out = Vec::with_capacity(k);
         for result in results {
+            examined += usize::from(instrumented);
             let (uuid_bytes, score) = result?;
             if uuid_bytes.len() == 16 {
                 let bytes: [u8; 16] = uuid_bytes.try_into().unwrap();
@@ -244,6 +279,12 @@ impl FtsIndex {
             }
         }
 
+        crate::performance::event!(
+            kind = "fts_legacy_rows",
+            examined,
+            returned = out.len(),
+            sqlite_internal_work_known = false
+        );
         Ok(out)
     }
 
@@ -312,6 +353,16 @@ impl FtsIndex {
         out.coverage.budget_exhausted =
             !out.coverage.exhausted && out.coverage.examined == MAX_FTS_EXAMINED;
         out.coverage.candidate_limited |= out.coverage.budget_exhausted;
+        crate::performance::event!(
+            kind = "fts_rows",
+            examined = out.coverage.examined,
+            eligible = out.coverage.eligible,
+            admitted = out.coverage.admitted,
+            pages = out.coverage.pages,
+            exhausted = out.coverage.exhausted,
+            budget_exhausted = out.coverage.budget_exhausted,
+            sqlite_internal_work_known = false
+        );
         Ok(out)
     }
 
@@ -422,6 +473,91 @@ mod tests {
 
     fn test_ns_id_2() -> NamespaceId {
         NamespaceId::new(2)
+    }
+
+    #[test]
+    fn repeated_rehydrate_preserves_multi_term_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = FtsIndex::new(dir.path()).unwrap();
+        let docs = [
+            (
+                MemoryId::from_bytes(1u128.to_be_bytes()),
+                "",
+                "alpha filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler",
+            ),
+            (
+                MemoryId::from_bytes(2u128.to_be_bytes()),
+                "beta beta beta",
+                "",
+            ),
+            (MemoryId::from_bytes(3u128.to_be_bytes()), "beta", ""),
+        ];
+        let mut rounds = Vec::new();
+        for round in 0..3 {
+            if round != 0 {
+                index.clear().unwrap();
+            }
+            for (id, summary, body) in docs {
+                index
+                    .add(test_ns_id(), id, summary, Some(body), &[])
+                    .unwrap();
+            }
+            let results = index.search(test_ns_id(), "alpha beta", 10).unwrap();
+            eprintln!(
+                "MULTI_TERM_REBUILD round={round} stats={} results={results:?}",
+                index.rebuild_statistics()
+            );
+            rounds.push(results);
+        }
+        let ids = |results: &Vec<(MemoryId, f32)>| results.iter().map(|r| r.0).collect::<Vec<_>>();
+        assert_eq!(ids(&rounds[0]), ids(&rounds[1]));
+        assert_eq!(rounds[0], rounds[2]);
+    }
+
+    #[test]
+    fn repeated_clear_rehydrate_preserves_exact_fts_scores() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = FtsIndex::new(dir.path()).unwrap();
+        let docs = [
+            (
+                MemoryId::from_bytes(1u128.to_be_bytes()),
+                "alpha alpha beta",
+                "",
+            ),
+            (
+                MemoryId::from_bytes(2u128.to_be_bytes()),
+                "beta",
+                "alpha beta gamma delta epsilon zeta",
+            ),
+            (
+                MemoryId::from_bytes(3u128.to_be_bytes()),
+                "gamma delta",
+                "beta",
+            ),
+        ];
+        let mut rounds = Vec::new();
+        for round in 0..4 {
+            if round != 0 {
+                index.clear().unwrap();
+            }
+            for (id, summary, body) in docs {
+                index
+                    .add(test_ns_id(), id, summary, Some(body), &[])
+                    .unwrap();
+            }
+            let queries: Vec<_> = ["alpha", "beta", "alpha gamma"]
+                .into_iter()
+                .map(|q| (q, index.search(test_ns_id(), q, 10).unwrap()))
+                .collect();
+            eprintln!(
+                "FTS_REBUILD round={round} stats={} results={queries:?}",
+                index.rebuild_statistics()
+            );
+            rounds.push(queries);
+        }
+        for result in &rounds[1..] {
+            assert_eq!(&rounds[0], result);
+        }
     }
 
     #[test]

@@ -12,10 +12,10 @@ impl crate::time::Clock for NoClock {
         panic!("purge sampled clock")
     }
 }
-fn open(path: &Path) -> NativeLifecycleSession {
+pub(super) fn open(path: &Path) -> NativeLifecycleSession {
     NativeLifecycleSession::open(path, NativePolicyInputs::default(), Arc::new(NoClock)).unwrap()
 }
-fn fixture(root: &Path) -> (PathBuf, NamespaceId, Vec<MemoryId>) {
+pub(super) fn fixture(root: &Path) -> (PathBuf, NamespaceId, Vec<MemoryId>) {
     let source = root.join("legacy");
     let target = root.join("native");
     let mut e = RedbStorageEngine::open(&source).unwrap();
@@ -234,6 +234,7 @@ fn native_purge_mixed_chunks_restart_replay_policy_and_ledger() {
 async fn native_purge_complete_export_import_backup_fork_preserves_witness() {
     let root = tempfile::tempdir().unwrap();
     let (path, id, _) = fixture(root.path());
+    crate::test_support::explicitly_adopt_inherited_policy(&path, id, 1., 2000);
     let mut s = open(&path);
     policy(&mut s, id);
     let memory = s
@@ -1008,7 +1009,8 @@ async fn native_purge_accepted_unknown_child_preserves_reserved_id_and_reopens()
         .await
         .unwrap_err();
     assert!(
-        matches!(error,StorageError::CommitOutcomeUnknown{operation_id,..} if Some(operation_id)==start.next_operation_id)
+        matches!(error,StorageError::CommitOutcomeUnknown{operation_id,..} if Some(operation_id)==start.next_operation_id),
+        "unexpected outcome: {error:?}"
     );
     let committed = fx
         .storage
@@ -1212,3 +1214,6 @@ async fn native_purge_cancelled_waiter_keeps_worker_publication_lease() {
         "cancelled waiter released publication lease before blocked worker completed"
     );
 }
+
+#[path = "native_purge_tests/request_context.rs"]
+mod request_context;

@@ -1,0 +1,13 @@
+{
+  "currentAction": {
+    "arguments": {
+      "id": "01a1dcec-b775-79a3-9ff3-06469b0497b6",
+      "namespace": "default"
+    },
+    "tag": "blocked-forget",
+    "tool": "forget_memory"
+  },
+  "deliveryOrdinal": 113,
+  "phase": "action",
+  "startId": 113
+}

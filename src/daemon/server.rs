@@ -58,15 +58,18 @@ impl DaemonServer {
             .with_clock(system.clock().clone())
             .with_query_engine(system.query_engine().clone()),
         );
-        let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(McpNamespaceAdapter::new(
-            system.storage().clone(),
-            system.cache().clone(),
-            system.vector_index().clone(),
-            system.fts_index().clone(),
-            system.entity_index().clone(),
-            system.graph().clone(),
-            tz,
-        ));
+        let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(
+            McpNamespaceAdapter::new(
+                system.storage().clone(),
+                system.cache().clone(),
+                system.vector_index().clone(),
+                system.fts_index().clone(),
+                system.entity_index().clone(),
+                system.graph().clone(),
+                tz,
+            )
+            .with_clock(system.clock().clone()),
+        );
         let health: Arc<dyn HealthChecker> =
             Arc::new(McpHealthAdapter::new(system.storage().clone()));
 
@@ -196,7 +199,23 @@ async fn handle_connection(
 
     loop {
         tokio::select! {
-            msg = read_framed_message(&mut reader, MAX_MESSAGE_SIZE) => {
+            msg = read_frame(&mut reader, MAX_MESSAGE_SIZE) => {
+                // EOF is connection termination, not another sampled request.
+                if let Err(e @ FrameError::Closed) = &msg {
+                    tracing::warn!(%e, "client read error, closing connection");
+                    break;
+                }
+                let operation = if msg.is_ok() { "daemon.rpc" } else { "daemon.frame_error" };
+                let outcome = crate::performance::measure_transport(operation, async {
+                let mut timeline = crate::performance::Timeline::new();
+                let msg = msg.and_then(|buf| {
+                    crate::performance::event!(kind = "transport_input", transport = "daemon", source_bytes = buf.len(), framing_bytes = 4);
+                    let decode = crate::performance::Timer::new("daemon.decode");
+                    let result = serde_json::from_slice::<DaemonRequest>(&buf).map_err(|e| FrameError::Malformed(e.to_string()));
+                    decode.outcome(result.is_ok());
+                    result
+                });
+                timeline.mark("transport.decode");
                 match msg {
                     Ok(request) => {
                         frame_error_strikes = 0;
@@ -206,6 +225,7 @@ async fn handle_connection(
                             peer_limit = peer_frame_limit(&request.params);
                         }
 
+                        crate::performance::event!(kind = "transport_operation", operation = if method == "store_memory" { "store_memory" } else { "other" });
                         let response = if matches!(method.as_str(),"feedback_api1_v1"|"forget_api1_v1") && peer_limit<MAX_MESSAGE_SIZE {
                             Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
                         } else { dispatch(
@@ -213,6 +233,8 @@ async fn handle_connection(
                             &request.method, request.params,
                         ).await };
 
+                        timeline.mark("transport.dispatch");
+                        crate::performance::event!(kind = "transport_rpc_result", success = response.is_ok());
                         let resp = match response {
                             Ok(result) => DaemonResponse::success(request.id, result),
                             Err(e) => DaemonResponse::error(request.id, DaemonRpcError::from(&e)),
@@ -224,6 +246,7 @@ async fn handle_connection(
                             // would desynchronize the client's stream, so send an
                             // error that does fit instead.
                             Err(FrameError::TooLarge { size, limit }) => {
+                                crate::performance::event!(kind = "transport_response_fallback", reason = "too_large");
                                 tracing::warn!(
                                     method = %method, size, limit,
                                     "response exceeds the peer frame limit, replying with an error"
@@ -243,12 +266,12 @@ async fn handle_connection(
                                     .await
                                     .is_err()
                                 {
-                                    break;
+                                    return Err(());
                                 }
                             }
                             Err(e) => {
                                 tracing::warn!(%e, "client write error, closing connection");
-                                break;
+                                return Err(());
                             }
                         }
 
@@ -258,7 +281,7 @@ async fn handle_connection(
 
                         if method == "shutdown" {
                             let _ = shutdown_tx.send(true);
-                            break;
+                            return Ok(false);
                         }
                     }
                     Err(e) => match action_for_frame_error(&e) {
@@ -274,7 +297,7 @@ async fn handle_connection(
                             );
                             let resp = DaemonResponse::error(UNATTRIBUTED_ID, err);
                             if write_framed_message(&mut writer, &resp, peer_limit).await.is_err() {
-                                break;
+                                return Err(());
                             }
                             // Answered, then hung up: a peer that only ever
                             // sends garbage is not worth a connection slot.
@@ -284,15 +307,19 @@ async fn handle_connection(
                                     "client sent {MAX_CONSECUTIVE_FRAME_ERRORS} consecutive \
                                      unusable frames, closing connection"
                                 );
-                                break;
+                                return Err(());
                             }
                         }
                         ConnectionAction::Close => {
                             tracing::warn!(%e, "client read error, closing connection");
-                            break;
+                            return Err(());
                         }
                     },
                 }
+                timeline.mark("transport.serialize_write_flush");
+                Ok::<_, ()>(true)
+                }).await;
+                if !matches!(outcome, Ok(true)) { break; }
             }
             _ = shutdown_rx.changed() => break,
         }
@@ -707,6 +734,7 @@ mod tests {
             tx.clone(),
         ));
         let mut input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -791,6 +819,7 @@ mod tests {
         let adapter = fx.storage_adapter();
         let store_id = fx.storage.read().unwrap().control_state().unwrap().store_id;
         let mut input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -877,6 +906,7 @@ mod tests {
             .fail_batch_commit
             .store(3, std::sync::atomic::Ordering::SeqCst);
         let input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -1332,6 +1362,46 @@ mod read_only_tests;
 #[path = "scope_tests.rs"]
 mod scope_tests;
 
+/// Exercise the actual framed connection handler against isolated fixture stores.
+#[cfg(test)]
+pub(crate) async fn native_batch_test_rpc(
+    storage: Arc<dyn BridgeStorageEngine>,
+    input: &crate::storage::batch::BatchInput,
+) -> DaemonResponse {
+    let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(handle_connection(
+        stub.clone(),
+        storage,
+        stub.clone(),
+        stub,
+        server,
+        Arc::new(AtomicU32::new(1)),
+        Arc::new(AtomicI64::new(0)),
+        rx,
+        tx.clone(),
+    ));
+    write_framed_request(
+        &mut client,
+        &DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            method: "mutate_batch".into(),
+            params: serde_json::to_value(input).unwrap(),
+        },
+        LEGACY_MAX_MESSAGE_SIZE,
+    )
+    .await
+    .unwrap();
+    let response = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+        .await
+        .unwrap();
+    tx.send(true).unwrap();
+    drop(client);
+    task.await.unwrap();
+    response
+}
 #[cfg(test)]
 #[path = "batch_label_tests.rs"]
 mod batch_label_tests;
@@ -1339,6 +1409,10 @@ mod batch_label_tests;
 #[cfg(test)]
 #[path = "coverage_tests.rs"]
 mod coverage_tests;
+
+#[cfg(test)]
+#[path = "producer_tests.rs"]
+mod producer_tests;
 
 #[cfg(test)]
 pub(crate) async fn native_lifecycle_test_remote(

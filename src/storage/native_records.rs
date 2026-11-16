@@ -778,30 +778,17 @@ impl super::native_lifecycle::NativeLifecycleSession {
                 profile: None,
             }
         } else {
-            let profile = provider.profile().ok_or_else(|| {
-                StorageError::ProviderVectorUnavailable("provider identity missing".into())
-            })?;
-            crate::embedding::profile::require_compatible(&intent.namespace, &profile)
-                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
-            if provider.dimensions() != intent.namespace.embedding_dim as usize {
-                return Err(StorageError::ProviderVectorUnavailable(
-                    "provider dimension differs".into(),
-                ));
-            }
-            let values = provider
-                .embed(
-                    input
-                        .memory
-                        .full_text
-                        .as_deref()
-                        .unwrap_or(&input.memory.summary),
-                )
-                .await
-                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
-            crate::embedding::runtime::GeneratedEmbedding {
-                values,
-                profile: Some(profile),
-            }
+            crate::embedding::runtime::generate_native(
+                provider,
+                &intent.namespace,
+                input
+                    .memory
+                    .full_text
+                    .as_deref()
+                    .unwrap_or(&input.memory.summary),
+            )
+            .await
+            .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?
         };
         self.engine.insert_native_record(
             ctx,
@@ -811,5 +798,21 @@ impl super::native_lifecycle::NativeLifecycleSession {
             self.clock.as_ref(),
             Some(root),
         )
+    }
+}
+
+/// Transport admission for auxiliary store work that has no native canonical
+/// proof/workflow yet. Historical receipt replay must precede this check.
+/// The flag covers semantic, entity and temporal linking in the legacy producer.
+pub(crate) fn native_store_execution_blocker(
+    config: &crate::config::RecalldConfig,
+    check_duplicates: bool,
+) -> Option<&'static str> {
+    if config.graph.autolink_enabled {
+        Some("graph.autolinkEnabled")
+    } else if check_duplicates {
+        Some("checkDuplicates")
+    } else {
+        None
     }
 }

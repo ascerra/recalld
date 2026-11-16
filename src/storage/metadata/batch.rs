@@ -103,8 +103,27 @@ pub(crate) fn validate_existing(
         let (key, bytes) = row?;
         let p: BatchProgress = control::decode(bytes.value())?;
         let parent = &p.reservation_receipt;
-        if p.version != 1
-            || parent.store_id != state.store_id
+        let latest = p
+            .bookkeeping_receipts
+            .iter()
+            .map(|r| r.committed_generation)
+            .chain(p.items.iter().filter_map(|item| match &item.state {
+                BatchItemState::Ok { receipt } => Some(receipt.committed_generation),
+                _ => None,
+            }))
+            .fold(parent.committed_generation, std::cmp::max);
+        let permitted_origin = crate::storage::lineage::permits_origin(
+            tx,
+            state,
+            control::GenerationRef {
+                store_id: parent.store_id,
+                generation: latest,
+            },
+        )? && (parent.store_id == state.store_id || p.unresolved() == 0);
+        if !matches!(p.version, 1 | 2 | 3)
+            || p.version == 3 && p.kind != BatchKind::Insert
+            || matches!(p.version, 2 | 3) && state.control_schema_version != 2
+            || !permitted_origin
             || parent.replayed
             || key.value() != parent.operation_id.as_bytes()
             || p.items.is_empty()
@@ -133,12 +152,29 @@ pub(crate) fn validate_existing(
                 && item_count as usize == p.items.len()
                 && caller_hash == p.caller_hash
                 && caller_hash
-                    == batch::caller_hash(
+                    == batch::caller_hash_version(
+                        p.version,
                         p.kind,
                         &p.items.iter().map(|i| i.request_hash).collect::<Vec<_>>(),
                     )?
-                && resolution_hash == batch::resolution_hash(&p.items)? => {}
+                && resolution_hash == batch::resolution_hash_version(p.version, &p.items)? => {}
             _ => return Err(invalid("reservation disagrees with ordered manifest")),
+        }
+        if matches!(p.version, 2 | 3) {
+            let ctx = MutationContext {
+                contract_version: 2,
+                ..catalog_context()
+            };
+            let stored = receipts.get(&parent_key).unwrap();
+            if stored.request_hash
+                != control::request_hash(
+                    &ctx,
+                    batch::reservation_domain(p.version)?,
+                    &[&p.caller_hash],
+                )
+            {
+                return Err(invalid("native reservation hash mismatch"));
+            }
         }
         claimed.insert(parent.operation_id);
         let mut rejections = std::collections::HashMap::new();
@@ -164,9 +200,25 @@ pub(crate) fn validate_existing(
             };
             if batch_operation_id != parent.operation_id
                 || index as usize >= p.items.len()
-                || rejections.insert(index, error).is_some()
+                || rejections
+                    .insert(index, (error, r.committed_generation))
+                    .is_some()
             {
                 return Err(invalid("duplicate or foreign rejection"));
+            }
+            if matches!(p.version, 2 | 3) {
+                let ctx = MutationContext {
+                    contract_version: 2,
+                    ..catalog_context()
+                };
+                let expected = control::request_hash(
+                    &ctx,
+                    batch::rejection_domain(p.version)?,
+                    &[parent.operation_id.as_bytes(), &index.to_be_bytes()],
+                );
+                if receipts.get(&key).unwrap().request_hash != expected {
+                    return Err(invalid("native bookkeeping hash mismatch"));
+                }
             }
             claimed.insert(r.operation_id);
         }
@@ -198,6 +250,15 @@ pub(crate) fn validate_existing(
             if let Some(d) = &item.defaults {
                 crate::model::validation::validate_namespace_name(&d.namespace_name)
                     .map_err(|_| invalid("invalid resolved namespace name"))?;
+                if matches!(p.version, 2 | 3) != d.native.is_some() {
+                    return Err(invalid("defaults/version mismatch"));
+                }
+                if let Some(native) = &d.native {
+                    native.validate(d.embedding_dim, p.kind)?;
+                    if (p.version == 3) != native.store_settings.is_some() {
+                        return Err(invalid("store settings/version mismatch"));
+                    }
+                }
                 if d.namespace_id.is_unset()
                     || !(1..=8192).contains(&d.embedding_dim)
                     || !f32::from_bits(d.initial_stability_bits).is_finite()
@@ -225,13 +286,15 @@ pub(crate) fn validate_existing(
                     {
                         return Err(invalid("child receipt mismatch"));
                     }
-                    if !matches!(
-                        (p.kind, &receipt.outcome),
-                        (BatchKind::Insert, MutationOutcome::MemoryInserted { .. })
-                            | (BatchKind::Forget, MutationOutcome::MemoryTombstoned { .. })
-                    ) {
+                    if !batch::native::child_matches(p.version, p.kind, &receipt.outcome) {
                         return Err(invalid("child kind mismatch"));
                     }
+                    batch::native::validate_outcome(
+                        item.defaults
+                            .as_ref()
+                            .ok_or_else(|| invalid("child defaults missing"))?,
+                        &receipt.outcome,
+                    )?;
                     last_child_generation = receipt.committed_generation;
                 }
                 BatchItemState::Error { error } => {
@@ -239,9 +302,20 @@ pub(crate) fn validate_existing(
                         || child.is_some()
                         || item.resolution_error.is_some() && rejections.contains_key(&item.index)
                         || !(item.resolution_error.as_ref() == Some(error)
-                            || rejections.get(&item.index).is_some_and(|e| *e == error))
+                            || rejections
+                                .get(&item.index)
+                                .is_some_and(|(e, _)| *e == error))
                     {
                         return Err(invalid("final error without matching bookkeeping"));
+                    }
+                    // Reservation-time invalid items have no child generation.
+                    // Every later final outcome, including errors, must follow
+                    // the input order in the same canonical generation stream.
+                    if let Some((_, generation)) = rejections.get(&item.index) {
+                        if *generation <= last_child_generation {
+                            return Err(invalid("final outcome generation order"));
+                        }
+                        last_child_generation = *generation;
                     }
                     validate_error(error)?;
                 }
@@ -343,9 +417,49 @@ impl MetadataStore {
         parent: Option<Uuid>,
         work: Option<&WorkTicket>,
     ) -> Result<BatchProgress, StorageError> {
+        self.reserve_batch_version_with_work(
+            ctx,
+            ctx.contract_version,
+            kind,
+            plans,
+            parent,
+            work,
+            || Ok(None),
+        )
+    }
+
+    pub(crate) fn reserve_native_store_batch_with_work(
+        &self,
+        ctx: &MutationContext,
+        plans: &[BatchItemPlan],
+        parent: Option<Uuid>,
+        work: Option<&WorkTicket>,
+        settings: impl FnOnce()
+            -> Result<crate::storage::native_store::NativeStoreSettings, StorageError>,
+    ) -> Result<BatchProgress, StorageError> {
+        self.reserve_batch_version_with_work(ctx, 3, BatchKind::Insert, plans, parent, work, || {
+            settings().map(Some)
+        })
+    }
+
+    fn reserve_batch_version_with_work(
+        &self,
+        ctx: &MutationContext,
+        version: u32,
+        kind: BatchKind,
+        plans: &[BatchItemPlan],
+        parent: Option<Uuid>,
+        work: Option<&WorkTicket>,
+        settings: impl FnOnce() -> Result<
+            Option<crate::storage::native_store::NativeStoreSettings>,
+            StorageError,
+        >,
+    ) -> Result<BatchProgress, StorageError> {
         ctx.validate()?;
         if ctx.scope != MutationScope::Catalog
-            || ctx.contract_version != 1
+            || ctx.contract_version != batch::contract_version(version)?
+            || version == 3 && kind != BatchKind::Insert
+            || ctx.contract_version == 2 && ctx.expected_generation.is_some()
             || plans.is_empty()
             || plans.len() > crate::model::constants::MAX_BATCH_MEMORIES
         {
@@ -353,15 +467,20 @@ impl MetadataStore {
                 "legacy batch requires catalog scope and bounded nonempty items".into(),
             ));
         }
-        let caller_hash = batch::caller_hash(
+        let caller_hash = batch::caller_hash_version(
+            version,
             kind,
             &plans
                 .iter()
                 .map(BatchItemPlan::request_hash)
                 .collect::<Vec<_>>(),
         )?;
-        let hash = control::request_hash(ctx, "batch_reserve_v1", &[&caller_hash]);
-        let _guard = self.mutation_guard_with_work(work)?;
+        let hash = control::request_hash(ctx, batch::reservation_domain(version)?, &[&caller_hash]);
+        let _guard = if ctx.contract_version == 2 {
+            self.native_guard_with_work(work)?
+        } else {
+            self.mutation_guard_with_work(work)?
+        };
         let tx = self.db.begin_write()?;
         if let Some(parent) = parent {
             if parent.is_nil() || ctx.store_id.is_none() || ctx.idempotency_key.is_some() {
@@ -380,7 +499,8 @@ impl MetadataStore {
             let receipt = receipts
                 .get(key.as_slice())?
                 .ok_or_else(|| invalid("reservation receipt missing"))?;
-            if p.kind != kind
+            if p.version != version
+                || p.kind != kind
                 || p.caller_hash != caller_hash
                 || control::validate_receipt(receipt.value())?.request_hash != hash
             {
@@ -391,24 +511,32 @@ impl MetadataStore {
         }
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             let mut p = load(&tx, receipt.operation_id)?;
-            if p.kind != kind || p.caller_hash != caller_hash {
+            if p.version != version || p.kind != kind || p.caller_hash != caller_hash {
                 return Err(StorageError::IdempotencyConflict);
             }
             p.reservation_receipt.replayed = true;
             return Ok(p);
+        }
+        // Do not inspect mutable settings until matching reservation replay failed.
+        let settings = settings()?;
+        if (version == 3) != settings.is_some() {
+            return Err(invalid("store settings/version mismatch"));
+        }
+        if let Some(settings) = &settings {
+            settings.validate()?;
         }
         let mut items = Vec::with_capacity(plans.len());
         for (index, plan) in plans.iter().enumerate() {
             let mut item = BatchItem {
                 index: index as u32,
                 request_hash: plan.request_hash(),
-                operation_id: Uuid::new_v4(),
+                operation_id: self.ids.uuid(crate::storage::ids::IdKind::Operation)?,
                 defaults: None,
                 canonical_hash: None,
                 resolution_error: None,
                 state: BatchItemState::NotAttempted {},
             };
-            match self.resolve_batch_item(&tx, kind, plan)? {
+            match self.resolve_batch_item(&tx, version, kind, plan, settings.as_ref())? {
                 Ok((defaults, hash)) => {
                     item.defaults = Some(defaults);
                     item.canonical_hash = Some(hash);
@@ -421,7 +549,7 @@ impl MetadataStore {
             }
             items.push(item);
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -429,12 +557,12 @@ impl MetadataStore {
                 batch_kind: kind,
                 item_count: items.len() as u32,
                 caller_hash,
-                resolution_hash: batch::resolution_hash(&items)?,
+                resolution_hash: batch::resolution_hash_version(version, &items)?,
             },
         )?;
         tx.open_table(SCHEMA)?.insert("version", 1)?;
         let p = BatchProgress {
-            version: 1,
+            version,
             kind,
             caller_hash,
             reservation_receipt: receipt.clone(),
@@ -449,13 +577,20 @@ impl MetadataStore {
     fn resolve_batch_item(
         &self,
         tx: &redb::WriteTransaction,
+        version: u32,
         kind: BatchKind,
         plan: &BatchItemPlan,
+        store_settings: Option<&crate::storage::native_store::NativeStoreSettings>,
     ) -> Result<Result<(BatchDefaults, [u8; 32]), BatchError>, StorageError> {
         (|| -> Result<_, StorageError> {
             let config = match (kind, plan) {
                 (_, BatchItemPlan::Invalid { error, .. }) => return Ok(Err(error.clone())),
-                (BatchKind::Insert, BatchItemPlan::Insert { namespace, .. }) => {
+                (
+                    BatchKind::Insert,
+                    BatchItemPlan::Insert { namespace, .. }
+                    | BatchItemPlan::NativeInsert { namespace, .. }
+                    | BatchItemPlan::NativeStore { namespace, .. },
+                ) => {
                     let mut found = None;
                     for row in tx.open_table(NAMESPACE_TABLE)?.iter()? {
                         let (_, value) = row?;
@@ -483,38 +618,80 @@ impl MetadataStore {
                 }
                 _ => return Ok(Err(BatchError::new("INVALID_INPUT"))),
             };
-            if config.schema.is_some() {
+            if matches!(version, 2 | 3) != config.schema.is_some() {
                 return Ok(Err(BatchError::new("INVALID_INPUT")));
             }
-            let ctx = MutationContext::unkeyed(config.id);
+            let ctx = MutationContext {
+                contract_version: batch::contract_version(version)?,
+                ..MutationContext::unkeyed(config.id)
+            };
             let stability = match plan {
                 BatchItemPlan::Insert { input, .. } => {
                     input.initial_stability.unwrap_or(config.initial_stability)
                 }
+                BatchItemPlan::NativeInsert { input, .. } => input
+                    .memory
+                    .initial_stability
+                    .unwrap_or(config.initial_stability),
+                BatchItemPlan::NativeStore { input, .. } => input
+                    .insert
+                    .memory
+                    .initial_stability
+                    .unwrap_or(config.initial_stability),
                 _ => config.initial_stability,
             };
             if !stability.is_finite() || stability <= 0.0 {
                 return Ok(Err(BatchError::new("INVALID_INPUT")));
             }
-            let hash = match plan {
-                BatchItemPlan::Insert { input, .. } => {
+            let native = if matches!(version, 2 | 3) {
+                let schema = config.schema.as_ref().unwrap();
+                let defaults = batch::NativeBatchDefaults {
+                    default_difficulty_bits: config.default_difficulty.to_bits(),
+                    lifecycle_version: schema.lifecycle_version,
+                    policy_revision: schema.policy_revision,
+                    embedding_binding: schema.embedding_binding.clone(),
+                    store_settings: store_settings.cloned(),
+                };
+                if defaults.validate(config.embedding_dim, kind).is_err() {
+                    return Ok(Err(BatchError::new("INVALID_INPUT")));
+                }
+                Some(defaults)
+            } else {
+                None
+            };
+            let defaults = BatchDefaults {
+                namespace_id: config.id,
+                namespace_name: config.name.clone(),
+                namespace_policy_hash: policy_hash(&config)?,
+                initial_stability_bits: stability.to_bits(),
+                embedding_dim: config.embedding_dim,
+                native,
+            };
+            let hash = match (version, plan) {
+                (1, BatchItemPlan::Insert { input, .. }) => {
                     input.request_hash(&ctx, stability, config.embedding_dim)?
                 }
-                BatchItemPlan::Forget { id, .. } => {
+                (2, BatchItemPlan::NativeInsert { input, .. }) => {
+                    if input.validate().is_err() {
+                        return Ok(Err(BatchError::new("INVALID_INPUT")));
+                    }
+                    batch::native::insert_hash(&ctx, input, &defaults)?
+                }
+                (3, BatchItemPlan::NativeStore { input, .. }) => {
+                    if input.insert.validate().is_err() {
+                        return Ok(Err(BatchError::new("INVALID_INPUT")));
+                    }
+                    batch::native::store_hash(&ctx, input, &defaults)?
+                }
+                (1, BatchItemPlan::Forget { id, .. }) => {
                     crate::storage::tombstone::request_hash(&ctx, *id)
                 }
-                _ => unreachable!(),
+                (2, BatchItemPlan::Forget { id, .. }) => {
+                    control::request_hash(&ctx, "native_tombstone", &[id.as_bytes()])
+                }
+                _ => return Ok(Err(BatchError::new("INVALID_INPUT"))),
             };
-            Ok(Ok((
-                BatchDefaults {
-                    namespace_id: config.id,
-                    namespace_name: config.name.clone(),
-                    namespace_policy_hash: policy_hash(&config)?,
-                    initial_stability_bits: stability.to_bits(),
-                    embedding_dim: config.embedding_dim,
-                },
-                hash,
-            )))
+            Ok(Ok((defaults, hash)))
         })()
     }
 
@@ -601,7 +778,11 @@ impl MetadataStore {
         work: Option<&WorkTicket>,
     ) -> Result<BatchProgress, StorageError> {
         validate_error(&error)?;
-        let _guard = self.mutation_guard_with_work(work)?;
+        let _guard = if matches!(child.version, 2 | 3) {
+            self.native_guard_with_work(work)?
+        } else {
+            self.mutation_guard_with_work(work)?
+        };
         let tx = self.db.begin_write()?;
         let mut p = load_child(&tx, child)?;
         require_turn(&p, child.index)?;
@@ -609,16 +790,19 @@ impl MetadataStore {
         if !matches!(item.state, BatchItemState::NotAttempted {}) {
             return Ok(p);
         }
-        let ctx = catalog_context();
+        let ctx = MutationContext {
+            contract_version: batch::contract_version(child.version)?,
+            ..catalog_context()
+        };
         let hash = control::request_hash(
             &ctx,
-            "batch_item_error_v1",
+            batch::rejection_domain(child.version)?,
             &[
                 child.batch_operation_id.as_bytes(),
                 &child.index.to_be_bytes(),
             ],
         );
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             &ctx,
             hash,
@@ -649,7 +833,8 @@ fn load_child(
         .items
         .get(child.index as usize)
         .ok_or_else(|| invalid("child index"))?;
-    if item.operation_id != child.operation_id
+    if p.version != child.version
+        || item.operation_id != child.operation_id
         || item.request_hash != child.request_hash
         || item.defaults.as_ref() != Some(&child.defaults)
         || item.canonical_hash != Some(child.canonical_hash)
@@ -726,19 +911,16 @@ pub(super) fn record_child(
         || ctx.store_id != Some(child.store_id)
         || ctx.idempotency_key.is_some()
         || ctx.expected_generation.is_some()
-        || ctx.contract_version != 1
+        || ctx.contract_version != batch::contract_version(child.version)?
     {
         return Err(invalid(
             "completed or foreign child attempted a fresh commit",
         ));
     }
-    if !matches!(
-        (p.kind, &outcome),
-        (BatchKind::Insert, MutationOutcome::MemoryInserted { .. })
-            | (BatchKind::Forget, MutationOutcome::MemoryTombstoned { .. })
-    ) {
+    if !batch::native::child_matches(p.version, p.kind, &outcome) {
         return Err(invalid("wrong reserved child mutation kind"));
     }
+    batch::native::validate_outcome(&child.defaults, &outcome)?;
     let receipt = control::record_reserved_receipt(tx, ctx, hash, outcome, child.operation_id)?;
     p.items[child.index as usize].state = BatchItemState::Ok {
         receipt: receipt.clone(),
@@ -750,3 +932,40 @@ pub(super) fn record_child(
 #[cfg(test)]
 #[path = "batch_tests.rs"]
 mod tests;
+
+/// Only the strict manifest validator may supply bookkeeping evidence to the
+/// native history dispatcher. This is an exact receipt reference, not an allowlist.
+pub(crate) struct NativeBatchBookkeepingRef {
+    pub generation: control::GenerationRef,
+    pub operation_id: Uuid,
+    pub batch_id: Uuid,
+}
+pub(crate) fn validated_native_bookkeeping(
+    tx: &redb::ReadTransaction,
+) -> Result<Vec<NativeBatchBookkeepingRef>, StorageError> {
+    let table = tx.open_table(control::CONTROL)?;
+    let state = ControlState::decode(
+        table
+            .get("state")?
+            .ok_or_else(|| invalid("missing control"))?
+            .value(),
+    )?;
+    let manifests = validate_existing(tx, Some(&state))?;
+    Ok(manifests
+        .into_iter()
+        .filter(|p| matches!(p.version, 2 | 3))
+        .flat_map(|p| {
+            let batch_id = p.reservation_receipt.operation_id;
+            std::iter::once(p.reservation_receipt)
+                .chain(p.bookkeeping_receipts)
+                .map(move |r| NativeBatchBookkeepingRef {
+                    generation: control::GenerationRef {
+                        store_id: r.store_id,
+                        generation: r.committed_generation,
+                    },
+                    operation_id: r.operation_id,
+                    batch_id,
+                })
+        })
+        .collect())
+}

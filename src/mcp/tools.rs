@@ -415,6 +415,7 @@ fn use_durable_batch(bridge: &McpBridge, arguments: &serde_json::Value) -> bool 
             "idempotencyKey",
             "batchOperationId",
             "batchResultVersion",
+            "batchMutationVersion",
             "expectedGeneration",
         ]
         .iter()
@@ -434,6 +435,7 @@ async fn handle_durable_batch(
     // Parse optional fields strictly. Do not silently drop a malformed retry key.
     let input = serde_json::from_value::<BatchInput>(json!({
         "resultVersion":arguments.get("batchResultVersion").cloned().unwrap_or(json!(1)),
+        "mutationVersion":arguments.get("batchMutationVersion").cloned().unwrap_or(json!(1)),
         "kind":kind,"items":items,"defaultNamespace":bridge.default_namespace(),
         "storeId":arguments.get("storeId"),"idempotencyKey":arguments.get("idempotencyKey"),"batchOperationId":arguments.get("batchOperationId")
     }));

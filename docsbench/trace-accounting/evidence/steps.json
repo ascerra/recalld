@@ -1,0 +1,52 @@
+[
+  {
+    "command": [
+      "python3",
+      "scripts/test_trace_accounting.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794712373.7869296
+  },
+  {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--bin",
+      "recalld",
+      "--example",
+      "score_mcp_episode"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794712403.7302094
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/check_trace_accounting.py",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/actual"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "/target/debug/recalld": "603bfa58f26c2e5eb66c3dc73372d5ed910ed014e087593a7f78e8aa1ccdfcf8",
+      "/target/debug/examples/score_mcp_episode": "bcb519165536ddfd5d47971af24e1ac0d40adcd5fe241e51343e87c40c1adb92"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794712407.9162087
+  }
+]

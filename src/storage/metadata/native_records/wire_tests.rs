@@ -32,6 +32,9 @@ async fn setup_policy(
         // The real schema migration destination retains the legacy lifecycle.
         // No raw policy edits or fabricated proof receipts.
         d.path = root.path().join("schema");
+        // This intended-positive public fixture selects a different real migration
+        // destination. Adopt there explicitly; unknown-history cases opt out.
+        crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 2000);
     }
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
@@ -41,8 +44,17 @@ async fn setup_policy(
     (f, d, clock, bridge, state)
 }
 fn public_adapters(f: &Fixture, clock: Arc<dyn Clock>) -> (McpBridge, crate::api::AppState) {
+    configured_public_adapters(f, clock, NativePolicyInputs::default())
+}
+fn configured_public_adapters(
+    f: &Fixture,
+    clock: Arc<dyn Clock>,
+    policy: NativePolicyInputs,
+) -> (McpBridge, crate::api::AppState) {
     let (_, mut bridge, engine) = readers(f, clock.clone());
-    let policy = NativePolicyInputs::default();
+    let mut config = crate::config::RecalldConfig::default();
+    config.decay.decay_rate_multiplier = policy.multiplier;
+    let config = Arc::new(config);
     bridge.storage = Arc::new(
         McpStorageAdapter::new(
             f.storage.clone(),
@@ -52,14 +64,13 @@ fn public_adapters(f: &Fixture, clock: Arc<dyn Clock>) -> (McpBridge, crate::api
             f.fts_index.clone(),
             f.entity_index.clone(),
             f.graph.clone(),
-            Arc::new(Default::default()),
+            config.clone(),
             chrono_tz::UTC,
         )
         .with_clock(clock.clone())
         .with_native_lifecycle_policy(policy.clone()),
     );
     bridge.default_namespace = "deliberately-wrong".into();
-    let config = Arc::new(crate::config::RecalldConfig::default());
     let state = crate::api::AppState::new(
         Arc::new(SearchPipelineAdapter::new(
             engine,
@@ -736,3 +747,6 @@ mod public_api1;
 
 #[path = "public_matrix_tests.rs"]
 mod public_matrix;
+
+#[path = "adopted_public_tests.rs"]
+mod adopted_public;

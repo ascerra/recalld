@@ -268,25 +268,63 @@ impl Recalld {
         config: RecalldConfig,
         clock: Arc<dyn crate::time::Clock>,
     ) -> Result<Self> {
+        Self::with_runtime_sources(config, clock, Box::new(crate::storage::ids::SystemIds)).await
+    }
+
+    pub(crate) async fn with_runtime_sources(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        ids: Box<dyn crate::storage::ids::IdSource>,
+    ) -> Result<Self> {
+        let engine = RedbStorageEngine::open_with_ids(&config.storage.data_dir, false, ids)
+            .map_err(|e| RecalldError::Init {
+                step: "open_storage",
+                message: format!("failed to open storage at {}: {e}", config.storage.data_dir),
+                source: Some(Box::new(e)),
+            })?;
+        Self::with_owned_storage(config, clock, engine).await
+    }
+
+    /// Internal construction over one already-owned engine. Selection and
+    /// bootstrap authority belong to the caller, never to an API version flag.
+    pub(crate) async fn with_owned_storage(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        engine: RedbStorageEngine,
+    ) -> Result<Self> {
+        let validate = || -> anyhow::Result<bool> {
+            anyhow::ensure!(
+                std::path::Path::new(&config.storage.data_dir).canonicalize()? == engine.db_path(),
+                "owned engine/config root mismatch"
+            );
+            let native = engine.control_state()?.control_schema_version == 2;
+            if native {
+                anyhow::ensure!(
+                    config.decay.disable_sweep
+                        && !config.rif.enabled
+                        && !config.graph.autolink_enabled,
+                    "native prefix requires explicit disabled sweep, RIF and autolink"
+                );
+                let default = engine
+                    .get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)?;
+                anyhow::ensure!(
+                    default.is_some_and(|ns| ns.schema.is_some()),
+                    "native prefix requires an existing schema2 default namespace"
+                );
+            }
+            Ok(native)
+        };
+        let native_prefix = validate().map_err(|e| RecalldError::Init {
+            step: "owned_storage_preflight",
+            message: e.to_string(),
+            source: None,
+        })?;
         let config = Arc::new(config);
         let (shutdown_tx, _) = watch::channel(false);
         let drain_notify = Arc::new(Notify::new());
         let inflight_count = Arc::new(AtomicU32::new(0));
-
-        tracing::info!("starting Recalld");
-
-        // -- Step 1: Open storage engine ------------------------------
-        let storage = {
-            let data_dir = &config.storage.data_dir;
-            tracing::info!(data_dir = %data_dir, "opening storage engine");
-            let engine = RedbStorageEngine::open(data_dir).map_err(|e| RecalldError::Init {
-                step: "open_storage",
-                message: format!("failed to open storage at {}: {}", data_dir, e),
-                source: Some(Box::new(e)),
-            })?;
-            tracing::info!("storage engine opened");
-            Arc::new(std::sync::RwLock::new(engine))
-        };
+        let storage = Arc::new(std::sync::RwLock::new(engine));
+        tracing::info!("starting Recalld with owned storage");
 
         let effects_rebuild = storage
             .read()
@@ -424,6 +462,37 @@ impl Recalld {
             );
             Arc::from(provider)
         };
+
+        if native_prefix {
+            let profile = embedding.profile().ok_or_else(|| RecalldError::Init {
+                step: "native_profile",
+                message: "provider profile missing".into(),
+                source: None,
+            })?;
+            let storage_r = storage.read().map_err(|e| RecalldError::Init {
+                step: "native_profile",
+                message: e.to_string(),
+                source: None,
+            })?;
+            for namespace in
+                storage_r
+                    .meta_store()
+                    .list_namespaces()
+                    .map_err(|e| RecalldError::Init {
+                        step: "native_profile",
+                        message: e.to_string(),
+                        source: Some(Box::new(e)),
+                    })?
+            {
+                crate::embedding::profile::require_compatible(&namespace, &profile).map_err(
+                    |e| RecalldError::Init {
+                        step: "native_profile",
+                        message: e.to_string(),
+                        source: None,
+                    },
+                )?;
+            }
+        }
 
         // -- Step 5: Create RIF engine --------------------------------
         let rif_engine = {
@@ -676,6 +745,11 @@ impl Recalld {
                 config.decay.decay_rate_multiplier,
             )
             .with_coherent_owner(completion, rif_engine.clone());
+            let engine = if native_prefix {
+                engine.with_native_query_admission()
+            } else {
+                engine
+            };
             tracing::info!("query engine initialized");
             Arc::new(engine)
         };
@@ -900,6 +974,17 @@ impl Recalld {
         self.query_engine
             .search_coherent_read_only(&owner, self.rif_engine.clone(), query, semantics, deadline)
             .await
+    }
+
+    pub(crate) fn derived_owner(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
     }
 
     /// Internal owned-core barrier. Returns a readiness observation, not a
@@ -1761,3 +1846,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "system_inherited_policy_tests.rs"]
+mod inherited_policy_tests;

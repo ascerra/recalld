@@ -1,0 +1,19 @@
+{
+  "sha256": {
+    "REPORT.md": "10432184b263539a94036e3b5d9e0f4edbeee2c1bde1f8e0c7b0a52452c58983",
+    "controls-summary.json": "cc197086bae372980ebed751b6c401ba0e78d637283e5a2c53f54b353c44a984",
+    "focused.log": "5cc0dcce6a2d078d33d32d82492423f320d083ce267584b063d4ef509410c734",
+    "frozen-source.tar.gz": "2a5d444d795b0d411814f3a490c8249e34e9f737e855071a57ea423a1809c435",
+    "full-driver-manifest.json": "0c456c65109406402b1a01dd404e1b8a04aa7e00b449423561aec157349bcc28",
+    "full-suite.log": "0b6a99f8ce212dc6c70266fe99ad82c2be0d7d12f4dee056f31eb2c1c5029408",
+    "ids.log": "39601373a3b7c840d963f6ba8fd9aecfbc4abf4e9f4fd83aac001e61c09cba1d",
+    "native-ids.log": "045ab1eb1c7785fb75a141dc7105913a4602cbcb512cc7af555d3b11230747f7",
+    "prior-sources.tar.gz": "89cbf84540fba69777af64ef020407f3afcb9664f8fe7dce7c0851bd4c00fb78",
+    "public-summary.json": "2dcf1561c341500ca146e2da4a72cc62f7fd7a5fb85586045a1f6801d5b9ea7a",
+    "public-tail-manifest.json": "8266af68ccae6c620636353dac96a0e58d7a3b106d194db76cb37946c7b19e56",
+    "run-evidence.tar.gz": "56d092e977ab732bf2d8490d42632ac04944fbc64280e24574968b641b5d6cfa",
+    "source-binaries.json": "413e434540ab876e749c22e2249252ce96934e99de3b57de834edf24b51e94c1",
+    "terminal-id-regression.log": "04855074f49cedb872e8ee5b72bedf2745c129255a7ad66d2e43667fa1f908bc"
+  },
+  "sourceCommit": "d09ca4988d99e2ba28a549bd6b0504347fc056e9"
+}

@@ -1,0 +1,14 @@
+{
+  "currentAction": {
+    "arguments": {
+      "id": "01a1dcec-b775-79a3-9ff3-06469b0497b6",
+      "namespace": "default",
+      "quality": 3
+    },
+    "tag": "blocked-feedback",
+    "tool": "reinforce_memory"
+  },
+  "deliveryOrdinal": 112,
+  "phase": "action",
+  "startId": 112
+}

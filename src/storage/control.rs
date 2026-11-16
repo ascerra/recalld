@@ -21,15 +21,6 @@ pub(crate) const RECEIPTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("mutation_receipts");
 pub(crate) const KEYS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("mutation_keys");
 
-/// Final exposure assertion, checked with canonical records in the write transaction.
-/// Namespace is the name pinned during selection; a by-ID source must still
-/// belong to that same namespace even when it is not itself exposed.
-#[derive(Debug, Clone, Serialize)]
-pub struct ExposureScope {
-    pub namespace: String,
-    pub source: Option<crate::model::MemoryId>,
-}
-
 // Per-test-thread work counts, not timing or a process-wide instrumentation
 // switch. Count receipt decoding as well as full proof entry so a regression
 // cannot hide a history scan behind a different validation helper.
@@ -48,6 +39,15 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn take_validation_work() -> ValidationWork {
     VALIDATION_WORK.with(|work| work.replace(ValidationWork::default()))
+}
+
+/// Final exposure assertion, checked with canonical records in the write transaction.
+/// Namespace is the name pinned during selection; a by-ID source must still
+/// belong to that same namespace even when it is not itself exposed.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExposureScope {
+    pub namespace: String,
+    pub source: Option<crate::model::MemoryId>,
 }
 
 /// Canonical decimal-string u63. JSON numbers, signs and leading zeros fail.
@@ -97,7 +97,7 @@ impl From<Generation> for String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GenerationRef {
     pub store_id: Uuid,
     pub generation: Generation,
@@ -147,7 +147,12 @@ impl ControlState {
 
 /// Catalog cannot alias namespace 0 or a mutable namespace name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind", content = "namespaceId")]
+#[serde(
+    rename_all = "camelCase",
+    tag = "kind",
+    content = "namespaceId",
+    deny_unknown_fields
+)]
 pub enum MutationScope {
     Catalog,
     Namespace(NamespaceId),
@@ -168,7 +173,8 @@ impl MutationScope {
 
 /// Resolved immutable scope. A4 supplies normalized semantic fields; generated
 /// IDs/times and provider output must not enter request identity.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MutationContext {
     pub store_id: Option<Uuid>,
     pub scope: MutationScope,
@@ -231,6 +237,9 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    InheritedDecayAdopted {
+        transition: super::inherited_policy::InheritedDecayAdopted,
+    },
     NativeNamespacePurgeStarted {
         transition: super::native_purge::NativePurgeStarted,
     },
@@ -273,6 +282,17 @@ pub enum MutationOutcome {
     LifecycleFeedbackApplied {
         transition: super::native_lifecycle::NativeLifecycleWrite,
     },
+    BatchReserved {
+        batch_kind: super::batch::BatchKind,
+        item_count: u32,
+        caller_hash: [u8; 32],
+        resolution_hash: [u8; 32],
+    },
+    BatchItemRejected {
+        batch_operation_id: Uuid,
+        index: u32,
+        error: super::batch::BatchError,
+    },
     LifecycleMaterialized {
         #[serde(rename = "memoryId")]
         memory_id: MemoryId,
@@ -286,17 +306,6 @@ pub enum MutationOutcome {
         decay_strength_bits: u32,
         #[serde(rename = "removedFieldsMask")]
         removed_fields_mask: u8,
-    },
-    BatchReserved {
-        batch_kind: super::batch::BatchKind,
-        item_count: u32,
-        caller_hash: [u8; 32],
-        resolution_hash: [u8; 32],
-    },
-    BatchItemRejected {
-        batch_operation_id: Uuid,
-        index: u32,
-        error: super::batch::BatchError,
     },
     NamespacePurgeStarted {
         namespace_id: NamespaceId,
@@ -364,6 +373,9 @@ pub enum MutationOutcome {
         record_count: u64,
         #[serde(rename = "attestedNamespaces")]
         attested_namespaces: u64,
+    },
+    NativeTextGenerationSelected {
+        transition: super::native_text::NativeTextRelocation,
     },
     TextGenerationSelected {
         #[serde(rename = "generationId")]
@@ -467,6 +479,7 @@ pub(crate) fn validate_existing(
             .value(),
     )?;
     let ancestry = super::lineage::read_lineage(tx, &state)?;
+    super::lineage::validate_text_anchor(tx, &state, ancestry.as_ref())?;
     super::canonical_schema::read_state(tx, &state)?;
     for entry in receipts.iter()? {
         let (key, value) = entry?;
@@ -482,7 +495,14 @@ pub(crate) fn validate_existing(
             MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::BatchReserved { .. }
             | MutationOutcome::BatchItemRejected { .. }
-            | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            | MutationOutcome::NativeNamespaceCreated { .. }
+            | MutationOutcome::TextGenerationSelected { .. }
+            | MutationOutcome::NativeTextGenerationSelected { .. } => {
+                scope == MutationScope::Catalog
+            }
+            MutationOutcome::InheritedDecayAdopted { transition } => {
+                scope == MutationScope::Namespace(transition.preview.namespace_id)
+            }
             MutationOutcome::NativeNamespacePolicyUnchanged { transition } => {
                 scope == MutationScope::Namespace(transition.namespace_id)
             }
@@ -520,10 +540,12 @@ pub(crate) fn validate_existing(
         // schema table is entirely absent. Legacy decode alone is not proof.
         if matches!(
             stored.receipt.outcome,
-            MutationOutcome::NativeNamespacePurgeStarted { .. }
+            MutationOutcome::NativeTextGenerationSelected { .. }
+                | MutationOutcome::NativeNamespacePurgeStarted { .. }
                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                 | MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
+                | MutationOutcome::InheritedDecayAdopted { .. }
                 | MutationOutcome::NativeNamespacePolicyUpdated { .. }
                 | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
                 | MutationOutcome::LifecycleExposureRecorded { .. }
@@ -608,7 +630,10 @@ fn decode_scope(key: &[u8]) -> Result<(Uuid, MutationScope, &[u8]), StorageError
 
 /// One-time adoption at generation zero; a present but incomplete control schema
 /// is corruption, not permission to mint a new retry lineage.
-pub(crate) fn initialize(tx: &WriteTransaction) -> Result<(), StorageError> {
+pub(crate) fn initialize_with_ids(
+    tx: &WriteTransaction,
+    ids: &dyn super::ids::IdSource,
+) -> Result<(), StorageError> {
     let names: Vec<_> = tx.list_tables()?.map(|t| t.name().to_owned()).collect();
     let present =
         [CONTROL.name(), RECEIPTS.name(), KEYS.name()].map(|n| names.iter().any(|s| s == n));
@@ -622,7 +647,7 @@ pub(crate) fn initialize(tx: &WriteTransaction) -> Result<(), StorageError> {
     } else {
         let state = ControlState {
             control_schema_version: 1,
-            store_id: Uuid::new_v4(),
+            store_id: ids.uuid(super::ids::IdKind::Store)?,
             committed_generation: Generation::default(),
             removal_ledger_version: None,
             restore_lineage_version: None,
@@ -702,6 +727,52 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::InheritedDecayAdopted { transition } => {
+            transition.validate(&stored.receipt)?;
+            let request = super::inherited_policy::AdoptInheritedDecay {
+                context: MutationContext {
+                    store_id: Some(stored.receipt.store_id),
+                    scope: MutationScope::Namespace(transition.preview.namespace_id),
+                    expected_generation: Some(transition.preview.source.generation),
+                    contract_version: transition.contract_version,
+                    idempotency_key: None,
+                },
+                preview: transition.preview.clone(),
+            };
+            if request.hash()? != stored.request_hash {
+                return Err(StorageError::InvalidControl(
+                    "inherited policy original request hash mismatch".into(),
+                ));
+            }
+        }
+        MutationOutcome::NativeTextGenerationSelected { transition } => {
+            transition.validate_stored(&stored)?;
+        }
+        MutationOutcome::TextGenerationSelected {
+            generation_id,
+            format_version,
+            ..
+        } => {
+            let previous = Generation(stored.receipt.committed_generation.get() - 1);
+            let ctx = super::native_text::request_context(GenerationRef {
+                store_id: stored.receipt.store_id,
+                generation: previous,
+            });
+            let operation = match format_version {
+                1 => "registerLegacyText",
+                2 => "compactText",
+                _ => {
+                    return Err(StorageError::InvalidControl(
+                        "invalid legacy text selection format".into(),
+                    ));
+                }
+            };
+            if generation_id.is_nil() || stored.request_hash != request_hash(&ctx, operation, &[]) {
+                return Err(StorageError::InvalidControl(
+                    "legacy text selection request hash mismatch".into(),
+                ));
+            }
+        }
         MutationOutcome::NativeNamespacePurgeStarted { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -744,17 +815,16 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::LifecycleFeedbackApplied { transition } => {
             transition.validate(&stored.receipt, true)?
         }
-        MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
-        | MutationOutcome::LifecycleMaterialized { .. }
+        MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::BatchReserved { .. }
         | MutationOutcome::BatchItemRejected { .. }
         | MutationOutcome::ExposuresRecorded { .. }
         | MutationOutcome::LegacyFeedbackRecorded { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
-        | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::AccessRecorded { .. }
         | MutationOutcome::NamespaceCreated { .. }
         | MutationOutcome::NamespacePolicyUpdated { .. }
@@ -873,6 +943,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::NativeNamespacePurgeStarted { .. }
         | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
         | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
+        | MutationOutcome::InheritedDecayAdopted { .. }
         | MutationOutcome::NativeNamespacePolicyUpdated { .. }
         | MutationOutcome::NativeNamespaceCreated { .. }
         | MutationOutcome::NativePhaseMaterialized { .. }
@@ -884,19 +955,20 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::NativeGraphUnchanged { .. }
         | MutationOutcome::LifecycleExposureRecorded { .. }
         | MutationOutcome::LifecycleFeedbackApplied { .. }
-        | MutationOutcome::GraphChanged { .. }
-        | MutationOutcome::SchemaMigrated { .. }
-        | MutationOutcome::TextGenerationSelected { .. }
-        | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
-        MutationOutcome::BatchReserved { .. }
-        | MutationOutcome::BatchItemRejected { .. }
-        | MutationOutcome::MemoryInserted { .. }
-        | MutationOutcome::MemoryTombstoned { .. }
-        | MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::NamespaceCreated { .. }
         | MutationOutcome::NamespacePolicyUpdated { .. }
         | MutationOutcome::NamespacePurgeStarted { .. }
-        | MutationOutcome::NamespacePurgeAdvanced { .. } => {}
+        | MutationOutcome::NamespacePurgeAdvanced { .. }
+        | MutationOutcome::MemoryTombstoned { .. }
+        | MutationOutcome::MemoryInserted { .. }
+        | MutationOutcome::GraphChanged { .. }
+        | MutationOutcome::SchemaMigrated { .. }
+        | MutationOutcome::TextGenerationSelected { .. }
+        | MutationOutcome::NativeTextGenerationSelected { .. }
+        | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
+        MutationOutcome::LifecycleMaterialized { .. }
+        | MutationOutcome::BatchReserved { .. }
+        | MutationOutcome::BatchItemRejected { .. } => {}
     }
     Ok(stored)
 }
@@ -975,7 +1047,23 @@ pub(crate) fn record_receipt(
     hash: [u8; 32],
     outcome: MutationOutcome,
 ) -> Result<WriteReceipt, StorageError> {
-    record_reserved_receipt(tx, ctx, hash, outcome, Uuid::new_v4())
+    record_receipt_with_ids(tx, ctx, hash, outcome, &super::ids::SystemIds)
+}
+
+pub(crate) fn record_receipt_with_ids(
+    tx: &WriteTransaction,
+    ctx: &MutationContext,
+    hash: [u8; 32],
+    outcome: MutationOutcome,
+    ids: &dyn super::ids::IdSource,
+) -> Result<WriteReceipt, StorageError> {
+    record_reserved_receipt(
+        tx,
+        ctx,
+        hash,
+        outcome,
+        ids.uuid(super::ids::IdKind::Operation)?,
+    )
 }
 
 /// Internal transaction primitive. Purge callers must first prove a durable

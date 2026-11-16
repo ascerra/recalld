@@ -13,6 +13,8 @@ mod exposure_consumer;
 mod feedback_consumer;
 #[path = "forget_consumer_tests.rs"]
 mod forget_consumer;
+#[path = "native_query_admission_tests.rs"]
+mod native_query_admission;
 #[path = "replay_consumer_tests.rs"]
 mod replay_consumer;
 

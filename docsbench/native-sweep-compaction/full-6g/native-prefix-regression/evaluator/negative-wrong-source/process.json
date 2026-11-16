@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/native-prefix-regression/runtime/config.toml",
+    "--data-root",
+    "/output/native-prefix-regression/runtime/negative-wrong-source",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--restore-checkpoint",
+    "/output/native-prefix-regression/runtime/recalld-frozen-canonical-q6HUBX/negative-source.json",
+    "--checkpoint-sha256",
+    "d9be4d0cf6335d0c447ae3ba293e6ac0173acb3794e511fe4b812fe94cca70ff"
+  ],
+  "exitCode": 1,
+  "forced": false,
+  "negativeConstructorProbe": true,
+  "pid": 4506,
+  "priorJoined": null,
+  "status": "joined"
+}

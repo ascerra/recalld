@@ -47,6 +47,7 @@ pub enum McpError {
     Bridge(String),
 }
 
+pub(crate) mod native_advisory;
 pub(crate) mod native_lifecycle_adapter;
 
 #[cfg(test)]
