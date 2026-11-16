@@ -13,9 +13,19 @@ ranking change, catalog/list dependency or automatic request replay. Preserve th
 actual177 same-view source/donor certification. The local consumer's
 select/budget/observe boundary remains authoritative.
 
-First proof is the actual absent Remote consumer, with a real isolated owned
-legacy store and actual framed daemon connection. This is not a claim of a
-mutation or receipt-loss RED. Tests are not executed yet.
+The BEFORE at `a1ae5498b24506a9b8fe400e6ccc45c8c42978f1` compiled and reached
+the intended final assertion: actual owned legacy prepared query200, Remote503.
+Expected row, false record/G invariance and same-connection subsequent ping
+passed. This is not a mutation or receipt-loss RED. Executable SHA256:
+`eac3d6a07c1edf18f5b9440659b2956077b71c7fc04232404920cd8f43297e71`.
+Raw/source/executable remain protected in
+`/tmp/recalld-huygens-active-validation/remote-query-001-red`.
+The 9198-file source manifest is a whole tracked-tree archive (including old
+documentation/evidence), not 9198 build inputs. Future snapshots use only actual
+Cargo/source/test/example inputs. The container exited101 and was removed;
+cgroup peak4GiB/max25986, oom0/oom_kill0 records reclaim pressure, not OOM.
+
+Current implementation is unvalidated WIP, with no READY or activation claim.
 
 BeforeSend/SentUnattributed/MatchedReply classification is additive for the new
 consumer; existing API1 call/retry behavior stays unchanged. A partial socket

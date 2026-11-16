@@ -223,7 +223,7 @@ pub struct ExecutionError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<Uuid>,
 }
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Scope {
     Namespace {
@@ -239,12 +239,12 @@ pub enum Scope {
         namespace_ids: Vec<crate::model::NamespaceId>,
     },
 }
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CatalogKind {
     Catalog,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
     Ok,
@@ -357,7 +357,7 @@ impl Readiness {
 /// Not returned by live handlers yet. A read generation must eventually come
 /// from the coherent ReadView covering selection and hydration, not a fresh read
 /// of the control table. Unknown read generations are not synthesized here.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Envelope<T> {
     contract_version: u32,

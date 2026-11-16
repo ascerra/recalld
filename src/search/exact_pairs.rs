@@ -4,7 +4,7 @@ use crate::{
     model::MemoryId,
     serialization::scan::{ExactScanRequest, MAX_PAIR_BUDGET, MAX_RESPONSE_PAIRS},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum PairError {
@@ -17,8 +17,8 @@ pub(crate) enum PairError {
     #[error("exact comparator requires ordered unique IDs and finite nonzero compatible vectors")]
     InvalidVectors,
 }
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PairEdge {
     pub left_id: MemoryId,
     pub right_id: MemoryId,

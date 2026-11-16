@@ -116,6 +116,7 @@ struct ClientState {
     api1_lifecycle: Option<bool>,
     api1_store: Option<bool>,
     api1_store_batch: Option<bool>,
+    prepared_queries: Option<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -134,9 +135,25 @@ impl Api1Capability {
     }
 }
 
-/// A failed exchange, plus whether the connection survived it.
+/// Attribution is independent of connection health. In particular a drained
+/// malformed frame leaves a usable connection but cannot settle a sent write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransmissionPhase {
+    BeforeSend,
+    SentUnattributed,
+    MatchedReply,
+}
+pub(crate) struct PreparedExchange {
+    pub(crate) phase: TransmissionPhase,
+    /// A fully admitted response result; no typed receipt has been acquired.
+    pub(crate) result: Option<serde_json::Value>,
+}
+
+/// A failed exchange, plus whether the connection survived it. Existing callers
+/// retain their old `lost` behavior; new prepared callers use typed attribution.
 struct ExchangeError {
     error: BridgeError,
+    phase: TransmissionPhase,
     /// The connection was poisoned and must be re-established. When set, the
     /// request may or may not have been applied by the daemon: neither a
     /// failed write nor a failed read proves the daemon did not act.
@@ -147,12 +164,36 @@ impl ExchangeError {
     /// The call failed but the connection is still usable and the outcome is
     /// known (nothing was sent, or the daemon answered definitively).
     fn settled(error: BridgeError) -> Self {
-        Self { error, lost: false }
+        Self {
+            error,
+            lost: false,
+            phase: TransmissionPhase::BeforeSend,
+        }
     }
 
     /// The connection was poisoned; the outcome of the call is unknown.
     fn lost(error: BridgeError) -> Self {
-        Self { error, lost: true }
+        Self {
+            error,
+            lost: true,
+            phase: TransmissionPhase::SentUnattributed,
+        }
+    }
+
+    fn unattributed(error: BridgeError) -> Self {
+        Self {
+            error,
+            lost: false,
+            phase: TransmissionPhase::SentUnattributed,
+        }
+    }
+
+    fn matched(error: BridgeError) -> Self {
+        Self {
+            error,
+            lost: false,
+            phase: TransmissionPhase::MatchedReply,
+        }
     }
 }
 
@@ -171,6 +212,138 @@ pub struct DaemonClient {
 }
 
 impl DaemonClient {
+    /// Prepared-only single exchange, without reconnect/replay after send. The
+    /// shared mutex covers negotiation and the entire attributed response.
+    pub(crate) async fn call_prepared(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> PreparedExchange {
+        let mut state = self.state.lock().await;
+        let outcome = async {
+            if state.conn.is_none() && self.reconnect(&mut state).await.is_err() {
+                return PreparedExchange {
+                    phase: TransmissionPhase::BeforeSend,
+                    result: None,
+                };
+            }
+            if state.prepared_queries.is_none() && state.negotiate().await.is_err() {
+                return PreparedExchange {
+                    phase: TransmissionPhase::BeforeSend,
+                    result: None,
+                };
+            }
+            if state.prepared_queries != Some(true) || state.frame_limit < MAX_MESSAGE_SIZE {
+                return PreparedExchange {
+                    phase: TransmissionPhase::BeforeSend,
+                    result: None,
+                };
+            }
+            let mut request = DaemonRequest {
+                jsonrpc: "2.0".into(),
+                id: 0,
+                method: method.into(),
+                params,
+            };
+            let id = match state.send_request(&mut request).await {
+                Ok(id) => id,
+                Err(error) => {
+                    return PreparedExchange {
+                        phase: error.phase,
+                        result: None,
+                    };
+                }
+            };
+            for _ in 0..=MAX_STALE_SKIPS {
+                let frame = match state.conn.as_mut() {
+                    Some(conn) => {
+                        super::protocol::read_frame(
+                            &mut conn.reader,
+                            super::prepared_query::response_limit(),
+                        )
+                        .await
+                    }
+                    None => {
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                };
+                let frame = match frame {
+                    Ok(frame) => frame,
+                    Err(FrameError::OversizedDiscarded { .. } | FrameError::Malformed(_)) => {
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                    Err(_) => {
+                        state.conn = None;
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                };
+                if !super::prepared_query::admitted_frame(&frame) {
+                    return PreparedExchange {
+                        phase: TransmissionPhase::SentUnattributed,
+                        result: None,
+                    };
+                }
+                // The bounded raw structural/scalar pass above precedes this
+                // owned tree, including all malformed-reply evidence paths.
+                let response: serde_json::Value = match serde_json::from_slice(&frame) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                };
+                if let Some(old) = response.get("id").and_then(serde_json::Value::as_u64) {
+                    if old != 0 && old < id {
+                        continue;
+                    }
+                }
+                let correlated = response.get("id").and_then(serde_json::Value::as_u64) == Some(id)
+                    && response.get("jsonrpc").and_then(serde_json::Value::as_str) == Some("2.0")
+                    && response.as_object().is_some_and(|o| {
+                        o.keys()
+                            .all(|k| matches!(k.as_str(), "jsonrpc" | "id" | "result" | "error"))
+                    })
+                    && response.get("error").is_none()
+                    && response.get("result").is_some();
+                let result = response.get("result").cloned();
+                if response
+                    .get("id")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|other| other > id)
+                {
+                    state.conn = None;
+                }
+                return PreparedExchange {
+                    phase: if correlated {
+                        TransmissionPhase::MatchedReply
+                    } else {
+                        TransmissionPhase::SentUnattributed
+                    },
+                    result,
+                };
+            }
+            state.conn = None;
+            PreparedExchange {
+                phase: TransmissionPhase::SentUnattributed,
+                result: None,
+            }
+        }
+        .await;
+        self.connected
+            .store(state.conn.is_some(), AtomicOrdering::Relaxed);
+        outcome
+    }
     /// Connects to the daemon at the given Unix socket path.
     ///
     /// The frame limit starts at the conservative protocol v1 value; call
@@ -186,6 +359,7 @@ impl DaemonClient {
                 api1_lifecycle: None,
                 api1_store: None,
                 api1_store_batch: None,
+                prepared_queries: None,
             }),
             connected: AtomicBool::new(true),
         })
@@ -431,6 +605,7 @@ impl DaemonClient {
         state.api1_lifecycle = None;
         state.api1_store = None;
         state.api1_store_batch = None;
+        state.prepared_queries = None;
         let mut last: Option<String> = None;
 
         for (attempt, backoff_ms) in RECONNECT_BACKOFF_MS.iter().enumerate() {
@@ -441,6 +616,7 @@ impl DaemonClient {
                     state.api1_lifecycle = None;
                     state.api1_store = None;
                     state.api1_store_batch = None;
+                    state.prepared_queries = None;
                     match state.negotiate().await {
                         Ok(()) => return Ok(()),
                         Err(e) => {
@@ -504,17 +680,16 @@ impl ClientState {
                 .and_then(serde_json::Value::as_bool)
                 == Some(true),
         );
+        self.prepared_queries = Some(
+            result
+                .get("preparedQueriesV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
         Ok(())
     }
 
-    /// One request/response round trip on the current connection.
-    ///
-    /// Assigns `request.id` so a retry gets a fresh id while reusing the
-    /// (potentially large) params without cloning them.
-    async fn exchange(
-        &mut self,
-        request: &mut DaemonRequest,
-    ) -> Result<serde_json::Value, ExchangeError> {
+    async fn send_request(&mut self, request: &mut DaemonRequest) -> Result<u64, ExchangeError> {
         let method = request.method.clone();
         let limit = self.frame_limit;
         request.id = self.next_id;
@@ -524,9 +699,12 @@ impl ClientState {
         let written = match self.conn.as_mut() {
             Some(conn) => write_framed_request(&mut conn.writer, request, limit).await,
             None => {
-                return Err(ExchangeError::lost(BridgeError::Internal(
-                    "daemon connection is not established".into(),
-                )));
+                return Err(ExchangeError {
+                    phase: TransmissionPhase::BeforeSend,
+                    ..ExchangeError::lost(BridgeError::Internal(
+                        "daemon connection is not established".into(),
+                    ))
+                });
             }
         };
 
@@ -550,6 +728,21 @@ impl ClientState {
             });
         }
 
+        Ok(id)
+    }
+
+    /// One request/response round trip on the current connection.
+    ///
+    /// Assigns `request.id` so a retry gets a fresh id while reusing the
+    /// (potentially large) params without cloning them.
+    async fn exchange(
+        &mut self,
+        request: &mut DaemonRequest,
+    ) -> Result<serde_json::Value, ExchangeError> {
+        let method = request.method.clone();
+        let limit = self.frame_limit;
+        let id = self.send_request(request).await?;
+
         for _ in 0..=MAX_STALE_SKIPS {
             let read = match self.conn.as_mut() {
                 Some(conn) => read_framed_response(&mut conn.reader, limit).await,
@@ -569,12 +762,12 @@ impl ClientState {
                 // wrong move when the daemon simply emitted a frame we could
                 // not parse.
                 Err(e @ FrameError::OversizedDiscarded { .. }) => {
-                    return Err(ExchangeError::settled(BridgeError::TooLarge(format!(
+                    return Err(ExchangeError::unattributed(BridgeError::TooLarge(format!(
                         "the daemon's response to `{method}` could not be delivered: {e}"
                     ))));
                 }
                 Err(FrameError::Malformed(detail)) => {
-                    return Err(ExchangeError::settled(BridgeError::Internal(format!(
+                    return Err(ExchangeError::unattributed(BridgeError::Internal(format!(
                         "the daemon's response to `{method}` could not be parsed: {detail}; \
                          the connection is still usable and the call can be retried"
                     ))));
@@ -597,17 +790,17 @@ impl ClientState {
                             "daemon reported an unattributable protocol error".into(),
                         )
                     });
-                return Err(ExchangeError::settled(error));
+                return Err(ExchangeError::unattributed(error));
             }
 
             match response.id.cmp(&id) {
                 Ordering::Equal => {
                     if let Some(err) = response.error {
-                        return Err(ExchangeError::settled(err.into_bridge_error()));
+                        return Err(ExchangeError::matched(err.into_bridge_error()));
                     }
                     return match response.result {
                         Some(result) => Ok(result),
-                        None => Err(ExchangeError::settled(BridgeError::Internal(
+                        None => Err(ExchangeError::unattributed(BridgeError::Internal(
                             "empty daemon response".into(),
                         ))),
                     };

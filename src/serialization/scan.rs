@@ -42,6 +42,25 @@ fn object(value: &Value) -> Result<&Map<String, Value>, InputError> {
         .ok_or_else(|| error("INVALID_TYPE", "", "arguments must be an object"))
 }
 impl ExactScanRequest {
+    pub(crate) fn rpc_arguments(&self) -> Result<Value, InputError> {
+        if !self.threshold.is_finite() {
+            return Err(error(
+                "OUT_OF_RANGE",
+                "/threshold",
+                "threshold must be finite",
+            ));
+        }
+        let mut value = json!({"contractVersion":2,"mode":"scan","threshold":self.threshold,"pairBudget":self.pair_budget});
+        if let Some(namespace) = &self.namespace {
+            value["namespace"] = json!(namespace);
+        }
+        if let Some(cursor) = &self.cursor {
+            value["cursor"] = json!(cursor);
+        }
+        Self::from_mcp(&value)?;
+        Ok(value)
+    }
+
     pub(crate) fn from_mcp(value: &Value) -> Result<Self, InputError> {
         let object = object(value)?;
         reject_unknown_fields(

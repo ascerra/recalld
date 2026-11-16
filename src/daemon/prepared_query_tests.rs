@@ -21,7 +21,10 @@ fn search(f: &Fixture) -> Arc<McpSearchAdapter> {
         Arc::new(StorageMetadataAdapter::new(f.storage.clone())),
         Arc::new(SharedGraphReader::new(f.graph.clone())),
         Arc::new(RifProcessorAdapter::new(rif.clone(), f.graph.clone())),
-        Arc::new(StorageAccessRecorder::new(f.storage.clone(), f.cache.clone())),
+        Arc::new(StorageAccessRecorder::new(
+            f.storage.clone(),
+            f.cache.clone(),
+        )),
     )
     .with_lifecycle_inputs(
         Arc::new(crate::time::ManualClock::new(2000)),
@@ -30,28 +33,40 @@ fn search(f: &Fixture) -> Arc<McpSearchAdapter> {
     )
     .with_coherent_owner(f.completion(), rif);
     Arc::new(McpSearchAdapter::new(
-        Arc::new(engine), provider, f.storage.clone(), f.graph.clone(), chrono_tz::UTC,
+        Arc::new(engine),
+        provider,
+        f.storage.clone(),
+        f.graph.clone(),
+        chrono_tz::UTC,
     ))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_remote_actual_query_matches_owned_false_read() {
     let f = Fixture::new();
-    let id = f.insert_memory_with(MemorySpec {
-        summary: "prepared Remote retained record",
-        tags: &["allow"],
-        embedding: Some(&[1., 0., 0., 0.]),
-        ..MemorySpec::new(crate::model::NamespaceId::new(1))
-    }).await;
+    let id = f
+        .insert_memory_with(MemorySpec {
+            summary: "prepared Remote retained record",
+            tags: &["allow"],
+            embedding: Some(&[1., 0., 0., 0.]),
+            ..MemorySpec::new(crate::model::NamespaceId::new(1))
+        })
+        .await;
     f.completion().rebuild_all().await.unwrap();
     let search = search(&f);
     let arguments = json!({"contractVersion":2,"namespace":"default", "queryMode":"metadata_only",
         "tags":["allow"],"recordAccess":false,"limit":1,"explain":true});
-    let input = || crate::serialization::query::QueryRequest::from_mcp(&arguments, "wrong-default").unwrap();
+    let input = || {
+        crate::serialization::query::QueryRequest::from_mcp(&arguments, "wrong-default").unwrap()
+    };
     let local = search.query_contract(input()).await;
     assert_eq!(local.http_status, 200, "actual local control: {local:?}");
-    let local_value = serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&local).unwrap()).unwrap();
-    assert_eq!(local_value["data"]["results"][0]["memoryId"], id.to_string());
+    let local_value =
+        serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&local).unwrap()).unwrap();
+    assert_eq!(
+        local_value["data"]["results"][0]["memoryId"],
+        id.to_string()
+    );
     let before = f.storage.read().unwrap().control_state().unwrap();
     let record = f.record(id).unwrap().encode().unwrap();
 
@@ -63,8 +78,18 @@ async fn prepared_remote_actual_query_matches_owned_false_read() {
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let unused = Arc::new(crate::test_support::StubBridge::default());
-        handle_connection(search, unused.clone(), unused.clone(), unused, stream,
-            Arc::new(AtomicU32::new(1)), Arc::new(AtomicI64::new(0)), rx, server_tx).await;
+        handle_connection(
+            search,
+            unused.clone(),
+            unused.clone(),
+            unused,
+            stream,
+            Arc::new(AtomicU32::new(1)),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            server_tx,
+        )
+        .await;
     });
     let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
     client.ping().await.unwrap();
@@ -78,7 +103,16 @@ async fn prepared_remote_actual_query_matches_owned_false_read() {
     server.await.unwrap();
     assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
     assert_eq!(f.record(id).unwrap().encode().unwrap(), record);
-    eprintln!("R1_REMOTE_BOUNDARY local={} remote={} reply={reply:?}", local.http_status, reply.http_status);
-    assert_eq!(reply.http_status, 200, "Remote prepared method must reach the real consumer");
-    assert_eq!(serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&reply).unwrap()).unwrap(), local_value);
+    eprintln!(
+        "R1_REMOTE_BOUNDARY local={} remote={} reply={reply:?}",
+        local.http_status, reply.http_status
+    );
+    assert_eq!(
+        reply.http_status, 200,
+        "Remote prepared method must reach the real consumer"
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&reply).unwrap()).unwrap(),
+        local_value
+    );
 }

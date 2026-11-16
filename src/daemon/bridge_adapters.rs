@@ -29,6 +29,25 @@ impl RemoteSearchAdapter {
 
 #[async_trait]
 impl SearchPipeline for RemoteSearchAdapter {
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        super::prepared_query::remote_pairs(&self.client, request).await
+    }
+    async fn query_contract(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        super::prepared_query::remote_query(&self.client, request).await
+    }
+    async fn similar_contract(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        super::prepared_query::remote_similar(&self.client, request).await
+    }
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError> {
         let params =
             serde_json::to_value(&query).map_err(|e| BridgeError::Internal(e.to_string()))?;
