@@ -396,6 +396,15 @@ fn namespace(name: &str, expected: Option<&str>) -> bool {
     crate::model::validation::validate_namespace_name(name).is_ok()
         && expected.is_some_and(|e| name.eq_ignore_ascii_case(e))
 }
+fn valid_total(total: u64, returned: usize, has_prior: bool, has_more: bool) -> bool {
+    // The opaque cursor proves at least one prior entry, not its ordinal.
+    u64::try_from(returned)
+        .ok()
+        .and_then(|n| n.checked_add(u64::from(has_prior)))
+        .and_then(|n| n.checked_add(u64::from(has_more)))
+        .is_some_and(|minimum| total >= minimum)
+}
+
 fn validate_list(p: &ListPage, r: &ListPageRequest) -> Option<()> {
     let d = &p.data;
     if p.binding.at.store_id.is_nil()
@@ -403,7 +412,12 @@ fn validate_list(p: &ListPage, r: &ListPageRequest) -> Option<()> {
         || !namespace(&p.namespace, r.namespace.as_deref())
         || d.limit != r.limit
         || d.memories.len() > r.limit
-        || d.total.get() < d.memories.len() as u64 + u64::from(r.cursor.is_some())
+        || !valid_total(
+            d.total.get(),
+            d.memories.len(),
+            r.cursor.is_some(),
+            !d.complete,
+        )
         || d.complete != d.next_cursor.is_none()
         || (!d.complete && d.memories.len() != r.limit)
     {
@@ -467,7 +481,6 @@ fn validate_list(p: &ListPage, r: &ListPageRequest) -> Option<()> {
             || c.namespace_id != p.binding.namespace_id
             || c.namespace_sha256 != p.binding.namespace_sha256
             || Some(c.after) != previous
-            || d.total.get() <= d.memories.len() as u64
         {
             return None;
         }
@@ -507,7 +520,12 @@ fn validate_catalog(p: &CatalogPage, r: &CatalogPageRequest) -> Option<()> {
     let (limit, complete, token) = match (&p.data, r.kind) {
         (CatalogData::Namespaces(d), CatalogKind::Namespaces) => {
             if d.namespaces.len() > r.limit
-                || d.total.get() < d.namespaces.len() as u64 + u64::from(r.cursor.is_some())
+                || !valid_total(
+                    d.total.get(),
+                    d.namespaces.len(),
+                    r.cursor.is_some(),
+                    !d.complete,
+                )
                 || (!d.complete && d.namespaces.len() != r.limit)
             {
                 return None;
@@ -525,7 +543,6 @@ fn validate_catalog(p: &CatalogPage, r: &CatalogPageRequest) -> Option<()> {
                 .unwrap_or(0);
             for e in &d.namespaces {
                 if e.id.get() <= previous
-                    || !(1..=8192).contains(&e.embedding_dim)
                     || crate::model::validation::validate_namespace_name(&e.name).is_err()
                     || e.embedding_profile_id.is_some() != e.binding_provenance.is_some()
                 {
@@ -572,8 +589,7 @@ fn validate_catalog(p: &CatalogPage, r: &CatalogPageRequest) -> Option<()> {
             }
             if let Some(token) = &d.next_cursor {
                 let c = CatalogCursor::decode(token, r).ok()?;
-                if c.namespace_after != Some(previous) || d.total.get() <= d.namespaces.len() as u64
-                {
+                if c.namespace_after != Some(previous) {
                     return None;
                 }
             }
@@ -592,7 +608,12 @@ fn validate_catalog(p: &CatalogPage, r: &CatalogPageRequest) -> Option<()> {
                 .ok()?;
             for (i, b) in buckets.into_iter().enumerate() {
                 if b.items.len() > r.limit
-                    || b.total.get() < b.items.len() as u64
+                    || !valid_total(
+                        b.total.get(),
+                        b.items.len(),
+                        incoming.as_ref().is_some_and(|c| c.tag_after[i].is_some()),
+                        b.truncated,
+                    )
                     || (b.truncated && b.items.len() != r.limit)
                 {
                     return None;

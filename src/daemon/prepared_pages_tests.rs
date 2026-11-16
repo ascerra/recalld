@@ -317,6 +317,218 @@ async fn prepared_pages_remote_rejects_total_omitting_prior_or_future_entries() 
 }
 
 #[tokio::test]
+async fn prepared_pages_remote_strict_peer_fields_identity_and_context() {
+    use crate::daemon::{
+        prepared_pages as wire, prepared_query::response_limit, protocol::MAX_MESSAGE_SIZE,
+    };
+    let f = Fixture::new();
+    f.insert_memory_with(MemorySpec::new(NamespaceId::new(1)))
+        .await;
+    let owned = adapter(&f);
+    let before = canonical(&f);
+    let args = json!({"contractVersion":2,"namespace":"default","limit":1});
+    let good = wire::dispatch(
+        owned.as_ref(),
+        wire::LIST,
+        json!({"arguments":args,"responseLimit":response_limit()}),
+        Some(MAX_MESSAGE_SIZE),
+    )
+    .await
+    .unwrap();
+    for (path, value) in [
+        ("/extra", json!(true)),
+        ("/result/namespace", json!("other")),
+        ("/result/namespaceId", json!(0)),
+        ("/result/at/storeId", json!(uuid::Uuid::nil())),
+        ("/result/at/generation", json!("01")),
+        ("/result/data/total", json!(1)),
+        ("/result/data/limit", json!(2)),
+        ("/result/data/memories/0/id", json!(uuid::Uuid::nil())),
+        ("/result/data/memories/0/entities", json!(["invented"])),
+    ] {
+        let mut raw = good.clone();
+        if path == "/extra" {
+            raw["extra"] = value;
+        } else {
+            *raw.pointer_mut(path).unwrap() = value;
+        }
+        let (remote, task, _root) = malformed_peer(raw, wire::LIST).await;
+        assert!(
+            matches!(
+                remote
+                    .list_canonical_page(ListPageRequest::from_mcp(&args).unwrap())
+                    .await,
+                Err(crate::canonical_list::ListError::Unavailable)
+            ),
+            "{path}"
+        );
+        remote.test_client().ping().await.unwrap();
+        drop(remote);
+        task.await.unwrap();
+    }
+    let args = json!({"contractVersion":2});
+    let good = wire::dispatch(
+        owned.as_ref(),
+        wire::CATALOG,
+        json!({"arguments":args,"catalogKind":"namespaces","responseLimit":response_limit()}),
+        Some(MAX_MESSAGE_SIZE),
+    )
+    .await
+    .unwrap();
+    for (path, value) in [
+        (
+            "/result/data/namespaces/0/profileCompatibility",
+            json!("compatible"),
+        ),
+        (
+            "/result/data/configuredEmbedding",
+            json!({"identity":"unknown","dimension":0}),
+        ),
+        (
+            "/result/data/configuredEmbedding",
+            json!({"identity":"configuration","dimension":4,"profileId":"invented"}),
+        ),
+    ] {
+        let mut raw = good.clone();
+        *raw.pointer_mut(path).unwrap() = value;
+        let (remote, task, _root) = malformed_peer(raw, wire::CATALOG).await;
+        assert!(
+            matches!(
+                remote
+                    .list_catalog_page(
+                        CatalogPageRequest::from_mcp(&args, CatalogKind::Namespaces).unwrap()
+                    )
+                    .await,
+                Err(crate::catalog_page::CatalogError::Unavailable)
+            ),
+            "{path}"
+        );
+        remote.test_client().ping().await.unwrap();
+        drop(remote);
+        task.await.unwrap();
+    }
+    assert_eq!(canonical(&f), before);
+}
+
+#[tokio::test]
+async fn prepared_pages_old_and_limited_peers_refuse_without_page_send() {
+    use crate::daemon::protocol::*;
+    for (cap, limit) in [(false, MAX_MESSAGE_SIZE), (true, LEGACY_MAX_MESSAGE_SIZE)] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("old.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            for _ in 0..2 {
+                let ping = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    ping.method, "ping",
+                    "no page request or fallback may be sent"
+                );
+                let result =
+                    json!({"protocolVersion":2,"maxMessageSize":limit,"canonicalPagesV1":cap});
+                write_framed_message(
+                    &mut stream,
+                    &DaemonResponse::success(ping.id, result),
+                    MAX_MESSAGE_SIZE,
+                )
+                .await
+                .unwrap();
+            }
+        });
+        let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+        let remote = crate::daemon::bridge_adapters::RemoteStorageAdapter::new(client.clone());
+        let request =
+            ListPageRequest::from_mcp(&json!({"contractVersion":2,"namespace":"default"})).unwrap();
+        assert!(matches!(
+            remote.list_canonical_page(request).await,
+            Err(crate::canonical_list::ListError::Unavailable)
+        ));
+        client.ping().await.unwrap();
+        drop((client, remote));
+        peer.await.unwrap();
+    }
+    let f = Fixture::new();
+    let before = canonical(&f);
+    let response=crate::daemon::server::native_method_test_rpc_with_limit(adapter(&f),
+        json!({"arguments":{"contractVersion":2,"namespace":"default"},"responseLimit":crate::daemon::prepared_query::response_limit()}),
+        crate::daemon::prepared_pages::LIST,None).await;
+    assert!(response.error.is_some());
+    assert!(response.result.is_none());
+    assert_eq!(canonical(&f), before);
+}
+
+#[tokio::test]
+async fn prepared_pages_whole_size_error_smaller_retry_actual_transport_frames() {
+    let f = Fixture::new();
+    let tags = (0..64)
+        .map(|i| format!("entity/t{i:02}{}", "x".repeat(115)))
+        .collect::<Vec<_>>();
+    let refs = tags.iter().map(String::as_str).collect::<Vec<_>>();
+    let summary = "\"\\\n".repeat(666);
+    for _ in 0..40 {
+        f.insert_memory_with(MemorySpec {
+            summary: &summary,
+            tags: &refs,
+            ..MemorySpec::new(NamespaceId::new(1))
+        })
+        .await;
+    }
+    let owned = adapter(&f);
+    let before = canonical(&f);
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) =
+        native_lifecycle_test_remote(owned, &socket.path().join("size.sock")).await;
+    let mut r =
+        ListPageRequest::from_mcp(&json!({"contractVersion":2,"namespace":"default","limit":40}))
+            .unwrap();
+    assert!(matches!(
+        remote.list_canonical_page(r.clone()).await,
+        Err(crate::canonical_list::ListError::TooLarge)
+    ));
+    r.limit = 10;
+    let page = remote.list_canonical_page(r).await.unwrap();
+    assert_eq!(page.data.total.get(), 40);
+    assert!(!page.data.complete);
+    let envelope = page.into_envelope();
+    let rest = serde_json::to_vec(&envelope).unwrap();
+    let tool = crate::mcp::protocol::ToolCallResult::json(&envelope).unwrap();
+    let mut lengths = Vec::new();
+    for legacy in [false, true] {
+        let mut tool = tool.clone();
+        if legacy {
+            tool.structured_content = None;
+        }
+        let value = serde_json::to_value(tool).unwrap();
+        let wrapped = crate::mcp::protocol::ResultEnvelope::complete(value.clone());
+        let mcp = crate::mcp::protocol::JsonRpcResponse::success(
+            crate::mcp::protocol::JsonRpcId::Number(i64::MAX),
+            serde_json::to_value(wrapped).unwrap(),
+        );
+        let daemon = crate::daemon::protocol::DaemonResponse::success(u64::MAX, value);
+        let sizes = (
+            serde_json::to_vec(&mcp).unwrap().len(),
+            serde_json::to_vec(&daemon).unwrap().len(),
+        );
+        assert!(
+            sizes.0 < crate::daemon::protocol::MAX_MESSAGE_SIZE
+                && sizes.1 < crate::daemon::protocol::MAX_MESSAGE_SIZE
+        );
+        lengths.push(sizes);
+    }
+    eprintln!(
+        "actual legacy-store escaped-field page REST={} modern/legacy MCP+daemon={lengths:?}; not an arbitrary-ID or RSS bound",
+        rest.len()
+    );
+    assert!(rest.len() < crate::daemon::protocol::MAX_MESSAGE_SIZE);
+    drop(remote);
+    task.await.unwrap();
+    assert_eq!(canonical(&f), before);
+}
+
+#[tokio::test]
 async fn prepared_pages_remote_list_matches_actual_owner_before() {
     let f = Fixture::new();
     f.insert_memory_with(MemorySpec {

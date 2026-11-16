@@ -286,6 +286,29 @@ async fn catalog_page_native_unknown_profile_preserves_retained_only_without_pro
         "unknownNamespaceProfile"
     );
     assert!(namespaces["data"]["namespaces"][0]["embeddingProfileId"].is_null());
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        bridge.storage.clone(),
+        &socket.path().join("retained.sock"),
+    )
+    .await;
+    let mut remote_bridge = crate::test_support::StubBridge::default().into_bridge();
+    remote_bridge.storage = Arc::new(remote);
+    assert_eq!(
+        mcp(&remote_bridge, "list_tags", json!({"contractVersion":2})).await,
+        tags
+    );
+    assert_eq!(
+        mcp(
+            &remote_bridge,
+            "list_namespaces",
+            json!({"contractVersion":2})
+        )
+        .await,
+        namespaces
+    );
+    drop(remote_bridge);
+    task.await.unwrap();
     assert_eq!(readers::bytes(&target), before);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
 }
@@ -353,6 +376,25 @@ async fn catalog_page_profile_compatibility_uses_supplied_configuration_not_equa
         )
         .unwrap();
         assert_eq!(h, m);
+        let socket = tempfile::tempdir().unwrap();
+        let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+            bridge.storage.clone(),
+            &socket.path().join("profile.sock"),
+        )
+        .await;
+        let mut remote_bridge = crate::test_support::StubBridge::default().into_bridge();
+        remote_bridge.storage = Arc::new(remote);
+        assert_eq!(
+            mcp(
+                &remote_bridge,
+                "list_namespaces",
+                json!({"contractVersion":2})
+            )
+            .await,
+            m
+        );
+        drop(remote_bridge);
+        task.await.unwrap();
         assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
     }
     assert_eq!(readers::bytes(&d.path), before);
