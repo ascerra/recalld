@@ -235,7 +235,10 @@ async fn native_batch_actual_adapter_commits_labels_and_replays_then_forgets() {
     let f = Fixture::from_open_engine(root, s.engine);
     completion(&f).rebuild_all().await.unwrap();
     let adapter = disabled_aux_adapter(&f, clock.clone());
-    let out = adapter.mutate_batch(r.clone()).await.unwrap();
+    let (out, trace) =
+        crate::performance::tests::capture_full(adapter.mutate_batch(r.clone())).await;
+    let out = out.unwrap();
+    crate::performance::tests::assert_no_legacy_batch_events(&trace);
     assert!(out.all_ready(), "{out:?}");
     let receipt = out.items[0].receipt.clone().unwrap();
     let id = inserted(&receipt);

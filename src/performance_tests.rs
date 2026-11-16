@@ -743,3 +743,66 @@ pub(crate) async fn capture_full<T>(
         .collect();
     (result, rows)
 }
+
+#[test]
+fn conditional_batch_measurement_preserves_parent_without_starting_disabled_clocks() {
+    fn forbidden() -> u64 {
+        panic!("disabled field evaluated")
+    }
+    let capture = Capture::default();
+    tracing::subscriber::with_default(subscriber(capture.clone()), || {
+        REQUEST.sync_scope(Decision {
+            selected: true,
+            every: 7,
+            root_ordinal: 19,
+            sampled_roots_seen: 3,
+        }, || {
+            assert!(enabled());
+            assert_eq!(allocation_probe::count(|| {
+                assert!(Timer::new_if("conditional.timer", false).start.is_none());
+                let mut timeline = Timeline::new_if(false);
+                assert!(timeline.start.is_none());
+                timeline.mark("conditional.timeline");
+                crate::performance::event!(false; kind = "conditional", value = forbidden());
+            }), 0);
+            let worker = Worker::new_if("conditional.queue", false);
+            assert!(worker.context.is_some());
+            assert!(worker.queued.start.is_none());
+            worker.run(|| {
+                assert!(enabled());
+                assert_eq!(REQUEST.with(|d| (d.every, d.root_ordinal, d.sampled_roots_seen)), (7, 19, 3));
+                crate::performance::event!(kind = "inherited_child");
+            });
+        });
+    });
+    let rows = events(&capture);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["kind"], "inherited_child");
+}
+
+pub(crate) fn assert_no_legacy_batch_events(rows: &[serde_json::Value]) {
+    assert!(
+        !rows.is_empty(),
+        "actual native consumer emitted no existing trace evidence"
+    );
+    for row in rows {
+        let fields = &row["fields"];
+        assert!(
+            !fields["kind"].as_str().unwrap_or("").starts_with("batch_"),
+            "{row}"
+        );
+        let stage = fields["stage"].as_str().unwrap_or("");
+        assert!(
+            !stage.starts_with("batch.") && stage != "metadata.batch_commit",
+            "{row}"
+        );
+        assert!(
+            !fields["resource"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("batch_"),
+            "{row}"
+        );
+        assert_ne!(fields["operation"], "mcp.batch", "{row}");
+    }
+}

@@ -640,7 +640,7 @@ impl MetadataStore {
             items,
         };
         save(&tx, &p)?;
-        self.commit_batch(tx, &receipt)?;
+        self.commit_batch(tx, &receipt, version == 1)?;
         Ok(p)
     }
 
@@ -791,10 +791,31 @@ impl MetadataStore {
         &self,
         tx: redb::WriteTransaction,
         receipt: &WriteReceipt,
+        legacy_trace: bool,
     ) -> Result<(), StorageError> {
         let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
         super::effects::crash_point("before_batch_commit");
+        let resource = match receipt.outcome {
+            MutationOutcome::BatchReserved { .. } => "batch_reservation",
+            MutationOutcome::BatchItemRejected { .. } => "batch_rejection",
+            _ => "batch_other",
+        };
+        crate::performance::event!(legacy_trace;
+            kind = "commit_call",
+            resource,
+            phase = "attempt",
+            sync_coverage = "opaque_backend"
+        );
+        let timer = crate::performance::Timer::new_if("metadata.batch_commit", legacy_trace);
         let result = tx.commit();
+        timer.outcome(result.is_ok());
+        crate::performance::event!(legacy_trace;
+            kind = "commit_call",
+            resource,
+            phase = "return",
+            success = result.is_ok(),
+            sync_coverage = "opaque_backend"
+        );
         #[cfg(test)]
         let result = result.and_then(|()| {
             if super::effects::FAIL_AFTER_RECORD_COMMIT.with(|f| f.replace(false))
@@ -909,7 +930,7 @@ impl MetadataStore {
         item.state = BatchItemState::Error { error };
         p.bookkeeping_receipts.push(receipt.clone());
         save(&tx, &p)?;
-        self.commit_batch(tx, &receipt)?;
+        self.commit_batch(tx, &receipt, child.version == 1)?;
         Ok(p)
     }
 }
