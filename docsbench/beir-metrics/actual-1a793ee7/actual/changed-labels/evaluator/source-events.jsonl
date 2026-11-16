@@ -1,0 +1,366 @@
+{"sourceId": "doc000", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc000", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc000", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3228-7d33-ad93-b01b4d7c2cf4"}
+{"sourceId": "doc001", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc001", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc001", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-322b-7753-9b8f-897fbba4cec7"}
+{"sourceId": "doc002", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc002", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc002", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-322e-7593-9fe7-6606e39b35cb"}
+{"sourceId": "doc003", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc003", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc003", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3231-7770-b8f5-483ce477387b"}
+{"sourceId": "doc004", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc004", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc004", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3233-77e3-82ec-d24bae66b95e"}
+{"sourceId": "doc005", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc005", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc005", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3236-75a1-ad64-c77015f3813f"}
+{"sourceId": "doc006", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc006", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc006", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3239-73e1-8f8a-6a9b00bc3151"}
+{"sourceId": "doc007", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc007", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc007", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-323b-79b0-b178-b5476b3568b0"}
+{"sourceId": "doc008", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc008", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc008", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-323e-76c3-abf2-f795f8e6c580"}
+{"sourceId": "doc009", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc009", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc009", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3241-7ac2-a61d-4715a6adb0e9"}
+{"sourceId": "doc010", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc010", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc010", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3244-7a61-98ff-5d0b048787cf"}
+{"sourceId": "doc011", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc011", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc011", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3246-7733-8af6-9672f888718b"}
+{"sourceId": "doc012", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc012", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc012", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3249-7962-91f5-7c34576716eb"}
+{"sourceId": "doc013", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc013", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc013", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-324c-7b31-a471-ef62eb516edc"}
+{"sourceId": "doc014", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc014", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc014", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-324f-7e20-8858-0a89e28cc36c"}
+{"sourceId": "doc015", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc015", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc015", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3252-7d52-bbcd-ff76181fc1ae"}
+{"sourceId": "doc016", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc016", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc016", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3255-7d50-8511-fc0ff8544031"}
+{"sourceId": "doc017", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc017", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc017", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3258-7831-aa70-1aa58fa1ee40"}
+{"sourceId": "doc018", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc018", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc018", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-325b-7413-baaa-eeb9a6fac7fa"}
+{"sourceId": "doc019", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc019", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc019", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-325f-7551-9987-0d2edd7b88d3"}
+{"sourceId": "doc020", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc020", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc020", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3262-73c1-85db-3167813a25db"}
+{"sourceId": "doc021", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc021", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc021", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3265-71f3-b792-ff2daedaea8c"}
+{"sourceId": "doc022", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc022", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc022", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3268-74c0-ba23-cc0253a8fc40"}
+{"sourceId": "doc023", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc023", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc023", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-326b-71b3-baa2-c993ea1c2057"}
+{"sourceId": "doc024", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc024", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc024", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-326e-7f10-9485-6882cb069853"}
+{"sourceId": "doc025", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc025", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc025", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3272-79a1-b708-c910447be776"}
+{"sourceId": "doc026", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc026", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc026", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3275-7d03-8e15-aaaa06d7ac8f"}
+{"sourceId": "doc027", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc027", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc027", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3278-7f22-aefe-1d424e6672e5"}
+{"sourceId": "doc028", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc028", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc028", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-327c-7c53-8d08-2d6f2bd83140"}
+{"sourceId": "doc029", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc029", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc029", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-327f-7fc2-9fe5-0553431135ca"}
+{"sourceId": "doc030", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc030", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc030", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3283-7421-b0c3-620f59a9f0a1"}
+{"sourceId": "doc031", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc031", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc031", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3286-7330-840e-036ff233be9c"}
+{"sourceId": "doc032", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc032", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc032", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-328a-7bb0-931e-99a6dd4c04e5"}
+{"sourceId": "doc033", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc033", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc033", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-328e-7d93-a494-c47df205e2ae"}
+{"sourceId": "doc034", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc034", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc034", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3292-7963-ad2b-9465ae529a39"}
+{"sourceId": "doc035", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc035", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc035", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3296-7302-8c11-bd14a156c4e8"}
+{"sourceId": "doc036", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc036", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc036", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-329a-7121-bfbe-dff620bc02d8"}
+{"sourceId": "doc037", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc037", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc037", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-329e-7600-b627-f606216d8b78"}
+{"sourceId": "doc038", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc038", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc038", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32a1-7010-a49a-546668adccf5"}
+{"sourceId": "doc039", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc039", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc039", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32a5-72e2-9ae8-68c9da3eba97"}
+{"sourceId": "doc040", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc040", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc040", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32a9-7be2-ab41-731cee30f161"}
+{"sourceId": "doc041", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc041", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc041", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32ad-78a1-a2ad-3906d22061e3"}
+{"sourceId": "doc042", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc042", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc042", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32b1-78b3-b802-f48644c49599"}
+{"sourceId": "doc043", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc043", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc043", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32b5-7aa1-a4b7-314e827298ec"}
+{"sourceId": "doc044", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc044", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc044", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32b9-7f32-a664-0bcaddf85870"}
+{"sourceId": "doc045", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc045", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc045", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32bd-7720-a28e-cf8bdd5ec172"}
+{"sourceId": "doc046", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc046", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc046", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32c1-77b1-8a40-c8a49de0d602"}
+{"sourceId": "doc047", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc047", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc047", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32c6-7c50-a53f-d1db59aa4802"}
+{"sourceId": "doc048", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc048", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc048", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32ca-7b51-890b-1b0d06410cac"}
+{"sourceId": "doc049", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc049", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc049", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32ce-72f1-8246-1aa3a19ac3f2"}
+{"sourceId": "doc050", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc050", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc050", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32d3-72b0-8633-7c24390d74e9"}
+{"sourceId": "doc051", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc051", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc051", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32d7-7353-9b5e-758cddca49ef"}
+{"sourceId": "doc052", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc052", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc052", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32db-78b0-8ccb-d69ed22c4064"}
+{"sourceId": "doc053", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc053", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc053", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32e0-7603-9436-8821e43c6686"}
+{"sourceId": "doc054", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc054", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc054", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32e5-7ca2-ba03-5ca86fba008a"}
+{"sourceId": "doc055", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc055", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc055", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32e9-7d91-882e-412724dc4ded"}
+{"sourceId": "doc056", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc056", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc056", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32ee-7ad3-8c4b-69ed3db62bd4"}
+{"sourceId": "doc057", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc057", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc057", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32f3-7232-bd97-341077e202f1"}
+{"sourceId": "doc058", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc058", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc058", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32f8-7480-862e-2d55f6ff8928"}
+{"sourceId": "doc059", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc059", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc059", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-32fd-7441-8815-03d540b535b3"}
+{"sourceId": "doc060", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc060", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc060", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3301-7f42-84a8-f422ab5cea25"}
+{"sourceId": "doc061", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc061", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc061", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3306-7842-b820-5452227df2bc"}
+{"sourceId": "doc062", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc062", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc062", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-330b-7c51-ac9a-e2f4756e5dc5"}
+{"sourceId": "doc063", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc063", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc063", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3310-71d2-af39-b59720944565"}
+{"sourceId": "doc064", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc064", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc064", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3315-7a21-9cad-58aaaa1e8857"}
+{"sourceId": "doc065", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc065", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc065", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-331a-7600-bd59-72da6a0186bb"}
+{"sourceId": "doc066", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc066", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc066", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-331f-7371-9e34-374c5f339cb3"}
+{"sourceId": "doc067", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc067", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc067", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3324-7242-894b-3e77e5cb49e9"}
+{"sourceId": "doc068", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc068", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc068", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3328-79c0-9b84-72f388bffc8f"}
+{"sourceId": "doc069", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc069", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc069", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-332d-7fa2-be76-504437dee192"}
+{"sourceId": "doc070", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc070", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc070", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3333-79e0-b739-b09e5a8a8360"}
+{"sourceId": "doc071", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc071", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc071", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3338-7a30-bd9e-531d1f34d74f"}
+{"sourceId": "doc072", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc072", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc072", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-333d-7a91-9cf8-e52afe5826b5"}
+{"sourceId": "doc073", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc073", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc073", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3342-7500-9db2-6f7ba533e856"}
+{"sourceId": "doc074", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc074", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc074", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3347-7e63-8ad5-fae1b6f649b4"}
+{"sourceId": "doc075", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc075", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc075", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-334d-79c0-a790-8e75851efc02"}
+{"sourceId": "doc076", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc076", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc076", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3352-7491-b565-ffdd171a4c50"}
+{"sourceId": "doc077", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc077", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc077", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3357-77e3-ab85-9e779682ce1f"}
+{"sourceId": "doc078", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc078", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc078", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-335d-73c1-be55-310d8ea34532"}
+{"sourceId": "doc079", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc079", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc079", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3362-7740-ad05-c53e77bba18c"}
+{"sourceId": "doc080", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc080", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc080", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3368-7b13-aec5-e98fc76ca472"}
+{"sourceId": "doc081", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc081", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc081", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-336d-7c11-b4b5-6fa3207fc48b"}
+{"sourceId": "doc082", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc082", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc082", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3373-7150-8cae-bb0d80bd30b6"}
+{"sourceId": "doc083", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc083", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc083", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3378-73d3-b2d8-98b38aed4963"}
+{"sourceId": "doc084", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc084", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc084", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-337e-7950-832b-a43bdcfbfc57"}
+{"sourceId": "doc085", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc085", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc085", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3384-7712-b591-f99bf81cafb4"}
+{"sourceId": "doc086", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc086", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc086", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3389-77b1-a692-dd874ac15604"}
+{"sourceId": "doc087", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc087", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc087", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33aa-7c92-8886-3558f6b96cf6"}
+{"sourceId": "doc088", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc088", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc088", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33b3-7012-8a5a-2434bec742e4"}
+{"sourceId": "doc089", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc089", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc089", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33bb-7393-adc3-214f2674309d"}
+{"sourceId": "doc090", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc090", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc090", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33c3-7e60-881a-6bded2ba08c1"}
+{"sourceId": "doc091", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc091", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc091", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33cb-78a3-b728-9aca9635fdd1"}
+{"sourceId": "doc092", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc092", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc092", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33d4-7760-9d54-8ea76636f649"}
+{"sourceId": "doc093", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc093", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc093", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33db-7a03-a2cc-4a4de7bf7f0d"}
+{"sourceId": "doc094", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc094", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc094", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33e3-7eb3-857a-e6a5fb5ce56e"}
+{"sourceId": "doc095", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc095", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc095", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33eb-74a1-a713-f608745afd0b"}
+{"sourceId": "doc096", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc096", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc096", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33f2-7b11-b979-5538ec6e84f7"}
+{"sourceId": "doc097", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc097", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc097", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-33fb-7101-af5c-6b805f71ad32"}
+{"sourceId": "doc098", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc098", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc098", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3402-7983-be7a-191f0036e271"}
+{"sourceId": "doc099", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc099", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc099", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3409-7bc3-9e95-410525b3c19d"}
+{"sourceId": "doc100", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc100", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc100", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3410-7501-99f4-59ae75d590d9"}
+{"sourceId": "doc101", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc101", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc101", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3416-7f63-b597-69edc441c59a"}
+{"sourceId": "doc102", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc102", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc102", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-341d-7591-99b7-c5b62c6c6340"}
+{"sourceId": "doc103", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc103", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc103", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3423-7b83-9e8a-1a8b44c08054"}
+{"sourceId": "doc104", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc104", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc104", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3429-71e3-928f-4b168f5d896b"}
+{"sourceId": "doc105", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc105", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc105", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3430-72b2-9f11-1fe9faa6996c"}
+{"sourceId": "doc106", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc106", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc106", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3436-7db2-8eaa-adbc99a7e08b"}
+{"sourceId": "doc107", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc107", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc107", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-343d-7961-bde3-1f87f48ca7eb"}
+{"sourceId": "doc108", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc108", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc108", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3444-7213-b81d-e9c8002c4423"}
+{"sourceId": "doc109", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc109", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc109", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-344a-74c0-b2ee-712e69b6f366"}
+{"sourceId": "doc110", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc110", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc110", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3451-76a2-a6a4-7251fbed1c46"}
+{"sourceId": "doc111", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc111", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc111", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3458-7291-91be-909174e33b76"}
+{"sourceId": "doc112", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc112", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc112", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-345f-7cf0-8caf-6cb0aac359f6"}
+{"sourceId": "doc113", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc113", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc113", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3465-7d51-84e6-77b524b51f5b"}
+{"sourceId": "doc114", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc114", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc114", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-346c-7bc2-ab5e-bd7a68f12b75"}
+{"sourceId": "doc115", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc115", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc115", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3473-7562-bdfc-33af60c241a7"}
+{"sourceId": "doc116", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc116", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc116", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-347a-73c1-8fed-c01ce12695e1"}
+{"sourceId": "doc117", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc117", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc117", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3481-7651-9eec-4407fc7c26f6"}
+{"sourceId": "doc118", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc118", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc118", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3488-7d21-ac13-831440aa1852"}
+{"sourceId": "doc119", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc119", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc119", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3490-7481-838b-33bbcbc4408b"}
+{"sourceId": "doc120", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc120", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc120", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-3497-75a2-afec-efc2a21f5037"}
+{"sourceId": "doc121", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc121", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "doc121", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e155-349e-74f3-855a-8b95d8124316"}
