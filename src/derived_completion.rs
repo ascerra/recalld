@@ -2,7 +2,7 @@
 //! storage; never hold storage while awaiting a derived lock.
 pub(crate) mod catalog;
 mod native_decay;
-mod native_graph;
+pub(crate) mod native_graph;
 mod native_purge;
 mod native_store;
 mod text_compaction;

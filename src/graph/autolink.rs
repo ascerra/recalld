@@ -363,6 +363,7 @@ pub(crate) async fn perform_autolink_with_work(
     cache: &Arc<CacheManager>,
     parent: Option<&WorkTicket>,
 ) -> Result<usize, AutoLinkError> {
+    require_legacy_owner(storage).map_err(|e| AutoLinkError::Storage(e.to_string()))?;
     let work = crate::storage::work::accept_work(storage, parent)
         .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
     let result = async {
@@ -508,6 +509,7 @@ pub(crate) async fn perform_entity_link_with_work(
     cache: &Arc<CacheManager>,
     parent: Option<&WorkTicket>,
 ) -> Result<usize, AutoLinkError> {
+    require_legacy_owner(storage).map_err(|e| AutoLinkError::Storage(e.to_string()))?;
     let work = crate::storage::work::accept_work(storage, parent)
         .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
     let result = async {
@@ -690,6 +692,7 @@ pub(crate) async fn perform_temporal_link_with_work(
     cache: &Arc<CacheManager>,
     parent: Option<&WorkTicket>,
 ) -> Result<usize, AutoLinkError> {
+    require_legacy_owner(storage).map_err(|e| AutoLinkError::Storage(e.to_string()))?;
     let work = crate::storage::work::accept_work(storage, parent)
         .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
     let result = async {
@@ -962,4 +965,15 @@ mod entity_scope_tests {
         );
         assert_eq!(f.storage.read().unwrap().load_all_edges().unwrap().len(), 1);
     }
+}
+
+/// Legacy producers cannot infer native publication ownership from shared caches.
+pub(crate) fn require_legacy_owner(
+    storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+) -> Result<(), crate::storage::StorageError> {
+    let engine = storage
+        .read()
+        .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?;
+    engine.meta_store().ensure_available()?;
+    engine.meta_store().ensure_legacy_operation()
 }
