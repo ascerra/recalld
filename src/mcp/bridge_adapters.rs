@@ -201,6 +201,18 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    async fn similar_contract(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.similar_contract(request).await
+    }
+    async fn query_contract(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.query_contract(request).await
+    }
     async fn scan_duplicate_pairs(
         &self,
         request: crate::serialization::scan::ExactScanRequest,
@@ -292,6 +304,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                 .await
                 .map_err(map_search_error)?
             {
+                let exposures = prepared.exposures(true).map_err(map_search_error)?;
                 let hydration = crate::performance::Timer::new("mcp.hydration");
                 let payload = prepared.payload.ok_or_else(|| {
                     bridge::BridgeError::Internal("coherent payload missing".into())
@@ -304,7 +317,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     ));
                 }
                 let mut hits = Vec::with_capacity(payload.rows.len());
-                let mut exposures = Vec::new();
                 for (selected, row) in prepared
                     .response
                     .response
@@ -334,14 +346,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    exposures.push((
-                        selected.memory_id,
-                        if selected.activation_score.is_some() {
-                            crate::model::AccessKind::AssociativeRetrieval
-                        } else {
-                            crate::model::AccessKind::DirectRetrieval
-                        },
-                    ));
                     hits.push(bridge::SearchHit {
                         labels,
                         id: selected.memory_id.to_string(),
@@ -369,7 +373,6 @@ impl bridge::SearchPipeline for McpSearchAdapter {
                     let id = crate::model::MemoryId::from_bytes(disk.id);
                     let labels = disk.schema.as_ref().map(|s| s.labels.clone());
                     let metadata = crate::model::structured_metadata(&disk.tags, labels.as_ref());
-                    exposures.push((id, crate::model::AccessKind::AssociativeRetrieval));
                     neighbors.push(bridge::NeighborMemory {
                         labels,
                         id: id.to_string(),
@@ -688,10 +691,62 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         id: MemoryId,
         limit: usize,
         min_score: Option<f32>,
-        _same_namespace: bool,
+        same_namespace: bool,
         record_access: bool,
         namespace: Option<&str>,
     ) -> Result<Vec<bridge::SearchHit>, bridge::BridgeError> {
+        if !same_namespace {
+            let observed = self
+                .query_engine
+                .similar_selected_with_work(
+                    id,
+                    namespace,
+                    crate::search::SimilaritySelection {
+                        semantics: crate::search::RetrievalSemantics::V1,
+                        scope: crate::search::SimilarityScope::AllCompatible,
+                        filter: Default::default(),
+                        limit: limit.min(crate::search::SearchQuery::MAX_USER_LIMIT),
+                        min_score,
+                        record_access,
+                        include_embeddings: false,
+                        original_contract_version: 1,
+                    },
+                    None,
+                )
+                .await
+                .map_err(map_search_error)?;
+            let hits = observed
+                .value
+                .rows
+                .into_iter()
+                .map(|selected| {
+                    let r = selected.result;
+                    let metadata = crate::model::structured_metadata(&r.tags, r.labels.as_ref());
+                    bridge::SearchHit {
+                        labels: r.labels.clone(),
+                        id: r.memory_id.to_string(),
+                        summary: r.summary.unwrap_or_default(),
+                        full_text: selected.payload.full_text,
+                        score: r.score.unwrap_or(0.0),
+                        namespace: selected.namespace.name,
+                        tags: r.tags.iter().map(|t| t.to_string()).collect(),
+                        entities: metadata.entities,
+                        topics: metadata.topics,
+                        emotions: metadata.emotions,
+                        phase: format!("{:?}", r.phase),
+                        strength: r.retrievability,
+                        created_at: format_timestamp(r.created_at, self.timezone),
+                        last_accessed_at: format_timestamp(r.last_accessed_at, self.timezone),
+                        related: Vec::new(),
+                    }
+                })
+                .collect();
+            return Observed {
+                value: hits,
+                receipts: observed.receipts,
+            }
+            .finish(Ok(()));
+        }
         // Admission follows the actual query metadata owner. Immutable offline
         // adapters have no mutable core; they cannot inherit a placeholder's ticket.
         let accepted = self

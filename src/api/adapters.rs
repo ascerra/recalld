@@ -86,11 +86,17 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
-    fn active_embedding(
+    async fn similar_contract(
         &self,
-    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
-    {
-        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+        request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.similar_contract(request).await
+    }
+    async fn query_contract(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.query_contract(request).await
     }
     fn accept_work(
         &self,
@@ -202,6 +208,12 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+    }
     async fn embed_text(
         &self,
         text: &str,

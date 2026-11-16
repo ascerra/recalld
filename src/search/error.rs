@@ -6,6 +6,8 @@ use thiserror::Error;
 /// Errors that can occur during search operations.
 #[derive(Debug, Error)]
 pub enum SearchError {
+    #[error("query embedding profile differs from canonical namespace binding")]
+    EmbeddingProfileMismatch,
     #[error(transparent)]
     CanonicalRead(Box<crate::storage::StorageError>),
     #[error(transparent)]

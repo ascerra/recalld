@@ -17,6 +17,8 @@ mod forget_consumer;
 mod native_query_admission;
 #[path = "replay_consumer_tests.rs"]
 mod replay_consumer;
+#[path = "supplied_query_certification_tests.rs"]
+mod supplied_query_certification;
 
 struct NoProvider;
 #[async_trait::async_trait]
@@ -354,9 +356,18 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
                     serde_json::from_value(body.clone()).unwrap(),
                     crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
                 )
-                .await
-                .unwrap();
-            assert!(result.response.results.iter().any(|r| r.memory_id == id));
+                .await;
+            if body.get("queryEmbedding").is_some() {
+                // Native supplied-vector reads require the pinned entry below.
+                // The unpinned Rust compatibility entry cannot grant certification.
+                assert!(matches!(
+                    result,
+                    Err(crate::search::SearchError::Unavailable(_))
+                ));
+            } else {
+                let result = result.unwrap();
+                assert!(result.response.results.iter().any(|r| r.memory_id == id));
+            }
             let target = f
                 .storage
                 .read()

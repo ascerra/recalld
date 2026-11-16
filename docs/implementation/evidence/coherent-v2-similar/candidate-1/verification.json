@@ -1,0 +1,7 @@
+{
+  "source_pre_post_identical": true,
+  "exit": 101,
+  "tests_executed": 0,
+  "failure": "two E0603 private pipeline module imports",
+  "source_manifest_sha256": "363d8d74740693c3d5c65a78ac68b89ed58a32c96ccbf5c003742c165568068a"
+}
