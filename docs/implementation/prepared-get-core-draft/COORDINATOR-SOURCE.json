@@ -40,7 +40,7 @@
     },
     {
       "path": "src/search/get_wire.rs",
-      "sha256": "6cfc53d701fe34e4eb1435663cfac8bcf6d8d35ba5a8e17fbeeb19663ec1a9d0"
+      "sha256": "7120f33369e6f32fef390cbc113c42c4dddcb5a75f7af93e5f902d9d1cd1ab2d"
     },
     {
       "path": "src/search/get_wire_tests.rs",

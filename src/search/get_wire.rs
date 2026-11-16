@@ -182,7 +182,7 @@ impl QueryEngine {
             SearchError::Unavailable("prepared get requires the actual publication owner".into())
         })?;
         let storage = owner.storage.clone();
-        let child = work.child().map_err(read_error)?;
+        let child = work.child().map_err(|error| read_error(error.into()))?;
         let gate = tokio::task::spawn_blocking(move || {
             let storage = storage
                 .read()
@@ -248,7 +248,7 @@ impl QueryEngine {
         let namespace = namespace.map(str::to_owned);
         let policy = self.native_policy_inputs();
         let clock = self.clock.clone();
-        let child = work.child().map_err(read_error)?;
+        let child = work.child().map_err(|error| read_error(error.into()))?;
         tokio::task::spawn_blocking(move || {
             // Retain both asynchronous leases if the awaiting caller cancels.
             let _publication = publication;
