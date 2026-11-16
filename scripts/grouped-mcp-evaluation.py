@@ -116,13 +116,14 @@ def load(root, ref, name, h):
     return json.loads(path.read_bytes())
 
 
-def prepare(args, h):
+def prepare(args, h, paired=None):
     sources = registry(h)
     group_map, split_map = maps(sources, h)  # Must precede cache/label construction.
     build = json.loads(args.build.read_text())
     manifest = h["build_manifest"](args, build)
     manifest.update(track=TRACK, groupMapVersion=1, splitMapVersion=1, aggregateProfile=PROFILE,
                     executionScope="synthetic-all-splits-no-training-no-holdout-claim")
+    if paired is not None: manifest.update(track=h["PAIRED"]["ARM_TRACK"], pairedArm=paired)
     args.out.mkdir()
     for key, name, value in (("sourceRegistry", "source-registry.json", sources), ("groupMap", "group-map.json", group_map), ("splitMap", "split-map.json", split_map)):
         manifest[key] = reference(args.out, name, value, h)
@@ -131,17 +132,19 @@ def prepare(args, h):
         identity = episode["episodeId"]
         (args.out / "episodes" / identity).mkdir(parents=True)
         artifacts = {key: reference(args.out, f"episodes/{identity}/{name}", value, h)
-                     for (key, name), value in zip(ARTIFACTS, episode_fixture(episode, h))}
+                     for (key, name), value in zip(ARTIFACTS, h["PAIRED"]["fixture"](episode,h) if paired is not None else episode_fixture(episode, h))}
         manifest["episodes"].append(dict(episodeId=identity, artifacts=artifacts))
     manifest["dataset"] = dict(kind="generated-synthetic-grouped", upstreamRevision=None, upstreamUrl=None, thirdPartyLicense=None,
         sourceRegistrySha256=manifest["sourceRegistry"]["sha256"], intendedUse="contract-diagnostic-only")
     h["save"](args.out / "manifest.json", manifest)
 
 
-def validate(args, h):
+def validate(args, h, paired=None):
     raw = args.manifest.read_bytes(); manifest = json.loads(raw); root = args.manifest.parent
-    h["exact_keys"](manifest, (*h["COMMON_FIELDS"], "groupMapVersion", "splitMapVersion", "aggregateProfile", "executionScope", "sourceRegistry", "groupMap", "splitMap", "episodes", "dataset"))
-    if manifest["track"] != TRACK or any(type(manifest[k]) is not int or manifest[k] != 1 for k in ("groupMapVersion", "splitMapVersion")) or manifest["aggregateProfile"] != PROFILE or manifest["executionScope"] != "synthetic-all-splits-no-training-no-holdout-claim":
+    h["exact_keys"](manifest, (*h["COMMON_FIELDS"], *(("pairedArm",) if paired is not None else ()), "groupMapVersion", "splitMapVersion", "aggregateProfile", "executionScope", "sourceRegistry", "groupMap", "splitMap", "episodes", "dataset"))
+    if paired is not None and h["encoded"](manifest["pairedArm"]) != h["encoded"](paired):
+        raise ValueError("paired arm policy/context mismatch")
+    if manifest["track"] != (h["PAIRED"]["ARM_TRACK"] if paired is not None else TRACK) or any(type(manifest[k]) is not int or manifest[k] != 1 for k in ("groupMapVersion", "splitMapVersion")) or manifest["aggregateProfile"] != PROFILE or manifest["executionScope"] != "synthetic-all-splits-no-training-no-holdout-claim":
         raise ValueError("unsupported grouped profile/version")
     h["validate_build"](manifest, args.binary, args.scorer, args.source_root)
     sources = load(root, manifest["sourceRegistry"], "source-registry.json", h)
@@ -173,7 +176,7 @@ def validate(args, h):
         episode = dict(manifest, **entry["artifacts"])
         episode["dataset"] = dict(kind="generated-synthetic", upstreamRevision=None, upstreamUrl=None, thirdPartyLicense=None,
             actorArtifactSha256=episode["actorInputs"]["sha256"], intendedUse="contract-diagnostic-only")
-        artifacts = h["validate_artifacts"](root, episode, episode_fixture(by_id[identity], h), prefix=f"episodes/{identity}/")
+        artifacts = h["validate_artifacts"](root, episode, (h["PAIRED"]["fixture"](by_id[identity],h) if paired is not None else episode_fixture(by_id[identity], h)), prefix=f"episodes/{identity}/")
         group = group_map["episodes"][identity]
         context = dict(episodeId=identity, groupId=group, split=split_map["groups"][group], queryIds=sorted(q["queryId"] for q in artifacts[3]["queries"]), groupMapSha256=manifest["groupMap"]["sha256"], splitMapSha256=manifest["splitMap"]["sha256"])
         episode["groupContext"] = context
@@ -182,8 +185,8 @@ def validate(args, h):
     return manifest, bundles, roster, environment
 
 
-def run(args, h):
-    manifest, bundles, roster, environment = validate(args, h)  # All episodes before any output/provider/store.
+def run(args, h, prepared=None):
+    manifest, bundles, roster, environment = prepared or validate(args, h)  # All episodes before any output/provider/store.
     args.out.mkdir(); (args.out / "episodes").mkdir()
     status = dict(status="running", environmentHash=environment, planned=len(roster), attempted=0, succeeded=0, failed=0, episodes=[dict(member, status="unattempted") for member in roster])
     scores = []
