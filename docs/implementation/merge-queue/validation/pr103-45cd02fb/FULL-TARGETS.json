@@ -1,0 +1,30 @@
+[
+  {
+    "target": "tests/inherited_policy_cli.rs",
+    "passed": 1,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/inherited_policy_cli-55f09460c02dd6ae",
+    "sha256": "05d1c7c448f1dc01ac0ab5ae4b3dd39f619b8bf0d2ca2f962d15cddd7ce1dec9"
+  },
+  {
+    "target": "tests/lifecycle_cli.rs",
+    "passed": 1,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/lifecycle_cli-5bae1aa288409852",
+    "sha256": "49def7584e2c0d0c4f2fb26349d2a6cf01f17d15cdf1276c86578aef7703b0b4"
+  },
+  {
+    "target": "tests/profile_attestation_cli.rs",
+    "passed": 5,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/profile_attestation_cli-e203f21f7c00a546",
+    "sha256": "2cd92022e33c6747d68a0d4658ee7eed0b5593677ebcf389f14ef6e3acc11e9b"
+  },
+  {
+    "target": "tests/text_migration_cli.rs",
+    "passed": 1,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/text_migration_cli-9d4a9dc03f7ddb52",
+    "sha256": "d1e0ca089a6ded8fa4a426b86ededc1b54009bcad3daab7da6d0f35cd875b0ab"
+  }
+]

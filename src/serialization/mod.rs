@@ -3,11 +3,13 @@
 //! Provides serde-based camelCase JSON format for the HTTP API wire protocol.
 //! Uses `serde_json` with skip-if-none and integer-millis timestamps.
 
+pub mod catalog;
 pub mod contract;
 mod json;
 pub mod native_batch;
 pub mod native_single;
 pub(crate) mod pair_cursor;
+pub mod policy;
 pub mod query;
 mod query_explanation;
 pub mod query_response;

@@ -1,0 +1,1 @@
+Supplementary committed source/input manifest includes non-Rust fixtures. Captured during final run from clean frozen d4c8a2f tree; primary Rust/config hashes were captured before execution. Reverify both manifests after completion.
