@@ -1,0 +1,67 @@
+[
+  {
+    "run": "before001",
+    "source": "423b9f21d3ffbae2ad1226dde6de076064bd63bf",
+    "exit": 101,
+    "test_results": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 0.66s"
+    ],
+    "source_manifest_sha256": "22e710592eff499a9eddb37cbacc72808322714e3a9396b4866b89260f34678d",
+    "focused_log_sha256": "ce8592de5f3296e14d9c4d1eb5f72212a9124cdd6ea4e40d3ec58a83dc5011c1",
+    "executable_manifest": "31e6a8c2604305efe06482c28a9a4247dc36b3b39d0afdc14a05de0353abd348  /work/target/debug/deps/recalld-b2844bb1c4a63074\n",
+    "memory_events": "low 0\nhigh 0\nmax 1115\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory_peak_bytes": 4294967296
+  },
+  {
+    "run": "candidate002",
+    "source": "67a60a501ad9248d86b0a713d48a667271b726bb",
+    "exit": 0,
+    "test_results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 0.74s"
+    ],
+    "source_manifest_sha256": "bab56f8c165a044106dfc105e2a793d8d404ccb2fb01ee8bedafd73d73f6e008",
+    "focused_log_sha256": "8ff70ca754f098c3cea93befd1a31034181901d992a8364f025795496cd3238b",
+    "executable_manifest": "e4fa474aa5300d673356d0a6612c46203afe0c31f89a71ed8f8db228ef60416a  /work/target/debug/deps/recalld-b2844bb1c4a63074\n",
+    "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory_peak_bytes": 4283260928
+  },
+  {
+    "run": "candidate003",
+    "source": "07d1c3c9d61eb620ea8d55e2f8d93db52e2f76eb",
+    "exit": 101,
+    "test_results": [
+      "test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 2.08s"
+    ],
+    "source_manifest_sha256": "c7202d5d8963de1210731b5ef13cfa4446c57b23888600b399f223e21530533d",
+    "focused_log_sha256": "ca65ddc986737c486433e11803ec33c911b7aeb47e6afa256e0962165f8ec1f2",
+    "executable_manifest": "b0768b8ef0a4e9068ddcad1e81974f7a3b09e3c25e454857071911f00fd79946  /work/target/debug/deps/recalld-b2844bb1c4a63074\n",
+    "memory_events": "low 0\nhigh 0\nmax 309\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory_peak_bytes": 4294967296
+  },
+  {
+    "run": "candidate004",
+    "source": "b7caaeeece561af1d8ca456cccb3b320ff5a58f7",
+    "exit": 101,
+    "test_results": [
+      "test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 2.08s"
+    ],
+    "source_manifest_sha256": "b4b8af57dfda189ada0dd36564a6f52324aa0948d9120558e89ac1c23105597b",
+    "focused_log_sha256": "4e8009af234d22399f6910bb8900439867d34b5bb6d2d88a687b43e7a460d10a",
+    "executable_manifest": "4db1c812a30c3dfa14b32f24af50de7faed1479883f0ff3e2ba3ddb9954c530f  /work/target/debug/deps/recalld-b2844bb1c4a63074\n",
+    "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory_peak_bytes": 4244434944
+  },
+  {
+    "run": "candidate005",
+    "source": "c8961d23f920fd4679a005ed6f399833e838b63c",
+    "exit": 0,
+    "test_results": [
+      "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 5.81s"
+    ],
+    "source_manifest_sha256": "962a8ecc1bca361304934ec0e8ad85ba451fe7581e79a49688566c8f8bf13f32",
+    "focused_log_sha256": "6d70073d45e0b845da9aa41ccca5858aa32ac6df391031ff9edd1e4b5133c82f",
+    "executable_manifest": "fd4956b7cb4876c7ce8272b47bc26b87f30bf7faa9d9c4b5f39d5eb265d71d29  /work/target/debug/deps/recalld-b2844bb1c4a63074\n",
+    "memory_events": "low 0\nhigh 0\nmax 336\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory_peak_bytes": 4294967296
+  }
+]

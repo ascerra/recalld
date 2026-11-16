@@ -556,6 +556,45 @@ impl MetadataStore {
         force: bool,
         parent: Option<&WorkTicket>,
     ) -> Result<PurgeProgress, StorageError> {
+        self.purge_request(ctx, force)?;
+        let _guard = self.purge_guard(parent)?;
+        let tx = self.db.begin_write()?;
+        self.begin_purge_transaction(tx, ctx, force, None)
+    }
+
+    pub(crate) fn begin_native_purge_named_admitted(
+        &self,
+        name: &str,
+        force: bool,
+        parent: Option<&WorkTicket>,
+        edges: &crate::storage::edges::EdgeStore,
+        receipt_limit: usize,
+    ) -> Result<Option<PurgeProgress>, StorageError> {
+        crate::model::validation::validate_namespace_name(name)
+            .map_err(|_| StorageError::InvalidPath)?;
+        self.require_native_purge_owner()?;
+        let _guard = self.purge_guard(parent)?;
+        // The public name route must never resume an old active operation.
+        self.ensure_available()?;
+        let tx = self.db.begin_write()?;
+        let mut scan = super::purge_budget::Scan::new(receipt_limit);
+        let Some(namespace) = scan.resolve_name(&tx, name)? else {
+            return Ok(None);
+        };
+        self.begin_purge_transaction(
+            tx,
+            &MutationContext::unkeyed(namespace),
+            force,
+            Some((edges, scan)),
+        )
+        .map(Some)
+    }
+
+    fn purge_request(
+        &self,
+        ctx: &MutationContext,
+        force: bool,
+    ) -> Result<(NamespaceId, bool, [u8; 32]), StorageError> {
         ctx.validate()?;
         let MutationScope::Namespace(namespace) = ctx.scope else {
             return Err(StorageError::InvalidMutationContext(
@@ -582,8 +621,17 @@ impl MetadataStore {
             },
             &[&[u8::from(force)]],
         );
-        let _guard = self.purge_guard(parent)?;
-        let tx = self.db.begin_write()?;
+        Ok((namespace, native, hash))
+    }
+
+    fn begin_purge_transaction(
+        &self,
+        tx: redb::WriteTransaction,
+        ctx: &MutationContext,
+        force: bool,
+        mut response: Option<(&crate::storage::edges::EdgeStore, super::purge_budget::Scan)>,
+    ) -> Result<PurgeProgress, StorageError> {
+        let (namespace, native, hash) = self.purge_request(ctx, force)?;
         if (control::read_control(&tx)?.control_schema_version == 2) != native {
             return Err(invalid("purge owner/schema mismatch"));
         }
@@ -607,6 +655,9 @@ impl MetadataStore {
             p.start_receipt = receipt;
             return Ok(p);
         }
+        if native && let Some((_, scan)) = response.as_mut() {
+            super::purge_budget::check_namespace_size(&tx, namespace, scan)?;
+        }
         let config = super::namespace_state::require_namespace_active(&tx, namespace)?;
         if config.id != namespace
             || native != config.schema.is_some()
@@ -620,7 +671,7 @@ impl MetadataStore {
         }
         crate::model::validation::validate_namespace_name(&config.name)
             .map_err(|_| StorageError::InvalidPath)?;
-        if !force || native {
+        if (!force || native) && !(native && response.is_some()) {
             for row in tx.open_table(META_TABLE)?.iter()? {
                 let (_, value) = row?;
                 let r = DiskRecord::from_bytes(value.value())?;
@@ -639,8 +690,6 @@ impl MetadataStore {
                 }
             }
         }
-        tx.open_table(SCHEMA)?.insert("version", 1)?;
-        tx.open_table(PROGRESS)?;
         let outcome = if native {
             let state = ControlState::decode(
                 tx.open_table(control::CONTROL)?
@@ -676,6 +725,11 @@ impl MetadataStore {
                 name_hash: Sha256::digest(config.name.as_bytes()).into(),
             }
         };
+        if native && let Some((edges, scan)) = response.as_mut() {
+            super::purge_budget::admit(&tx, namespace, &outcome, edges, scan, force)?;
+        }
+        tx.open_table(SCHEMA)?.insert("version", 1)?;
+        tx.open_table(PROGRESS)?;
         let receipt = self.record_receipt(&tx, ctx, hash, outcome)?;
         let p = PurgeProgress {
             version: if native { 2 } else { 1 },

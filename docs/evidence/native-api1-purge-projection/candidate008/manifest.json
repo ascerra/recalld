@@ -1,0 +1,51 @@
+{
+  "sourceCommit": "369d8e9219441a031b5502edd3d1ea435334c576",
+  "result": {
+    "passed": 15,
+    "failed": 0,
+    "seconds": 38.9
+  },
+  "status": "Focused only; additional actual high-peer/profile/history/concurrency acceptance remains before full validation",
+  "artifacts": {
+    "source.json": {
+      "sha256": "763ee4c255e005aeb470773c7bc311c8702524d0cdc07bfa40a8c6e02a90af52",
+      "bytes": 57725
+    },
+    "focused.log": {
+      "sha256": "9129bf13af3074b825dfd2e01b8e239bfb7522ba2ae96d51e3f302382b8f1fdb",
+      "bytes": 39473
+    },
+    "fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "source-after.txt": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "executables.sha256": {
+      "sha256": "369c357f0b276fefdeac5745d299d17c43e9abec7766c94ab633a750b794eb53",
+      "bytes": 115
+    },
+    "memory-events.txt": {
+      "sha256": "76c358ea20edf846c31657c8ebf3a2d9bf3ad43e262b405b7f6070165cb84654",
+      "bytes": 72
+    },
+    "memory-peak.txt": {
+      "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "bytes": 11
+    },
+    "driver.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "command.json": {
+      "sha256": "9cbddbdeaf839e133c23a4817187de1763d78d20b3477897123d9af8abd36855",
+      "bytes": 1891
+    },
+    "rustc.txt": {
+      "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "bytes": 197
+    }
+  }
+}

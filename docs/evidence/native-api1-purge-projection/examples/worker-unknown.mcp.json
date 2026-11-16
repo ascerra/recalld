@@ -1,0 +1,15 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"commitState\": \"unknown\",\n  \"error\": \"COMMIT_OUTCOME_UNKNOWN\",\n  \"message\": \"Purge worker outcome is unknown; no receipt is available. Reconcile before further deletion.\",\n  \"operationId\": null\n}"
+    }
+  ],
+  "structuredContent": {
+    "error": "COMMIT_OUTCOME_UNKNOWN",
+    "commitState": "unknown",
+    "operationId": null,
+    "message": "Purge worker outcome is unknown; no receipt is available. Reconcile before further deletion."
+  },
+  "isError": true
+}

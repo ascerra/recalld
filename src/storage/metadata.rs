@@ -30,6 +30,7 @@ mod observation;
 mod publication;
 pub(crate) use publication::CanonicalReadView;
 pub(crate) mod purge;
+mod purge_budget;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
 pub(crate) mod text_generation;
@@ -126,6 +127,17 @@ pub struct MetadataStore {
     pub(crate) catalog_test_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
     pub(crate) fail_purge_child_commit: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub(crate) native_purge_pause: std::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<super::purge::PurgeProgress>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
+    #[cfg(test)]
+    pub(crate) native_purge_worker_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
+    pub(crate) purge_lookup_count: std::sync::atomic::AtomicUsize,
     /// Store-local lost-ack probes: 1 reservation, 2 rejection, 3 child.
     #[cfg(test)]
     pub(crate) fail_batch_commit: std::sync::atomic::AtomicU8,
@@ -300,6 +312,12 @@ impl MetadataStore {
             catalog_test_fault: std::sync::atomic::AtomicU8::new(0),
             #[cfg(test)]
             fail_purge_child_commit: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            native_purge_pause: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            native_purge_worker_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            purge_lookup_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             fail_batch_commit: std::sync::atomic::AtomicU8::new(0),
             publication: std::sync::RwLock::new(()),

@@ -1,0 +1,46 @@
+{
+  "source_commit": "1f5d083d8142dd631f16f95617d23fddc85751ad",
+  "reviewed_wire_plan": "921487dffe5de89e5abd94208857dc88c4a9806f",
+  "files": [
+    {
+      "path": "src/storage/engine/purge.rs",
+      "sha256": "11f83baa9916f1f0257a39f62b01b1f450fbafd92ceb8e8e0fd8163a176d5f5a"
+    },
+    {
+      "path": "src/derived_completion.rs",
+      "sha256": "5ef4860d2f3d8714e21732aae9979446c591c246261217649e9f59786a21af4c"
+    },
+    {
+      "path": "src/derived_completion/native_purge.rs",
+      "sha256": "b7af2d36dfc905de858f6abf2017d061f5a255c8b264a5266627dba7bcba292d"
+    },
+    {
+      "path": "src/mcp/bridge_adapters.rs",
+      "sha256": "8d41136894b179b164f83f79f6a7c3fe6178365b186c928c4a4a835e6fe05d9d"
+    },
+    {
+      "path": "src/mcp/tools.rs",
+      "sha256": "4f1a5fc30594750b5129cae349e85cb5477fa07573e5c14c00ffc1a8d1a83de0"
+    },
+    {
+      "path": "src/mcp/bridge.rs",
+      "sha256": "63d1aa194f91d5aa9c915a28a18e8d7788d3f2eda1724ac05aebec58b77fae96"
+    },
+    {
+      "path": "src/daemon/server.rs",
+      "sha256": "4f5849b589b0f2c8a4ca0799335354db687c8008869d1f0437e3030a79c8881e"
+    },
+    {
+      "path": "src/search/fts.rs",
+      "sha256": "288553fcb9525a142717a63254cafcb6e278ac280a23ab8fceb928dcddedc422"
+    },
+    {
+      "path": "src/storage/metadata/purge.rs",
+      "sha256": "4b8e9df92eecfae8a312f76e59fdc80f68e26c164d6b964f6b7aa3b372844b8e"
+    },
+    {
+      "path": "src/storage/work.rs",
+      "sha256": "ab4d9741379e6abe51cab3d115e12bebcd1454b09ddf759a1de5974a7c962c19"
+    }
+  ]
+}
