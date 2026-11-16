@@ -1,0 +1,1569 @@
+{
+  "sourceCommit": "427c57e9e00bfa32f09edff22a479b31e656d269",
+  "directParent": "6265d05ae9fd52177dc0603d179c7c082d82b755",
+  "runs": {
+    "compile-failure": {
+      "sourceCommit": "edc2394b89cf21c67dee0c4c36bf90380ef180a9",
+      "status": "failed",
+      "sourceFiles": 239,
+      "gitAndPrePostVerified": true,
+      "steps": [
+        {
+          "command": [
+            "cargo",
+            "fmt",
+            "--check"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776631.4183671
+        },
+        {
+          "command": [
+            "python3",
+            "scripts/test_grouped_mcp_evaluation.py"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776631.5382042
+        },
+        {
+          "command": [
+            "python3",
+            "scripts/test_paired_mcp_evaluation.py"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776631.6644888
+        },
+        {
+          "command": [
+            "cargo",
+            "test",
+            "--offline",
+            "--locked",
+            "-j1",
+            "--example",
+            "score_mcp_episode",
+            "--",
+            "--test-threads=1"
+          ],
+          "exitCode": 101,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {
+            "/target/debug/examples/score_mcp_episode-6999ddfd18d09748": "c8c2937e3b35cc11eb23c051c06fee24359f56113a99dca5b7d095ae5b840b2d",
+            "/target/debug/examples/score_mcp_episode-8321ff86af15492b": "bcb519165536ddfd5d47971af24e1ac0d40adcd5fe241e51343e87c40c1adb92",
+            "/target/debug/examples/score_mcp_episode-619256c9d7ed6ccd": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f",
+            "/target/debug/examples/score_mcp_episode-bd683bb3c4eb99a4": "f29f2d2dcdac97c10646e2cf661146144ee03a2d40608634d31b81186bdb2fef"
+          },
+          "finished": 1794776657.3382251
+        }
+      ],
+      "cgroupFinal": {
+        "memory.max": "4294967296\n",
+        "memory.peak": "2509955072\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+      },
+      "testResults": {},
+      "testExecutableClaim": "None: compile failed. Listed glob hashes in original steps are historical cache inventory, not executed binaries."
+    },
+    "checker-failure": {
+      "sourceCommit": "93598b713feb8da18a0df7ccbe3da61f5ecd1970",
+      "status": "failed",
+      "sourceFiles": 239,
+      "gitAndPrePostVerified": true,
+      "steps": [
+        {
+          "command": [
+            "cargo",
+            "fmt",
+            "--check"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776711.2155595
+        },
+        {
+          "command": [
+            "python3",
+            "scripts/test_grouped_mcp_evaluation.py"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776711.327264
+        },
+        {
+          "command": [
+            "python3",
+            "scripts/test_paired_mcp_evaluation.py"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776711.4529736
+        },
+        {
+          "command": [
+            "cargo",
+            "test",
+            "--offline",
+            "--locked",
+            "-j1",
+            "--example",
+            "score_mcp_episode",
+            "--",
+            "--test-threads=1"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {
+            "/target/debug/examples/score_mcp_episode-225f1b0ef35712db": "be7d0d10b1f899e9e3494358300cd4ea006188f2f9cd9250df0efdaa53806fe1"
+          },
+          "finished": 1794776727.1993976
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--offline",
+            "--locked",
+            "-j1",
+            "--bin",
+            "recalld",
+            "--example",
+            "score_mcp_episode"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776740.4146068
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "--offline",
+            "--locked",
+            "-j1",
+            "--example",
+            "score_mcp_episode"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776750.1165185
+        },
+        {
+          "command": [
+            "python3",
+            "scripts/check_paired_mcp_evaluation.py",
+            "--binary",
+            "/target/debug/recalld",
+            "--scorer",
+            "/target/debug/examples/score_mcp_episode",
+            "--source-root",
+            "/work/source",
+            "--build",
+            "/output/build.json",
+            "--out",
+            "/output/actual"
+          ],
+          "exitCode": 1,
+          "binariesBeforeSha256": {
+            "/target/debug/recalld": "05a8384b5444a18cae2e4fdd8ddb2a894a209b4240379ad79091bb4f94fed2e3",
+            "/target/debug/examples/score_mcp_episode": "8ccf8e9639e7c194361cbc1c22841e4d370c05920b6b8c73cd3fca04249e876e"
+          },
+          "testExecutablesSha256": {},
+          "finished": 1794776762.1477757
+        }
+      ],
+      "cgroupFinal": {
+        "memory.max": "4294967296\n",
+        "memory.peak": "4294967296\n",
+        "memory.events": "low 0\nhigh 0\nmax 2601\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+      },
+      "testResults": {
+        "step-3.log": [
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s"
+        ]
+      },
+      "actualPairStatus": {
+        "arms": {
+          "baseline": {
+            "status": "passed"
+          },
+          "candidate": {
+            "status": "passed"
+          }
+        },
+        "attemptedMembers": 14,
+        "environmentHash": "17b77617ffdb1cff953c9bd3cc581bf12772874b472bb532679b14806f5094a7",
+        "failedMembers": 0,
+        "members": [
+          {
+            "episodeId": "episode-0",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-1",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-2",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-3",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-4",
+            "groupId": "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "test",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-5",
+            "groupId": "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-6",
+            "groupId": "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-0",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-1",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-2",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-3",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-4",
+            "groupId": "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "test",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-5",
+            "groupId": "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-6",
+            "groupId": "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          }
+        ],
+        "passedMembers": 14,
+        "plannedMembers": 14,
+        "runningMembers": 0,
+        "status": "passed",
+        "unattemptedMembers": 0
+      }
+    },
+    "final-tail": {
+      "sourceCommit": "427c57e9e00bfa32f09edff22a479b31e656d269",
+      "status": "passed",
+      "sourceFiles": 239,
+      "gitAndPrePostVerified": true,
+      "steps": [
+        {
+          "command": [
+            "python3",
+            "scripts/test_grouped_mcp_evaluation.py"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776825.6616578
+        },
+        {
+          "command": [
+            "python3",
+            "scripts/test_paired_mcp_evaluation.py"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776825.785517
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--offline",
+            "--locked",
+            "-j1",
+            "--example",
+            "score_mcp_episode"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {},
+          "testExecutablesSha256": {},
+          "finished": 1794776839.724622
+        },
+        {
+          "command": [
+            "python3",
+            "scripts/check_paired_mcp_evaluation.py",
+            "--binary",
+            "/target/debug/recalld",
+            "--scorer",
+            "/target/debug/examples/score_mcp_episode",
+            "--source-root",
+            "/work/source",
+            "--build",
+            "/output/build.json",
+            "--out",
+            "/output/actual"
+          ],
+          "exitCode": 0,
+          "binariesBeforeSha256": {
+            "/target/debug/recalld": "05a8384b5444a18cae2e4fdd8ddb2a894a209b4240379ad79091bb4f94fed2e3",
+            "/target/debug/examples/score_mcp_episode": "d3549cb2488d1e3304b6a1f2cc0a6ac50e223ff061bdc896b797b30c13f6e74f"
+          },
+          "testExecutablesSha256": {},
+          "finished": 1794776854.70659
+        }
+      ],
+      "cgroupFinal": {
+        "memory.max": "4294967296\n",
+        "memory.peak": "4269314048\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+      },
+      "testResults": {},
+      "actualPairStatus": {
+        "arms": {
+          "baseline": {
+            "status": "passed"
+          },
+          "candidate": {
+            "status": "passed"
+          }
+        },
+        "attemptedMembers": 14,
+        "environmentHash": "9326d9fea7193e3435778db2cea2b59301134f40de11ea80043bdae7d835aac1",
+        "failedMembers": 0,
+        "members": [
+          {
+            "episodeId": "episode-0",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-1",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-2",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-3",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-4",
+            "groupId": "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "test",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-5",
+            "groupId": "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-6",
+            "groupId": "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "baseline",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-0",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-1",
+            "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-2",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-3",
+            "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "development",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-4",
+            "groupId": "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "test",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-5",
+            "groupId": "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          },
+          {
+            "episodeId": "episode-6",
+            "groupId": "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05",
+            "queryIds": [
+              "q0",
+              "q1",
+              "q2",
+              "q3"
+            ],
+            "role": "candidate",
+            "split": "train",
+            "status": "passed"
+          }
+        ],
+        "passedMembers": 14,
+        "plannedMembers": 14,
+        "runningMembers": 0,
+        "status": "passed",
+        "unattemptedMembers": 0
+      }
+    }
+  },
+  "scope": "synthetic paired public-v1 limit contrast; no quality promotion/full A6/native/reset/token/cost/performance claim",
+  "unchangedRustCargoSince": "93598b713feb8da18a0df7ccbe3da61f5ecd1970",
+  "rustProofReuse": "8 focused scorer tests/fmt/example clippy on93598; final tail changes only checker script. Scorer rebuilt for new embedded source pins, production CLI byte-identical.",
+  "validation": {
+    "actions": 210,
+    "armComparisons": [
+      {
+        "actorCodeEqual": true,
+        "actorInputsEqual": true,
+        "episodeId": "episode-0",
+        "onlyDeclaredRequestLimitDiffers": true,
+        "providerInputsVectorsEqual": true
+      },
+      {
+        "actorCodeEqual": true,
+        "actorInputsEqual": true,
+        "episodeId": "episode-1",
+        "onlyDeclaredRequestLimitDiffers": true,
+        "providerInputsVectorsEqual": true
+      },
+      {
+        "actorCodeEqual": true,
+        "actorInputsEqual": true,
+        "episodeId": "episode-2",
+        "onlyDeclaredRequestLimitDiffers": true,
+        "providerInputsVectorsEqual": true
+      },
+      {
+        "actorCodeEqual": true,
+        "actorInputsEqual": true,
+        "episodeId": "episode-3",
+        "onlyDeclaredRequestLimitDiffers": true,
+        "providerInputsVectorsEqual": true
+      },
+      {
+        "actorCodeEqual": true,
+        "actorInputsEqual": true,
+        "episodeId": "episode-4",
+        "onlyDeclaredRequestLimitDiffers": true,
+        "providerInputsVectorsEqual": true
+      },
+      {
+        "actorCodeEqual": true,
+        "actorInputsEqual": true,
+        "episodeId": "episode-5",
+        "onlyDeclaredRequestLimitDiffers": true,
+        "providerInputsVectorsEqual": true
+      },
+      {
+        "actorCodeEqual": true,
+        "actorInputsEqual": true,
+        "episodeId": "episode-6",
+        "onlyDeclaredRequestLimitDiffers": true,
+        "providerInputsVectorsEqual": true
+      }
+    ],
+    "episodes": 14,
+    "frozenBeforeOutcomes": {
+      "baseline/episodes/episode-0/actor-inputs.json": "986dc08a06083aa531bcfb732456b1bbd0bbfb5e1dedcd6a6d969471c0e8f984",
+      "baseline/episodes/episode-0/evaluator-cache.json": "2bcadb4f935dd88f52e3599a2e9cf2cf32af74a4a87a76a6f2a7ecb12ef7493f",
+      "baseline/episodes/episode-0/evaluator-labels.json": "4b8bb5f45e964b482880be1cd58e5437aae35914c8afc46bcf970ffe23bf15d5",
+      "baseline/episodes/episode-0/evaluator-schedule.json": "945045de84bbe47781796c50691f893043d36330e18887dc277d4f322253efb3",
+      "baseline/episodes/episode-1/actor-inputs.json": "cb37372ad7d52f89d7f5d7bb7c5bbc22523035c74c20ad4e1cb5eb9b1335e4c2",
+      "baseline/episodes/episode-1/evaluator-cache.json": "2bcadb4f935dd88f52e3599a2e9cf2cf32af74a4a87a76a6f2a7ecb12ef7493f",
+      "baseline/episodes/episode-1/evaluator-labels.json": "ff2a920911d84ea4a392b9a11c28eb9a32854de1b7722376c0eb88f99102ca23",
+      "baseline/episodes/episode-1/evaluator-schedule.json": "945045de84bbe47781796c50691f893043d36330e18887dc277d4f322253efb3",
+      "baseline/episodes/episode-2/actor-inputs.json": "fe0653460fa278b7a20838b3650abf896439a00dd91063062d575efb5ac4000d",
+      "baseline/episodes/episode-2/evaluator-cache.json": "a17165885cee4906978f38993bd613ae0042e4210377ad13f6097978d8cf0c81",
+      "baseline/episodes/episode-2/evaluator-labels.json": "cdf1d719587fd0accb2daec8f502744bd1c6d5c83c7fa39d9bf980b14d5f4fb2",
+      "baseline/episodes/episode-2/evaluator-schedule.json": "e76da32661ee78e3485ab42c4c9f4479865a4e7627a3276471797631ae47f81e",
+      "baseline/episodes/episode-3/actor-inputs.json": "11d87f4d40a84fd185fe6eb891e8fc94499e66dd96a09de7a9de35576416cd2c",
+      "baseline/episodes/episode-3/evaluator-cache.json": "8041a94d7fe41f9877dec4b9dc2d08dd982e6ccc4e830f88bf1c25c6137150b8",
+      "baseline/episodes/episode-3/evaluator-labels.json": "9c29b4cff376b9c13c46ad2b3f8588982e125e174b8c38e9ff75d38fceedb5f4",
+      "baseline/episodes/episode-3/evaluator-schedule.json": "fa71e30fb4b0291fae62eb178b022876cd476028a46032f227f0374443a6839e",
+      "baseline/episodes/episode-4/actor-inputs.json": "88c3f0352b54a444a5c43fa3949b7a471acb4449a6e026126b62b34d8ea43f1e",
+      "baseline/episodes/episode-4/evaluator-cache.json": "dd9f2c2d1496e042753ae2f45a2bd3f83af6835fc10f314d3c9539d3655724d7",
+      "baseline/episodes/episode-4/evaluator-labels.json": "3f4febdc047068b6690b33c4118af447003600d201205ffff049d29c4108c4af",
+      "baseline/episodes/episode-4/evaluator-schedule.json": "daf94385e373bb13c9c8d73147081636733d034b40e516dd9fcf7a81267c2e7c",
+      "baseline/episodes/episode-5/actor-inputs.json": "ede18fa8354e3f07f51fb29a89bc55bdc3c11efb6f929043183cb286df804700",
+      "baseline/episodes/episode-5/evaluator-cache.json": "757ebfebb3e1ae57d28a3c6d50c56b13c98900e9b67c1fb2946d5302cb3ac556",
+      "baseline/episodes/episode-5/evaluator-labels.json": "74904facda83c5d05ab5ee98966797cf84d63c131c04ec220572e927d33c4747",
+      "baseline/episodes/episode-5/evaluator-schedule.json": "c47c559776ba082c9713a4de399cc7c644275a6bfe427f49ba5ed2a01032fff1",
+      "baseline/episodes/episode-6/actor-inputs.json": "a5c75d215055104d6cff7650197a4c7eaba3e1b5b8523b8fc1525cd8cada6782",
+      "baseline/episodes/episode-6/evaluator-cache.json": "3c7d520ec743f5b6378fcaa2ce11926611a9b1dbdce2c53b52e86c45e7a05c90",
+      "baseline/episodes/episode-6/evaluator-labels.json": "f4b9f407b8453d1093b25143924aefd7d8613a568fef78ab73b98feaf3406021",
+      "baseline/episodes/episode-6/evaluator-schedule.json": "18dbd88f8fb00e306c8c87de092adf40518eae9abf71597e1b75cd572d058d68",
+      "baseline/group-map.json": "7928db2870b7545850e833d880842ba9893f8260014a3f5f9abc8443e79537d2",
+      "baseline/manifest.json": "5a1944110dc95ff4dce057fdde33bab3ce051c80d38aa669badf9212da346dcc",
+      "baseline/source-registry.json": "a0e9955b4409ea8e181ba50aa3d3850f3631f8f33868aac682897991204a5168",
+      "baseline/split-map.json": "e4beebf686bb7207cf87ff1657662d7cd4f049c316deb2c412c95ce7241ec23c",
+      "candidate/episodes/episode-0/actor-inputs.json": "986dc08a06083aa531bcfb732456b1bbd0bbfb5e1dedcd6a6d969471c0e8f984",
+      "candidate/episodes/episode-0/evaluator-cache.json": "2bcadb4f935dd88f52e3599a2e9cf2cf32af74a4a87a76a6f2a7ecb12ef7493f",
+      "candidate/episodes/episode-0/evaluator-labels.json": "4b8bb5f45e964b482880be1cd58e5437aae35914c8afc46bcf970ffe23bf15d5",
+      "candidate/episodes/episode-0/evaluator-schedule.json": "945045de84bbe47781796c50691f893043d36330e18887dc277d4f322253efb3",
+      "candidate/episodes/episode-1/actor-inputs.json": "cb37372ad7d52f89d7f5d7bb7c5bbc22523035c74c20ad4e1cb5eb9b1335e4c2",
+      "candidate/episodes/episode-1/evaluator-cache.json": "2bcadb4f935dd88f52e3599a2e9cf2cf32af74a4a87a76a6f2a7ecb12ef7493f",
+      "candidate/episodes/episode-1/evaluator-labels.json": "ff2a920911d84ea4a392b9a11c28eb9a32854de1b7722376c0eb88f99102ca23",
+      "candidate/episodes/episode-1/evaluator-schedule.json": "945045de84bbe47781796c50691f893043d36330e18887dc277d4f322253efb3",
+      "candidate/episodes/episode-2/actor-inputs.json": "fe0653460fa278b7a20838b3650abf896439a00dd91063062d575efb5ac4000d",
+      "candidate/episodes/episode-2/evaluator-cache.json": "a17165885cee4906978f38993bd613ae0042e4210377ad13f6097978d8cf0c81",
+      "candidate/episodes/episode-2/evaluator-labels.json": "cdf1d719587fd0accb2daec8f502744bd1c6d5c83c7fa39d9bf980b14d5f4fb2",
+      "candidate/episodes/episode-2/evaluator-schedule.json": "e76da32661ee78e3485ab42c4c9f4479865a4e7627a3276471797631ae47f81e",
+      "candidate/episodes/episode-3/actor-inputs.json": "11d87f4d40a84fd185fe6eb891e8fc94499e66dd96a09de7a9de35576416cd2c",
+      "candidate/episodes/episode-3/evaluator-cache.json": "8041a94d7fe41f9877dec4b9dc2d08dd982e6ccc4e830f88bf1c25c6137150b8",
+      "candidate/episodes/episode-3/evaluator-labels.json": "9c29b4cff376b9c13c46ad2b3f8588982e125e174b8c38e9ff75d38fceedb5f4",
+      "candidate/episodes/episode-3/evaluator-schedule.json": "fa71e30fb4b0291fae62eb178b022876cd476028a46032f227f0374443a6839e",
+      "candidate/episodes/episode-4/actor-inputs.json": "88c3f0352b54a444a5c43fa3949b7a471acb4449a6e026126b62b34d8ea43f1e",
+      "candidate/episodes/episode-4/evaluator-cache.json": "dd9f2c2d1496e042753ae2f45a2bd3f83af6835fc10f314d3c9539d3655724d7",
+      "candidate/episodes/episode-4/evaluator-labels.json": "3f4febdc047068b6690b33c4118af447003600d201205ffff049d29c4108c4af",
+      "candidate/episodes/episode-4/evaluator-schedule.json": "daf94385e373bb13c9c8d73147081636733d034b40e516dd9fcf7a81267c2e7c",
+      "candidate/episodes/episode-5/actor-inputs.json": "ede18fa8354e3f07f51fb29a89bc55bdc3c11efb6f929043183cb286df804700",
+      "candidate/episodes/episode-5/evaluator-cache.json": "757ebfebb3e1ae57d28a3c6d50c56b13c98900e9b67c1fb2946d5302cb3ac556",
+      "candidate/episodes/episode-5/evaluator-labels.json": "74904facda83c5d05ab5ee98966797cf84d63c131c04ec220572e927d33c4747",
+      "candidate/episodes/episode-5/evaluator-schedule.json": "c47c559776ba082c9713a4de399cc7c644275a6bfe427f49ba5ed2a01032fff1",
+      "candidate/episodes/episode-6/actor-inputs.json": "a5c75d215055104d6cff7650197a4c7eaba3e1b5b8523b8fc1525cd8cada6782",
+      "candidate/episodes/episode-6/evaluator-cache.json": "3c7d520ec743f5b6378fcaa2ce11926611a9b1dbdce2c53b52e86c45e7a05c90",
+      "candidate/episodes/episode-6/evaluator-labels.json": "f4b9f407b8453d1093b25143924aefd7d8613a568fef78ab73b98feaf3406021",
+      "candidate/episodes/episode-6/evaluator-schedule.json": "18dbd88f8fb00e306c8c87de092adf40518eae9abf71597e1b75cd572d058d68",
+      "candidate/group-map.json": "7928db2870b7545850e833d880842ba9893f8260014a3f5f9abc8443e79537d2",
+      "candidate/manifest.json": "8c4065abd658f0eb4f7dd85a6f2236a83c718bca8bf2fedced2c891a2ecf0162",
+      "candidate/source-registry.json": "a0e9955b4409ea8e181ba50aa3d3850f3631f8f33868aac682897991204a5168",
+      "candidate/split-map.json": "e4beebf686bb7207cf87ff1657662d7cd4f049c316deb2c412c95ce7241ec23c",
+      "manifest.json": "9326d9fea7193e3435778db2cea2b59301134f40de11ea80043bdae7d835aac1",
+      "pair-contract.json": "fe0f78e7c9680ccc90ca79126292a89e514ff86d4f8b3c9d491f67e73d2caf1f"
+    },
+    "manifestNegatives": 8,
+    "note": "Two actual public limits on identical predeclared synthetic source/labels; same whole-group draws. Three training groups are diagnostic only. No model tokens, cost, training, reset or upstream semantics claim.",
+    "otherSplitIntervals": null,
+    "permutationEqual": true,
+    "qualityPromotionEligible": false,
+    "queryEvents": 56,
+    "scoredQueries": 28,
+    "scorerNegatives": 7,
+    "status": "passed",
+    "trainReplicates": 10000,
+    "unknownAnnotations": 14,
+    "zeroLabelUnscored": 14
+  },
+  "scores": {
+    "pairContractSha256": "fe0f78e7c9680ccc90ca79126292a89e514ff86d4f8b3c9d491f67e73d2caf1f",
+    "pairManifestSha256": "9326d9fea7193e3435778db2cea2b59301134f40de11ea80043bdae7d835aac1",
+    "policy": {
+      "boundedIndex": "rand-0.8.6-u64-gen-range",
+      "contrast": "candidate-minus-baseline",
+      "interval": "nearest-rank-2.5-97.5",
+      "minimumEligibleGroups": 2,
+      "population": "whole-history-groups-with-common-scored-queries",
+      "replicates": 10000,
+      "rng": "rand_chacha-0.3.1-ChaCha12Rng",
+      "seed": 7,
+      "seedEncoding": "u64-le-zero-pad32",
+      "streams": {
+        "development": 1,
+        "test": 2,
+        "train": 0
+      },
+      "uncertaintyVersion": 1
+    },
+    "profile": "synthetic-paired-grouped-unique-source-v1",
+    "qualityPromotionEligible": false,
+    "semanticQualityClaim": false,
+    "splits": {
+      "development": {
+        "baseline": {
+          "groupMacro": {
+            "allRequiredEvidenceRate": 0.25,
+            "denominatorUnit": "scored-history-group",
+            "groups": "1",
+            "means": {
+              "binarySourceNdcgAt10": 0.5565735963827292,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.5,
+              "retrievalRecallAt20": 0.5,
+              "retrievalRecallAt5": 0.5
+            },
+            "scoredGroups": "1",
+            "unscoredGroups": "0"
+          },
+          "groups": {
+            "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4": {
+              "allRequiredEvidenceRate": 0.25,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.5565735963827292,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 0.5,
+                "retrievalRecallAt20": 0.5,
+                "retrievalRecallAt5": 0.5
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "8",
+              "scored": "4",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "2",
+              "zeroLabelUnscored": "2"
+            }
+          },
+          "queryMicro": {
+            "allRequiredEvidenceRate": 0.25,
+            "denominatorUnit": "measured-query-event",
+            "means": {
+              "binarySourceNdcgAt10": 0.5565735963827292,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.5,
+              "retrievalRecallAt20": 0.5,
+              "retrievalRecallAt5": 0.5
+            },
+            "profile": "synthetic-unique-source-v1",
+            "queryEvents": "8",
+            "scored": "4",
+            "semanticQualityClaim": false,
+            "unknownAnnotations": "2",
+            "zeroLabelUnscored": "2"
+          }
+        },
+        "candidate": {
+          "groupMacro": {
+            "allRequiredEvidenceRate": 0.75,
+            "denominatorUnit": "scored-history-group",
+            "groups": "1",
+            "means": {
+              "binarySourceNdcgAt10": 0.811019236584229,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.875,
+              "retrievalRecallAt20": 0.875,
+              "retrievalRecallAt5": 0.875
+            },
+            "scoredGroups": "1",
+            "unscoredGroups": "0"
+          },
+          "groups": {
+            "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4": {
+              "allRequiredEvidenceRate": 0.75,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.811019236584229,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 0.875,
+                "retrievalRecallAt20": 0.875,
+                "retrievalRecallAt5": 0.875
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "8",
+              "scored": "4",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "2",
+              "zeroLabelUnscored": "2"
+            }
+          },
+          "queryMicro": {
+            "allRequiredEvidenceRate": 0.75,
+            "denominatorUnit": "measured-query-event",
+            "means": {
+              "binarySourceNdcgAt10": 0.811019236584229,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.875,
+              "retrievalRecallAt20": 0.875,
+              "retrievalRecallAt5": 0.875
+            },
+            "profile": "synthetic-unique-source-v1",
+            "queryEvents": "8",
+            "scored": "4",
+            "semanticQualityClaim": false,
+            "unknownAnnotations": "2",
+            "zeroLabelUnscored": "2"
+          }
+        },
+        "eligibleGroupIds": [
+          "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4"
+        ],
+        "excludedGroups": {},
+        "paired": {
+          "drawsSha256": null,
+          "eligibleGroups": "1",
+          "executedReplicates": "0",
+          "interval95": null,
+          "point": {
+            "allRequiredEvidenceRate": {
+              "groupMacro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              },
+              "queryMicro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              }
+            },
+            "binarySourceNdcgAt10": {
+              "groupMacro": {
+                "baseline": 0.5565735963827292,
+                "candidate": 0.811019236584229,
+                "effect": 0.25444564020149985
+              },
+              "queryMicro": {
+                "baseline": 0.5565735963827292,
+                "candidate": 0.811019236584229,
+                "effect": 0.25444564020149985
+              }
+            },
+            "extractionEvidenceRetention": {
+              "groupMacro": {
+                "baseline": 1.0,
+                "candidate": 1.0,
+                "effect": 0.0
+              },
+              "queryMicro": {
+                "baseline": 1.0,
+                "candidate": 1.0,
+                "effect": 0.0
+              }
+            },
+            "retrievalRecallAt10": {
+              "groupMacro": {
+                "baseline": 0.5,
+                "candidate": 0.875,
+                "effect": 0.375
+              },
+              "queryMicro": {
+                "baseline": 0.5,
+                "candidate": 0.875,
+                "effect": 0.375
+              }
+            },
+            "retrievalRecallAt20": {
+              "groupMacro": {
+                "baseline": 0.5,
+                "candidate": 0.875,
+                "effect": 0.375
+              },
+              "queryMicro": {
+                "baseline": 0.5,
+                "candidate": 0.875,
+                "effect": 0.375
+              }
+            },
+            "retrievalRecallAt5": {
+              "groupMacro": {
+                "baseline": 0.5,
+                "candidate": 0.875,
+                "effect": 0.375
+              },
+              "queryMicro": {
+                "baseline": 0.5,
+                "candidate": 0.875,
+                "effect": 0.375
+              }
+            }
+          },
+          "qualityPromotionEligible": false,
+          "requestedReplicates": "10000",
+          "status": "insufficient_eligible_groups"
+        }
+      },
+      "test": {
+        "baseline": {
+          "groupMacro": {
+            "allRequiredEvidenceRate": 0.0,
+            "denominatorUnit": "scored-history-group",
+            "groups": "1",
+            "means": {
+              "binarySourceNdcgAt10": 0.3065735963827292,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.25,
+              "retrievalRecallAt20": 0.25,
+              "retrievalRecallAt5": 0.25
+            },
+            "scoredGroups": "1",
+            "unscoredGroups": "0"
+          },
+          "groups": {
+            "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595": {
+              "allRequiredEvidenceRate": 0.0,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.3065735963827292,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 0.25,
+                "retrievalRecallAt20": 0.25,
+                "retrievalRecallAt5": 0.25
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "4",
+              "scored": "2",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "1",
+              "zeroLabelUnscored": "1"
+            }
+          },
+          "queryMicro": {
+            "allRequiredEvidenceRate": 0.0,
+            "denominatorUnit": "measured-query-event",
+            "means": {
+              "binarySourceNdcgAt10": 0.3065735963827292,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.25,
+              "retrievalRecallAt20": 0.25,
+              "retrievalRecallAt5": 0.25
+            },
+            "profile": "synthetic-unique-source-v1",
+            "queryEvents": "4",
+            "scored": "2",
+            "semanticQualityClaim": false,
+            "unknownAnnotations": "1",
+            "zeroLabelUnscored": "1"
+          }
+        },
+        "candidate": {
+          "groupMacro": {
+            "allRequiredEvidenceRate": 0.5,
+            "denominatorUnit": "scored-history-group",
+            "groups": "1",
+            "means": {
+              "binarySourceNdcgAt10": 0.622038473168458,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.75,
+              "retrievalRecallAt20": 0.75,
+              "retrievalRecallAt5": 0.75
+            },
+            "scoredGroups": "1",
+            "unscoredGroups": "0"
+          },
+          "groups": {
+            "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595": {
+              "allRequiredEvidenceRate": 0.5,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.622038473168458,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 0.75,
+                "retrievalRecallAt20": 0.75,
+                "retrievalRecallAt5": 0.75
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "4",
+              "scored": "2",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "1",
+              "zeroLabelUnscored": "1"
+            }
+          },
+          "queryMicro": {
+            "allRequiredEvidenceRate": 0.5,
+            "denominatorUnit": "measured-query-event",
+            "means": {
+              "binarySourceNdcgAt10": 0.622038473168458,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.75,
+              "retrievalRecallAt20": 0.75,
+              "retrievalRecallAt5": 0.75
+            },
+            "profile": "synthetic-unique-source-v1",
+            "queryEvents": "4",
+            "scored": "2",
+            "semanticQualityClaim": false,
+            "unknownAnnotations": "1",
+            "zeroLabelUnscored": "1"
+          }
+        },
+        "eligibleGroupIds": [
+          "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595"
+        ],
+        "excludedGroups": {},
+        "paired": {
+          "drawsSha256": null,
+          "eligibleGroups": "1",
+          "executedReplicates": "0",
+          "interval95": null,
+          "point": {
+            "allRequiredEvidenceRate": {
+              "groupMacro": {
+                "baseline": 0.0,
+                "candidate": 0.5,
+                "effect": 0.5
+              },
+              "queryMicro": {
+                "baseline": 0.0,
+                "candidate": 0.5,
+                "effect": 0.5
+              }
+            },
+            "binarySourceNdcgAt10": {
+              "groupMacro": {
+                "baseline": 0.3065735963827292,
+                "candidate": 0.622038473168458,
+                "effect": 0.31546487678572877
+              },
+              "queryMicro": {
+                "baseline": 0.3065735963827292,
+                "candidate": 0.622038473168458,
+                "effect": 0.31546487678572877
+              }
+            },
+            "extractionEvidenceRetention": {
+              "groupMacro": {
+                "baseline": 1.0,
+                "candidate": 1.0,
+                "effect": 0.0
+              },
+              "queryMicro": {
+                "baseline": 1.0,
+                "candidate": 1.0,
+                "effect": 0.0
+              }
+            },
+            "retrievalRecallAt10": {
+              "groupMacro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              },
+              "queryMicro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              }
+            },
+            "retrievalRecallAt20": {
+              "groupMacro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              },
+              "queryMicro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              }
+            },
+            "retrievalRecallAt5": {
+              "groupMacro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              },
+              "queryMicro": {
+                "baseline": 0.25,
+                "candidate": 0.75,
+                "effect": 0.5
+              }
+            }
+          },
+          "qualityPromotionEligible": false,
+          "requestedReplicates": "10000",
+          "status": "insufficient_eligible_groups"
+        }
+      },
+      "train": {
+        "baseline": {
+          "groupMacro": {
+            "allRequiredEvidenceRate": 0.3333333333333333,
+            "denominatorUnit": "scored-history-group",
+            "groups": "3",
+            "means": {
+              "binarySourceNdcgAt10": 0.4866201315246979,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.4583333333333333,
+              "retrievalRecallAt20": 0.4583333333333333,
+              "retrievalRecallAt5": 0.4583333333333333
+            },
+            "scoredGroups": "3",
+            "unscoredGroups": "0"
+          },
+          "groups": {
+            "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff": {
+              "allRequiredEvidenceRate": 0.0,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.1532867981913646,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 0.125,
+                "retrievalRecallAt20": 0.125,
+                "retrievalRecallAt5": 0.125
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "8",
+              "scored": "4",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "2",
+              "zeroLabelUnscored": "2"
+            },
+            "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05": {
+              "allRequiredEvidenceRate": 0.0,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.3065735963827292,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 0.25,
+                "retrievalRecallAt20": 0.25,
+                "retrievalRecallAt5": 0.25
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "4",
+              "scored": "2",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "1",
+              "zeroLabelUnscored": "1"
+            },
+            "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697": {
+              "allRequiredEvidenceRate": 1.0,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 1.0,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 1.0,
+                "retrievalRecallAt20": 1.0,
+                "retrievalRecallAt5": 1.0
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "4",
+              "scored": "2",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "1",
+              "zeroLabelUnscored": "1"
+            }
+          },
+          "queryMicro": {
+            "allRequiredEvidenceRate": 0.25,
+            "denominatorUnit": "measured-query-event",
+            "means": {
+              "binarySourceNdcgAt10": 0.4032867981913646,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.375,
+              "retrievalRecallAt20": 0.375,
+              "retrievalRecallAt5": 0.375
+            },
+            "profile": "synthetic-unique-source-v1",
+            "queryEvents": "16",
+            "scored": "8",
+            "semanticQualityClaim": false,
+            "unknownAnnotations": "4",
+            "zeroLabelUnscored": "4"
+          }
+        },
+        "candidate": {
+          "groupMacro": {
+            "allRequiredEvidenceRate": 0.9166666666666666,
+            "denominatorUnit": "scored-history-group",
+            "groups": "3",
+            "means": {
+              "binarySourceNdcgAt10": 0.793643251190486,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.9166666666666666,
+              "retrievalRecallAt20": 0.9166666666666666,
+              "retrievalRecallAt5": 0.9166666666666666
+            },
+            "scoredGroups": "3",
+            "unscoredGroups": "0"
+          },
+          "groups": {
+            "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff": {
+              "allRequiredEvidenceRate": 0.75,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.5654648767857288,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 0.75,
+                "retrievalRecallAt20": 0.75,
+                "retrievalRecallAt5": 0.75
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "8",
+              "scored": "4",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "2",
+              "zeroLabelUnscored": "2"
+            },
+            "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05": {
+              "allRequiredEvidenceRate": 1.0,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 0.8154648767857288,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 1.0,
+                "retrievalRecallAt20": 1.0,
+                "retrievalRecallAt5": 1.0
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "4",
+              "scored": "2",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "1",
+              "zeroLabelUnscored": "1"
+            },
+            "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697": {
+              "allRequiredEvidenceRate": 1.0,
+              "denominatorUnit": "measured-query-event",
+              "means": {
+                "binarySourceNdcgAt10": 1.0,
+                "extractionEvidenceRetention": 1.0,
+                "retrievalRecallAt10": 1.0,
+                "retrievalRecallAt20": 1.0,
+                "retrievalRecallAt5": 1.0
+              },
+              "profile": "synthetic-unique-source-v1",
+              "queryEvents": "4",
+              "scored": "2",
+              "semanticQualityClaim": false,
+              "unknownAnnotations": "1",
+              "zeroLabelUnscored": "1"
+            }
+          },
+          "queryMicro": {
+            "allRequiredEvidenceRate": 0.875,
+            "denominatorUnit": "measured-query-event",
+            "means": {
+              "binarySourceNdcgAt10": 0.7365986575892965,
+              "extractionEvidenceRetention": 1.0,
+              "retrievalRecallAt10": 0.875,
+              "retrievalRecallAt20": 0.875,
+              "retrievalRecallAt5": 0.875
+            },
+            "profile": "synthetic-unique-source-v1",
+            "queryEvents": "16",
+            "scored": "8",
+            "semanticQualityClaim": false,
+            "unknownAnnotations": "4",
+            "zeroLabelUnscored": "4"
+          }
+        },
+        "eligibleGroupIds": [
+          "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+          "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05",
+          "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697"
+        ],
+        "excludedGroups": {},
+        "paired": {
+          "drawsSha256": "11d835c8b5a8155e86573bafd30b8f167eec48b79f27f6f5e71a40ee70d76eea",
+          "eligibleGroups": "3",
+          "executedReplicates": "10000",
+          "interval95": {
+            "allRequiredEvidenceRate": {
+              "groupMacro": {
+                "lower": 0.0,
+                "upper": 1.0,
+                "zeroObservedDispersion": false
+              },
+              "queryMicro": {
+                "lower": 0.0,
+                "upper": 1.0,
+                "zeroObservedDispersion": false
+              }
+            },
+            "binarySourceNdcgAt10": {
+              "groupMacro": {
+                "lower": 0.0,
+                "upper": 0.5088912804029996,
+                "zeroObservedDispersion": false
+              },
+              "queryMicro": {
+                "lower": 0.0,
+                "upper": 0.5088912804029996,
+                "zeroObservedDispersion": false
+              }
+            },
+            "extractionEvidenceRetention": {
+              "groupMacro": {
+                "lower": 0.0,
+                "upper": 0.0,
+                "zeroObservedDispersion": true
+              },
+              "queryMicro": {
+                "lower": 0.0,
+                "upper": 0.0,
+                "zeroObservedDispersion": true
+              }
+            },
+            "retrievalRecallAt10": {
+              "groupMacro": {
+                "lower": 0.0,
+                "upper": 0.75,
+                "zeroObservedDispersion": false
+              },
+              "queryMicro": {
+                "lower": 0.0,
+                "upper": 0.75,
+                "zeroObservedDispersion": false
+              }
+            },
+            "retrievalRecallAt20": {
+              "groupMacro": {
+                "lower": 0.0,
+                "upper": 0.75,
+                "zeroObservedDispersion": false
+              },
+              "queryMicro": {
+                "lower": 0.0,
+                "upper": 0.75,
+                "zeroObservedDispersion": false
+              }
+            },
+            "retrievalRecallAt5": {
+              "groupMacro": {
+                "lower": 0.0,
+                "upper": 0.75,
+                "zeroObservedDispersion": false
+              },
+              "queryMicro": {
+                "lower": 0.0,
+                "upper": 0.75,
+                "zeroObservedDispersion": false
+              }
+            }
+          },
+          "point": {
+            "allRequiredEvidenceRate": {
+              "groupMacro": {
+                "baseline": 0.3333333333333333,
+                "candidate": 0.9166666666666666,
+                "effect": 0.5833333333333333
+              },
+              "queryMicro": {
+                "baseline": 0.25,
+                "candidate": 0.875,
+                "effect": 0.625
+              }
+            },
+            "binarySourceNdcgAt10": {
+              "groupMacro": {
+                "baseline": 0.4866201315246979,
+                "candidate": 0.793643251190486,
+                "effect": 0.30702311966578805
+              },
+              "queryMicro": {
+                "baseline": 0.4032867981913646,
+                "candidate": 0.7365986575892965,
+                "effect": 0.33331185939793195
+              }
+            },
+            "extractionEvidenceRetention": {
+              "groupMacro": {
+                "baseline": 1.0,
+                "candidate": 1.0,
+                "effect": 0.0
+              },
+              "queryMicro": {
+                "baseline": 1.0,
+                "candidate": 1.0,
+                "effect": 0.0
+              }
+            },
+            "retrievalRecallAt10": {
+              "groupMacro": {
+                "baseline": 0.4583333333333333,
+                "candidate": 0.9166666666666666,
+                "effect": 0.4583333333333333
+              },
+              "queryMicro": {
+                "baseline": 0.375,
+                "candidate": 0.875,
+                "effect": 0.5
+              }
+            },
+            "retrievalRecallAt20": {
+              "groupMacro": {
+                "baseline": 0.4583333333333333,
+                "candidate": 0.9166666666666666,
+                "effect": 0.4583333333333333
+              },
+              "queryMicro": {
+                "baseline": 0.375,
+                "candidate": 0.875,
+                "effect": 0.5
+              }
+            },
+            "retrievalRecallAt5": {
+              "groupMacro": {
+                "baseline": 0.4583333333333333,
+                "candidate": 0.9166666666666666,
+                "effect": 0.4583333333333333
+              },
+              "queryMicro": {
+                "baseline": 0.375,
+                "candidate": 0.875,
+                "effect": 0.5
+              }
+            }
+          },
+          "qualityPromotionEligible": false,
+          "requestedReplicates": "10000",
+          "status": "synthetic_diagnostic_only"
+        }
+      }
+    }
+  },
+  "finalExecutables": {
+    "/target/debug/recalld": "05a8384b5444a18cae2e4fdd8ddb2a894a209b4240379ad79091bb4f94fed2e3",
+    "/target/debug/examples/score_mcp_episode": "d3549cb2488d1e3304b6a1f2cc0a6ac50e223ff061bdc896b797b30c13f6e74f"
+  },
+  "cargoLockSha256": "a6f73ed9223bb1d6a7a02f893067d8c537c77aa515b5837d33a041271400669e",
+  "statisticalImplementationFiles": {
+    "rand_chacha-0.3.1/src/chacha.rs": "dfd79ed4762e8267148d1776381c71b898808014a4069cfafbc78177247d5fe9",
+    "rand-0.8.6/src/distributions/uniform.rs": "8b209d99270a1fdc34b09b985273bcc2ad80f230f31ed92386fff42c62c4f1a5"
+  },
+  "sourceDiffFinalVsFocused": " scripts/check_paired_mcp_evaluation.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)\n"
+}
