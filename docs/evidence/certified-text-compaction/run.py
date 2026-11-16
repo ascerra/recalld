@@ -2,7 +2,7 @@
 import hashlib, json, pathlib, shutil, subprocess, sys
 source = pathlib.Path(__file__).resolve().parents[3]
 mode = sys.argv[1]
-assert mode in ('check', 'focused', 'full')
+assert mode in ('check', 'focused', 'full', 'tail')
 label = sys.argv[2] if len(sys.argv) > 2 else mode
 assert label.replace('-', '').isalnum()
 root = pathlib.Path('/tmp/recalld-certified-text-compaction-validation') / label
@@ -39,6 +39,11 @@ cargo check --locked --offline --all-features --all-targets > /work/output/check
 '''
 if mode == 'focused':
     script = script.replace('cargo check --locked --offline --all-features --all-targets > /work/output/check.log 2>&1', 'cargo test --locked --offline --lib compaction -- --nocapture > /work/output/focused.log 2>&1\nfind /work/target/debug/deps -maxdepth 1 -type f -name \"recalld-*\" -perm /111 -exec sha256sum {} \\; > /work/output/executables.sha256')
+if mode == 'tail':
+    script = script.replace('cargo check --locked --offline --all-features --all-targets > /work/output/check.log 2>&1', """cargo fmt --all -- --check > /work/output/fmt.log 2>&1
+cargo test --locked --offline --lib vector_certification_catalog_graph_lifecycle_and_real_derived_ack_carry_exact_generation -- --nocapture > /work/output/corrected-boundary.log 2>&1
+cargo test --locked --offline --lib compaction -- --nocapture > /work/output/focused.log 2>&1
+cargo clippy --locked --offline --all-features --all-targets > /work/output/clippy.log 2>&1""")
 if mode == 'full':
     script = script.replace('cargo check --locked --offline --all-features --all-targets > /work/output/check.log 2>&1', """cargo fmt --all -- --check > /work/output/fmt.log 2>&1
 cargo test --locked --offline --lib compaction -- --nocapture > /work/output/focused.log 2>&1

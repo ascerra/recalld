@@ -1371,13 +1371,34 @@ async fn vector_certification_catalog_graph_lifecycle_and_real_derived_ack_carry
     } else {
         panic!("actual exposure did not commit");
     }
-    // This parent deliberately lacks the later native physical-compaction
-    // consumer. Its physical writer must remain closed with no canonical G.
+    // The composed physical writer carries the same owned certification through
+    // exactly one canonical generation, without changing its namespace binding.
     let before = session.engine.control_state().unwrap().generation_ref();
-    assert!(session.engine.compact_text_log().is_err());
+    let selected = session.engine.compact_text_log().unwrap().receipt;
+    assert!(matches!(
+        selected.outcome,
+        control::MutationOutcome::NativeTextGenerationSelected { .. }
+    ));
+    let after = GenerationRef {
+        generation: before.generation.next().unwrap(),
+        ..before
+    };
+    assert_eq!(selected.store_id, after.store_id);
+    assert_eq!(selected.committed_generation, after.generation);
+    assert_eq!(
+        session
+            .engine
+            .lookup_operation(
+                selected.store_id,
+                MutationScope::Catalog,
+                selected.operation_id
+            )
+            .unwrap(),
+        Some(selected)
+    );
     assert_eq!(
         session.engine.control_state().unwrap().generation_ref(),
-        before
+        after
     );
     assert_eq!(
         session
@@ -1386,7 +1407,7 @@ async fn vector_certification_catalog_graph_lifecycle_and_real_derived_ack_carry
             .unwrap()
             .binding
             .at,
-        before
+        after
     );
     std::fs::create_dir(root.path().join("fts")).unwrap();
     let owner = crate::derived_completion::DerivedCompletion {
@@ -1413,14 +1434,17 @@ async fn vector_certification_catalog_graph_lifecycle_and_real_derived_ack_carry
     {
         let engine = owner.storage.read().unwrap();
         assert!(engine.meta_store().pending_effects().unwrap().is_empty());
-        assert_eq!(engine.control_state().unwrap().generation_ref(), before);
+        assert_eq!(engine.control_state().unwrap().generation_ref(), after);
+        let publication = engine.meta_store().publication_state().unwrap();
+        assert_eq!(publication.canonical, after);
+        assert!(publication.matches_canonical());
         assert_eq!(
             engine
                 .canonical_vector_snapshot("new-certified", None, limits())
                 .unwrap()
                 .binding
                 .at,
-            before
+            after
         );
         assert_eq!(
             engine
