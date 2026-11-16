@@ -74,12 +74,19 @@ the shared implementation with their actual transport policy; no artificial daem
 8 MiB cap is assumed for an MCP transport that has no such response limit. Local
 modern MCP still must prove full text plus structured serialization preserves the
 same receipt; remote MCP additionally inherits the daemon admission. Final names
-and Rust API compatibility are subject to wire review.
+and Rust API compatibility are subject to wire review. The provided default is compatibility delegation for
+existing implementors, not a proof that an arbitrary custom native implementation
+obeys the budget. The actual Mcp override and daemon dispatch require end-to-end
+admission tests.
 
 Budget checking has two stages, one authority. A cheap check can reject before
 accepting asynchronous work. The definitive positive decision must run in the
 original fresh-start TX after original replay/namespace validation and before any
-canonical write or owned ID draw. A cached positive is insufficient. It consumes
+canonical write or owned ID draw. The guarded check can run after transient root/child work tickets were admitted;
+fresh refusal promises no durable work, owned ID/provider/clock/FS side effects
+and all known tickets settled, not zero tickets ever accepted. Cheap rejection
+before ticket admission is useful where feasible. A cached positive is insufficient.
+It consumes
 current canonical namespace/records plus authoritative incident edges under the
 existing publication -> graph -> storage/mutation lock order. No lock crosses an
 await; no second generation, serialized summary, registry or durable permit.
@@ -162,6 +169,10 @@ worker-local permit. An exception cannot become generic postcommit TooLarge.
 
 Feynman owns runtime and canonical feasibility; Huygens reviews wire/source plan.
 Halley confirmed no queue edits to the protocol/trait/adapter hunks and delegated
-source-plan coordination to these owners. No additional parent is needed for this
+source-plan coordination to these owners. Huygens reviewed this combined plan and
+ACKed option 1 plus existing negotiation, both target record roles, u63 widths and
+absence of an invented MCP 8 MiB cap; his two trait/ticket clarifications are included.
+This is source feasibility review, not runtime approval or executed proof.
+No additional parent is needed for this
 plan; live protocol integration must preserve the already published prework guards.
 The failed pilot's clone/evidence/seeds and personal recalld remain untouched.
