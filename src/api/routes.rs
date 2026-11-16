@@ -63,6 +63,10 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
         .route("/", get(handlers::list_namespaces))
         .route("/", post(handlers::create_namespace))
         .route("/{id}/stats", get(handlers::namespace_stats))
+        .route(
+            "/{id}/policy",
+            axum::routing::put(handlers::update_namespace_policy),
+        )
         .route("/{name}/duplicates", post(handlers::dispatch_duplicates));
 
     let ops_routes = Router::new()

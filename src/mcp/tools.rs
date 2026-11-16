@@ -1962,6 +1962,39 @@ pub(crate) async fn dispatch_v2(
         return result;
     }
 
+    if name == "update_namespace_policy" {
+        let mut namespace_id = None;
+        let result = match crate::serialization::policy::PolicyRequest::from_mcp(&arguments) {
+            Ok(request) => {
+                namespace_id = Some(request.namespace_id);
+                bridge.namespaces.update_native_policy(request).await
+            }
+            Err(error) => Err(error.into()),
+        };
+        let (status, envelope) =
+            crate::native_catalog_adapter::policy_response(result, namespace_id);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        if status >= 400 {
+            result.is_error = Some(true);
+        }
+        return result;
+    }
+    if name == "create_namespace" {
+        let result =
+            match crate::serialization::catalog::CreateNamespaceRequest::from_mcp(&arguments) {
+                Ok(request) => bridge.namespaces.create_native_namespace(request).await,
+                Err(error) => Err(error.into()),
+            };
+        let (status, envelope) = crate::native_catalog_adapter::response(result);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        if status >= 400 {
+            result.is_error = Some(true);
+        }
+        return result;
+    }
+
     if name == "store_memory" {
         use crate::serialization::native_single::{Reply, Request, mcp_result};
         let reply = match Request::parse(&arguments, false, None, bridge.default_namespace()) {
