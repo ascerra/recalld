@@ -367,8 +367,8 @@ async fn namespace_profile_http_mcp_use_active_width_before_catalog_allocation()
         )
         .unwrap();
         assert_eq!(page["readGeneration"], serde_json::to_value(at).unwrap());
-        assert_eq!(page["namespace"], name);
-        assert_eq!(page["namespaceId"], row["id"]);
+        assert_eq!(page["scope"]["namespace"], name);
+        assert_eq!(page["scope"]["namespaceId"], row["id"]);
         assert_eq!(page["data"]["total"], "0");
         assert_eq!(page["data"]["memories"], json!([]));
     }
