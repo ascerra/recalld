@@ -140,6 +140,13 @@ negotiated capacity and not inferred from the daemon limit. Legacy creation keep
 its current behavior. Native admission must count every actual success/failure
 representation described above against this policy before preparation/commit.
 
+Exact counting boundary: MCP allows at most 8,388,607 bytes of final serialized
+`JsonRpcResponse` plus the one LF byte written by the existing stdio transport,
+for a total of at most 8,388,608 bytes. This is not a claim about HTTP/SSE or
+network framing. The local HTTP catalog policy covers the complete serialized
+JSON response body, at most 8,388,608 bytes, excluding HTTP headers and transfer
+framing. Neither boundary changes a daemon's negotiated frame-length semantics.
+
 Proposed endpoint capability: `CatalogReplyAdmission`, with private fields and
 crate-controlled constructors, carries the response surface and the existing E1
 `ReceiptAdmission`. It is not deserializable from public tool arguments. Local
@@ -157,6 +164,16 @@ legacy storage only. A native invocation without endpoint admission refuses
 before work. Exact public Rust trait visibility and the default method behavior
 need review against the released transport composition; these signatures are
 not implemented by this document.
+
+An absent capability is never evidence that storage is legacy. Only the actual
+owned storage format can select legacy fallback. Default handler/registry paths
+must not silently discard required admission and then invoke a native writer.
+The actual emitter order is tool result construction, legacy structured-content
+removal, conversion to Value, complete-result wrapper and its Value conversion,
+then the JSON-RPC response and transport serialization. Source review against
+published composition `200a1` confirmed the dispatcher blob is unchanged from
+this branch; this source comparison is not a transport-runtime proof or hunk
+ownership release.
 
 For MCP, `dispatch` owns the actual ID and must pass it, together with era, to
 the catalog-specific admission constructor before `call_tool`. The bounded
