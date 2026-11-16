@@ -238,3 +238,19 @@ discard or replace it. Query's fixed allowance and three-times-input argument
 are not asserted for this different catalog emitter. Exact catalog framing and
 raw-preflight proof remain open review items, including malformed peers and
 historical oversized evidence; there is no implementation or READY claim here.
+
+Huygens's additional source check on the same `200a1` composition: current
+`PreparedExchange` retains only `response.result`, not the complete admitted
+reply. Its correlated-success predicate requires the error member to be absent.
+A matching-ID daemon `-32006` error containing a full receipt in its message
+would therefore yield `SentUnattributed` with no retained result if N1 blindly
+reused this path. This is a source finding about the proposed reuse, not an
+executed catalog RED or a newly established bug in R1's own typed-result protocol.
+
+The catalog protocol must either retain both bounded admitted error/result arms
+with exact correlation, or use a reviewed private typed-result failure carrier.
+Do not claim the present `PreparedExchange` preserves every receipt-bearing
+daemon frame. Preserve before-send serialization failure separately from partial
+write, lost response, oversize and malformed reply. No readback, receipt
+reconstruction or automatic fallback may upgrade unknown evidence to a known
+commit or a known refusal.
