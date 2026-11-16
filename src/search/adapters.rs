@@ -809,6 +809,17 @@ impl GraphReader for SharedGraphReader {
             .map_err(|e| SearchError::Internal(e.into()))
     }
 
+    fn rif_edges(
+        &self,
+        anchor: MemoryId,
+        namespace: NamespaceId,
+        allowance: usize,
+    ) -> Result<crate::graph::query::RifAdjacency> {
+        let graph = self.graph.read();
+        crate::graph::query::rif_edges(&graph, anchor, namespace, allowance)
+            .map_err(|error| SearchError::Unavailable(error.into()))
+    }
+
     fn neighbors(&self, id: &MemoryId) -> Vec<MemoryId> {
         let graph = self.graph.read();
         graph

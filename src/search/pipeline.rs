@@ -17,6 +17,12 @@ use super::response::{MemoryResponse, SearchResponse, SearchResult, StageTimings
 use super::{EligibleFtsResults, FtsCoverage};
 use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConfig, NamespaceId};
 
+#[path = "rif_experiment.rs"]
+mod rif_experiment;
+pub use rif_experiment::{
+    MAX_RIF_EXAMINED_EDGES, MAX_RIF_PAIRS, MAX_RIF_TARGETS_PER_ANCHOR, RifDiagnostics, RifMode,
+};
+
 #[path = "diagnostics.rs"]
 mod diagnostics;
 #[path = "explanation.rs"]
@@ -66,6 +72,9 @@ pub use diagnostics::{
 #[cfg(test)]
 #[path = "explanation_tests.rs"]
 mod explanation_tests;
+#[cfg(test)]
+#[path = "rif_experiment_tests.rs"]
+mod rif_experiment_tests;
 #[cfg(test)]
 #[path = "semantics_tests.rs"]
 mod semantics_tests;
@@ -388,6 +397,20 @@ pub trait GraphReader: Send + Sync {
             "semantics2 graph expansion unavailable".into(),
         ))
     }
+    /// Whole one-hop typed adjacency within the remaining examination allowance.
+    /// A refused neighborhood returns explicit unexamined work and no prefix.
+    /// Unsupported/corrupt reads fail; absence is not silently successful.
+    fn rif_edges(
+        &self,
+        _anchor: MemoryId,
+        _namespace: NamespaceId,
+        _allowance: usize,
+    ) -> Result<crate::graph::query::RifAdjacency> {
+        Err(SearchError::Unavailable(
+            "RIF graph reads unavailable".into(),
+        ))
+    }
+
     /// Get the neighbor IDs for a given memory.
     /// Used by RIF computation (line 601) to find competitors.
     fn neighbors(&self, id: &MemoryId) -> Vec<MemoryId>;
@@ -502,6 +525,7 @@ struct Candidate {
     /// Diagnostic evidence only; never read by ranking or source selection.
     provenance: ResultProvenance,
     score_explanation: Option<OwnScoreExplanation>,
+    applied_rif_multiplier: f32,
     rejected_direct: Option<DirectScoreEvidence>,
     // Deduplicate actual admitted origins across version-resolution passes.
     // The response projection bounds details; this map is not a 64-entry cap.
@@ -525,6 +549,7 @@ impl Candidate {
             seed_score: 0.0,
             provenance: ResultProvenance::default(),
             score_explanation: None,
+            applied_rif_multiplier: 1.0,
             rejected_direct: None,
             inherited_score_sources: Default::default(),
         }
@@ -560,6 +585,7 @@ pub struct QueryEngine {
         crate::derived_completion::DerivedCompletion,
         Arc<crate::rif::RifEngine>,
     )>,
+    rif_mode: RifMode,
     clock: Arc<dyn crate::time::Clock>,
     decay_policy: crate::decay::DecayConfig,
     decay_multiplier: f64,
@@ -644,6 +670,7 @@ impl QueryEngine {
     ) -> Self {
         Self {
             coherent_owner: None,
+            rif_mode: RifMode::Off,
             clock: Arc::new(crate::time::SystemClock),
             decay_policy: crate::decay::DecayConfig::default(),
             decay_multiplier: 1.0,
@@ -817,6 +844,11 @@ impl QueryEngine {
         let stage_start = Instant::now();
         if semantics != RetrievalSemantics::V1 {
             semantics::validate_query(&query)?;
+            if self.rif_mode != RifMode::Off && query.record_access {
+                return Err(SearchError::InvalidFilter(
+                    "operator RIF experiments require explicit recordAccess=false".into(),
+                ));
+            }
         }
         query.validate()?;
         let ns_config = self.namespace_resolver.resolve(&query.namespace).await?;
@@ -1418,7 +1450,7 @@ impl QueryEngine {
     }
 
     /// Stage 8: Compute composite scores and apply temporal boost.
-    fn apply_boosts(&self, candidates: &mut Vec<Candidate>, query: &SearchQuery, explain: bool) {
+    fn apply_boosts(&self, candidates: &mut [Candidate], query: &SearchQuery, explain: bool) {
         for candidate in candidates.iter_mut() {
             let (formula, fts_signal, base_score) = Self::compute_composite_score(candidate);
             candidate.composite_score = base_score;
@@ -1431,6 +1463,7 @@ impl QueryEngine {
                     fts_signal,
                     raw_retrievability: candidate.record.strength,
                     effective_retrievability: candidate.effective_r,
+                    rif_multiplier: candidate.applied_rif_multiplier,
                     activation: candidate.activation_score,
                     activation_depth: candidate.activation_score.and(candidate.graph_depth),
                     base_score,
