@@ -28,6 +28,10 @@ impl RedbStorageEngine {
         namespace: NamespaceId,
         parent: Uuid,
     ) -> Result<Option<PurgeProgress>, StorageError> {
+        #[cfg(test)]
+        self.meta_store
+            .purge_lookup_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.meta_store
             .lookup_namespace_purge(store_id, namespace, parent)
     }

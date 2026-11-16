@@ -368,6 +368,16 @@ impl DerivedCompletion {
                     }
                 }
                 storage.resume_pending_purges_observed(Some(&child), purge.as_mut())?;
+                #[cfg(test)]
+                if purge.is_some()
+                    && storage
+                        .meta_store()
+                        .native_purge_worker_fault
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        == 2
+                {
+                    panic!("injected native purge completion worker loss");
+                }
                 observations.directory_removed = purge.as_ref().and_then(|p| p.directory_removed);
                 storage.ensure_available()?;
                 let publication = storage.meta_store().publication_state()?;

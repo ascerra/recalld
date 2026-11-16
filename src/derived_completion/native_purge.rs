@@ -150,6 +150,17 @@ impl DerivedCompletion {
             // Cancellation cannot release the lease before this write finishes.
             let _publication = lease;
             let _graph = graph;
+            #[cfg(test)]
+            if storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .native_purge_worker_fault
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == 1
+            {
+                panic!("injected native purge begin worker loss");
+            }
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
             let result = (|| {
                 storage.meta_store().require_native_purge_owner()?;
@@ -174,6 +185,22 @@ impl DerivedCompletion {
         .map_err(|_| PurgeApi1Failure::WorkerUnknown {
             known_receipt: None,
         })??;
+        #[cfg(test)]
+        {
+            let pause = self
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .native_purge_pause
+                .lock()
+                .unwrap()
+                .take();
+            if let Some((started, resume)) = pause {
+                let _ = started.send(start.clone());
+                let _ = resume.await;
+            }
+        }
         let known_start = || Some(Box::new(start.last_receipt.clone()));
         let completion = self
             .complete_observing(
