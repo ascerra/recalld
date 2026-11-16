@@ -4,22 +4,77 @@ use crate::search::{
     ChannelParticipation, CoherentSearchResponse, FtsAvailability, RetrievalChannel,
     RetrievalSemantics, SearchError, UnresolvedReason, VersionMode,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryReply {
     #[serde(flatten)]
     pub envelope: Envelope<Value>,
     /// Every retained exposure receipt, including a failed multi-step observer.
     /// A single-namespace successful recall also exposes its one `receipt`.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observation_receipts: Vec<crate::storage::control::WriteReceipt>,
+    /// Separately decoded remote evidence is never current-query commitment.
+    /// Preserve its original validated JSON representation, including numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) received_evidence: Option<ReceivedQueryEvidence>,
     #[serde(skip)]
     pub http_status: u16,
 }
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReceivedQueryEvidence {
+    pub(crate) receipts: Vec<Value>,
+}
 impl QueryReply {
+    pub(crate) fn remote_failure(record_access: bool, sent: bool, evidence: Vec<Value>) -> Self {
+        let unknown = record_access && sent;
+        let mut envelope = Envelope::failure(
+            None,
+            ExecutionError {
+                category: ErrorCategory::Unavailable,
+                code: if unknown {
+                    "COMMIT_OUTCOME_UNKNOWN"
+                } else {
+                    "REMOTE_UNAVAILABLE"
+                }
+                .into(),
+                message: if unknown {
+                    "Remote observation outcome is unknown; reconcile before retry."
+                } else {
+                    "Prepared remote response is unavailable."
+                }
+                .into(),
+                field: None,
+                retryable: false,
+                commit_state: if unknown {
+                    CommitState::Unknown
+                } else {
+                    CommitState::NotCommitted
+                },
+                operation_id: None,
+            },
+        );
+        if unknown {
+            envelope.warnings.push("READINESS_UNKNOWN".into());
+        }
+        let received_evidence = if evidence.is_empty() {
+            None
+        } else {
+            envelope
+                .warnings
+                .push("UNVERIFIED_RECEIVED_EVIDENCE".into());
+            Some(ReceivedQueryEvidence { receipts: evidence })
+        };
+        Self {
+            envelope,
+            observation_receipts: vec![],
+            received_evidence,
+            http_status: 503,
+        }
+    }
     pub(crate) fn unavailable() -> Self {
         Self::failure(SearchError::Unavailable(
             "prepared coherent query unavailable".into(),
@@ -47,6 +102,7 @@ impl QueryReply {
                 },
             ),
             observation_receipts: vec![],
+            received_evidence: None,
             http_status,
         }
     }
@@ -103,6 +159,7 @@ impl QueryReply {
         Self {
             envelope,
             observation_receipts: receipts,
+            received_evidence: None,
             http_status: status,
         }
     }
@@ -121,6 +178,16 @@ impl QueryReply {
         self.fits_before_observation(0)
     }
     pub(crate) fn fits_before_observation(&self, exposures: usize) -> bool {
+        self.fits_before_observation_with_limit(
+            exposures,
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+    }
+    pub(crate) fn fits_before_observation_with_limit(
+        &self,
+        exposures: usize,
+        limit: usize,
+    ) -> bool {
         // Count the actual typed JSON twice: structured bytes and the exact
         // escaping of those same bytes in compact MCP text. No pretty estimate.
         struct Count {
@@ -163,7 +230,7 @@ impl QueryReply {
                 .and_then(|n| n.checked_add(64 * 1024))
                 .and_then(|n| n.checked_add(c.raw))
                 .and_then(|n| n.checked_add(c.escaped))
-                .is_some_and(|n| n <= crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .is_some_and(|n| n <= limit)
     }
     pub(crate) fn oversize(mut self) -> Self {
         self.envelope.data = None;
@@ -260,6 +327,7 @@ pub(crate) fn project_similarity(
     Ok(QueryReply {
         envelope,
         observation_receipts: vec![],
+        received_evidence: None,
         http_status: 200,
     })
 }
@@ -422,6 +490,7 @@ pub(crate) fn project(
     Ok(QueryReply {
         envelope,
         observation_receipts: vec![],
+        received_evidence: None,
         http_status: 200,
     })
 }

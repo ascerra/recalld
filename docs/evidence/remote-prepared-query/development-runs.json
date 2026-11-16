@@ -1,0 +1,269 @@
+[
+  {
+    "run": "remote-query-001-red",
+    "source": "a1ae5498b24506a9b8fe400e6ccc45c8c42978f1",
+    "sourceManifestSha256": "bcec993649ade5c6547ce5fcd6c00062fe04195a5526b60619c382d8844dd4ab",
+    "sourceFiles": 9198,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [
+      "eac3d6a07c1edf18f5b9440659b2956077b71c7fc04232404920cd8f43297e71  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "d6214e51705e3cf57534b2df9fbdde747631bc0b41c1704225e80d5148dc1cbb",
+        "bytes": 39,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "6f844e5fb9eb3bacda51cd12eb19a1114f2beebe1c25cce78bf52036ab0f9eab",
+        "bytes": 26911,
+        "testResults": [
+          "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1697 filtered out; finished in 0.15s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-002-focus",
+    "source": "d517d4af7956af6f99e3d30c949a71afda4c8c66",
+    "sourceManifestSha256": "1ec2e0c8dea1483a8b8bca62036b19e187ab2343d8b00d47158064fcd4cfa7b1",
+    "sourceFiles": 452,
+    "status": "focused 0",
+    "exitCode": 0,
+    "executables": [
+      "e16fcd8225512903f4d7962530d81e429dd35f9f61b2442d9ccac75937479d75  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "cdc5fd6ac8dcdc7eabecc7cdb0b6c9d9bad78ea0d5b407c36ee0d245cb95e77c",
+        "bytes": 30597,
+        "testResults": [
+          "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1700 filtered out; finished in 0.35s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-003-decode-red",
+    "source": "8d36a1896d67ed0d749a26b6c540bce858085c43",
+    "sourceManifestSha256": "8786620dd1902bbc4ed072c023a424bc29ae5e7c100fbc4f2e3e23a2020a6b9a",
+    "sourceFiles": 452,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [
+      "09934e208a6cc359c89e6ea5fbd7801e1db4ec5a09332ac47c2e14bc18ac8f81  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "2f91dde96858208819f52b4122627021069a24d6538027d44955e67731d43c01",
+        "bytes": 26872,
+        "testResults": [
+          "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1701 filtered out; finished in 0.19s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-004-focus",
+    "source": "44290ce165e0c8f8df031c78f8b2e2629aafa236",
+    "sourceManifestSha256": "448c3f568d65a70a1db094b3b362f9c1adf2b955c0833bae7493b8f5576113ca",
+    "sourceFiles": 452,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "26f5289c6e162d72e06e5371849eb9c7c61346ee2c9a8d88f296ddc93dc964ed",
+        "bytes": 4815,
+        "testResults": []
+      }
+    }
+  },
+  {
+    "run": "remote-query-005-focus",
+    "source": "ab953cdbc922aec7d03dc34d660a6676eb48656d",
+    "sourceManifestSha256": "57f560912b5495cd9bddafec0c652322d84195646723e9dee7354f9d922670a5",
+    "sourceFiles": 452,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [
+      "9d753648dc7e4cb17eb3f5cb178225ff3287d8a0fc7d9840702b077d73a07f34  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "072515f4b78b7ed6ba6498ac71da4f788157f8c31a305e20dfaa13497b9fb2da",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "2963f6320189a4a159c77576d3df9c5a4ca68e96cc9f99be61914e93f5b4fa3e",
+        "bytes": 39366,
+        "testResults": [
+          "FAILED. 19 passed; 1 failed; 0 ignored; 0 measured; 1685 filtered out; finished in 34.32s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-006-focus",
+    "source": "63d3691ad9cc37e4feef788cc4116125afe2c86b",
+    "sourceManifestSha256": "e3a3c8aad206ccfe21f8e27319d82f10edf3cad39963b384b2118a6712c85c61",
+    "sourceFiles": 452,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [
+      "479b94202041690ee2902d9555f51e9972e22125b1e971794788ceb96efb413c  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "6d73ed2147e3dcaa00831b80060edd32d85ccc2134ac1ef30f00c4df4a41cf63",
+        "bytes": 46552,
+        "testResults": [
+          "FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 1700 filtered out; finished in 8.36s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-007-focus",
+    "source": "76d545cbbf55109e6254560d271b54ea2e33ae4b",
+    "sourceManifestSha256": "4c5347fcb1f1a0a8c1df9014844c0d4efa4e661126fb50a05273d24dd340db9e",
+    "sourceFiles": 452,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [
+      "6b5943bdc53658fe0b27bd7dcf1a6cbb13a968cad928caff49f139ba17d910d1  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "6484af08c877d2b7862dfb8e131277391ab55d1d5e0c6721e2b0e024f42147d5",
+        "bytes": 32230,
+        "testResults": [
+          "FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 1700 filtered out; finished in 8.32s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-008-focus",
+    "source": "32d4de39135d4bf22d248d9669585cd48d449420",
+    "sourceManifestSha256": "87493d7763d8ec81258dee82f3a566abbb1fbfa18f18412f307fe7400267dd58",
+    "sourceFiles": 452,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [
+      "2273da8e8e8b50a7b57ec4db0f11393ceea3c044a84c561e35f9ce911668409e  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "0dd3e69186cc8dce3ede271d070c75c81277aa9775d9e19110e10e028a296989",
+        "bytes": 35279,
+        "testResults": [
+          "FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 1700 filtered out; finished in 8.70s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-009-threshold",
+    "source": "9c3297b8e3142c59dae589c7a029780601fed054",
+    "sourceManifestSha256": "35ef0a870fe71debfce8ef8fd1bef8e084ff56774ab4f4b6ecd59620948840df",
+    "sourceFiles": 452,
+    "status": "focused 101",
+    "exitCode": 101,
+    "executables": [
+      "ecab20e81a60edbd91a2b4db5bd100743acbdeca3e70778f51978f64fd2b5020  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "focused.log": {
+        "sha256": "7ed8f5f440a676eb91637f8635af5ab88c437857562f31c9eeb5b9453219ed34",
+        "bytes": 26856,
+        "testResults": [
+          "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1706 filtered out; finished in 7.22s"
+        ]
+      }
+    }
+  },
+  {
+    "run": "remote-query-010-bits",
+    "source": "09399ad1811396e17ad85e1b735c6d1334e75fb5",
+    "sourceManifestSha256": "3a16f853d54f91f07da244156ae82785051855472d8b8384f4e94adef37b6e0c",
+    "sourceFiles": 452,
+    "status": "prepared_ 0\nstrict_query_valid_lifecycle_receipt_groups_fit_full_error_projection_reservation 0\nexact_pair 0\nexact_scan_response_budget_covers_real_mcp_text_structured_daemon_and_rest_serializers 0",
+    "exitCode": 0,
+    "executables": [
+      "8df6e430a398c67be9b85dbc7182143b5a2e3b1fc195b1a5cd80fb09c4b97ff9  /target/debug/deps/recalld-8b31964f64b2cfc4"
+    ],
+    "logs": {
+      "clean.log": {
+        "sha256": "ce54dbef3abcce2ecb3592f6b116094f33a421880ca2c93891f7821ee25feb34",
+        "bytes": 37,
+        "testResults": []
+      },
+      "exact_pair.log": {
+        "sha256": "aad350d439f19a942c4f5f0f3aea470fe0e24b53f5e080e9cb461230e5967300",
+        "bytes": 26365,
+        "testResults": [
+          "ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1704 filtered out; finished in 0.47s"
+        ]
+      },
+      "exact_scan_response_budget_covers_real_mcp_text_structured_daemon_and_rest_serializers.log": {
+        "sha256": "a7ab42d820fd66bc25b470e5ff1eed00e2579a579a8c3e12eb36a10aadc5cb86",
+        "bytes": 25985,
+        "testResults": [
+          "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1708 filtered out; finished in 0.88s"
+        ]
+      },
+      "prepared_.log": {
+        "sha256": "3fc62eabe93209e3c64e1a994bd882a3b579f6027123bb6c2994c0a599e4aca8",
+        "bytes": 33769,
+        "testResults": [
+          "ok. 24 passed; 0 failed; 0 ignored; 0 measured; 1685 filtered out; finished in 38.98s"
+        ]
+      },
+      "strict_query_valid_lifecycle_receipt_groups_fit_full_error_projection_reservation.log": {
+        "sha256": "f8933106f81792cba9c8bac7f1dc566a62898845b547059c9eb4b60530d4a0fa",
+        "bytes": 25927,
+        "testResults": [
+          "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1708 filtered out; finished in 0.06s"
+        ]
+      }
+    }
+  }
+]
