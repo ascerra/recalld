@@ -23,8 +23,9 @@ Prepared similarity accepts strict optional `explain`; omission/false still
 omits the field. True projects the actual selected row's `cosineMax` evidence:
 own cosine, four distinct own-admission states, threshold, admitted own score,
 inherited floor, eligible origins, omitted count, final similarity and version.
-The producer retains at most64 origins; this consumer neither recomputes a dot
-product nor labels cosine as the ranked `baseline-v1` formula. Missing evidence
+The returned explanation displays at most64 eligible origins; internal
+O(scored) capture/work is not bounded by that display cap. This consumer neither
+recomputes a dot product nor labels cosine as the ranked `baseline-v1` formula. Missing evidence
 fails before observation. Selection, ordering and exposure logic are unchanged.
 
 Ranked coverage now exposes each channel's nullable `examinedUnit` and separate
