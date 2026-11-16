@@ -522,9 +522,10 @@ impl DerivedCompletion {
                                 );
                             }
                             let ack = crate::performance::Timer::new("derived.effects_ack");
-                            let result = storage
-                                .meta_store()
-                                .acknowledge_rebuilt_effects_with_work(Some(&child));
+                            let result = storage.meta_store().acknowledge_rebuilt_effects_at(
+                                publication.canonical,
+                                Some(&child),
+                            );
                             crate::performance::event!(
                                 kind = "derived_ack",
                                 success = result.is_ok(),
