@@ -5,9 +5,12 @@
 
 pub mod contract;
 mod json;
+pub mod native_batch;
+pub mod native_single;
 pub(crate) mod pair_cursor;
 pub mod scan;
 pub mod session;
+pub mod store_api1;
 
 pub use json::{
     ApiError, ApiResponse, CreateMemoryRequest, MemoryResponse, NamespaceRequest,
@@ -17,3 +20,5 @@ pub use json::{
 pub(crate) mod native_lifecycle;
 
 pub(crate) mod lifecycle_api1;
+
+pub mod batch_api1;

@@ -638,7 +638,7 @@ fn reject_zero_insertion(supplied: bool) {
     let error = error.expect_err("zero-norm insertion must fail");
     assert!(
         if supplied {
-            matches!(error, StorageError::InvalidMutation(_))
+            matches!(error, StorageError::CallerVectorInvalid(_))
         } else {
             matches!(error, StorageError::ProviderVectorUnavailable(_))
         },
@@ -736,7 +736,7 @@ fn insertion_vector_boundary_normalizes_both_origins_and_preserves_request_ident
                 .unwrap_err();
             assert!(
                 if supplied {
-                    matches!(error, StorageError::InvalidMutation(_))
+                    matches!(error, StorageError::CallerVectorInvalid(_))
                 } else {
                     matches!(error, StorageError::ProviderVectorUnavailable(_))
                 },

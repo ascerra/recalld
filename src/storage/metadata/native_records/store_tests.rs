@@ -254,7 +254,7 @@ fn native_store_plan_generation_scope_profile_and_provider_faults_precede_alloca
             },
         );
         assert!(if supplied {
-            matches!(result, Err(StorageError::InvalidMutation(_)))
+            matches!(result, Err(StorageError::CallerVectorInvalid(_)))
         } else {
             matches!(result, Err(StorageError::ProviderVectorUnavailable(_)))
         });
