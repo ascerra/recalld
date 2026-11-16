@@ -6,6 +6,7 @@
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut};
+use std::pin::{Pin, pin};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -77,6 +78,16 @@ fn sampler() -> &'static Sampler {
     })
 }
 fn target_enabled() -> bool {
+    // Contain tracing-core#3611: an untraced thread must not first register
+    // this callsite against NoSubscriber while a scoped Dispatch is alive.
+    // Keep the global/static fast path before inspecting thread-local state.
+    if tracing::Level::TRACE > tracing::level_filters::STATIC_MAX_LEVEL
+        || tracing::Level::TRACE > tracing::level_filters::LevelFilter::current()
+        || tracing::dispatcher::get_default(|d| d.is::<tracing::subscriber::NoSubscriber>())
+    {
+        return false;
+    }
+    // Outside get_default: nesting would trigger dispatcher reentrancy suppression.
     tracing::enabled!(target: "recalld::performance", tracing::Level::TRACE)
 }
 pub(crate) fn enabled() -> bool {
@@ -170,17 +181,34 @@ impl Drop for Timeline {
 
 /// An outer request reports error explicitly; cancellation/unwind retains a
 /// duration with an honestly ambiguous outcome. Errors themselves are not logged.
-pub(crate) async fn measure<T, E>(
+pub(crate) fn measure<T, E>(
     operation: &'static str,
     record_access: bool,
     future: impl Future<Output = Result<T, E>>,
-) -> Result<T, E> {
-    measure_with_sampler(operation, record_access, future, None).await
+) -> impl Future<Output = Result<T, E>> {
+    measure_with_sampler(operation, record_access, future, None)
 }
 
-async fn measure_with_sampler<T, E>(
+fn measure_with_sampler<T, E>(
     operation: &'static str,
     record_access: bool,
+    future: impl Future<Output = Result<T, E>>,
+    sampler_override: Option<&Sampler>,
+) -> impl Future<Output = Result<T, E>> {
+    measure_request(operation, Some(record_access), future, sampler_override)
+}
+
+/// Transport intent is unknown before decoding, never implicitly read-only.
+pub(crate) fn measure_transport<T, E>(
+    operation: &'static str,
+    future: impl Future<Output = Result<T, E>>,
+) -> impl Future<Output = Result<T, E>> {
+    measure_request(operation, None, future, None)
+}
+
+async fn measure_request<T, E>(
+    operation: &'static str,
+    record_access: Option<bool>,
     future: impl Future<Output = Result<T, E>>,
     sampler_override: Option<&Sampler>,
 ) -> Result<T, E> {
@@ -196,33 +224,75 @@ async fn measure_with_sampler<T, E>(
             }
         }
     });
-    if !decision.selected {
-        return REQUEST.scope(decision, future).await;
-    }
-    let trace_id = NEXT_TRACE.fetch_add(1, Ordering::Relaxed);
+    // Keep a single future-containing path: duplicating it in sampled and
+    // unsampled branches compounds stack usage when request wrappers nest.
     // Full trace keeps its original event-v1 span fields. Sampled traces have
     // version 2 and explicit root-level counts (not whole-population metrics).
-    let span = if decision.every == 1 {
-        tracing::trace_span!(target: "recalld::performance", "performance_request",
-            operation, record_access, trace_id, event_version = 1)
+    let span = if !decision.selected {
+        tracing::Span::none()
     } else {
-        tracing::trace_span!(target: "recalld::performance", "performance_request",
-            operation, record_access, trace_id, event_version = 2,
+        let trace_id = NEXT_TRACE.fetch_add(1, Ordering::Relaxed);
+        if record_access.is_none() {
+            tracing::trace_span!(target: "recalld::performance", "performance_request",
+            operation, intent = "unknown", trace_id, event_version = 3,
             sample_every = decision.every, root_ordinal = decision.root_ordinal,
             sampled_roots_seen = decision.sampled_roots_seen)
+        } else if decision.every == 1 {
+            tracing::trace_span!(target: "recalld::performance", "performance_request",
+            operation, record_access = record_access.unwrap(), trace_id, event_version = 1)
+        } else {
+            tracing::trace_span!(target: "recalld::performance", "performance_request",
+            operation, record_access = record_access.unwrap(), trace_id, event_version = 2,
+            sample_every = decision.every, root_ordinal = decision.root_ordinal,
+            sampled_roots_seen = decision.sampled_roots_seen)
+        }
+    };
+    let mut inner = pin!(Some(async move {
+        let mut timer = Timer::new(operation);
+        let result = future.await;
+        timer.end(if result.is_ok() { "ok" } else { "error" });
+        result
+    }));
+    let mut drop_context = RequestDrop {
+        inner: inner.as_mut(),
+        decision,
+        span: span.clone(),
     };
     REQUEST
         .scope(
             decision,
-            async move {
-                let mut timer = Timer::new(operation);
-                let result = future.await;
-                timer.end(if result.is_ok() { "ok" } else { "error" });
-                result
-            }
-            .instrument(span),
+            std::future::poll_fn(|cx| drop_context.inner.as_mut().as_pin_mut().unwrap().poll(cx))
+                .instrument(span),
         )
         .await
+}
+
+// WithSubscriber restores its dispatcher for polling, but not for task abort.
+// Drop the stack-pinned future under the original decision/subscriber/span so
+// its timers and owned work guards retain context even when another task aborts
+// it. Pin::set drops in place: no unsafe projection, box or added dependency.
+struct RequestDrop<'a, F> {
+    inner: Pin<&'a mut Option<F>>,
+    decision: Decision,
+    span: tracing::Span,
+}
+impl<F> Drop for RequestDrop<'_, F> {
+    fn drop(&mut self) {
+        let Self {
+            inner,
+            decision,
+            span,
+        } = self;
+        let mut drop_inner = || REQUEST.sync_scope(*decision, || inner.set(None));
+        if span
+            .with_subscriber(|(_, dispatch)| {
+                tracing::dispatcher::with_default(dispatch, || span.in_scope(&mut drop_inner));
+            })
+            .is_none()
+        {
+            drop_inner();
+        }
+    }
 }
 
 /// Canonical receipt identities are isolated trace fields, never metric labels.
@@ -235,6 +305,29 @@ pub(crate) fn receipts(receipts: &[crate::storage::control::WriteReceipt]) {
                 committed_generation = receipt.committed_generation.get());
         }
     }
+}
+
+/// Counts this explicit Rust sync call, not opaque backend syscalls.
+pub(crate) fn sync_io<T>(
+    resource: &'static str,
+    method: &'static str,
+    sync: impl FnOnce() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    if !enabled() {
+        return sync();
+    }
+    event!(kind = "sync_call", resource, method, phase = "attempt");
+    let timer = Timer::new("storage.sync");
+    let result = sync();
+    event!(
+        kind = "sync_call",
+        resource,
+        method,
+        phase = "return",
+        success = result.is_ok()
+    );
+    timer.outcome(result.is_ok());
+    result
 }
 
 /// Carry the request's subscriber and span into a blocking worker. No capture

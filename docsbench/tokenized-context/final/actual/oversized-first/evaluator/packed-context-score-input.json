@@ -1,0 +1,55 @@
+{
+  "environmentHash": "c8d9811b6d4c856a2330f42df9a594559831f8f9043969e7e0d44488f1a653e3",
+  "mappings": {
+    "01a1e122-9445-7cb3-ad0d-b435b938bf16": [
+      "turn-0"
+    ],
+    "01a1e122-9449-7780-8e21-2be55415a818": [
+      "turn-1"
+    ],
+    "01a1e122-944c-73f1-a81d-3ccc67758918": [
+      "turn-2"
+    ],
+    "01a1e122-9450-7d90-9104-9d601d179d63": [
+      "turn-3"
+    ]
+  },
+  "profile": "synthetic-unique-source-v1",
+  "queries": [
+    {
+      "memoryIds": [],
+      "queryId": "q0"
+    },
+    {
+      "memoryIds": [],
+      "queryId": "q1"
+    },
+    {
+      "memoryIds": [],
+      "queryId": "q2"
+    },
+    {
+      "memoryIds": [],
+      "queryId": "q3"
+    }
+  ],
+  "relevant": {
+    "q0": [
+      "turn-0",
+      "turn-1"
+    ],
+    "q1": [],
+    "q3": [
+      "turn-1",
+      "turn-3"
+    ]
+  },
+  "sourceEvents": "{\"sourceId\": \"turn-0\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-0\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-0\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e122-9445-7cb3-ad0d-b435b938bf16\"}\n{\"sourceId\": \"turn-1\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-1\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-1\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e122-9449-7780-8e21-2be55415a818\"}\n{\"sourceId\": \"turn-2\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-2\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-2\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e122-944c-73f1-a81d-3ccc67758918\"}\n{\"sourceId\": \"turn-3\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-3\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-3\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e122-9450-7d90-9104-9d601d179d63\"}\n",
+  "sourceEventsSha256": "d3d07c78a2fec8b129c2894d414a0f27201e446d92037214939ceb0945d95c52",
+  "sourceIds": [
+    "turn-0",
+    "turn-1",
+    "turn-2",
+    "turn-3"
+  ]
+}

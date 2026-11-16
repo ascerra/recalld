@@ -1,0 +1,6 @@
+{
+  "classification": "checker missed declared replay-miss recall limit",
+  "diff": "--- baseline\n\n+++ candidate\n\n@@ -251,7 +251,7 @@\n\n       \"params\": {\n         \"arguments\": {\n           \"depth\": 0,\n-          \"limit\": 1,\n+          \"limit\": 2,\n           \"namespace\": \"default\",\n           \"query\": \"unrecorded-query\",\n           \"recordAccess\": false",
+  "runtimePairPassed": true,
+  "checkerPassed": false
+}

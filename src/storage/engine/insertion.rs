@@ -131,7 +131,10 @@ impl RedbStorageEngine {
     ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
         let guard = self.meta_store.mutation_guard_with_work(parent)?;
+        let scan = crate::performance::Timer::new("insert.canonical_edges");
         let edges = self.edge_store.load_all_edges()?;
+        scan.complete();
+        crate::performance::event!(kind = "insert_edges", loaded = edges.len());
         let vectors = &mut self.vector_manager;
         let text = &mut self.text_store;
         let mut staging_started = false;
@@ -150,9 +153,37 @@ impl RedbStorageEngine {
                     .get_mut(namespace.id)
                     .ok_or(StorageError::NamespaceNotFound(namespace.id.get()))?;
                 staging_started = true;
+                let append = crate::performance::Timer::new("insert.vector_append");
+                crate::performance::event!(
+                    kind = "payload_append",
+                    resource = "vector",
+                    phase = "attempt",
+                    source_bytes = normalized.len() * std::mem::size_of::<f32>()
+                );
                 record.vector_slot = store.insert_vector(normalized)?;
+                append.complete();
+                crate::performance::event!(
+                    kind = "payload_append",
+                    resource = "vector",
+                    phase = "complete",
+                    source_bytes = normalized.len() * std::mem::size_of::<f32>()
+                );
                 if let Some(value) = &input.full_text {
+                    let append = crate::performance::Timer::new("insert.text_append");
+                    crate::performance::event!(
+                        kind = "payload_append",
+                        resource = "text",
+                        phase = "attempt",
+                        source_bytes = value.len()
+                    );
                     let reference = text.append(value)?;
+                    append.complete();
+                    crate::performance::event!(
+                        kind = "payload_append",
+                        resource = "text",
+                        phase = "complete",
+                        source_bytes = value.len()
+                    );
                     record.text_offset = reference.file_offset;
                     record.text_length = reference.length;
                 }
@@ -168,6 +199,11 @@ impl RedbStorageEngine {
             self.meta_store.mark_unavailable();
         }
         let receipt = result?;
+        crate::performance::event!(
+            kind = "insert_receipt",
+            replayed = receipt.replayed,
+            committed_generation = receipt.committed_generation.get()
+        );
         if !receipt.replayed {
             effects::apply_pending(
                 &self.meta_store,

@@ -1,0 +1,60 @@
+{
+  "activeEmbedding": {
+    "dimension": 4,
+    "identity": "configuration",
+    "profileId": "ep1:5f3b75813618f6ae18a59adb38e40568fd62bc7e97075fe96c1ff7618cbee42b"
+  },
+  "deliveryOrdinal": 0,
+  "phase": "ingest",
+  "sources": [
+    {
+      "contentSha256": "bcd6e935537801ceb2b6eddfb0b88a7255f0cc866c794fa09bb5333674ac44fd",
+      "conversationId": "conversation-6",
+      "namespace": "default",
+      "ordinal": 0,
+      "role": "user",
+      "sessionId": "session-6",
+      "sourceId": "turn-0",
+      "sourceTimestamp": 1767225600000,
+      "summary": "amber fir",
+      "turnId": "turn-0"
+    },
+    {
+      "contentSha256": "2c6e1e655f3c82fe0f381d17e69826a98b46c917948ff2b7a191136caf1b63d7",
+      "conversationId": "conversation-6",
+      "namespace": "default",
+      "ordinal": 1,
+      "role": "user",
+      "sessionId": "session-6",
+      "sourceId": "turn-1",
+      "sourceTimestamp": 1767225600000,
+      "summary": "birch fir",
+      "turnId": "turn-1"
+    },
+    {
+      "contentSha256": "5c494783f15bdffb9828df2dbd0f02824713ff01782dad765e3455797170424d",
+      "conversationId": "conversation-6",
+      "namespace": "default",
+      "ordinal": 2,
+      "role": "user",
+      "sessionId": "session-6",
+      "sourceId": "turn-2",
+      "sourceTimestamp": 1767225600000,
+      "summary": "olive fir",
+      "turnId": "turn-2"
+    },
+    {
+      "contentSha256": "44570d6cbeb59009d68c0105a807e0567f4233b22ccced19b3967bbc78ae62fe",
+      "conversationId": "conversation-6",
+      "namespace": "foreign",
+      "ordinal": 3,
+      "role": "user",
+      "sessionId": "session-6",
+      "sourceId": "turn-3",
+      "sourceTimestamp": 1767225600000,
+      "summary": "foreign fir",
+      "turnId": "turn-3"
+    }
+  ],
+  "startId": 0
+}

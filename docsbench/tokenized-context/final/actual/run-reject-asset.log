@@ -1,0 +1,21 @@
+Traceback (most recent call last):
+  File "/work/source/scripts/public-mcp-evaluation.py", line 427, in <module>
+    main()
+  File "/work/source/scripts/public-mcp-evaluation.py", line 423, in main
+    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+  File "/work/source/scripts/public-mcp-evaluation.py", line 183, in run_episode
+    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root, getattr(args,"context_assets",None))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/public-mcp-evaluation.py", line 130, in validate
+    if context: CONTEXT["preflight"](m,schedule,context_assets)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/context-mcp-evaluation.py", line 35, in preflight
+    encoder=TOKEN['load'](bundle)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/context_tokenizer.py", line 46, in load
+    bundle=Path(bundle);expected=verify_bundle(bundle)
+                                 ^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/context_tokenizer.py", line 42, in verify_bundle
+    if not p.is_file() or p.is_symlink() or digest(p.read_bytes())!=expected[key]:raise ValueError('tokenizer asset/config hash mismatch')
+                                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: tokenizer asset/config hash mismatch
