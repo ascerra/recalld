@@ -1,5 +1,99 @@
 // Real owned fixture consumers; included in read_view::tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_remote_exact_threshold_bits_and_continuation() {
+    use crate::mcp::bridge::SearchPipeline as _;
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let f=similar_fixture().await;
+    let engine=Arc::new(f.engine);
+    let adapter=Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(engine,
+        Arc::new(crate::embedding::PassthroughProvider::new(4)),
+        f.f.storage.clone(),f.f.graph.clone(),chrono_tz::UTC));
+    let daemon=crate::daemon::server::prepared_query_tests::PreparedDaemon::start(adapter.clone()).await;
+    daemon.client.ping().await.unwrap();
+    let remote=crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+    let before=bytes(&f.f);
+    let base=crate::serialization::scan::ExactScanRequest::from_http(
+        &serde_json::json!({"pairBudget":2,"threshold":0.}),"default").unwrap();
+    let initial=adapter.scan_duplicate_pairs(base.clone()).await.unwrap();
+    let edge=&initial.data.pairs[0];
+    let score=edge.similarity;
+    let mut failures=Vec::new();
+    let mut evidence=Vec::new();
+    for (case,threshold) in [("below",score.next_down()),("equal",score),("above",score.next_up())] {
+        let input=crate::serialization::scan::ExactScanRequest{threshold,..base.clone()};
+        let local=adapter.scan_duplicate_pairs(input.clone()).await.unwrap();
+        let arguments=input.rpc_arguments().unwrap();
+        let argument_bits=arguments["threshold"].as_f64().unwrap().to_bits();
+        let local_score_bits:Vec<_>=local.data.pairs.iter().map(|p|p.similarity.to_bits()).collect();
+        let typed=crate::daemon::prepared_query::Reply{wire_version:1,http_status:200,reply:&local};
+        let typed_bytes=serde_json::to_vec(&typed).unwrap();
+        let compact=crate::daemon::prepared_query::compact_value(&typed).unwrap();
+        let score_bits=|v:&serde_json::Value| v["reply"]["data"]["pairs"].as_array().unwrap().iter()
+            .map(|p|p["similarity"].as_f64().unwrap().to_bits()).collect::<Vec<_>>();
+        let compact_score_bits=score_bits(&compact);
+        let response_bytes=serde_json::to_vec(&crate::daemon::DaemonResponse::success(u64::MAX,compact)).unwrap();
+        let response_value:serde_json::Value=serde_json::from_slice(&response_bytes).unwrap();
+        let frame_score_bits=score_bits(&response_value["result"]);
+        let params=serde_json::json!({"arguments":arguments,"responseLimit":crate::daemon::prepared_query::response_limit()});
+        // A separately identified diagnostic exchange uses the same negotiation
+        // and prepared parameters. It does not replace the Remote call below.
+        let raw=daemon.client.call(crate::daemon::prepared_query::PAIRS,params.clone()).await.unwrap();
+        let cursor=raw["reply"]["data"]["nextCursor"].as_str().unwrap();
+        let cursor_value:serde_json::Value=serde_json::from_slice(&URL_SAFE_NO_PAD.decode(cursor).unwrap()).unwrap();
+        let server_bits=cursor_value["thresholdBits"].as_u64().unwrap();
+        let request_bytes=serde_json::to_vec(&crate::daemon::protocol::DaemonRequest {
+            jsonrpc:"2.0".into(),id:u64::MAX,method:crate::daemon::prepared_query::PAIRS.into(),params,
+        }).unwrap();
+        let parsed:crate::daemon::protocol::DaemonRequest=serde_json::from_slice(&request_bytes).unwrap();
+        let parsed_bits=parsed.params["arguments"]["threshold"].as_f64().unwrap().to_bits();
+        if server_bits!=parsed_bits {failures.push(format!("{case}: server cursor differs from emitter model"));}
+        let received=remote.scan_duplicate_pairs(input.clone()).await;
+        let returned_pairs=|page:&crate::search::exact_scan::ExactScanPage| page.data.pairs.iter()
+            .map(|p|serde_json::json!({"leftId":p.left_id,"rightId":p.right_id,"scoreBits":p.similarity.to_bits()})).collect::<Vec<_>>();
+        let remote_pairs=received.as_ref().ok().map(&returned_pairs);
+        if server_bits!=threshold.to_bits() {failures.push(format!("{case}: request threshold bits changed"));}
+        match &received {
+            Ok(page) if serde_json::to_value(page).unwrap()==serde_json::to_value(&local).unwrap()=>{},
+            other=>failures.push(format!("{case}: first page differs: {other:?}")),
+        }
+        let next=crate::serialization::scan::ExactScanRequest{cursor:local.data.next_cursor.clone(),..input.clone()};
+        assert!(next.cursor.is_some());
+        let local_next=adapter.scan_duplicate_pairs(next.clone()).await.unwrap();
+        let (cursor,continuation_source)=match &received {
+            Ok(page)=>(page.data.next_cursor.clone(),"remoteReturnedCursor"),
+            Err(_)=>(next.cursor,"localCursorControlAfterRemoteFailure"),
+        };
+        let remote_next=remote.scan_duplicate_pairs(crate::serialization::scan::ExactScanRequest{cursor,..input}).await;
+        let remote_next_pairs=remote_next.as_ref().ok().map(&returned_pairs);
+        match &remote_next {
+            Ok(page) if serde_json::to_value(page).unwrap()==serde_json::to_value(&local_next).unwrap()=>{},
+            other=>failures.push(format!("{case}: continuation differs: {other:?}")),
+        }
+        evidence.push(serde_json::json!({"case":case,"thresholdBits":threshold.to_bits(),
+            "argumentThresholdBits":argument_bits,"localScoreBits":local_score_bits,
+            "compactScoreBits":compact_score_bits,"frameScoreBits":frame_score_bits,
+            "actualDiagnosticScoreBits":score_bits(&raw),
+            "modeledTypedReplyJson":String::from_utf8(typed_bytes).unwrap(),
+            "modeledResponseJson":String::from_utf8(response_bytes).unwrap(),
+            "thresholdDecimal":threshold.to_string(),"serverCursorThresholdBits":server_bits,
+            "modeledRequestJson":String::from_utf8(request_bytes).unwrap(),
+            "remotePairs":remote_pairs,"remoteNextPairs":remote_next_pairs,"continuationSource":continuation_source,
+            "local":local,"diagnosticExchange":raw,"remote":format!("{received:?}"),
+            "localNext":local_next,"remoteNext":format!("{remote_next:?}")}));
+    }
+    let report=serde_json::json!({"initialEdge":edge,"initialScoreBits":score.to_bits(),
+        "cases":evidence,"failures":failures});
+    if let Some(root)=std::env::var_os("RECALLD_QUERY_SCHEMA_FIXTURES") {
+        let path=std::path::Path::new(&root).parent().unwrap().join("pair-threshold-evidence.json");
+        std::fs::write(path,serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+    assert_eq!(bytes(&f.f),before,"all diagnostic/Remote calls are false reads");
+    drop(remote);
+    daemon.finish().await;
+    assert!(failures.is_empty(),"{failures:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_remote_native_query_similar_exact_and_known_publication_failure() {
     use crate::mcp::bridge::SearchPipeline as _;
     use crate::daemon::server::prepared_query_tests::PreparedDaemon;
