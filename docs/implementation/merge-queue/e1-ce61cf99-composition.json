@@ -1,0 +1,23 @@
+{
+  "source": "ce61cf9921d7d2ce9a073817d03326edfd8b9de3",
+  "parents": [
+    "6ebfd25080bda0d21a755d88211fba471da1e652",
+    "315cd2b1e6d300caa9df9d776b74cb0e8a4cb20b"
+  ],
+  "overlap": [
+    "src/api/adapters.rs",
+    "src/api/handlers.rs",
+    "src/storage/error.rs"
+  ],
+  "customConflictResolution": false,
+  "sourceACKs": [
+    "Pascal",
+    "Feynman",
+    "Huygens"
+  ],
+  "pendingReview": [],
+  "validation": "ACTIVE49491: first11 stages PASS;47unique/48focused executions plusfmt3Python. Mandatory allfeature/alltarget full stage11 active, no full result.",
+  "scope": "Independent E1 actualmain join; no conveniencefeatureparent; unknown/fullreceipts/precommitbudget/foreignpending/emptyACK gates retained; no ordinarynative/public2 activation",
+  "sourceReviewLimit": "All3 source-only; actual runtime/full/headCI still pending. No generic knownreceipt fallback approved; closedproducer admission remains obligation.",
+  "driverPreflightFailure": "validation/e1-driver-preflight-failure/FAILURE.json; HEADguard before snapshot/cache/Docker; corrected driver root, source unchanged"
+}
