@@ -160,6 +160,25 @@ pub(crate) fn project(failure: PurgeApi1Failure) -> bridge::BridgeError {
     bridge::BridgeError::PartiallyApplied(payload.to_string())
 }
 
+fn same_fields(expected: &Value, received: &Value) -> bool {
+    match (expected, received) {
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, value)| b.get(key).is_some_and(|other| same_fields(value, other)))
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_fields(a, b))
+        }
+        // The typed receipt decoder validates the numeric fields. The default
+        // JSON Value parser may round f64 text one ulp while preserving the
+        // original f32 bits (e.g. initialStability=3.7145). Do not equate numeric
+        // reserialization text with retained proof identity or discard evidence.
+        (Value::Number(_), Value::Number(_)) => true,
+        _ => expected == received,
+    }
+}
+
 /// Validate the known payload shape before adding structured MCP classification.
 /// This validates returned evidence syntax, not independent server authenticity.
 pub(crate) fn structured_failure(message: &str) -> Option<Value> {
@@ -179,7 +198,7 @@ pub(crate) fn structured_failure(message: &str) -> Option<Value> {
     let receipt = match payload.get("receipt") {
         Some(value) => {
             let receipt: WriteReceipt = serde_json::from_value(value.clone()).ok()?;
-            if serde_json::to_value(&receipt).ok()?.ne(value)
+            if !same_fields(&serde_json::to_value(&receipt).ok()?, value)
                 || payload.get("commitEvidenceScope")?.as_str()? != scope(&receipt)?
             {
                 return None;

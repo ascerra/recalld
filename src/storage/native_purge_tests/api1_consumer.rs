@@ -80,6 +80,20 @@ async fn native_api1_purge_retains_known_receipt_on_publication_failure() {
     assert_eq!(payload["commitEvidenceScope"], "purgeStep");
     assert_eq!(payload["error"], "SERVICE_UNAVAILABLE");
     assert_eq!(payload["commitState"], "committed");
+    assert!(crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&message).is_some());
+    for bad_value in [
+        serde_json::json!(1.5),
+        serde_json::json!(true),
+        serde_json::json!(null),
+    ] {
+        let mut bad = payload.clone();
+        bad["receipt"]["outcome"]["transition"]["chunk"]["deletions"][0]["before"]["lifecycle"]["createdAt"] =
+            bad_value;
+        assert!(
+            crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&bad.to_string())
+                .is_none()
+        );
+    }
     for field in ["ready", "readiness", "applied", "pendingWork", "data"] {
         assert!(payload.get(field).is_none(), "invented {field}");
     }
@@ -491,4 +505,381 @@ async fn native_api1_purge_lost_begin_has_no_invented_identity_or_receipt() {
             .unresolved
             > 0
     );
+}
+
+async fn mcp_delete(
+    namespaces: Arc<dyn NamespaceRegistry>,
+    modern: bool,
+) -> crate::mcp::protocol::JsonRpcResponse {
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.namespaces = namespaces;
+    let mut server = crate::mcp::server::McpServer::new(Arc::new(bridge));
+    let args =
+        serde_json::json!({"name":"delete_namespace","arguments":{"name":"doomed","force":true}});
+    let request = if modern {
+        crate::mcp::server::tests::modern_request(2, "tools/call", args)
+    } else {
+        let init = serde_json::from_value(serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"purge-probe","version":"1"}}})).unwrap();
+        assert!(server.handle_message(init).await.unwrap().error.is_none());
+        serde_json::from_value(
+            serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":args}),
+        )
+        .unwrap()
+    };
+    server.handle_message(request).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_race_actual_mcp_eras_remote_and_legacy_frames() {
+    for surface in 0..4 {
+        let (fx, namespace, publisher, _) = setup();
+        publisher.rebuild_all().await.unwrap();
+        let (started, resume) = pause(&fx);
+        let direct: Arc<dyn NamespaceRegistry> =
+            Arc::new(fx.namespace_adapter().with_clock(Arc::new(NoClock)));
+        let socket_dir = tempfile::tempdir().unwrap();
+        let (namespaces, server): (Arc<dyn NamespaceRegistry>, _) = if surface == 2 {
+            let (remote, server) = crate::daemon::server::catalog_test_remote(
+                direct,
+                &socket_dir.path().join("purge.sock"),
+            )
+            .await;
+            (remote, Some(server))
+        } else {
+            (direct, None)
+        };
+        let task = tokio::spawn(async move {
+            if surface == 3 {
+                let response =
+                    crate::daemon::server::native_purge_test_legacy_rpc(namespaces).await;
+                assert!(response.result.is_none());
+                let bytes = serde_json::to_vec(&response).unwrap().len();
+                let error = response.error.unwrap();
+                assert_eq!(error.code, -32006);
+                (
+                    serde_json::from_str::<serde_json::Value>(&error.message).unwrap(),
+                    bytes,
+                )
+            } else {
+                let response = mcp_delete(namespaces, surface != 1).await;
+                let bytes = serde_json::to_vec(&response).unwrap().len();
+                assert!(response.error.is_none(), "{response:?}");
+                let result = response.result.unwrap();
+                assert_eq!(result["isError"], true);
+                let text: serde_json::Value =
+                    serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+                if surface == 1 {
+                    assert!(result.get("structuredContent").is_none());
+                } else {
+                    assert_eq!(result["structuredContent"], text);
+                }
+                (text, bytes)
+            }
+        });
+        let start = tokio::time::timeout(std::time::Duration::from_secs(5), started)
+            .await
+            .unwrap()
+            .unwrap();
+        publisher.complete().await.unwrap();
+        let completed = fx
+            .storage
+            .read()
+            .unwrap()
+            .lookup_namespace_purge(start.store_id, namespace, start.start_receipt.operation_id)
+            .unwrap()
+            .unwrap();
+        let before = counters(&fx);
+        resume.send(()).unwrap();
+        let (result, bytes) = task.await.unwrap();
+        assert_eq!(result["error"], "PURGE_METRICS_UNAVAILABLE");
+        assert_eq!(result["commitEvidenceScope"], "purgeComplete");
+        assert_eq!(
+            serde_json::from_value::<control::WriteReceipt>(result["receipt"].clone()).unwrap(),
+            completed.last_receipt
+        );
+        no_readiness(&result);
+        assert!(bytes < crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE);
+        eprintln!("ACTUAL_PURGE_COMPLETE_FRAME surface={surface} bytes={bytes}");
+        assert_eq!(counters(&fx), before);
+        if let Some(server) = server {
+            tokio::time::timeout(std::time::Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_full_start_and_child_errors_survive_actual_frames() {
+    for child in [false, true] {
+        let (fx, namespace, publisher, _) = setup();
+        publisher.rebuild_all().await.unwrap();
+        if child {
+            *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+        } else {
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .fail_purge_child_commit
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        let response =
+            crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(fx.namespace_adapter()))
+                .await;
+        let bytes = serde_json::to_vec(&response).unwrap().len();
+        let error = response.error.unwrap();
+        assert_eq!(error.code, -32006);
+        let result =
+            crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message)
+                .unwrap();
+        let p = fx
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .purge_progress()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.namespace_id == namespace)
+            .unwrap();
+        let receipt: control::WriteReceipt =
+            serde_json::from_value(result["receipt"].clone()).unwrap();
+        if child {
+            assert_eq!(result["commitEvidenceScope"], "purgeStep");
+            assert_eq!(
+                receipt,
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .pending_effects()
+                    .unwrap()
+                    .first()
+                    .unwrap()
+                    .receipt
+            );
+        } else {
+            assert_eq!(result["commitEvidenceScope"], "purgeStart");
+            assert_eq!(receipt, p.start_receipt);
+            assert_eq!(result["commitState"], "unknown");
+        }
+        no_readiness(&result);
+        eprintln!("ACTUAL_PURGE_EVIDENCE_FRAME child={child} bytes={bytes}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejects_extras() {
+    let (fx, _, publisher, _) = setup();
+    publisher.rebuild_all().await.unwrap();
+    fx.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .fail_purge_child_commit
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let good = payload(
+        fx.namespace_adapter()
+            .delete_namespace(DeleteNamespaceInput {
+                name: "doomed".into(),
+                force: true,
+            })
+            .await
+            .unwrap_err(),
+    );
+    assert!(
+        crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&good.to_string())
+            .is_some()
+    );
+    let retained: control::WriteReceipt = serde_json::from_value(good["receipt"].clone()).unwrap();
+    let control::MutationOutcome::NativeNamespacePurgeStarted { transition } = retained.outcome
+    else {
+        panic!("expected start");
+    };
+    assert_eq!(
+        transition
+            .before_namespace
+            .namespace()
+            .unwrap()
+            .initial_stability
+            .to_bits(),
+        0x406dba5e
+    );
+    for change in 0..12 {
+        let mut bad = good.clone();
+        match change {
+            0 => bad["ready"] = serde_json::json!(false),
+            1 => bad["commitEvidenceScope"] = serde_json::json!("purgeComplete"),
+            2 => bad["receipt"]["invented"] = serde_json::json!(true),
+            3 => {
+                bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["invented"] =
+                    serde_json::json!(true)
+            }
+            4 => bad["receipt"]["storeId"] = serde_json::json!(uuid::Uuid::nil()),
+            5 => bad["message"] = serde_json::json!("界".repeat(172)),
+            6 => {
+                bad["receipt"]["outcome"]["transition"]["previousGeneration"] =
+                    serde_json::json!("0")
+            }
+            7 => {
+                bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["embeddingDim"] =
+                    serde_json::json!(9000)
+            }
+            8 => {
+                bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["policy"]["initialStability"] =
+                    serde_json::json!(-1)
+            }
+            9 => {
+                bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["namespaceId"] =
+                    serde_json::json!(1.5)
+            }
+            10 => {
+                bad["receipt"]["outcome"]["transition"]["beforeNamespace"]["schema"]["extensions"] =
+                    serde_json::json!({"x":1})
+            }
+            _ => bad["receipt"]["committedGeneration"] = serde_json::json!("18446744073709551615"),
+        }
+        assert!(
+            crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&bad.to_string())
+                .is_none(),
+            "case{change}"
+        );
+        let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+        bridge.namespaces = Arc::new(crate::test_support::StubBridge {
+            delete_namespace_error: Some(BridgeError::PartiallyApplied(bad.to_string())),
+            ..Default::default()
+        });
+        let result = crate::mcp::tools::dispatch_tool(
+            &bridge,
+            "delete_namespace",
+            serde_json::json!({"name":"doomed","force":true}),
+        )
+        .await;
+        assert_eq!(result.is_error, Some(true));
+        assert!(result.structured_content.is_none());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_cancelled_completion_retains_worker_publication_lease() {
+    use std::time::Duration;
+    let (fx, namespace, publisher, _) = setup();
+    publisher.rebuild_all().await.unwrap();
+    let (started, resume) = pause(&fx);
+    let gate = crate::derived_completion::publication_gate(&fx.storage)
+        .await
+        .unwrap();
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    let adapter = fx.namespace_adapter();
+    let task = tokio::spawn(async move {
+        adapter
+            .delete_namespace(DeleteNamespaceInput {
+                name: "doomed".into(),
+                force: true,
+            })
+            .await
+    });
+    let start = tokio::time::timeout(Duration::from_secs(5), started)
+        .await
+        .unwrap()
+        .unwrap();
+    let graph = fx.graph.clone().write_owned().await;
+    resume.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while gate.try_read().is_ok() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let storage = fx.storage.clone();
+    let (held, wait) = tokio::sync::oneshot::channel();
+    let (release, block) = std::sync::mpsc::channel();
+    let blocker = tokio::task::spawn_blocking(move || {
+        let _storage = storage.write().unwrap();
+        held.send(()).unwrap();
+        block.recv().unwrap();
+    });
+    wait.await.unwrap();
+    drop(graph);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().pending < 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let publication_held = gate.try_read().is_err();
+    let graph_held = fx.graph.try_write().is_err();
+    release.send(()).unwrap();
+    blocker.await.unwrap();
+    let guard = tokio::time::timeout(Duration::from_secs(5), gate.write())
+        .await
+        .unwrap();
+    drop(guard);
+    assert!(
+        publication_held && graph_held,
+        "cancelled completion lost worker guards"
+    );
+    assert!(tracker.status().unresolved >= 2);
+    let p = fx
+        .storage
+        .read()
+        .unwrap()
+        .lookup_namespace_purge(start.store_id, namespace, start.start_receipt.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(p.stage, PurgeStage::Complete);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_lost_completion_preserves_start_without_invented_final() {
+    let (fx, namespace, publisher, path) = setup();
+    publisher.rebuild_all().await.unwrap();
+    let (started, resume) = pause(&fx);
+    let tracker = fx.storage.read().unwrap().meta_store().work_tracker();
+    fx.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .native_purge_worker_fault
+        .store(2, std::sync::atomic::Ordering::SeqCst);
+    let adapter = fx.namespace_adapter();
+    let task = tokio::spawn(async move {
+        adapter
+            .delete_namespace(DeleteNamespaceInput {
+                name: "doomed".into(),
+                force: true,
+            })
+            .await
+    });
+    let start = tokio::time::timeout(std::time::Duration::from_secs(5), started)
+        .await
+        .unwrap()
+        .unwrap();
+    resume.send(()).unwrap();
+    let result = payload(task.await.unwrap().unwrap_err());
+    assert_eq!(result["commitState"], "unknown");
+    assert!(result.get("operationId").unwrap().is_null());
+    assert_eq!(result["commitEvidenceScope"], "purgeStart");
+    assert_eq!(
+        serde_json::from_value::<control::WriteReceipt>(result["receipt"].clone()).unwrap(),
+        start.last_receipt
+    );
+    assert!(tracker.status().unresolved >= 2);
+    no_readiness(&result);
+    drop(publisher);
+    let _root = fx.close();
+    let reopened = open(&path);
+    let p = reopened
+        .engine
+        .lookup_namespace_purge(start.store_id, namespace, start.start_receipt.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(p.stage, PurgeStage::Complete);
+    assert!(p.last_receipt.committed_generation > start.last_receipt.committed_generation);
 }

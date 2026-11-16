@@ -1420,6 +1420,47 @@ pub(crate) async fn native_lifecycle_test_remote(
 
 /// Isolated actual framed namespace connection for catalog completion regressions.
 #[cfg(test)]
+pub(crate) async fn native_purge_test_legacy_rpc(
+    namespaces: Arc<dyn NamespaceRegistry>,
+) -> DaemonResponse {
+    let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(handle_connection(
+        stub.clone(),
+        stub.clone(),
+        namespaces,
+        stub,
+        server,
+        Arc::new(AtomicU32::new(1)),
+        Arc::new(AtomicI64::new(0)),
+        rx,
+        tx.clone(),
+    ));
+    write_framed_request(
+        &mut client,
+        &DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            method: "delete_namespace".into(),
+            params: serde_json::json!({"name":"doomed","force":true}),
+        },
+        LEGACY_MAX_MESSAGE_SIZE,
+    )
+    .await
+    .unwrap();
+    let response = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+        .await
+        .unwrap();
+    assert!(serde_json::to_vec(&response).unwrap().len() <= LEGACY_MAX_MESSAGE_SIZE);
+    tx.send(true).unwrap();
+    drop(client);
+    task.await.unwrap();
+    response
+}
+
+/// Isolated actual framed namespace connection for catalog completion regressions.
+#[cfg(test)]
 pub(crate) async fn catalog_test_remote(
     namespaces: Arc<dyn NamespaceRegistry>,
     path: &std::path::Path,
