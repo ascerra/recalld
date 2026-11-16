@@ -1,0 +1,108 @@
+# N1 catalog wire review boundary
+
+Proposal for Huygens's wire review, not an implemented or validated transport.
+Source: actual103/main `b374f07e` + E1 `6ebfd250`; bounded producer
+`04406c8b5fbc4fcaa78b527a65815b40e8919f3f`. No R1 parent, public2 activation,
+daemon/client edit, or outer MCP dispatcher edit follows from this document.
+
+## Producer and accepted work
+
+The implemented, not yet tested producer signature is
+`create_native_namespace_with_provider_bounded(ctx, input, provider, policy,
+clock, parent: Option<&WorkTicket>, admission: Option<&ReceiptAdmission>,
+check_candidate: impl FnOnce(&WriteReceipt) -> Result<(), StorageError>)`.
+The original context reaches hashing and persistence unchanged. API1 will use
+unkeyed Catalog scope/original1; the existing v2 entry remains original2.
+
+Exact replay precedes provider lookup and fresh admission. The metadata writer
+holds the existing native mutation guard and write transaction while checking
+the committed pending-work snapshot. Candidate sizing follows private receipt
+construction and precedes namespace file preparation and canonical commit.
+The callback is validation only: it never records the candidate as committed.
+Clock and operation ID can already be consumed at size refusal.
+
+The actual adapter will keep the existing worker-held publication lease, record
+only a returned receipt or one in a known-commit wrapper, release storage/lease,
+then call E1 `complete_with_admission` with the same accepted work and collector.
+No scheduler, foreign-outbox drain, replay normalization or second collector.
+An invalid evidence invariant is not projected as an ordinary small failure.
+
+## Proposed native-only failure carrier
+
+Keep the original `CatalogError`/`StorageError` as the internal cause. A private
+serializable projection carries `error`, `commitState`, a fixed `message`, and
+the following conditional fields. It does not accept arbitrary source messages.
+
+| Actual evidence | Projection | Full receipt and identity | Readiness |
+| --- | --- | --- | --- |
+| Fresh candidate refused before preparation/commit | `SERVICE_UNAVAILABLE`, `notCommitted`, fixed operation-too-large message | No receipt or operation ID | Omitted |
+| Fresh dependency or ordinary precommit storage refusal | `SERVICE_UNAVAILABLE`, `notCommitted` | No receipt or operation ID | Omitted |
+| Known own commit, generic storage/dependency failure afterward | `SERVICE_UNAVAILABLE`, `committed` | Exact in-hand own receipt; operation ID only from that receipt | Omitted |
+| Known own commit, actual typed publication failure | `INDEX_NOT_READY`, `committed` | Exact in-hand own receipt | `ready: false` |
+| Commit acknowledgement unknown | `COMMIT_OUTCOME_UNKNOWN`, `unknown` | Actual allocated ID; retain any separately known own receipt | Omitted |
+| Worker outcome unknown after send/start | `COMMIT_OUTCOME_UNKNOWN`, `unknown` | Null unknown ID unless allocated identity is actually known; retain any separately known own receipt | Omitted |
+| Conflicting or out-of-scope internal evidence | Preserve original typed failure; no ordinary success/no-commit fallback | Never relabel foreign evidence as this creation | No readiness inference |
+
+Unknown classification takes precedence through nested typed causes. A receipt
+proves its own canonical transition, not the state of subsequent publication.
+Whether a source is a publication failure must come from the accepted worker's
+typed boundary, not the mere presence of `CommittedMutation` or its error text.
+Existing plain legacy mappings remain unchanged. The exact malformed-Remote
+projection and bounded preservation of unverified received evidence remain for
+joint review; this table does not authorize dropping an acquired full receipt.
+
+Successful API1 responses retain `NamespaceInfo` (MCP/daemon) or
+`NamespaceResponse` inside `ApiResponse` (HTTP). Derive namespace fields from
+the validated `NativeNamespaceCreated` transition; do not look the name up after
+commit. Success has no new receipt, readiness or generation field. API1 is still
+unkeyed; oversized keyed replay through the old internal v2 entry is not solved
+by this fresh-candidate admission and must not be silently routed through it.
+
+## Actual emitter table and budget handoff
+
+The candidate callback must exercise the following actual representations for
+success and every reachable typed failure, using a checked capped writer.
+Count the full typed receipt before allocating any corresponding JSON Value.
+Only after that bounded first encoding may the existing Value/pretty pipeline
+be constructed and counted. `json!(receipt)` is not an interchangeable estimate.
+
+| Route | Actual emitter on the released base | Budget source |
+| --- | --- | --- |
+| Daemon success | `DaemonResponse::success(id, Value(NamespaceInfo))` | Current connection's negotiated frame limit; maximum numeric ID width is safe |
+| Daemon known/unknown error | `DaemonResponse::error(id, -32006, compact_failure_json)` | Same actual peer limit; count the string's additional JSON escaping |
+| Local MCP modern | `ToolCallResult::json(info or parsed_failure_value)` with pretty text and structured content; `isError` for failure; then `ResultEnvelope::complete`, then `JsonRpcResponse::success(actual_id, ...)` | Explicit native response policy plus actual request ID and era, supplied before work |
+| Local MCP legacy era | Same tool result, but dispatcher removes `structured_content` before the same complete-result/JSON-RPC wrappers | Same request-specific accounting, with the actual legacy shape |
+| HTTP API1 success | `ApiResponse<NamespaceResponse>`, `took_us: Some(u64)` | Explicit native response policy; count maximum timing width |
+| HTTP API1 native failure | Dedicated typed body retaining the full own receipt and cause classification above | Same explicit native response policy; do not route through a generic error conversion that drops evidence |
+
+Source corroboration: `mcp/tools.rs::handle_create_namespace` parses the compact
+PartiallyApplied message into Value and then pretty-prints it through
+`ToolCallResult::json`. `mcp/server.rs::handle_tools_call` removes structured
+content for legacy era; `McpDispatcher::dispatch` adds the actual
+`ResultEnvelope` fields (`resultType`, `_meta`) before the outer JSON-RPC envelope.
+The tool-call outcome has no cache hints. Counting only the inner tool result
+or only an echoed ID therefore does not prove the emitted modern/legacy frame.
+
+Proposed transport handoff: a private, non-deserializable response-admission
+object owns an exact candidate-check closure and the separate E1 receipt
+authority. Endpoint constructors supply actual peer capacity or the explicit
+local response policy and actual MCP ID/era. The native adapter receives this
+object; old legacy calls remain unchanged. An absent native admission object
+must refuse before canonical work rather than assume a budget. No request JSON
+field may supply or enlarge the authority.
+
+Local MCP currently has no negotiated reply capacity. A native-only local reply
+ceiling must therefore be explicitly chosen and documented as an application
+resource policy, **not** inferred from daemon8MiB, HTTP request-body limits, or
+R1's inner-response bound. The policy value and exact construction signature
+remain review questions; no hardcoded local8MiB claim is implemented. A request
+whose echoed ID alone exhausts that policy must not start a canonical write.
+This does not promise that an arbitrary oversized ID can itself receive a
+bounded error response, and does not alter legacy request acceptance.
+
+Only count admitted complete representations; no speculative padding, truncated
+receipt, receipt reference, changed public number encoding or automatic new-key
+retry. Actual tests must compare the estimator with the emitted complete frames,
+including heavily escaped string IDs/profile fields, modern and legacy eras,
+known/unknown outcomes, and the exact just-under/over limits. Remote send and
+correlation state requires its separate reviewed same-connection handoff.
