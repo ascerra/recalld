@@ -40,13 +40,15 @@ async fn setup_policy(
     let session = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, session.engine);
     completion(&f).rebuild_all().await.unwrap();
-    let (bridge, state) =
-        configured_public_adapters(&f, clock.clone(), NativePolicyInputs::default());
+    let (bridge, state) = public_adapters(&f, clock.clone());
     (f, d, clock, bridge, state)
+}
+fn public_adapters(f: &Fixture, clock: Arc<dyn Clock>) -> (McpBridge, crate::api::AppState) {
+    configured_public_adapters(f, clock, NativePolicyInputs::default())
 }
 fn configured_public_adapters(
     f: &Fixture,
-    clock: Arc<FixedClock>,
+    clock: Arc<dyn Clock>,
     policy: NativePolicyInputs,
 ) -> (McpBridge, crate::api::AppState) {
     let (_, mut bridge, engine) = readers(f, clock.clone());
@@ -742,6 +744,9 @@ async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocate
 
 #[path = "public_api1_tests.rs"]
 mod public_api1;
+
+#[path = "public_matrix_tests.rs"]
+mod public_matrix;
 
 #[path = "adopted_public_tests.rs"]
 mod adopted_public;

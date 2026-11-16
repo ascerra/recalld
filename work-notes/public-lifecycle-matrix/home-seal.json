@@ -1,0 +1,12 @@
+{
+  "path": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-public-lifecycle-matrix-915d160",
+  "copy_sha256": "0009e906fc8407dedbe3e9e28d28655d245522598796206ac6270190c97c6fb9",
+  "files": {
+    "REPORT.md": "efc5f26f020867e82ce6e6282afe8b1848dc13a06c8fc00f3da305e6110f936a",
+    "validation.json": "edff5d2ae5908fc0cfce6961529dd126626a0d5dba304e1138c7a5db945e38bc",
+    "source-3.json": "f5f9de52bbf0b582d02cf867eb1816a0f1a4ef8930248932fe950918a65c3e20",
+    "executables-3.json": "9bc5eb12ad016cdfb9cf7eb7828ac150f205418d0025ac3516772067f2da2d63"
+  },
+  "verified": true,
+  "raw_archived": false
+}
