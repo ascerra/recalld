@@ -695,3 +695,6 @@ async fn native_exposure_invalid_configured_policy_fails_without_writes_and_empt
 
 #[path = "exposure_origin_tests.rs"]
 mod origin;
+
+#[path = "exposure_postcommit_tests.rs"]
+mod postcommit;

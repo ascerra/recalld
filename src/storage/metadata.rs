@@ -118,6 +118,8 @@ pub struct MetadataStore {
     #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
+    pub(crate) vector_publication_failure_nth: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
     pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
@@ -286,6 +288,8 @@ impl MetadataStore {
             effects_epoch: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             observation_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            vector_publication_failure_nth: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             tombstone_publication_fault: std::sync::atomic::AtomicBool::new(false),
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),

@@ -299,6 +299,19 @@ impl MetadataStore {
             return Ok(());
         };
         let result = (|| {
+            // Instance-local test fault at the real postcommit publication boundary.
+            // The production wrapper below retains the already durable receipt.
+            #[cfg(test)]
+            if self.vector_publication_failure_nth.fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |remaining| remaining.checked_sub(1),
+            ) == Ok(1)
+            {
+                return Err(StorageError::RecoveryRequired(
+                    "injected vector validation publication failure".into(),
+                ));
+            }
             let mut owned = self
                 .vector_validation
                 .write()
