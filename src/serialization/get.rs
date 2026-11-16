@@ -164,6 +164,11 @@ impl GetReply {
     }
 
     pub(crate) fn failure(error: SearchError) -> Self {
+        let precommit_conflict = matches!(&error, SearchError::Observation(observation)
+            if observation.cause == Some(crate::decay::observation::ObservationCause::LifecycleConflict)
+                && observation.commit_state == "notCommitted"
+                && observation.receipts.is_empty()
+                && observation.unknown_operation_id.is_none());
         let error = match error {
             SearchError::CanonicalRead(error)
                 if matches!(*error, crate::storage::StorageError::NotFound(_)) =>
@@ -176,7 +181,14 @@ impl GetReply {
             }
             error => error,
         };
-        Self::from_failure(super::query_response::QueryReply::failure(error))
+        let mut reply = Self::from_failure(super::query_response::QueryReply::failure(error));
+        if precommit_conflict {
+            let error = reply.envelope.error.as_mut().expect("typed failure");
+            error.category = ErrorCategory::Conflict;
+            error.code = "LIFECYCLE_CONFLICT".into();
+            reply.http_status = 409;
+        }
+        reply
     }
 
     fn from_failure(mut failure: super::query_response::QueryReply) -> Self {

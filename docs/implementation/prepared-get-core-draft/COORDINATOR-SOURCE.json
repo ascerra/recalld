@@ -1,6 +1,6 @@
 {
   "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
-  "status": "source only; no execution",
+  "status": "source reviewed; first-focus702 passed12/1ignored; policy counterexampled66 failed1; new typed cause not executed",
   "files": [
     {
       "path": "src/api/adapters.rs",
@@ -17,6 +17,10 @@
     {
       "path": "src/api/state.rs",
       "sha256": "643364ead7cfafdccbfc24940cd42175af807412964462c2684f273775e873a2"
+    },
+    {
+      "path": "src/decay/observation.rs",
+      "sha256": "62499d9f1e8ba91cff28d98bc851b693e4a213b882041bbd9d539028cf7cd489"
     },
     {
       "path": "src/derived_completion/native_exposure.rs",
@@ -44,7 +48,7 @@
     },
     {
       "path": "src/search/get_wire_tests.rs",
-      "sha256": "b2f1cb89c2c75dce4e3a1d0dfb4c68b790a73ee947b788e62d79631058c4573f"
+      "sha256": "2f08a7a220e68cb6433575064ea897dec78c5c6634fb7cfa195d4b73b7accbd6"
     },
     {
       "path": "src/search/pipeline.rs",
@@ -60,7 +64,11 @@
     },
     {
       "path": "src/serialization/get.rs",
-      "sha256": "91af8aa1aa9ed4aa936e851f57cf138c97758c2749b108f30f765fa3e6f54e55"
+      "sha256": "5279cf8bb84157599aef160a0668495361733cdaf744f30754a0d43641fa6b10"
+    },
+    {
+      "path": "src/serialization/lifecycle_api1.rs",
+      "sha256": "0ed8c99a4c441fd438be05c93d9e51ad722e0e214972353709eb94c8744dd658"
     },
     {
       "path": "src/serialization/mod.rs",

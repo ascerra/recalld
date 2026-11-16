@@ -1,0 +1,17 @@
+
+running 1 test
+
+thread 'search::pipeline::read_view::tests::prepared_get_actual_policy_change_keeps_real_history_and_typed_conflict' (8) panicked at src/search/get_wire_tests.rs:328:5:
+assertion `left == right` failed: GetReply { envelope: Envelope { contract_version: 2, status: Error, scope: Some(Namespace { namespace_id: NamespaceId(2), namespace: "other" }), data: None, receipt: None, read_generation: Some(GenerationRef { store_id: 0799ccda-4a18-484f-80b1-44bb4d565187, generation: Generation(24) }), error: Some(ExecutionError { category: Unavailable, code: "INDEX_NOT_READY", message: "get could not complete", field: None, retryable: false, commit_state: NotCommitted, operation_id: None }), readiness: None, warnings: [] }, observation_receipts: [], http_status: 503 }
+  left: 503
+ right: 409
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test search::pipeline::read_view::tests::prepared_get_actual_policy_change_keeps_real_history_and_typed_conflict ... FAILED
+
+failures:
+
+failures:
+    search::pipeline::read_view::tests::prepared_get_actual_policy_change_keeps_real_history_and_typed_conflict
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1714 filtered out; finished in 7.26s
+

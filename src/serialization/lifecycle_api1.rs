@@ -372,6 +372,7 @@ impl Reply {
         }
         if error.commit_state == CommitState::Unknown {
             return AppError::Observation(crate::decay::observation::ObservationError {
+                cause: None,
                 commit_state: "unknown",
                 ready: false,
                 receipts: vec![],
