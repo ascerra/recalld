@@ -55,11 +55,9 @@ impl RedbStorageEngine {
         asserted_namespace: Option<&str>,
     ) -> Result<Option<(NamespaceConfig, HydratedRecord)>, StorageError> {
         if let Some(namespace) = asserted_namespace {
-            validate_namespace_name(namespace).map_err(|e| {
-                StorageError::InvalidNamespaceName {
-                    name: namespace.to_owned(),
-                    reason: e.to_string(),
-                }
+            validate_namespace_name(namespace).map_err(|e| StorageError::InvalidNamespaceName {
+                name: namespace.to_owned(),
+                reason: e.to_string(),
             })?;
         }
         let Some(record) = view.disk_record(id)? else {

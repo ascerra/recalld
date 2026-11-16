@@ -31,12 +31,12 @@ pub use explanation::{
     DirectScoreEvidence, InheritedScoreExplanation, MAX_EXPLANATION_SOURCES, MinScoreDisposition,
     OwnScoreExplanation, ScoreExplanation, ScoreFormula,
 };
+#[path = "get_wire.rs"]
+mod get_wire;
 #[path = "payload_selection.rs"]
 mod payload_selection;
 #[path = "query_wire.rs"]
 mod query_wire;
-#[path = "get_wire.rs"]
-mod get_wire;
 #[path = "similar_selection.rs"]
 mod similar_selection;
 pub(crate) use similar_selection::{
@@ -295,7 +295,9 @@ pub trait AccessRecorder: Send + Sync {
         _policy: &crate::storage::native_lifecycle::NativePolicyInputs,
         _original_contract_version: u32,
     ) -> Result<crate::decay::observation::AccessObservation> {
-        Err(SearchError::Unavailable("captured point observer unavailable".into()))
+        Err(SearchError::Unavailable(
+            "captured point observer unavailable".into(),
+        ))
     }
 
     async fn record_similarity_for_publication(

@@ -4,15 +4,15 @@
   "files": [
     {
       "path": "src/api/adapters.rs",
-      "sha256": "2672b75e63680233966b3e674c0d8bdc91cb4898bfb63a12a6115319f9b2e5e3"
+      "sha256": "05442b93d69c352fd51eeb3fd27df456130c3ec4d2be253db9120bc68758cfae"
     },
     {
       "path": "src/api/handlers.rs",
-      "sha256": "29592a0ff571c6471fe206ff7bfea1a95ad511c636ec271a8da2daaf0aa84797"
+      "sha256": "e81fe03e1971fa5325efe13c6965a6fac1583104769777822cce29b8fa0cfff2"
     },
     {
       "path": "src/api/mod.rs",
-      "sha256": "e939d9c01276d62801ae0fb57d6cc2b95249939132dc29ef783476e2b25f8854"
+      "sha256": "ac4040a7dbec9f2445473a3fc8f69443ea2a6d5d007af2be750d8197df2e1453"
     },
     {
       "path": "src/api/state.rs",
@@ -20,7 +20,7 @@
     },
     {
       "path": "src/derived_completion/native_exposure.rs",
-      "sha256": "90088b1e14891f1c174ef7799bc0f80370ecd14bfbd4959cdaf9e03463127257"
+      "sha256": "cb8db8361978b12a590d678b4a3f35ef0f28fc53ca970ab9043780c7a2cc9187"
     },
     {
       "path": "src/mcp/bridge.rs",
@@ -28,19 +28,19 @@
     },
     {
       "path": "src/mcp/bridge_adapters.rs",
-      "sha256": "8d5ae4de467eeb594599381b92882b345eaa0fc25eb8a466f9383a937f9f3730"
+      "sha256": "4438e94a34694b43154ca54fb7379a2b38e43f69ea11b3b44174d18453b85c4d"
     },
     {
       "path": "src/mcp/tools.rs",
-      "sha256": "7dee5910da401923ecc96b051e4a138c9728f248dee04504539901da58060f6d"
+      "sha256": "d63702e7e188de5c6ae824951a91cff10328f382b8f9c1ea37b8521c7ed4bec4"
     },
     {
       "path": "src/search/adapters.rs",
-      "sha256": "13868be5e93d13a029e6aa21371c4502b3231f0ab4054d4906ddaa26089afcd3"
+      "sha256": "d60d97755036bb78ecb4b149e0f934828c1ea1b55b67dbfb45ee605864915b7e"
     },
     {
       "path": "src/search/get_wire.rs",
-      "sha256": "904b288b8db70be013bf815240b2c318708195ae1dd71c697d14ecc2ea00924d"
+      "sha256": "6cfc53d701fe34e4eb1435663cfac8bcf6d8d35ba5a8e17fbeeb19663ec1a9d0"
     },
     {
       "path": "src/search/get_wire_tests.rs",
@@ -48,7 +48,7 @@
     },
     {
       "path": "src/search/pipeline.rs",
-      "sha256": "63a7adfb58452878e27d128623fd0df943b3c74f3526c9453598562d8ecc77d0"
+      "sha256": "5aa97cccfe9b04e80c464390f3f9c008098ea4e960a7d86cd7aa0b85d763a0a3"
     },
     {
       "path": "src/search/read_view.rs",
@@ -60,7 +60,7 @@
     },
     {
       "path": "src/serialization/get.rs",
-      "sha256": "f08d4c7abf7a34c3526f84b1ad173bb3088fb306f9f6e360dc49cd65a3b7b3ed"
+      "sha256": "91af8aa1aa9ed4aa936e851f57cf138c97758c2749b108f30f765fa3e6f54e55"
     },
     {
       "path": "src/serialization/mod.rs",
@@ -68,7 +68,7 @@
     },
     {
       "path": "src/storage/engine/read_payload.rs",
-      "sha256": "fc089afd1d9fc750fb45f2dde37f2b8fd2f857af4ae6d5e6847873a2e69624f9"
+      "sha256": "2dc78a6398118598201ecc4a7cec83a729959ac3d4c1c480f930e66bad067e52"
     },
     {
       "path": "src/storage/metadata.rs",
@@ -76,7 +76,8 @@
     },
     {
       "path": "src/storage/metadata/publication.rs",
-      "sha256": "f850843cef2804ea067bf545e2e78e0fe18d4a035918edb51c923abd1a41895f"
+      "sha256": "ac8a8a964a23d997a7a7378ded4d7a475bd1e68536f44270639024c7c80a95ad"
     }
-  ]
+  ],
+  "format": "cargo fmt --all, recalld-ci:1.94, RUSTUP_TOOLCHAIN=1.94.1, network none; exit0"
 }

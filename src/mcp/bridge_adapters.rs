@@ -208,7 +208,9 @@ impl bridge::SearchPipeline for McpSearchAdapter {
         request: crate::serialization::get::GetRequest,
         response_limit: usize,
     ) -> crate::serialization::get::GetReply {
-        self.query_engine.get_contract(request, response_limit).await
+        self.query_engine
+            .get_contract(request, response_limit)
+            .await
     }
     async fn similar_contract(
         &self,

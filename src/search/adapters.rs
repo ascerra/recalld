@@ -694,22 +694,34 @@ impl AccessRecorder for StorageAccessRecorder {
         original_contract_version: u32,
     ) -> Result<crate::decay::observation::AccessObservation> {
         if !matches!(original_contract_version, 1 | 2) || scope.source != Some(id) {
-            return Err(SearchError::Unavailable("invalid point exposure origin/scope".into()));
+            return Err(SearchError::Unavailable(
+                "invalid point exposure origin/scope".into(),
+            ));
         }
-        let native = self.storage.read()
+        let native = self
+            .storage
+            .read()
             .map_err(|e| SearchError::Unavailable(e.to_string()))?
-            .meta_store().uses_native_lifecycle();
+            .meta_store()
+            .uses_native_lifecycle();
         if !native {
             if intent.is_some() {
-                return Err(SearchError::Unavailable("native witness on legacy owner".into()));
+                return Err(SearchError::Unavailable(
+                    "native witness on legacy owner".into(),
+                ));
             }
             // Existing legacy live identity/name checks, timestamp clamp and
             // hash shape; no native captured policy/token parity is asserted.
-            return self.record_with_scopes(
-                &[(id, AccessKind::DirectRetrieval)],
-                crate::decay::similarity_scope::ExposureScopes::Existing(Some(scope.clone())),
-                Some(sampled_at), parent, Some(policy), original_contract_version,
-            ).await;
+            return self
+                .record_with_scopes(
+                    &[(id, AccessKind::DirectRetrieval)],
+                    crate::decay::similarity_scope::ExposureScopes::Existing(Some(scope.clone())),
+                    Some(sampled_at),
+                    parent,
+                    Some(policy),
+                    original_contract_version,
+                )
+                .await;
         }
         let intent = intent.ok_or_else(|| {
             SearchError::Unavailable("native point exposure requires captured intent".into())
@@ -718,15 +730,25 @@ impl AccessRecorder for StorageAccessRecorder {
             || intent.scope.source != scope.source
             || intent.scope.namespace_name != scope.namespace
         {
-            return Err(SearchError::Unavailable("point exposure intent mismatch".into()));
+            return Err(SearchError::Unavailable(
+                "point exposure intent mismatch".into(),
+            ));
         }
         let completion = self.completion.as_ref().ok_or_else(|| {
             SearchError::Unavailable("native point exposure requires publication owner".into())
         })?;
-        let receipts = completion.record_native_point_exposure_with_work(
-            intent, sampled_at, policy.clone(), parent, original_contract_version,
-        ).await?;
-        Ok(crate::decay::observation::AccessObservation::from_receipts(receipts))
+        let receipts = completion
+            .record_native_point_exposure_with_work(
+                intent,
+                sampled_at,
+                policy.clone(),
+                parent,
+                original_contract_version,
+            )
+            .await?;
+        Ok(crate::decay::observation::AccessObservation::from_receipts(
+            receipts,
+        ))
     }
 
     async fn record_access_batch_for_publication(

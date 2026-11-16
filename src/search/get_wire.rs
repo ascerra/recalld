@@ -1,11 +1,11 @@
 //! Canonical point capture for the prepared get consumer. No ranked-read gate.
 use super::*;
 use crate::search::adapters::SharedGraphReader;
+use crate::storage::StorageError;
 use crate::storage::control::GenerationRef;
 use crate::storage::engine::HydratedRecord;
 use crate::storage::native_lifecycle::{ExposureIntent, LifecycleScope, NativePolicyInputs};
 use crate::storage::work::WorkTicket;
-use crate::storage::StorageError;
 
 type GraphLease = Arc<tokio::sync::OwnedRwLockReadGuard<crate::graph::RelationshipGraph>>;
 
@@ -43,9 +43,13 @@ impl QueryEngine {
     ) -> crate::serialization::get::GetReply {
         use crate::serialization::contract::{CommitState, Scope};
         use crate::serialization::get::{GetData, GetReply};
-        if let Err(error) = request.validate() { return GetReply::input(error) }
+        if let Err(error) = request.validate() {
+            return GetReply::input(error);
+        }
         let Some((owner, _)) = &self.coherent_owner else {
-            return GetReply::failure(SearchError::Unavailable("prepared get owner unavailable".into()));
+            return GetReply::failure(SearchError::Unavailable(
+                "prepared get owner unavailable".into(),
+            ));
         };
         let work = match owner.accept_work(None) {
             Ok(work) => work,
@@ -55,58 +59,103 @@ impl QueryEngine {
         let result = async {
             let (mut selected, graph) = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                self.capture_point_get(request.id, request.namespace.as_deref(), request.record_access, &work),
-            ).await.map_err(|_| SearchError::Unavailable("point capture deadline expired".into()))??;
+                self.capture_point_get(
+                    request.id,
+                    request.namespace.as_deref(),
+                    request.record_access,
+                    &work,
+                ),
+            )
+            .await
+            .map_err(|_| SearchError::Unavailable("point capture deadline expired".into()))??;
             let scope = selected.payload.as_ref().map(|(ns, _)| Scope::Namespace {
-                namespace_id: ns.id, namespace: ns.name.clone(),
+                namespace_id: ns.id,
+                namespace: ns.name.clone(),
             });
             captured = Some((scope.clone(), selected.at));
-            let response = self.project_point_get(&mut selected, graph.as_ref(), request.record_access)?;
+            let response =
+                self.project_point_get(&mut selected, graph.as_ref(), request.record_access)?;
             // Actual publication acquires graph.write. Never carry the read
             // lease across exposure/completion, including behind a queued writer.
             drop(graph);
             let response = response.ok_or(SearchError::MemoryNotFound(request.id))?;
             let will_observe = request.record_access && exposed_phase(response.phase);
-            let mut reply = GetReply::success(scope.expect("present source scope"), selected.at, GetData {
-                evaluated_at: selected.evaluated_at,
-                record_access: request.record_access,
-                memory: response,
-            });
-            if !reply.fits(response_limit, will_observe) { return Ok(reply.oversize()) }
+            let mut reply = GetReply::success(
+                scope.expect("present source scope"),
+                selected.at,
+                GetData {
+                    evaluated_at: selected.evaluated_at,
+                    record_access: request.record_access,
+                    memory: response,
+                },
+            );
+            if !reply.fits(response_limit, will_observe) {
+                return Ok(reply.oversize());
+            }
             #[cfg(test)]
             if let Some((entered, release)) = &request.before_observation {
                 entered.notify_one();
                 release.notified().await;
             }
-            reply.observation_receipts = self.observe_point_get(
-                &mut selected, request.record_access, &work, request.original_contract_version,
-            ).await?;
+            reply.observation_receipts = self
+                .observe_point_get(
+                    &mut selected,
+                    request.record_access,
+                    &work,
+                    request.original_contract_version,
+                )
+                .await?;
             reply.envelope.receipt = (reply.observation_receipts.len() == 1)
                 .then(|| reply.observation_receipts[0].clone());
             Ok::<_, SearchError>(reply)
-        }.await;
-        let mut reply = match result { Ok(reply) => reply, Err(error) => GetReply::failure(error) };
-        if reply.envelope.read_generation.is_none() && let Some((scope, at)) = captured {
+        }
+        .await;
+        let mut reply = match result {
+            Ok(reply) => reply,
+            Err(error) => GetReply::failure(error),
+        };
+        if reply.envelope.read_generation.is_none()
+            && let Some((scope, at)) = captured
+        {
             reply.envelope.scope = scope;
             reply.envelope.read_generation = Some(at);
         }
-        if reply.envelope.error.as_ref().is_some_and(|e| e.commit_state == CommitState::Unknown) {
+        if reply
+            .envelope
+            .error
+            .as_ref()
+            .is_some_and(|e| e.commit_state == CommitState::Unknown)
+        {
             drop(work);
             return reply;
         }
         // Finish our root before a barrier that drains accepted descendants.
         owner.finish_known_work(work);
         #[cfg(test)]
-        if let Some(hook) = request.before_barrier { hook(owner); }
-        if reply.http_status == 200 && let Some(receipt) = reply.observation_receipts.last() {
-            let target = GenerationRef { store_id: receipt.store_id, generation: receipt.committed_generation };
-            match owner.readiness_barrier(
-                target, std::time::Instant::now() + std::time::Duration::from_secs(30),
-            ).await {
+        if let Some(hook) = request.before_barrier {
+            hook(owner);
+        }
+        if reply.http_status == 200
+            && let Some(receipt) = reply.observation_receipts.last()
+        {
+            let target = GenerationRef {
+                store_id: receipt.store_id,
+                generation: receipt.committed_generation,
+            };
+            match owner
+                .readiness_barrier(
+                    target,
+                    std::time::Instant::now() + std::time::Duration::from_secs(30),
+                )
+                .await
+            {
                 Ok(readiness) => reply.envelope.readiness = Some(readiness.into()),
                 Err(error) => {
                     let mut failed = GetReply::failure(SearchError::Observation(
-                        crate::decay::observation::ObservationError::not_ready(reply.observation_receipts, error),
+                        crate::decay::observation::ObservationError::not_ready(
+                            reply.observation_receipts,
+                            error,
+                        ),
                     ));
                     failed.envelope.scope = reply.envelope.scope;
                     failed.envelope.read_generation = reply.envelope.read_generation;
@@ -114,7 +163,9 @@ impl QueryEngine {
                 }
             }
         }
-        if reply.http_status == 200 && !reply.fits(response_limit, false) { return reply.oversize() }
+        if reply.http_status == 200 && !reply.fits(response_limit, false) {
+            return reply.oversize();
+        }
         reply
     }
 
@@ -133,25 +184,45 @@ impl QueryEngine {
         let storage = owner.storage.clone();
         let child = work.child().map_err(read_error)?;
         let gate = tokio::task::spawn_blocking(move || {
-            let storage = storage.read().map_err(|e| SearchError::Unavailable(e.to_string()))?;
+            let storage = storage
+                .read()
+                .map_err(|e| SearchError::Unavailable(e.to_string()))?;
             let gate = storage.meta_store().derived_publication.clone();
             storage.meta_store().finish_work(child);
             Ok::<_, SearchError>(gate)
-        }).await.map_err(|e| SearchError::Unavailable(e.to_string()))??;
+        })
+        .await
+        .map_err(|e| SearchError::Unavailable(e.to_string()))??;
         let publication = Arc::new(gate.read_owned().await);
-        let first = self.copy_point_get(
-            id, namespace, record_access, work, publication.clone(), None, None,
-        ).await?;
+        let first = self
+            .copy_point_get(
+                id,
+                namespace,
+                record_access,
+                work,
+                publication.clone(),
+                None,
+                None,
+            )
+            .await?;
         match first {
             PointAttempt::Captured(selected) => Ok((selected, None)),
             PointAttempt::NeedsGraph(at) => {
                 // The first attempt sampled no clock and captured no exposure.
                 // Re-open under the real graph lease and reject a changed G.
                 let graph = Arc::new(owner.graph.clone().read_owned().await);
-                match self.copy_point_get(
-                    id, namespace, record_access, work, publication,
-                    Some(graph.clone()), Some(at),
-                ).await? {
+                match self
+                    .copy_point_get(
+                        id,
+                        namespace,
+                        record_access,
+                        work,
+                        publication,
+                        Some(graph.clone()),
+                        Some(at),
+                    )
+                    .await?
+                {
                     PointAttempt::Captured(selected) => Ok((selected, Some(graph))),
                     PointAttempt::NeedsGraph(_) => Err(SearchError::Unavailable(
                         "point projection did not retain its graph lease".into(),
@@ -181,47 +252,69 @@ impl QueryEngine {
         tokio::task::spawn_blocking(move || {
             // Retain both asynchronous leases if the awaiting caller cancels.
             let _publication = publication;
-            let storage = storage.read().map_err(|e| SearchError::Unavailable(e.to_string()))?;
-            let result = storage.with_point_get(id, namespace.as_deref(), |point, payload| {
-                let at = point.view().at;
-                if expected.is_some_and(|expected| expected != at) {
-                    return Err(StorageError::RecoveryRequired(
-                        "canonical state changed while acquiring point projection inputs".into(),
-                    ));
-                }
-                let projects = payload.as_ref().is_some_and(|(ns, row)| {
-                    exposed_phase(row.record.phase)
-                        && ns.schema.as_ref().is_some_and(|s| s.lifecycle_version
-                            == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2)
-                });
-                if projects && graph.is_none() {
-                    return Ok(PointAttempt::NeedsGraph(at));
-                }
-                let donors = if projects {
-                    point.require_graph()?;
-                    point.view().records(payload.as_ref().expect("projected row").0.id)?
-                } else {
-                    Vec::new()
-                };
-                let intent = if point.view().is_native_owned() && record_access {
-                    payload.as_ref().filter(|(_, row)| exposed_phase(row.record.phase))
-                        .map(|(ns, _)| point.capture_exposure(
-                            LifecycleScope {
-                                namespace_id: ns.id,
-                                namespace_name: ns.name.clone(),
-                                source: Some(id),
-                            }, id, &policy,
-                        )).transpose()?
-                } else {
-                    None
-                };
-                Ok(PointAttempt::Captured(PointSelection {
-                    at, evaluated_at: clock.now_millis(), payload, donors, intent,
-                }))
-            }).map_err(read_error);
+            let storage = storage
+                .read()
+                .map_err(|e| SearchError::Unavailable(e.to_string()))?;
+            let result = storage
+                .with_point_get(id, namespace.as_deref(), |point, payload| {
+                    let at = point.view().at;
+                    if expected.is_some_and(|expected| expected != at) {
+                        return Err(StorageError::RecoveryRequired(
+                            "canonical state changed while acquiring point projection inputs"
+                                .into(),
+                        ));
+                    }
+                    let projects = payload.as_ref().is_some_and(|(ns, row)| {
+                        exposed_phase(row.record.phase)
+                            && ns.schema.as_ref().is_some_and(|s| {
+                                s.lifecycle_version
+                                    == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+                            })
+                    });
+                    if projects && graph.is_none() {
+                        return Ok(PointAttempt::NeedsGraph(at));
+                    }
+                    let donors = if projects {
+                        point.require_graph()?;
+                        point
+                            .view()
+                            .records(payload.as_ref().expect("projected row").0.id)?
+                    } else {
+                        Vec::new()
+                    };
+                    let intent = if point.view().is_native_owned() && record_access {
+                        payload
+                            .as_ref()
+                            .filter(|(_, row)| exposed_phase(row.record.phase))
+                            .map(|(ns, _)| {
+                                point.capture_exposure(
+                                    LifecycleScope {
+                                        namespace_id: ns.id,
+                                        namespace_name: ns.name.clone(),
+                                        source: Some(id),
+                                    },
+                                    id,
+                                    &policy,
+                                )
+                            })
+                            .transpose()?
+                    } else {
+                        None
+                    };
+                    Ok(PointAttempt::Captured(PointSelection {
+                        at,
+                        evaluated_at: clock.now_millis(),
+                        payload,
+                        donors,
+                        intent,
+                    }))
+                })
+                .map_err(read_error);
             storage.meta_store().finish_work(child);
             result
-        }).await.map_err(|e| SearchError::Unavailable(e.to_string()))?
+        })
+        .await
+        .map_err(|e| SearchError::Unavailable(e.to_string()))?
     }
 
     fn project_point_get(
@@ -230,16 +323,17 @@ impl QueryEngine {
         graph: Option<&GraphLease>,
         record_access: bool,
     ) -> Result<Option<MemoryResponse>> {
-        let Some((namespace, payload)) = &selected.payload else { return Ok(None) };
+        let Some((namespace, payload)) = &selected.payload else {
+            return Ok(None);
+        };
         let mut record = CachedRecord::from(&payload.record);
         if exposed_phase(record.phase) {
-            let mut strength = StrengthContext::pin_at(
-                self, namespace, record_access, selected.evaluated_at,
-            )?;
+            let mut strength =
+                StrengthContext::pin_at(self, namespace, record_access, selected.evaluated_at)?;
             if strength.explicit() {
-                let graph = graph.ok_or_else(|| SearchError::Unavailable(
-                    "missing graph lease for point projection".into(),
-                ))?;
+                let graph = graph.ok_or_else(|| {
+                    SearchError::Unavailable("missing graph lease for point projection".into())
+                })?;
                 let reader = SharedGraphReader::pinned(graph.clone());
                 strength.project_namespace(&mut selected.donors, &reader)?;
             }
@@ -271,21 +365,38 @@ impl QueryEngine {
         work: &WorkTicket,
         original_contract_version: u32,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
-        let Some((namespace, payload)) = &selected.payload else { return Ok(Vec::new()) };
-        if !record_access || !exposed_phase(payload.record.phase) { return Ok(Vec::new()) }
+        let Some((namespace, payload)) = &selected.payload else {
+            return Ok(Vec::new());
+        };
+        if !record_access || !exposed_phase(payload.record.phase) {
+            return Ok(Vec::new());
+        }
         let policy: NativePolicyInputs = self.native_policy_inputs();
         let id = MemoryId::from_bytes(payload.record.id);
-        let observation = self.access_recorder.record_point_for_publication(
-            id,
-            &crate::storage::control::ExposureScope {
-                namespace: namespace.name.clone(), source: Some(id),
-            },
-            selected.intent.take(), selected.evaluated_at, Some(work), &policy,
-            original_contract_version,
-        ).await?;
-        let observed = Observed { value: (), receipts: observation.receipts }
-            .publish_derived(self.coherent_owner.as_ref().map(|(owner, _)| owner), Some(work))
+        let observation = self
+            .access_recorder
+            .record_point_for_publication(
+                id,
+                &crate::storage::control::ExposureScope {
+                    namespace: namespace.name.clone(),
+                    source: Some(id),
+                },
+                selected.intent.take(),
+                selected.evaluated_at,
+                Some(work),
+                &policy,
+                original_contract_version,
+            )
             .await?;
+        let observed = Observed {
+            value: (),
+            receipts: observation.receipts,
+        }
+        .publish_derived(
+            self.coherent_owner.as_ref().map(|(owner, _)| owner),
+            Some(work),
+        )
+        .await?;
         Ok(observed.receipts)
     }
 }

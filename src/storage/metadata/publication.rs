@@ -174,14 +174,20 @@ impl MetadataStore {
         &self,
         copy: impl for<'a> FnOnce(PointRead<'a>) -> Result<T, StorageError>,
     ) -> Result<T, StorageError> {
-        let _publication = self.publication.read().map_err(|_| {
-            StorageError::RecoveryRequired("metadata publication poisoned".into())
-        })?;
+        let _publication = self
+            .publication
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
         // Existing owned-mode/lineage admission rejects canonical_pending and
         // active purge, but unrelated stale derived views do not gate a point.
         let view = self.open_canonical_read()?;
-        let graph_applied = self.view_publication.state(view.at).applied[DerivedView::Graph as usize];
-        copy(PointRead { owner: self, view: &view, graph_applied })
+        let graph_applied =
+            self.view_publication.state(view.at).applied[DerivedView::Graph as usize];
+        copy(PointRead {
+            owner: self,
+            view: &view,
+            graph_applied,
+        })
     }
 
     pub(crate) fn capture_read_view(&self) -> Result<CanonicalReadView, StorageError> {

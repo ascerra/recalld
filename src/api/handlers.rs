@@ -455,10 +455,17 @@ pub(crate) async fn prepared_get(
     arguments: &serde_json::Value,
 ) -> (StatusCode, Json<crate::serialization::get::GetReply>) {
     let reply = match crate::serialization::get::GetRequest::from_http(arguments, id) {
-        Ok(request) => search.get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE).await,
+        Ok(request) => {
+            search
+                .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .await
+        }
         Err(error) => crate::serialization::get::GetReply::input(error),
     };
-    (StatusCode::from_u16(reply.http_status).expect("get HTTP status"), Json(reply))
+    (
+        StatusCode::from_u16(reply.http_status).expect("get HTTP status"),
+        Json(reply),
+    )
 }
 
 pub async fn get_memory(

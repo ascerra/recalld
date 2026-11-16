@@ -81,17 +81,20 @@ impl DerivedCompletion {
             namespace: intent.scope.namespace_name.clone(),
             source: intent.scope.source,
         };
-        let work = self.accept_work(parent)
+        let work = self
+            .accept_work(parent)
             .map_err(|e| ObservationError::storage(e, vec![]))?;
-        let result = self.native_exposures_accepted(
-            intent.original.clone(),
-            crate::decay::similarity_scope::ExposureScopes::Existing(Some(scope)),
-            sampled_at,
-            policy,
-            &work,
-            original_contract_version,
-            Some(intent),
-        ).await;
+        let result = self
+            .native_exposures_accepted(
+                intent.original.clone(),
+                crate::decay::similarity_scope::ExposureScopes::Existing(Some(scope)),
+                sampled_at,
+                policy,
+                &work,
+                original_contract_version,
+                Some(intent),
+            )
+            .await;
         self.finish_known_work(work);
         result
     }
@@ -177,7 +180,9 @@ impl DerivedCompletion {
                             };
                             // This fresh capture's G is truthful. It is NOT the earlier
                             // selection/readGeneration; no whole-query CAS is claimed.
-                            storage.meta_store().capture_exposure(scope, &batch, &policy)?
+                            storage
+                                .meta_store()
+                                .capture_exposure(scope, &batch, &policy)?
                         };
                         let mut ctx = MutationContext::unkeyed(namespace);
                         ctx.contract_version = original_contract_version;

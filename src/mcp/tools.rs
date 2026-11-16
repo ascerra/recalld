@@ -2065,7 +2065,11 @@ pub(crate) async fn prepared_get(
     arguments: &serde_json::Value,
 ) -> ToolCallResult {
     let reply = match crate::serialization::get::GetRequest::from_mcp(arguments) {
-        Ok(request) => search.get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE).await,
+        Ok(request) => {
+            search
+                .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .await
+        }
         Err(error) => crate::serialization::get::GetReply::input(error),
     };
     reply.mcp()
