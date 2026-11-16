@@ -37,6 +37,12 @@ VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = (
          # Exact native replay inputs; no directory wildcard or ambient scratch.
+         'src/storage/vector_certification/fixtures/pending-before-certification.zip',
+         'src/storage/vector_certification/fixtures/pending-multi-provenance.json',
+         'src/storage/vector_certification/fixtures/pending-v2-api2-generatedfalse.zip',
+         'src/storage/vector_certification/fixtures/pending-v2-api2-generatedtrue.zip',
+         'src/storage/vector_certification/fixtures/pending-v3-api1-generatedfalse.zip',
+         'src/storage/vector_certification/fixtures/pending-v3-api2-generatedtrue.zip',
          'src/storage/metadata/native_records/fixtures/document-recipe-legacy-receipts.json',
          'src/storage/metadata/native_records/fixtures/document-recipe-legacy.jsonl',
          'tests/fixtures/native-api1-batch-before158/PROVENANCE.json',
