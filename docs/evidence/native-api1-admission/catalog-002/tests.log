@@ -1,0 +1,50 @@
+
+running 27 tests
+test native_catalog_adapter::tests::native_catalog_wire_accepted_root_survives_closed_admission_for_lookup_and_commit ... ok
+test native_catalog_adapter::tests::native_catalog_wire_actual_fault_receipt_and_unknown_reconcile ... ok
+test native_catalog_adapter::tests::native_catalog_wire_invalid_before_provider_and_typed_profile_conflict ... ok
+test native_catalog_adapter::tests::native_catalog_wire_real_cross_transport_replay_and_reopen ... ok
+test native_catalog_adapter::tests::native_policy_wire_actual_completion_uses_root_accepted_before_close ... ok
+test native_catalog_adapter::tests::native_policy_wire_cancelled_spawn_retains_unknown_root_and_executing_child ... ok
+test native_catalog_adapter::tests::native_policy_wire_catalog_noop_change_and_replay_publish_current_generation ... ok
+test native_catalog_adapter::tests::native_policy_wire_real_completion_failures_keep_original_receipt_and_replay_repairs ... ok
+test native_catalog_adapter::tests::native_policy_wire_rejects_invalid_scope_preconditions_and_policy_without_writes ... ok
+test native_catalog_adapter::tests::native_policy_wire_unknown_worker_keeps_root_unresolved ... 
+thread 'tokio-rt-worker' (342) panicked at src/native_catalog_adapter_tests.rs:500:9:
+policy/replay sampled a clock
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+ok
+test serialization::catalog::tests::native_catalog_wire_preserves_selectors_and_cross_transport_key ... ok
+test serialization::catalog::tests::native_catalog_wire_strict_fields_and_legacy_bounds ... ok
+test storage::native_catalog::tests::forged_native_catalog_configuration_is_rejected_immutably ... ok
+test storage::native_catalog::tests::native_catalog_bounded_replay_keeps_original_contract_and_skips_fresh_budget ... ok
+test storage::native_catalog::tests::native_catalog_candidate_admission_rolls_back_before_file_preparation ... ok
+test storage::native_catalog::tests::native_catalog_publication_fault_reconciles_receipt_on_reopen ... ok
+test storage::native_catalog::tests::native_catalog_rejections_do_not_allocate_or_publish ... ok
+test storage::native_catalog::tests::native_catalog_replay_before_provider_cas_and_real_record_reopen ... Starting backup...
+  Source: /tmp/.tmp2uzC95/copy
+  Destination: /tmp/.tmp2uzC95/created.zip
+Generating manifest...
+Creating archive...
+Backup complete!
+  Archive: /tmp/.tmp2uzC95/created.zip
+  Size: 0.02 MB (compressed)
+  Uncompressed: 8.07 MB
+  Compression ratio: 99.7%
+ok
+test storage::native_catalog::tests::native_catalog_review_expanded_fixed_defaults_replay_but_dynamic_selectors_conflict ... ok
+test storage::native_catalog::tests::native_catalog_review_invalid_inherited_policy_rejects_before_allocation ... ok
+test storage::native_catalog::tests::native_context_api1_catalog_replay_cross_contract_and_unkeyed ... ok
+test storage::native_catalog::tests::owned_ids::owned_native_catalog_abandoned_precommit_consumes_reserved_id_without_rewind ... ok
+test storage::native_catalog::tests::owned_ids::owned_native_catalog_create_replay_conflict_and_closed_reopen_keep_allocator ... ok
+test storage::native_catalog::tests::owned_ids::owned_native_catalog_known_and_unknown_commits_keep_id_through_recovery ... owned catalog fault api=1 point=before_handle_publish operation=53477c40-ceb3-4a34-8d12-0c0445edbcd3 receipt=Some(WriteReceipt { store_id: 5b44a69b-431c-4117-96ea-ea16cda4874b, operation_id: 53477c40-ceb3-4a34-8d12-0c0445edbcd3, committed_generation: Generation(3), receipt_version: 1, outcome: NativeNamespaceCreated { transition: NativeNamespaceCreated { vector_certification: Some(VectorCertification { version: 1, origin: GenerationRef { store_id: 5b44a69b-431c-4117-96ea-ea16cda4874b, generation: Generation(3) }, operation_id: 53477c40-ceb3-4a34-8d12-0c0445edbcd3, inventory_root: [168, 193, 65, 188, 32, 139, 216, 179, 126, 225, 128, 102, 18, 65, 129, 134, 169, 152, 128, 33, 84, 171, 209, 179, 181, 14, 228, 137, 30, 142, 16, 97], vector_count: 0 }), namespace_id: NamespaceId(2), previous_max_id: 1, previous_generation: Generation(2), name: "created", created_at: 2000, profile: EmbeddingProfile { identity_version: 1, provider_kind: Ollama, model_id: "configured-model", model_revision: None, dimension: 4, document_preprocessing: PreprocessingIdentity { version: "recalld-document-v1", prefix: "" }, query_preprocessing: PreprocessingIdentity { version: "recalld-query-v1", prefix: "" }, normalization: L2UnitV1 }, policy: NamespacePolicyState { initial_stability: FiniteF32(3.0), default_difficulty: FiniteF32(5.0), thresholds: [FiniteF32(0.7), FiniteF32(0.3), FiniteF32(0.05)], permastore_threshold: FiniteF32(1500.0), desired_retention: FiniteF32(0.9), decay_rate_multiplier: None }, inherited_decay: Some(InheritedDecayBinding { version: 1, multiplier_bits: 1065353216, adoption: GenerationRef { store_id: 5b44a69b-431c-4117-96ea-ea16cda4874b, generation: Generation(3) }, operation_id: 53477c40-ceb3-4a34-8d12-0c0445edbcd3 }) } }, replayed: false }) cursor=IdState { version: 1, seed: [41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41], counter: 1, last_memory_millis: None }
+owned catalog fault api=1 point=commit_unknown operation=53477c40-ceb3-4a34-8d12-0c0445edbcd3 receipt=None cursor=IdState { version: 1, seed: [41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41], counter: 1, last_memory_millis: None }
+owned catalog fault api=2 point=before_handle_publish operation=53477c40-ceb3-4a34-8d12-0c0445edbcd3 receipt=Some(WriteReceipt { store_id: 36233190-5457-4c2d-a52a-1177b7f3332c, operation_id: 53477c40-ceb3-4a34-8d12-0c0445edbcd3, committed_generation: Generation(3), receipt_version: 1, outcome: NativeNamespaceCreated { transition: NativeNamespaceCreated { vector_certification: Some(VectorCertification { version: 1, origin: GenerationRef { store_id: 36233190-5457-4c2d-a52a-1177b7f3332c, generation: Generation(3) }, operation_id: 53477c40-ceb3-4a34-8d12-0c0445edbcd3, inventory_root: [168, 193, 65, 188, 32, 139, 216, 179, 126, 225, 128, 102, 18, 65, 129, 134, 169, 152, 128, 33, 84, 171, 209, 179, 181, 14, 228, 137, 30, 142, 16, 97], vector_count: 0 }), namespace_id: NamespaceId(2), previous_max_id: 1, previous_generation: Generation(2), name: "created", created_at: 2000, profile: EmbeddingProfile { identity_version: 1, provider_kind: Ollama, model_id: "configured-model", model_revision: None, dimension: 4, document_preprocessing: PreprocessingIdentity { version: "recalld-document-v1", prefix: "" }, query_preprocessing: PreprocessingIdentity { version: "recalld-query-v1", prefix: "" }, normalization: L2UnitV1 }, policy: NamespacePolicyState { initial_stability: FiniteF32(3.0), default_difficulty: FiniteF32(5.0), thresholds: [FiniteF32(0.7), FiniteF32(0.3), FiniteF32(0.05)], permastore_threshold: FiniteF32(1500.0), desired_retention: FiniteF32(0.9), decay_rate_multiplier: None }, inherited_decay: Some(InheritedDecayBinding { version: 1, multiplier_bits: 1065353216, adoption: GenerationRef { store_id: 36233190-5457-4c2d-a52a-1177b7f3332c, generation: Generation(3) }, operation_id: 53477c40-ceb3-4a34-8d12-0c0445edbcd3 }) } }, replayed: false }) cursor=IdState { version: 1, seed: [41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41], counter: 1, last_memory_millis: None }
+owned catalog fault api=2 point=commit_unknown operation=53477c40-ceb3-4a34-8d12-0c0445edbcd3 receipt=None cursor=IdState { version: 1, seed: [41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41], counter: 1, last_memory_millis: None }
+ok
+test storage::native_catalog::tests::owned_ids::owned_native_numeric_policy_update_and_keyed_nochange_reserve_once ... ok
+test storage::native_catalog::tests::owned_ids::owned_native_purge_children_consume_reservations_and_closed_reopen_preserves_cursor ... ok
+test storage::native_purge_tests::native_purge_native_catalog_binding_empty_cleanup_and_recreated_name ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 1648 filtered out; finished in 46.44s
+
