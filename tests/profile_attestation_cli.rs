@@ -5,9 +5,13 @@ use std::process::{Command, Output};
 use recalld::model::schema::{
     EmbeddingProfile, Normalization, PreprocessingIdentity, ProviderKind,
 };
-use recalld::model::{DecayPhase, DiskRecord, MemoryId, NamespaceConfig, Tag};
+use recalld::model::{MemoryId, NamespaceConfig, Tag};
+use recalld::storage::control::MutationContext;
+use recalld::storage::insertion::InsertMemory;
+use recalld::storage::vectors::VectorFileHeader;
 use recalld::storage::{RedbStorageEngine, StorageEngine};
 use serde_json::{Value, json};
+use zerocopy::FromBytes;
 
 fn profile() -> EmbeddingProfile {
     EmbeddingProfile {
@@ -29,39 +33,61 @@ fn profile() -> EmbeddingProfile {
 }
 
 fn fixture(path: &Path, vector: &[f32]) {
+    assert!(vector == [1., 0., 0., 0.] || vector == [2., 0., 0., 0.]);
     let mut engine = RedbStorageEngine::open(path).unwrap();
+    let mut slots = Vec::new();
     for name in ["default", "other"] {
         let mut namespace = NamespaceConfig::default_namespace(0);
         namespace.name = name.into();
         namespace.embedding_dim = 4;
         let ns = engine.create_namespace(&namespace).unwrap();
         let id = MemoryId::new();
-        let mut record = DiskRecord {
-            version: 1,
-            schema: None,
-            id: *id.as_bytes(),
-            namespace_id: ns.get(),
-            created_at: 100,
-            last_accessed_at: 200,
-            phase: DecayPhase::Full,
-            strength: 0.9,
-            decay_strength: 0.9,
-            stability: 3.0,
-            difficulty: 5.0,
-            is_permastore: 0,
-            vector_slot: 0,
-            edge_count: 0,
-            summary: "retained résumé".into(),
-            tags: vec![Tag::new("entity/john-smith").unwrap()],
-            access_history: vec![],
-            text_offset: 0,
-            text_length: 0,
-        };
         engine
-            .insert_memory(id, ns, &mut record, vector, Some("exact retained text"))
+            .insert_memory_with_receipt(
+                &MutationContext::unkeyed(ns),
+                &InsertMemory {
+                    id: Some(id),
+                    summary: "retained résumé".into(),
+                    full_text: Some("exact retained text".into()),
+                    tags: vec![Tag::new("entity/john-smith").unwrap()],
+                    initial_stability: Some(3.0),
+                    created_at: Some(100),
+                    embedding: Some(vec![1., 0., 0., 0.]),
+                    parent_id: None,
+                    supersedes: None,
+                },
+                &[],
+                100,
+            )
             .unwrap();
+        slots.push((name, engine.get_record(id).unwrap().unwrap().vector_slot));
     }
     engine.sync().unwrap();
+    drop(engine);
+    if vector[0] == 2.0 {
+        // Stopped synthetic corruption, not a historical producer claim. The
+        // canonical writer normalizes supplied vectors, so inject the original
+        // nonunit attestation negative only after closing its actual owner.
+        use std::io::{Seek, SeekFrom, Write};
+        for (name, slot) in slots {
+            let file = path.join(name).join("vectors.dat");
+            let before = std::fs::read(&file).unwrap();
+            let header =
+                VectorFileHeader::read_from_bytes(&before[..VectorFileHeader::SIZE]).unwrap();
+            header.validate(&file, 4).unwrap();
+            assert_eq!(header.live_count.get(), 1);
+            assert!(slot < header.slot_count.get());
+            let offset = VectorFileHeader::data_offset(slot, header.stride.get()) as usize;
+            assert_eq!(&before[offset..offset + 4], &1.0f32.to_le_bytes());
+            let mut output = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+            output.seek(SeekFrom::Start(offset as u64)).unwrap();
+            output.write_all(&2.0f32.to_le_bytes()).unwrap();
+            output.sync_all().unwrap();
+            let after = std::fs::read(&file).unwrap();
+            assert_eq!(&before[..offset], &after[..offset]);
+            assert_eq!(&before[offset + 4..], &after[offset + 4..]);
+        }
+    }
 }
 
 fn snapshot(path: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
