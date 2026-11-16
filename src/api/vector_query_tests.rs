@@ -760,6 +760,47 @@ async fn coherent_payload_http_preserves_metadata_bytes_and_returned_only_exposu
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_http_never_exposes_unserialized_graph_neighbors() {
+    let h = coherent_harness().await;
+    let anchor = h.ids[0];
+    for &id in &h.ids[1..] {
+        h.f.storage
+            .read()
+            .unwrap()
+            .add_edge(
+                anchor,
+                id,
+                crate::model::EdgeType::Associative,
+                1.0,
+                false,
+                100,
+            )
+            .unwrap();
+    }
+    coherent_owner(&h).complete().await.unwrap();
+    let before = h.snapshot();
+    let mut input = json!({"embedding":[1.,0.,0.,0.], "limit":1,
+        "depth":0, "recordAccess":false});
+    let (status, body) = request(&h, "/search", input.to_string()).await;
+    assert!(status.is_success(), "{body}");
+    assert_eq!(body["hits"].as_array().unwrap().len(), 1);
+    assert_eq!(body["hits"][0]["memory"]["id"], anchor.to_string());
+    assert!(body.get("neighbors").is_none());
+    h.assert_quiet(&before).await;
+    input["recordAccess"] = json!(true);
+    let (status, body) = request(&h, "/search", input.to_string()).await;
+    assert!(status.is_success(), "{body}");
+    assert_eq!(body["hits"].as_array().unwrap().len(), 1);
+    assert_eq!(body["hits"][0]["memory"]["id"], anchor.to_string());
+    for &id in &h.ids {
+        assert_eq!(
+            h.f.record(id).unwrap().access_history.len(),
+            usize::from(id == anchor)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn coherent_payload_transports_reject_concurrent_forget_and_compaction_before_exposure() {
     for mcp in [false, true] {
         for compact in [false, true] {

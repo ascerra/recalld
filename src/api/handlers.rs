@@ -1030,6 +1030,9 @@ async fn search_memories_admitted(
     let hydration = crate::performance::Timer::new("rest.hydration");
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
+            // This serializer returns ranked hits only; reject unexpected
+            // supplemental rows before exposing any unreturned neighbor.
+            let exposures = prepared.exposures(false)?;
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -1043,7 +1046,6 @@ async fn search_memories_admitted(
                 });
             }
             let mut hits = Vec::with_capacity(payload.rows.len());
-            let mut exposures = Vec::with_capacity(payload.rows.len());
             for (selected, row) in prepared
                 .response
                 .response
@@ -1069,14 +1071,6 @@ async fn search_memories_admitted(
                 }
                 memory.full_text = row.full_text;
                 memory.embedding = row.embedding;
-                exposures.push((
-                    selected.memory_id,
-                    if selected.activation_score.is_some() {
-                        crate::model::AccessKind::AssociativeRetrieval
-                    } else {
-                        crate::model::AccessKind::DirectRetrieval
-                    },
-                ));
                 hits.push(SearchHit {
                     memory,
                     score: selected.score.unwrap_or(0.0),
@@ -2556,6 +2550,42 @@ pub(crate) async fn scan_duplicates_v2(
                 .into_response()
         }
     }
+}
+
+/// Prepared inner handler. Public middleware still rejects application2.
+pub(crate) async fn search_v2(
+    search: &dyn super::state::SearchPipeline,
+    default_namespace: &str,
+    body: &serde_json::Value,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let reply = match crate::serialization::query::QueryRequest::from_http(body, default_namespace)
+    {
+        Ok(request) => search.query_contract(request).await,
+        Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    (
+        axum::http::StatusCode::from_u16(reply.http_status).expect("query HTTP status"),
+        Json(reply),
+    )
+        .into_response()
+}
+
+pub(crate) async fn similar_v2(
+    search: &dyn super::state::SearchPipeline,
+    id: crate::model::MemoryId,
+    body: &serde_json::Value,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let reply = match crate::serialization::query::SimilarRequest::from_http(body, id) {
+        Ok(request) => search.similar_contract(request).await,
+        Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    (
+        axum::http::StatusCode::from_u16(reply.http_status).expect("similarity HTTP status"),
+        Json(reply),
+    )
+        .into_response()
 }
 
 /// Resolved v1 discovery only. Store/provider identity certifies no ReadView,

@@ -1,0 +1,29 @@
+{
+  "runtime_commit": "6d65c7a655b81a6acb533655cab182f2d609d703",
+  "source_manifest_sha256": "bdc48a910e643f2c9af161c62dd14456d49165fff3efd93615aad60c5394e4ff",
+  "source_files": 235,
+  "host_snapshot_worktree_match": true,
+  "mounted_check_timing": "all235 matched after5focused checks; not a precompile check",
+  "binary_sha256": "40b9893f4a051bd284e25ceb5395089dc6ce6988dbff9b7d69164882c5b02918",
+  "log_sha256": "b30e5ef2549dd70b9046fe118c4c0811c074cf296bb412d200379c7d66a80529",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 137,
+    "Error": "",
+    "StartedAt": "2026-11-15T00:42:16.332411846Z",
+    "FinishedAt": "2026-11-15T00:45:36.10498247Z"
+  },
+  "result_lines": [
+    "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1042 filtered out; finished in 0.07s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1044 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1044 filtered out; finished in 0.25s"
+  ],
+  "outcome": "Five focused checks passed. Full suite intentionally interrupted to replace final proof with atomic committed export + inside-container precompile/postrun manifest checks. No full-suite/clippy success claim."
+}

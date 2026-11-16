@@ -10,9 +10,10 @@ or public API2/native-startup activation.
   query and similarity consumers, strict selectors and profile assertions.
 - Feynman's direct175 helper `3f76d77e47715499b1ec9180514fec8af2578018`:
   extracts `CanonicalReadView::check_native_vector_namespace` from the existing
-  generated-query admission. A frozen follow-up exposes the existing validated
-  native-owner bit through `is_native_owned()`; its exact hash will be recorded
-  before consumption. No helper PR, PR149, PR176, compaction, or moving parent.
+  generated-query admission. Frozen follow-up
+  `794506f6cec23d949fb600000690017ae085dcf4` exposes the existing validated
+  native-owner bit through `is_native_owned()`. Both helper commits are consumed
+  unchanged. No helper PR, PR149, PR176, compaction, or moving parent.
 
 Feynman owns `storage/metadata/publication.rs` and confirmed the helper interface
 and accessor on 2026-11-15. Huygens owns the NamespaceResolver trait/delegate,
