@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "/work/source/scripts/public-mcp-evaluation.py", line 436, in <module>
+    main()
+  File "/work/source/scripts/public-mcp-evaluation.py", line 432, in main
+    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+  File "/work/source/scripts/public-mcp-evaluation.py", line 197, in run_episode
+    return GROUPED["run"](args, globals())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/grouped-mcp-evaluation.py", line 186, in run
+    manifest, bundles, roster, environment = validate(args, h)  # All episodes before any output/provider/store.
+                                             ^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/grouped-mcp-evaluation.py", line 176, in validate
+    artifacts = h["validate_artifacts"](root, episode, episode_fixture(by_id[identity], h), prefix=f"episodes/{identity}/")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/public-mcp-evaluation.py", line 119, in validate_artifacts
+    raise ValueError("unsupported synthetic actor/cache fixture")
+ValueError: unsupported synthetic actor/cache fixture

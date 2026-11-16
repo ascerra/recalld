@@ -1,0 +1,275 @@
+[
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "prepare",
+      "--track",
+      "serialized-mcp-accounting-synthetic-diagnostic-v1",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/actual/inputs"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "inputs",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/inputs/manifest.json",
+      "--out",
+      "/output/actual/baseline"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "baseline",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/changed-inputs/manifest.json",
+      "--out",
+      "/output/actual/changed-labels"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "changed-labels",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-version/manifest.json",
+      "--out",
+      "/output/actual/reject-version"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-version",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-bool-version/manifest.json",
+      "--out",
+      "/output/actual/reject-bool-version"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-bool-version",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-tokenizer/manifest.json",
+      "--out",
+      "/output/actual/reject-tokenizer"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-tokenizer",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-context/manifest.json",
+      "--out",
+      "/output/actual/reject-context"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-context",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-cost/manifest.json",
+      "--out",
+      "/output/actual/reject-cost"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-cost",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-sampled/manifest.json",
+      "--out",
+      "/output/actual/reject-sampled"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-sampled",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-old-fields/manifest.json",
+      "--out",
+      "/output/actual/reject-old-fields"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-old-fields",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/negative-readiness/manifest.json",
+      "--out",
+      "/output/actual/reject-readiness"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-readiness",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "prepare",
+      "--track",
+      "serialized-mcp-synthetic-diagnostic-v1",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/actual/old-inputs"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "old-inputs",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/actual/old-inputs/manifest.json",
+      "--out",
+      "/output/actual/old-profile"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "old-profile",
+    "outputAbsent": null
+  }
+]

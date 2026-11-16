@@ -552,7 +552,7 @@ impl MetadataStore {
             let mut item = BatchItem {
                 index: index as u32,
                 request_hash: plan.request_hash(),
-                operation_id: Uuid::new_v4(),
+                operation_id: self.ids.uuid(crate::storage::ids::IdKind::Operation)?,
                 defaults: None,
                 canonical_hash: None,
                 resolution_error: None,
@@ -578,7 +578,7 @@ impl MetadataStore {
             }
             items.push(item);
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -868,7 +868,7 @@ impl MetadataStore {
                 &child.index.to_be_bytes(),
             ],
         );
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             &ctx,
             hash,

@@ -1,0 +1,10 @@
+{
+  "committed": {
+    "generation": "8",
+    "storeId": "da30f844-2729-4628-870c-fa5efeca8d66"
+  },
+  "logicalHash": "52dd9a1019c5076218f05a7ddd3bd54370c09c507f99a7dc64eb252fb0abc084",
+  "manifest": "/output/episode/runtime/recalld-frozen-canonical-uriRhB/manifest.json",
+  "sha256": "09ded95ef78694686a1e719cd28b55e92dd2ab583da5c9c598f3d7857f74b04a",
+  "track": "isolated-native-sweep-checkpoint-v1"
+}

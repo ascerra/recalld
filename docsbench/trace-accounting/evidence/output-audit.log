@@ -1,0 +1,48 @@
+{
+  "status": "passed",
+  "runs": [
+    {
+      "run": "baseline",
+      "sourceMappingsVerified": 4,
+      "publicRankRowsVerified": 4,
+      "attempts": 15,
+      "outcomes": 15,
+      "requestBytes": 2365,
+      "responseBytes": 30009,
+      "providerRequests": 9,
+      "providerRequestBodyBytes": 966,
+      "providerResponseBodyBytes": 930,
+      "categories": {
+        "notification": "1",
+        "protocol_error": "1",
+        "success": "12",
+        "tool_error": "1"
+      },
+      "providerAttribution": "delivery-window-only",
+      "clientDurationSummed": false,
+      "unknownFieldsPreserved": true
+    },
+    {
+      "run": "changed-labels",
+      "sourceMappingsVerified": 4,
+      "publicRankRowsVerified": 4,
+      "attempts": 15,
+      "outcomes": 15,
+      "requestBytes": 2365,
+      "responseBytes": 30009,
+      "providerRequests": 9,
+      "providerRequestBodyBytes": 966,
+      "providerResponseBodyBytes": 930,
+      "categories": {
+        "notification": "1",
+        "protocol_error": "1",
+        "success": "12",
+        "tool_error": "1"
+      },
+      "providerAttribution": "delivery-window-only",
+      "clientDurationSummed": false,
+      "unknownFieldsPreserved": true
+    }
+  ],
+  "auditorSha256": "e960d2736be0886f4e34051b2fab74ea2b8e949863b98c64e988e16dd0718ad7"
+}

@@ -1,0 +1,188 @@
+diff --git a/src/system.rs b/src/system.rs
+index 1aaf0b37..06098ef7 100644
+--- a/src/system.rs
++++ b/src/system.rs
+@@ -1847,3 +1847,7 @@ mod tests {
+         }
+     }
+ }
++
++#[cfg(test)]
++#[path = "system_global_restart_audit.rs"]
++mod inherited_global_restart_audit;
+diff --git a/src/system_global_restart_audit.rs b/src/system_global_restart_audit.rs
+new file mode 100644
+index 00000000..78afd937
+--- /dev/null
++++ b/src/system_global_restart_audit.rs
+@@ -0,0 +1,170 @@
++//! BEFORE audit only: real config loader, owned startup and false get on restart.
++use super::*;
++use crate::model::schema::{LifecycleVersion, ProviderKind};
++use crate::model::{MemoryId, NamespaceConfig};
++use crate::storage::StorageEngine as _;
++use crate::storage::control::{Generation, MutationContext};
++use crate::storage::insertion::{InsertMemory, inserted_id};
++use crate::storage::lifecycle_migration::{LifecycleMigrationOptions, migrate_lifecycle};
++use crate::storage::schema_migration::{
++    MigrationOptions, ProfileAttestationInput, inspect_schema, migrate_schema,
++};
++
++const NOW: i64 = 30 * 86_400_000;
++
++async fn restart_case(override_value: Option<f32>) -> [f32; 2] {
++    let root = tempfile::tempdir().unwrap();
++    let legacy = root.path().join("legacy");
++    let schema = root.path().join("schema");
++    let native = root.path().join("native");
++    let mut config = RecalldConfig::default();
++    config.storage.data_dir = native.to_str().unwrap().into();
++    config.embedding.provider = crate::config::EmbeddingProvider::Ollama;
++    config.embedding.model_name = "synthetic-restart-audit".into();
++    config.embedding.dimensions = 4;
++    config.embedding.base_url = "http://127.0.0.1:1".into();
++    config.embedding.document_prefix.clear();
++    config.embedding.query_prefix.clear();
++    config.decay.disable_sweep = true;
++    config.rif.enabled = false;
++    config.graph.autolink_enabled = false;
++    let mut engine = RedbStorageEngine::open(&legacy).unwrap();
++    let mut namespace = NamespaceConfig::default_namespace(1000);
++    namespace.embedding_dim = 4;
++    namespace.decay_rate_multiplier = override_value;
++    let ns = engine.create_namespace(&namespace).unwrap();
++    let id: MemoryId = inserted_id(
++        &engine
++            .insert_memory_with_receipt(
++                &MutationContext::unkeyed(ns),
++                &InsertMemory {
++                    id: None,
++                    summary: "synthetic restart audit".into(),
++                    full_text: Some("retained synthetic payload".into()),
++                    tags: vec![],
++                    initial_stability: Some(1.),
++                    created_at: Some(1000),
++                    embedding: Some(vec![1., 0., 0., 0.]),
++                    parent_id: None,
++                    supersedes: None,
++                },
++                &[],
++                1000,
++            )
++            .unwrap(),
++    )
++    .unwrap();
++    engine.sync().unwrap();
++    drop(engine);
++    // Explicit operator assertion for this synthetic fixture, not inferred from width.
++    let descriptor = crate::embedding::runtime::native_profile(
++        ProviderKind::Ollama,
++        &config.embedding.model_name,
++        4,
++    );
++    migrate_schema(
++        &legacy,
++        &schema,
++        &MigrationOptions {
++            migration_now: 2000,
++            expected_source: inspect_schema(&legacy).unwrap().control.generation_ref(),
++            attestations: vec![ProfileAttestationInput {
++                namespace_id: ns,
++                namespace_name: "default".into(),
++                descriptor,
++            }],
++        },
++    )
++    .unwrap();
++    migrate_lifecycle(
++        &schema,
++        &native,
++        &LifecycleMigrationOptions {
++            expected_source: inspect_schema(&schema).unwrap().control.generation_ref(),
++            namespace_id: ns,
++            expected_policy_revision: Generation::default(),
++            target: LifecycleVersion::ExplicitFeedbackV2,
++            idempotency_key: "explicit-fixture-policy".into(),
++        },
++    )
++    .unwrap();
++    let baseline = inspect_schema(&native).unwrap();
++    let baseline_ns = baseline.namespaces.iter().find(|n| n.id == ns).unwrap();
++    let canonical_namespace = crate::storage::control::encode(baseline_ns).unwrap();
++    let revision = baseline_ns.schema.as_ref().unwrap().policy_revision;
++    let clock = Arc::new(crate::time::ManualClock::new(NOW));
++    let mut values = [0.; 2];
++    let mut canonical_record = None;
++    for (index, multiplier) in [1., 0.].into_iter().enumerate() {
++        config.decay.decay_rate_multiplier = multiplier;
++        let file = root.path().join("config.toml");
++        std::fs::write(&file, toml::to_string(&config).unwrap()).unwrap();
++        let loaded = crate::config::load_config(Some(&file), &Default::default())
++            .unwrap()
++            .config;
++        assert_eq!(
++            serde_json::to_value(&loaded).unwrap(),
++            serde_json::to_value(&config).unwrap()
++        );
++        let engine = RedbStorageEngine::open_native(&native).unwrap();
++        let core = Recalld::with_owned_storage(loaded, clock.clone(), engine)
++            .await
++            .unwrap();
++        let response = core
++            .query_engine()
++            .get_memory_with_access(id, false)
++            .await
++            .unwrap()
++            .unwrap();
++        values[index] = response.strength;
++        {
++            let store = core.storage().read().unwrap();
++            assert_eq!(
++                store.control_state().unwrap().generation_ref(),
++                baseline.control.generation_ref()
++            );
++            let ns_after = store.get_namespace(ns).unwrap().unwrap();
++            assert_eq!(
++                crate::storage::control::encode(&ns_after).unwrap(),
++                canonical_namespace
++            );
++            assert_eq!(ns_after.schema.as_ref().unwrap().policy_revision, revision);
++            let encoded = store.get_record(id).unwrap().unwrap().encode().unwrap();
++            if let Some(before) = &canonical_record {
++                assert_eq!(&encoded, before);
++            } else {
++                canonical_record = Some(encoded);
++            }
++            assert_eq!(response.phase, crate::model::DecayPhase::Full);
++            println!(
++                "AUDIT override={override_value:?} global={multiplier} generation={:?} policyRevision={revision:?} clock={NOW} strength={} strengthBits={} committedPhase={:?}",
++                baseline.control.generation_ref(),
++                response.strength,
++                response.strength.to_bits(),
++                response.phase
++            );
++        }
++        core.shutdown().await.unwrap();
++    }
++    assert_eq!(
++        inspect_schema(&native).unwrap().control.generation_ref(),
++        baseline.control.generation_ref()
++    );
++    values
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn inherited_global_restart_requires_policy_revision_before_changed_projection() {
++    let explicit = restart_case(Some(1.)).await;
++    assert_eq!(
++        explicit[0].to_bits(),
++        explicit[1].to_bits(),
++        "explicit namespace override is the control"
++    );
++    let inherited = restart_case(None).await;
++    assert_eq!(
++        inherited[0].to_bits(),
++        inherited[1].to_bits(),
++        "same canonical generation/revision and clock must not silently adopt changed inherited globals"
++    );
++}

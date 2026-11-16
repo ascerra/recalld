@@ -26,7 +26,8 @@ impl MetadataStore {
     ) -> Result<NativePolicyIntent, StorageError> {
         input.validate()?;
         let _guard = self.native_guard_with_work(parent)?;
-        let capture = self.capture_at(&self.db.begin_read()?, &scope, &[], policy, false)?;
+        let capture =
+            self.capture_policy_at(&self.db.begin_read()?, &scope, &[], policy, false, false)?;
         Ok(NativePolicyIntent {
             scope,
             original: input.clone(),
@@ -49,17 +50,34 @@ impl MetadataStore {
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(Some(receipt));
         }
-        let (state, mut namespace, _, _) =
-            self.check_native_capture(&tx, &intent.scope, &intent.capture, policy, false)?;
+        let (state, mut namespace, _, _) = self.check_native_policy_capture(
+            &tx,
+            &intent.scope,
+            &intent.capture,
+            policy,
+            false,
+            false,
+        )?;
         let before = NamespacePolicyState::capture(&namespace)?;
         intent.original.apply(&mut namespace);
-        policy.resolve(&namespace)?;
+        let returns_to_inheritance =
+            before.decay_rate_multiplier.is_some() && namespace.decay_rate_multiplier.is_none();
+        let cleared_inherited_decay = if returns_to_inheritance {
+            namespace.schema.as_mut().unwrap().inherited_decay.take()
+        } else {
+            None
+        };
+        // Numeric replacement can leave inheritance unadopted. It cannot perform
+        // dependent projection; only explicit preview/adoption establishes it.
+        crate::storage::inherited_policy::supported_inputs(&policy.global)?;
+        crate::decay::lifecycle::resolve_policy(&namespace, &policy.global, policy.multiplier)
+            .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
         let after = NamespacePolicyState::capture(&namespace)?;
         if before == after {
             if ctx.idempotency_key.is_none() {
                 return Ok(None);
             }
-            let receipt = control::record_receipt(
+            let receipt = self.record_receipt(
                 &tx,
                 ctx,
                 hash,
@@ -122,6 +140,7 @@ impl MetadataStore {
             capture_generation: intent.capture.generation,
             before,
             after,
+            cleared_inherited_decay,
             record_count: records.len() as u64,
             record_token_digest: crate::storage::lifecycle_migration::token_digest_values(
                 records.iter().map(|r| {
@@ -140,7 +159,7 @@ impl MetadataStore {
         }
         tx.open_table(NAMESPACE_TABLE)?
             .insert(namespace.id.get(), control::encode(&namespace)?.as_slice())?;
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,

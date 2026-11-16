@@ -13,6 +13,11 @@ impl crate::time::Clock for CountingClock {
     }
 }
 fn setup() -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
+    setup_with_multiplier(1.)
+}
+fn setup_with_multiplier(
+    multiplier: f64,
+) -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
     let root = tempfile::tempdir().unwrap();
     let d = fixture(root.path());
     let clock = Arc::new(CountingClock {
@@ -26,8 +31,21 @@ fn setup() -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
         .insert_prepared(&ctx(&s, &d, "create"), &intent, &generated())
         .unwrap();
     let id = inserted(&created);
+    if multiplier != 1. {
+        drop(s);
+        crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, multiplier, 5000);
+        s = NativeLifecycleSession::open(
+            &d.path,
+            NativePolicyInputs {
+                multiplier,
+                ..Default::default()
+            },
+            clock.clone(),
+        )
+        .unwrap();
+    }
     let mut context = ctx(&s, &d, "feedback");
-    context.expected_generation = Some(created.committed_generation);
+    context.expected_generation = Some(s.metadata().control_state().unwrap().committed_generation);
     (
         Fixture::from_open_engine(root, s.engine),
         d,
@@ -76,7 +94,7 @@ async fn native_feedback_replay_survives_actual_policy_rollback_but_not_restore_
         &LifecycleMigrationOptions {
             expected_source: inspect_schema(&d.path).unwrap().control.generation_ref(),
             namespace_id: d.ns,
-            expected_policy_revision: Generation::default().next().unwrap(),
+            expected_policy_revision: policy_revision(&d),
             target: LifecycleVersion::LegacyAccessV1,
             idempotency_key: "rollback".into(),
         },
@@ -174,7 +192,7 @@ async fn native_feedback_replay_survives_actual_policy_rollback_but_not_restore_
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_feedback_uses_anchor_and_configured_policy_and_replays_before_clock() {
     use crate::decay::lifecycle::{FeedbackState, plan_feedback_state};
-    let (f, d, clock, id, mut context) = setup();
+    let (f, d, clock, id, mut context) = setup_with_multiplier(0.25);
     let publisher = completion(&f);
     publisher.rebuild_all().await.unwrap();
     let policy = NativePolicyInputs {

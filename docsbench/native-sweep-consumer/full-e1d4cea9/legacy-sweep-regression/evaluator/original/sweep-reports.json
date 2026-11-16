@@ -1,0 +1,182 @@
+[
+  {
+    "controlRequestId": 1023,
+    "executionCompleted": true,
+    "phase": "completed",
+    "readiness": {
+      "committedGeneration": "6",
+      "derived": [
+        {
+          "appliedGeneration": "6",
+          "name": "graph",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "6",
+          "name": "vectors",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "6",
+          "name": "fts",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "6",
+          "name": "entities",
+          "ready": true
+        }
+      ],
+      "pendingWork": 0,
+      "ready": true,
+      "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+    },
+    "result": {
+      "compactionTriggered": true,
+      "decayDisabledSkipped": 0,
+      "deletions": 0,
+      "errors": [],
+      "exemptSkipped": 0,
+      "fullToSummary": 1,
+      "knownCommitError": null,
+      "knownCommittedReceipt": null,
+      "memoriesScanned": 1,
+      "permastoreSkipped": 0,
+      "publicationError": null,
+      "savedByConnectionBonus": 0,
+      "staleSkipped": 0,
+      "summaryToGhost": 0,
+      "transitions": [
+        {
+          "fromPhase": "full",
+          "id": "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "summary"
+        }
+      ],
+      "uncertainOperation": null,
+      "unchangedSkipped": 0
+    },
+    "sampledAtMillis": 4920825600000
+  },
+  {
+    "controlRequestId": 1035,
+    "executionCompleted": true,
+    "phase": "completed",
+    "readiness": {
+      "committedGeneration": "7",
+      "derived": [
+        {
+          "appliedGeneration": "7",
+          "name": "graph",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "7",
+          "name": "vectors",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "7",
+          "name": "fts",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "7",
+          "name": "entities",
+          "ready": true
+        }
+      ],
+      "pendingWork": 0,
+      "ready": true,
+      "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+    },
+    "result": {
+      "compactionTriggered": false,
+      "decayDisabledSkipped": 0,
+      "deletions": 0,
+      "errors": [],
+      "exemptSkipped": 0,
+      "fullToSummary": 0,
+      "knownCommitError": null,
+      "knownCommittedReceipt": null,
+      "memoriesScanned": 1,
+      "permastoreSkipped": 0,
+      "publicationError": null,
+      "savedByConnectionBonus": 0,
+      "staleSkipped": 0,
+      "summaryToGhost": 1,
+      "transitions": [
+        {
+          "fromPhase": "summary",
+          "id": "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "ghost"
+        }
+      ],
+      "uncertainOperation": null,
+      "unchangedSkipped": 0
+    },
+    "sampledAtMillis": 4920825600000
+  },
+  {
+    "controlRequestId": 1047,
+    "executionCompleted": true,
+    "phase": "completed",
+    "readiness": {
+      "committedGeneration": "9",
+      "derived": [
+        {
+          "appliedGeneration": "9",
+          "name": "graph",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "9",
+          "name": "vectors",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "9",
+          "name": "fts",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "9",
+          "name": "entities",
+          "ready": true
+        }
+      ],
+      "pendingWork": 0,
+      "ready": true,
+      "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+    },
+    "result": {
+      "compactionTriggered": true,
+      "decayDisabledSkipped": 0,
+      "deletions": 1,
+      "errors": [],
+      "exemptSkipped": 0,
+      "fullToSummary": 0,
+      "knownCommitError": null,
+      "knownCommittedReceipt": null,
+      "memoriesScanned": 1,
+      "permastoreSkipped": 0,
+      "publicationError": null,
+      "savedByConnectionBonus": 0,
+      "staleSkipped": 0,
+      "summaryToGhost": 0,
+      "transitions": [
+        {
+          "fromPhase": "ghost",
+          "id": "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "deleted"
+        }
+      ],
+      "uncertainOperation": null,
+      "unchangedSkipped": 0
+    },
+    "sampledAtMillis": 4920825600000
+  }
+]

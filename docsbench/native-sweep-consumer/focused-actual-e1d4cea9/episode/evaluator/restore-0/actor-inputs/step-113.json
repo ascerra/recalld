@@ -1,0 +1,13 @@
+{
+  "currentAction": {
+    "arguments": {
+      "id": "01a1dcb1-37a8-7203-b925-8fd73d4eeb9f",
+      "namespace": "default"
+    },
+    "tag": "omitted-access",
+    "tool": "get_memory"
+  },
+  "deliveryOrdinal": 113,
+  "phase": "action",
+  "startId": 109
+}

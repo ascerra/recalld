@@ -71,6 +71,13 @@ fn canonical_read_error(error: crate::storage::StorageError) -> SearchError {
 
 #[async_trait::async_trait]
 impl NamespaceResolver for CanonicalReadView {
+    fn check_native_query_profile(
+        &self,
+        namespace: &NamespaceConfig,
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<()> {
+        CanonicalReadView::check_native_query_profile(self, namespace, profile).map_err(unavailable)
+    }
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig> {
         let configs = self.namespaces().map_err(unavailable)?;
         configs
@@ -376,6 +383,7 @@ impl QueryEngine {
         let canonical = Arc::new(canonical);
         let evaluated_at = self.clock.now_millis();
         let engine = Self {
+            native_query_admission: self.native_query_admission,
             coherent_owner: None,
             clock: Arc::new(crate::time::ManualClock::new(evaluated_at)),
             decay_policy: self.decay_policy.clone(),

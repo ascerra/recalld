@@ -160,6 +160,10 @@ pub type RefMapping = Vec<(MemoryId, TextRef)>;
 /// Statistics and results from a fulltext.dat compaction run.
 #[derive(Debug)]
 pub struct CompactionResult {
+    /// Exact canonical receipt; does not claim derived readiness.
+    pub receipt: crate::storage::control::WriteReceipt,
+    /// Selection committed, but safe orphan cleanup must be retried on reopen.
+    pub cleanup_pending: bool,
     /// Size of the old fulltext.dat in bytes.
     pub old_size: u64,
     /// Size of the new (compacted) fulltext.dat in bytes.
@@ -230,7 +234,7 @@ impl TextStore {
             // Write header.
             let header = TextLogHeader::new();
             file.write_all(zerocopy::IntoBytes::as_bytes(&header))?;
-            file.sync_all()?;
+            crate::performance::sync_io("text", "sync_all", || file.sync_all())?;
 
             Ok(TextStore {
                 file,
@@ -371,7 +375,8 @@ impl TextStore {
 
     /// Flush pending writes to durable storage.
     pub fn sync_data(&self) -> Result<(), StorageError> {
-        self.file.sync_data().map_err(StorageError::Io)
+        crate::performance::sync_io("text", "sync_data", || self.file.sync_data())
+            .map_err(StorageError::Io)
     }
 
     /// Return the current file size in bytes.

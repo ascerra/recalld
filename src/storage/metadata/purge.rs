@@ -676,7 +676,7 @@ impl MetadataStore {
                 name_hash: Sha256::digest(config.name.as_bytes()).into(),
             }
         };
-        let receipt = control::record_receipt(&tx, ctx, hash, outcome)?;
+        let receipt = self.record_receipt(&tx, ctx, hash, outcome)?;
         let p = PurgeProgress {
             version: if native { 2 } else { 1 },
             store_id: receipt.store_id,
@@ -686,7 +686,7 @@ impl MetadataStore {
             last_receipt: receipt.clone(),
             sequence: 0,
             stage: PurgeStage::Deleting,
-            next_operation_id: Some(Uuid::new_v4()),
+            next_operation_id: Some(self.ids.uuid(crate::storage::ids::IdKind::Operation)?),
             cursor: None,
             removed: 0,
             tombstones_removed: 0,
@@ -734,15 +734,17 @@ impl MetadataStore {
 pub(super) fn record_next(
     tx: &redb::WriteTransaction,
     expected: &PurgeProgress,
+    ids: &dyn crate::storage::ids::IdSource,
     stage: PurgeStage,
     removed: &[(MemoryId, DiskRecord)],
     edges_removed: usize,
 ) -> Result<WriteReceipt, StorageError> {
-    record_next_native(tx, expected, stage, removed, edges_removed, None)
+    record_next_native(tx, expected, ids, stage, removed, edges_removed, None)
 }
 pub(super) fn record_next_native(
     tx: &redb::WriteTransaction,
     expected: &PurgeProgress,
+    ids: &dyn crate::storage::ids::IdSource,
     stage: PurgeStage,
     removed: &[(MemoryId, DiskRecord)],
     edges_removed: usize,
@@ -859,7 +861,7 @@ pub(super) fn record_next_native(
     p.next_operation_id = if stage == PurgeStage::Complete {
         None
     } else {
-        Some(Uuid::new_v4())
+        Some(ids.uuid(crate::storage::ids::IdKind::Operation)?)
     };
     save(tx, &p)?;
     Ok(receipt)
@@ -992,7 +994,7 @@ impl MetadataStore {
         }
         drop(config);
         drop(namespaces);
-        let receipt = record_next(&tx, p, PurgeStage::Cleanup, &[], 0)?;
+        let receipt = record_next(&tx, p, self.ids.as_ref(), PurgeStage::Cleanup, &[], 0)?;
         self.commit_purge(tx, &receipt)?;
         Ok(None)
     }
@@ -1018,7 +1020,7 @@ impl MetadataStore {
         }
         // The name lease stays durable if cleanup or its acknowledgement fails.
         cleanup()?;
-        let receipt = record_next(&tx, p, PurgeStage::Complete, &[], 0)?;
+        let receipt = record_next(&tx, p, self.ids.as_ref(), PurgeStage::Complete, &[], 0)?;
         let pending = super::effects::PendingEffects {
             version: 1,
             receipt: receipt.clone(),

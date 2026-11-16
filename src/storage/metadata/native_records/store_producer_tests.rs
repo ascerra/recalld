@@ -1735,3 +1735,6 @@ async fn native_document_recipe_plain_batch_with_explicit_auxiliary_disable() {
         vec!["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
     );
 }
+
+#[path = "owned_ids_producer_tests.rs"]
+mod owned_ids;

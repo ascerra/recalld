@@ -1,0 +1,494 @@
+{
+  "allSnapshotFilesMatchCommittedGitObjects": true,
+  "cliTests": 2,
+  "clippyExitCode": 0,
+  "clippyWarnings": {
+    "binary": 1,
+    "library": 985,
+    "testDuplicates": 951,
+    "tests": 1058
+  },
+  "containerImageId": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "exampleSha256": {
+    "native_prefix_fixture": "a0be95280872dfe921c5f89b3dd10bede332b2f0f4931ecc2b2132226a8b7506",
+    "owned_evaluator": "67dc8dac7dd42701af0d662c542e99841f069ebd40a812096dd4964b3580d413",
+    "score_mcp_episode": "a7d2af83b566170fb0a30b75c96a86380a0c50cba2e49224dcbcf5a108af58fe"
+  },
+  "fmtExitCode": 0,
+  "focusedRust": 45,
+  "fullLibrary": {
+    "executedPath": "/target/debug/deps/recalld-7025a4141187b374",
+    "failed": 0,
+    "filtered": 0,
+    "ignored": 0,
+    "passed": 1234,
+    "seconds": 536.93,
+    "sha256": "cfd330c0ae9e1d5e5e5bbce7b127c8e415ef27172c4aed8d315ac9b4076ddd63"
+  },
+  "limits": {
+    "cargoJobs": 1,
+    "cpus": 2,
+    "memoryGiB": 4,
+    "network": "none"
+  },
+  "lineages": {
+    "focusedActual": {
+      "finalGeneration": {
+        "generation": "20",
+        "storeId": "dbf09151-3cd6-4f35-9e72-c375dd8c9030"
+      },
+      "independentNativeGenesis": false,
+      "phaseHashes": [
+        "1e104d0b99869671d28c860e07a84a102a1db032c9c573a04ed2988847f2347d",
+        "cbf6ead2c1b9b60e9a969390993dc7d3bdc7feca6288af93f371ac26866fbfbd",
+        "30cc5ce4298aa0ea81bde7fbc00737bfbb97181c93c38e0b93ca92bf0214f2c0",
+        "232fb6f388789430114246eecd7253099f294eca52ba38fdd9afda6777a8f742"
+      ],
+      "restores": 3,
+      "suffixes": 4
+    },
+    "full": {
+      "finalGeneration": {
+        "generation": "20",
+        "storeId": "da30f844-2729-4628-870c-fa5efeca8d66"
+      },
+      "independentNativeGenesis": false,
+      "phaseHashes": [
+        "52dd9a1019c5076218f05a7ddd3bd54370c09c507f99a7dc64eb252fb0abc084",
+        "cfd4c1de3d11d3efd751356df1e1aa4af331c7b635aac5c259ad748572f07d60",
+        "1151c5ec55bc0218157f17c096ba4ae7f5a4c85604236cd91958fb50017c1a05",
+        "c9c81dadedbc455432128a981b35d5cc44f8ece7a2de8f5aa04dde2e2fce4008"
+      ],
+      "restores": 3,
+      "suffixes": 4
+    }
+  },
+  "manifestNegativeCases": [
+    {
+      "case": "manifest-version",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-manifest-version.json",
+        "--out",
+        "/output/negative-output-manifest-version"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "sweep-origin",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-sweep-origin.json",
+        "--out",
+        "/output/negative-output-sweep-origin"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "native-writes",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-native-writes.json",
+        "--out",
+        "/output/negative-output-native-writes"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "physical-compaction",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-physical-compaction.json",
+        "--out",
+        "/output/negative-output-physical-compaction"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "canonical-schema",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-canonical-schema.json",
+        "--out",
+        "/output/negative-output-canonical-schema"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "multiplier",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-multiplier.json",
+        "--out",
+        "/output/negative-output-multiplier"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "rng",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-rng.json",
+        "--out",
+        "/output/negative-output-rng"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "full-reset",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-full-reset.json",
+        "--out",
+        "/output/negative-output-full-reset"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "source-hash",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-source-hash.json",
+        "--out",
+        "/output/negative-output-source-hash"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    },
+    {
+      "case": "binary-hash",
+      "command": [
+        "python3",
+        "scripts/public-mcp-evaluation.py",
+        "run",
+        "--binary",
+        "/target/debug/examples/owned_evaluator",
+        "--scorer",
+        "/target/debug/examples/score_mcp_episode",
+        "--source-root",
+        "/work/source",
+        "--manifest",
+        "/output/inputs/negative-binary-hash.json",
+        "--out",
+        "/output/negative-output-binary-hash"
+      ],
+      "exitCode": 1,
+      "outputExists": false
+    }
+  ],
+  "parents": {
+    "135": "24da9206ba141493cdb9ca988188be6d5690a814",
+    "143": "0f34cd30e48b59dd655b3285d00f8b99e92c32d1"
+  },
+  "pythonTests": 23,
+  "remainingGates": [
+    "native physical compaction consumer",
+    "public native API1 writers and suffixes",
+    "ordinary native startup",
+    "public2/fullA6",
+    "broader A6 trace/grouping/scorer adapter implementation"
+  ],
+  "results": {
+    "episode": {
+      "actionsPerSuffix": 17,
+      "actorCurrentStepOnly": true,
+      "canaries": [
+        {
+          "actorBehaviorVerified": true,
+          "environmentHash": "f7dbbfaca42a4b77af781fa976fa01d414df0b7831626fb82727295c67fa33b8",
+          "logicalHash": "c9c81dadedbc455432128a981b35d5cc44f8ece7a2de8f5aa04dde2e2fce4008",
+          "variant": "labels"
+        },
+        {
+          "actorBehaviorVerified": true,
+          "environmentHash": "9bea3fd5ffd816a97367a12cdc37099f2ff736aebe3974b5e66d661ec3b0586a",
+          "logicalHash": "c9c81dadedbc455432128a981b35d5cc44f8ece7a2de8f5aa04dde2e2fce4008",
+          "variant": "future"
+        }
+      ],
+      "hashes": [
+        "c9c81dadedbc455432128a981b35d5cc44f8ece7a2de8f5aa04dde2e2fce4008",
+        "c9c81dadedbc455432128a981b35d5cc44f8ece7a2de8f5aa04dde2e2fce4008",
+        "c9c81dadedbc455432128a981b35d5cc44f8ece7a2de8f5aa04dde2e2fce4008",
+        "c9c81dadedbc455432128a981b35d5cc44f8ece7a2de8f5aa04dde2e2fce4008"
+      ],
+      "negativeCases": [
+        {
+          "case": "old-owner",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "old-query-worker-active",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "unsupported-checkpoint-clock",
+          "error": "CONTROL_UNAVAILABLE"
+        },
+        {
+          "case": "existing-destination",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "symlink-destination",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-manifest-digest",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-source",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "unbound",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-model",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-revision",
+          "exitCode": 1,
+          "providerCalls": 0
+        }
+      ],
+      "originalOwnerBytesUnchanged": true,
+      "restores": 3,
+      "sourceCheckpointBytesUnchanged": true,
+      "status": "passed",
+      "track": "serialized-native-sweep-synthetic-diagnostic-v1"
+    },
+    "legacy-sweep-regression": {
+      "actorCurrentStepOnly": true,
+      "freshOwnerSuffixReplays": 3,
+      "logicalSuffixHash": "598f61f37c1e1a1f26946d45284d7aef124e8cc6a04954be9031cb6c342716f7",
+      "negativeCases": [
+        {
+          "case": "old-owner-active",
+          "destination": "/output/legacy-sweep-regression/runtime/negative-old-owner-active",
+          "exitCode": 1
+        },
+        {
+          "case": "old-worker-active",
+          "destination": "/output/legacy-sweep-regression/runtime/negative-old-worker-active",
+          "exitCode": 1
+        },
+        {
+          "case": "unsupported-checkpoint-clock",
+          "error": "CONTROL_UNAVAILABLE",
+          "newCheckpointPublished": false
+        },
+        {
+          "case": "existing-destination",
+          "destination": "/output/legacy-sweep-regression/runtime/existing-destination",
+          "exitCode": 1
+        },
+        {
+          "case": "symlink-destination",
+          "destination": "/output/legacy-sweep-regression/runtime/symlink-destination",
+          "exitCode": 1
+        },
+        {
+          "case": "wrong-manifest-digest",
+          "destination": "/output/legacy-sweep-regression/runtime/negative-wrong-manifest-digest",
+          "exitCode": 1
+        },
+        {
+          "case": "wrong-source",
+          "destination": "/output/legacy-sweep-regression/runtime/negative-wrong-source",
+          "exitCode": 1
+        }
+      ],
+      "originalOwnerBytesUnchanged": true,
+      "rawSuffixEquality": true,
+      "sourceCheckpointBytesUnchanged": true,
+      "status": "passed",
+      "track": "serialized-owned-sweep-synthetic-diagnostic-v1"
+    },
+    "native-prefix-regression": {
+      "actionsPerSuffix": 15,
+      "actorCurrentStepOnly": true,
+      "canaries": [
+        {
+          "actorBehaviorVerified": true,
+          "environmentHash": "d8c68ada1978affa6c42da2bbc843a399fdb7463d873fb4601c3ef9c9a285954",
+          "logicalHash": "ea7adde15efce8c7c14b0eece6ad4f08fe06d28dd238ef3b8efa691e9b759a8b",
+          "variant": "labels"
+        },
+        {
+          "actorBehaviorVerified": true,
+          "environmentHash": "917d199cbd938f6804e7c0a8a509a8c09cf48241640940be4dee2a72df814819",
+          "logicalHash": "ea7adde15efce8c7c14b0eece6ad4f08fe06d28dd238ef3b8efa691e9b759a8b",
+          "variant": "future"
+        }
+      ],
+      "hashes": [
+        "ea7adde15efce8c7c14b0eece6ad4f08fe06d28dd238ef3b8efa691e9b759a8b",
+        "ea7adde15efce8c7c14b0eece6ad4f08fe06d28dd238ef3b8efa691e9b759a8b",
+        "ea7adde15efce8c7c14b0eece6ad4f08fe06d28dd238ef3b8efa691e9b759a8b",
+        "ea7adde15efce8c7c14b0eece6ad4f08fe06d28dd238ef3b8efa691e9b759a8b"
+      ],
+      "negativeCases": [
+        {
+          "case": "old-owner",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "old-query-worker-active",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "unsupported-checkpoint-clock",
+          "error": "CONTROL_UNAVAILABLE"
+        },
+        {
+          "case": "existing-destination",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "symlink-destination",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-manifest-digest",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-source",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "unbound",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-model",
+          "exitCode": 1,
+          "providerCalls": 0
+        },
+        {
+          "case": "wrong-revision",
+          "exitCode": 1,
+          "providerCalls": 0
+        }
+      ],
+      "originalOwnerBytesUnchanged": true,
+      "restores": 3,
+      "sourceCheckpointBytesUnchanged": true,
+      "status": "passed",
+      "track": "serialized-native-prefix-synthetic-diagnostic-v1"
+    }
+  },
+  "runtimeFailures": 0,
+  "scorerTests": 3,
+  "sourceCommit": "e1d4cea92f3ae8bed6fc9e1865a5ce05d89bea38",
+  "sourceFiles": 321,
+  "sourceSnapshotsEqual": true
+}
