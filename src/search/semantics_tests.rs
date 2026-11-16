@@ -1019,13 +1019,13 @@ async fn entity_total_budget_counts_vector_fts_overlap_before_union() {
                 let channel = &result.diagnostics.channels.as_ref().unwrap()[&Entity];
                 assert_eq!(channel.offered, Some(4), "overlap={overlap}");
                 assert_eq!(channel.admitted, Some(4));
-                // This interface does not measure the uncapped scan. A full
-                // page alone proves neither exhaustion nor unseen candidates.
-                assert_eq!(channel.examined, None);
-                assert_eq!(channel.eligible, None);
-                assert_eq!(channel.exhausted, None);
-                assert_eq!(channel.candidate_limited, None);
-                assert_eq!(channel.budget_exhausted, None);
+                // Actual target postings: 75 rejected UUIDs under two keys + 8 eligible.
+                assert_eq!(channel.examined, Some(158));
+                assert_eq!(channel.examined_unit, Some(ExaminationUnit::EntityPostings));
+                assert_eq!(channel.eligible, Some(8));
+                assert_eq!(channel.exhausted, Some(true));
+                assert_eq!(channel.candidate_limited, Some(true));
+                assert_eq!(channel.budget_exhausted, Some(false));
                 assert_eq!(result.response.total_matches, 5); // Four entities + vector 108.
                 assert_eq!(result.response.results[0].memory_id, mid(108));
                 let evidence = &result.diagnostics.provenance.as_ref().unwrap()[&mid(108)];
@@ -1086,10 +1086,11 @@ async fn diagnostics_capture_overlapping_sources_before_dedup_and_only_returned_
         assert_eq!(channels[&channel].admitted, Some(offered));
         assert_eq!(channels[&channel].returned_own, 2);
     }
-    for channel in [Vector, Entity] {
-        assert_eq!(channels[&channel].examined, None);
-        assert_eq!(channels[&channel].eligible, None);
-        assert_eq!(channels[&channel].exhausted, None);
+    for (channel, count) in [(Vector, 2), (Entity, 3)] {
+        assert_eq!(channels[&channel].examined, Some(count));
+        assert_eq!(channels[&channel].eligible, Some(count));
+        assert_eq!(channels[&channel].exhausted, Some(true));
+        assert_eq!(channels[&channel].candidate_limited, Some(false));
     }
     assert_eq!(channels[&Fts].examined, Some(3));
     assert_eq!(channels[&Fts].exhausted, Some(true));
@@ -1279,7 +1280,8 @@ async fn diagnostics_report_unknown_vector_exhaustion_and_measured_metadata_cap(
     use RetrievalChannel::*;
     let records: Vec<_> = (1..=150).map(|n| rec(mid(n))).collect();
     let vectors: Vec<_> = (1..=150).map(|n| (mid(n), 0.9)).collect();
-    let (engine, _) = graph_engine(records, &vectors, &[]);
+    let (mut engine, _) = graph_engine(records, &vectors, &[]);
+    engine.vector_indexes = Arc::new(ResultOnlyVector(engine.vector_indexes.clone()));
     let vector = engine
         .search_with_semantics(query(serde_json::json!({"text":"q","limit":1})), current())
         .await
@@ -1307,7 +1309,8 @@ async fn diagnostics_report_unknown_vector_exhaustion_and_measured_metadata_cap(
         (count.offered, count.eligible, count.admitted),
         (Some(150), Some(150), Some(100))
     );
-    assert_eq!(count.examined, None); // Rejected canonical rows weren't instrumented.
+    assert_eq!(count.examined, Some(150));
+    assert_eq!(count.examined_unit, Some(ExaminationUnit::CanonicalRecords));
     assert_eq!(count.exhausted, Some(true));
     assert_eq!(count.candidate_limited, Some(true));
     assert_eq!(count.budget_exhausted, Some(false));
@@ -1320,4 +1323,570 @@ async fn diagnostics_report_unknown_vector_exhaustion_and_measured_metadata_cap(
         assert_eq!(channels[&channel].offered, None);
     }
     assert_score_provenance(&metadata);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_vector_coverage_distinguishes_exact_cap_from_truncation() {
+    for n in [99, 100, 101] {
+        let records = (1..=n).map(|id| rec(mid(id))).collect();
+        let vectors: Vec<_> = (1..=n).map(|id| (mid(id), 0.8)).collect();
+        let (engine, _) = graph_engine(records, &vectors, &[]);
+        let result = engine
+            .search_with_semantics(
+                query(serde_json::json!({"text":"q", "limit":1, "graphDepth":0})),
+                history(),
+            )
+            .await
+            .unwrap();
+        let count = &result.diagnostics.channels.as_ref().unwrap()[&RetrievalChannel::Vector];
+        assert_eq!(count.examined, Some(n as usize));
+        assert_eq!(count.eligible, Some(n as usize));
+        assert_eq!(count.exhausted, Some(true));
+        assert_eq!(count.candidate_limited, Some(n > 100));
+        assert_eq!(count.budget_exhausted, Some(false));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_entity_coverage_counts_actual_posting_work_before_cap() {
+    let mut records: Vec<_> = (1..=5)
+        .map(|id| {
+            let mut r = rec(mid(id));
+            r.entities = vec!["alice".into(), "bob".into()];
+            r
+        })
+        .collect();
+    records[3].tags.push(Tag::new("blocked").unwrap());
+    records[4].namespace_id = other_ns();
+    let vectors: Vec<_> = (1..=5).map(|id| (mid(id), 0.8)).collect();
+    let (engine, _) = graph_engine(records, &vectors, &[]);
+    let result = engine
+        .search_with_semantics(
+            query(serde_json::json!({
+                "text":"q", "limit":1, "graphDepth":0,
+                "entities":["alice", "ALICE", "bob"], "filter":{"excludeTags":["blocked"]}
+            })),
+            history(),
+        )
+        .await
+        .unwrap();
+    let channels = result.diagnostics.channels.as_ref().unwrap();
+    let count = &channels[&RetrievalChannel::Entity];
+    assert_eq!(count.examined, Some(8)); // Four target-namespace UUIDs, two distinct keys.
+    assert_eq!(count.eligible, Some(3)); // Distinct canonical eligible UUIDs.
+    assert_eq!(count.offered, Some(2)); // Total entity2L, including vector overlap.
+    assert_eq!(count.admitted, Some(2));
+    assert_eq!(count.exhausted, Some(true));
+    assert_eq!(count.candidate_limited, Some(true));
+    assert_eq!(count.budget_exhausted, Some(false));
+    let vector = &channels[&RetrievalChannel::Vector];
+    assert_eq!(vector.examined, Some(5)); // Shared physical vector entries include foreign UUID.
+    assert_eq!(vector.eligible, Some(3));
+    assert_eq!(vector.candidate_limited, Some(false));
+    assert!(
+        !result
+            .diagnostics
+            .provenance
+            .as_ref()
+            .unwrap()
+            .contains_key(&mid(4))
+    );
+    assert!(
+        !result
+            .diagnostics
+            .provenance
+            .as_ref()
+            .unwrap()
+            .contains_key(&mid(5))
+    );
+}
+
+// Deliberately only the pre-existing result interface: defaults must not infer
+// source completion from an actual producer hidden behind this adapter.
+struct ResultOnlyVector(Arc<dyn VectorIndexRegistry>);
+impl VectorIndexRegistry for ResultOnlyVector {
+    fn search(
+        &self,
+        ns: NamespaceId,
+        q: &[f32],
+        k: usize,
+        ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<Vec<ScoredResult>> {
+        self.0.search(ns, q, k, ids)
+    }
+    fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>> {
+        self.0.get_vector(id)
+    }
+}
+struct ResultOnlyEntity(Arc<dyn EntityIndexReader>);
+impl EntityIndexReader for ResultOnlyEntity {
+    fn find_by_entities(
+        &self,
+        ns: NamespaceId,
+        e: &[String],
+        exclude: MemoryId,
+        k: usize,
+        ids: &HashSet<MemoryId>,
+    ) -> Result<Vec<EntityRecallResult>> {
+        self.0.find_by_entities(ns, e, exclude, k, ids)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_empty_unrequested_and_result_only_remain_distinct() {
+    let (mut engine, _) = graph_engine(Vec::new(), &[], &[]);
+    let q = serde_json::json!({"text":"q", "entities":["alice"], "graphDepth":0});
+    let measured = engine
+        .search_with_semantics(query(q.clone()), history())
+        .await
+        .unwrap();
+    for (channel, unit) in [
+        (RetrievalChannel::Vector, ExaminationUnit::VectorEntries),
+        (RetrievalChannel::Entity, ExaminationUnit::EntityPostings),
+    ] {
+        let c = &measured.diagnostics.channels.as_ref().unwrap()[&channel];
+        assert_eq!(c.participation, ChannelParticipation::Completed);
+        assert_eq!(
+            (c.examined, c.eligible, c.offered, c.admitted),
+            (Some(0), Some(0), Some(0), Some(0))
+        );
+        assert_eq!(c.examined_unit, Some(unit));
+        assert_eq!(c.exhausted, Some(true));
+        assert_eq!(c.candidate_limited, Some(false));
+    }
+    engine.vector_indexes = Arc::new(ResultOnlyVector(engine.vector_indexes.clone()));
+    engine.entity_index = Arc::new(ResultOnlyEntity(engine.entity_index.clone()));
+    let unknown = engine
+        .search_with_semantics(query(q), history())
+        .await
+        .unwrap();
+    for channel in [RetrievalChannel::Vector, RetrievalChannel::Entity] {
+        let c = &unknown.diagnostics.channels.as_ref().unwrap()[&channel];
+        assert_eq!(c.participation, ChannelParticipation::Completed);
+        assert_eq!(
+            (
+                c.examined,
+                c.eligible,
+                c.examined_unit,
+                c.exhausted,
+                c.candidate_limited,
+                c.budget_exhausted
+            ),
+            (None, None, None, None, None, None)
+        );
+        assert_eq!(c.offered, Some(0));
+    }
+    let metadata = engine
+        .search_with_semantics(
+            query(serde_json::json!({"queryMode":"metadata_only", "filter":{"minStrength":0.0}})),
+            history(),
+        )
+        .await
+        .unwrap();
+    for channel in [RetrievalChannel::Vector, RetrievalChannel::Entity] {
+        let c = &metadata.diagnostics.channels.as_ref().unwrap()[&channel];
+        assert_eq!(c.participation, ChannelParticipation::NotRequested);
+        assert_eq!(
+            (c.examined, c.examined_unit, c.exhausted),
+            (None, None, None)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_source_entity_cap_parity_exclusion_and_empty_keys() {
+    use crate::search::{EntityIndex, adapters::SharedEntityIndexReader};
+    let mut index = EntityIndex::new();
+    for n in 1..=5 {
+        index.add(ns(), mid(n), &["alice".into(), "bob".into()]);
+    }
+    index.add(other_ns(), mid(6), &["alice".into()]);
+    let adapter = SharedEntityIndexReader::new(Arc::new(tokio::sync::RwLock::new(index)));
+    let ids = [mid(1), mid(2), mid(3), mid(4)].into_iter().collect();
+    let entities = vec!["alice".into(), "ALICE".into(), "bob".into()];
+    for k in [0, 2, 3, 4] {
+        let source = adapter
+            .find_by_entities_measured(ns(), &entities, mid(4), k, &ids)
+            .unwrap();
+        let plain = adapter
+            .find_by_entities(ns(), &entities, mid(4), k, &ids)
+            .unwrap();
+        let pairs = |rows: &[EntityRecallResult]| {
+            rows.iter()
+                .map(|r| (r.memory_id, r.shared_count))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(pairs(&source.results), pairs(&plain));
+        assert_eq!(
+            pairs(&source.results),
+            (1..=3).take(k).map(|n| (mid(n), 2)).collect::<Vec<_>>()
+        );
+        let c = source.coverage.unwrap();
+        assert_eq!((c.examined, c.eligible), (10, 3));
+        assert!(c.exhausted); // Even k=0 actually scans this producer.
+        assert_eq!(c.candidate_limited, k < 3);
+        assert!(!c.budget_exhausted);
+    }
+    let empty = adapter
+        .find_by_entities_measured(ns(), &[], MemoryId::nil(), 2, &ids)
+        .unwrap();
+    assert_eq!(empty.coverage.unwrap().examined, 0);
+    assert!(empty.coverage.unwrap().exhausted);
+}
+
+fn canonical_eligibility_fixture() -> QueryEngine {
+    let mut records: Vec<_> = (1..=8).map(|n| rec(mid(n))).collect();
+    records[1].phase = DecayPhase::Ghost;
+    records[2].phase = DecayPhase::Tombstone;
+    records[3].phase = DecayPhase::Summary;
+    records[4].strength = 0.1;
+    records[4].tags.push(Tag::new("blocked").unwrap());
+    records[5].tags.push(Tag::new("blocked").unwrap());
+    records[7].namespace_id = other_ns(); // Not presented by namespace enumeration.
+    let vectors: Vec<_> = (1..=8).map(|n| (mid(n), 0.8)).collect();
+    graph_engine(records, &vectors, &[]).0
+}
+
+fn canonical_eligibility_query(metadata: bool) -> SearchQuery {
+    let mut q = query(serde_json::json!({
+        "text":"q", "limit":10, "graphDepth":0,
+        "filter":{"phases":["full"], "minStrength":0.5, "excludeTags":["blocked"]}
+    }));
+    if metadata {
+        q.query_mode = QueryMode::MetadataOnly;
+        q.text = None;
+    }
+    q
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_metadata_measures_presented_rows_before_filter() {
+    let engine = canonical_eligibility_fixture();
+    let out = engine
+        .search_with_semantics(canonical_eligibility_query(true), history())
+        .await
+        .unwrap();
+    assert_eq!(result_ids(&out.response), vec![mid(1), mid(7)]);
+    let metadata = &out.diagnostics.channels.as_ref().unwrap()[&RetrievalChannel::Metadata];
+    assert_eq!(metadata.examined, Some(7));
+    assert_eq!(
+        metadata.examined_unit,
+        Some(ExaminationUnit::CanonicalRecords)
+    );
+    assert_eq!(metadata.eligible, Some(2));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_shared_hybrid_work_is_not_metadata_participation() {
+    use HardFilterRejection::*;
+    let engine = canonical_eligibility_fixture();
+    let out = engine
+        .search_with_semantics(canonical_eligibility_query(false), history())
+        .await
+        .unwrap();
+    assert_eq!(result_ids(&out.response), vec![mid(1), mid(7)]);
+    let facts = out
+        .diagnostics
+        .canonical_eligibility
+        .as_ref()
+        .expect("actual hard-filter loop measurements");
+    assert_eq!(facts.examined_unit, ExaminationUnit::CanonicalRecords);
+    assert_eq!((facts.examined, facts.passed), (7, 2));
+    assert_eq!(
+        facts.first_rejections,
+        [
+            (Tombstone, 1),
+            (Ghost, 1),
+            (Phase, 1),
+            (Strength, 1),
+            (ExcludedTag, 1)
+        ]
+        .into_iter()
+        .collect()
+    );
+    let metadata = &out.diagnostics.channels.as_ref().unwrap()[&RetrievalChannel::Metadata];
+    assert_eq!(metadata.participation, ChannelParticipation::NotRequested);
+    assert_eq!(
+        (
+            metadata.examined,
+            metadata.examined_unit,
+            metadata.exhausted
+        ),
+        (None, None, None)
+    );
+}
+
+#[test]
+fn canonical_eligibility_first_rejection_preserves_short_circuit_order() {
+    use HardFilterRejection::*;
+    let mut q = canonical_eligibility_query(true);
+    q.filter.permastore_only = true;
+    q.filter.labels.entities = vec!["alice".into()];
+    q.filter.require_tags = vec![Tag::new("required").unwrap()];
+    let mut good = rec(mid(1));
+    good.is_permastore = true;
+    good.tags = vec![
+        Tag::new("entity/alice").unwrap(),
+        Tag::new("required").unwrap(),
+    ];
+    // Each row fails its named predicate and every later record predicate.
+    let mut blocked = good.clone();
+    blocked.tags.push(Tag::new("blocked").unwrap());
+    let mut required = blocked.clone();
+    required.tags.retain(|tag| tag.as_str() != "required");
+    let mut labels = required.clone();
+    labels.tags.retain(|tag| tag.as_str() != "entity/alice");
+    let mut permastore = labels.clone();
+    permastore.is_permastore = false;
+    let mut strength = permastore.clone();
+    strength.strength = 0.1;
+    let mut phase = strength.clone();
+    phase.phase = DecayPhase::Summary;
+    let mut ghost = phase.clone();
+    ghost.phase = DecayPhase::Ghost;
+    let mut tombstone = ghost.clone();
+    tombstone.phase = DecayPhase::Tombstone;
+    let mut foreign = tombstone.clone();
+    foreign.namespace_id = other_ns();
+    let rows = [
+        (foreign, Namespace),
+        (tombstone, Tombstone),
+        (ghost, Ghost),
+        (phase, Phase),
+        (strength, Strength),
+        (permastore, Permastore),
+        (labels, Labels),
+        (required, RequiredTag),
+        (blocked, ExcludedTag),
+    ];
+    for compiled in [false, true] {
+        q.filter.compiled_labels = compiled.then(|| q.filter.labels.compile());
+        assert!(QueryEngine::passes_hard_filters(&good, &q, ns()));
+        assert!(QueryEngine::record_passes_filter(&good, &q.filter));
+        for (row, reason) in &rows {
+            assert_eq!(
+                QueryEngine::hard_filter_rejection(row, &q, ns()),
+                Some(*reason)
+            );
+            assert!(!QueryEngine::passes_hard_filters(row, &q, ns()));
+        }
+        // Record-only callers still reject tombstones; ghost opt-in still reaches phase filtering.
+        assert!(!QueryEngine::record_passes_filter(&rows[1].0, &q.filter));
+        q.include_ghosts = true;
+        assert_eq!(
+            QueryEngine::hard_filter_rejection(&rows[2].0, &q, ns()),
+            Some(Phase)
+        );
+        q.include_ghosts = false;
+    }
+}
+
+/// Controlled adapter boundary cases, not states accepted by canonical storage.
+struct EligibilityRows {
+    records: Vec<CachedRecord>,
+    fail: bool,
+}
+#[async_trait::async_trait]
+impl MetadataStore for EligibilityRows {
+    async fn get(&self, id: &MemoryId) -> Result<Option<CachedRecord>> {
+        Ok(self.records.iter().find(|r| r.id == *id).cloned())
+    }
+    async fn get_batch(&self, ids: &[MemoryId]) -> Result<Vec<CachedRecord>> {
+        Ok(self
+            .records
+            .iter()
+            .filter(|r| ids.contains(&r.id))
+            .cloned()
+            .collect())
+    }
+    async fn list_namespace_memories(&self, _: NamespaceId) -> Result<Vec<MemoryId>> {
+        unreachable!("controlled namespace_records override")
+    }
+    async fn namespace_records(&self, _: NamespaceId) -> Result<Vec<CachedRecord>> {
+        if self.fail {
+            return Err(SearchError::MetadataError(
+                "controlled enumeration failure".into(),
+            ));
+        }
+        Ok(self.records.clone())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_controlled_duplicate_and_foreign_rows_are_not_unique_counts() {
+    let (mut engine, _) = graph_engine(vec![rec(mid(1))], &[], &[]);
+    let mut foreign = rec(mid(2));
+    foreign.namespace_id = other_ns();
+    foreign.phase = DecayPhase::Tombstone; // Namespace is the first real rejection.
+    engine.meta_store = Arc::new(EligibilityRows {
+        records: vec![rec(mid(1)), rec(mid(1)), foreign],
+        fail: false,
+    });
+    let out = engine
+        .search_with_semantics(canonical_eligibility_query(true), history())
+        .await
+        .unwrap();
+    assert_eq!(result_ids(&out.response), vec![mid(1)]);
+    let facts = out.diagnostics.canonical_eligibility.unwrap();
+    assert_eq!((facts.examined, facts.passed), (3, 2));
+    assert_eq!(
+        facts.first_rejections,
+        [(HardFilterRejection::Namespace, 1)].into_iter().collect()
+    );
+    let metadata = &out.diagnostics.channels.unwrap()[&RetrievalChannel::Metadata];
+    assert_eq!(
+        (metadata.examined, metadata.eligible, metadata.admitted),
+        (Some(3), Some(1), Some(1))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_empty_rejected_and_v1_score_parity() {
+    for records in [
+        vec![],
+        vec![{
+            let mut row = rec(mid(1));
+            row.phase = DecayPhase::Tombstone;
+            row
+        }],
+    ] {
+        let n = records.len();
+        let (engine, _) = graph_engine(records, &[], &[]);
+        let out = engine
+            .search_with_semantics(canonical_eligibility_query(true), history())
+            .await
+            .unwrap();
+        assert!(out.response.results.is_empty());
+        let facts = out.diagnostics.canonical_eligibility.unwrap();
+        assert_eq!((facts.examined, facts.passed), (n, 0));
+        assert_eq!(facts.first_rejections.values().sum::<usize>(), n);
+        let metadata = &out.diagnostics.channels.unwrap()[&RetrievalChannel::Metadata];
+        assert_eq!(
+            (metadata.examined, metadata.eligible, metadata.exhausted),
+            (Some(n), Some(0), Some(true))
+        );
+    }
+    for metadata in [false, true] {
+        let engine = canonical_eligibility_fixture();
+        let legacy = engine
+            .search_with_semantics(
+                canonical_eligibility_query(metadata),
+                RetrievalSemantics::V1,
+            )
+            .await
+            .unwrap();
+        let measured = engine
+            .search_with_semantics(canonical_eligibility_query(metadata), history())
+            .await
+            .unwrap();
+        let scores = |out: &SearchResponse| {
+            out.results
+                .iter()
+                .map(|r| (r.memory_id, r.composite_score.map(f32::to_bits)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(scores(&legacy.response), scores(&measured.response));
+        assert!(legacy.diagnostics.canonical_eligibility.is_none());
+        let facts = measured.diagnostics.canonical_eligibility.unwrap();
+        assert_eq!(
+            facts.examined,
+            facts.passed + facts.first_rejections.values().sum::<usize>()
+        );
+    }
+}
+
+struct NoEligibilityObservation;
+#[async_trait::async_trait]
+impl AccessRecorder for NoEligibilityObservation {
+    async fn record_access(
+        &self,
+        _: MemoryId,
+        _: AccessKind,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        panic!("failed eligibility must not observe")
+    }
+    async fn record_access_batch(
+        &self,
+        _: &[(MemoryId, AccessKind)],
+        _: Option<&crate::storage::control::ExposureScope>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        panic!("failed eligibility must not observe")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_errors_fail_before_observer_not_measured_empty_success() {
+    for failure in 0..3 {
+        let mut row = rec(mid(1));
+        if failure == 1 {
+            // Controlled nonfinite eligible row: existing validation must still fail.
+            row.strength = f32::NAN;
+        } else if failure == 2 {
+            // Controlled schema mismatch must fail projection, even though phase
+            // filtering would reject this row later. No pre-filter shortcut.
+            use crate::model::schema::{LifecycleFields, LifecycleVersion, TimestampOrigin};
+            row.phase = DecayPhase::Tombstone;
+            row.lifecycle = Some(LifecycleFields {
+                observed_at: 0,
+                retrieved_at: None,
+                reinforced_at: None,
+                decay_anchor_at: 0,
+                lifecycle_version: LifecycleVersion::LegacyAccessV1,
+                lifecycle_updated_at: 0,
+                timestamp_origin: TimestampOrigin::LegacyInferred,
+                phase_changed_at: 0,
+                policy_revision: Default::default(),
+                record_generation: Default::default(),
+            });
+        }
+        let (mut engine, _) = graph_engine(vec![rec(mid(1))], &[], &[]);
+        engine.meta_store = Arc::new(EligibilityRows {
+            records: vec![row],
+            fail: failure == 0,
+        });
+        engine.access_recorder = Arc::new(NoEligibilityObservation);
+        let mut q = canonical_eligibility_query(true);
+        q.record_access = true;
+        let error = engine
+            .search_with_semantics(q, history())
+            .await
+            .err()
+            .expect("failure, not empty measured success");
+        let expected = match failure {
+            0 => "controlled enumeration failure",
+            1 => "nonfinite",
+            _ => "record lifecycle/policy does not match pinned namespace",
+        };
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn canonical_eligibility_real_adapter_false_mode_retains_record_bytes() {
+    use crate::test_support::Fixture;
+    let fixture = Fixture::new();
+    let ids = [fixture.insert_memory().await, fixture.insert_memory().await];
+    let before = ids.map(|id| fixture.record(id).unwrap().to_bytes());
+    let mut engine = search_engine(Vec::new(), &[]);
+    engine.meta_store = Arc::new(StorageMetadataAdapter::new(fixture.storage.clone()));
+    engine.graph = Arc::new(SharedGraphReader::new(fixture.graph.clone()));
+    engine.access_recorder = Arc::new(NoEligibilityObservation);
+    for mode in [current(), history()] {
+        let out = engine
+            .search_with_semantics(
+                query(serde_json::json!({
+                    "queryMode":"metadata_only", "recordAccess":false,
+                    "filter":{"minStrength":0.0}, "graphDepth":0
+                })),
+                mode,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.response.results.len(), 2);
+        let facts = out.diagnostics.canonical_eligibility.unwrap();
+        assert_eq!((facts.examined, facts.passed), (2, 2));
+        assert!(facts.first_rejections.is_empty());
+    }
+    tokio::task::yield_now().await;
+    assert_eq!(before, ids.map(|id| fixture.record(id).unwrap().to_bytes()));
 }

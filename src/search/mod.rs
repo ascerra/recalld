@@ -51,18 +51,21 @@ pub use entity_normalize::canonicalize_entity;
 // --- CS-16 re-exports ---
 pub use error::SearchError;
 pub use pipeline::{
-    AccessRecorder, ChannelDiagnostics, ChannelParticipation, CoherentGetResponse,
-    CoherentSearchResponse, CoherentSimilarResponse, DirectScoreEvidence,
-    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, FtsAvailability,
-    FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, InheritedScoreExplanation,
-    MAX_EXPLANATION_SOURCES, MetadataStore, MinScoreDisposition, NamespaceResolver,
+    AccessRecorder, CanonicalEligibilityDiagnostics, ChannelDiagnostics, ChannelParticipation,
+    CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse, DirectScoreEvidence,
+    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, ExaminationUnit,
+    FtsAvailability, FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, HardFilterRejection,
+    InheritedScoreExplanation, MAX_EXPLANATION_SOURCES, MAX_RIF_EXAMINED_EDGES, MAX_RIF_PAIRS,
+    MAX_RIF_TARGETS_PER_ANCHOR, MetadataStore, MinScoreDisposition, NamespaceResolver,
     OwnScoreExplanation, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
-    RetrievalSemantics, RifProcessor, RifSuppression, ScoreExplanation, ScoreFormula, ScoredResult,
-    SemanticsDiagnostics, SemanticsResponse, StrengthDiagnostics, UnresolvedReason,
-    VectorIndexRegistry, VersionMode, VersionStatus,
+    RetrievalSemantics, RifDiagnostics, RifMode, RifProcessor, RifSuppression, ScoreExplanation,
+    ScoreFormula, ScoredResult, SemanticsDiagnostics, SemanticsResponse, SourceCoverage,
+    SourceResults, StrengthDiagnostics, UnresolvedReason, VectorIndexRegistry, VersionMode,
+    VersionStatus,
 };
 pub(crate) use pipeline::{
-    SelectedSimilarity, SimilarityExclusion, SimilarityScope, SimilaritySelection,
+    SelectedSimilarity, SimilarityAlgorithm, SimilarityExclusion, SimilarityExplanation,
+    SimilarityOrigin, SimilarityOwnAdmission, SimilarityScope, SimilaritySelection,
 };
 pub use query::SearchFilter as PipelineSearchFilter;
 pub use query::{QueryMode, SearchQuery};

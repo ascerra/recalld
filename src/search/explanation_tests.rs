@@ -3,7 +3,7 @@ use super::tests::{mid, ns, other_ns, query, rec};
 use super::*;
 use crate::model::{EdgeType, Tag};
 
-fn reconstruct(own: &OwnScoreExplanation) -> f32 {
+pub(super) fn reconstruct(own: &OwnScoreExplanation) -> f32 {
     let fts_signal = own.direct.fts.map_or(0.0, |fts| {
         if fts > 0.5 {
             1.0 - (-fts * 0.5).exp()

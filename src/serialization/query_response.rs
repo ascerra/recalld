@@ -190,6 +190,7 @@ impl QueryReply {
 pub(crate) fn project_similarity(
     selected: &crate::search::SelectedSimilarity,
     all_compatible: bool,
+    explain: bool,
 ) -> Result<QueryReply, SearchError> {
     let d = &selected.diagnostics;
     let RetrievalSemantics::V2(mode) = d.semantics else {
@@ -212,6 +213,12 @@ pub(crate) fn project_similarity(
         let mut value = serde_json::to_value(result)
             .map_err(|_| SearchError::Unavailable("similarity serialization failed".into()))?;
         value["namespaceId"] = json!(row.namespace.id);
+        if explain {
+            let evidence = row.explanation.as_ref().ok_or_else(|| {
+                SearchError::Unavailable("similarity explanation unavailable".into())
+            })?;
+            value["explanation"] = super::query_explanation::similarity(evidence);
+        }
         if let Some(embedding) = &row.payload.embedding {
             value["embedding"] = json!(embedding);
         }
@@ -287,6 +294,40 @@ fn counts(values: &std::collections::BTreeMap<UnresolvedReason, usize>) -> Value
     )
 }
 
+fn examination_unit(unit: crate::search::ExaminationUnit) -> &'static str {
+    use crate::search::ExaminationUnit::*;
+    match unit {
+        VectorEntries => "vectorEntries",
+        EntityPostings => "entityPostings",
+        FtsRows => "ftsRows",
+        ScoredVectors => "scoredVectors",
+        CanonicalRecords => "canonicalRecords",
+    }
+}
+
+fn eligibility(e: &crate::search::CanonicalEligibilityDiagnostics) -> Value {
+    use crate::search::HardFilterRejection::*;
+    let rejections: serde_json::Map<String, Value> = e
+        .first_rejections
+        .iter()
+        .map(|(reason, count)| {
+            let name = match reason {
+                Namespace => "namespace",
+                Tombstone => "tombstone",
+                Ghost => "ghost",
+                Phase => "phase",
+                Strength => "strength",
+                Permastore => "permastore",
+                Labels => "labels",
+                RequiredTag => "requiredTag",
+                ExcludedTag => "excludedTag",
+            };
+            (name.into(), json!(count))
+        })
+        .collect();
+    json!({"examinedUnit":examination_unit(e.examined_unit),"examined":e.examined,"passed":e.passed,"firstRejections":rejections})
+}
+
 pub(crate) fn project(
     prepared: &CoherentSearchResponse,
     explain: bool,
@@ -308,7 +349,7 @@ pub(crate) fn project(
             RetrievalChannel::Metadata => "metadata",
             RetrievalChannel::Graph => "graph",
         };
-        channel_values.insert(name.into(),json!({"participation":match c.participation {ChannelParticipation::NotRequested=>"notRequested",ChannelParticipation::Completed=>"completed"},"offered":c.offered,"admitted":c.admitted,"examined":c.examined,"eligible":c.eligible,"exhausted":c.exhausted,"candidateLimited":c.candidate_limited,"budgetExhausted":c.budget_exhausted,"returnedOwn":c.returned_own,"returnedInherited":c.returned_inherited}));
+        channel_values.insert(name.into(),json!({"participation":match c.participation {ChannelParticipation::NotRequested=>"notRequested",ChannelParticipation::Completed=>"completed"},"offered":c.offered,"admitted":c.admitted,"examinedUnit":c.examined_unit.map(examination_unit),"examined":c.examined,"eligible":c.eligible,"exhausted":c.exhausted,"candidateLimited":c.candidate_limited,"budgetExhausted":c.budget_exhausted,"returnedOwn":c.returned_own,"returnedInherited":c.returned_inherited}));
     }
     if payload.rows.len() != prepared.response.response.results.len() {
         return Err(unavailable());
@@ -363,6 +404,7 @@ pub(crate) fn project(
     let coverage = json!({
         "semanticsVersion":2,"versionMode":match mode{VersionMode::Current=>"current",VersionMode::History=>"history"},
         "budgetProfile":"retrieval-v2-default","channels":channel_values,
+        "canonicalEligibility":d.canonical_eligibility.as_ref().map(eligibility),
         "ftsAvailability":match d.fts.availability{FtsAvailability::NotRequested=>"notRequested",FtsAvailability::Available=>"available",FtsAvailability::Unavailable=>"unavailable"},
         "graph":{"expandedStates":d.graph.expanded_states,"examinedEdges":d.graph.examined_edges,"stateLimited":d.graph.state_limit,"edgeLimited":d.graph.edge_limit},
         "supersession":{"examinedEdges":d.supersession_edges_examined,"unresolved":counts(&d.unresolved),"workLimited":d.unresolved.contains_key(&UnresolvedReason::WorkLimit)||supplemental.supersession_work_limited},
