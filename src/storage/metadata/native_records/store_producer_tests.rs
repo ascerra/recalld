@@ -1746,9 +1746,10 @@ async fn native_document_recipe_plain_batch_with_explicit_auxiliary_disable() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_wire_actual_unknown_commit_keeps_original_operation_on_reopen() {
-    struct UnknownClock;
+    struct UnknownClock(Arc<AtomicUsize>);
     impl Clock for UnknownClock {
         fn now_millis(&self) -> i64 {
+            self.0.fetch_add(1, Ordering::SeqCst);
             crate::storage::metadata::effects::FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.set(true));
             86_400_000
         }
@@ -1760,13 +1761,15 @@ async fn native_single_wire_actual_unknown_commit_keeps_original_operation_on_re
     let f = Fixture::from_open_engine(root, s.engine);
     completion(&f).rebuild_all().await.unwrap();
     let p = provider(&d);
+    let diagnostic_clock_calls = Arc::new(AtomicUsize::new(0));
     let a = Arc::new(
         adapter(&f, p.clone(), clock.clone(), Default::default())
-            .with_clock(Arc::new(UnknownClock)),
+            .with_clock(Arc::new(UnknownClock(diagnostic_clock_calls.clone()))),
     );
     let body = serde_json::json!({"namespaceId":d.ns,"storeId":f.storage.read().unwrap().control_state().unwrap().store_id,"idempotencyKey":"wire-unknown-semantic","summary":"actual unknown wire outcome","checkDuplicates":false});
     let request =
         crate::serialization::native_single::Request::parse(&body, true, None, "native").unwrap();
+    let diagnostic_control_before = f.storage.read().unwrap().control_state();
     let rpc = crate::daemon::server::native_method_test_rpc(
         a.clone(),
         serde_json::to_value(&request).unwrap(),
@@ -1776,6 +1779,13 @@ async fn native_single_wire_actual_unknown_commit_keeps_original_operation_on_re
     assert!(rpc.error.is_none(), "{rpc:?}");
     let reply: crate::serialization::native_single::Reply =
         serde_json::from_value(rpc.result.unwrap()).unwrap();
+    let diagnostic_control_after = f.storage.read().unwrap().control_state();
+    eprintln!(
+        "NATIVE_UNKNOWN_DIAGNOSTIC reply={reply:?} provider_calls={} profile_calls={} clock_calls={} before={diagnostic_control_before:?} after={diagnostic_control_after:?}",
+        p.calls.load(Ordering::SeqCst),
+        p.profiles.load(Ordering::SeqCst),
+        diagnostic_clock_calls.load(Ordering::SeqCst),
+    );
     assert!(reply.receipt.is_none());
     let error = reply.error.unwrap();
     assert_eq!(error.code, "COMMIT_OUTCOME_UNKNOWN");
