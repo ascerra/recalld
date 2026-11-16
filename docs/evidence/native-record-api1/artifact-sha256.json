@@ -1,0 +1,78 @@
+{
+  "before.log": {
+    "sha256": "2c64a88fc47018dc2888fd0783a3d37495e351c619f03b0f3594b234ca8f0ec6",
+    "bytes": 32293
+  },
+  "focused.log": {
+    "sha256": "0bbaecf46e1b1512009286acd0eb5a517516287e0c11101dec988bc466199864",
+    "bytes": 16693
+  },
+  "final.log": {
+    "sha256": "def84f56ba2336cc65b803b7cd315b52cc0538fad1854439b3988d36cdb46b4d",
+    "bytes": 145799
+  },
+  "shipping.log": {
+    "sha256": "7ba27f25d61813290715d22fad572081b025e1cd9cadb826f4f1544b76c6a5a4",
+    "bytes": 977816
+  },
+  "shipping.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "before-fixture.tar": {
+    "sha256": "4e843341236401719dc8db13eb5147bb2ae196c18db26ef0da85253756321490",
+    "bytes": 153600
+  },
+  "fixture-before.sha256.json": {
+    "sha256": "f423f25fd6773bd7ddcc5ef6e71e77e072e360779065b829d4f58d28b02609af",
+    "bytes": 175
+  },
+  "source-before.tar": {
+    "sha256": "260b75d6aa4fdaa5b28a41cebb8816efc0455d64ce6bcc389dec3b773768a046",
+    "bytes": 9041920
+  },
+  "source-before.sha256.json": {
+    "sha256": "3b6549d5f5d7cf01f3088cc513e12b4a9f6637850dc26fbd0b13cd59e2cc2ab6",
+    "bytes": 25866
+  },
+  "library-before.sha256": {
+    "sha256": "5302a93569aab0fa814e1e95ba11c132631727a5bf4dc5d7883f97cd20e3a291",
+    "bytes": 102
+  },
+  "source-focused.tar": {
+    "sha256": "66c598eaa05274056eb5a4cdff51b867adb967e37225d61fad370e408a7238f8",
+    "bytes": 9041920
+  },
+  "source-focused.sha256.json": {
+    "sha256": "3d906b5e2cb8a5b058028ad7c31d38555659a07cb2e42d9d8992b667c6de1746",
+    "bytes": 25866
+  },
+  "library-focused.sha256": {
+    "sha256": "ac2f0174954b749c472b1239068b70588ee7025b834d13ba96837cd06dc1f3b1",
+    "bytes": 91
+  },
+  "source-final.tar": {
+    "sha256": "c11e5bc01ba1d591cb684433e3e753917d88f9bcbcf3bb3621aeb6416cc5cfb5",
+    "bytes": 9041920
+  },
+  "source-final.sha256.json": {
+    "sha256": "1ace65d6855312d840457a3211689593907f57af2c23485f99fcb5f6aaaf32bc",
+    "bytes": 25866
+  },
+  "library-final.sha256": {
+    "sha256": "80e106a0f1566e34ee009f0a92db0aa20c2b59a165dbfaca99262f81e34f6c96",
+    "bytes": 91
+  },
+  "source-shipping.tar": {
+    "sha256": "c2fb0eb52c957f26e4bb1fcc650897248fd5eaebdf827e91f4e0d90e4a59e60d",
+    "bytes": 9062400
+  },
+  "source-shipping.sha256.json": {
+    "sha256": "137d722700e6a1f70ee80a02e6e5207d321efe175336c15badf7be1315cde27d",
+    "bytes": 26009
+  },
+  "library-shipping.sha256": {
+    "sha256": "2f86b47f4091cc625006700cf053cb24ace2e7ffc06d63152db12f39afe188ba",
+    "bytes": 91
+  }
+}

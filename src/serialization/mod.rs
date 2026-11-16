@@ -16,3 +16,6 @@ pub use json::{
 };
 
 pub mod catalog_page;
+pub(crate) mod native_lifecycle;
+
+pub(crate) mod lifecycle_api1;

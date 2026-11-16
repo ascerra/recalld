@@ -1,0 +1,44 @@
+[
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "prepare",
+      "--track",
+      "serialized-mcp-paired-grouped-synthetic-diagnostic-v1",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/actual/inputs"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "prepare",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/inputs/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/paired"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "actual-pair",
+    "outputAbsent": null
+  }
+]

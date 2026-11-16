@@ -1,0 +1,80 @@
+[
+  {
+    "command": [
+      "python3",
+      "scripts/prepare-context-assets.py",
+      "--prefetch",
+      "/prefetch",
+      "--out",
+      "/output/tokenizer"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794778326.8332572
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794778326.9600987
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_context_mcp_evaluation.py",
+      "--assets",
+      "/output/tokenizer"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794778327.4608536
+  },
+  {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--bin",
+      "recalld",
+      "--example",
+      "score_mcp_episode"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794778353.066847
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/check_context_mcp_evaluation.py",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--build",
+      "/output/build.json",
+      "--assets",
+      "/output/tokenizer",
+      "--out",
+      "/output/actual"
+    ],
+    "exitCode": 1,
+    "binariesBeforeSha256": {
+      "/target/debug/recalld": "603bfa58f26c2e5eb66c3dc73372d5ed910ed014e087593a7f78e8aa1ccdfcf8",
+      "/target/debug/examples/score_mcp_episode": "a19de1310bab3d7ab87160838a1139314938654b17da414c9931c16aaa304dfe"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794778355.9182627
+  }
+]

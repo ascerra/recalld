@@ -1,0 +1,16 @@
+
+running 1 test
+Starting backup...
+  Source: /tmp/.tmpU5KS1C
+  Destination: /validation/evidence/old-api1.zip
+Generating manifest...
+Creating archive...
+Backup complete!
+  Archive: /validation/evidence/old-api1.zip
+  Size: 0.02 MB (compressed)
+  Uncompressed: 7.05 MB
+  Compression ratio: 99.8%
+test mcp::legacy_lifecycle_tests::legacy_api2_generate_genuine_before_one_fixture ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1174 filtered out; finished in 0.52s
+

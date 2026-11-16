@@ -4,6 +4,29 @@ use crate::model::{MemoryId, NamespaceId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Invocation-local physical observation, never persisted or a replay authority.
+pub(crate) struct PurgeCleanupObservation {
+    pub store_id: Uuid,
+    pub namespace_id: NamespaceId,
+    pub start_operation_id: Uuid,
+    pub directory_removed: Option<bool>,
+}
+impl PurgeCleanupObservation {
+    pub(crate) fn for_progress(progress: &PurgeProgress) -> Self {
+        Self {
+            store_id: progress.store_id,
+            namespace_id: progress.namespace_id,
+            start_operation_id: progress.start_receipt.operation_id,
+            directory_removed: None,
+        }
+    }
+    pub(crate) fn matches(&self, progress: &PurgeProgress) -> bool {
+        self.store_id == progress.store_id
+            && self.namespace_id == progress.namespace_id
+            && self.start_operation_id == progress.start_receipt.operation_id
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PurgeStage {

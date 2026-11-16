@@ -146,8 +146,6 @@ async fn shutdown_signal() {
 }
 
 #[cfg(test)]
-mod legacy_label_tests;
-#[cfg(test)]
 mod vector_query_tests;
 
 #[cfg(test)]
@@ -155,3 +153,8 @@ pub(crate) use handlers::list_memories_v2;
 
 #[cfg(test)]
 pub(crate) use handlers::catalog_v2;
+
+#[cfg(test)]
+mod legacy_label_tests;
+
+pub(crate) mod native_lifecycle;

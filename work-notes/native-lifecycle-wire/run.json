@@ -1,0 +1,86 @@
+{
+  "commands": [
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all"
+      ],
+      "exit_code": 0,
+      "start_ns": 1794688753555757759,
+      "end_ns": 1794688754128095993
+    },
+    {
+      "name": "focused",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--lib",
+        "native_lifecycle_wire",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "start_ns": 1794688754715109320,
+      "end_ns": 1794688779725121570
+    },
+    {
+      "name": "full",
+      "command": [
+        "cargo",
+        "test",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "start_ns": 1794688780082202409,
+      "end_ns": 1794689404034754567
+    },
+    {
+      "name": "fmt-check",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "start_ns": 1794689404647418630,
+      "end_ns": 1794689405267742409
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "start_ns": 1794689405609801127,
+      "end_ns": 1794689425853823222
+    }
+  ],
+  "binaries": [
+    {
+      "name": "recalld-7667794dd2328ce1",
+      "sha256": "a303be6b0eb09c295815395aeef1da9f328013ebf4de682c2c9ef4296b6470ec",
+      "size": 366097664,
+      "mtime_ns": 1794688808652921697
+    },
+    {
+      "name": "recalld-c8392f2a5ef64898",
+      "sha256": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+      "size": 6908664,
+      "mtime_ns": 1794688813467705573
+    },
+    {
+      "name": "recalld-e423ca3d07310388",
+      "sha256": "4aff1eefccccabdfeee1ede57aab20b5cca18a18347ad9fc90935b770e457fd7",
+      "size": 431245328,
+      "mtime_ns": 1794688774293260745
+    }
+  ]
+}

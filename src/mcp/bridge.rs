@@ -99,6 +99,73 @@ pub trait StorageEngine: Send + Sync {
         Err(crate::canonical_list::ListError::Unavailable)
     }
 
+    fn supports_api1_lifecycle(&self) -> bool {
+        false
+    }
+    async fn api1_lifecycle(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+        operation: crate::serialization::native_lifecycle::Operation,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{Reply, Value},
+            native_lifecycle::{self, Operation},
+        };
+        if let Err(error) =
+            crate::serialization::lifecycle_api1::parse(&request.wire(operation), operation)
+        {
+            return Reply::failure(native_lifecycle::Reply::input(error));
+        }
+        // Old Rust implementations retain their API1 entry, selected before work.
+        let result = match operation {
+            Operation::Feedback => self
+                .reinforce_memory(request.id, request.quality, request.namespace.as_deref())
+                .await
+                .map(|result| Value::Feedback { result }),
+            Operation::Forget => self
+                .delete_memory(request.id, request.namespace.as_deref())
+                .await
+                .map(|deleted| Value::Forget { deleted }),
+        };
+        match result {
+            Ok(value) => Reply::compatibility(value),
+            Err(e) => Reply::bridge_error(e),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    /// Old implementations cannot manufacture durable receipts. The actual
+    /// direct and daemon adapters opt in; callers never fall back after a write.
+    fn supports_durable_batches(&self) -> bool {
+        false
+    }
+
+    async fn mutate_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {
+        Err(BridgeError::InvalidInput(
+            "durable batch protocol is not supported by this storage adapter".into(),
+        ))
+    }
+
     /// Optional resolved backend context; old adapters must not invent identity.
     async fn backend_context(
         &self,
@@ -184,6 +251,17 @@ pub trait NamespaceRegistry: Send + Sync {
         &self,
         input: DeleteNamespaceInput,
     ) -> Result<DeleteNamespaceResult, BridgeError>;
+
+    /// Transport-owned bound, never a field trusted from request JSON. The
+    /// default preserves existing implementors; native implementations must
+    /// override this to admit their complete commit evidence before work.
+    async fn delete_namespace_bounded(
+        &self,
+        input: DeleteNamespaceInput,
+        _frame_limit: usize,
+    ) -> Result<DeleteNamespaceResult, BridgeError> {
+        self.delete_namespace(input).await
+    }
 }
 
 /// Health check interface.
@@ -797,12 +875,12 @@ pub enum BridgeError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
-    /// An explicit by-ID namespace assertion failed.
-    #[error("{0}")]
-    NamespaceMismatch(String),
     /// A provider or required service cannot satisfy the operation.
     #[error("Unavailable: {0}")]
     Unavailable(String),
+    /// An explicit by-ID namespace assertion failed.
+    #[error("{0}")]
+    NamespaceMismatch(String),
 
     /// A storage subsystem error occurred.
     #[error("Storage error: {0}")]

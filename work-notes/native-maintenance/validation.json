@@ -1,0 +1,105 @@
+{
+  "runtime": "86ad2743edc0f797825dcd9e2b871564bf2f1546",
+  "tree": "3cc1df19b871b33549c3ce98a6c791fbb00f3387",
+  "source_manifest_sha256": "e0615e916c9b817fc2c1acea58159bd59cefd078fad9d70d02ff9134d000d4d3",
+  "executables": [
+    {
+      "path": ".test-scratch/target/debug/deps/recalld-7667794dd2328ce1",
+      "sha256": "ff2fb00649cd8311099acb8f7641eb4fd40818d52f8d6faad60bf3eff801496e",
+      "mtime_ns": 1794678442143358727,
+      "size": 343805040
+    },
+    {
+      "path": ".test-scratch/target/debug/deps/recalld-c8392f2a5ef64898",
+      "sha256": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+      "mtime_ns": 1794678440605475817,
+      "size": 6908664
+    },
+    {
+      "path": ".test-scratch/target/debug/deps/recalld-e423ca3d07310388",
+      "sha256": "b2e1cd00dc88f1d5f422da8621aeea9000563471f0b8d951c59bbf414dfbdede",
+      "mtime_ns": 1794678386225740255,
+      "size": 370798864
+    },
+    {
+      "path": ".test-scratch/target/debug/deps/recalld_cli-2dba722497aafcf6",
+      "sha256": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f",
+      "mtime_ns": 1794678440863797083,
+      "size": 6357936
+    },
+    {
+      "path": ".test-scratch/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb",
+      "sha256": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41",
+      "mtime_ns": 1794678442568595381,
+      "size": 6358016
+    },
+    {
+      "path": ".test-scratch/target/debug/deps/lifecycle_cli-4843a41927cafc6b",
+      "sha256": "24bfc1a8119b8a1bd98c249c919aa923c2e012422b344af37c22a79eb6c80322",
+      "mtime_ns": 1794678447915610960,
+      "size": 254183064
+    },
+    {
+      "path": ".test-scratch/target/debug/deps/text_migration_cli-92bf02c892a58814",
+      "sha256": "9f2f15cc44e600864f44744a6f3f27e65478d5e938911c828d200dde9b9cf4c6",
+      "mtime_ns": 1794678445407580894,
+      "size": 253842280
+    }
+  ],
+  "files": {
+    "REPORT.md": "2375d99e4925d499aab4b020c74fd58238392e25a7fcf7db50d61977366ea834",
+    "check-initial.log": "3c79a80fd6c336a72461faa0c79f96f9c4990fb9b25c0b459a2cb01d9a27ddbe",
+    "clean.log": "2f8e519c7a58328b19616a3f9ae5f5bca3c7d67be2bb3fb94f101c0d40b0acbd",
+    "clippy.log.gz": "476a1d5015bd27f82a7188c69108feab030d7719c1fed3e1849bfcc6ed8c7559",
+    "final-source-manifest.json": "e0615e916c9b817fc2c1acea58159bd59cefd078fad9d70d02ff9134d000d4d3",
+    "fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "focused-1.log": "3d1c4b59b9ebb6e26f98f92c617666aae99ebd67cf3ff1c697abf5e0ee1e13a0",
+    "focused-2.log": "d9784763c4be4ffbcec32f004bf75fdeb8ffd20df577cbfcf3c56539dd574b8a",
+    "focused-3.log": "19d6024893987901374f0a7f25bad8badc21e584bffcaf40c12e1da07afc5b1a",
+    "focused-4.log": "ce8444b2321f8aec3e010b91eb46325e63f742bdad35a34be3f7e7cfb69991d5",
+    "focused-5.log": "2f129ca0f7fe4617381d3a7098ab28690ba13b2c7106a618d6945d026ada4240",
+    "focused-6.log": "f39230a3f2735bd7f5820d83de027d44b2d86b31ccbd7f156dee716ccd529ba1",
+    "focused-7.log": "634ef732db532126f0b3ed9e0a5d7b8e07ca25affe775bfd4a9915778e07858b",
+    "full-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "harddelete-recovery-before/manifest.json": "fa04f5afb35fb835f0a2e2e8081591310cc9465851b49a847854d988d02cfa49",
+    "harddelete-recovery-before/source.tar.gz": "cdcb54d9e81729741c6f865377625fe21be3e317848ffca0259be132477a0f4f",
+    "harddelete-recovery-before.log": "44e9a3127a8267837e0c45062bb63f008788f9743ece3c579122aa7326f7e3db",
+    "initial-failure/manifest.json": "490a9ff7b2c19a595a80914e3db7e3bc1a4256debc3de51cd203a7b858152734",
+    "initial-failure/source.tar.gz": "95f5a99415914e6d1db689b5249d4998666a545e514985bbf516b32dfbfd3499",
+    "publication-focused-2.log": "1b1433edea7c616a2e5d931942cf3960ec85d4920763f5618c9f0601ec0f96ca",
+    "publication-focused.log": "3435f806a5e77b883de5d3889fb2055e3a03f406fb007f8d482fd8537a109aa6",
+    "release-full.log": "ecea3a38b7fcf720e3f172ef03dd44d770eb0a7b5350c5e7e2fae96b691ff4b0",
+    "runtime.patch": "f5f935c77b88ce9f64d2551085b4accb5cc654149750b30deffd368165bade55",
+    "signed-zero-before/manifest.json": "f80037aa064053409122eea8e7ce2e66cf1a2d7d78bd1d3fca01ec0388a14af0",
+    "signed-zero-before/source.tar.gz": "f2903e6ad0007073170a7c03a1c8e5a0cc296b9e1030df30b9a31fe5775f6602",
+    "signed-zero-before.log": "f7499e4aa2024d387301e54a3284d5614dc484c5d983be93b503dd17780f4b36",
+    "validated-source.tar.gz": "6131408d4a278413f8286a9c7e77d165130f44763f2c8e5a50ab0cbc12b943d1"
+  },
+  "results": {
+    "focused_maintenance": 13,
+    "focused_publication": 1,
+    "library": 940,
+    "cli": 2,
+    "doctests_ignored": 4,
+    "container_exit": 0,
+    "fmt_exit": 0,
+    "clippy_exit": 0,
+    "clippy_library_warnings": 623,
+    "clippy_library_test_warnings": 661,
+    "clippy_duplicate_test_warnings": 621
+  },
+  "docker_image": "recalld-ci:1.94@sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "environment": {
+    "RUSTUP_TOOLCHAIN": "1.94.1",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_HOME": "/cargo",
+    "CARGO_TARGET_DIR": "/target",
+    "network": "none",
+    "cpus": 2,
+    "memory": "4g"
+  },
+  "unchanged_integration_inputs": {
+    "tests/lifecycle_cli.rs": "28e82f6ed7841c15556282bd1f706c005e9a90dfd417d4cc0aeeaae0963374d3",
+    "tests/text_migration_cli.rs": "9c3ab2d5cb779f05f075adf9cf5b98cddeca6182d53c3c4fb27b616dd1fc19bd"
+  }
+}

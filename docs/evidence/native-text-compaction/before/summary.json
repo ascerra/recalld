@@ -1,0 +1,15 @@
+{
+  "source": "c51b53226e4e420b49fd28d0267fd0ac56aa37fc",
+  "focused": {
+    "passed": 0,
+    "failed": 4,
+    "seconds": 0.9
+  },
+  "legacyFixture": {
+    "passed": 1,
+    "seconds": 0.25
+  },
+  "compileFailurePreserved": "/tmp/recalld-native-text-compaction-validation/before/output",
+  "binarySha256": "d3ea331a92a72b8906f708dbb8595da0842c98f1af08edb8c8d51e9ce8dd43cf",
+  "rawRoot": "/tmp/recalld-native-text-compaction-validation/before-corrected"
+}

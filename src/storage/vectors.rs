@@ -351,9 +351,11 @@ impl VectorStore {
                     path: path.clone(),
                     source: e,
                 })?;
-            file.sync_all().map_err(|e| VectorError::Io {
-                path: path.clone(),
-                source: e,
+            crate::performance::sync_io("vector", "sync_all", || file.sync_all()).map_err(|e| {
+                VectorError::Io {
+                    path: path.clone(),
+                    source: e,
+                }
             })?;
         }
 
@@ -750,9 +752,11 @@ impl VectorStore {
     /// Calls `sync_data()` on the underlying file descriptor. This
     /// ensures all written vector data and header updates reach disk.
     pub fn sync(&self) -> Result<()> {
-        self.file.sync_data().map_err(|e| VectorError::Io {
-            path: self.path.clone(),
-            source: e,
+        crate::performance::sync_io("vector", "sync_data", || self.file.sync_data()).map_err(|e| {
+            VectorError::Io {
+                path: self.path.clone(),
+                source: e,
+            }
         })
     }
 }

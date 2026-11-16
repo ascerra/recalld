@@ -264,7 +264,8 @@ fn store_memories_def() -> ToolInfo {
         name: "store_memories".to_string(),
         title: Some("Store Memories (Batch)".to_string()),
         description: "Store multiple memories in a single call. Each item has the \
-            same schema as store_memory. Returns an array of results, one per \
+            store_memory fields, plus optional embedding and initialStability \
+            in the batch schema. Returns an array of results, one per \
             input memory. Saves round trips for bulk ingestion. \
             Items are stored in order and each is indexed before the next is \
             checked, so a result entry may carry a `nearDuplicates` object naming \
@@ -283,6 +284,8 @@ fn store_memories_def() -> ToolInfo {
                     "items": {
                         "type": "object",
                         "properties": {
+                            "embedding": {"type":["array","null"],"items":{"type":"number"},"minItems":1,"maxItems":8192,"description":"Optional raw supplied vector; exact input bits define retry identity, effective vector is normalized before storage."},
+                            "initialStability": {"type":["number","null"],"exclusiveMinimum":0,"description":"Omitted uses the namespace policy frozen by this reservation."},
                             "summary": {
                                 "type": "string",
                                 "description": SUMMARY_DESC,
@@ -337,7 +340,11 @@ fn store_memories_def() -> ToolInfo {
                         },
                         "required": ["summary"]
                     }
-                }
+                },
+                "storeId": {"type":"string","format":"uuid","description":"Store lineage for a durable retry."},
+                "batchOperationId": {"type":"string","format":"uuid","description":"Resume an existing reservation with storeId and the same full ordered payload, instead of idempotencyKey."},
+                "idempotencyKey": {"type":"string","description":"Resume with the same full ordered payload and session namespace; finalized failures require a new key."},
+                "batchResultVersion": {"type":"integer","enum":[1],"description":"Additive batch envelope version, not lifecycle/API v2 or whole-store CAS."}
             },
             "required": ["memories"]
         }),
@@ -401,6 +408,110 @@ fn store_result_entry(index: usize, stored: &StoredMemory) -> serde_json::Value 
     entry
 }
 
+fn use_durable_batch(bridge: &McpBridge, arguments: &serde_json::Value) -> bool {
+    bridge.storage.supports_durable_batches()
+        || [
+            "storeId",
+            "idempotencyKey",
+            "batchOperationId",
+            "batchResultVersion",
+            "batchMutationVersion",
+            "expectedGeneration",
+        ]
+        .iter()
+        .any(|key| arguments.get(key).is_some())
+}
+
+async fn handle_durable_batch(
+    bridge: &McpBridge,
+    arguments: &serde_json::Value,
+    kind: crate::storage::batch::BatchKind,
+    items: &[serde_json::Value],
+) -> ToolCallResult {
+    use crate::storage::batch::{BatchInput, BatchKind, BatchStatus};
+    if arguments.get("expectedGeneration").is_some() {
+        return ToolCallResult::error("public whole-store expectedGeneration is not enabled");
+    }
+    // Parse optional fields strictly. Do not silently drop a malformed retry key.
+    let input = serde_json::from_value::<BatchInput>(json!({
+        "resultVersion":arguments.get("batchResultVersion").cloned().unwrap_or(json!(1)),
+        "mutationVersion":arguments.get("batchMutationVersion").cloned().unwrap_or(json!(1)),
+        "kind":kind,"items":items,"defaultNamespace":bridge.default_namespace(),
+        "storeId":arguments.get("storeId"),"idempotencyKey":arguments.get("idempotencyKey"),"batchOperationId":arguments.get("batchOperationId")
+    }));
+    let input = match input {
+        Ok(input) => input,
+        Err(e) => return ToolCallResult::error(format!("Invalid batch parameters: {e}")),
+    };
+    let outcome = match bridge.storage.mutate_batch(input).await {
+        Ok(outcome) => outcome,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+    let results: Vec<_> = outcome
+        .items
+        .iter()
+        .map(|item| {
+            let mut result = item.result.clone().unwrap_or_else(|| json!({}));
+            let object = result.as_object_mut().expect("batch compatibility object");
+            object.insert("index".into(), json!(item.index));
+            object.insert("status".into(), json!(item.status));
+            object.insert("ready".into(), json!(item.ready));
+            if let Some(receipt) = &item.receipt {
+                object.insert("receipt".into(), json!(receipt));
+            }
+            let legacy_missing = kind == BatchKind::Forget
+                && item.error.as_ref().is_some_and(|e| e.code == "NOT_FOUND");
+            if legacy_missing {
+                object.insert("id".into(), items[item.index as usize].clone());
+                object.insert("deleted".into(), json!(false));
+            } else if let Some(error) = &item.error {
+                // Additive typed detail; retain the old string error member.
+                object.insert("error".into(), json!(error.code));
+                object.insert("errorDetail".into(), json!(error));
+                if let Some(field) = &error.field {
+                    object.insert("field".into(), json!(field));
+                }
+            } else if matches!(
+                item.status,
+                BatchStatus::NotAttempted | BatchStatus::Unknown
+            ) {
+                object.insert(
+                    "error".into(),
+                    json!("batch item unresolved; resubmit the same full request and key"),
+                );
+            }
+            result
+        })
+        .collect();
+    let errors = results
+        .iter()
+        .filter(|item| item.get("error").is_some())
+        .count();
+    let mut response =
+        json!({"results":results,"total":outcome.total,"errors":errors,"batch":outcome});
+    if kind == BatchKind::Insert {
+        response["stored"] = json!(outcome.succeeded);
+    } else {
+        response["deleted"] = json!(
+            results
+                .iter()
+                .filter(|item| item.get("deleted") == Some(&json!(true)))
+                .count()
+        );
+    }
+    match ToolCallResult::json(&response) {
+        Ok(mut result) => {
+            if !outcome.all_ready() {
+                result.is_error = Some(true);
+            }
+            result
+        }
+        Err(e) => {
+            ToolCallResult::error(format!("Committed batch result serialization failed: {e}"))
+        }
+    }
+}
+
 async fn handle_store_memories(bridge: &McpBridge, arguments: serde_json::Value) -> ToolCallResult {
     let memories_val = match arguments.get("memories") {
         Some(v) => v,
@@ -420,6 +531,16 @@ async fn handle_store_memories(bridge: &McpBridge, arguments: serde_json::Value)
         return ToolCallResult::error(format!(
             "Too many memories (maximum {MAX_BATCH_MEMORIES} per call)"
         ));
+    }
+
+    if use_durable_batch(bridge, &arguments) {
+        return handle_durable_batch(
+            bridge,
+            &arguments,
+            crate::storage::batch::BatchKind::Insert,
+            memories_arr,
+        )
+        .await;
     }
 
     let mut results: Vec<serde_json::Value> = Vec::with_capacity(memories_arr.len());
@@ -788,17 +909,14 @@ async fn handle_reinforce_memory(
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge
+    bridge
         .storage
-        .reinforce_memory(id, quality, namespace)
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+        )
         .await
-    {
-        Ok(result) => match ToolCallResult::json(&result) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to reinforce memory: {e}")),
-    }
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -861,19 +979,14 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
     };
     let id = crate::model::MemoryId::from_uuid(uuid);
 
-    match bridge.storage.delete_memory(id, namespace).await {
-        Ok(deleted) => {
-            let response = json!({
-                "id": id_str,
-                "deleted": deleted,
-            });
-            match ToolCallResult::json(&response) {
-                Ok(r) => r,
-                Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-            }
-        }
-        Err(e) => ToolCallResult::error(format!("Failed to delete memory: {e}")),
-    }
+    bridge
+        .storage
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+        )
+        .await
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -901,7 +1014,11 @@ fn forget_memories_def() -> ToolInfo {
                     "items": { "type": "string", "format": "uuid" },
                     "description": "Memory UUIDs to forget. Each moves to the Tombstone \
                         phase; its graph edges are kept and its UUID is never reused."
-                }
+                },
+                "storeId": {"type":"string","format":"uuid","description":"Store lineage for a durable retry."},
+                "batchOperationId": {"type":"string","format":"uuid","description":"Resume an existing reservation with storeId and the same full ordered payload, instead of idempotencyKey."},
+                "idempotencyKey": {"type":"string","description":"Resume the same full ordered ID array. A new key is required to retry finalized failures."},
+                "batchResultVersion": {"type":"integer","enum":[1]}
             },
             "required": ["ids"]
         }),
@@ -938,6 +1055,16 @@ async fn handle_forget_memories(
         return ToolCallResult::error(format!(
             "Too many ids (maximum {MAX_BATCH_MEMORIES} per call)"
         ));
+    }
+
+    if use_durable_batch(bridge, &arguments) {
+        return handle_durable_batch(
+            bridge,
+            &arguments,
+            crate::storage::batch::BatchKind::Forget,
+            ids_arr,
+        )
+        .await;
     }
 
     // UUIDs are parsed here, not at the bridge, so one malformed id
@@ -1337,6 +1464,19 @@ async fn handle_create_namespace(
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(message)) => {
+            match serde_json::from_str::<serde_json::Value>(&message)
+                .ok()
+                .filter(|v| v.is_object())
+            {
+                Some(evidence) => {
+                    let mut result = ToolCallResult::json(&evidence).expect("catalog failure JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(message),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to create namespace: {e}")),
     }
 }
@@ -1443,7 +1583,16 @@ async fn handle_delete_namespace(
         // "Failed to delete namespace" would tell the agent nothing
         // happened, when in fact memories were destroyed and the job
         // needs finishing — so the message passes through unwrapped.
-        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => ToolCallResult::error(msg),
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => {
+            match crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&msg) {
+                Some(payload) => {
+                    let mut result = ToolCallResult::json(&payload).expect("validated purge JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(msg),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to delete namespace: {e}")),
     }
 }
@@ -1786,6 +1935,21 @@ pub(crate) async fn dispatch_v2(
             result.is_error = Some(true);
         }
         return result;
+    }
+
+    let lifecycle = match name {
+        "forget_memory" => Some(crate::serialization::native_lifecycle::Operation::Forget),
+        "reinforce_memory" => Some(crate::serialization::native_lifecycle::Operation::Feedback),
+        _ => None,
+    };
+    if let Some(operation) = lifecycle {
+        return crate::mcp::native_lifecycle_adapter::dispatch(
+            bridge.storage.as_ref(),
+            operation,
+            arguments,
+        )
+        .await
+        .mcp();
     }
     use crate::search::exact_scan::ExactScanData;
     use crate::serialization::{

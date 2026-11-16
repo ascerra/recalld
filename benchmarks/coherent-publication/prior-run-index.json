@@ -1,0 +1,260 @@
+[
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "driver.py": "b7eeb5ea2763d39c7e2ab5c645ee3d37aec998076a52f7dd328f32a9c006097c",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "full-suite.log": "5feeb525047b6e7c7d0f77c87772b3013a04eaa5b9b314e013680df32d204e4d",
+      "manifest.json": "a3a32946345131a60a189425104ad438e1c2afb171b6167f11f424fb54664fc8",
+      "package-clean.log": "f6a50b93fce4f71199f31156f9a4a377df18beb435a36333fba2f3a41e7aa43e",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "4c69c867588e1067dfeaaa445f51cdd9cc50f50276e03a2963c7bec6ed2650b3",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-full-3kzh_qz6"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "driver.py": "2eead3f32bf9c951fd36d2af7b4dd0dcbc9262146def01513919fb0377791011",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "full-suite.log": "3de7aa1ad6497137b1f93f0fd0349915768ed4928afbea812bc2d9f712dc4475",
+      "live-resource-observation.json": "9da5cae50a0ecbb04164a174f506fc3b539a9190b75afe2c8629213dcf45e005",
+      "manifest.json": "77236b1d55cb89604efb2a470ec475e6c6b1a140e6f5819534af034c01f28a83",
+      "memory-events.txt": "54e1a60d982a600a098fc2c88f1ed698a5c3fea145dffe8f4ff32e144c23068b",
+      "memory-peak.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "package-clean.log": "0355f2cfbecfae9e5881c309196d704a9337dcb68b592cf3c99484375bb63701",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "1c65af97858e2e612bf210c3f058a603769ae493f16441986b48656dc9153254",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-full-avgv812g"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coherent-tests.log": "b9e751882849d2eaf094b80ca69606406e27aec39097715fc45edb8c6bf36eba",
+      "driver.py": "a68ca9b432f743524f49647bb4ba228fe2e9a54a545482c7e97c12f70456026a",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "33b2553c18414e25bab3585fd50bf3bb5ad97fc0d576dea3c104a146338607f5",
+      "package-clean.log": "f6a50b93fce4f71199f31156f9a4a377df18beb435a36333fba2f3a41e7aa43e",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "55cd8b6922c49ddf61f92266d7beb58508778428217d2dd8d76a05e79cf20033",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-_3yh4mqc"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coherent-tests.log": "a2854f888a08a216287e04409eb9c86be244c603e72c8647b1c198dfaba2484e",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "1d234c25a540dc7759961d850b72034e237bb22453977c6ff141bfff41d30cfa",
+      "package-clean.log": "f6a50b93fce4f71199f31156f9a4a377df18beb435a36333fba2f3a41e7aa43e",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "cc811033e5f6a290256600b396196e80a3d166dc05dcaf5ee504908fe7654b2e",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-cj0r7f9l"
+  },
+  {
+    "files": {
+      "accepted-query-tests.log": "2bcb3c8db4460139d2a80fcf4599737ffedba03ce61b5e8eb346aa12a3986cec",
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "driver.py": "63dd05a348cc5c2edda8e411efada8db716d56b652a28b6a8da1b69de4137358",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "bea90e7cf25aa4259b4c9d1d853208416e65a3dd0a9fa82d5d5ca04c54b87ee7",
+      "package-clean.log": "f6a50b93fce4f71199f31156f9a4a377df18beb435a36333fba2f3a41e7aa43e",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "6da1a909a7cef5e9cb0f297d41278076059555f407a4d7412fce805c76a35861",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-d8_5_vl4"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coherent-tests.log": "7818c437a43198d92c78b7c152047e3d0203592b7eef9e7a54ae1d7b7092f858",
+      "current-freeze-tests.log": "2ba2aebba4498f30f8fa9144ccf05803e5cedbf3f8c8410a7319a77d40de37f7",
+      "driver.py": "a68ca9b432f743524f49647bb4ba228fe2e9a54a545482c7e97c12f70456026a",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "de4c398c56d81416a4cb8f9f4ce09ba12cab120d6a7d3a8393b1279f94a7a643",
+      "package-clean.log": "bbfa53042383ffd6deb74a91e9a18f4672527758fe9a2befb5fc2505cf164277",
+      "publication-tests.log": "5eb9613409a3579f83cbbbc182a5a1c03129cc721c09fdddb0b7d8b22928fac7",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "6ea002c09c762a040fc1fec617edf392bd5563b28817f925e475cb3a54f24da8",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-e89v5btr"
+  },
+  {
+    "files": {
+      "batch-tests.log": "0980698c76af57275a4909402a22506a65ddc3c3a2d184bb4d652216dd8bfbaf",
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coherent-tests.log": "74f34e7cafc7ac2788292fb9126f5459f6d901346f8950db749c1c034a7d0b77",
+      "coordinator-tests.log": "aeeccb5bdcfa7e243035c895f3038184fb2ef2e4479c2c932fc2d98fbe82c4d5",
+      "current-freeze-tests.log": "2ed6f7fb9423d287b5c5db01f35db46dd25825a0be056e00be264da9b7f227bc",
+      "entity-tests.log": "cb593e352fa374634e9489e994d67b905d328ca741f11783643a190ca0164f6c",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "b6249f59bd63a69b4b86404d6e1a412f68079103da807677e4ffce3765d6f97e",
+      "observation-tests.log": "338db533e7a8fe6dd1550be6dfe76eddc8b2b204d9af6aa7775c7db086fff044",
+      "package-clean.log": "f6a50b93fce4f71199f31156f9a4a377df18beb435a36333fba2f3a41e7aa43e",
+      "publication-tests.log": "e41c97411f1c1954c3617173a168dba353ffe3687ff569ad6b8453b93a65dcf7",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "dd13374a8da917fa5be6ccf92e6eb925a4060c4c9cb449a706878561a608d854",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-jznmb08x"
+  },
+  {
+    "files": {
+      "batch-tests.log": "adfa524214cb450cf26a3c1cc9997aa02e1c4974c07c8c58aad2befbcce9e8e2",
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coherent-tests.log": "4be0d21a2ee459597276033496f22c0a6646c355e2a60fb396d434bf70548eb4",
+      "consumer-observation-tests.log": "189e3a860fc73e0f56dcede70b61a4a88b37c7d8cb1251f44623764c7d190213",
+      "coordinator-tests.log": "4a1402ac2eddde1454aba34d26d33569bb60eb841d4dc280ef3fbc2b0dbd17cd",
+      "current-freeze-tests.log": "2b608cab52bb916768798d6af2025482f881f4c78ed97b7ae35b1bc34e67c1d1",
+      "driver.py": "a68ca9b432f743524f49647bb4ba228fe2e9a54a545482c7e97c12f70456026a",
+      "entity-tests.log": "8953aba5add6ffd6819b7e5d7f534a8265f4b555643c41f192a000533a7d7a7b",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "d95496ddbea5325df1a0fe02aff25741eefb7c3102a9cd33d534f202a2e04d2d",
+      "native-tests.log": "a1b069c9b665a90be590e3c7b80c4c23ae730420d2aa54a9cd57efe3460ea410",
+      "observation-tests.log": "fc668be564bd1154e984e3a4f7a2c901f1069f1049c20628c69b116f6ac5b1d8",
+      "package-clean.log": "f6a50b93fce4f71199f31156f9a4a377df18beb435a36333fba2f3a41e7aa43e",
+      "publication-tests.log": "a5e25c99e9365b883016f20b328420c4199ad1b0bd3824b9ca44e170edef9fc6",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "315e0b5d1eb982b2a8a3a53093f7a2f777dc665f923d3d7a3ec56d43a2d1a50c",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-v_io4dkt"
+  },
+  {
+    "files": {
+      "accepted-query-tests.log": "a1f3e31ed451a4fb695e50c4f9f52ba5f71486998a9be97e0c0575a6104702c8",
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "driver.py": "63dd05a348cc5c2edda8e411efada8db716d56b652a28b6a8da1b69de4137358",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "bfbe6cb257abc000207596a5d65891394e74f7667b34e716260781577815aae1",
+      "package-clean.log": "e7734d7aecfe185e2b2f8c8fc55e76a85607e58ff12af810af3d140a26921066",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "3eeea0ded4dccf5c293d765b0f6e300ea95cafce9a53a3059a40baa08bd21115",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-vkmi6ps6"
+  },
+  {
+    "files": {
+      "driver.py": "909c326eda46a958f455ee3b6c765b3a8027177fd619cc22a3028834f324a42a"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-ybv54qcx"
+  },
+  {
+    "files": {
+      "accepted-query-tests.log": "76cdd1d0032399dd33354a0cbbea9022b914bb61860071846e7a576cab57c0b5",
+      "batch-tests.log": "88d7e7c01730cc3960d2eff5f7fdbb25e171f386f48cffac08e576bc1ad8766c",
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coherent-tests.log": "c0ac7e6c7747e45a6ab4694ffe4475277b4ca2f34f202a6ce5ee99c24f8c6a70",
+      "consumer-observation-tests.log": "09dcd758a3603943c950e39a49c29493641f2affd8dae3bd97d3de1750c9303c",
+      "coordinator-tests.log": "d0bc87a20e45fd657aa307b06de1477d2a86a362e96f40d116d9cae215ac4a32",
+      "current-freeze-tests.log": "542ec9b15b76f12ff3632e1adb66f2392e9f7a7196cd606e292258accf90fc92",
+      "daemon-query-tests.log": "dee041e0c26b92b78ee39f973b4d70480d36d4ff987ac32887f14e9c1ce829e6",
+      "driver.py": "aa0c3002a25cc8cf2e25ed7be20366777e407b31933d746b9ce0ad4dfda81c67",
+      "entity-tests.log": "b2f6ff57e92cae7d39041272fe7cdfc6a758b4a7a669ab1d5ffdaaf6ec0b24b9",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "http-query-tests.log": "690fcb4fa96ae39d197b497f6b404ee1dda61d69fc191fdf910a8a16f61f587f",
+      "manifest.json": "3e6fd6f52898045b61ec66f83705bcb062fd765a4e98beba9e0f5c28b391f5a3",
+      "native-tests.log": "a235341420ebf26a561cb8ac0faf843d529a8f506ce33e957e4d84e016cba953",
+      "observation-tests.log": "e69b1dd193b29df0241918a0a88f52a400fc1b64784111f1973f6045efd7eda2",
+      "package-clean.log": "f6a50b93fce4f71199f31156f9a4a377df18beb435a36333fba2f3a41e7aa43e",
+      "publication-tests.log": "7da11c4470a8163e6e27ea2282132b3fbec9367cfc06242018968ec0ca7cbf75",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source-binaries.json": "1c9731b1637cb0f61dae86a0947a93b79b7976d7838be7605e4040cce0c9840d",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-coherent-controls-test-zdafl6vx"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coordinator-tests.log": "1b64193d01839c14045fae7b70c867f00b5a6a4cf88158850fa5c80f6a352b9d",
+      "entity-tests.log": "861cca34b38fa4978397080330f127aa693496a606b8b025b69596dedfbaf365",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "5a2bef383f7c21e59878c2ebfbdbcf3a27dc1e7fbb7887472884f6852f46861e",
+      "observation-tests.log": "25ef007b1424372824b59ce5b0509a1dd9afa42ca358d0429779a619f276846a",
+      "package-clean.log": "555b902daa7cdde4c90d50bb3551a94b2d2da01844ed6dfb0f04ee4b0a910df6",
+      "publication-tests.log": "538c2622ebd5da6529d72e4ee9568d4db95c1497460499e6000575ba3f33db4c",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-publication-controls-test-0vle2vst"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coordinator-tests.log": "075efa1368df97df558326913e53fa0f9bb9c2f00e7cf0c310d0b934eca613b9",
+      "entity-tests.log": "a522885a4a3436d176cad80dc7c888b29eadc7cc669a5f70a3f2ed0890329231",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "ae8f48c99770b3cc832a525fef209ca9eac986874918788088e3c5f8097bee20",
+      "observation-tests.log": "b5ef6923302fe73a686cab08bdf3fe7674851efc6cbe1795ab88eb9528b46cd8",
+      "package-clean.log": "0f51ac147e5805a573f4220200b2dc952d7fa295fa6ea2d3d38144488cd8cd85",
+      "publication-tests.log": "726ad6329f0b268bb2d7ae05cee36a8f0900f1ae21298681f300399e107527ef",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-publication-controls-test-93kw_s3y"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "coordinator-tests.log": "ca2d39066206489806081af1cf8f377b19a8a4e5c7ce980fdd8a9eba06a3cc43",
+      "entity-tests.log": "7e9adb311a836959a0c182171f3577e5160c8301b9c7a53ef374294b9f43c320",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "6cea28cb4d36363e8a1a3b9264eecdb6a8dd3573ad41650f0e0413a11c1a55e2",
+      "observation-tests.log": "d98ab3595a9a58627aebb641d6b5287ec351c118f0f01ca74c2a9797327d36b6",
+      "package-clean.log": "b9d9d8978a6c724a90ca4a21427a7484c7d33e7a58a6c5522383cb6289353cf6",
+      "publication-tests.log": "8a01b281833b0a5bda9de46fdf43d20ad23e17c1ef3bad97bb54ab02ff1369e1",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-publication-controls-test-jgc8kgiu"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "4ffb6fd9597740d51475a71014dd2e5afb669c97a93fe73ebfd8762708fc25ea",
+      "package-clean.log": "555b902daa7cdde4c90d50bb3551a94b2d2da01844ed6dfb0f04ee4b0a910df6",
+      "publication-tests.log": "f92872066fe580559a6f683c6c55b7ac0061510e4389951bc13fc2c4bd255dcb",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-publication-controls-test-n5y70_d3"
+  },
+  {
+    "files": {
+      "cgroup-cpu.txt": "07eb5019b2babb019fbbfe1cb328ec5b7affac5e07da4b94ebedb5e110dfab69",
+      "cgroup-memory.txt": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "manifest.json": "850ce41bb480d048a187af5f7334aa1824800b82754a67cbc7d4fc6d83def9d4",
+      "package-clean.log": "0e17c26e5915c903c8716366f2a57b29c813b53ecda567525bc570a2a0c31099",
+      "publication-tests.log": "cf21932e69d36e7641ec8e4e25f37dead37ba18da62716ca64aa4eb817ed8d0a",
+      "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "source.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scratch": "/tmp/recalld-publication-controls-test-qg_aik89"
+  }
+]

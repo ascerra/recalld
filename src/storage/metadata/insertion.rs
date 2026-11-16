@@ -119,9 +119,15 @@ mod profile_boundary_tests {
 
 impl MetadataStore {
     /// Shared owned-core allocation point for legacy/native receipt writers.
-    /// Still nondeterministic until the real scoped ID/RNG prerequisite lands.
-    pub(super) fn allocate_memory_id(&self, supplied: Option<MemoryId>) -> MemoryId {
-        supplied.unwrap_or_else(MemoryId::new)
+    pub(super) fn allocate_memory_id(
+        &self,
+        supplied: Option<MemoryId>,
+        sampled_at: i64,
+    ) -> Result<MemoryId, StorageError> {
+        match supplied {
+            Some(id) => Ok(id),
+            None => self.ids.memory(sampled_at),
+        }
     }
 
     pub(crate) fn lookup_insert_replay(
@@ -132,6 +138,26 @@ impl MetadataStore {
         let _guard = self.mutation_guard()?;
         let tx = self.db.begin_write()?;
         replay_insert(&tx, ctx, input)
+    }
+
+    pub(crate) fn lookup_insert_child_with_work(
+        &self,
+        child: &crate::storage::batch::BatchChild,
+        input: &InsertMemory,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let _guard = self.mutation_guard_with_work(parent)?;
+        let tx = self.db.begin_write()?;
+        let hash = input.request_hash(
+            &child.context(),
+            f32::from_bits(child.defaults.initial_stability_bits),
+            child.defaults.embedding_dim,
+        )?;
+        let replay = super::batch::replay_child(&tx, child, hash)?;
+        if replay.is_none() {
+            super::batch::check_policy(&tx, child)?;
+        }
+        Ok(replay)
     }
 
     /// Replay and all fresh canonical checks precede payload allocation. The
@@ -149,6 +175,31 @@ impl MetadataStore {
         existing_edges: &[PersistedEdge],
         stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.insert_reserved_with_effects(
+            guard,
+            ctx,
+            input,
+            sampled_at,
+            embedding,
+            profile,
+            existing_edges,
+            None,
+            stage,
+        )
+    }
+
+    pub(crate) fn insert_reserved_with_effects(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        sampled_at: i64,
+        embedding: &[f32],
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+        existing_edges: &[PersistedEdge],
+        child: Option<&crate::storage::batch::BatchChild>,
+        stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
+    ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
         ctx.validate()?;
         if ctx.contract_version != 1 {
@@ -162,7 +213,17 @@ impl MetadataStore {
             ));
         };
         let tx = self.db.begin_write()?;
-        if let Some(receipt) = replay_insert(&tx, ctx, input)? {
+        if let Some(child) = child {
+            let hash = input.request_hash(
+                ctx,
+                f32::from_bits(child.defaults.initial_stability_bits),
+                child.defaults.embedding_dim,
+            )?;
+            if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
+                return Ok(receipt);
+            }
+            super::batch::check_policy(&tx, child)?;
+        } else if let Some(receipt) = replay_insert(&tx, ctx, input)? {
             return Ok(receipt);
         }
         // Reserve a generation before writing external bytes (without advancing
@@ -226,7 +287,7 @@ impl MetadataStore {
             config.embedding_dim,
             input.embedding.is_some(),
         )?;
-        let id = self.allocate_memory_id(input.id);
+        let id = self.allocate_memory_id(input.id, sampled_at)?;
         if id == MemoryId::nil() {
             return Err(StorageError::InvalidMutation("nil memory ID".into()));
         }
@@ -280,6 +341,7 @@ impl MetadataStore {
             false,
             false,
             effects::RecordMutation::Inserted(&record, config.embedding_dim),
+            child,
         )
         .map(|result| result.receipt)
     }

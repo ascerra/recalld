@@ -7,6 +7,17 @@ use crate::search::adapters::*;
 use crate::test_support::Fixture;
 use serde_json::{Value, json};
 
+#[path = "exposure_consumer_tests.rs"]
+mod exposure_consumer;
+#[path = "feedback_consumer_tests.rs"]
+mod feedback_consumer;
+#[path = "forget_consumer_tests.rs"]
+mod forget_consumer;
+#[path = "native_query_admission_tests.rs"]
+mod native_query_admission;
+#[path = "replay_consumer_tests.rs"]
+mod replay_consumer;
+
 struct NoProvider;
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for NoProvider {
@@ -35,30 +46,47 @@ pub(super) fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompl
 }
 pub(super) fn readers(
     f: &Fixture,
-    clock: Arc<FixedClock>,
+    clock: Arc<dyn Clock>,
+) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
+    readers_with_exposure(f, clock, false)
+}
+fn readers_with_exposure(
+    f: &Fixture,
+    clock: Arc<dyn Clock>,
+    native_exposure: bool,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
     let provider = Arc::new(NoProvider);
-    let engine = Arc::new(
-        crate::search::QueryEngine::new(
-            Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
-            Arc::new(SingleEmbeddingRegistry::new(provider.clone())),
-            Arc::new(SharedVectorIndexRegistry::new(f.vector_index.clone())),
-            Arc::new(SharedFtsIndexRegistry::new(f.fts_index.clone())),
-            Arc::new(SharedEntityIndexReader::new(f.entity_index.clone())),
-            Arc::new(CacheManagerAdapter::new(f.cache.clone())),
-            Arc::new(StorageMetadataAdapter::new(f.storage.clone())),
-            Arc::new(SharedGraphReader::new(f.graph.clone())),
-            Arc::new(RifProcessorAdapter::new(
-                Arc::new(crate::rif::RifEngine::new(Default::default())),
-                f.graph.clone(),
-            )),
-            Arc::new(
-                StorageAccessRecorder::new(f.storage.clone(), f.cache.clone())
-                    .with_clock(clock.clone()),
-            ),
+    let recorder =
+        StorageAccessRecorder::new(f.storage.clone(), f.cache.clone()).with_clock(clock.clone());
+    let recorder = if native_exposure {
+        recorder.with_completion(completion(f))
+    } else {
+        recorder
+    };
+    let engine = crate::search::QueryEngine::new(
+        Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
+        Arc::new(SingleEmbeddingRegistry::new(provider.clone())),
+        Arc::new(SharedVectorIndexRegistry::new(f.vector_index.clone())),
+        Arc::new(SharedFtsIndexRegistry::new(f.fts_index.clone())),
+        Arc::new(SharedEntityIndexReader::new(f.entity_index.clone())),
+        Arc::new(CacheManagerAdapter::new(f.cache.clone())),
+        Arc::new(StorageMetadataAdapter::new(f.storage.clone())),
+        Arc::new(SharedGraphReader::new(f.graph.clone())),
+        Arc::new(RifProcessorAdapter::new(
+            Arc::new(crate::rif::RifEngine::new(Default::default())),
+            f.graph.clone(),
+        )),
+        Arc::new(recorder),
+    )
+    .with_lifecycle_inputs(clock.clone(), crate::decay::DecayConfig::default(), 1.0);
+    let engine = Arc::new(if native_exposure {
+        engine.with_coherent_owner(
+            completion(f),
+            Arc::new(crate::rif::RifEngine::new(Default::default())),
         )
-        .with_lifecycle_inputs(clock.clone(), crate::decay::DecayConfig::default(), 1.0),
-    );
+    } else {
+        engine
+    });
     let config = Arc::new(crate::config::RecalldConfig::default());
     let router = crate::api::router(
         crate::api::AppState::new(
@@ -97,7 +125,7 @@ pub(super) fn readers(
                     config,
                     false,
                 )
-                .with_clock(clock),
+                .with_clock(clock.clone()),
             ),
             Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
             Arc::new(NoopMetricsCollector),
@@ -112,7 +140,13 @@ pub(super) fn readers(
             f.graph.clone(),
             chrono_tz::UTC,
         )),
-        storage: Arc::new(f.storage_adapter()),
+        storage: Arc::new(if native_exposure {
+            f.storage_adapter()
+                .with_clock(clock.clone())
+                .with_query_engine(engine.clone())
+        } else {
+            f.storage_adapter()
+        }),
         namespaces: Arc::new(f.namespace_adapter()),
         health: Arc::new(crate::test_support::StubBridge::default()),
         default_namespace: "different-default".into(),
@@ -317,12 +351,49 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
         ] {
             let result = query
                 .search_with_semantics(
-                    serde_json::from_value(body).unwrap(),
+                    serde_json::from_value(body.clone()).unwrap(),
                     crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
                 )
                 .await
                 .unwrap();
             assert!(result.response.results.iter().any(|r| r.memory_id == id));
+            let target = f
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .canonical;
+            let coherent = query
+                .search_coherent_read_only(
+                    &publisher,
+                    Arc::new(crate::rif::RifEngine::new(Default::default())),
+                    serde_json::from_value(body).unwrap(),
+                    crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
+                    std::time::Instant::now() + std::time::Duration::from_secs(10),
+                )
+                .await
+                .unwrap();
+            assert_eq!(coherent.read_generation, target);
+            assert!(
+                coherent
+                    .response
+                    .response
+                    .results
+                    .iter()
+                    .any(|r| r.memory_id == id)
+            );
+            assert!(
+                publisher
+                    .readiness_barrier(
+                        target,
+                        std::time::Instant::now() + std::time::Duration::from_secs(10)
+                    )
+                    .await
+                    .unwrap()
+                    .ready
+            );
         }
         assert_eq!(bytes(&d.path), before, "false-mode canonical bytes changed");
         assert_eq!(
@@ -335,6 +406,21 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
                 .pending,
             0
         );
+        if reopen {
+            f.storage.read().unwrap().mark_unavailable();
+            let result = query.search_coherent_read_only(
+                &publisher, Arc::new(crate::rif::RifEngine::new(Default::default())),
+                serde_json::from_value(json!({"namespace":"native", "queryEmbedding":[1.,0.,0.,0.], "recordAccess":false})).unwrap(),
+                crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
+                std::time::Instant::now() + std::time::Duration::from_secs(10),
+            ).await;
+            assert!(result.is_err());
+            assert_eq!(
+                bytes(&d.path),
+                before,
+                "poison rejection changed canonical bytes"
+            );
+        }
         drop((api, bridge, query, publisher));
         root = f.close();
         inspect_schema(&d.path).unwrap();
@@ -428,7 +514,10 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
     assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
     *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
     let failure = publisher.complete().await.unwrap_err();
-    assert!(matches!(failure,StorageError::CommittedMutation{receipt,..} if *receipt==forgotten));
+    let StorageError::CommittedMutation { receipt, .. } = failure else {
+        panic!("publication failure lost full committed receipt: {failure:?}");
+    };
+    assert_eq!(*receipt, forgotten);
     assert!(
         !f.storage
             .read()
@@ -503,3 +592,236 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
         DecayPhase::Tombstone
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_maintenance_accepted_publication_failure_replays_full_receipt_then_removes_content()
+{
+    use crate::storage::native_maintenance::NativeDecayResult;
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let mut session = open(&d, clock.clone());
+    let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
+    let key = ctx(&session, &d, "maintenance-reader-create");
+    let created = session
+        .insert_prepared(&key, &intent, &generated())
+        .unwrap();
+    let id = inserted(&created);
+    let f = Fixture::from_open_engine(root, session.engine);
+    let publisher = completion(&f);
+    publisher.complete().await.unwrap();
+    let (api, bridge, query) = readers(&f, clock.clone());
+    let policy = NativePolicyInputs::default();
+    let sampled = 10_000 * 86_400_000_i64;
+    let capture = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .capture_native_decay(id, d.ns, &policy, sampled)
+        .unwrap();
+    let context = MutationContext {
+        store_id: Some(created.store_id),
+        scope: MutationScope::Namespace(d.ns),
+        idempotency_key: Some("maintenance-reader-summary".into()),
+        expected_generation: None,
+        contract_version: 2,
+    };
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let work = tracker.begin().unwrap();
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let result = publisher
+        .apply_native_decay_accepted(context.clone(), capture.clone(), policy.clone(), &work)
+        .await;
+    let Err(StorageError::CommittedMutation { receipt, .. }) = result else {
+        panic!("expected full committed receipt")
+    };
+    assert!(matches!(
+        receipt.outcome,
+        MutationOutcome::NativePhaseMaterialized { .. }
+    ));
+    let generation = receipt.committed_generation;
+    let (status, _) = http(
+        &api,
+        "GET",
+        &format!("/memories/{id}?recordAccess=false"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .effects_stamp()
+            .is_err()
+    );
+    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    let NativeDecayResult::Committed(replay) = publisher
+        .apply_native_decay_accepted(context, capture, policy.clone(), &work)
+        .await
+        .unwrap()
+    else {
+        panic!("expected receipt")
+    };
+    assert!(replay.replayed);
+    assert_eq!(replay.operation_id, receipt.operation_id);
+    assert_eq!(replay.committed_generation, generation);
+    work.finish();
+    let (status, body) = http(
+        &api,
+        "GET",
+        &format!("/memories/{id}?recordAccess=false"),
+        Value::Null,
+    )
+    .await;
+    assert!(status.is_success(), "{body}");
+    assert_eq!(body["data"]["summary"], json!("native exact summary"));
+    assert!(body["data"].get("fullText").is_none_or(Value::is_null));
+    for (key, expected) in [
+        ("maintenance-reader-ghost", Some(DecayPhase::Ghost)),
+        ("maintenance-reader-delete", None),
+    ] {
+        let capture = f
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .capture_native_decay(id, d.ns, &policy, sampled)
+            .unwrap();
+        let work = tracker.begin().unwrap();
+        let context = MutationContext {
+            store_id: Some(created.store_id),
+            scope: MutationScope::Namespace(d.ns),
+            idempotency_key: Some(key.into()),
+            expected_generation: None,
+            contract_version: 2,
+        };
+        publisher
+            .apply_native_decay_accepted(context, capture, policy.clone(), &work)
+            .await
+            .unwrap();
+        work.finish();
+        let row = f.storage.read().unwrap().get_record(id).unwrap();
+        assert_eq!(row.as_ref().map(|r| r.phase), expected);
+        if let Some(row) = row {
+            assert!(row.schema.as_ref().unwrap().labels.is_empty());
+            assert!(row.schema.as_ref().unwrap().vector.is_some());
+        }
+    }
+    let (status, _) = http(
+        &api,
+        "GET",
+        &format!("/memories/{id}?recordAccess=false"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(tracker.status().pending, 0);
+    assert_eq!(tracker.status().unresolved, 0);
+    drop((api, bridge, query, publisher));
+    let _root = f.close();
+    inspect_schema(&d.path).unwrap();
+    let reopened = open(&d, clock);
+    assert!(reopened.engine.get_record(id).unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_decay_cancelled_waiter_keeps_worker_publication_lease() {
+    use std::time::Duration;
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let mut s = open(&d, clock);
+    let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();
+    let key = ctx(&s, &d, "cancel-create");
+    let created = s.insert_prepared(&key, &intent, &generated()).unwrap();
+    let id = inserted(&created);
+    let context = ctx(&s, &d, "cancel-decay");
+    let policy = NativePolicyInputs::default();
+    let capture = s
+        .metadata()
+        .capture_native_decay(id, d.ns, &policy, 10_000 * 86_400_000)
+        .unwrap();
+    let f = Fixture::from_open_engine(root, s.engine);
+    let publisher = completion(&f);
+    publisher.complete().await.unwrap();
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let accepted = tracker.begin().unwrap();
+    let gate = crate::derived_completion::publication_gate(&f.storage)
+        .await
+        .unwrap();
+    let graph_block = f.graph.clone().write_owned().await;
+    let task = tokio::spawn(async move {
+        publisher
+            .apply_native_decay_accepted(context, capture, policy, &accepted)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if tracker.status().pending == 2 && gate.try_write().is_err() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let storage = f.storage.clone();
+    let (held_tx, held_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let blocker = tokio::task::spawn_blocking(move || {
+        let _guard = storage.write().unwrap();
+        held_tx.send(()).unwrap();
+        release_rx.recv().unwrap();
+    });
+    held_rx.await.unwrap();
+    drop(graph_block);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().pending != 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let publication_held = gate.try_write().is_err();
+    let graph_held = f.graph.try_write().is_err();
+    // Always unblock the actual worker before assertions/fixture cleanup, even RED.
+    release_tx.send(()).unwrap();
+    blocker.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while tracker.status().pending > 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let lease = tokio::time::timeout(Duration::from_secs(5), gate.write())
+        .await
+        .unwrap();
+    drop(lease);
+    assert!(graph_held, "worker graph guard was not retained");
+    assert!(
+        tracker.status().unresolved >= 1,
+        "cancelled waiter must remain unresolved"
+    );
+    assert!(
+        publication_held,
+        "cancelled waiter released publication lease before blocked worker completed"
+    );
+}
+
+#[path = "wire_tests.rs"]
+mod native_lifecycle_wire;

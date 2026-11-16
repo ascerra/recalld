@@ -96,6 +96,11 @@ impl OfflineSnapshot {
         })
     }
 
+    pub(crate) fn into_owner(self) -> StoreOwnership {
+        // All disposable databases/payload handles and the source directory lock
+        // drop before the receiver opens live handles; process ownership persists.
+        self._owner
+    }
     pub fn control(&self) -> &ControlState {
         &self.control
     }
