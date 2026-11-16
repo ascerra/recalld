@@ -254,3 +254,85 @@ daemon frame. Preserve before-send serialization failure separately from partial
 write, lost response, oversize and malformed reply. No readback, receipt
 reconstruction or automatic fallback may upgrade unknown evidence to a known
 commit or a known refusal.
+
+## Local consumer hunk freeze for queue review
+
+Source base: `bad91bc09dc3513e0ecf3f4409be5a9d0d1a9a89`, containing
+actual parents `b374f07efb2da994d3a82e85d4814e642d2864b2` and
+`6ebfd25080bda0d21a755d88211fba471da1e652`. This is a proposed local
+implementation boundary, not a runtime or transport validation claim.
+
+Huygens confirmed the local subset does not require the unresolved Remote
+protocol. Constructing an ID/era descriptor in the dispatcher MUST NOT reject
+the request against the native cap. Only the actual owned-format Native branch
+applies the endpoint allowance, before accepting work, provider calls, clock or
+ID allocation. The legacy branch preserves its existing behavior, including
+large IDs. The old unbounded create entry remains legacy-only, so an old Remote
+alias cannot discard the descriptor and reach a native writer.
+
+Proposed exact local hunks and signatures:
+
+- `serialization/catalog_api1.rs` plus its module declaration: one
+  `CatalogReplyAdmission` with private fields and crate-only MCP `(id, era)` and
+  HTTP constructors, holding the existing E1 `ReceiptAdmission`. It is not
+  deserializable request input. Its pure candidate check uses the actual full
+  success and failure encodings; no new collector or capacity authority.
+- `mcp/server.rs`: add a default handler method
+  `call_catalog_tool(arguments: Value, admission: CatalogReplyAdmission) ->
+  ToolCallResult` forwarding to the existing `call_tool("create_namespace", ...)`.
+  Pass the actual ID into `handle_tools_call`; select this method only for the
+  API1 create tool after existing argument/version checks. Default forwarding is
+  safe only because the old owned-native entry remains rejected.
+- `mcp/bridge.rs`: override that method on `McpBridge`; add
+  `NamespaceRegistry::create_namespace_bounded(input, admission)` with the
+  existing `Result<NamespaceInfo, BridgeError>` and legacy default forwarding.
+  `mcp/tools.rs` changes only the create handler/forwarding, not get or search.
+- `mcp/bridge_adapters.rs`: implement the bounded override with actual format
+  selection, original legacy call or native adapter dispatch. Preserve the
+  existing `PartiallyApplied` full-evidence carrier at the final wire boundary.
+- `native_catalog_adapter.rs`: add
+  `create_api1_bounded(request: CreateNamespaceRequest, admission:
+  CatalogReplyAdmission) -> Result<WriteReceipt, CatalogError>` using the same
+  accepted worker, worker-held lease and original API1 context. Delegate to the
+  already validated bounded producer; keep V2 and policy entry semantics.
+  Record only the actual committed receipt. After releasing worker leases, use
+  restricted E1 completion; never drain unrelated prior receipts into this reply.
+- `api/state.rs` and `api/adapters.rs`: add bounded create forwarding with the
+  existing create inputs/result, plus admission. Keep legacy errors unchanged;
+  retain native `CatalogError` as a typed boxed error until the HTTP boundary.
+  `api/handlers.rs` changes only `create_namespace_v1` response projection to
+  preserve native full evidence; no generic `AppError` conversion that drops it.
+
+The final HTTP/MCP success is projected from the committed namespace transition,
+not a later catalog read. API1 numeric defaults remain unchanged, and the
+original API1 context determines the hash. Endpoint-only refusal precedes work;
+the exact full candidate check still runs in the authoritative transaction before
+staging. Candidate construction may consume an owned ID on later rejection as
+already proved by catalog-002; it must not be described as zero allocation.
+
+Tests for this local slice must exercise real dispatcher and HTTP emitters:
+legacy and modern MCP aliases/ID escaping/LF, HTTP body bounds, exact below/above
+limits, Value float representation, full known receipt and unknown precedence,
+publication failure, waiter cancellation, unrelated pending receipt refusal and
+unchanged legacy behavior. Native direct/old Remote unbounded entries remain
+rejected. No daemon client/server/capability, O1 get, R2 page, ordinary startup or
+public2 activation edits belong to this slice. Halley granted literal local
+hunk ownership on this exact base, with Huygens to review the implementation
+before proof. Source/hunk and cache/test plans must be frozen before a build.
+The E1 x86 stack investigation remains an integration gate. No local heavy
+validation is scheduled by this document.
+
+## Historical batch finding disposition
+
+Read-only live remote `main` verification on 2026-11-16 returned
+`200a1f10b9db52d8e5a758cab50c092ca2b07359`. Fix
+`6cbb2e53d05239c2bc68f34940666243178afbf1` is an ancestor. At this main,
+`src/mcp/batch_adapters.rs:468-501` validates the matching `BatchItemRejected`
+receipt's store, version, nonzero operation/generation, parent, child index and
+error, then retains the full bookkeeping receipt with a terminal, unready item.
+The following arm preserves a genuine unknown bookkeeping operation separately.
+The diff from that fix changes async forwarding/pinning only;
+`src/serialization/native_batch.rs` is unchanged. The historical 9ed finding is
+therefore solved for this call chain, not a residual PR181 blocker. This is an
+exact-source comparison, not a newly executed regression. No duplicate fix or
+build was started; Halley and Huygens received the disposition.
