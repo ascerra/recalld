@@ -188,6 +188,8 @@ async fn postcommit_failure(nth: usize, origin: u32, query: bool) {
         error.receipts, expected,
         "lost current postcommit receipt: {error:?}"
     );
+    assert_nested_mapping(&expected);
+    assert_failed_wire(error.clone(), &expected, "committed");
     assert_eq!(error.commit_state, "committed");
     assert!(!error.ready);
     assert!(error.unknown_operation_id.is_none());
@@ -225,4 +227,219 @@ async fn native_exposure_postcommit_whole_query_page_api1() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_exposure_postcommit_whole_query_page_api2() {
     postcommit_failure(1, 2, true).await;
+}
+
+// Typed nested-error checks use the actual durable exposure receipts above.
+// They do not claim the certification publisher emits a nested unknown failure.
+fn assert_nested_mapping(receipts: &[WriteReceipt]) {
+    let current = receipts.last().unwrap();
+    let prior = &receipts[..receipts.len() - 1];
+    let unknown_id = uuid::Uuid::new_v4();
+    for unknown_worker in [false, true] {
+        let leaf = if unknown_worker {
+            StorageError::WorkerOutcomeUnknown("lost worker".into())
+        } else {
+            StorageError::CommitOutcomeUnknown {
+                operation_id: unknown_id,
+                source: redb::CommitError::Storage(redb::StorageError::Io(std::io::Error::other(
+                    "unknown ACK",
+                ))),
+            }
+        };
+        let error = ObservationError::storage(
+            StorageError::CommittedMutation {
+                receipt: Box::new(current.clone()),
+                source: Box::new(StorageError::CommittedMutation {
+                    receipt: Box::new(current.clone()),
+                    source: Box::new(leaf),
+                }),
+            },
+            prior.to_vec(),
+        );
+        assert_eq!(
+            error.receipts, receipts,
+            "dedupe exact wrapper, preserve prior order"
+        );
+        assert_eq!(error.commit_state, "unknown");
+        assert_eq!(
+            error.unknown_operation_id,
+            (!unknown_worker).then_some(unknown_id)
+        );
+        assert!(!error.ready);
+        assert!(!error.message.contains("receipt="));
+        assert_failed_wire(error, receipts, "unknown");
+    }
+    let plain =
+        ObservationError::storage(StorageError::InvalidMutation("precommit".into()), vec![]);
+    assert_eq!(plain.commit_state, "notCommitted");
+    assert!(plain.receipts.is_empty());
+    assert!(plain.unknown_operation_id.is_none());
+    let worker = ObservationError::worker_failed("cancelled worker");
+    assert_eq!(worker.commit_state, "unknown");
+    assert!(worker.receipts.is_empty());
+    assert!(worker.unknown_operation_id.is_none());
+}
+
+fn assert_failed_wire(error: ObservationError, receipts: &[WriteReceipt], state: &str) {
+    let reply =
+        crate::serialization::query_response::QueryReply::failure(SearchError::Observation(error));
+    assert_eq!(reply.http_status, 503);
+    assert!(reply.envelope.data.is_none());
+    assert!(reply.envelope.readiness.is_none());
+    assert_eq!(reply.observation_receipts, receipts);
+    assert_eq!(
+        reply.envelope.receipt.as_ref(),
+        (receipts.len() == 1).then(|| &receipts[0])
+    );
+    let value = serde_json::to_value(&reply).unwrap();
+    assert_eq!(value["error"]["commitState"], state);
+    assert_eq!(value["error"]["retryable"], false);
+    assert_eq!(reply.mcp().is_error, Some(true));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_exposure_postcommit_keyed_core_replays_after_reopen_without_time_or_history() {
+    for origin in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let d = certified_fixture(root.path());
+        let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+        let session = open(&d, clock.clone());
+        let intent = session
+            .capture_exposure(scope(&d), &[(d.parent, AccessKind::DirectRetrieval)])
+            .unwrap();
+        let mut context = ctx(&session, &d, "postcommit-keyed-core");
+        context.contract_version = origin;
+        session
+            .metadata()
+            .vector_publication_failure_nth
+            .store(1, Ordering::SeqCst);
+        let error = ObservationError::storage(
+            session.record_exposure(&context, &intent).unwrap_err(),
+            vec![],
+        );
+        assert_eq!(error.commit_state, "committed");
+        assert_eq!(error.receipts.len(), 1);
+        drop(session);
+        let reopened = open(&d, clock.clone());
+        let generation = reopened
+            .metadata()
+            .control_state()
+            .unwrap()
+            .generation_ref();
+        let record = reopened
+            .engine
+            .get_record(d.parent)
+            .unwrap()
+            .unwrap()
+            .encode()
+            .unwrap();
+        let calls = clock.0.load(Ordering::SeqCst);
+        let replay = reopened
+            .record_exposure(&context, &intent)
+            .unwrap()
+            .unwrap();
+        let mut expected = error.receipts[0].clone();
+        expected.replayed = true;
+        assert_eq!(replay, expected);
+        assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+        assert_eq!(
+            reopened
+                .metadata()
+                .control_state()
+                .unwrap()
+                .generation_ref(),
+            generation
+        );
+        assert_eq!(
+            reopened
+                .engine
+                .get_record(d.parent)
+                .unwrap()
+                .unwrap()
+                .encode()
+                .unwrap(),
+            record
+        );
+        context.contract_version = 3 - origin;
+        assert!(matches!(
+            reopened.record_exposure(&context, &intent),
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+        drop((reopened, root));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_exposure_postcommit_prepared_query_returns_only_failure_and_full_receipt() {
+    let (f, d, clock, id) = setup();
+    let owner = completion(&f);
+    owner.rebuild_all().await.unwrap();
+    let (api, bridge, engine) = readers_with_exposure(&f, clock.clone(), true);
+    let before = event_count(&f, id);
+    f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .vector_publication_failure_nth
+        .store(1, Ordering::SeqCst);
+    let request = crate::serialization::query::QueryRequest::from_mcp(
+        &json!({
+            "contractVersion":2, "namespace":"native", "queryMode":"metadata_only",
+            "recordAccess":true, "minStrength":0.0,
+        }),
+        "native",
+    )
+    .unwrap();
+    let reply = engine.query_contract(request).await;
+    assert_eq!(reply.http_status, 503);
+    assert!(reply.envelope.data.is_none());
+    assert!(reply.envelope.readiness.is_none());
+    assert_eq!(reply.observation_receipts.len(), 1);
+    assert_eq!(
+        reply.envelope.receipt.as_ref(),
+        reply.observation_receipts.first()
+    );
+    assert_eq!(reply.mcp().is_error, Some(true));
+    let value = serde_json::to_value(&reply).unwrap();
+    assert_eq!(value["error"]["commitState"], "committed");
+    assert_eq!(value["error"]["retryable"], false);
+    assert!(owner.complete().await.is_err());
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .work_tracker()
+            .status()
+            .unresolved
+            > 0
+    );
+    drop((api, bridge, engine, owner));
+    let root = f.close();
+    let reopened = open(&d, clock);
+    let receipt = &reply.observation_receipts[0];
+    assert_eq!(
+        reopened
+            .metadata()
+            .lookup_operation(
+                receipt.store_id,
+                MutationScope::Namespace(d.ns),
+                receipt.operation_id
+            )
+            .unwrap()
+            .as_ref(),
+        Some(receipt)
+    );
+    assert_eq!(
+        reopened
+            .engine
+            .get_record(id)
+            .unwrap()
+            .unwrap()
+            .access_history
+            .len(),
+        before + 1
+    );
+    drop((reopened, root));
 }

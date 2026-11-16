@@ -116,15 +116,25 @@ impl ObservationError {
         }
     }
 
-    pub(crate) fn storage(error: StorageError, receipts: Vec<WriteReceipt>) -> Self {
-        let unknown = match &error {
-            StorageError::CommitOutcomeUnknown { operation_id, .. } => Some(*operation_id),
-            _ => None,
-        };
-        let mut result = Self::failed(error, receipts);
-        if unknown.is_some() {
-            result.commit_state = "unknown";
-            result.unknown_operation_id = unknown;
+    pub(crate) fn storage(error: StorageError, mut receipts: Vec<WriteReceipt>) -> Self {
+        let mut cause = &error;
+        while let StorageError::CommittedMutation { receipt, source } = cause {
+            // Keep prior groups followed by the exact returned commit evidence.
+            // Nested wrappers may repeat it; never reconstruct it from storage.
+            if !receipts.contains(receipt.as_ref()) {
+                receipts.push((**receipt).clone());
+            }
+            cause = source;
+        }
+        // Receipts belong in their typed field, not duplicated in the message.
+        let mut result = Self::failed(cause, receipts);
+        match cause {
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => {
+                result.commit_state = "unknown";
+                result.unknown_operation_id = Some(*operation_id);
+            }
+            StorageError::WorkerOutcomeUnknown(_) => result.commit_state = "unknown",
+            _ => {}
         }
         result
     }
