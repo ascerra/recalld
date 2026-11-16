@@ -1,6 +1,6 @@
 # Heterogeneous namespace vector owner
 
-Status: validated, awaiting coordinating-agent publication review. No ordinary native
+Status: validated; coordinating agent approved publication. No ordinary native
 startup or public API2 activation. Proposed base is actual PR178
 `3361ddb2309593493326ace621d4fdcc9ba89d8c`; the only additional parent is actual
 PR175 socket-fixture correction `a54cdc7dc89221f66049147ee8543d84bbb49977`.
@@ -13,8 +13,8 @@ three explicitly remedied namespaces, one unknown namespace and one old Bound bu
 uncertified namespace. Independent publication now retains all five physical vectors
 and exact f32 bits at G15, with all four required views at the actual canonical
 GenerationRef. Real native purge removes the wide namespace and republishes four
-remaining vectors; a subsequent rebuild preserves them. Corrupt referenced vector
-files fail open without repairing or changing the canonical source.
+remaining vectors; a subsequent rebuild preserves them. Opening/rebuilding with
+corrupt referenced vector files fails, without repairing or changing canonical source.
 
 The private constructor still rejects this heterogeneous fixture at `native_profile`.
 Its profile loops are unchanged. The positive publisher result does not establish
