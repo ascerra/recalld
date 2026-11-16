@@ -1479,12 +1479,24 @@ async fn handle_create_namespace(
     bridge: &McpBridge,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    handle_create_namespace_bounded(bridge, arguments, None).await
+}
+
+pub(crate) async fn handle_create_namespace_bounded(
+    bridge: &McpBridge,
+    arguments: serde_json::Value,
+    admission: Option<crate::serialization::catalog_api1::CatalogReplyAdmission>,
+) -> ToolCallResult {
     let input = match args::parse_create_namespace(&arguments) {
         Ok(input) => input,
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge.namespaces.create_namespace(input).await {
+    let result = match admission {
+        Some(admission) => bridge.namespaces.create_namespace_bounded(input, admission).await,
+        None => bridge.namespaces.create_namespace(input).await,
+    };
+    match result {
         Ok(info) => match ToolCallResult::json(&info) {
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),

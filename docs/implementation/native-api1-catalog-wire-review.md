@@ -291,7 +291,7 @@ Proposed exact local hunks and signatures:
   selection, original legacy call or native adapter dispatch. Preserve the
   existing `PartiallyApplied` full-evidence carrier at the final wire boundary.
 - `native_catalog_adapter.rs`: add
-  `create_api1_bounded(request: CreateNamespaceRequest, admission:
+  `create_api1_bounded(input: NativeNamespaceInput, admission:
   CatalogReplyAdmission) -> Result<WriteReceipt, CatalogError>` using the same
   accepted worker, worker-held lease and original API1 context. Delegate to the
   already validated bounded producer; keep V2 and policy entry semantics.
@@ -336,3 +336,38 @@ The diff from that fix changes async forwarding/pinning only;
 therefore solved for this call chain, not a residual PR181 blocker. This is an
 exact-source comparison, not a newly executed regression. No duplicate fix or
 build was started; Halley and Huygens received the disposition.
+
+## Local source draft, not validated
+
+The initial local implementation follows the released hunks. Huygens's review
+removed `CreateNamespaceRequest` from the API1 entry: accepting only
+`NativeNamespaceInput` prevents key/CAS data from reaching this fresh-unkeyed
+admission path. Existing V2 replay remains separate and unchanged.
+
+A proposed new publication-error wrapper was removed before validation.
+`complete_with_admission` can fail during admission/owner checks before any
+publisher runs. N1 therefore preserves the actual `CommittedMutation` receipt
+and reports `SERVICE_UNAVAILABLE` without readiness for indistinguishable
+completion errors; recursive unknown outcome takes precedence. No message text
+or completion call-site inference establishes `INDEX_NOT_READY`. The candidate
+estimator also checks that larger shape conservatively, but the new projector
+does not emit it without typed stage evidence. E1 core remains unchanged.
+
+The source includes unexecuted tests for real MCP legacy/modern envelopes,
+original API1 hash versus API2, old unbounded native alias refusal, actual
+catalog fault/unknown reopen, oversized outer-ID refusal with legacy control,
+HTTP bodies, exact serialized-byte boundaries and unknown plus known receipt.
+Cancellation, foreign pending work and candidate refusal at a custom limit
+still need their final regression coverage. No compile, fmt, runtime GREEN,
+full suite or activation is claimed for this source draft.
+
+Proposed validation resource plan after literal patch review: one existing
+private target `/tmp/recalld-owned-native-catalog-ids-full-xk182ybj/target`, the
+retained shared registry `/tmp/recalld-unit-tests-l__ja1yo/cargo/registry`, no
+cache clone or released-root reuse. Use a new owned run directory under
+`/tmp/recalld-native-api1-admission-validation`, offline Docker with 2 CPUs,
+4 GiB and one Cargo build job. Clean only this agent's recalld package before
+switching source roots; capture source and executable identities. Run fmt and
+focused `native_catalog_api1`/existing `native_catalog` controls first. Request
+the queue's resource slot before creating any container; E1 investigation and
+queue validation retain priority. No full run is scheduled by this draft.

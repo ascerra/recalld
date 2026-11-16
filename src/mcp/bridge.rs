@@ -304,6 +304,14 @@ pub trait NamespaceRegistry: Send + Sync {
         input: CreateNamespaceInput,
     ) -> Result<NamespaceInfo, BridgeError>;
 
+    async fn create_namespace_bounded(
+        &self,
+        input: CreateNamespaceInput,
+        _admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
+    ) -> Result<NamespaceInfo, BridgeError> {
+        self.create_namespace(input).await
+    }
+
     /// Get detailed statistics for a namespace by name.
     async fn namespace_stats(&self, name: &str) -> Result<NamespaceStats, BridgeError>;
 
@@ -1068,6 +1076,14 @@ impl McpBridge {
 
 #[async_trait]
 impl crate::mcp::server::McpHandler for McpBridge {
+    async fn call_catalog_tool(
+        &self,
+        arguments: serde_json::Value,
+        admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
+    ) -> crate::mcp::protocol::ToolCallResult {
+        crate::mcp::tools::handle_create_namespace_bounded(self, arguments, Some(admission)).await
+    }
+
     fn tools(&self) -> Vec<crate::mcp::protocol::ToolInfo> {
         crate::mcp::tools::tool_definitions()
     }

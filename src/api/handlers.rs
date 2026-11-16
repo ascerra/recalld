@@ -1521,25 +1521,30 @@ pub(crate) async fn create_namespace_v2(
 async fn create_namespace_v1(
     State(state): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Result<(StatusCode, Json<ApiResponse<NamespaceResponse>>), AppError> {
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
     let start = Instant::now();
 
-    let req = crate::mcp::args::parse_create_namespace(&req).map_err(argument_error)?;
+    let req = match crate::mcp::args::parse_create_namespace(&req) {
+        Ok(req) => req,
+        Err(error) => return argument_error(error).into_response(),
+    };
 
     // Create namespace (registry checks for duplicates)
-    let ns = state
+    let result = state
         .namespaces
-        .create(
-            &req.name,
-            req.embedding_dim.map(u32::from),
-            req.initial_stability
-                .unwrap_or(crate::model::constants::DEFAULT_INITIAL_STABILITY),
-            req.desired_retention
-                .unwrap_or(crate::model::constants::DEFAULT_DESIRED_RETENTION),
-            req.decay_rate_multiplier,
-        )
-        .await
-        .map_err(namespace_create_error)?;
+        .create_bounded(req, crate::serialization::catalog_api1::CatalogReplyAdmission::http())
+        .await;
+    let ns = match result {
+        Ok(ns) => ns,
+        Err(error) => match error.downcast::<crate::native_catalog_adapter::CatalogError>() {
+            Ok(error) => {
+                let (status, value) = crate::serialization::catalog_api1::failure(&error);
+                return (StatusCode::from_u16(status).expect("catalog HTTP status"), Json(value)).into_response();
+            }
+            Err(error) => return namespace_create_error(error).into_response(),
+        },
+    };
 
     let response = NamespaceResponse {
         id: ns.id.get(),
@@ -1555,13 +1560,13 @@ async fn create_namespace_v1(
 
     let took = start.elapsed().as_micros() as u64;
 
-    Ok((
+    (
         StatusCode::CREATED,
         Json(ApiResponse {
             data: response,
             took_us: Some(took),
         }),
-    ))
+    ).into_response()
 }
 
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {

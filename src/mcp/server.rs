@@ -40,6 +40,16 @@ pub trait McpHandler: Send + Sync {
     /// Execute a tool call and return the result.
     async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> ToolCallResult;
 
+    /// Local catalog reply authority. Legacy-only handlers retain their entry;
+    /// the owning native adapter must reject that unbounded entry.
+    async fn call_catalog_tool(
+        &self,
+        arguments: serde_json::Value,
+        _admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
+    ) -> ToolCallResult {
+        self.call_tool("create_namespace", arguments).await
+    }
+
     /// Read a resource by URI and return its content.
     async fn read_resource(&self, uri: &str) -> Result<ResourceReadResult, String>;
 }
@@ -165,7 +175,7 @@ impl McpDispatcher {
             (Era::Legacy, "ping") => Ok(Outcome::plain(serde_json::json!({}))),
 
             (_, "tools/list") => self.handle_tools_list(),
-            (_, "tools/call") => self.handle_tools_call(ctx, msg.params).await,
+            (_, "tools/call") => self.handle_tools_call(ctx, &id, msg.params).await,
             (_, "resources/list") => self.handle_resources_list(),
             (_, "resources/templates/list") => self.handle_resource_templates_list(),
             (_, "resources/read") => self.handle_resources_read(msg.params).await,
@@ -284,6 +294,7 @@ impl McpDispatcher {
     async fn handle_tools_call(
         &self,
         ctx: &RequestContext,
+        id: &JsonRpcId,
         params: Option<serde_json::Value>,
     ) -> Result<Outcome, DispatchError> {
         let params: ToolCallParams = params
@@ -301,6 +312,13 @@ impl McpDispatcher {
                     .map_err(|error| error.to_string())
             });
         let mut result = match version {
+            Ok(()) if params.name == "create_namespace" && matches!(
+                crate::serialization::contract::ContractVersion::from_mcp(&params.arguments),
+                Ok(crate::serialization::contract::ContractVersion::V1)
+            ) => self.handler.call_catalog_tool(
+                params.arguments,
+                crate::serialization::catalog_api1::CatalogReplyAdmission::mcp(id.clone(), ctx.era),
+            ).await,
             Ok(()) => self.handler.call_tool(&params.name, params.arguments).await,
             Err(error) => ToolCallResult::error(error),
         };

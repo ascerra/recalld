@@ -4,6 +4,7 @@
 //! Uses `serde_json` with skip-if-none and integer-millis timestamps.
 
 pub mod catalog;
+pub mod catalog_api1;
 pub mod contract;
 mod json;
 pub mod native_batch;
