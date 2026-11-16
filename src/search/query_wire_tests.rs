@@ -47,11 +47,11 @@ async fn prepared_remote_native_query_similar_exact_and_known_publication_failur
         }
 
     };
-    for mode in ["metadata_only","fts_only","embedding_only"] {
+    for (case,mode) in [("metadata_only","metadata_only"),("hybrid_fts","embedding_plus_metadata"),("embedding_only","embedding_only")] {
         let mut args=serde_json::json!({"contractVersion":2,"namespace":"DeFaUlT","queryMode":mode,
             "tags":["allow"],"recordAccess":false,"explain":true,"compact":false,"includeEmbeddings":true});
-        if mode=="fts_only" {args["ftsQuery"]=serde_json::json!("similar");}
-        if mode=="embedding_only" {
+        if case=="hybrid_fts" {args["ftsQuery"]=serde_json::json!("similar");}
+        if mode!="metadata_only" {
             args["query"]=serde_json::json!("provider must not run");
             args["embedding"]=serde_json::json!([1.,0.,0.,0.]);
             args["embeddingProfileId"]=serde_json::json!(crate::embedding::runtime::tests::profile().profile_id().unwrap());
@@ -60,7 +60,13 @@ async fn prepared_remote_native_query_similar_exact_and_known_publication_failur
         let local=adapter.query_contract(input()).await;
         assert_eq!(local.http_status,200,"{mode}: {local:?}");
         let received=remote.query_contract(input()).await;
-        assert_wire(mode,&local,&received);
+        assert_wire(case,&local,&received);
+        if case=="hybrid_fts" {
+            let coverage=&received.envelope.data.as_ref().unwrap()["coverage"];
+            for channel in ["fts","vector"] {
+                assert_eq!(coverage["channels"][channel]["participation"],"completed");
+            }
+        }
     }
     for scope in ["sameNamespace","allCompatible"] {
         for version in ["current","history"] {
