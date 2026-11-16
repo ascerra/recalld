@@ -160,3 +160,145 @@ async fn supplied_query_certification_mcp_rejects_uncertified_native() {
 async fn supplied_query_certification_rest_rejects_uncertified_native() {
     uncertified_boundary(2).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn supplied_query_certification_real_remedy_all_boundaries_and_profile_controls() {
+    let root = tempfile::tempdir().unwrap();
+    // This invokes real reembed_fresh using retained documents, not policy adoption.
+    let d = certified_fixture(root.path());
+    let f = Fixture::from_open_engine(root, RedbStorageEngine::open_native(&d.path).unwrap());
+    completion(&f).rebuild_all().await.unwrap();
+    let query = engine(&f);
+    let before = bytes(&d.path);
+    let arguments = args(&d);
+    let request =
+        crate::serialization::query::QueryRequest::from_mcp(&arguments, "wrong-default").unwrap();
+    let result = query.query_contract(request).await;
+    assert_eq!(result.http_status, 200, "{result:?}");
+    assert_eq!(
+        result.envelope.data.as_ref().unwrap()["results"][0]["memoryId"],
+        json!(d.parent)
+    );
+    let mcp = McpSearchAdapter::new(
+        query.clone(),
+        Arc::new(NoProvider),
+        f.storage.clone(),
+        f.graph.clone(),
+        chrono_tz::UTC,
+    );
+    let result = crate::mcp::tools::prepared_query(&mcp, "wrong-default", &arguments).await;
+    assert_eq!(result.is_error, Some(false), "{result:?}");
+    let expected = Value::Object(result.structured_content.unwrap());
+    let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
+    assert_eq!(serde_json::from_str::<Value>(text).unwrap(), expected);
+    let http = SearchPipelineAdapter::new(
+        query.clone(),
+        Arc::new(NoProvider),
+        f.vector_index.clone(),
+        f.fts_index.clone(),
+        f.entity_index.clone(),
+    );
+    let mut body = arguments.clone();
+    body.as_object_mut().unwrap().remove("contractVersion");
+    let result = crate::api::search_v2(&http, "wrong-default", &body).await;
+    assert_eq!(result.status(), axum::http::StatusCode::OK);
+    let raw = axum::body::to_bytes(result.into_body(), 8 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&raw).unwrap(), expected);
+    for (field, value, status) in [
+        ("embedding", json!([1., 0., 0.]), 422),
+        ("embedding", json!([0., 0., 0., 0.]), 422),
+        (
+            "embeddingProfileId",
+            json!(format!("ep1:{}", "a".repeat(64))),
+            409,
+        ),
+    ] {
+        let mut bad = body.clone();
+        bad[field] = value;
+        assert_eq!(
+            crate::api::search_v2(&http, "wrong-default", &bad)
+                .await
+                .status()
+                .as_u16(),
+            status
+        );
+    }
+    assert_eq!(bytes(&d.path), before);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn supplied_query_certification_metadata_and_fts_do_not_require_vector_certification() {
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let f = Fixture::from_open_engine(root, RedbStorageEngine::open_native(&d.path).unwrap());
+    completion(&f).rebuild_all().await.unwrap();
+    let before = bytes(&d.path);
+    let query = engine(&f);
+    let request = crate::serialization::query::QueryRequest::from_mcp(
+        &json!({"contractVersion":2,"namespace":"native","queryMode":"metadata_only","phases":["full"],"recordAccess":false}),
+        "wrong-default",
+    ).unwrap();
+    let result = query.query_contract(request).await;
+    assert_eq!(result.http_status, 200, "{result:?}");
+    assert_eq!(
+        result.envelope.data.as_ref().unwrap()["results"][0]["memoryId"],
+        json!(d.parent)
+    );
+    // Existing nonsemantic FTS reader, not a new public FTS-only query mode.
+    let fts = SharedFtsIndexRegistry::new(f.fts_index.clone());
+    let hits = crate::search::FtsIndexRegistry::search(&fts, d.ns, "original", 10).unwrap();
+    assert_eq!(hits[0].memory_id, d.parent);
+    assert_eq!(bytes(&d.path), before);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn supplied_query_certification_scope_and_stale_view_fail_closed() {
+    let root = tempfile::tempdir().unwrap();
+    let d = certified_fixture(root.path());
+    let f = Fixture::from_open_engine(root, RedbStorageEngine::open_native(&d.path).unwrap());
+    completion(&f).rebuild_all().await.unwrap();
+    let view = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .capture_read_view()
+        .unwrap();
+    let ns = f
+        .storage
+        .read()
+        .unwrap()
+        .get_namespace(d.ns)
+        .unwrap()
+        .unwrap();
+    view.check_native_vector_namespace(&ns).unwrap();
+    let mut wrong = ns.clone();
+    wrong.name.push_str("-wrong");
+    assert!(view.check_native_vector_namespace(&wrong).is_err());
+    wrong = ns.clone();
+    wrong.initial_stability += 1.;
+    assert!(view.check_native_vector_namespace(&wrong).is_err());
+    {
+        let mut storage = f.storage.write().unwrap();
+        let policy = crate::storage::native_lifecycle::NativePolicyInputs::default();
+        let intent = storage
+            .meta_store()
+            .capture_native_tombstone(d.parent, Some(d.ns), &policy)
+            .unwrap();
+        storage
+            .tombstone_native_record(
+                &MutationContext::unkeyed(d.ns),
+                &intent,
+                &policy,
+                &crate::time::ManualClock::new(3000),
+                None,
+            )
+            .unwrap();
+    }
+    assert!(
+        view.check_native_vector_namespace(&ns).is_err(),
+        "old pinned G must not borrow new owner certification"
+    );
+}

@@ -68,3 +68,39 @@ on immutable read-only source in offline Rust1.94.1 Docker, 2CPU/4GiB/two build 
 Reuse the single owned Cargo cache/target, hash executed binaries before switching
 source roots and clean only the owned package target. Retain failed evidence;
 release completed raw roots centrally after publication and recorded results.
+
+## Implemented boundary and review
+
+The live `StorageNamespaceResolver` also reports the actual storage format. It
+cannot grant certification itself: its strict check retains the rejecting default,
+so an unpinned native resolver cannot use the legacy compatibility lane. Owned
+coherent reads replace it with the captured canonical resolver. Custom/legacy
+resolvers retain their existing default; they grant no native certification.
+
+Hume reviewed the production four-file diff on 2026-11-15, SHA256
+`85ea70fc606d2c9bf0493bebe54b35157c926b702f3da0b83f5668033a1e2187`:
+source checks precede `get_vector`; donor checks precede searched coverage,
+records and vectors; errors escape before observation; pinned hydration remains.
+This is a source review, not independent execution evidence.
+
+The similarity positive fixture now explicitly re-embeds retained documents via
+the real remedy, then performs real native Full→Summary→Ghost transitions. Its
+synthetic document provider preserves the declared geometry without reading old
+vector bytes. The original ranking, scope, terminal/history and phase assertions
+remain. An additional fixture certifies only the source and proves a compatible
+uncertified donor fails the whole allCompatible operation. Policy adoption is
+only lifecycle setup; it does not certify vectors or repair historical output.
+
+The Rust internal unpinned `search_with_semantics` entry now rejects native
+supplied-vector requests, even on a certified store: it cannot bind certification
+to a captured generation. Callers must use the owned pinned coherent entry.
+There is no silent fallback. Direct nonsemantic metadata selection remains valid,
+as do legacy-disk compatibility calls. The inherited native writer/reader fixture
+now asserts that deliberate rejection while retaining its original pinned positive
+result, labels, generation and false-mode byte checks. This is an internal API
+behavior correction, not public API2 activation.
+
+Feynman independently source-reviewed the same four-file diff and acknowledged
+actual format authority, rejecting unpinned default, unchanged shared helper,
+source/donor scope and generation checks, and unchanged generated-provider checks.
+Neither owner source review claims independent execution.

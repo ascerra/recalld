@@ -83,6 +83,16 @@ pub use semantics::{
 pub trait NamespaceResolver: Send + Sync {
     /// Look up a namespace by name, returning its configuration.
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
+    /// Actual storage-owner format authority, never a query feature selector.
+    /// Legacy/custom resolvers have no native authority by default.
+    fn is_native_owned(&self) -> Result<bool> {
+        Ok(false)
+    }
+    fn check_native_vector_namespace(&self, _namespace: &NamespaceConfig) -> Result<()> {
+        Err(SearchError::Unavailable(
+            "native vector certification requires a pinned canonical view".into(),
+        ))
+    }
     /// Only an actual owned native canonical view can grant this admission.
     fn check_native_query_profile(
         &self,
@@ -825,7 +835,13 @@ impl QueryEngine {
         let stage_start = Instant::now();
         let query_embedding = match query.query_mode {
             QueryMode::MetadataOnly => None,
-            _ if query.query_embedding.is_some() => query.query_embedding.take(),
+            _ if query.query_embedding.is_some() => {
+                if self.namespace_resolver.is_native_owned()? {
+                    self.namespace_resolver
+                        .check_native_vector_namespace(&ns_config)?;
+                }
+                query.query_embedding.take()
+            }
             _ => {
                 let text = query.text.as_ref().ok_or(SearchError::EmptyQuery)?;
                 let profile = self.embedding_providers.profile();

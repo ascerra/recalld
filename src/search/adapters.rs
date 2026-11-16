@@ -95,6 +95,16 @@ impl StorageNamespaceResolver {
 
 #[async_trait]
 impl NamespaceResolver for StorageNamespaceResolver {
+    fn is_native_owned(&self) -> Result<bool> {
+        Ok(self
+            .storage
+            .read()
+            .map_err(|_| SearchError::Unavailable("storage owner poisoned".into()))?
+            .meta_store()
+            .uses_native_lifecycle())
+    }
+    // Native semantic admission still uses the trait's rejecting default here:
+    // only the pinned CanonicalReadView can validate namespace certification at G.
     async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
         let storage = self.storage.clone();
         tokio::task::spawn_blocking(move || {

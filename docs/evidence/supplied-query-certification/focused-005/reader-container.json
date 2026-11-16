@@ -1,0 +1,246 @@
+[
+    {
+        "Id": "4da21e670424985ea46c7b62ec813aee6076c00c4ae35aafb92a3d6cf751997b",
+        "Created": "2026-11-16T00:35:03.525009738Z",
+        "Path": "sh",
+        "Args": [
+            "-c",
+            "cargo test --offline --locked --all-features --lib native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_read_only_bytes -- --nocapture > /output/inherited-reader.log 2>&1; echo \"$?\" > /output/inherited-reader.exit; cat /sys/fs/cgroup/memory.events > /output/reader-memory.events; cat /sys/fs/cgroup/memory.peak > /output/reader-memory.peak"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-16T00:35:03.570039043Z",
+            "FinishedAt": "2026-11-16T00:35:06.691863221Z"
+        },
+        "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+        "ResolvConfPath": "/var/lib/docker/containers/4da21e670424985ea46c7b62ec813aee6076c00c4ae35aafb92a3d6cf751997b/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/4da21e670424985ea46c7b62ec813aee6076c00c4ae35aafb92a3d6cf751997b/hostname",
+        "HostsPath": "/var/lib/docker/containers/4da21e670424985ea46c7b62ec813aee6076c00c4ae35aafb92a3d6cf751997b/hosts",
+        "LogPath": "/var/lib/docker/containers/4da21e670424985ea46c7b62ec813aee6076c00c4ae35aafb92a3d6cf751997b/4da21e670424985ea46c7b62ec813aee6076c00c4ae35aafb92a3d6cf751997b-json.log",
+        "Name": "/recalld-huygens-supplied-query-005-reader",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/tmp/recalld-huygens-active-validation/target:/target",
+                "/tmp/recalld-huygens-active-validation/supplied-query-green-005/source:/work:ro",
+                "/tmp/recalld-huygens-active-validation/supplied-query-green-005/output:/output",
+                "/tmp/recalld-implementation/compaction-review-7281918/cargo:/cargo"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {
+                    "max-file": "5",
+                    "max-size": "20m"
+                }
+            },
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 8589934592,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 4294967296,
+            "NanoCpus": 2000000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 8589934592,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/compaction-review-7281918/cargo",
+                "Destination": "/cargo",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-huygens-active-validation/supplied-query-green-005/output",
+                "Destination": "/output",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-huygens-active-validation/target",
+                "Destination": "/target",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-huygens-active-validation/supplied-query-green-005/source",
+                "Destination": "/work",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "4da21e670424",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "CARGO_TARGET_DIR=/target",
+                "CARGO_PROFILE_DEV_DEBUG=0",
+                "CARGO_PROFILE_TEST_DEBUG=0",
+                "RUSTUP_TOOLCHAIN=1.94.1",
+                "CARGO_BUILD_JOBS=2",
+                "CARGO_HOME=/cargo",
+                "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "RUSTUP_HOME=/usr/local/rustup",
+                "RUST_VERSION=1.94.1"
+            ],
+            "Cmd": [
+                "sh",
+                "-c",
+                "cargo test --offline --locked --all-features --lib native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_read_only_bytes -- --nocapture > /output/inherited-reader.log 2>&1; echo \"$?\" > /output/inherited-reader.exit; cat /sys/fs/cgroup/memory.events > /output/reader-memory.events; cat /sys/fs/cgroup/memory.peak > /output/reader-memory.peak"
+            ],
+            "Image": "recalld-ci:1.94",
+            "Volumes": null,
+            "WorkingDir": "/work",
+            "Entrypoint": null,
+            "Labels": {
+                "org.opencontainers.image.source": "https://github.com/rust-lang/docker-rust"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "none": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "9f8d771a69aae6568ca4386f95a53838dae6a2faa7f0494668ca6d561de2ff98",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:3065526a10807e4b0672a1c23f6a167f6b42ba75efdae5deaf7afdbd4d554544",
+            "size": 1448,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]
