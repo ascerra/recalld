@@ -1,0 +1,5 @@
+STARTUP_ACK_WORK backlog=32 AckWork { validation_calls: 65, effect_rows: 1056, commit_attempts: 32, commit_successes: 32 }
+
+thread 'storage::metadata::effects::ack_tests::startup_ack_actual_rebuild_has_linear_validation_work' (303) panicked at src/storage/metadata/effects/ack_tests.rs:111:5:
+actual ACK repeats full backlog validation: AckWork { validation_calls: 65, effect_rows: 1056, commit_attempts: 32, commit_successes: 32 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
