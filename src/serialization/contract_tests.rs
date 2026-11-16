@@ -215,9 +215,11 @@ fn contract_envelope_fixture_serializes_decimal_counters_and_identical_mcp_objec
         pending_work: 1,
         derived: vec![DerivedReadiness {
             name: "vector".into(),
-            applied_generation: Generation::default(),
+            applied_generation: Some(Generation::default()),
             ready: false,
         }],
+        pending_work_scope: None,
+        observed_work: None,
     });
     envelope.status = Status::Error;
     envelope.error = Some(ExecutionError {

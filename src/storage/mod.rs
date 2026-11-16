@@ -50,7 +50,7 @@ pub mod native_text;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
 pub(crate) mod publication;
-pub use publication::{DerivedReadiness, Readiness};
+pub use publication::{DerivedReadiness, ObservedDerived, Readiness, ReadinessObservation};
 pub mod purge;
 #[cfg(test)]
 mod purge_tests;

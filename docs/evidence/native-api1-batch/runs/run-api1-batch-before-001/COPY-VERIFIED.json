@@ -1,0 +1,46 @@
+{
+  "base.txt": {
+    "bytes": 41,
+    "sha256": "b72586ce6a6425307b3c3ccf561cb9c7b0a8dad52e6334af7c3754c27c93a4e0"
+  },
+  "before.exit": {
+    "bytes": 4,
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+  },
+  "before.log": {
+    "bytes": 25232,
+    "sha256": "5b62827851757df2d43196d3b686535090c4bf1ea82fff53cdca6b014bcf9cc8"
+  },
+  "clean.log": {
+    "bytes": 38,
+    "sha256": "d64cf63f2c70afa1febd3f559e18784934a7d937e5fe89b3b281769f2950634a"
+  },
+  "generator.exit": {
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "generator.log": {
+    "bytes": 23441,
+    "sha256": "65837afa9e75ddf7114ab16874781652b5cfc7daea65a365491e699cab50f815"
+  },
+  "memory.events.final": {
+    "bytes": 74,
+    "sha256": "e6dbbcd48b42506c72dec5e9afa72f04d931e77cfd1925cdd87137d0eda9d782"
+  },
+  "memory.peak.final": {
+    "bytes": 11,
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb"
+  },
+  "source-executables-final.json": {
+    "bytes": 164,
+    "sha256": "083a29acd4ec17f539cc5383608710392a142ec8e9f0cfb4cccce0802a6a988f"
+  },
+  "source-manifest-after.json": {
+    "bytes": 37311,
+    "sha256": "2dcf06ef1e39dd51eb492c9b6a01ffec63a72ad655ae68cb49c37b13c4d8e069"
+  },
+  "source-manifest.json": {
+    "bytes": 37311,
+    "sha256": "2dcf06ef1e39dd51eb492c9b6a01ffec63a72ad655ae68cb49c37b13c4d8e069"
+  }
+}

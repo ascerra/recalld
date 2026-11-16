@@ -1007,6 +1007,25 @@ impl Recalld {
         .await
     }
 
+    /// Actual canonical/component/work observation for a committed-error
+    /// envelope. This never drains the caller's root or claims barrier readiness.
+    pub async fn readiness_observation(
+        &self,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<crate::storage::ReadinessObservation, crate::storage::StorageError>
+    {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .observe_readiness(deadline)
+        .await
+    }
+
     /// Access the FTS5 full-text search index.
     pub fn fts_index(&self) -> &Arc<tokio::sync::Mutex<FtsIndex>> {
         &self.fts_index

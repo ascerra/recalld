@@ -1,0 +1,33 @@
+{
+  "testedSource": "cc4dc09158b5b0fd81ea3f81b1915494446232bb",
+  "focused": 20,
+  "fmt": 0,
+  "fullSuite": null,
+  "clippy": null,
+  "failedSource": "083d9a446de9d82fb74b66680145db33ccff3b21",
+  "failure": "Compile only: Generation has From<Generation> for String, not Display; tests did not run.",
+  "beforeProducer": {
+    "runtime": "d7c4d5fa3d39e14f3bc2dc4be5554e2e1bf1c8c8",
+    "test": "one appended producer with public-compatible observedAt omitted; original runtime files unchanged",
+    "passed": 1,
+    "edges": 1024,
+    "recordProofs": 1025,
+    "receiptBytes": 3220502,
+    "compactReceiptOnlyMcpFrameBytes": 6648160,
+    "wireConsumerReplay": "not yet tested"
+  },
+  "durableCopy": {
+    "path": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-single-first-cc4dc09",
+    "payloadFiles": 63,
+    "copySha256": "22685563f1d121ebb9c569f2456c185ffdd8a47189057a8cd6e784473c8ba687"
+  },
+  "binaries": {
+    "single-cc4dc09": {
+      "/tmp/recalld-implementation/compaction-review-7281918/target/debug/deps/recalld-7025a4141187b374": "813ce4134a511a8b2ab40fc26d7e0becedb4308395f032c871b0ad4464446d80"
+    },
+    "before-single-wire": {
+      "/tmp/recalld-implementation/compaction-review-7281918/target/debug/deps/recalld-7025a4141187b374": "ceea4040f2e03a61deb7596ef8135453e240f15749339b00fc44eb213567db00"
+    }
+  },
+  "qualification": "Inherited environment-selected BEFORE helper tests in the20 count do not establish fixture replay; the dedicated ignored full-wire BEFORE regression is pending."
+}

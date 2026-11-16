@@ -139,6 +139,102 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::{native_single, store_api1::Reply};
+        let legacy = if request.validate_legacy().is_ok() {
+            serde_json::to_value(&request.input).ok()
+        } else {
+            None
+        };
+        let params = match serde_json::to_value(&request) {
+            Ok(params) => params,
+            Err(_) => {
+                return Reply::Owned(native_single::Reply::failure(
+                    crate::storage::StorageError::InvalidMutation(
+                        "invalid API1 store request".into(),
+                    ),
+                ));
+            }
+        };
+        match self.client.call_api1_store(params, legacy).await {
+            Ok((true, value)) => Reply::decode(value, &request),
+            Ok((false, value)) => match serde_json::from_value(value) {
+                Ok(data) => Reply::Legacy(Ok(data)),
+                Err(_) => Reply::Owned(native_single::Reply::uncertain()),
+            },
+            Err(_) => Reply::Owned(native_single::Reply::uncertain()),
+        }
+    }
+    async fn store_native_wire(
+        &self,
+        request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        use crate::serialization::native_single::Reply;
+        let params = match serde_json::to_value(request) {
+            Ok(v) => v,
+            Err(_) => {
+                return Reply::failure(crate::storage::StorageError::InvalidMutation(
+                    "invalid native single request".into(),
+                ));
+            }
+        };
+        match self
+            .client
+            .call("store_native_single_observed_v1", params)
+            .await
+        {
+            Ok(value) => serde_json::from_value(value).unwrap_or_else(|_| Reply::uncertain()),
+            Err(_) => Reply::uncertain(),
+        }
+    }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::batch_api1::Reply;
+        if let Err(e) = request.validate() {
+            return Reply::invalid(e);
+        }
+        let legacy = request
+            .legacy()
+            .ok()
+            .and_then(|_| serde_json::to_value(&request.input).ok());
+        let params = match serde_json::to_value(&request) {
+            Ok(v) => v,
+            Err(_) => return Reply::Uncertain(None),
+        };
+        match self.client.call_api1_store_batch(params, legacy).await {
+            Ok((true, value)) => Reply::decode(value, &request),
+            Ok((false, value)) => match serde_json::from_value(value) {
+                Ok(out) => Reply::Legacy(Ok(out)),
+                Err(_) => Reply::Uncertain(None),
+            },
+            Err(_) => Reply::Uncertain(None),
+        }
+    }
+    async fn mutate_native_batch(
+        &self,
+        input: crate::storage::batch::BatchInput,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        use crate::serialization::native_batch::{BatchFailure, NativeBatchReply};
+        let params = serde_json::to_value(input).map_err(|_| BatchFailure::unavailable())?;
+        // Dedicated non-retrying RPC. Never fall back to the legacy writer.
+        let value = self
+            .client
+            .call("mutate_native_batch_observed_v1", params)
+            .await
+            .map_err(|_| BatchFailure::uncertain())?;
+        serde_json::from_value::<NativeBatchReply>(value)
+            .map_err(|_| BatchFailure::uncertain())?
+            .result()
+    }
+
     async fn api1_lifecycle(
         &self,
         request: crate::serialization::native_lifecycle::Request,
