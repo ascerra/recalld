@@ -1086,6 +1086,11 @@ pub struct RelationshipGraphAdapter {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     config: Arc<RecalldConfig>,
+    native: Option<(
+        crate::derived_completion::DerivedCompletion,
+        Arc<dyn crate::time::Clock>,
+        crate::storage::native_lifecycle::NativePolicyInputs,
+    )>,
 }
 
 impl RelationshipGraphAdapter {
@@ -1106,12 +1111,80 @@ impl RelationshipGraphAdapter {
             storage,
             cache,
             config,
+            native: None,
         }
+    }
+    /// Supply the actual owner's remaining view, clock and lifecycle inputs.
+    /// This shares existing handles and their registry; it creates no new owner.
+    pub fn with_native_completion(
+        mut self,
+        fts: Arc<tokio::sync::Mutex<FtsIndex>>,
+        clock: Arc<dyn crate::time::Clock>,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native = Some((
+            crate::derived_completion::DerivedCompletion {
+                storage: self.storage.clone(),
+                cache: self.cache.clone(),
+                graph: self.graph.clone(),
+                vectors: self.vector_index.clone(),
+                fts,
+                entities: self.entity_index.clone(),
+            },
+            clock,
+            policy,
+        ));
+        self
     }
 }
 
 #[async_trait]
 impl state::RelationshipGraph for RelationshipGraphAdapter {
+    async fn put_native_edges(
+        &self,
+        ctx: crate::storage::control::MutationContext,
+        input: crate::storage::native_graph::NativeGraphInput,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, crate::storage::StorageError> {
+        let (owner, clock, policy) = self.native.as_ref().ok_or_else(|| {
+            crate::storage::StorageError::RecoveryRequired(
+                "native graph requires FTS, clock and policy from its actual owner".into(),
+            )
+        })?;
+        owner
+            .native_graph(
+                ctx,
+                crate::derived_completion::native_graph::GraphRequest::Explicit(input),
+                policy.clone(),
+                clock.clone(),
+                parent,
+            )
+            .await
+            .map(|result| result.map(|effect| effect.receipt))
+    }
+    async fn select_native_links(
+        &self,
+        ctx: crate::storage::control::MutationContext,
+        selection: crate::graph::native_producer::NativeLinkSelection,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, crate::storage::StorageError> {
+        let (owner, clock, policy) = self.native.as_ref().ok_or_else(|| {
+            crate::storage::StorageError::RecoveryRequired(
+                "native graph requires FTS, clock and policy from its actual owner".into(),
+            )
+        })?;
+        owner
+            .native_graph(
+                ctx,
+                crate::derived_completion::native_graph::GraphRequest::Automatic(selection),
+                policy.clone(),
+                clock.clone(),
+                parent,
+            )
+            .await
+            .map(|result| result.map(|effect| effect.receipt))
+    }
+
     async fn check_link_target(
         &self,
         field: &'static str,
@@ -1154,6 +1227,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         id: MemoryId,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), crate::graph::GraphError> {
+        crate::graph::autolink::require_legacy_owner(&self.storage)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let work = crate::storage::work::accept_work(&self.storage, parent)
             .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let result = async {
@@ -1174,6 +1249,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         strength: f32,
         vector_slot: u32,
     ) -> Result<(), crate::graph::GraphError> {
+        crate::graph::autolink::require_legacy_owner(&self.storage)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let work = crate::storage::work::accept_work(&self.storage, None)
             .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let result = async {
@@ -1221,6 +1298,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         created_at: i64,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), crate::graph::GraphError> {
+        crate::graph::autolink::require_legacy_owner(&self.storage)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         if !self.config.graph.autolink_enabled {
             return Ok(());
         }

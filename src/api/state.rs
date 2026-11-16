@@ -491,6 +491,29 @@ pub trait RecordCache: Send + Sync {
 /// Relationship graph for edge traversal.
 #[async_trait::async_trait]
 pub trait RelationshipGraph: Send + Sync {
+    /// Standalone native edge intent. Ready success includes every derived view.
+    async fn put_native_edges(
+        &self,
+        _ctx: crate::storage::control::MutationContext,
+        _input: crate::storage::native_graph::NativeGraphInput,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "native graph completion owner is required".into(),
+        ))
+    }
+    /// Automatic selection is volatile and unkeyed. Never a creation callback.
+    async fn select_native_links(
+        &self,
+        _ctx: crate::storage::control::MutationContext,
+        _selection: crate::graph::native_producer::NativeLinkSelection,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "native graph completion owner is required".into(),
+        ))
+    }
+
     async fn tombstone_node_with_work(
         &self,
         id: MemoryId,

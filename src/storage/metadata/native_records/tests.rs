@@ -846,7 +846,7 @@ mod graph;
 #[path = "maintenance_tests.rs"]
 mod maintenance;
 
-#[path = "graph_producer_tests.rs"]
+#[path = "graph_publication_tests.rs"]
 mod graph_producers;
 
 #[path = "selection_tests.rs"]

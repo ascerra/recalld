@@ -15,6 +15,8 @@ mod feedback_consumer;
 mod forget_consumer;
 #[path = "native_query_admission_tests.rs"]
 mod native_query_admission;
+#[path = "graph_producer_tests.rs"]
+mod graph_producer;
 #[path = "replay_consumer_tests.rs"]
 mod replay_consumer;
 

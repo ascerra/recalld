@@ -13,6 +13,7 @@ pub mod activation;
 pub mod autolink;
 pub mod explicit_links;
 pub(crate) mod native_selection;
+pub mod native_producer;
 pub mod query;
 pub mod rebuild;
 mod structure;
