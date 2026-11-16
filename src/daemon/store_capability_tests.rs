@@ -205,6 +205,100 @@ async fn api1_store_remote_malformed_reply_is_unknown_without_same_connection_fa
 }
 
 #[tokio::test]
+async fn api1_store_remote_malformed_parent_receipt_preserves_unverified_evidence() {
+    use crate::mcp::bridge::StorageEngine as _;
+    use crate::storage::{RedbStorageEngine, batch::BatchKind, control::MutationOutcome};
+
+    // Genuine legacy reservation, not an authored receipt or single-write proof.
+    let fixture = crate::test_support::Fixture::new();
+    let receipt = {
+        let engine = fixture.storage.read().unwrap();
+        let before = engine.control_state().unwrap();
+        let input = crate::storage::batch::BatchInput {
+            request_context: None,
+            expected_generation: None,
+            mutation_version: 1,
+            result_version: 1,
+            kind: BatchKind::Insert,
+            items: vec![json!({"summary":false})],
+            default_namespace: "default".into(),
+            store_id: Some(before.store_id),
+            idempotency_key: Some("unrelated-parent".into()),
+            batch_operation_id: None,
+        };
+        let plans = crate::mcp::batches::prepare(&input)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.plan)
+            .collect::<Vec<_>>();
+        let progress = engine.meta_store()
+            .reserve_batch(&input.context(), BatchKind::Insert, &plans).unwrap();
+        assert_eq!(engine.control_state().unwrap().committed_generation.get(),
+            before.committed_generation.get() + 1);
+        assert_eq!(progress.unresolved(), 0);
+        assert!(matches!(progress.reservation_receipt.outcome, MutationOutcome::BatchReserved { .. }));
+        progress.reservation_receipt
+    };
+    let data = fixture.close();
+    let reopened = RedbStorageEngine::open(data.path()).unwrap();
+    assert_eq!(reopened.meta_store().lookup_batch(receipt.store_id, receipt.operation_id)
+        .unwrap().unwrap().reservation_receipt, receipt);
+    drop(reopened);
+    fn files(root: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        let mut result = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() { result.extend(files(&path)); }
+            else { result.insert(path.clone(), std::fs::read(path).unwrap()); }
+        }
+        result
+    }
+    let before_files = files(data.path());
+    let expected: Value = serde_json::from_slice(&serde_json::to_vec(&receipt).unwrap()).unwrap();
+    let sent = expected.clone();
+    let socket = tempfile::tempdir().unwrap();
+    let path = socket.path().join("s.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let ping = receive(&mut stream).await;
+        assert_eq!(ping.method, "ping");
+        let caps = json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"api1StoreV1":true});
+        answer(&mut stream, &ping, caps.clone()).await;
+        let write = receive(&mut stream).await;
+        assert_eq!(write.method, "store_api1_v1");
+        answer(&mut stream, &write, json!({"route":"owned","result":{"receipt":sent,"not":"a reply"}})).await;
+        let next = receive(&mut stream).await;
+        assert_eq!(next.method, "ping", "malformed evidence must not trigger mutation fallback");
+        answer(&mut stream, &next, caps).await;
+    });
+    let client = Arc::new(DaemonClient::connect(&path).await.unwrap());
+    let remote = super::super::bridge_adapters::RemoteStorageAdapter::new(client.clone());
+    let reply = remote.store_api1(crate::serialization::store_api1::Request {
+        input: crate::mcp::args::parse_store_input_fields(&json!({"summary":"different single request"}), "default").unwrap(),
+        profile_id: None, created_at: None, require_native: false,
+    }).await;
+    client.ping().await.unwrap();
+    task.await.unwrap();
+    assert_eq!(files(data.path()), before_files, "no canonical/history/receipt writes");
+    // An additional typed serialization hop must retain all evidence too.
+    let reply: crate::serialization::store_api1::Reply = serde_json::from_slice(&serde_json::to_vec(&reply).unwrap()).unwrap();
+    let mcp = reply.mcp();
+    assert_eq!(mcp.is_error, Some(true));
+    let value = Value::Object(mcp.structured_content.unwrap());
+    eprintln!("malformed parent reply: {}", serde_json::to_string(&value).unwrap());
+    assert_eq!(value["receivedEvidence"]["receipt"], expected, "complete unverified parent evidence must survive");
+    assert_eq!(value["commitState"], "unknown");
+    assert_eq!(value["error"], "COMMIT_OUTCOME_UNKNOWN");
+    assert!(value.get("receipt").is_none());
+    assert!(value.get("operationId").is_none());
+    assert!(value.get("readiness").is_none());
+    assert!(value.get("data").is_none());
+    assert_eq!(value["ready"], false);
+    assert!(value["warnings"].as_array().unwrap().contains(&json!("UNVERIFIED_RECEIVED_EVIDENCE")));
+}
+
+#[tokio::test]
 async fn api1_batch_capability_independent_selection_and_no_fallback() {
     for (batch, store, lifecycle) in [
         (false, true, true),
