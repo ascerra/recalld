@@ -8,6 +8,12 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error("maintenance response evidence limit reached before commit")]
+    ReceiptBudgetExceeded,
+    #[error("maintenance publication depends on work outside this pass")]
+    MaintenanceDependencyUnavailable,
+    #[error("conflicting maintenance receipt evidence")]
+    ReceiptEvidenceConflict,
     /// Existing item receipts remain retained. This is reservation evidence only,
     /// never an assertion that the batch committed atomically or became ready.
     #[error("RESPONSE_TOO_LARGE: complete native batch result exceeds transport budget")]

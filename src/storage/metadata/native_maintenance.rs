@@ -138,7 +138,21 @@ impl MetadataStore {
         edges: &[PersistedEdge],
         text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
     ) -> Result<NativeDecayResult, StorageError> {
+        self.decay_native_with_effects_bounded(guard, ctx, intent, policy, edges, text_hashes, None)
+    }
+
+    pub(crate) fn decay_native_with_effects_bounded(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        intent: &NativeDecayIntent,
+        policy: &NativePolicyInputs,
+        edges: &[PersistedEdge],
+        text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<NativeDecayResult, StorageError> {
         guard.check(self)?;
+        self.check_receipt_admission(admission)?;
         let hash = request_hash(ctx, intent.memory_id)?;
         if ctx.scope != MutationScope::Namespace(intent.scope.namespace_id) {
             return Err(StorageError::MutationNamespaceMismatch);
@@ -228,7 +242,7 @@ impl MetadataStore {
                     intent.memory_id.as_bytes().as_slice(),
                     patched.encode()?.as_slice(),
                 )?;
-                self.finish_record_effects(
+                self.finish_record_effects_bounded(
                     guard,
                     tx,
                     ctx,
@@ -244,6 +258,9 @@ impl MetadataStore {
                         transition,
                     },
                     None,
+                    admission
+                        .map(crate::storage::maintenance::ReceiptAdmission::limit)
+                        .transpose()?,
                 )
                 .map(|r| NativeDecayResult::Committed(r.receipt))
             }
@@ -308,7 +325,7 @@ impl MetadataStore {
                     peers,
                     removed_edges,
                 };
-                self.finish_record_effects(
+                self.finish_record_effects_bounded(
                     guard,
                     tx,
                     ctx,
@@ -320,6 +337,9 @@ impl MetadataStore {
                     release,
                     effects::RecordMutation::NativeHardDelete(transition),
                     None,
+                    admission
+                        .map(crate::storage::maintenance::ReceiptAdmission::limit)
+                        .transpose()?,
                 )
                 .map(|r| NativeDecayResult::Committed(r.receipt))
             }

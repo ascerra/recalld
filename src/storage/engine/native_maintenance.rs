@@ -20,6 +20,18 @@ impl RedbStorageEngine {
         policy: &NativePolicyInputs,
         parent: Option<&WorkTicket>,
     ) -> Result<NativeDecayResult, StorageError> {
+        self.apply_native_decay_bounded(ctx, intent, policy, parent, None)
+    }
+
+    pub(crate) fn apply_native_decay_bounded(
+        &mut self,
+        ctx: &MutationContext,
+        intent: &NativeDecayIntent,
+        policy: &NativePolicyInputs,
+        parent: Option<&WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<NativeDecayResult, StorageError> {
+        self.meta_store.check_receipt_admission(admission)?;
         let guard = self.meta_store.native_guard_with_work(parent)?;
         if let Some(receipt) = self
             .meta_store
@@ -43,9 +55,9 @@ impl RedbStorageEngine {
                 hashes.insert(id, self.native_text_hash(id)?);
             }
         }
-        let result = self
-            .meta_store
-            .decay_native_with_effects(&guard, ctx, intent, policy, &edges, &hashes)?;
+        let result = self.meta_store.decay_native_with_effects_bounded(
+            &guard, ctx, intent, policy, &edges, &hashes, admission,
+        )?;
         if let NativeDecayResult::Committed(receipt) = &result {
             if !receipt.replayed {
                 effects::apply_pending(

@@ -26,6 +26,7 @@ use crate::serialization::ApiError;
 /// human-readable message, and an optional field name for validation errors.
 #[derive(Debug)]
 pub enum AppError {
+    Sweep(crate::decay::sweep::evidence::SweepFailure),
     /// A catalog worker/commit has no known complete receipt. Never invent one.
     MutationUnknown {
         operation_id: Option<uuid::Uuid>,
@@ -98,6 +99,11 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        if let AppError::Sweep(failure) = self {
+            // Serialize the same typed receipts measured before canonical commit.
+            // A Value roundtrip would promote f32 spellings and change the bound.
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(failure)).into_response();
+        }
         if let AppError::Observation(error) = self {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -127,7 +133,8 @@ impl IntoResponse for AppError {
             }))).into_response();
         }
         let (status, error_code, message, field) = match &self {
-            AppError::Observation(_)
+            AppError::Sweep(_)
+            | AppError::Observation(_)
             | AppError::CommittedMutation { .. }
             | AppError::MutationUnknown { .. } => unreachable!(),
             AppError::NotFound { resource, id } => (

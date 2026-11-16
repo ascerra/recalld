@@ -2463,17 +2463,15 @@ pub async fn trigger_decay_sweep(
             field: Some("asOf".into()),
         });
     }
-    let result =
-        state
-            .decay
-            .trigger_sweep(None)
-            .await
-            .map_err(
-                |error| match error.downcast::<crate::storage::StorageError>() {
-                    Ok(storage) => AppError::from(*storage),
-                    Err(source) => AppError::Internal { source },
-                },
-            )?;
+    let result = state.decay.trigger_sweep(None).await.map_err(|error| {
+        match error.downcast::<crate::decay::sweep::evidence::SweepFailure>() {
+            Ok(failure) => AppError::Sweep(*failure),
+            Err(error) => match error.downcast::<crate::storage::StorageError>() {
+                Ok(storage) => AppError::from(*storage),
+                Err(source) => AppError::Internal { source },
+            },
+        }
+    })?;
 
     Ok(Json(ApiResponse {
         data: TriggerSweepResponse {
