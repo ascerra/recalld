@@ -110,6 +110,10 @@ pub struct MetadataStore {
     pub(crate) ack_work_probe:
         std::sync::Mutex<Option<std::sync::mpsc::Sender<effects::ack_tests::AckWork>>>,
     #[cfg(test)]
+    pub(crate) ack_test_hook: std::sync::Mutex<Option<effects::ack_tests::AckHook>>,
+    #[cfg(test)]
+    pub(crate) ack_test_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
     pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
@@ -265,6 +269,10 @@ impl MetadataStore {
         let store = Self {
             #[cfg(test)]
             ack_work_probe: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            ack_test_hook: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            ack_test_fault: std::sync::atomic::AtomicU8::new(0),
             db,
             ids,
             native_lifecycle_only,
