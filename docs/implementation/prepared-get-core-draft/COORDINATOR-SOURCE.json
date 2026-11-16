@@ -44,7 +44,7 @@
     },
     {
       "path": "src/search/get_wire_tests.rs",
-      "sha256": "1e8b1a6b11d8f65d3ed4d8f97958010d90c86c184e54f966bcad5ccd7687054e"
+      "sha256": "b2f1cb89c2c75dce4e3a1d0dfb4c68b790a73ee947b788e62d79631058c4573f"
     },
     {
       "path": "src/search/pipeline.rs",

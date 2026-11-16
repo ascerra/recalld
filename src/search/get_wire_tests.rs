@@ -281,6 +281,57 @@ async fn prepared_get_actual_terminal_transition_after_capture_rejects_without_p
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_actual_policy_change_keeps_real_history_and_typed_conflict() {
+    let f = similar_fixture().await;
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let mut request = point_request(f.foreign, true);
+    request.before_observation = Some((entered.clone(), release.clone()));
+    let engine = Arc::new(f.engine);
+    let reader = engine.clone();
+    let task = tokio::spawn(async move { reader.get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE).await });
+    entered.notified().await;
+    let (policy_receipt, after_policy) = {
+        let mut storage = f.f.storage.write().unwrap();
+        let before = storage.get_record(f.foreign).unwrap().unwrap();
+        let namespace = storage.get_namespace(f.other).unwrap().unwrap();
+        let mut replacement = crate::storage::catalog::NamespacePolicy::from(&namespace);
+        replacement.decay_rate_multiplier = Some(1.5);
+        let inputs = engine.native_policy_inputs();
+        let intent = storage.meta_store().capture_native_policy(
+            crate::storage::native_lifecycle::LifecycleScope {
+                namespace_id: f.other, namespace_name: namespace.name, source: None,
+            }, &replacement, &inputs, None,
+        ).unwrap();
+        let receipt = storage.apply_native_policy(
+            &MutationContext::unkeyed(f.other), &intent, &inputs, None,
+        ).unwrap().unwrap();
+        let after = storage.get_record(f.foreign).unwrap().unwrap();
+        let old_fields = &before.schema.as_ref().unwrap().lifecycle;
+        let new_fields = &after.schema.as_ref().unwrap().lifecycle;
+        // This actual writer changes both tokens. Do not manufacture a
+        // policy-only history by restoring a target token behind its receipt.
+        assert!(new_fields.policy_revision > old_fields.policy_revision);
+        assert!(new_fields.record_generation > old_fields.record_generation);
+        assert_eq!(after.access_history, before.access_history);
+        (receipt, storage.control_state().unwrap())
+    };
+    release.notify_one();
+    let reply = tokio::time::timeout(Duration::from_secs(10), task).await.unwrap().unwrap();
+    assert!(reply.envelope.data.is_none());
+    assert!(reply.observation_receipts.is_empty());
+    assert_eq!(f.f.storage.read().unwrap().control_state().unwrap(), after_policy);
+    assert_eq!(f.f.storage.read().unwrap().lookup_operation(policy_receipt.store_id,
+        crate::storage::control::MutationScope::Namespace(f.other), policy_receipt.operation_id,
+    ).unwrap(), Some(policy_receipt));
+    assert_eq!(f.clock.0.load(Ordering::SeqCst), 1);
+    assert_eq!(reply.http_status, 409, "{reply:?}");
+    let error = reply.envelope.error.unwrap();
+    assert_eq!(error.code, "LIFECYCLE_CONFLICT");
+    assert_eq!(error.commit_state, crate::serialization::contract::CommitState::NotCommitted);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_get_actual_publication_failure_keeps_exact_receipt_and_allows_rebuild() {
     let f = similar_fixture().await;
     let mut request = point_request(f.foreign, true);
