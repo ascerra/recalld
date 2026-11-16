@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "error": {
+    "code": -32006,
+    "message": "{\"commitEvidenceScope\":\"purgeStart\",\"commitState\":\"committed\",\"error\":\"SERVICE_UNAVAILABLE\",\"message\":\"Purge progress lookup unavailable after committed start. Reconcile the original operation before further deletion.\",\"receipt\":{\"committedGeneration\":\"11\",\"operationId\":\"22222222-2222-4222-8222-222222222222\",\"outcome\":{\"kind\":\"nativeNamespacePurgeStarted\",\"transition\":{\"beforeNamespace\":{\"createdAt\":1000,\"embeddingDim\":4,\"name\":\"scratch\",\"namespaceId\":7,\"policy\":{\"decayRateMultiplier\":1.0,\"defaultDifficulty\":5.0,\"desiredRetention\":0.75,\"initialStability\":4.0,\"permastoreThreshold\":1024.0,\"thresholds\":[0.5,0.25,0.125]},\"schema\":{\"embeddingBinding\":{\"state\":\"unknownLegacy\"},\"extensions\":{},\"lifecycleVersion\":\"legacy_access_v1\",\"namespaceSchemaVersion\":2,\"policyRevision\":\"0\",\"requiredFeatures\":[]}},\"previousGeneration\":\"10\",\"request\":{\"context\":{\"contractVersion\":1,\"proofVersion\":1},\"expectedGeneration\":null,\"force\":true}}},\"receiptVersion\":1,\"replayed\":false,\"storeId\":\"11111111-1111-4111-8111-111111111111\"}}"
+  }
+}
