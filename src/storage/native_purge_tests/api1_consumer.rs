@@ -1138,3 +1138,726 @@ async fn native_api1_purge_actual_receipt_frames_obey_streamed_wire_bound() {
         }
     }
 }
+
+/// Historical cross-namespace edges use the same pre-migration fixture seam as
+/// fixture() above. New graph writers do not promise to create these old edges.
+fn bounded_frame_fixture(
+    peers: usize,
+    history: usize,
+    profile: Option<(bool, String)>,
+) -> (crate::test_support::Fixture, NamespaceId, PathBuf, MemoryId) {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let target = root.path().join("native");
+    let mut engine = RedbStorageEngine::open(&source).unwrap();
+    let mut config = NamespaceConfig::default_namespace(100);
+    config.name = "doomed".into();
+    config.embedding_dim = 4;
+    let namespace = engine.create_namespace(&config).unwrap();
+    let input = insertion::InsertMemory {
+        id: None,
+        summary: "bounded frame witness".into(),
+        full_text: None,
+        tags: vec![],
+        initial_stability: None,
+        created_at: Some(1000),
+        embedding: Some(vec![1., 0., 0., 0.]),
+        parent_id: None,
+        supersedes: None,
+    };
+    let first = engine
+        .insert_memory_with_receipt(&MutationContext::unkeyed(namespace), &input, &[], 1000)
+        .unwrap();
+    let first = insertion::inserted_id(&first).unwrap();
+    for n in 0..history {
+        engine
+            .update_access_with_receipt(
+                &MutationContext::unkeyed(namespace),
+                first,
+                1001 + n as i64,
+                crate::model::AccessKind::DirectRetrieval,
+            )
+            .unwrap();
+    }
+    config.name = "kept".into();
+    let kept = engine.create_namespace(&config).unwrap();
+    for _ in 0..peers {
+        let row = engine
+            .insert_memory_with_receipt(&MutationContext::unkeyed(kept), &input, &[], 1000)
+            .unwrap();
+        let id = insertion::inserted_id(&row).unwrap();
+        engine
+            .edge_store()
+            .add_edge(
+                id,
+                first,
+                crate::model::EdgeType::Associative,
+                0.5,
+                false,
+                1000,
+            )
+            .unwrap();
+        engine.meta_store().update_edge_count(id, 1).unwrap();
+    }
+    engine.sync().unwrap();
+    drop(engine);
+    let attestations = profile
+        .map(|(target, name)| {
+            let mut descriptor = crate::embedding::runtime::tests::profile();
+            descriptor.model_id = name;
+            vec![schema_migration::ProfileAttestationInput {
+                namespace_id: if target { namespace } else { kept },
+                namespace_name: if target { "doomed" } else { "kept" }.into(),
+                descriptor,
+            }]
+        })
+        .unwrap_or_default();
+    schema_migration::migrate_schema(
+        &source,
+        &target,
+        &schema_migration::MigrationOptions {
+            migration_now: 2000,
+            expected_source: schema_migration::inspect_schema(&source)
+                .unwrap()
+                .control
+                .generation_ref(),
+            attestations,
+        },
+    )
+    .unwrap();
+    let engine = RedbStorageEngine::open_with_ids(
+        &target,
+        true,
+        Box::new(crate::storage::ids::SeededIds::new([73; 32])),
+    )
+    .unwrap();
+    (
+        crate::test_support::Fixture::from_open_engine(root, engine),
+        namespace,
+        target,
+        first,
+    )
+}
+
+fn publication(fx: &crate::test_support::Fixture) -> crate::derived_completion::DerivedCompletion {
+    crate::derived_completion::DerivedCompletion {
+        storage: fx.storage.clone(),
+        cache: fx.cache.clone(),
+        graph: fx.graph.clone(),
+        vectors: fx.vector_index.clone(),
+        fts: fx.fts_index.clone(),
+        entities: fx.entity_index.clone(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_oversized_profile_and_late_unrelated_namespace_refuse_immutably() {
+    for target_profile in [true, false] {
+        let (fx, _, path, _) =
+            bounded_frame_fixture(0, 0, Some((target_profile, "\0\\\"".repeat(500_000))));
+        publication(&fx).rebuild_all().await.unwrap();
+        let before = counters(&fx);
+        let bytes = std::fs::read(path.join("meta.db")).unwrap();
+        for limit in [
+            crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE,
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        ] {
+            let response = crate::daemon::server::native_purge_test_rpc(
+                Arc::new(fx.namespace_adapter().with_clock(Arc::new(NoClock))),
+                limit,
+            )
+            .await;
+            let error = response.error.unwrap();
+            assert_eq!(error.code, -32005);
+            assert!(error.message.contains("operation too large"));
+            assert!(!error.message.contains("retry"));
+            assert_eq!(counters(&fx), before);
+            assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), bytes);
+            assert!(
+                fx.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .purge_progress()
+                    .unwrap()
+                    .is_empty()
+            );
+            let status = fx
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .status();
+            assert_eq!((status.pending, status.unresolved), (0, 0));
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_single_target_high_peer_and_max_history_full_frame() {
+    let (fx, namespace, path, _) =
+        bounded_frame_fixture(400, crate::model::constants::ACCESS_HISTORY_MAX, None);
+    let publisher = publication(&fx);
+    publisher.rebuild_all().await.unwrap();
+    *fx.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    let before = counters(&fx);
+    let bytes = std::fs::read(path.join("meta.db")).unwrap();
+    let refused =
+        crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(fx.namespace_adapter())).await;
+    assert_eq!(refused.error.unwrap().code, -32005);
+    assert_eq!(counters(&fx), before);
+    assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), bytes);
+    let response = crate::daemon::server::native_purge_test_rpc(
+        Arc::new(fx.namespace_adapter()),
+        crate::daemon::protocol::MAX_MESSAGE_SIZE,
+    )
+    .await;
+    let frame_bytes = serde_json::to_vec(&response).unwrap().len();
+    let error = response.error.unwrap();
+    assert_eq!(error.code, -32006);
+    let payload =
+        crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message).unwrap();
+    let receipt: control::WriteReceipt =
+        serde_json::from_value(payload["receipt"].clone()).unwrap();
+    let control::MutationOutcome::NativeNamespacePurgeAdvanced { transition } = &receipt.outcome
+    else {
+        panic!("child expected");
+    };
+    let chunk = transition.chunk.as_ref().unwrap();
+    assert_eq!(chunk.deletions.len(), 1);
+    assert_eq!(
+        chunk.deletions[0].history.len(),
+        crate::model::constants::ACCESS_HISTORY_MAX
+    );
+    assert_eq!((chunk.peers.len(), chunk.removed_edges.len()), (400, 400));
+    let engine = fx.storage.read().unwrap();
+    assert_eq!(
+        engine
+            .meta_store()
+            .lookup_operation(
+                receipt.store_id,
+                MutationScope::Namespace(namespace),
+                receipt.operation_id
+            )
+            .unwrap()
+            .unwrap(),
+        receipt
+    );
+    assert_eq!(
+        engine.meta_store().purge_progress().unwrap()[0].stage,
+        PurgeStage::Complete
+    );
+    assert!(frame_bytes > crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE);
+    assert!(frame_bytes <= crate::daemon::protocol::MAX_MESSAGE_SIZE);
+    eprintln!("ACTUAL_HIGH_PEER_FRAME target_rows=1 peers=400 history=32 bytes={frame_bytes}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_admission_survives_blocked_writers_and_competing_one_row_chunks() {
+    use crate::storage::native_graph::{NativeEdgeInput, NativeGraphInput};
+    let (fx, namespace, publisher, path) = setup();
+    let (ids, kept, intent, peer_generation) = {
+        let mut engine = fx.storage.write().unwrap();
+        let mut ids: Vec<_> = engine
+            .meta_store()
+            .scan_all_for_recovery()
+            .unwrap()
+            .into_iter()
+            .filter(|(_, r)| r.namespace_id == namespace.get())
+            .map(|(id, _)| id)
+            .collect();
+        ids.sort();
+        let kept = engine.get_namespace_by_name("kept").unwrap().unwrap().id;
+        let scope = LifecycleScope {
+            namespace_id: namespace,
+            namespace_name: "doomed".into(),
+            source: None,
+        };
+        // This actual native structural edge makes a later target a peer of the
+        // first deletion. No raw mutation or semantic selector is used here.
+        let input = NativeGraphInput {
+            edges: vec![NativeEdgeInput {
+                source: ids[1],
+                target: ids[0],
+                edge_type: crate::model::EdgeType::Associative,
+                weight: 0.5,
+                auto_created: false,
+            }],
+        };
+        let policy = NativePolicyInputs::default();
+        let intent = engine
+            .meta_store()
+            .capture_native_graph(scope.clone(), &input, &policy, None)
+            .unwrap();
+        let mut ctx = MutationContext::unkeyed(namespace);
+        ctx.contract_version = 2;
+        engine
+            .apply_native_graph(
+                &ctx,
+                &intent,
+                &policy,
+                &crate::time::ManualClock::new(2001),
+                None,
+            )
+            .unwrap();
+        let other = NativeGraphInput {
+            edges: vec![NativeEdgeInput {
+                source: ids[0],
+                target: ids[1],
+                edge_type: crate::model::EdgeType::Associative,
+                weight: 0.75,
+                auto_created: false,
+            }],
+        };
+        let intent = engine
+            .meta_store()
+            .capture_native_graph(scope, &other, &policy, None)
+            .unwrap();
+        let peer_generation = engine
+            .get_record(ids[1])
+            .unwrap()
+            .unwrap()
+            .schema
+            .unwrap()
+            .lifecycle
+            .record_generation;
+        (ids, kept, intent, peer_generation)
+    };
+    publisher.rebuild_all().await.unwrap();
+    let (started, resume) = pause(&fx);
+    let adapter = Arc::new(fx.namespace_adapter().with_clock(Arc::new(NoClock)));
+    let task = tokio::spawn(crate::daemon::server::native_purge_test_legacy_rpc(adapter));
+    let start = tokio::time::timeout(std::time::Duration::from_secs(5), started)
+        .await
+        .unwrap()
+        .unwrap();
+    let graph = fx.graph.clone().write_owned().await;
+    let storage = fx.storage.clone();
+    let path2 = path.clone();
+    let receipts = tokio::task::spawn_blocking(move || {
+        let _graph = graph;
+        let mut engine = storage.write().unwrap();
+        let before_ids = engine.meta_store().id_source().checkpoint().unwrap();
+        let bytes = std::fs::read(path2.join("meta.db")).unwrap();
+        let mut ctx = MutationContext::unkeyed(namespace);
+        ctx.contract_version = 2;
+        assert!(matches!(
+            engine.apply_native_graph(
+                &ctx,
+                &intent,
+                &NativePolicyInputs::default(),
+                &NoClock,
+                None
+            ),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        let mut other = MutationContext::unkeyed(kept);
+        other.contract_version = 2;
+        assert!(matches!(
+            engine.begin_namespace_purge(&other, true),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        let mut catalog = ctx.clone();
+        catalog.scope = MutationScope::Catalog;
+        assert!(matches!(
+            engine.create_native_namespace(
+                &catalog,
+                &crate::storage::native_catalog::NativeNamespaceInput {
+                    name: "blocked".into(),
+                    embedding_dim: None,
+                    embedding_profile_id: None,
+                    initial_stability: None,
+                    desired_retention: None,
+                    decay_rate_multiplier: None,
+                },
+                &crate::embedding::runtime::tests::profile(),
+                &NativePolicyInputs::default(),
+                &NoClock,
+                None
+            ),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        assert!(
+            engine
+                .update_access_with_receipt(
+                    &MutationContext::unkeyed(namespace),
+                    ids[0],
+                    5000,
+                    crate::model::AccessKind::DirectRetrieval
+                )
+                .is_err()
+        );
+        assert_eq!(
+            engine.meta_store().id_source().checkpoint().unwrap(),
+            before_ids
+        );
+        assert_eq!(std::fs::read(path2.join("meta.db")).unwrap(), bytes);
+        assert!(!path2.join("blocked").exists());
+        assert!(engine.control_state().is_err()); // ordinary pending guard retained
+        let mut p = start.clone();
+        let mut receipts = vec![];
+        while p.stage != PurgeStage::Complete {
+            p = engine
+                .resume_namespace_purge(p.store_id, namespace, p.start_receipt.operation_id, 1)
+                .unwrap();
+            receipts.push(p.last_receipt.clone());
+        }
+        let deletion = receipts
+            .iter()
+            .find_map(|r| match &r.outcome {
+                control::MutationOutcome::NativeNamespacePurgeAdvanced { transition } => transition
+                    .chunk
+                    .as_ref()
+                    .and_then(|c| c.deletions.iter().find(|d| d.memory_id == ids[1])),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            deletion.before.lifecycle.lifecycle.record_generation,
+            peer_generation.next().unwrap()
+        );
+        receipts
+    })
+    .await
+    .unwrap();
+    publisher.complete().await.unwrap();
+    let before = counters(&fx);
+    let bytes = std::fs::read(path.join("meta.db")).unwrap();
+    resume.send(()).unwrap();
+    let response = task.await.unwrap();
+    let error = response.error.unwrap();
+    assert_eq!(error.code, -32006);
+    let result =
+        crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message).unwrap();
+    assert_eq!(result["error"], "PURGE_METRICS_UNAVAILABLE");
+    assert_eq!(
+        serde_json::from_value::<control::WriteReceipt>(result["receipt"].clone()).unwrap(),
+        *receipts.last().unwrap()
+    );
+    assert_eq!(counters(&fx), before);
+    assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), bytes);
+    let budget = crate::mcp::bridge_adapters::native_purge_api1::receipt_budget(
+        crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE,
+    )
+    .unwrap();
+    for receipt in receipts {
+        assert!(
+            serde_json::to_vec(&serde_json::to_value(receipt).unwrap())
+                .unwrap()
+                .len()
+                <= budget
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_historical_oversized_start_stays_private_and_name_reuse_is_fresh() {
+    let (fx, namespace, path, _) =
+        bounded_frame_fixture(0, 0, Some((true, "\0\\".repeat(200_000))));
+    let publisher = publication(&fx);
+    publisher.rebuild_all().await.unwrap();
+    let (ctx, start) = {
+        let mut engine = fx.storage.write().unwrap();
+        let state = engine.control_state().unwrap();
+        let ctx = MutationContext {
+            store_id: Some(state.store_id),
+            scope: MutationScope::Namespace(namespace),
+            idempotency_key: Some("historical-oversized-purge".into()),
+            expected_generation: Some(state.committed_generation),
+            contract_version: 2,
+        };
+        // Existing unbounded/private core path, representing immutable retained
+        // history. The public name route must not try to squeeze this into 1MiB.
+        let start = engine.begin_namespace_purge(&ctx, true).unwrap();
+        assert!(
+            serde_json::to_vec(&serde_json::to_value(&start.start_receipt).unwrap())
+                .unwrap()
+                .len()
+                > crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE
+        );
+        (ctx, start)
+    };
+    let bytes = std::fs::read(path.join("meta.db")).unwrap();
+    let ids = fx
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .id_source()
+        .checkpoint()
+        .unwrap();
+    let response =
+        crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(fx.namespace_adapter())).await;
+    let error = response.error.unwrap();
+    assert_eq!(error.code, -32006);
+    assert!(error.message.contains("namespace purge pending"));
+    assert!(!error.message.contains("notCommitted"));
+    assert!(!error.message.contains("response is"));
+    assert!(
+        crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message)
+            .is_none()
+    );
+    assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), bytes);
+    assert_eq!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .id_source()
+            .checkpoint()
+            .unwrap(),
+        ids
+    );
+    let completed = {
+        let mut engine = fx.storage.write().unwrap();
+        let replay = engine.begin_namespace_purge(&ctx, true).unwrap();
+        assert!(replay.start_receipt.replayed);
+        assert_eq!(
+            replay.start_receipt.operation_id,
+            start.start_receipt.operation_id
+        );
+        assert_eq!(replay.next_operation_id, start.next_operation_id);
+        assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), bytes);
+        assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
+        let mut p = start.clone();
+        while p.stage != PurgeStage::Complete {
+            p = engine
+                .resume_namespace_purge(p.store_id, namespace, p.start_receipt.operation_id, 1)
+                .unwrap();
+        }
+        p
+    };
+    publisher.complete().await.unwrap();
+    let before = counters(&fx);
+    let absent =
+        crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(fx.namespace_adapter())).await;
+    assert_eq!(absent.error.unwrap().code, -32001);
+    assert_eq!(counters(&fx), before);
+    let fresh = {
+        let mut engine = fx.storage.write().unwrap();
+        let mut catalog = MutationContext::unkeyed(namespace);
+        catalog.scope = MutationScope::Catalog;
+        let receipt = engine
+            .create_native_namespace(
+                &catalog,
+                &crate::storage::native_catalog::NativeNamespaceInput {
+                    name: "doomed".into(),
+                    embedding_dim: Some(4),
+                    embedding_profile_id: None,
+                    initial_stability: None,
+                    desired_retention: None,
+                    decay_rate_multiplier: None,
+                },
+                &crate::embedding::runtime::tests::profile(),
+                &NativePolicyInputs::default(),
+                &crate::time::ManualClock::new(5000),
+                None,
+            )
+            .unwrap();
+        assert!(receipt.committed_generation > completed.last_receipt.committed_generation);
+        let fresh = engine.get_namespace_by_name("doomed").unwrap().unwrap().id;
+        assert_ne!(fresh, namespace);
+        let before_ids = engine.meta_store().id_source().checkpoint().unwrap();
+        let old = engine.begin_namespace_purge(&ctx, true).unwrap();
+        assert_eq!(old.namespace_id, namespace);
+        assert_eq!(old.last_receipt, completed.last_receipt);
+        assert_eq!(
+            engine.meta_store().id_source().checkpoint().unwrap(),
+            before_ids
+        );
+        fresh
+    };
+    publisher.complete().await.unwrap();
+    let result =
+        crate::daemon::server::native_purge_test_legacy_rpc(Arc::new(fx.namespace_adapter())).await;
+    assert!(result.error.is_none(), "{result:?}");
+    let value = result.result.unwrap();
+    assert_eq!(value["id"], fresh.get());
+    assert_eq!(value["memoriesDeleted"], 0);
+    assert_eq!(value["ftsRowsRemoved"], 0);
+    let old = fx
+        .storage
+        .read()
+        .unwrap()
+        .lookup_namespace_purge(start.store_id, namespace, start.start_receipt.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(old.last_receipt, completed.last_receipt);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_unknown_outcomes_survive_actual_bounded_frames() {
+    for fault in 1..=3 {
+        let (fx, namespace, publisher, path) = setup();
+        publisher.rebuild_all().await.unwrap();
+        if fault == 3 {
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .fail_purge_child_commit
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        } else {
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .native_purge_worker_fault
+                .store(fault, std::sync::atomic::Ordering::SeqCst);
+        }
+        let pause = (fault != 1).then(|| pause(&fx));
+        let adapter = Arc::new(fx.namespace_adapter().with_clock(Arc::new(NoClock)));
+        let task = tokio::spawn(crate::daemon::server::native_purge_test_legacy_rpc(adapter));
+        let start = if let Some((started, resume)) = pause {
+            let start = tokio::time::timeout(std::time::Duration::from_secs(5), started)
+                .await
+                .unwrap()
+                .unwrap();
+            resume.send(()).unwrap();
+            Some(start)
+        } else {
+            None
+        };
+        let response = task.await.unwrap();
+        let error = response.error.unwrap();
+        assert_eq!(error.code, -32006);
+        let result =
+            crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message)
+                .unwrap();
+        assert_eq!(result["error"], "COMMIT_OUTCOME_UNKNOWN");
+        assert_eq!(result["commitState"], "unknown");
+        if let Some(start) = &start {
+            assert_eq!(
+                serde_json::from_value::<control::WriteReceipt>(result["receipt"].clone()).unwrap(),
+                start.last_receipt
+            );
+            assert_eq!(result["commitEvidenceScope"], "purgeStart");
+            if fault == 3 {
+                assert_eq!(
+                    result["operationId"],
+                    start.next_operation_id.unwrap().to_string()
+                );
+            } else {
+                assert!(result["operationId"].is_null());
+            }
+        } else {
+            assert!(result.get("receipt").is_none());
+            assert!(result["operationId"].is_null());
+        }
+        no_readiness(&result);
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .status()
+                .unresolved
+                > 0
+        );
+        drop(publisher);
+        let _root = fx.close();
+        let reopened = open(&path);
+        if let Some(start) = start {
+            let completed = reopened
+                .engine
+                .lookup_namespace_purge(start.store_id, namespace, start.start_receipt.operation_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(completed.stage, PurgeStage::Complete);
+            if fault == 3 {
+                let child = reopened
+                    .engine
+                    .meta_store()
+                    .lookup_operation(
+                        start.store_id,
+                        MutationScope::Namespace(namespace),
+                        start.next_operation_id.unwrap(),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(result["operationId"], child.operation_id.to_string());
+            }
+        } else {
+            assert!(
+                reopened
+                    .engine
+                    .meta_store()
+                    .purge_progress()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_empty_cleanup_reports_observed_zero_and_directory_absence() {
+    for directory_present in [true, false] {
+        let (fx, _, path, retained) = bounded_frame_fixture(0, 0, None);
+        let publisher = publication(&fx);
+        publisher.rebuild_all().await.unwrap();
+        if !directory_present {
+            // Private test fault: remove only the empty namespace directory.
+            // No canonical record references a slot there. Cleanup's NotFound
+            // branch must report its actual observation, not infer false from
+            // missing invocation evidence.
+            std::fs::remove_dir_all(path.join("kept")).unwrap();
+        }
+        let before = counters(&fx).0;
+        let result = fx
+            .namespace_adapter()
+            .with_clock(Arc::new(NoClock))
+            .delete_namespace_bounded(
+                DeleteNamespaceInput {
+                    name: "kept".into(),
+                    force: false,
+                },
+                crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                result.memories_deleted,
+                result.tombstones_purged,
+                result.edges_removed,
+                result.fts_rows_removed
+            ),
+            (0, 0, 0, 0)
+        );
+        assert_eq!(result.vector_file_removed, directory_present);
+        let after = counters(&fx).0;
+        assert_eq!(after.store_id, before.store_id);
+        assert_eq!(
+            after.generation,
+            before
+                .generation
+                .next()
+                .unwrap()
+                .next()
+                .unwrap()
+                .next()
+                .unwrap()
+        );
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .get_record(retained)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            publisher
+                .readiness_barrier(
+                    after,
+                    std::time::Instant::now() + std::time::Duration::from_secs(5)
+                )
+                .await
+                .unwrap()
+                .ready
+        );
+    }
+}
