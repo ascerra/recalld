@@ -261,19 +261,30 @@ async fn vector_certification_genuine_pending_keeps_parent_child_then_real_remed
         .unwrap()
         .unwrap();
     assert_eq!(retained, pending);
-    // In-hand committed state takes precedence over even this typed cause.
-    let reply =
-        crate::serialization::native_single::Reply::failure(StorageError::CommittedMutation {
+    // In-hand batch reservation evidence takes precedence over this typed cause.
+    let reply = crate::serialization::native_batch::BatchFailure::from_storage(
+        StorageError::CommittedMutation {
             receipt: Box::new(pending.reservation_receipt.clone()),
             source: Box::new(StorageError::VectorCertificationRequired {
                 namespace_id: remedy.namespace_id.get(),
             }),
-        });
-    assert_eq!(reply.receipt, Some(pending.reservation_receipt.clone()));
+        },
+    );
     assert_eq!(
-        reply.error.unwrap().commit_state,
+        reply.reservation_receipt,
+        Some(pending.reservation_receipt.clone())
+    );
+    assert!(reply.receipt.is_none());
+    assert_eq!(
+        reply.error.commit_state,
         crate::serialization::contract::CommitState::Committed
     );
+    assert_eq!(
+        reply.error.operation_id,
+        Some(pending.reservation_receipt.operation_id)
+    );
+    assert!(reply.readiness.is_none());
+    assert_eq!(reply.error.code, "READINESS_UNKNOWN");
     assert!(matches!(
         retained.items[0].state,
         BatchItemState::NotAttempted {}
