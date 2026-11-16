@@ -388,14 +388,16 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
             .unwrap();
         assert_eq!(canonical(&historical), canonical(&retained));
         let namespace = engine.get_namespace(d.ns).unwrap().unwrap();
-        assert!(namespace
-            .schema
-            .as_ref()
-            .unwrap()
-            .inherited_decay
-            .as_ref()
-            .unwrap()
-            .matches_receipt(&adoption));
+        assert!(
+            namespace
+                .schema
+                .as_ref()
+                .unwrap()
+                .inherited_decay
+                .as_ref()
+                .unwrap()
+                .matches_receipt(&adoption)
+        );
     }
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
