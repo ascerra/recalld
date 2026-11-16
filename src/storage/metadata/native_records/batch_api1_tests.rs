@@ -276,6 +276,64 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
         .is_err()
     );
     assert_eq!(bytes(&d.path), baseline);
+    // Historical replay above must remain valid without inventing old policy.
+    // Only the fresh operation below needs explicit present-day adoption.
+    let policy = crate::storage::native_lifecycle::NativePolicyInputs {
+        global: crate::decay::DecayConfig::default(),
+        multiplier: crate::config::RecalldConfig::default()
+            .decay
+            .decay_rate_multiplier,
+    };
+    {
+        let engine = f.storage.read().unwrap();
+        let namespace = engine.get_namespace(d.ns).unwrap().unwrap();
+        assert!(namespace.decay_rate_multiplier.is_none());
+        assert!(namespace.schema.as_ref().unwrap().inherited_decay.is_none());
+        assert!(matches!(
+            policy.resolve(&namespace),
+            Err(StorageError::InvalidMutation(message))
+                if message == "inherited policy is unknown; explicitly preview/adopt before dependent operations"
+        ));
+    }
+    drop(a);
+    let temp = f.close();
+    let adoption = crate::test_support::explicitly_adopt_inherited_policy(
+        &d.path,
+        d.ns,
+        policy.multiplier,
+        2000,
+    );
+    let session = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(temp, session.engine);
+    readers::completion(&f).complete().await.unwrap();
+    let a = adapter(&f, provider.clone(), clock.clone(), Default::default());
+    {
+        let engine = f.storage.read().unwrap();
+        let namespace = engine.get_namespace(d.ns).unwrap().unwrap();
+        let binding = namespace
+            .schema
+            .as_ref()
+            .unwrap()
+            .inherited_decay
+            .as_ref()
+            .unwrap();
+        assert!(binding.matches_receipt(&adoption));
+        assert_eq!(
+            policy
+                .resolve(&namespace)
+                .unwrap()
+                .decay_rate_multiplier
+                .to_bits(),
+            (policy.multiplier as f32).to_bits()
+        );
+        let historical = engine
+            .meta_store()
+            .lookup_batch(r.store_id.unwrap(), old.outcome.batch_operation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(canonical(&historical), canonical(&retained));
+    }
+    assert_eq!(bytes(&source), before_source);
     let mut fresh = r;
     fresh.idempotency_key = Some("fresh-timestamp".into());
     let out = a
@@ -286,36 +344,6 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
         )
         .await
         .unwrap();
-    // Diagnostic only: resolve the exact failed fresh child's namespace with
-    // the same policy inputs as run_linked_batch_child/default adapter config.
-    let namespace = f
-        .storage
-        .read()
-        .unwrap()
-        .get_namespace(out.items[0].namespace_id.unwrap())
-        .unwrap()
-        .unwrap();
-    assert_eq!(namespace.id, d.ns);
-    let policy = crate::storage::native_lifecycle::NativePolicyInputs {
-        global: crate::decay::DecayConfig::default(),
-        multiplier: crate::config::RecalldConfig::default()
-            .decay
-            .decay_rate_multiplier,
-    };
-    let resolution = policy.resolve(&namespace);
-    eprintln!(
-        "PR168_FRESH_POLICY_DIAGNOSTIC namespace={} explicit_multiplier={:?} inherited={:?} resolution={resolution:?}",
-        namespace.id.get(),
-        namespace.decay_rate_multiplier,
-        namespace.schema.as_ref().unwrap().inherited_decay,
-    );
-    assert!(namespace.decay_rate_multiplier.is_none());
-    assert!(namespace.schema.as_ref().unwrap().inherited_decay.is_none());
-    assert!(matches!(
-        &resolution,
-        Err(StorageError::InvalidMutation(message))
-            if message == "inherited policy is unknown; explicitly preview/adopt before dependent operations"
-    ));
     assert_eq!(out.succeeded, 1, "{out:?}");
     let id: MemoryId =
         serde_json::from_value(out.items[0].result.as_ref().unwrap()["id"].clone()).unwrap();
