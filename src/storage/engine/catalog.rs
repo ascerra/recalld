@@ -23,68 +23,16 @@ impl RedbStorageEngine {
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
-        // The same owned guard covers preparation, canonical commit and handle
-        // installation; no observer can drain between commit and publication.
-        let guard = self.meta_store.mutation_guard_with_work(parent)?;
-        let mut prepared = None;
-        let mut payload_published = false;
-        let root = &self.db_path;
-        let result = self
-            .meta_store
-            .create_catalog_guarded(&guard, ctx, config, |id| {
-                boundary("before_stage")?;
-                let target = root.join(&config.name);
-                // Never adopt or clean an existing directory, including broken links.
-                match std::fs::symlink_metadata(&target) {
-                    Ok(_) => {
-                        return Err(StorageError::InvalidMutation(
-                            "namespace directory already exists".into(),
-                        ));
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(e.into()),
-                }
-                let stage = tempfile::Builder::new()
-                    .prefix(".recalld-catalog-")
-                    .tempdir_in(root)?;
-                let mut vector =
-                    crate::storage::VectorStore::open(stage.path(), config.embedding_dim as usize)?;
-                vector.sync()?;
-                fsync_dir(stage.path())?;
-                boundary("after_stage")?;
-                boundary("before_payload_publish")?;
-                rename_new_directory(stage.path(), &target)?;
-                payload_published = true;
-                // The final directory is deliberately never compensating-deleted:
-                // a failed/uncertain commit is reconciled by reopen; unreferenced
-                // final directories are quarantined by existing orphan recovery.
-                fsync_dir(root)?;
-                vector.relocate_path(&target);
-                boundary("after_payload_publish")?;
-                prepared = Some((id, vector));
-                Ok(())
-            });
-        let receipt = result.map_err(|error| {
-            if payload_published {
-                self.meta_store.mark_unavailable();
-            }
-            error
-        })?;
-        if let Some((id, vector)) = prepared {
-            let publish = (|| {
-                boundary("before_handle_publish")?;
-                self.vector_manager.install_prepared(id, vector);
-                boundary("after_handle_publish")
-            })();
-            publish.map_err(|source| {
-                self.meta_store.mark_unavailable();
-                StorageError::CommittedEffectsPending {
-                    operation_id: receipt.operation_id,
-                    source: Box::new(source),
-                }
-            })?;
-        }
-        Ok(receipt)
+        // Keep the accepted mutation guard through filesystem/handle publication.
+        let meta = &self.meta_store;
+        let guard = meta.mutation_guard_with_work(parent)?;
+        publish_namespace(meta, &mut self.vector_manager, &self.db_path, |prepare| {
+            meta.create_catalog_guarded(&guard, ctx, config, |id| {
+                let mut stored = config.clone();
+                stored.id = id;
+                prepare(&stored)
+            })
+        })
     }
 
     pub(crate) fn create_namespace_with_work(
@@ -129,9 +77,78 @@ impl RedbStorageEngine {
     }
 }
 
+/// Shared filesystem publication for legacy and native catalog transactions.
+/// The caller supplies its actual canonical transaction; no file rename is
+/// represented as atomic with metadata. Failed publication poisons the owner.
+pub(super) fn publish_namespace(
+    meta: &MetadataStore,
+    vectors: &mut VectorManager,
+    root: &Path,
+    commit: impl FnOnce(
+        &mut dyn FnMut(&NamespaceConfig) -> Result<(), StorageError>,
+    ) -> Result<WriteReceipt, StorageError>,
+) -> Result<WriteReceipt, StorageError> {
+    let mut prepared = None;
+    let mut payload_published = false;
+    let result = commit(&mut |config| {
+        boundary("before_stage")?;
+        let target = root.join(&config.name);
+        // Never adopt or clean an existing directory, including broken links.
+        match std::fs::symlink_metadata(&target) {
+            Ok(_) => {
+                return Err(StorageError::InvalidMutation(
+                    "namespace directory already exists".into(),
+                ));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        let stage = tempfile::Builder::new()
+            .prefix(".recalld-catalog-")
+            .tempdir_in(root)?;
+        let mut vector =
+            crate::storage::VectorStore::open(stage.path(), config.embedding_dim as usize)?;
+        vector.sync()?;
+        fsync_dir(stage.path())?;
+        boundary("after_stage")?;
+        boundary("before_payload_publish")?;
+        rename_new_directory(stage.path(), &target)?;
+        payload_published = true;
+        // The final directory is deliberately never compensating-deleted:
+        // a failed/uncertain commit is reconciled by reopen; unreferenced
+        // final directories are quarantined by existing orphan recovery.
+        fsync_dir(root)?;
+        vector.relocate_path(&target);
+        boundary("after_payload_publish")?;
+        prepared = Some((config.id, vector));
+        Ok(())
+    });
+    let receipt = result.map_err(|error| {
+        if payload_published {
+            meta.mark_unavailable();
+        }
+        error
+    })?;
+    if let Some((id, vector)) = prepared {
+        let publish = (|| {
+            boundary("before_handle_publish")?;
+            vectors.install_prepared(id, vector);
+            boundary("after_handle_publish")
+        })();
+        publish.map_err(|source| {
+            meta.mark_unavailable();
+            StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(source),
+            }
+        })?;
+    }
+    Ok(receipt)
+}
+
 /// Publish a prepared directory without replacing even an empty existing one.
 /// The supported local platforms already provide an atomic no-replace rename.
-fn rename_new_directory(source: &Path, target: &Path) -> Result<(), StorageError> {
+pub(crate) fn rename_new_directory(source: &Path, target: &Path) -> Result<(), StorageError> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -313,15 +330,26 @@ mod tests {
             engine.create_namespace(&config("recover"))
         })
         .unwrap_err();
-        assert!(matches!(
-            error,
-            StorageError::CommittedEffectsPending { .. }
-        ));
+        let StorageError::CommittedMutation { receipt, .. } = error else {
+            panic!("known catalog commit lost its full receipt: {error:?}");
+        };
         assert!(tracker.status().unresolved > 0);
         drop(engine);
         let engine = RedbStorageEngine::open(root.path()).unwrap();
         let id = engine.get_namespace_by_name("recover").unwrap().unwrap().id;
         assert!(engine.vector_manager.get(id).is_some());
+        assert_eq!(
+            engine
+                .meta_store()
+                .lookup_operation(
+                    receipt.store_id,
+                    MutationScope::Catalog,
+                    receipt.operation_id
+                )
+                .unwrap()
+                .unwrap(),
+            *receipt
+        );
         assert_eq!(engine.meta_store().work_tracker().status().pending, 0);
     }
 

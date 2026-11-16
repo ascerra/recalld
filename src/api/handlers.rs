@@ -391,6 +391,59 @@ async fn get_memory_admitted(
     let start = Instant::now();
 
     let memory_id = parse_memory_id(&id)?;
+    if let Some(prepared) = state
+        .search
+        .prepare_coherent_get_with_work(
+            memory_id,
+            options.namespace.as_deref(),
+            options.record_access,
+            parent,
+        )
+        .await?
+    {
+        let (namespace, row) = prepared.payload.ok_or_else(|| AppError::NotFound {
+            resource: "memory",
+            id: id.clone(),
+        })?;
+        let mut response = MemoryResponse::from_cached(
+            &crate::model::CachedRecord::from(&row.record),
+            namespace.name,
+        );
+        if row.record.schema.as_ref().is_some_and(|s| {
+            s.lifecycle.lifecycle_version
+                == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+        }) {
+            if let Some(projected) = prepared.response {
+                response.strength = projected.strength;
+                response.decay_strength = projected.decay_strength;
+            }
+        }
+        response.full_text = row.full_text;
+        check_read_admission(&state, admitted_stamp).await?;
+        let receipts = if prepared.requested_access && row.record.phase != DecayPhase::Tombstone {
+            state
+                .search
+                .record_coherent_exposures_with_work(
+                    &[(memory_id, AccessKind::DirectRetrieval)],
+                    crate::storage::control::ExposureScope {
+                        namespace: response.namespace.clone(),
+                        source: Some(memory_id),
+                    },
+                    prepared.evaluated_at,
+                    parent,
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        return Ok(Observed {
+            receipts,
+            value: Json(ApiResponse {
+                data: response,
+                took_us: Some(start.elapsed().as_micros() as u64),
+            }),
+        });
+    }
     if let Some(namespace) = options.namespace.as_deref() {
         state
             .storage
@@ -462,67 +515,23 @@ pub async fn delete_memory(
     Path(id): Path<String>,
     Query(scope): Query<MemoryScopeQuery>,
 ) -> Result<Json<ApiResponse<DeleteResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-        if let Some(namespace) = scope.namespace.as_deref() {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-
-        // Read record first for entity index cleanup (Issue 14)
-        let existing_record = state.storage.get_record(memory_id).await;
-
-        let existed = state
-            .storage
-            .delete_memory_with_work(memory_id, scope.namespace.as_deref(), work.as_ref())
-            .await?;
-        if existed {
-            state.cache.remove(memory_id).await;
-            state.search.remove_from_index(memory_id).await;
-
-            // Issue 14: Clean up FTS5 index
-            state.search.fts_remove(memory_id).await;
-
-            // Issue 14: Clean up entity index
-            if let Some(ref record) = existing_record {
-                state
-                    .search
-                    .entity_index_remove(NamespaceId::new(record.namespace_id), memory_id)
-                    .await;
-            }
-
-            // Issue 13: Tombstone the graph node instead of removing it
-            if let Err(e) = state
-                .graph
-                .tombstone_node_with_work(memory_id, work.as_ref())
-                .await
-            {
-                tracing::warn!(
-                    memory_id = %memory_id,
-                    %e,
-                    "graph tombstone failed (non-fatal)"
-                );
-            }
-        }
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: DeleteResponse {
-                id: memory_id,
-                deleted: existed,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let mut reply = state
+        .storage
+        .forget_api1(memory_id, scope.namespace.as_deref())
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Forget { deleted }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: DeleteResponse {
+            id: memory_id,
+            deleted,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// POST /memories/:id/reinforce -- manual reinforcement.
@@ -538,44 +547,28 @@ pub async fn reinforce_memory(
     Path(id): Path<String>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<ApiResponse<ReinforceResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-
-        let namespace =
-            crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
-        if let Some(namespace) = namespace {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-        let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
-
-        let updated = state
-            .decay
-            .reinforce_with_work(memory_id, quality, namespace, work.as_ref())
-            .await
-            .map_err(|e| feedback_error(e, &id))?;
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: ReinforceResponse {
-                id: memory_id,
-                strength: updated.strength,
-                stability: updated.stability,
-                phase: format!("{:?}", updated.phase),
-                is_permastore: updated.is_permastore,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let namespace = crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
+    let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
+    let mut reply = state
+        .decay
+        .feedback_api1(memory_id, quality, namespace)
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Feedback { result }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: ReinforceResponse {
+            id: memory_id,
+            strength: result.strength,
+            stability: result.stability,
+            phase: result.phase,
+            is_permastore: result.is_permastore,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// Preserve typed lifecycle outcomes instead of classifying display strings.
@@ -944,6 +937,7 @@ async fn search_memories_admitted(
         .search
         .prepare_coherent_search_with_work(search_query.clone(), req.include_embeddings, parent)
         .await?;
+    let hydration = crate::performance::Timer::new("rest.hydration");
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
             let hydration = crate::performance::Timer::new("rest.hydration");
@@ -1136,6 +1130,70 @@ async fn find_similar_admitted(
     let start = Instant::now();
 
     let memory_id = parse_memory_id(&id)?;
+
+    if let Some(prepared) = state
+        .search
+        .prepare_coherent_similar_with_work(
+            memory_id,
+            req.namespace.as_deref(),
+            req.limit.min(100) as usize,
+            req.min_score,
+            req.record_access,
+            req.include_embeddings,
+            parent,
+        )
+        .await?
+    {
+        let mut hits = Vec::with_capacity(prepared.results.len());
+        for (selected, row) in prepared.results.into_iter().zip(prepared.payload.rows) {
+            let mut memory = MemoryResponse::from_cached(
+                &crate::model::CachedRecord::from(&row.record),
+                prepared.payload.namespace.name.clone(),
+            );
+            if row.record.schema.as_ref().is_some_and(|s| {
+                s.lifecycle.lifecycle_version
+                    == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+            }) {
+                memory.strength = selected.retrievability;
+                memory.decay_strength = selected.effective_r;
+            }
+            memory.full_text = row.full_text;
+            memory.embedding = row.embedding;
+            hits.push(SearchHit {
+                memory,
+                score: selected.score.unwrap_or(0.0),
+            });
+        }
+        check_read_admission(&state, admitted_stamp).await?;
+        let accesses: Vec<_> = hits
+            .iter()
+            .map(|h| (h.memory.id, AccessKind::AssociativeRetrieval))
+            .collect();
+        let receipts = if prepared.requested_access {
+            state
+                .search
+                .record_coherent_exposures_with_work(
+                    &accesses,
+                    crate::storage::control::ExposureScope {
+                        namespace: prepared.payload.namespace.name,
+                        source: Some(memory_id),
+                    },
+                    prepared.evaluated_at,
+                    parent,
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        return Ok(Observed {
+            receipts,
+            value: Json(SearchResponse {
+                total: hits.len() as u64,
+                hits,
+                took_us: Some(start.elapsed().as_micros() as u64),
+            }),
+        });
+    }
 
     if let Some(namespace) = req.namespace.as_deref() {
         state
@@ -1337,7 +1395,22 @@ pub async fn create_namespace(
 
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {
     use crate::decay::lifecycle::LifecycleError;
+    use crate::derived_completion::catalog::CatalogCreateError;
     use crate::storage::StorageError;
+    let error: Box<dyn std::error::Error + Send + Sync> = match error
+        .downcast::<CatalogCreateError>()
+    {
+        Ok(error) => match *error {
+            CatalogCreateError::Storage(error) => Box::new(error),
+            CatalogCreateError::WorkerUnknown => {
+                return AppError::MutationUnknown {
+                    operation_id: None,
+                    message: "namespace worker outcome unavailable; reconcile before retry".into(),
+                };
+            }
+        },
+        Err(error) => error,
+    };
     if matches!(
         error.downcast_ref::<LifecycleError>(),
         Some(LifecycleError::InvalidInput(_))
@@ -1356,8 +1429,10 @@ fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> Ap
                 message,
                 field: None,
             },
-            error @ StorageError::CommitOutcomeUnknown { .. } => AppError::ServiceUnavailable {
-                message: error.to_string(),
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => AppError::MutationUnknown {
+                operation_id: Some(operation_id),
+                message: "namespace commit acknowledgement unavailable; reconcile before retry"
+                    .into(),
             },
             error => error.into(),
         },
@@ -2103,24 +2178,29 @@ pub async fn metrics(
 
 /// POST /decay/sweep -- trigger an immediate decay sweep.
 ///
-/// Accepts an optional `as_of` field (milliseconds since epoch) to run
-/// the sweep as if the current time were the given timestamp. This is
-/// used by the replay driver to simulate time-appropriate decay during
-/// historical seeding.
+/// Uses the configured clock. Caller-supplied time overrides are rejected
+/// before accepting work; isolated replay controls its existing owned clock.
 pub async fn trigger_decay_sweep(
     State(state): State<AppState>,
     Json(req): Json<TriggerSweepRequest>,
 ) -> Result<Json<ApiResponse<TriggerSweepResponse>>, AppError> {
-    let result = state
-        .decay
-        .trigger_sweep(req.as_of)
-        .await
-        .map_err(
-            |error| match error.downcast::<crate::storage::StorageError>() {
-                Ok(storage) => AppError::from(*storage),
-                Err(source) => AppError::Internal { source },
-            },
-        )?;
+    if req.fields.contains_key("asOf") || req.fields.contains_key("as_of") {
+        return Err(AppError::BadRequest {
+            message: "Public sweeps use the configured clock; remove asOf/as_of".into(),
+            field: Some("asOf".into()),
+        });
+    }
+    let result =
+        state
+            .decay
+            .trigger_sweep(None)
+            .await
+            .map_err(
+                |error| match error.downcast::<crate::storage::StorageError>() {
+                    Ok(storage) => AppError::from(*storage),
+                    Err(source) => AppError::Internal { source },
+                },
+            )?;
 
     Ok(Json(ApiResponse {
         data: TriggerSweepResponse {
@@ -2217,4 +2297,130 @@ async fn check_read_admission(state: &AppState, stamp: u64) -> Result<(), AppErr
         });
     }
     Ok(())
+}
+
+/// Route selection for duplicates. The shared middleware and this direct-call
+/// boundary both keep v2 closed until the native serving/wire contract is ready.
+pub async fn dispatch_duplicates(
+    State(state): State<super::state::AppState>,
+    Path(name): Path<String>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::{ContractVersion, Envelope};
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = super::middleware::request_contract_version(request.headers());
+    let version = match version {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version == ContractVersion::V1 {
+        // Preserve Axum's legacy JSON extractor rejection and successful shape.
+        return match Json::<super::models::ScanDuplicatesRequest>::from_request(request, &state)
+            .await
+        {
+            Ok(Json(body)) => scan_duplicates(State(state), Path(name), Json(body))
+                .await
+                .into_response(),
+            Err(rejection) => rejection.into_response(),
+        };
+    }
+    let body = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            let error = crate::search::exact_scan::ExactScanError::Input(
+                crate::serialization::contract::InputError {
+                    code: "INVALID_TYPE",
+                    field: String::new(),
+                    message: "body must be a JSON object",
+                },
+            )
+            .execution_error();
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(Envelope::<crate::search::exact_scan::ExactScanData>::failure(None, error)),
+            )
+                .into_response();
+        }
+    };
+    scan_duplicates_v2(state.storage.as_ref(), &name, &body).await
+}
+
+/// Actual gated handler logic, shared with native acceptance checks. The public
+/// route must still pass the version/serving gate before entering this function.
+pub(crate) async fn scan_duplicates_v2(
+    storage: &dyn super::state::StorageEngine,
+    name: &str,
+    body: &serde_json::Value,
+) -> axum::response::Response {
+    use crate::serialization::contract::Envelope;
+    use axum::response::IntoResponse;
+    let result = match crate::serialization::scan::ExactScanRequest::from_http(body, name) {
+        Ok(request) => storage.scan_duplicate_pairs(request).await,
+        Err(error) => Err(crate::search::exact_scan::ExactScanError::Input(error)),
+    };
+    match result {
+        Ok(page) => Json(page.into_envelope()).into_response(),
+        Err(error) => {
+            use crate::serialization::contract::ErrorCategory;
+            let error = error.execution_error();
+            let status = match error.category {
+                ErrorCategory::InvalidInput => axum::http::StatusCode::BAD_REQUEST,
+                ErrorCategory::NotFound => axum::http::StatusCode::NOT_FOUND,
+                ErrorCategory::Conflict => axum::http::StatusCode::CONFLICT,
+                _ => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (
+                status,
+                Json(Envelope::<crate::search::exact_scan::ExactScanData>::failure(None, error)),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Resolved v1 discovery only. Store/provider identity certifies no ReadView,
+/// native writer readiness or historical vector provenance.
+pub async fn capabilities(State(state): State<super::state::AppState>) -> axum::response::Response {
+    use crate::serialization::session::{BackendContext, document};
+    use axum::response::IntoResponse;
+    let unavailable = || AppError::ServiceUnavailable {
+        message: "backend context unavailable".into(),
+    };
+    let result = async {
+        let store_id = state
+            .storage
+            .store_identity()
+            .await
+            .map_err(|_| unavailable())?;
+        let active = state.search.active_embedding().map_err(|_| unavailable())?;
+        let backend = BackendContext::new(store_id, active).map_err(|_| unavailable())?;
+        let requested = crate::model::constants::DEFAULT_NAMESPACE_NAME;
+        let namespace = state.namespaces.resolve(requested);
+        Ok::<_, AppError>(Json(document(
+            requested,
+            "legacyHttpDefault",
+            namespace.map(|ns| (ns.name, ns.id.get(), ns.embedding_dim)),
+            Some(backend),
+        )))
+    }
+    .await;
+    let mut response = result.into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response
 }

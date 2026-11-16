@@ -1,0 +1,86 @@
+
+running 1 test
+test storage::metadata::native_lifecycle::tests::replay_precedes_stale_tokens_policy_and_clock_but_not_lineage_or_payload ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 1.53s
+
+
+running 1 test
+test storage::metadata::native_records::tests::actual_native_insert_feedback_tombstone_replay_and_reopen_preserve_proof ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 1.90s
+
+
+running 1 test
+Starting backup...
+  Source: /tmp/.tmptTfhiI/rollback
+  Destination: /tmp/.tmptTfhiI/peer-policy.zip
+Generating manifest...
+Creating archive...
+Backup complete!
+  Archive: /tmp/.tmptTfhiI/peer-policy.zip
+  Size: 0.03 MB (compressed)
+  Uncompressed: 9.13 MB
+  Compression ratio: 99.7%
+test storage::metadata::native_records::tests::maintenance::native_harddelete_foreign_peer_requires_actual_policy_history ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 6.46s
+
+
+running 1 test
+test storage::metadata::native_records::tests::maintenance::native_harddelete_zero_weight_pending_edge_rejects_signed_zero_change_without_source_writes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 3.21s
+
+
+running 1 test
+test storage::metadata::native_records::tests::maintenance::native_maintenance_actual_policy_migration_invalidates_plan_but_replays_old_receipt_first ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 2.36s
+
+
+running 1 test
+test storage::metadata::native_records::tests::maintenance::native_maintenance_missing_summary_permastore_and_unknown_phase_marker_are_preserved ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 3.01s
+
+
+running 1 test
+test storage::metadata::native_records::tests::maintenance::native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_without_receipts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 2.57s
+
+
+running 1 test
+test storage::metadata::native_records::tests::original_expansion_replay_precedes_aborted_default_changes_and_real_policy_migration_provider ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 2.18s
+
+
+running 1 test
+Starting backup...
+  Source: /tmp/.tmp6jrmTN/rollback
+  Destination: /tmp/.tmp6jrmTN/feedback.zip
+Generating manifest...
+Creating archive...
+Backup complete!
+  Archive: /tmp/.tmp6jrmTN/feedback.zip
+  Size: 0.03 MB (compressed)
+  Uncompressed: 9.13 MB
+  Compression ratio: 99.7%
+test storage::metadata::native_records::tests::readers::feedback_consumer::native_feedback_replay_survives_actual_policy_rollback_but_not_restore_lineage ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 5.24s
+
+
+running 1 test
+test storage::metadata::native_records::tests::readers::feedback_consumer::native_feedback_uses_anchor_and_configured_policy_and_replays_before_clock ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 2.75s
+
+
+running 1 test
+test storage::metadata::native_records::tests::sweep::origin::manual_origin_native_requires_configured_policy_and_rejects_unknown_before_clock ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1242 filtered out; finished in 2.40s
+

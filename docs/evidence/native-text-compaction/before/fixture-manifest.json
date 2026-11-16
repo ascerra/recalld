@@ -1,0 +1,35 @@
+{
+  "sourceCommit": "c51b532",
+  "runtimeParent": "05e0d55aa3a92483e294b2a5e79cf490ce270609",
+  "test": "compaction_genuine_before_fixture",
+  "testBinarySha256": "d3ea331a92a72b8906f708dbb8595da0842c98f1af08edb8c8d51e9ce8dd43cf",
+  "fixtureSha256": "7af226b26fae5af82658b4a4271fec72c8ad7714c0656d25dd66d3d425f8a188",
+  "fixtureBytes": 17014,
+  "files": {
+    "default/vectors.dat": {
+      "bytes": 16448,
+      "sha256": "63806e9c4054868d576cd057a5ecc13a4fa485a15aa1ffb8c7d60735d8d74e05"
+    },
+    "edges.db": {
+      "bytes": 3686400,
+      "sha256": "5a50f921527ec4bfddbfce6043d625c38ce4ba1b2612c16bef25a234dab1f052"
+    },
+    "fulltext.dat": {
+      "bytes": 48,
+      "sha256": "ac73be27c39f69d16b734ff47141e284ebe125215cb33a334a9918915169e33c"
+    },
+    "fulltext.f11644b3-37fa-4c27-97bf-5ef600db58fd.dat": {
+      "bytes": 102,
+      "sha256": "56577105e5624e36de1238f1d9cec718b85b919aaf3f7d02091d349a074fd979"
+    },
+    "meta.db": {
+      "bytes": 3686400,
+      "sha256": "2734e628da716431f18f52cbd0557d852d62e9e85da4ff176ac817e998b7f082"
+    },
+    "recalld.lock": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "scope": "Synthetic selected-text legacy store generated before runtime edits. Test input, not a backup or production snapshot."
+}

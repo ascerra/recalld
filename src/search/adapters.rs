@@ -552,6 +552,7 @@ pub struct StorageAccessRecorder {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     clock: Arc<dyn crate::time::Clock>,
+    completion: Option<crate::derived_completion::DerivedCompletion>,
 }
 
 impl StorageAccessRecorder {
@@ -563,16 +564,97 @@ impl StorageAccessRecorder {
             storage,
             cache,
             clock: Arc::new(crate::time::SystemClock),
+            completion: None,
         }
     }
     pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
         self.clock = clock;
         self
     }
+    pub(crate) fn with_completion(
+        mut self,
+        owner: crate::derived_completion::DerivedCompletion,
+    ) -> Self {
+        assert!(Arc::ptr_eq(&self.storage, &owner.storage));
+        self.completion = Some(owner);
+        self
+    }
 }
 
 #[async_trait]
 impl AccessRecorder for StorageAccessRecorder {
+    fn supports_native_exposure(&self) -> bool {
+        self.completion.is_some()
+            && self
+                .storage
+                .read()
+                .is_ok_and(|s| s.meta_store().uses_native_lifecycle())
+    }
+
+    async fn record_access_batch_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        if accesses.is_empty() {
+            return Ok(crate::decay::observation::AccessObservation::from_receipts(
+                Vec::new(),
+            ));
+        }
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(SearchError::Unavailable(
+                "unsupported original application contract".into(),
+            ));
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| SearchError::Unavailable(e.to_string()))?
+            .meta_store()
+            .uses_native_lifecycle();
+        let receipts = if native {
+            let completion = self.completion.as_ref().ok_or_else(|| {
+                SearchError::Unavailable(
+                    "native exposure requires the configured publication owner".into(),
+                )
+            })?;
+            let policy = policy.ok_or_else(|| {
+                SearchError::Unavailable(
+                    "native exposure requires the query's configured lifecycle policy".into(),
+                )
+            })?;
+            completion
+                .record_native_exposures_with_work(
+                    accesses.to_vec(),
+                    scope.cloned(),
+                    sampled_at.unwrap_or_else(|| self.clock.now_millis()),
+                    policy.clone(),
+                    parent,
+                    original_contract_version,
+                )
+                .await?
+        } else {
+            crate::decay::observation::record_exposures_scoped_with_origin_work(
+                self.storage.clone(),
+                self.cache.clone(),
+                accesses.to_vec(),
+                sampled_at.unwrap_or_else(|| self.clock.now_millis()),
+                scope.cloned(),
+                parent,
+                original_contract_version,
+            )
+            .await?
+        };
+        // Native exposure initially uses the existing full publication fallback.
+        Ok(crate::decay::observation::AccessObservation::from_receipts(
+            receipts,
+        ))
+    }
+
     async fn record_access(
         &self,
         id: MemoryId,
@@ -758,10 +840,8 @@ impl GraphReader for SharedGraphReader {
 
 /// Adapts a shared `EntityIndex` to `EntityIndexReader`.
 ///
-/// Canonical eligible IDs are scoped to the resolved namespace by the pipeline.
-/// Apply them before the result cap, so foreign or filtered postings cannot
-/// crowd out eligible records. Namespace-partitioned postings can later avoid
-/// scanning those foreign postings without changing this admission contract.
+/// Namespace postings and canonical eligible IDs are selected before the
+/// adapter's candidate cap, so foreign or filtered records cannot crowd out hits.
 pub struct SharedEntityIndexReader {
     entity_index: ReadHandle<EntityIndex>,
 }
@@ -930,21 +1010,27 @@ mod entity_namespace_tests {
         let other = NamespaceId::new(2);
         let mut index = EntityIndex::new();
         let entities = vec!["John Smith".into(), "José".into()];
+        let mut eligible = HashSet::new();
         for _ in 0..100 {
-            index.add(other, MemoryId::new(), &entities);
+            let foreign = MemoryId::new();
+            index.add(other, foreign, &entities);
+            eligible.insert(foreign);
         }
+        // Higher-count local postings must also be filtered before the cap.
+        index.add(ns, MemoryId::new(), &entities);
         let local = MemoryId::new();
         index.add(ns, local, &["José".into()]);
+        eligible.insert(local);
         let reader = SharedEntityIndexReader::new(Arc::new(tokio::sync::RwLock::new(index)));
         let hits = reader
-            .find_by_entities(ns, &entities, MemoryId::new(), 1, &HashSet::from([local]))
+            .find_by_entities(ns, &entities, MemoryId::new(), 1, &eligible)
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].memory_id, local);
         assert_eq!(hits[0].shared_count, 1);
         assert!(
             reader
-                .find_by_entities(ns, &entities, local, 1, &HashSet::from([local]))
+                .find_by_entities(ns, &entities, local, 1, &eligible)
                 .unwrap()
                 .is_empty()
         );

@@ -263,7 +263,7 @@ pub(crate) fn reconcile(
     if ancestors.contains_key(&new_store_id) || new_store_id.is_nil() {
         return Err(StorageError::StoreLineageMismatch);
     }
-    let lineage = LineageState {
+    let mut lineage = LineageState {
         version: 1,
         active_store_id: new_store_id,
         operation_id,
@@ -279,6 +279,7 @@ pub(crate) fn reconcile(
             })
             .collect(),
         ledger_sources: sources,
+        native_text_anchor: None,
     };
     let db = redb::Database::open(stage.join("meta.db"))?;
     let read = db.begin_read()?;
@@ -448,12 +449,6 @@ pub(crate) fn reconcile(
     let mut control = snapshot.control.clone();
     control.store_id = new_store_id;
     control.committed_generation = Generation::default().next()?;
-    control.restore_lineage_version = Some(1);
-    lineage.validate(&control)?;
-    tx.open_table(control::CONTROL)?
-        .insert("state", control::encode(&control)?.as_slice())?;
-    tx.open_table(lineage::LINEAGE)?
-        .insert("state", control::encode(&lineage)?.as_slice())?;
     if let Some(target) = target {
         merge_rows(&tx, control::RECEIPTS, &target.receipts)?;
         merge_rows(&tx, control::KEYS, &target.keys)?;
@@ -464,6 +459,26 @@ pub(crate) fn reconcile(
             merge_rows(&tx, batch::BATCHES, rows)?;
         }
     }
+    // Both captured inputs and the private archive stage were strictly validated.
+    // Anchor the exact original rows retained by this actual merge, never an
+    // attacker-supplied root and never a newly reconstructed receipt encoding.
+    let mut anchor = lineage::TextAnchorBuilder::new();
+    for row in tx.open_table(control::RECEIPTS)?.iter()? {
+        let (key, value) = row?;
+        anchor.push(new_store_id, key.value(), value.value())?;
+    }
+    lineage.native_text_anchor = anchor.finish();
+    lineage.version = if lineage.native_text_anchor.is_some() {
+        2
+    } else {
+        1
+    };
+    control.restore_lineage_version = Some(lineage.version);
+    lineage.validate(&control)?;
+    tx.open_table(control::CONTROL)?
+        .insert("state", control::encode(&control)?.as_slice())?;
+    tx.open_table(lineage::LINEAGE)?
+        .insert("state", control::encode(&lineage)?.as_slice())?;
     if has_purge_schema {
         tx.open_table(purge::SCHEMA)?.insert("version", 1)?;
         let mut table = tx.open_table(purge::PROGRESS)?;

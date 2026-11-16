@@ -14,6 +14,8 @@ mod simd;
 
 // Near-duplicate detection at store time.
 mod duplicates;
+pub(crate) mod exact_pairs;
+pub mod exact_scan;
 
 // CS-26: FTS5 full-text search (replaces custom BM25)
 mod fts;
@@ -47,12 +49,13 @@ pub use entity_normalize::canonicalize_entity;
 // --- CS-16 re-exports ---
 pub use error::SearchError;
 pub use pipeline::{
-    AccessRecorder, ChannelDiagnostics, ChannelParticipation, CoherentSearchResponse,
-    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, FtsAvailability,
-    FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, MetadataStore, NamespaceResolver,
-    QueryEngine, RecordCache, ResultProvenance, RetrievalChannel, RetrievalSemantics, RifProcessor,
-    RifSuppression, ScoredResult, SemanticsDiagnostics, SemanticsResponse, StrengthDiagnostics,
-    UnresolvedReason, VectorIndexRegistry, VersionMode, VersionStatus,
+    AccessRecorder, ChannelDiagnostics, ChannelParticipation, CoherentGetResponse,
+    CoherentSearchResponse, CoherentSimilarResponse, EmbeddingProviderRegistry, EntityIndexReader,
+    EntityRecallResult, FtsAvailability, FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader,
+    MetadataStore, NamespaceResolver, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
+    RetrievalSemantics, RifProcessor, RifSuppression, ScoredResult, SemanticsDiagnostics,
+    SemanticsResponse, StrengthDiagnostics, UnresolvedReason, VectorIndexRegistry, VersionMode,
+    VersionStatus,
 };
 pub use query::SearchFilter as PipelineSearchFilter;
 pub use query::{QueryMode, SearchQuery};

@@ -317,7 +317,7 @@ fn namespace_keys_are_independent_and_shared_across_operation_kinds() {
     r.id = *c.as_bytes();
     r.namespace_id = other.get();
     store.insert(c, &r).unwrap();
-    let before = counts(&store);
+    let before = counts(&store); // Includes the actual catalog creation receipts.
     let first = context(&store, ns, "shared");
     store
         .update_access_with_receipt(&first, a, 100, AccessKind::DirectRetrieval)
@@ -414,14 +414,18 @@ fn invalid_feedback_kinds_and_v2_contexts_do_not_mutate() {
             )
             .is_err()
     );
-    let mut v2 = ctx.clone();
-    v2.contract_version = 2;
+    let mut unsupported = ctx.clone();
+    unsupported.contract_version = 3;
     assert!(
         store
-            .record_exposure_batch(&v2, &[(a, AccessKind::DirectRetrieval)], 100)
+            .record_exposure_batch(&unsupported, &[(a, AccessKind::DirectRetrieval)], 100)
             .is_err()
     );
-    assert!(store.record_legacy_feedback(&v2, a, 3, 100, 1.0).is_err());
+    assert!(
+        store
+            .record_legacy_feedback(&unsupported, a, 3, 100, 1.0)
+            .is_err()
+    );
     assert_eq!(snapshot(&store, &[a, b]), before);
 }
 
@@ -814,4 +818,46 @@ fn final_transaction_asserts_scope_and_unexposed_similarity_source() {
         store.get(returned).unwrap().unwrap().access_history.len(),
         1
     );
+}
+
+#[test]
+fn exposure_origin_legacy_feedback_and_access_retain_original_contract_in_keys() {
+    let (_dir, store, ns, [id, _]) = fixture();
+    for api in [1, 2] {
+        let mut key = context(&store, ns, &format!("original-{api}"));
+        key.contract_version = api;
+        let feedback = store.record_legacy_feedback(&key, id, 3, 100, 1.0).unwrap();
+        let before = snapshot(&store, &[id]);
+        let replay = store
+            .record_legacy_feedback(&key, id, 3, 0, f64::NAN)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.operation_id, feedback.operation_id);
+        key.contract_version = 3 - api;
+        assert!(matches!(
+            store.record_legacy_feedback(&key, id, 3, 100, 1.0),
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(snapshot(&store, &[id]), before);
+        let mut key = context(&store, ns, &format!("exposure-original-{api}"));
+        key.contract_version = api;
+        let accesses = [(id, AccessKind::DirectRetrieval)];
+        let first = store
+            .record_exposure_batch(&key, &accesses, 101)
+            .unwrap()
+            .unwrap();
+        let before = snapshot(&store, &[id]);
+        let replay = store
+            .record_exposure_batch(&key, &accesses, 0)
+            .unwrap()
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.operation_id, first.operation_id);
+        key.contract_version = 3 - api;
+        assert!(matches!(
+            store.record_exposure_batch(&key, &accesses, 101),
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(snapshot(&store, &[id]), before);
+    }
 }

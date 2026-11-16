@@ -1,0 +1,12 @@
+{
+  "sha256": {
+    "target/debug/deps/recalld-27bbb81e23f12ff5": "613d5896e230b65d20512188b12dd3b0a9928b1ca95d1e00ef46f7fbd5418a26",
+    "target/debug/deps/recalld-7025a4141187b374": "67dd0526cb75781747308171939219bb4bd7ddb887f6d02087496e65831bddd6",
+    "target/debug/deps/recalld-db4c01372257a80b": "363b2debde15b5d84104a6198bd51401b91d2072744d01200a961a750b3b3486",
+    "target/debug/examples/owned_evaluator": "481e734b03b5c8edbc113499f1cf3b9377f01a5eee7ddbd07905e39dae3e4ff1",
+    "target/debug/recalld-cli": "f6ca7567a8f21ded22056805567a24474db26e2fc50414452122079ceffb376a",
+    "target/debug/recalld-schema": "6c5964a4e273038b8747279f02b87acc6ebd608d7bd85a1734bfe7c5ce7d8368",
+    "target/debug/recalld-text-migrate": "e211b242da7f97565bdb6535ea219bd306a50e6a49740d6678d0d43b9789f85b"
+  },
+  "sourceCommit": "d09ca4988d99e2ba28a549bd6b0504347fc056e9"
+}

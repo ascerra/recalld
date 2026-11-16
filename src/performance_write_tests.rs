@@ -830,3 +830,109 @@ fn online_producer_aborted_root_keeps_queued_worker_context_and_owned_guards() {
 
 #[path = "performance_batch_tests.rs"]
 mod batch;
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn trace_provenance_actual_mcp_after_unsubscribed_first_callsite() {
+    const CHILD: &str = "RECALLD_MCP_COLD_TRACE_CHILD";
+    let Ok(mode) = std::env::var(CHILD) else {
+        for mode in ["scoped", "global", "untraced", "target_filtered"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "performance::tests::writes::trace_provenance_actual_mcp_after_unsubscribed_first_callsite",
+                    "--nocapture",
+                ])
+                .env(CHILD, mode)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    };
+    // Each child starts with cold process-global callsites, even in a parallel suite.
+    let capture = Capture::default();
+    let dispatch = if mode == "target_filtered" {
+        tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .json()
+                .without_time()
+                .with_env_filter("off,trace_control=trace")
+                .with_writer(capture.clone())
+                .finish(),
+        )
+    } else {
+        tracing::Dispatch::new(subscriber(capture.clone()))
+    };
+    assert!(
+        !std::thread::spawn(crate::performance::enabled)
+            .join()
+            .unwrap()
+    );
+    let enabled_under_capture =
+        tracing::dispatcher::with_default(&dispatch, crate::performance::enabled);
+    assert_eq!(enabled_under_capture, mode != "target_filtered");
+    assert!(
+        !crate::performance::enabled(),
+        "scoped dispatch leaked outside its scope"
+    );
+    if mode == "global" {
+        tracing::dispatcher::set_global_default(dispatch.clone()).unwrap();
+    }
+    let fx = Fixture::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let server = server(&fx, calls.clone());
+    let output = Output::default();
+    let captured = output.clone();
+    let input = format!("{}\n", request());
+    let serving = crate::mcp::transport::serve_io(server, input.as_bytes(), output);
+    if mode == "scoped" || mode == "target_filtered" {
+        serving.with_subscriber(dispatch).await.unwrap();
+    } else {
+        serving.await.unwrap();
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(captured.flushes.load(Ordering::SeqCst), 1);
+    let response: serde_json::Value =
+        serde_json::from_slice(&captured.bytes.lock().unwrap()).unwrap();
+    assert!(response.get("error").is_none(), "{response}");
+    assert_ne!(response["result"]["isError"], true);
+    assert_eq!(fx.storage.read().unwrap().scan_all().unwrap().len(), 1);
+    assert!(
+        fx.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    let rows = raw_events(&capture);
+    eprintln!(
+        "ACTUAL_MCP enabled_under_capture={enabled_under_capture} captured_rows={} rows={rows:?}",
+        rows.len()
+    );
+    if mode == "untraced" || mode == "target_filtered" {
+        assert!(rows.is_empty(), "{mode} emitted performance rows");
+        return;
+    }
+    // Exact real transport evidence, not merely a nonempty capture.
+    assert!(
+        rows.iter().any(|e| e["fields"]["kind"] == "transport_input"
+            && e["fields"]["source_bytes"] == input.trim_end().len()),
+        "missing actual MCP transport input after unsubscribed callsite registration"
+    );
+    assert!(
+        rows.iter().any(
+            |e| e["fields"]["kind"] == "transport_output" && e["fields"]["phase"] == "complete"
+        )
+    );
+    assert!(rows.iter().any(|e| {
+        e["spans"]
+            .as_array()
+            .is_some_and(|spans| spans.iter().any(|s| s["name"] == "performance_request"))
+    }));
+}

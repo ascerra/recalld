@@ -1,0 +1,6 @@
+{
+  "installedFiles": 1249,
+  "extension": "pytrec_eval_ext.cpython-311-aarch64-linux-gnu.so",
+  "extensionSha256": "7a0bc4482eb8d2ce73596b9812bbec1ca8889255c1529a02fa4342a933c7b544",
+  "scope": "external reference import/scorer contract only; no MCP episode yet"
+}

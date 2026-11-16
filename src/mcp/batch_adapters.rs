@@ -9,7 +9,7 @@ use crate::storage::control::{MutationOutcome, WriteReceipt};
 use serde_json::json;
 
 impl McpStorageAdapter {
-    fn batch_completion(&self) -> crate::derived_completion::DerivedCompletion {
+    pub(super) fn batch_completion(&self) -> crate::derived_completion::DerivedCompletion {
         crate::derived_completion::DerivedCompletion {
             storage: self.storage.clone(),
             cache: self.cache.clone(),
@@ -24,8 +24,9 @@ impl McpStorageAdapter {
         &self,
         input: BatchInput,
     ) -> impl std::future::Future<Output = Result<BatchOutcome, bridge::BridgeError>> + '_ {
-        performance::measure("mcp.batch", true, async move {
-            performance::event!(
+        let legacy_trace = input.mutation_version == 1;
+        let run = async move {
+            performance::event!(legacy_trace;
                 kind = "batch_input",
                 operation = match input.kind {
                     BatchKind::Insert => "insert",
@@ -40,7 +41,7 @@ impl McpStorageAdapter {
             let result = self.run_batch_accepted(input, &work).await;
             completion.finish_known_work(work);
             match &result {
-                Ok(outcome) => performance::event!(
+                Ok(outcome) => performance::event!(legacy_trace;
                     kind = "batch_outcome",
                     total = outcome.total,
                     succeeded = outcome.succeeded,
@@ -52,10 +53,19 @@ impl McpStorageAdapter {
                     retained_bookkeeping_receipts = outcome.bookkeeping_receipts.len(),
                     unknown_bookkeeping_operations = outcome.unknown_bookkeeping_operations.len()
                 ),
-                Err(_) => performance::event!(kind = "batch_error", state = "returned_error"),
+                Err(_) => {
+                    performance::event!(legacy_trace; kind = "batch_error", state = "returned_error")
+                }
             }
             result
-        })
+        };
+        async move {
+            if legacy_trace {
+                performance::measure("mcp.batch", true, run).await
+            } else {
+                run.await
+            }
+        }
     }
 
     async fn run_batch_accepted(
@@ -63,33 +73,46 @@ impl McpStorageAdapter {
         input: BatchInput,
         work: &crate::storage::work::WorkTicket,
     ) -> Result<BatchOutcome, bridge::BridgeError> {
-        let mut timeline = Timeline::new();
+        let legacy_trace = input.mutation_version == 1;
+        let mut timeline = Timeline::new_if(legacy_trace);
         // Prepare the entire ordered caller intent before policy/default reads.
-        let prepared = batches::prepare(&input)?;
+        let prepared = if input.mutation_version == 3 {
+            batches::prepare_native_store(&input)?
+        } else {
+            batches::prepare(&input)?
+        };
         timeline.mark("batch.prepare");
         let plans: Vec<_> = prepared.iter().map(|item| item.plan.clone()).collect();
         let ctx = input.context();
         let kind = input.kind;
         let parent = input.batch_operation_id;
+        let version = input.mutation_version;
+        let config = self.config.clone();
         let storage = self.storage.clone();
         let worker = work
             .child()
             .map_err(|e| super::map_mutation_error(e.into()))?;
-        let trace_worker = Worker::new("batch.reservation.queue");
+        let trace_worker = Worker::new_if("batch.reservation.queue", legacy_trace);
         let reserved = tokio::task::spawn_blocking(move || trace_worker.run(move || {
-            let wait = Timer::new("batch.reservation.lock.wait");
+            let wait = Timer::new_if("batch.reservation.lock.wait", legacy_trace);
             let storage = storage.read().map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
             wait.complete();
-            let storage = Hold::new("batch.reservation.lock.hold", storage);
+            let storage = Hold::new_if("batch.reservation.lock.hold", storage, legacy_trace);
             let result = (|| {
                 let store_id = storage.meta_store().control_state()?.store_id;
-                let timer = Timer::new("batch.reservation.call");
-                let reserved = storage.meta_store().reserve_or_resume_batch_with_work(&ctx, kind, &plans, parent, Some(&worker));
+                let timer = Timer::new_if("batch.reservation.call", legacy_trace);
+                let reserved = if version == 3 {
+                    storage.meta_store().reserve_native_store_batch_with_work(
+                        &ctx, &plans, parent, Some(&worker),
+                        || crate::graph::native_selection::freeze_settings(&config.graph))
+                } else {
+                    storage.meta_store().reserve_or_resume_batch_with_work(&ctx, kind, &plans, parent, Some(&worker))
+                };
                 timer.outcome(reserved.is_ok());
                 match &reserved {
-                    Ok(progress) => performance::event!(kind = "batch_reservation", state = "committed", replayed = progress.reservation_receipt.replayed),
-                    Err(StorageError::CommitOutcomeUnknown { .. }) => performance::event!(kind = "batch_reservation", state = "unknown"),
-                    Err(_) => performance::event!(kind = "batch_reservation", state = "error"),
+                    Ok(progress) => performance::event!(legacy_trace; kind = "batch_reservation", state = "committed", replayed = progress.reservation_receipt.replayed),
+                    Err(StorageError::CommitOutcomeUnknown { .. }) => performance::event!(legacy_trace; kind = "batch_reservation", state = "unknown"),
+                    Err(_) => performance::event!(legacy_trace; kind = "batch_reservation", state = "error"),
                 }
                 Ok::<_, StorageError>((store_id, reserved))
             })();
@@ -155,9 +178,15 @@ impl McpStorageAdapter {
             let item_work = work
                 .child()
                 .map_err(|e| super::map_mutation_error(e.into()))?;
-            performance::event!(kind = "batch_child", phase = "attempt");
-            let child_timer = Timer::new("batch.child");
-            let result = if let Some(input) = &prepared.store {
+            performance::event!(legacy_trace; kind = "batch_child", phase = "attempt");
+            let child_timer = Timer::new_if("batch.child", legacy_trace);
+            let result = if input.mutation_version == 3 {
+                self.run_linked_batch_child(prepared, &child, &item_work)
+                    .await
+            } else if input.mutation_version == 2 {
+                self.run_native_batch_child(prepared, &child, &item_work)
+                    .await
+            } else if let Some(input) = &prepared.store {
                 let mut input = input.clone();
                 input.namespace = progress.items[index]
                     .defaults
@@ -191,7 +220,7 @@ impl McpStorageAdapter {
             child_timer.outcome(result.is_ok());
             match result {
                 Ok((receipt, result)) => {
-                    performance::event!(
+                    performance::event!(legacy_trace;
                         kind = "batch_child",
                         phase = "return",
                         state = "committed",
@@ -206,7 +235,7 @@ impl McpStorageAdapter {
                     receipt,
                     ..
                 })) => {
-                    performance::event!(
+                    performance::event!(legacy_trace;
                         kind = "batch_child",
                         phase = "return",
                         state = "committed_unready",
@@ -237,7 +266,7 @@ impl McpStorageAdapter {
                     operation_id,
                     ..
                 })) => {
-                    performance::event!(kind = "batch_child", phase = "return", state = "unknown");
+                    performance::event!(legacy_trace; kind = "batch_child", phase = "return", state = "unknown");
                     outcome.items[index].status = BatchStatus::Unknown;
                     outcome.items[index].operation_id = Some(operation_id);
                     outcome.items[index].error = Some(BatchError::new("COMMIT_OUTCOME_UNKNOWN"));
@@ -247,7 +276,7 @@ impl McpStorageAdapter {
                 }
                 Err(error) => {
                     if let Some(mut final_error) = final_error(&error) {
-                        performance::event!(
+                        performance::event!(legacy_trace;
                             kind = "batch_child",
                             phase = "return",
                             state = "rejected"
@@ -261,23 +290,27 @@ impl McpStorageAdapter {
                         let worker = work
                             .child()
                             .map_err(|e| super::map_mutation_error(e.into()))?;
-                        let trace_worker = Worker::new("batch.rejection.queue");
+                        let trace_worker = Worker::new_if("batch.rejection.queue", legacy_trace);
                         let finalized = tokio::task::spawn_blocking(move || {
                             trace_worker.run(move || {
-                                let wait = Timer::new("batch.rejection.lock.wait");
+                                let wait = Timer::new_if("batch.rejection.lock.wait", legacy_trace);
                                 let storage = storage
                                     .read()
                                     .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
                                 wait.complete();
-                                let storage = Hold::new("batch.rejection.lock.hold", storage);
-                                let timer = Timer::new("batch.rejection.call");
+                                let storage = Hold::new_if(
+                                    "batch.rejection.lock.hold",
+                                    storage,
+                                    legacy_trace,
+                                );
+                                let timer = Timer::new_if("batch.rejection.call", legacy_trace);
                                 let result = storage.meta_store().finalize_batch_error_with_work(
                                     &child,
                                     final_error,
                                     Some(&worker),
                                 );
                                 timer.outcome(result.is_ok());
-                                performance::event!(
+                                performance::event!(legacy_trace;
                                     kind = "batch_bookkeeping",
                                     state = match &result {
                                         Ok(_) => "returned_progress",
@@ -332,7 +365,7 @@ impl McpStorageAdapter {
                                     StorageError::ProviderVectorUnavailable(_)
                                 )
                         );
-                        performance::event!(
+                        performance::event!(legacy_trace;
                             kind = "batch_child",
                             phase = "return",
                             state = if unavailable {
@@ -352,6 +385,10 @@ impl McpStorageAdapter {
                         } else {
                             "RECONCILIATION_REQUIRED"
                         }));
+                        if unavailable {
+                            outcome.items[index].error.as_mut().unwrap().field =
+                                self.native_store_blocker(prepared).map(str::to_owned);
+                        }
                         break;
                     }
                 }
@@ -372,19 +409,19 @@ impl McpStorageAdapter {
             let parent = outcome.batch_operation_id;
             let store_id = outcome.store_id;
             timeline.mark("batch.final_publication");
-            let trace_worker = Worker::new("batch.progress.queue");
+            let trace_worker = Worker::new_if("batch.progress.queue", legacy_trace);
             let current = tokio::task::spawn_blocking(move || {
                 trace_worker.run(move || {
-                    let wait = Timer::new("batch.progress.lock.wait");
+                    let wait = Timer::new_if("batch.progress.lock.wait", legacy_trace);
                     let storage = storage
                         .read()
                         .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
                     wait.complete();
-                    let storage = Hold::new("batch.progress.lock.hold", storage);
-                    let timer = Timer::new("batch.progress.call");
+                    let storage = Hold::new_if("batch.progress.lock.hold", storage, legacy_trace);
+                    let timer = Timer::new_if("batch.progress.call", legacy_trace);
                     let result = storage.meta_store().lookup_batch(store_id, parent);
                     timer.outcome(result.is_ok());
-                    performance::event!(
+                    performance::event!(legacy_trace;
                         kind = "batch_progress",
                         state = match &result {
                             Ok(Some(_)) => "present",
@@ -425,6 +462,7 @@ impl McpStorageAdapter {
             mark_unready(&mut outcome);
         }
         outcome.recount();
+        self.enrich_linked_batch(&mut outcome);
         Ok(outcome)
     }
 }
@@ -513,8 +551,24 @@ fn item_outcome(
     Ok(outcome)
 }
 
-fn forget_result(id: crate::model::MemoryId, receipt: &WriteReceipt) -> serde_json::Value {
-    json!({"id":id.to_string(),"deleted":matches!(receipt.outcome,MutationOutcome::MemoryTombstoned{status:crate::storage::tombstone::TombstoneStatus::Tombstoned,..})})
+pub(super) fn forget_result(
+    id: crate::model::MemoryId,
+    receipt: &WriteReceipt,
+) -> serde_json::Value {
+    let deleted = match &receipt.outcome {
+        MutationOutcome::MemoryTombstoned { status, .. } => {
+            *status == crate::storage::tombstone::TombstoneStatus::Tombstoned
+        }
+        MutationOutcome::NativeMemoryTombstoned { transition } => {
+            transition.primary().is_ok_and(|p| {
+                p.before
+                    .as_ref()
+                    .is_some_and(|b| b.lifecycle.phase != crate::model::DecayPhase::Tombstone)
+            })
+        }
+        _ => false,
+    };
+    json!({"id":id.to_string(),"deleted":deleted})
 }
 
 fn final_error(error: &StoreWriteError) -> Option<BatchError> {
@@ -545,6 +599,7 @@ mod tests {
 
     fn request(f: &Fixture, key: &str, items: Vec<serde_json::Value>) -> BatchInput {
         BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items,

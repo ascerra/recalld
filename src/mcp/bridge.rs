@@ -24,6 +24,15 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    /// Exact canonical/vector page. Public application v2 remains gated.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Execute a semantic search query.
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError>;
 
@@ -69,6 +78,58 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    fn supports_api1_lifecycle(&self) -> bool {
+        false
+    }
+    async fn api1_lifecycle(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+        operation: crate::serialization::native_lifecycle::Operation,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{Reply, Value},
+            native_lifecycle::{self, Operation},
+        };
+        if let Err(error) =
+            crate::serialization::lifecycle_api1::parse(&request.wire(operation), operation)
+        {
+            return Reply::failure(native_lifecycle::Reply::input(error));
+        }
+        // Old Rust implementations retain their API1 entry, selected before work.
+        let result = match operation {
+            Operation::Feedback => self
+                .reinforce_memory(request.id, request.quality, request.namespace.as_deref())
+                .await
+                .map(|result| Value::Feedback { result }),
+            Operation::Forget => self
+                .delete_memory(request.id, request.namespace.as_deref())
+                .await
+                .map(|deleted| Value::Forget { deleted }),
+        };
+        match result {
+            Ok(value) => Reply::compatibility(value),
+            Err(e) => Reply::bridge_error(e),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
     /// Old implementations cannot manufacture durable receipts. The actual
     /// direct and daemon adapters opt in; callers never fall back after a write.
     fn supports_durable_batches(&self) -> bool {
@@ -84,6 +145,14 @@ pub trait StorageEngine: Send + Sync {
         ))
     }
 
+    /// Optional resolved backend context; old adapters must not invent identity.
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        Err(BridgeError::Unavailable(
+            "backend context unavailable".into(),
+        ))
+    }
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 

@@ -96,11 +96,16 @@ pub const CATALOG_TTL_MS: u64 = 3_600_000;
 pub const RESOURCE_READ_TTL_MS: u64 = 0;
 
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
-pub const SERVER_INSTRUCTIONS: &str = "Recalld is an AI memory system with human-like forgetting. \
-     Use store_memory to save observations, recall_memories to \
-     search by semantic similarity, and reinforce_memory to \
-     strengthen useful memories. Memories decay naturally over \
-     time unless reinforced.";
+pub const SERVER_INSTRUCTIONS: &str = "Recalld is an AI memory system. Namespaces organize data; they are not access controls. \
+     Store/search use the resolved session default when namespace is omitted; by-ID operations \
+     use the record namespace. Supply namespace explicitly for reproducible workflows. \
+     Use recordAccess:false for evaluation or inspection. Reinforce only deliberate usefulness \
+     feedback. Inspect every batch item: legacy batch flags do not guarantee every item succeeded. \
+     Current duplicate scans are bounded and non-exhaustive; similarity is not proof of equivalence, \
+     so do not automatically delete close matches. Forget is logical removal, not backup erasure. \
+     Application contract 1 is supported; explicit contract 2 fails before work. Public v2 retries, \
+     exact-pair cursors and readiness are not enabled. Do not infer embedding-profile identity from \
+     matching dimensions.";
 
 // ── JSON-RPC error codes ────────────────────────────────────────────
 

@@ -1,0 +1,62 @@
+--- build.log ---
+    Finished `test` profile [unoptimized] target(s) in 30.87s
+--- focus-adopted_public_.log ---
+failures:
+
+failures:
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_feedback_requires_actual_adoption_after_global_change
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::adopted_public::adopted_public_unknown_feedback_rejects_but_structural_forget_is_unblocked
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 1323 filtered out; finished in 6.77s
+
+error: test failed, to rerun pass `--lib`
+
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.33s
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 1323 filtered out; finished in 6.77s
+error: test failed, to rerun pass `--lib`
+--- focus-api1_public_.log ---
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1309 filtered out; finished in 22.73s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+--- focus-decoder_native_.log ---
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.71s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1324 filtered out; finished in 4.59s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+--- focus-inherited_policy_.log ---
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.33s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 1316 filtered out; finished in 22.83s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+--- focus-legacy_lifecycle.log ---
+warning: `recalld` (lib) generated 79 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+warning: `recalld` (lib test) generated 49 warnings (11 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+test result: ok. 21 passed; 0 failed; 1 ignored; 0 measured; 1305 filtered out; finished in 3.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

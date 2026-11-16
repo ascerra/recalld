@@ -292,7 +292,18 @@ impl McpDispatcher {
             .map_err(|e| DispatchError::InvalidParams(e.to_string()))?
             .ok_or_else(|| DispatchError::InvalidParams("Missing params".to_string()))?;
 
-        let mut result = self.handler.call_tool(&params.name, params.arguments).await;
+        // Keep the existing v1 object-boundary error before new selection.
+        let version = crate::mcp::args::require_object(&params.arguments)
+            .map_err(|error| error.to_string())
+            .and_then(|()| {
+                crate::serialization::contract::ContractVersion::from_mcp(&params.arguments)
+                    .and_then(|version| version.require_supported())
+                    .map_err(|error| error.to_string())
+            });
+        let mut result = match version {
+            Ok(()) => self.handler.call_tool(&params.name, params.arguments).await,
+            Err(error) => ToolCallResult::error(error),
+        };
         // Legacy sessions include pre-structured-content protocol versions.
         // Keep their response shape unchanged until version-aware adoption.
         if ctx.era == Era::Legacy {

@@ -160,6 +160,10 @@ pub type RefMapping = Vec<(MemoryId, TextRef)>;
 /// Statistics and results from a fulltext.dat compaction run.
 #[derive(Debug)]
 pub struct CompactionResult {
+    /// Exact canonical receipt; does not claim derived readiness.
+    pub receipt: crate::storage::control::WriteReceipt,
+    /// Selection committed, but safe orphan cleanup must be retried on reopen.
+    pub cleanup_pending: bool,
     /// Size of the old fulltext.dat in bytes.
     pub old_size: u64,
     /// Size of the new (compacted) fulltext.dat in bytes.

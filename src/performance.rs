@@ -78,6 +78,16 @@ fn sampler() -> &'static Sampler {
     })
 }
 fn target_enabled() -> bool {
+    // Contain tracing-core#3611: an untraced thread must not first register
+    // this callsite against NoSubscriber while a scoped Dispatch is alive.
+    // Keep the global/static fast path before inspecting thread-local state.
+    if tracing::Level::TRACE > tracing::level_filters::STATIC_MAX_LEVEL
+        || tracing::Level::TRACE > tracing::level_filters::LevelFilter::current()
+        || tracing::dispatcher::get_default(|d| d.is::<tracing::subscriber::NoSubscriber>())
+    {
+        return false;
+    }
+    // Outside get_default: nesting would trigger dispatcher reentrancy suppression.
     tracing::enabled!(target: "recalld::performance", tracing::Level::TRACE)
 }
 pub(crate) fn enabled() -> bool {
@@ -88,6 +98,11 @@ pub(crate) fn enabled() -> bool {
 // Gate before evaluating fields, not only inside the tracing subscriber. All
 // performance events, including counters outside Timer, must use this gate.
 macro_rules! event {
+    ($condition:expr; $($fields:tt)*) => {
+        if $condition {
+            $crate::performance::event!($($fields)*);
+        }
+    };
     ($($fields:tt)*) => {
         if $crate::performance::enabled() {
             tracing::trace!(target: "recalld::performance", $($fields)*);
@@ -102,9 +117,12 @@ pub(crate) struct Timer {
 }
 impl Timer {
     pub fn new(stage: &'static str) -> Self {
+        Self::new_if(stage, true)
+    }
+    pub fn new_if(stage: &'static str, capture: bool) -> Self {
         Self {
             stage,
-            start: enabled().then(Instant::now),
+            start: (capture && enabled()).then(Instant::now),
         }
     }
     fn end(&mut self, outcome: &'static str) {
@@ -139,7 +157,10 @@ pub(crate) struct Timeline {
 }
 impl Timeline {
     pub fn new() -> Self {
-        let start = enabled().then(Instant::now);
+        Self::new_if(true)
+    }
+    pub fn new_if(capture: bool) -> Self {
+        let start = (capture && enabled()).then(Instant::now);
         Self {
             start,
             last: start,
@@ -329,6 +350,11 @@ pub(crate) struct Worker {
 }
 impl Worker {
     pub fn new(stage: &'static str) -> Self {
+        Self::new_if(stage, true)
+    }
+    // Keep the inherited subscriber/sampling decision for existing child work,
+    // even when this caller does not claim queue-duration coverage.
+    pub fn new_if(stage: &'static str, capture_queue: bool) -> Self {
         let context = enabled().then(|| {
             (
                 tracing::dispatcher::get_default(Clone::clone),
@@ -338,7 +364,10 @@ impl Worker {
         // One decision: a disabled context never starts a clock or emits on drop.
         let queued = Timer {
             stage,
-            start: context.as_ref().map(|_| Instant::now()),
+            start: context
+                .as_ref()
+                .filter(|_| capture_queue)
+                .map(|_| Instant::now()),
         };
         Self {
             context,
@@ -376,9 +405,12 @@ pub(crate) struct Hold<G> {
 }
 impl<G> Hold<G> {
     pub fn new(stage: &'static str, guard: G) -> Self {
+        Self::new_if(stage, guard, true)
+    }
+    pub fn new_if(stage: &'static str, guard: G, capture: bool) -> Self {
         Self {
             guard: Some(guard),
-            timer: Timer::new(stage),
+            timer: Timer::new_if(stage, capture),
         }
     }
 }

@@ -110,6 +110,40 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
+    async fn prepare_coherent_get_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentGetResponse>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_coherent_get(id, namespace, requested_access, parent)
+            .await
+    }
+    async fn prepare_coherent_similar_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        include_embeddings: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSimilarResponse>, crate::search::SearchError> {
+        self.query_engine
+            .prepare_coherent_similar(
+                id,
+                namespace,
+                limit,
+                min_score,
+                requested_access,
+                include_embeddings,
+                parent,
+            )
+            .await
+    }
+
     async fn prepare_search_with_work(
         &self,
         query: state::SearchQuery,
@@ -162,6 +196,12 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+    }
     async fn embed_text(
         &self,
         text: &str,
@@ -357,6 +397,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `StorageEngine` trait.
 pub struct StorageEngineAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
@@ -373,6 +414,14 @@ pub struct StorageEngineAdapter {
 }
 
 impl StorageEngineAdapter {
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     /// Creates a new adapter wrapping the storage engine, the cache, and
     /// the four indexes a delete has to clean.
     pub fn new(
@@ -385,6 +434,7 @@ impl StorageEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -403,6 +453,78 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    async fn forget_api1(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        };
+        crate::serialization::lifecycle_api1::execute(
+            &owner,
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+            self.native_policy.as_ref(),
+            Default::default(),
+            self.clock.clone(),
+        )
+        .await
+    }
+
+    async fn forget_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        let Some(policy) = self.native_policy.as_ref() else {
+            return crate::serialization::native_lifecycle::Reply::unavailable(
+                "native lifecycle policy not configured",
+            );
+        };
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        };
+        crate::mcp::native_lifecycle_adapter::execute(
+            &owner,
+            request,
+            crate::serialization::native_lifecycle::Operation::Forget,
+            policy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
+    async fn store_identity(&self) -> Result<uuid::Uuid, crate::storage::StorageError> {
+        let storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = storage.read().map_err(|_| {
+                crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+            })?;
+            Ok(engine.control_state()?.store_id)
+        })
+        .await
+        .map_err(|_| {
+            crate::storage::StorageError::RecoveryRequired("store identity unavailable".into())
+        })?
+    }
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        crate::search::exact_scan::scan_exact(self.storage.clone(), request).await
+    }
+
     async fn publication_lease(
         &self,
     ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, crate::storage::StorageError> {
@@ -1197,6 +1319,7 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
 
 /// Adapts the decay subsystem to the API `FsrsEngine` trait.
 pub struct FsrsEngineAdapter {
+    native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1207,6 +1330,89 @@ pub struct FsrsEngineAdapter {
 }
 
 impl FsrsEngineAdapter {
+    pub(crate) async fn trigger_sweep_with_origin(
+        &self,
+        as_of_millis: Option<i64>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
+        use crate::graph::ActivationConfig;
+
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(Box::new(
+                crate::storage::StorageError::InvalidMutationContext(
+                    "unsupported original application contract".into(),
+                ),
+            ));
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| e.to_string())?
+            .meta_store()
+            .uses_native_lifecycle();
+        let legacy = crate::storage::native_lifecycle::NativePolicyInputs {
+            global: crate::decay::DecayConfig::default(),
+            multiplier: self.config.decay.decay_rate_multiplier as f64,
+        };
+        let policy = if native {
+            self.native_policy.as_ref().ok_or_else(|| {
+                crate::storage::StorageError::InvalidMutationContext(
+                    "native manual sweep requires configured lifecycle policy".into(),
+                )
+            })?
+        } else {
+            &legacy
+        };
+        let sweep_config = SweepConfig::default();
+        let activation_config = ActivationConfig::default();
+
+        let result = DecaySweepRunner::execute_sweep_with_origin_work(
+            &sweep_config,
+            &policy.global,
+            &activation_config,
+            &self.storage,
+            &self.graph,
+            &self.cache,
+            policy.multiplier,
+            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
+            None,
+            self.completion.as_ref(),
+            original_contract_version,
+        )
+        .await;
+
+        // Do not let a subsequent unavailable-handle error hide the original
+        // canonical receipt or uncertain operation identity.
+        if let Some((receipt, message)) = &result.failed_commit {
+            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    message.clone(),
+                )),
+            }));
+        }
+        if let Some(operation_id) = result.uncertain_operation {
+            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
+                format!(
+                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
+                ),
+            )));
+        }
+        if let Some(error) = &result.publication_error {
+            return Err(error.clone().into());
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn with_native_lifecycle_policy(
+        mut self,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native_policy = Some(policy);
+        self
+    }
+
     /// Creates a new adapter with the storage engine, cache, and sweep-thread liveness flag.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1217,6 +1423,7 @@ impl FsrsEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -1252,6 +1459,74 @@ impl FsrsEngineAdapter {
 
 #[async_trait]
 impl state::FsrsEngine for FsrsEngineAdapter {
+    async fn feedback_api1(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        let Some(owner) = self.completion.as_ref() else {
+            // Existing Rust adapters without attached derived views retain the
+            // legacy entry. Native mode requires the actual canonical owner.
+            if self
+                .storage
+                .read()
+                .map(|s| s.meta_store().uses_native_lifecycle())
+                .unwrap_or(true)
+            {
+                return crate::serialization::lifecycle_api1::Reply::failure(
+                    crate::serialization::native_lifecycle::Reply::unavailable(
+                        "lifecycle completion unavailable",
+                    ),
+                );
+            }
+            return crate::serialization::lifecycle_api1::Reply::legacy_feedback(
+                self.reinforce(id, quality, namespace).await,
+                id,
+            );
+        };
+        let legacy = crate::storage::native_lifecycle::NativePolicyInputs {
+            global: Default::default(),
+            multiplier: self.config.decay.decay_rate_multiplier,
+        };
+        crate::serialization::lifecycle_api1::execute(
+            owner,
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+            self.native_policy.as_ref(),
+            legacy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
+    async fn feedback_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        let Some(policy) = self.native_policy.as_ref() else {
+            return crate::serialization::native_lifecycle::Reply::unavailable(
+                "native lifecycle policy not configured",
+            );
+        };
+        let owner = match &self.completion {
+            Some(owner) => owner.clone(),
+            None => {
+                return crate::serialization::native_lifecycle::Reply::unavailable(
+                    "native completion unavailable",
+                );
+            }
+        };
+        crate::mcp::native_lifecycle_adapter::execute(
+            &owner,
+            request,
+            crate::serialization::native_lifecycle::Operation::Feedback,
+            policy,
+            self.clock.clone(),
+        )
+        .await
+    }
+
     async fn record_access_batch(
         &self,
         accesses: &[(MemoryId, AccessKind)],
@@ -1318,49 +1593,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         &self,
         as_of_millis: Option<i64>,
     ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
-        use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
-        use crate::graph::ActivationConfig;
-
-        let sweep_config = SweepConfig::default();
-        let decay_config = crate::decay::DecayConfig::default();
-        let activation_config = ActivationConfig::default();
-        let global_multiplier = self.config.decay.decay_rate_multiplier as f64;
-
-        let result = DecaySweepRunner::execute_sweep_with_work(
-            &sweep_config,
-            &decay_config,
-            &activation_config,
-            &self.storage,
-            &self.graph,
-            &self.cache,
-            global_multiplier,
-            Some(as_of_millis.unwrap_or_else(|| self.clock.now_millis())),
-            None,
-            self.completion.as_ref(),
-        )
-        .await;
-
-        // Do not let a subsequent unavailable-handle error hide the original
-        // canonical receipt or uncertain operation identity.
-        if let Some((receipt, message)) = &result.failed_commit {
-            return Err(Box::new(crate::storage::StorageError::CommittedMutation {
-                receipt: Box::new(receipt.clone()),
-                source: Box::new(crate::storage::StorageError::RecoveryRequired(
-                    message.clone(),
-                )),
-            }));
-        }
-        if let Some(operation_id) = result.uncertain_operation {
-            return Err(Box::new(crate::storage::StorageError::RecoveryRequired(
-                format!(
-                    "commitState=unknown operationId={operation_id}; reopen and reconcile before retry"
-                ),
-            )));
-        }
-        if let Some(error) = &result.publication_error {
-            return Err(error.clone().into());
-        }
-        Ok(result)
+        self.trigger_sweep_with_origin(as_of_millis, 1).await
     }
 }
 
@@ -1370,13 +1603,47 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
+    completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl NamespaceRegistryAdapter {
-    /// Creates a new adapter wrapping the storage engine for namespace operations.
+    /// Storage-only reads. Creation requires `from_system` to bind actual publishers.
     pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
-        Self { storage }
+        Self {
+            completion: None,
+            storage,
+            clock: Arc::new(crate::time::SystemClock),
+        }
+    }
+    /// Bind creates to the same system's accepted work and derived publishers.
+    pub fn from_system(system: &crate::Recalld) -> Self {
+        Self::new(system.storage().clone())
+            .with_completion(crate::derived_completion::DerivedCompletion {
+                storage: system.storage().clone(),
+                cache: system.cache().clone(),
+                graph: system.graph().clone(),
+                vectors: system.vector_index().clone(),
+                fts: system.fts_index().clone(),
+                entities: system.entity_index().clone(),
+            })
+            .with_clock(system.clock().clone())
+    }
+    pub(crate) fn with_completion(
+        mut self,
+        completion: crate::derived_completion::DerivedCompletion,
+    ) -> Self {
+        assert!(
+            Arc::ptr_eq(&self.storage, &completion.storage),
+            "namespace completion belongs to another owner"
+        );
+        self.completion = Some(completion);
+        self
+    }
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -1460,71 +1727,32 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         desired_retention: f32,
         decay_rate_multiplier: Option<f32>,
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
-        let work = crate::storage::work::accept_work(&self.storage, None)?;
-        let worker = work.child()?;
-        let now = chrono::Utc::now().timestamp_millis();
-        let storage = self.storage.clone();
-        let name_owned = name.to_string();
-
-        let result = tokio::task::spawn_blocking(move || {
-            let result = (|| {
-                // Resolve embedding_dim: use provided value, or inherit from
-                // the 'default' namespace, or fall back to 1536.
-                let dim = embedding_dim.unwrap_or_else(|| {
-                    storage
-                        .read()
-                        .ok()
-                        .and_then(|s| s.get_namespace_by_name("default").ok().flatten())
-                        .map(|ns| ns.embedding_dim)
-                        .unwrap_or(1536)
-                });
-
-                let ns_config = NamespaceConfig {
-                    schema: None,
-                    id: NamespaceId::UNSET,
-                    name: name_owned,
-                    embedding_dim: dim,
-                    initial_stability,
-                    default_difficulty: 5.0,
-                    phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
-                    permastore_threshold: 1500.0,
-                    created_at: now,
-                    desired_retention,
-                    decay_rate_multiplier,
-                };
-
-                crate::decay::lifecycle::resolve_policy(
-                    &ns_config,
-                    &crate::decay::DecayConfig::default(),
-                    1.0,
-                )?;
-
-                let mut storage_w = storage.write().map_err(|e| {
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("storage lock poisoned: {e}"),
-                    )) as Box<dyn std::error::Error + Send + Sync>
-                })?;
-                let assigned_id =
-                    storage_w.create_namespace_with_work(&ns_config, Some(&worker))?;
-                Ok(NamespaceConfig {
-                    schema: None,
-                    id: assigned_id,
-                    ..ns_config
-                })
-            })();
-            crate::storage::work::finish_work(&storage, worker);
-            result
-        })
-        .await
-        .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("blocking task join error: {e}"),
-            )) as Box<dyn std::error::Error + Send + Sync>
+        let completion = self.completion.as_ref().ok_or_else(|| {
+            crate::storage::StorageError::InvalidMutation("namespace creation requires an owner-bound registry; use NamespaceRegistryAdapter::from_system".into())
         })?;
-        crate::storage::work::finish_work(&self.storage, work);
-        result
+        let config = NamespaceConfig {
+            schema: None,
+            id: NamespaceId::UNSET,
+            name: name.into(),
+            embedding_dim: 1536,
+            initial_stability,
+            default_difficulty: 5.0,
+            phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
+            permastore_threshold: 1500.0,
+            created_at: 0,
+            desired_retention,
+            decay_rate_multiplier,
+        };
+        // Preserve the existing concrete LifecycleError for standalone callers,
+        // before accepting work or sampling the create clock.
+        crate::decay::lifecycle::resolve_policy(
+            &config,
+            &crate::decay::DecayConfig::default(),
+            1.0,
+        )?;
+        Ok(completion
+            .create_legacy_namespace(config, embedding_dim, self.clock.clone())
+            .await?)
     }
 }
 
@@ -1795,7 +2023,7 @@ mod tests {
         use crate::api::state::NamespaceRegistry as _;
         use crate::mcp::bridge::{BridgeError, CreateNamespaceInput, NamespaceRegistry as _};
         let f = Fixture::new();
-        let http = NamespaceRegistryAdapter::new(f.storage.clone());
+        let http = NamespaceRegistryAdapter::new(f.storage.clone()).with_completion(f.completion());
         let mcp = f.namespace_adapter();
         for (stability, multiplier) in [
             (0.0, None),

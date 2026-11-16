@@ -15,7 +15,15 @@ use crate::storage::StorageEngine as _;
 use crate::test_support::Fixture;
 
 fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
-    fixture_clients_with_embedding(
+    let (state, bridge) = fixture_state(f);
+    (
+        crate::api::routes::router(state, &Default::default()),
+        bridge,
+    )
+}
+
+fn fixture_state(f: &Fixture) -> (AppState, crate::mcp::bridge::McpBridge) {
+    fixture_state_with_embedding(
         f,
         Arc::new(crate::embedding::PassthroughProvider::new(
             crate::test_support::DIM,
@@ -27,6 +35,17 @@ fn fixture_clients_with_embedding(
     f: &Fixture,
     embedding: Arc<dyn crate::embedding::EmbeddingProvider>,
 ) -> (Router, crate::mcp::bridge::McpBridge) {
+    let (state, bridge) = fixture_state_with_embedding(f, embedding);
+    (
+        crate::api::routes::router(state, &Default::default()),
+        bridge,
+    )
+}
+
+fn fixture_state_with_embedding(
+    f: &Fixture,
+    embedding: Arc<dyn crate::embedding::EmbeddingProvider>,
+) -> (AppState, crate::mcp::bridge::McpBridge) {
     use crate::search::adapters::*;
     let engine = Arc::new(crate::search::QueryEngine::new(
         Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
@@ -87,13 +106,10 @@ fn fixture_clients_with_embedding(
             config,
             false,
         )),
-        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone()).with_completion(f.completion())),
         Arc::new(NoopMetricsCollector),
     );
-    (
-        crate::api::routes::router(state, &Default::default()),
-        bridge,
-    )
+    (state, bridge)
 }
 
 async fn post(app: &Router, path: &str, body: Value) -> (StatusCode, Value) {
@@ -666,6 +682,8 @@ async fn scope_assertions_similarity_uses_canonical_source_scope_with_stale_cach
     }
 }
 
+#[path = "sweep_clock_tests.rs"]
+mod sweep_clock;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn performance_sampling_actual_http_and_mcp_share_root_decision_and_keep_bytes() {
     use crate::search::VectorIndex;

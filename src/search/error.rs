@@ -7,6 +7,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum SearchError {
     #[error(transparent)]
+    CanonicalRead(Box<crate::storage::StorageError>),
+    #[error(transparent)]
     Observation(#[from] crate::decay::observation::ObservationError),
     /// Canonical effects or their derived publication are not ready.
     #[error("search unavailable: {0}")]

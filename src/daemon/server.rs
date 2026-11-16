@@ -55,17 +55,21 @@ impl DaemonServer {
                 std::sync::Arc::new(system.config().clone()),
                 tz,
             )
+            .with_clock(system.clock().clone())
+            .with_query_engine(system.query_engine().clone()),
+        );
+        let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(
+            McpNamespaceAdapter::new(
+                system.storage().clone(),
+                system.cache().clone(),
+                system.vector_index().clone(),
+                system.fts_index().clone(),
+                system.entity_index().clone(),
+                system.graph().clone(),
+                tz,
+            )
             .with_clock(system.clock().clone()),
         );
-        let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(McpNamespaceAdapter::new(
-            system.storage().clone(),
-            system.cache().clone(),
-            system.vector_index().clone(),
-            system.fts_index().clone(),
-            system.entity_index().clone(),
-            system.graph().clone(),
-            tz,
-        ));
         let health: Arc<dyn HealthChecker> =
             Arc::new(McpHealthAdapter::new(system.storage().clone()));
 
@@ -222,10 +226,12 @@ async fn handle_connection(
                         }
 
                         crate::performance::event!(kind = "transport_operation", operation = if method == "store_memory" { "store_memory" } else { "other" });
-                        let response = dispatch(
+                        let response = if matches!(method.as_str(),"feedback_api1_v1"|"forget_api1_v1") && peer_limit<MAX_MESSAGE_SIZE {
+                            Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
+                        } else { dispatch(
                             &*search, &*storage, &*namespaces, &*health,
                             &request.method, request.params,
-                        ).await;
+                        ).await };
 
                         timeline.mark("transport.dispatch");
                         crate::performance::event!(kind = "transport_rpc_result", success = response.is_ok());
@@ -459,9 +465,46 @@ async fn dispatch(
         "ping" => Ok(serde_json::json!({
             "protocolVersion": PROTOCOL_VERSION,
             "maxMessageSize": MAX_MESSAGE_SIZE,
+            "api1LifecycleV1": storage.supports_api1_lifecycle(),
         })),
 
+        "feedback_api1_v1" | "forget_api1_v1" => {
+            use crate::serialization::{
+                lifecycle_api1,
+                native_lifecycle::{self, Operation},
+            };
+            if !storage.supports_api1_lifecycle() {
+                return Err(BridgeError::InvalidInput(
+                    "API1 lifecycle capability unavailable".into(),
+                ));
+            }
+            let operation = if method == "feedback_api1_v1" {
+                Operation::Feedback
+            } else {
+                Operation::Forget
+            };
+            let reply = match lifecycle_api1::parse(&params, operation) {
+                Ok(request) => storage.api1_lifecycle(request, operation).await,
+                Err(error) => lifecycle_api1::Reply::failure(native_lifecycle::Reply::input(error)),
+            };
+            serde_json::to_value(reply).map_err(|e| BridgeError::Internal(e.to_string()))
+        }
+
         "shutdown" => Ok(serde_json::json!({})),
+
+        "session_context_v1" => {
+            if !params.as_object().is_some_and(|object| object.is_empty()) {
+                return Err(BridgeError::InvalidInput(
+                    "session context requires an empty object".into(),
+                ));
+            }
+            let context = storage.backend_context().await?;
+            context
+                .validate()
+                .map_err(|e| BridgeError::Unavailable(e.into()))?;
+            serde_json::to_value(context)
+                .map_err(|_| BridgeError::Internal("context serialization failed".into()))
+        }
 
         "search" | "search_read_only" => {
             let mut input: SearchInput = serde_json::from_value(params)
@@ -514,6 +557,29 @@ async fn dispatch(
             serde_json::to_value(result).map_err(|e| {
                 BridgeError::PartiallyApplied(format!("batch result serialization failed: {e}"))
             })
+        }
+        "forget_lifecycle_v1" | "feedback_lifecycle_v1" => {
+            let operation = if method == "forget_lifecycle_v1" {
+                crate::serialization::native_lifecycle::Operation::Forget
+            } else {
+                crate::serialization::native_lifecycle::Operation::Feedback
+            };
+            let reply = crate::mcp::native_lifecycle_adapter::dispatch_lifecycle_private(
+                storage, operation, params,
+            )
+            .await;
+            serde_json::to_value(reply).map_err(|e| BridgeError::PartiallyApplied(e.to_string()))
+        }
+        "forget_native_v1" | "feedback_native_v1" => {
+            let operation = if method == "forget_native_v1" {
+                crate::serialization::native_lifecycle::Operation::Forget
+            } else {
+                crate::serialization::native_lifecycle::Operation::Feedback
+            };
+            let reply =
+                crate::mcp::native_lifecycle_adapter::dispatch_private(storage, operation, params)
+                    .await;
+            serde_json::to_value(reply).map_err(|e| BridgeError::PartiallyApplied(e.to_string()))
         }
         "store_memory" => {
             let input: StoreInput = serde_json::from_value(params)
@@ -647,7 +713,7 @@ mod tests {
 
     /// Stub subsystems for the dispatch tests. Only the unknown-method path
     /// is exercised, which never reaches any of these.
-    struct Unused;
+    pub(super) struct Unused;
 
     #[tokio::test]
     async fn actual_batch_socket_roundtrip_preserves_partial_outcome_and_rejects_foreign_resume() {
@@ -668,6 +734,7 @@ mod tests {
             tx.clone(),
         ));
         let mut input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -752,6 +819,7 @@ mod tests {
         let adapter = fx.storage_adapter();
         let store_id = fx.storage.read().unwrap().control_state().unwrap().store_id;
         let mut input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -838,6 +906,7 @@ mod tests {
             .fail_batch_commit
             .store(3, std::sync::atomic::Ordering::SeqCst);
         let input = BatchInput {
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: vec![
@@ -1293,6 +1362,46 @@ mod read_only_tests;
 #[path = "scope_tests.rs"]
 mod scope_tests;
 
+/// Exercise the actual framed connection handler against isolated fixture stores.
+#[cfg(test)]
+pub(crate) async fn native_batch_test_rpc(
+    storage: Arc<dyn BridgeStorageEngine>,
+    input: &crate::storage::batch::BatchInput,
+) -> DaemonResponse {
+    let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(handle_connection(
+        stub.clone(),
+        storage,
+        stub.clone(),
+        stub,
+        server,
+        Arc::new(AtomicU32::new(1)),
+        Arc::new(AtomicI64::new(0)),
+        rx,
+        tx.clone(),
+    ));
+    write_framed_request(
+        &mut client,
+        &DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            method: "mutate_batch".into(),
+            params: serde_json::to_value(input).unwrap(),
+        },
+        LEGACY_MAX_MESSAGE_SIZE,
+    )
+    .await
+    .unwrap();
+    let response = read_framed_response(&mut client, LEGACY_MAX_MESSAGE_SIZE)
+        .await
+        .unwrap();
+    tx.send(true).unwrap();
+    drop(client);
+    task.await.unwrap();
+    response
+}
 #[cfg(test)]
 #[path = "batch_label_tests.rs"]
 mod batch_label_tests;
@@ -1304,3 +1413,72 @@ mod coverage_tests;
 #[cfg(test)]
 #[path = "producer_tests.rs"]
 mod producer_tests;
+
+#[cfg(test)]
+pub(crate) async fn native_lifecycle_test_remote(
+    storage: Arc<dyn BridgeStorageEngine>,
+    path: &Path,
+) -> (
+    crate::daemon::bridge_adapters::RemoteStorageAdapter,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let task = tokio::spawn(async move {
+        let (server, _) = listener.accept().await.unwrap();
+        let (tx, rx) = watch::channel(false);
+        handle_connection(
+            Arc::new(tests::Unused),
+            storage,
+            Arc::new(tests::Unused),
+            Arc::new(tests::Unused),
+            server,
+            Arc::new(AtomicU32::new(1)),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            tx,
+        )
+        .await;
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(path).await.unwrap());
+    (
+        crate::daemon::bridge_adapters::RemoteStorageAdapter::new(client),
+        task,
+    )
+}
+
+/// Isolated actual framed namespace connection for catalog completion regressions.
+#[cfg(test)]
+pub(crate) async fn catalog_test_remote(
+    namespaces: Arc<dyn NamespaceRegistry>,
+    path: &std::path::Path,
+) -> (
+    Arc<crate::daemon::bridge_adapters::RemoteNamespaceAdapter>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        handle_connection(
+            stub.clone(),
+            stub.clone(),
+            namespaces,
+            stub,
+            stream,
+            Arc::new(AtomicU32::new(1)),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            tx,
+        )
+        .await;
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(path).await.unwrap());
+    client.ping().await.unwrap();
+    (
+        Arc::new(crate::daemon::bridge_adapters::RemoteNamespaceAdapter::new(
+            client,
+        )),
+        task,
+    )
+}

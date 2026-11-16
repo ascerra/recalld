@@ -16,6 +16,13 @@ use std::sync::{
 #[path = "reader_tests.rs"]
 mod readers;
 
+#[path = "batch_tests.rs"]
+mod batches;
+#[path = "exact_scan_tests.rs"]
+mod exact_scan;
+#[path = "sweep_tests.rs"]
+mod sweep;
+
 #[path = "phase_clock_tests.rs"]
 mod phase_clock;
 
@@ -36,11 +43,34 @@ struct Data {
     profile: crate::model::schema::EmbeddingProfile,
 }
 fn fixture(root: &Path) -> Data {
+    fixture_with_seed(root, |_| {})
+}
+fn fixture_with_seed(root: &Path, seed: impl FnOnce(&mut RedbStorageEngine)) -> Data {
+    fixture_with_seed_and_ghost(root, seed, false)
+}
+fn fixture_with_ghost(root: &Path, ghost: bool) -> Data {
+    fixture_with_seed_and_ghost(root, |_| {}, ghost)
+}
+fn fixture_with_seed_and_ghost(
+    root: &Path,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+    ghost: bool,
+) -> Data {
+    fixture_with_policy(root, seed, ghost, None, true)
+}
+fn fixture_with_policy(
+    root: &Path,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+    ghost: bool,
+    multiplier: Option<f32>,
+    adopt: bool,
+) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
     let mut config = NamespaceConfig::default_namespace(0);
     config.name = "native".into();
     config.embedding_dim = 4;
+    config.decay_rate_multiplier = multiplier;
     let ns = engine.create_namespace(&config).unwrap();
     let input = crate::storage::insertion::InsertMemory {
         id: None,
@@ -57,6 +87,29 @@ fn fixture(root: &Path) -> Data {
         .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &input, &[], 1000)
         .unwrap();
     let parent = crate::storage::insertion::inserted_id(&receipt).unwrap();
+    seed(&mut engine);
+    if ghost {
+        // Real legacy phase-loss receipts before explicit migration/attestation.
+        // Never author a schema-v2 row or bypass native startup validation.
+        for phase in [DecayPhase::Summary, DecayPhase::Ghost] {
+            let record = engine.get_record(parent).unwrap().unwrap();
+            let namespace = engine.get_namespace(ns).unwrap().unwrap();
+            assert!(matches!(
+                engine
+                    .apply_legacy_decay_with_receipt(
+                        &MutationContext::unkeyed(ns),
+                        parent,
+                        &record,
+                        &namespace,
+                        phase,
+                        0.01,
+                        0.01,
+                    )
+                    .unwrap(),
+                crate::storage::maintenance::DecayMutationResult::Committed(_)
+            ));
+        }
+    }
     engine.sync().unwrap();
     drop(engine);
     let profile = crate::embedding::runtime::tests::profile();
@@ -88,6 +141,11 @@ fn fixture(root: &Path) -> Data {
         },
     )
     .unwrap();
+    // Dependent native writer fixtures explicitly adopt present-day multiplier1.
+    // The actual migration above still preserves unknown historical inheritance.
+    if adopt {
+        crate::test_support::explicitly_adopt_inherited_policy(&path, ns, 1., 2000);
+    }
     Data {
         path,
         ns,
@@ -101,6 +159,17 @@ fn scope(d: &Data) -> LifecycleScope {
         namespace_name: "native".into(),
         source: None,
     }
+}
+fn policy_revision(d: &Data) -> Generation {
+    inspect_schema(&d.path)
+        .unwrap()
+        .namespaces
+        .into_iter()
+        .find(|n| n.id == d.ns)
+        .unwrap()
+        .schema
+        .unwrap()
+        .policy_revision
 }
 fn input(d: &Data) -> NativeInsert {
     NativeInsert {
@@ -154,6 +223,15 @@ fn actual_native_insert_feedback_tombstone_replay_and_reopen_preserve_proof() {
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let original = input(&d);
+    let parent_before = session
+        .engine
+        .get_record(d.parent)
+        .unwrap()
+        .unwrap()
+        .schema
+        .unwrap()
+        .lifecycle
+        .record_generation;
     let intent = session.capture_insert(scope(&d), &original).unwrap();
     let key = ctx(&session, &d, "create");
     let receipt = session
@@ -183,8 +261,8 @@ fn actual_native_insert_feedback_tombstone_replay_and_reopen_preserve_proof() {
             .lifecycle
             .record_generation
             .get(),
-        2
-    ); // policy migration 1, edge mutation 1
+        parent_before.next().unwrap().get()
+    ); // Exactly one edge mutation after the explicit fixture adoption.
     let feedback = session.capture_feedback(id, None, 3).unwrap();
     session
         .apply_feedback(&ctx(&session, &d, "feedback"), &feedback)
@@ -321,7 +399,7 @@ async fn original_expansion_replay_precedes_aborted_default_changes_and_real_pol
         &LifecycleMigrationOptions {
             expected_source: inspect_schema(&d.path).unwrap().control.generation_ref(),
             namespace_id: d.ns,
-            expected_policy_revision: "1".to_string().try_into().unwrap(),
+            expected_policy_revision: policy_revision(&d),
             target: LifecycleVersion::LegacyAccessV1,
             idempotency_key: "rollback".into(),
         },
@@ -740,3 +818,71 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
     assert_eq!(tracker.status().pending, 0);
     assert_eq!(tracker.status().unresolved, 0);
 }
+
+#[test]
+fn owned_ids_actual_native_insert_uses_single_clock_sample_and_replay_allocates_nothing() {
+    use crate::storage::ids::{IdKind, IdSource, SeededIds};
+    let root = tempfile::tempdir().unwrap();
+    let d = fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let engine =
+        RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([7; 32]))).unwrap();
+    let expected = SeededIds::new([7; 32]);
+    let expected_id = expected.memory(86_400_000).unwrap();
+    let expected_operation = expected.uuid(IdKind::Operation).unwrap();
+    let mut session = NativeLifecycleSession {
+        engine,
+        policy: NativePolicyInputs::default(),
+        clock: clock.clone(),
+    };
+    let original = input(&d);
+    let intent = session.capture_insert(scope(&d), &original).unwrap();
+    let key = ctx(&session, &d, "scoped-native");
+    let receipt = session
+        .insert_prepared(&key, &intent, &generated())
+        .unwrap();
+    assert_eq!(inserted(&receipt), expected_id);
+    assert_eq!(receipt.operation_id, expected_operation);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+    let cursor = session.metadata().id_source().checkpoint().unwrap();
+    assert_eq!(cursor, expected.checkpoint().unwrap());
+    let replay = session
+        .insert_prepared(&key, &intent, &generated())
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.operation_id, receipt.operation_id);
+    assert_eq!(inserted(&replay), expected_id);
+    assert_eq!(session.metadata().id_source().checkpoint().unwrap(), cursor);
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+}
+#[path = "graph_tests.rs"]
+mod graph;
+#[path = "maintenance_tests.rs"]
+mod maintenance;
+
+#[path = "graph_producer_tests.rs"]
+mod graph_producers;
+
+#[path = "selection_tests.rs"]
+mod selection;
+
+#[path = "store_tests.rs"]
+mod store;
+
+#[path = "store_batch_tests.rs"]
+mod store_batches;
+
+#[path = "store_producer_tests.rs"]
+mod store_producers;
+
+#[path = "mixed_history_tests.rs"]
+mod mixed_history;
+
+#[path = "namespace_binding_tests.rs"]
+mod namespace_binding;
+
+#[path = "request_context_tests.rs"]
+mod request_context;
+
+#[path = "compaction_tests.rs"]
+mod compaction;

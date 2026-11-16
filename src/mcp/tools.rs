@@ -37,7 +37,7 @@ const FULL_TEXT_DESC: &str = "Detailed content. Removed as memory decays to ghos
 
 /// Return all tool definitions for `tools/list`.
 pub fn tool_definitions() -> Vec<ToolInfo> {
-    vec![
+    let mut tools = vec![
         store_memory_def(),
         store_memories_def(),
         recall_memories_def(),
@@ -52,7 +52,14 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         list_memories_def(),
         list_namespaces_def(),
         list_tags_def(),
-    ]
+    ];
+    for tool in &mut tools {
+        tool.input_schema["properties"]["contractVersion"] = json!({
+            "type": "integer", "enum": [1], "default": 1,
+            "description": "Application contract version. This server currently supports version 1 only."
+        });
+    }
+    tools
 }
 
 /// Every tool name [`dispatch_tool`] has an arm for.
@@ -86,6 +93,18 @@ pub async fn dispatch_tool(
 ) -> ToolCallResult {
     if let Err(e) = args::require_object(&arguments) {
         return ToolCallResult::error(e.to_string());
+    }
+    if let Err(error) = crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        .and_then(|version| version.require_supported())
+    {
+        return ToolCallResult::error(error.to_string());
+    }
+    // This branch is deliberately behind the shared unconditional v2 gate.
+    // Activation requires the native owner/serving and complete wire proof.
+    if crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        == Ok(crate::serialization::contract::ContractVersion::V2)
+    {
+        return dispatch_v2(bridge, name, arguments).await;
     }
     match name {
         "store_memory" => handle_store_memory(bridge, arguments).await,
@@ -396,6 +415,7 @@ fn use_durable_batch(bridge: &McpBridge, arguments: &serde_json::Value) -> bool 
             "idempotencyKey",
             "batchOperationId",
             "batchResultVersion",
+            "batchMutationVersion",
             "expectedGeneration",
         ]
         .iter()
@@ -415,6 +435,7 @@ async fn handle_durable_batch(
     // Parse optional fields strictly. Do not silently drop a malformed retry key.
     let input = serde_json::from_value::<BatchInput>(json!({
         "resultVersion":arguments.get("batchResultVersion").cloned().unwrap_or(json!(1)),
+        "mutationVersion":arguments.get("batchMutationVersion").cloned().unwrap_or(json!(1)),
         "kind":kind,"items":items,"defaultNamespace":bridge.default_namespace(),
         "storeId":arguments.get("storeId"),"idempotencyKey":arguments.get("idempotencyKey"),"batchOperationId":arguments.get("batchOperationId")
     }));
@@ -888,17 +909,14 @@ async fn handle_reinforce_memory(
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge
+    bridge
         .storage
-        .reinforce_memory(id, quality, namespace)
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+        )
         .await
-    {
-        Ok(result) => match ToolCallResult::json(&result) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to reinforce memory: {e}")),
-    }
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -961,19 +979,14 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
     };
     let id = crate::model::MemoryId::from_uuid(uuid);
 
-    match bridge.storage.delete_memory(id, namespace).await {
-        Ok(deleted) => {
-            let response = json!({
-                "id": id_str,
-                "deleted": deleted,
-            });
-            match ToolCallResult::json(&response) {
-                Ok(r) => r,
-                Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-            }
-        }
-        Err(e) => ToolCallResult::error(format!("Failed to delete memory: {e}")),
-    }
+    bridge
+        .storage
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+        )
+        .await
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1451,6 +1464,19 @@ async fn handle_create_namespace(
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(message)) => {
+            match serde_json::from_str::<serde_json::Value>(&message)
+                .ok()
+                .filter(|v| v.is_object())
+            {
+                Some(evidence) => {
+                    let mut result = ToolCallResult::json(&evidence).expect("catalog failure JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(message),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to create namespace: {e}")),
     }
 }
@@ -1840,6 +1866,69 @@ async fn handle_list_tags(bridge: &McpBridge, arguments: serde_json::Value) -> T
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
         Err(e) => ToolCallResult::error(format!("List tags failed: {e}")),
+    }
+}
+
+/// Prepared actual consumer, reachable only after the shared version gate opens.
+pub(crate) async fn dispatch_v2(
+    bridge: &McpBridge,
+    name: &str,
+    arguments: serde_json::Value,
+) -> ToolCallResult {
+    let lifecycle = match name {
+        "forget_memory" => Some(crate::serialization::native_lifecycle::Operation::Forget),
+        "reinforce_memory" => Some(crate::serialization::native_lifecycle::Operation::Feedback),
+        _ => None,
+    };
+    if let Some(operation) = lifecycle {
+        return crate::mcp::native_lifecycle_adapter::dispatch(
+            bridge.storage.as_ref(),
+            operation,
+            arguments,
+        )
+        .await
+        .mcp();
+    }
+    use crate::search::exact_scan::ExactScanData;
+    use crate::serialization::{
+        contract::{CommitState, Envelope, ErrorCategory, ExecutionError},
+        scan::ExactScanRequest,
+    };
+    let failure = |error: ExecutionError| {
+        let envelope = Envelope::<ExactScanData>::failure(None, error);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        result.is_error = Some(true);
+        result
+    };
+    if name != "find_similar_memories"
+        || arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
+    {
+        return failure(ExecutionError {
+            category: ErrorCategory::Unavailable,
+            code: "UNSUPPORTED_CONTRACT_VERSION".into(),
+            message: "this operation has no active v2 backend".into(),
+            field: Some("/contractVersion".into()),
+            retryable: false,
+            commit_state: CommitState::NotCommitted,
+            operation_id: None,
+        });
+    }
+    let mut request = match ExactScanRequest::from_mcp(&arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            return failure(
+                crate::search::exact_scan::ExactScanError::Input(error).execution_error(),
+            );
+        }
+    };
+    request
+        .namespace
+        .get_or_insert_with(|| bridge.default_namespace().into());
+    match bridge.search.scan_duplicate_pairs(request).await {
+        Ok(page) => ToolCallResult::json(&page.into_envelope())
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error")),
+        Err(error) => failure(error.execution_error()),
     }
 }
 

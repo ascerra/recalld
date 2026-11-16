@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tracing::instrument::WithSubscriber;
 
 #[derive(Clone, Default)]
-struct Capture(Arc<Mutex<Vec<u8>>>);
+pub(crate) struct Capture(pub(crate) Arc<Mutex<Vec<u8>>>);
 impl Write for Capture {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.0.lock().unwrap().extend_from_slice(bytes);
@@ -23,7 +23,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
         self.clone()
     }
 }
-fn subscriber(capture: Capture) -> impl tracing::Subscriber + Send + Sync {
+pub(crate) fn subscriber(capture: Capture) -> impl tracing::Subscriber + Send + Sync {
     tracing_subscriber::fmt()
         .json()
         .without_time()
@@ -634,6 +634,73 @@ fn sampling_disabled_and_skipped_paths_allocate_no_instrumentation_state() {
     });
 }
 
+#[test]
+fn trace_provenance_cold_disabled_paths_keep_zero_allocations_and_clocks() {
+    const CHILD: &str = "RECALLD_COLD_TRACE_COST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "performance::tests::trace_provenance_cold_disabled_paths_keep_zero_allocations_and_clocks", "--nocapture"])
+            .env(CHILD, "1").output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    fn forbidden() -> u64 {
+        panic!("disabled field evaluated")
+    }
+    fn disabled() {
+        assert_eq!(
+            allocation_probe::count(|| {
+                assert!(!enabled());
+                assert!(Timer::new("cold").start.is_none());
+                let timeline = Timeline::new();
+                assert!(timeline.start.is_none() && timeline.last.is_none());
+                let worker = Worker::new("cold");
+                assert!(worker.context.is_none() && worker.queued.start.is_none());
+                worker.run(|| {
+                    crate::performance::event!(kind = "must_not_evaluate", value = forbidden())
+                });
+            }),
+            0
+        );
+    }
+    // No subscriber at all, then a live scoped subscriber on an untraced thread.
+    disabled();
+    let capture = Capture::default();
+    let dispatch = tracing::Dispatch::new(subscriber(capture.clone()));
+    disabled();
+    for _ in 0..3 {
+        tracing::dispatcher::with_default(&dispatch, || {
+            assert!(target_enabled());
+            crate::performance::event!(kind = "cold_scope_control");
+        });
+        disabled();
+    }
+    assert_eq!(events(&capture).len(), 3);
+    drop(dispatch);
+    // TRACE remains globally possible but this target must still be filtered out.
+    let filtered = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .json()
+            .without_time()
+            .with_env_filter("off,trace_control=trace")
+            .with_writer(capture)
+            .finish(),
+    );
+    tracing::dispatcher::with_default(&filtered, || {
+        assert_eq!(
+            tracing::level_filters::LevelFilter::current(),
+            tracing::level_filters::LevelFilter::TRACE
+        );
+        assert!(!target_enabled()); // Registration is outside the measured request path.
+        disabled();
+    });
+}
+
 // Reuse actual HTTP/MCP fixture clients without exposing a production sampler API.
 pub(crate) async fn capture_sampled<T>(
     ordinal: u64,
@@ -675,4 +742,67 @@ pub(crate) async fn capture_full<T>(
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
     (result, rows)
+}
+
+#[test]
+fn conditional_batch_measurement_preserves_parent_without_starting_disabled_clocks() {
+    fn forbidden() -> u64 {
+        panic!("disabled field evaluated")
+    }
+    let capture = Capture::default();
+    tracing::subscriber::with_default(subscriber(capture.clone()), || {
+        REQUEST.sync_scope(Decision {
+            selected: true,
+            every: 7,
+            root_ordinal: 19,
+            sampled_roots_seen: 3,
+        }, || {
+            assert!(enabled());
+            assert_eq!(allocation_probe::count(|| {
+                assert!(Timer::new_if("conditional.timer", false).start.is_none());
+                let mut timeline = Timeline::new_if(false);
+                assert!(timeline.start.is_none());
+                timeline.mark("conditional.timeline");
+                crate::performance::event!(false; kind = "conditional", value = forbidden());
+            }), 0);
+            let worker = Worker::new_if("conditional.queue", false);
+            assert!(worker.context.is_some());
+            assert!(worker.queued.start.is_none());
+            worker.run(|| {
+                assert!(enabled());
+                assert_eq!(REQUEST.with(|d| (d.every, d.root_ordinal, d.sampled_roots_seen)), (7, 19, 3));
+                crate::performance::event!(kind = "inherited_child");
+            });
+        });
+    });
+    let rows = events(&capture);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["kind"], "inherited_child");
+}
+
+pub(crate) fn assert_no_legacy_batch_events(rows: &[serde_json::Value]) {
+    assert!(
+        !rows.is_empty(),
+        "actual native consumer emitted no existing trace evidence"
+    );
+    for row in rows {
+        let fields = &row["fields"];
+        assert!(
+            !fields["kind"].as_str().unwrap_or("").starts_with("batch_"),
+            "{row}"
+        );
+        let stage = fields["stage"].as_str().unwrap_or("");
+        assert!(
+            !stage.starts_with("batch.") && stage != "metadata.batch_commit",
+            "{row}"
+        );
+        assert!(
+            !fields["resource"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("batch_"),
+            "{row}"
+        );
+        assert_ne!(fields["operation"], "mcp.batch", "{row}");
+    }
 }
