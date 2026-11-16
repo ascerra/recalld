@@ -12,7 +12,7 @@ use crate::graph::structure::RelationshipGraph;
 use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
 use crate::search::{EntityIndex, SearchFilter, VectorIndex, VectorIndexOwner};
 use crate::storage::PersistedEdge;
-use crate::storage::engine::RedbStorageEngine;
+use crate::storage::engine::{RedbStorageEngine, StorageEngine};
 use crate::storage::work::WorkTicket;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -524,14 +524,55 @@ pub(crate) async fn perform_entity_link_with_work(
             return Ok(0);
         }
 
-        let new_entity_count = entities.len();
+        // Postings propose IDs only: namespace and deletion state must be checked
+        // canonically before the cap, even when caches/indexes are stale.
+        let storage_for_read = storage.clone();
+        let candidates = tokio::task::spawn_blocking(move || {
+            let storage = storage_for_read
+                .read()
+                .map_err(|e| AutoLinkError::LockPoisoned(e.to_string()))?;
+            let source = storage
+                .get_record(new_memory_id)
+                .map_err(|e| AutoLinkError::Storage(e.to_string()))?;
+            let live_in_scope = |r: &crate::model::DiskRecord| {
+                r.namespace_id == namespace_id.get() && r.phase != DecayPhase::Tombstone
+            };
+            if source.as_ref().is_none_or(|r| !live_in_scope(r)) {
+                return Ok::<_, AutoLinkError>(Vec::new());
+            }
+            let mut eligible = Vec::new();
+            for (id, shared) in candidates {
+                if storage
+                    .get_record(id)
+                    .map_err(|e| AutoLinkError::Storage(e.to_string()))?
+                    .as_ref()
+                    .is_some_and(&live_in_scope)
+                {
+                    eligible.push((id, shared));
+                }
+            }
+            eligible.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            Ok(eligible)
+        })
+        .await
+        .map_err(|e| AutoLinkError::Storage(format!("blocking task join error: {e}")))??;
+
+        // Count the same normalized keys as the canonical entity postings.
+        let key_count = |names: &[String]| {
+            names
+                .iter()
+                .flat_map(|name| crate::search::canonicalize_entity(name))
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        };
+        let new_entity_count = key_count(entities);
 
         // Pre-fetch candidate entity counts from cache for Jaccard weight calculation.
         let candidate_entity_counts: std::collections::HashMap<MemoryId, usize> = {
             let mut counts = std::collections::HashMap::with_capacity(candidates.len());
             for (cid, _) in &candidates {
                 if let Some(cached) = cache.get(*cid).await {
-                    counts.insert(*cid, cached.entities.len());
+                    counts.insert(*cid, key_count(&cached.entities));
                 }
             }
             counts
@@ -550,9 +591,12 @@ pub(crate) async fn perform_entity_link_with_work(
                     // Jaccard similarity: shared / union for order-independent weight.
                     // Look up candidate's entity count from cache; fall back to
                     // shared count (which gives weight=1.0, a safe overestimate).
-                    let candidate_entity_count =
-                        candidate_entity_counts.get(cid).copied().unwrap_or(*shared);
-                    let union = new_entity_count + candidate_entity_count - *shared;
+                    let candidate_entity_count = candidate_entity_counts
+                        .get(cid)
+                        .copied()
+                        .unwrap_or(*shared)
+                        .max(*shared);
+                    let union = new_entity_count.max(*shared) + candidate_entity_count - *shared;
                     let weight = if union > 0 {
                         (*shared as f32 / union as f32).min(1.0)
                     } else {
@@ -721,4 +765,201 @@ pub(crate) async fn perform_temporal_link_with_work(
     .await;
     crate::storage::work::finish_work(storage, work);
     result
+}
+
+#[cfg(test)]
+mod entity_scope_tests {
+    use super::*;
+    use crate::test_support::Fixture;
+
+    #[tokio::test]
+    async fn entity_links_filter_foreign_and_removed_postings_before_cap_without_cache() {
+        let f = Fixture::new();
+        let ns = NamespaceId::new(1);
+        let foreign_ns = f.create_namespace("foreign");
+        let source = f
+            .insert_memory_in(ns, &["entity/alice", "entity/bob"])
+            .await;
+        let local = f
+            .insert_memory_in(ns, &["entity/alice", "entity/carol"])
+            .await;
+        let foreign = f
+            .insert_memory_in(foreign_ns, &["entity/alice", "entity/bob"])
+            .await;
+        let removed = f
+            .insert_memory_in(ns, &["entity/alice", "entity/bob"])
+            .await;
+        f.tombstone(removed);
+        {
+            let mut index = f.entity_index.write().await;
+            index.add(ns, local, &["alice".into()]);
+            // Deliberately stale local postings still require canonical scope/phase checks.
+            for id in [foreign, removed, MemoryId::new()] {
+                index.add(ns, id, &["alice".into(), "bob".into()]);
+            }
+        }
+        let count = perform_entity_link(
+            source,
+            ns,
+            &["alice".into(), "bob".into()],
+            1,
+            &f.entity_index,
+            &f.graph,
+            &f.storage,
+            &f.cache,
+        )
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+        let edges = f.storage.read().unwrap().load_all_edges().unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].target, local);
+        assert!((edges[0].weight - 0.5).abs() < 1e-6);
+        assert!(
+            f.graph
+                .read()
+                .await
+                .has_typed_edge_between_ids(&source, &local, EdgeType::Entity)
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_entity_admission_rejects_lossy_names_and_links_encodable_names() {
+        use crate::mcp::bridge::{BridgeError, StorageEngine as _, StoreInput};
+        // PR68 rejects labels the legacy carrier cannot retain. Exact UTF-8
+        // canonical reader/native writer coverage belongs to their own consumers.
+        for (name, accepted) in [
+            ("John Smith", false),
+            ("José", false),
+            ("Alice's", false),
+            ("John-Smith", true),
+            ("JOSE", true),
+            ("Alice", true),
+        ] {
+            let f = Fixture::new();
+            let adapter = f.storage_adapter();
+            let input = || StoreInput {
+                summary: "accepted structured name".into(),
+                full_text: None,
+                tags: vec![],
+                entities: vec![name.into()],
+                topics: vec![],
+                emotions: vec![],
+                namespace: "default".into(),
+                embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
+                initial_stability: None,
+                parent_id: None,
+                supersedes: None,
+                check_duplicates: None,
+            };
+            if !accepted {
+                let before = f
+                    .storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .control_state()
+                    .unwrap();
+                let error = adapter.store_memory(input()).await.unwrap_err();
+                assert!(matches!(error, BridgeError::InvalidInput(ref message)
+                    if message.contains("cannot be represented by legacy storage")));
+                assert_eq!(
+                    before,
+                    f.storage
+                        .read()
+                        .unwrap()
+                        .meta_store()
+                        .control_state()
+                        .unwrap()
+                );
+                assert!(f.storage.read().unwrap().scan_all().unwrap().is_empty());
+                assert!(f.persisted_edges().is_empty());
+                assert!(f.entity_index.read().await.is_empty());
+                continue;
+            }
+            adapter.store_memory(input()).await.unwrap();
+            adapter.store_memory(input()).await.unwrap();
+            let edges = f.persisted_edges();
+            let entity_edges: Vec<_> = edges
+                .iter()
+                .filter(|e| e.edge_type == EdgeType::Entity)
+                .collect();
+            assert_eq!(entity_edges.len(), 1, "{name}");
+            assert!(entity_edges[0].weight.is_finite());
+            assert!((0.0..=1.0).contains(&entity_edges[0].weight));
+        }
+    }
+
+    #[tokio::test]
+    async fn entity_links_reject_wrong_source_scope_and_resolve_ties_by_uuid() {
+        let f = Fixture::new();
+        let ns = NamespaceId::new(1);
+        let other = f.create_namespace("other");
+        let source = f.insert_memory_in(ns, &["entity/alice"]).await;
+        let a = f.insert_memory_in(ns, &["entity/alice"]).await;
+        let b = f.insert_memory_in(ns, &["entity/alice"]).await;
+        {
+            let mut index = f.entity_index.write().await;
+            index.add(ns, b, &["alice".into()]);
+            index.add(ns, a, &["alice".into()]);
+        }
+        assert_eq!(
+            perform_entity_link(
+                source,
+                other,
+                &["alice".into()],
+                1,
+                &f.entity_index,
+                &f.graph,
+                &f.storage,
+                &f.cache
+            )
+            .await
+            .unwrap(),
+            0
+        );
+        assert!(
+            f.storage
+                .read()
+                .unwrap()
+                .load_all_edges()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            perform_entity_link(
+                source,
+                ns,
+                &["alice".into()],
+                1,
+                &f.entity_index,
+                &f.graph,
+                &f.storage,
+                &f.cache
+            )
+            .await
+            .unwrap(),
+            1
+        );
+        let edges = f.storage.read().unwrap().load_all_edges().unwrap();
+        assert_eq!(edges[0].target, a.min(b));
+        assert_eq!(edges[0].weight, 1.0);
+        f.tombstone(source);
+        assert_eq!(
+            perform_entity_link(
+                source,
+                ns,
+                &["alice".into()],
+                1,
+                &f.entity_index,
+                &f.graph,
+                &f.storage,
+                &f.cache
+            )
+            .await
+            .unwrap(),
+            0
+        );
+        assert_eq!(f.storage.read().unwrap().load_all_edges().unwrap().len(), 1);
+    }
 }

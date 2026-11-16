@@ -1,0 +1,12 @@
+{"sourceId": "turn-0", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-0", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-0", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e107-e8a1-7b13-acd4-f4669100de3e"}
+{"sourceId": "turn-1", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-1", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-1", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e107-e8a4-79d3-b69b-af1e7544d2db"}
+{"sourceId": "turn-2", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-2", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-2", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e107-e8a8-7903-900d-8fa06a97f204"}
+{"sourceId": "turn-3", "status": "seen", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-3", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
+{"sourceId": "turn-3", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e107-e8ab-7251-a0f2-daa0ad4b09f2"}

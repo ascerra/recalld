@@ -10,6 +10,8 @@
 pub(crate) mod batch;
 mod canonical_vector_snapshot;
 mod catalog;
+#[cfg(test)]
+mod catalog_completion_tests;
 mod certification;
 pub(crate) mod effects;
 mod inherited_policy;
@@ -120,6 +122,8 @@ pub struct MetadataStore {
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub(crate) catalog_test_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
     pub(crate) fail_purge_child_commit: std::sync::atomic::AtomicBool,
     /// Store-local lost-ack probes: 1 reservation, 2 rejection, 3 child.
@@ -287,6 +291,8 @@ impl MetadataStore {
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            catalog_test_fault: std::sync::atomic::AtomicU8::new(0),
             #[cfg(test)]
             fail_purge_child_commit: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
@@ -1100,6 +1106,7 @@ impl MetadataStore {
         &self,
         namespace_id: NamespaceId,
     ) -> Result<Vec<DiskRecord>, StorageError> {
+        self.ensure_available()?;
         let timer = crate::performance::Timer::new("canonical.namespace_read");
         let instrumented = crate::performance::enabled();
         let mut encoded_bytes = 0usize;
@@ -1127,8 +1134,12 @@ impl MetadataStore {
                 result.push(record);
             }
         }
-        tracing::trace!(target: "recalld::performance", kind = "canonical_read",
-            examined, records = result.len(), encoded_record_bytes = encoded_bytes);
+        crate::performance::event!(
+            kind = "canonical_read",
+            examined,
+            records = result.len(),
+            encoded_record_bytes = encoded_bytes
+        );
         timer.complete();
         Ok(result)
     }

@@ -20,7 +20,6 @@ mod readers;
 mod batches;
 #[path = "exact_scan_tests.rs"]
 mod exact_scan;
-
 #[path = "sweep_tests.rs"]
 mod sweep;
 
@@ -60,11 +59,21 @@ fn fixture_with_seed_and_ghost(
     ghost: bool,
     seed: impl FnOnce(&mut RedbStorageEngine),
 ) -> Data {
+    fixture_with_policy(root, seed, ghost, None, true)
+}
+fn fixture_with_policy(
+    root: &Path,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+    ghost: bool,
+    multiplier: Option<f32>,
+    adopt: bool,
+) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
     let mut config = NamespaceConfig::default_namespace(0);
     config.name = "native".into();
     config.embedding_dim = 4;
+    config.decay_rate_multiplier = multiplier;
     let ns = engine.create_namespace(&config).unwrap();
     let input = crate::storage::insertion::InsertMemory {
         id: None,
@@ -137,7 +146,9 @@ fn fixture_with_seed_and_ghost(
     .unwrap();
     // Dependent native writer fixtures explicitly adopt present-day multiplier1.
     // The actual migration above still preserves unknown historical inheritance.
-    crate::test_support::explicitly_adopt_inherited_policy(&path, ns, 1., 2000);
+    if adopt {
+        crate::test_support::explicitly_adopt_inherited_policy(&path, ns, 1., 2000);
+    }
     Data {
         path,
         ns,
@@ -866,7 +877,8 @@ mod store_producers;
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
 
-#[path = "compaction_tests.rs"]
-mod compaction;
 #[path = "request_context_tests.rs"]
 mod request_context;
+
+#[path = "compaction_tests.rs"]
+mod compaction;

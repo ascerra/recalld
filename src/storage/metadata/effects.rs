@@ -935,7 +935,22 @@ impl MetadataStore {
         self.derived_dirty.store(true, Ordering::SeqCst);
         self.canonical_pending.store(true, Ordering::SeqCst);
         self.effects_epoch.store(next, Ordering::SeqCst);
+        crate::performance::event!(
+            kind = "commit_call",
+            resource = "metadata_effects",
+            phase = "attempt",
+            sync_coverage = "opaque_backend"
+        );
+        let timer = crate::performance::Timer::new("metadata.effects_commit");
         let committed = tx.commit();
+        crate::performance::event!(
+            kind = "commit_call",
+            resource = "metadata_effects",
+            phase = "return",
+            success = committed.is_ok(),
+            sync_coverage = "opaque_backend"
+        );
+        timer.outcome(committed.is_ok());
         // Synthetic I/O ambiguity: the commit succeeded, but the caller must
         // not assume failure means its staged bytes can be reclaimed.
         #[cfg(test)]

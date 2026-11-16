@@ -1,0 +1,53 @@
+{
+  "adapterVersion": 1,
+  "sources": [
+    {
+      "contentSha256": "ef1ebd2702c62cd1db1bde1f50218b4dead82b69d617398d7df26f941054e5e8",
+      "conversationId": "conversation-1",
+      "namespace": "default",
+      "ordinal": 0,
+      "role": "user",
+      "sessionId": "session-1",
+      "sourceId": "turn-0",
+      "sourceTimestamp": 1767225600000,
+      "summary": "amber oak",
+      "turnId": "turn-0"
+    },
+    {
+      "contentSha256": "02afc6a32fa30b26927ed61ed51a0a176a716b8622c0de6ca49424e77a88cffa",
+      "conversationId": "conversation-1",
+      "namespace": "default",
+      "ordinal": 1,
+      "role": "user",
+      "sessionId": "session-1",
+      "sourceId": "turn-1",
+      "sourceTimestamp": 1767225600000,
+      "summary": "birch oak",
+      "turnId": "turn-1"
+    },
+    {
+      "contentSha256": "46b8fe0bc326e8d56132e26216f3d7befc952658a46bc3d12eff0c27f5c7a8e6",
+      "conversationId": "conversation-1",
+      "namespace": "default",
+      "ordinal": 2,
+      "role": "user",
+      "sessionId": "session-1",
+      "sourceId": "turn-2",
+      "sourceTimestamp": 1767225600000,
+      "summary": "olive oak",
+      "turnId": "turn-2"
+    },
+    {
+      "contentSha256": "568c1a191dcd15d5abf84695dfdddd538534009068ab35d47c5f3b7d7b486d24",
+      "conversationId": "conversation-1",
+      "namespace": "foreign",
+      "ordinal": 3,
+      "role": "user",
+      "sessionId": "session-1",
+      "sourceId": "turn-3",
+      "sourceTimestamp": 1767225600000,
+      "summary": "foreign oak",
+      "turnId": "turn-3"
+    }
+  ]
+}

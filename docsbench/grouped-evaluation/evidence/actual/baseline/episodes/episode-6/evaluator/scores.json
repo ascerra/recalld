@@ -1,0 +1,92 @@
+{
+  "environmentHash": "178d6037daafc45f6354404d61ed7c122b5aa42b5ac0599e6866ef34e9a79eed",
+  "profile": "synthetic-unique-source-v1",
+  "scoring": {
+    "allRequiredEvidenceRate": null,
+    "denominatorUnit": "measured-query-event",
+    "means": {
+      "binarySourceNdcgAt10": null,
+      "extractionEvidenceRetention": null,
+      "retrievalRecallAt10": null,
+      "retrievalRecallAt20": null,
+      "retrievalRecallAt5": null
+    },
+    "profile": "synthetic-unique-source-v1",
+    "queryEvents": "4",
+    "scored": "0",
+    "semanticQualityClaim": false,
+    "unknownAnnotations": "0",
+    "zeroLabelUnscored": "4"
+  },
+  "semanticQualityClaim": false,
+  "trace": [
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q0",
+      "retrievedSourceIds": [
+        "turn-0"
+      ]
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q1",
+      "retrievedSourceIds": [
+        "turn-0"
+      ]
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q2",
+      "retrievedSourceIds": [
+        "turn-0"
+      ]
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q3",
+      "retrievedSourceIds": [
+        "turn-0"
+      ]
+    }
+  ],
+  "turnCoverage": {
+    "acceptedMemoryCoverage": 1.0,
+    "countUnit": "unique-source-turn",
+    "eligible": "4",
+    "eventCount": "12",
+    "ledgerVersion": 1,
+    "pending": "0",
+    "processed": "4",
+    "processedCoverage": 1.0,
+    "propositionPreservation": "not measured",
+    "statuses": {
+      "accepted": "4",
+      "attempted": "4",
+      "no_op": "0",
+      "rejected": "0",
+      "seen": "4",
+      "truncated": "0"
+    },
+    "unseen": "0"
+  }
+}

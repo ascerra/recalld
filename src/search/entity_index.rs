@@ -97,7 +97,7 @@ impl EntityIndex {
         self.find_by_entities_filtered(namespace_id, entities, exclude_id, |_| true)
     }
 
-    /// Canonical membership is applied before counting and the caller's cap.
+    /// Apply canonical eligibility within the namespace before counting or capping.
     pub fn find_by_entities_filtered(
         &self,
         namespace_id: NamespaceId,

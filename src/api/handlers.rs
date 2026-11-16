@@ -1030,6 +1030,7 @@ async fn search_memories_admitted(
     let hydration = crate::performance::Timer::new("rest.hydration");
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
+            let hydration = crate::performance::Timer::new("rest.hydration");
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -1082,6 +1083,7 @@ async fn search_memories_admitted(
                     score: selected.score.unwrap_or(0.0),
                 });
             }
+            hydration.complete();
             (hits, exposures, Some(prepared.evaluated_at))
         } else {
             let results = state
@@ -1089,6 +1091,7 @@ async fn search_memories_admitted(
                 .prepare_search_with_work(search_query, parent)
                 .await?;
 
+            let hydration = crate::performance::Timer::new("rest.hydration");
             // Batch-load embeddings with a single lock acquisition if requested.
             let embeddings = if req.include_embeddings {
                 let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
@@ -1136,10 +1139,10 @@ async fn search_memories_admitted(
                 });
             }
 
+            hydration.complete();
             (hits, exposures, None)
         };
 
-    hydration.complete();
     check_read_admission(&state, admitted_stamp).await?;
     let receipts = if req.record_access {
         let scope = crate::storage::control::ExposureScope {
@@ -1482,7 +1485,22 @@ pub async fn create_namespace(
 
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {
     use crate::decay::lifecycle::LifecycleError;
+    use crate::derived_completion::catalog::CatalogCreateError;
     use crate::storage::StorageError;
+    let error: Box<dyn std::error::Error + Send + Sync> = match error
+        .downcast::<CatalogCreateError>()
+    {
+        Ok(error) => match *error {
+            CatalogCreateError::Storage(error) => Box::new(error),
+            CatalogCreateError::WorkerUnknown => {
+                return AppError::MutationUnknown {
+                    operation_id: None,
+                    message: "namespace worker outcome unavailable; reconcile before retry".into(),
+                };
+            }
+        },
+        Err(error) => error,
+    };
     if matches!(
         error.downcast_ref::<LifecycleError>(),
         Some(LifecycleError::InvalidInput(_))
@@ -1501,8 +1519,10 @@ fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> Ap
                 message,
                 field: None,
             },
-            error @ StorageError::CommitOutcomeUnknown { .. } => AppError::ServiceUnavailable {
-                message: error.to_string(),
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => AppError::MutationUnknown {
+                operation_id: Some(operation_id),
+                message: "namespace commit acknowledgement unavailable; reconcile before retry"
+                    .into(),
             },
             error => error.into(),
         },
@@ -2350,24 +2370,29 @@ pub async fn metrics(
 
 /// POST /decay/sweep -- trigger an immediate decay sweep.
 ///
-/// Accepts an optional `as_of` field (milliseconds since epoch) to run
-/// the sweep as if the current time were the given timestamp. This is
-/// used by the replay driver to simulate time-appropriate decay during
-/// historical seeding.
+/// Uses the configured clock. Caller-supplied time overrides are rejected
+/// before accepting work; isolated replay controls its existing owned clock.
 pub async fn trigger_decay_sweep(
     State(state): State<AppState>,
     Json(req): Json<TriggerSweepRequest>,
 ) -> Result<Json<ApiResponse<TriggerSweepResponse>>, AppError> {
-    let result = state
-        .decay
-        .trigger_sweep(req.as_of)
-        .await
-        .map_err(
-            |error| match error.downcast::<crate::storage::StorageError>() {
-                Ok(storage) => AppError::from(*storage),
-                Err(source) => AppError::Internal { source },
-            },
-        )?;
+    if req.fields.contains_key("asOf") || req.fields.contains_key("as_of") {
+        return Err(AppError::BadRequest {
+            message: "Public sweeps use the configured clock; remove asOf/as_of".into(),
+            field: Some("asOf".into()),
+        });
+    }
+    let result =
+        state
+            .decay
+            .trigger_sweep(None)
+            .await
+            .map_err(
+                |error| match error.downcast::<crate::storage::StorageError>() {
+                    Ok(storage) => AppError::from(*storage),
+                    Err(source) => AppError::Internal { source },
+                },
+            )?;
 
     Ok(Json(ApiResponse {
         data: TriggerSweepResponse {

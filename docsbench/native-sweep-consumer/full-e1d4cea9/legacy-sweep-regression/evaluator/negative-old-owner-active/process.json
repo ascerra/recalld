@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/legacy-sweep-regression/runtime/config.toml",
+    "--data-root",
+    "/output/legacy-sweep-regression/runtime/negative-old-owner-active",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "12",
+    "--restore-checkpoint",
+    "/output/legacy-sweep-regression/runtime/recalld-frozen-canonical-5Vrew7/manifest.json",
+    "--checkpoint-sha256",
+    "8e431c0d530a616bd0a52f9c0224db00a9f8ce809aa179aa6d9b719117b18a3b"
+  ],
+  "exitCode": 1,
+  "forced": false,
+  "negativeConstructorProbe": true,
+  "pid": 4412,
+  "priorJoined": null,
+  "status": "joined"
+}

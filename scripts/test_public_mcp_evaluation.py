@@ -93,7 +93,7 @@ class Preflight(unittest.TestCase):
         import ast
         tree = ast.parse(Path(__file__).with_name("public-mcp-actor.py").read_text())
         imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
-        self.assertEqual(imported, {"argparse", "json", "os", "select", "sys", "uuid"})
+        self.assertEqual(imported, {"argparse", "json", "os", "select", "sys", "time", "uuid", "context_tokenizer"})
         self.assertFalse(any(isinstance(node, ast.ImportFrom) for node in ast.walk(tree)))
         self.assertFalse(any(isinstance(node, ast.Name) and node.id == "fixtures" for node in ast.walk(tree)))
 

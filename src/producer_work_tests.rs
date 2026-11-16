@@ -158,7 +158,8 @@ async fn queued_catalog_adapters_keep_children_admitted_until_handle_publication
             resume.recv_timeout(Duration::from_secs(10)).unwrap();
         });
         held.recv_timeout(Duration::from_secs(10)).unwrap();
-        let api = crate::api::adapters::NamespaceRegistryAdapter::new(f.storage.clone());
+        let api = crate::api::adapters::NamespaceRegistryAdapter::new(f.storage.clone())
+            .with_completion(f.completion());
         let bridge = f.namespace_adapter();
         let task = tokio::spawn(async move {
             if mcp {

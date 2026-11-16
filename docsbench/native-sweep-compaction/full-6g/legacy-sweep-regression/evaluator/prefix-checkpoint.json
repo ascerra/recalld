@@ -1,0 +1,10 @@
+{
+  "committed": {
+    "generation": "4",
+    "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+  },
+  "logicalHash": "4fc2216ac2a013ccb124817bc6c481df16f945c700f01ed3ba1baf09f413f7fe",
+  "manifest": "/output/legacy-sweep-regression/runtime/recalld-frozen-canonical-BZXHN2/manifest.json",
+  "sha256": "788b525be540457a22f1ffa2806d31ac81dc5758fca74027e0f3b29f879e83cf",
+  "track": "isolated-legacy-checkpoint-v1"
+}

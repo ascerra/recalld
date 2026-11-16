@@ -35,12 +35,12 @@ async fn dispatch(
     evaluator: Option<&super::frozen::OwnedEvaluator>,
     request: &Request,
 ) -> Result<Value, Value> {
-    if evaluator.is_some_and(|v| v.is_native_prefix())
+    if evaluator.is_some_and(|v| v.is_native_prefix() && !v.native_sweep_enabled())
         && matches!(request.method.as_str(), "sweep" | "sweepStatus")
     {
         return Err(error(
             "UNSUPPORTED_CONTROL",
-            "native prefix sweep awaits validated public writer/sweep consumers",
+            "this native prefix track does not admit explicit sweep",
         ));
     }
     if request.method == "snapshot" && evaluator.is_some_and(|v| v.checkpoint_supported()) {
@@ -122,20 +122,20 @@ async fn dispatch(
             }
             let mut capabilities = json!({
                 "controlVersion":1,
-                "methods": if evaluator.is_some_and(|v| v.is_native_prefix()) { vec!["capabilities","inspect","barrier","advance","snapshot"] } else if evaluator.is_some_and(|v| v.checkpoint_supported()) { vec!["capabilities","inspect","barrier","advance","snapshot","sweep","sweepStatus"] } else if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance","sweep","sweepStatus"] } else { vec!["capabilities","inspect","barrier"] },
+                "methods": if evaluator.is_some_and(|v| v.is_native_prefix() && !v.native_sweep_enabled()) { vec!["capabilities","inspect","barrier","advance","snapshot"] } else if evaluator.is_some_and(|v| v.checkpoint_supported()) { vec!["capabilities","inspect","barrier","advance","snapshot","sweep","sweepStatus"] } else if evaluator.is_some() { vec!["capabilities","inspect","barrier","advance","sweep","sweepStatus"] } else { vec!["capabilities","inspect","barrier"] },
                 "publicContract":"legacy-v1",
-                "sweepControlVersion": if evaluator.is_some_and(|v| !v.is_native_prefix()) { Some(1) } else { None },
+                "sweepControlVersion": if evaluator.is_some_and(|v| !v.is_native_prefix() || v.native_sweep_enabled()) { Some(1) } else { None },
                 "guarantees":{
                     "barrier":"owned-work-and-required-derived-generations",
                     "logicalHash":false,"snapshot":evaluator.is_some_and(|v| v.checkpoint_supported()),"reset":false,
                     "freshOwnerCheckpointRestore":evaluator.is_some_and(|v| v.checkpoint_supported()),
                     "controlledClock":false,"lifecycleClockControlled":evaluator.is_some(),
-                    "explicitLegacySweep":evaluator.is_some_and(|v| !v.is_native_prefix()),"nativeSweep":false,
+                    "explicitLegacySweep":evaluator.is_some_and(|v| !v.is_native_prefix()),"nativeSweep":evaluator.is_some_and(|v| v.native_sweep_enabled()),
                     "controlledIds":false,"canonicalAllocationControlled":evaluator.is_some(),"controlledRng":false
                 }
             });
             if evaluator.is_some_and(|v| v.is_native_prefix()) {
-                capabilities["track"] = super::native_prefix::TRACK.into();
+                capabilities["track"] = evaluator.unwrap().native_checkpoint_track().into();
                 capabilities["canonicalSchemaVersion"] = 2.into();
                 capabilities["logicalHashContract"] = super::native_prefix::HASH_CONTRACT.into();
                 capabilities["actorActions"] = json!([
@@ -143,6 +143,11 @@ async fn dispatch(
                     "recall_memories:recordAccess=false"
                 ]);
                 capabilities["writes"] = false.into();
+                if evaluator.is_some_and(|v| v.native_sweep_enabled()) {
+                    capabilities["sweepOriginalContractVersion"] = 1.into();
+                    capabilities["nativePhysicalCompaction"] = true.into();
+                    capabilities["physicalCompactionContractVersion"] = 1.into();
+                }
             }
             Ok(capabilities)
         }

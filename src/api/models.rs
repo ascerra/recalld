@@ -703,7 +703,10 @@ pub struct DuplicateEntry {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TriggerSweepRequest {
-    pub as_of: Option<i64>,
+    // Keep API1's unrelated unknown-field compatibility, but retain presence
+    // of either unsupported clock override even when its value is null.
+    #[serde(flatten)]
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, serde::Serialize)]
