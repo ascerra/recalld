@@ -46,7 +46,7 @@ bytes once for cost and exact identity; this preserves negative-zero spellings,
 replay flags and all other fields. Do not compare only IDs or normalize receipts.
 
 Compatibility boundary: the old known-failure `json!(receipt)` path promotes f32
-numbers into Value spellings (for example `0.020643016442656517`); direct typed
+numbers into Value spellings (the sealed control has `0.020643016323447227`); direct typed
 serialization can emit the shorter same-f32 spelling `0.020643016`. This is an
 intentional failure-response encoding change, not a wrong old fixture or a stored
 receipt modification. Preserve the sealed old raw response. The updated known
