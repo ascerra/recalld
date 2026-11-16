@@ -37,6 +37,8 @@ impl MetadataStore {
         profile: &EmbeddingProfile,
         policy: &NativePolicyInputs,
         clock: &dyn Clock,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+        check_candidate: impl FnOnce(&WriteReceipt) -> Result<(), StorageError>,
         prepare: impl FnOnce(&NamespaceConfig) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
@@ -46,6 +48,10 @@ impl MetadataStore {
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }
+        // The existing mutation guard and write transaction exclude writers
+        // until commit; the admission helper reads the last committed snapshot.
+        // A replay above does not adopt its decorated receipt as outbox authority.
+        self.check_receipt_admission(admission)?;
         let state = control::read_control(&tx)?;
         state.committed_generation.next()?;
         let mut config = input.prepare(profile, clock.now_millis())?;
@@ -132,6 +138,12 @@ impl MetadataStore {
             MutationOutcome::NativeNamespaceCreated { transition },
             operation_id,
         )?;
+        if let Some(admission) = admission {
+            admission.limit()?.check(&receipt)?;
+        }
+        // Still private to this transaction: do not record the candidate as
+        // committed evidence. Refusal precedes namespace file preparation.
+        check_candidate(&receipt)?;
         prepare(&config)?;
         self.commit_catalog(tx, &receipt)?;
         Ok(receipt)
