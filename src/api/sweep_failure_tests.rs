@@ -1056,3 +1056,64 @@ async fn bounded_legacy_strength_and_bridged_delete_abort_all_staged_effects() {
     let reopened = Fixture::from_open_engine(_root, engine);
     assert_eq!(canonical(&reopened), before);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_later_known_publication_failure_retains_ordered_full_receipts() {
+    let (f, _, clock) = fixture().await;
+    let path = f.storage.read().unwrap().db_path().to_owned();
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let old = receipt_snapshot(&path);
+    f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .vector_publication_failure_nth
+        .store(2, Ordering::SeqCst);
+    let router = app(&f, clock.clone());
+    let (status, body) = request(&router, "{}").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["commitState"], "committed");
+    assert_eq!(body["error"], "INDEX_NOT_READY");
+    assert_eq!(body["ready"], false);
+    let known: Vec<WriteReceipt> = serde_json::from_value(body["receipts"].clone()).unwrap();
+    assert_eq!(known.len(), 2);
+    assert_eq!(
+        serde_json::from_value::<WriteReceipt>(body["receipt"].clone()).unwrap(),
+        known[1]
+    );
+    // The singular operationId denotes uncertain work; known identity is in
+    // the complete receipt/receipts fields and is never fabricated here.
+    assert!(body["operationId"].is_null());
+    assert!(known[0].committed_generation < known[1].committed_generation);
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .ensure_available()
+            .is_err()
+    );
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+    drop(router);
+    let _root = f.close();
+    let reopened =
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();
+    assert_eq!(
+        reopened
+            .engine
+            .control_state()
+            .unwrap()
+            .committed_generation
+            .get(),
+        before.committed_generation.get() + 2
+    );
+    let rows = receipt_snapshot(&path);
+    assert_eq!(rows.len(), old.len() + 2);
+    assert!(old.iter().all(|r| rows.contains(r)));
+    for receipt in known {
+        assert!(
+            rows.iter()
+                .any(|(_, b)| control::validate_receipt(b).unwrap().receipt == receipt)
+        );
+    }
+}

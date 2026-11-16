@@ -232,7 +232,7 @@ mod tests {
                 let (_, known, failed) = admission.snapshot().unwrap();
                 assert_eq!(known, vec![*receipt.clone()]);
                 assert_eq!(failed.as_ref(), Some(receipt.as_ref()));
-                let body = crate::decay::sweep::SweepFailure::from_admission(&admission)
+                let body = crate::decay::sweep::evidence::SweepFailure::from_admission(&admission)
                     .unwrap()
                     .unwrap();
                 let encoded = serde_json::to_vec(&body).unwrap();
