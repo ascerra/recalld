@@ -118,6 +118,18 @@ mod profile_boundary_tests {
 }
 
 impl MetadataStore {
+    /// Shared owned-core allocation point for legacy/native receipt writers.
+    pub(super) fn allocate_memory_id(
+        &self,
+        supplied: Option<MemoryId>,
+        sampled_at: i64,
+    ) -> Result<MemoryId, StorageError> {
+        match supplied {
+            Some(id) => Ok(id),
+            None => self.ids.memory(sampled_at),
+        }
+    }
+
     pub(crate) fn lookup_insert_replay(
         &self,
         ctx: &MutationContext,
@@ -128,12 +140,33 @@ impl MetadataStore {
         replay_insert(&tx, ctx, input)
     }
 
+    pub(crate) fn lookup_insert_child_with_work(
+        &self,
+        child: &crate::storage::batch::BatchChild,
+        input: &InsertMemory,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        let _guard = self.mutation_guard_with_work(parent)?;
+        let tx = self.db.begin_write()?;
+        let hash = input.request_hash(
+            &child.context(),
+            f32::from_bits(child.defaults.initial_stability_bits),
+            child.defaults.embedding_dim,
+        )?;
+        let replay = super::batch::replay_child(&tx, child, hash)?;
+        if replay.is_none() {
+            super::batch::check_policy(&tx, child)?;
+        }
+        Ok(replay)
+    }
+
     /// Replay and all fresh canonical checks precede payload allocation. The
     /// caller stages payloads through the closure while this publication guard
     /// and redb transaction are held; no metadata writer can acquire ownership
     /// of that reserved slot before this transaction resolves.
     pub(crate) fn insert_with_effects(
         &self,
+        guard: &MutationGuard<'_>,
         ctx: &MutationContext,
         input: &InsertMemory,
         sampled_at: i64,
@@ -142,7 +175,32 @@ impl MetadataStore {
         existing_edges: &[PersistedEdge],
         stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
-        let guard = self.mutation_guard()?;
+        self.insert_reserved_with_effects(
+            guard,
+            ctx,
+            input,
+            sampled_at,
+            embedding,
+            profile,
+            existing_edges,
+            None,
+            stage,
+        )
+    }
+
+    pub(crate) fn insert_reserved_with_effects(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        sampled_at: i64,
+        embedding: &[f32],
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+        existing_edges: &[PersistedEdge],
+        child: Option<&crate::storage::batch::BatchChild>,
+        stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
+    ) -> Result<WriteReceipt, StorageError> {
+        guard.check(self)?;
         ctx.validate()?;
         if ctx.contract_version != 1 {
             return Err(StorageError::InvalidMutationContext(
@@ -155,18 +213,23 @@ impl MetadataStore {
             ));
         };
         let tx = self.db.begin_write()?;
-        if let Some(receipt) = replay_insert(&tx, ctx, input)? {
+        if let Some(child) = child {
+            let hash = input.request_hash(
+                ctx,
+                f32::from_bits(child.defaults.initial_stability_bits),
+                child.defaults.embedding_dim,
+            )?;
+            if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
+                return Ok(receipt);
+            }
+            super::batch::check_policy(&tx, child)?;
+        } else if let Some(receipt) = replay_insert(&tx, ctx, input)? {
             return Ok(receipt);
         }
         // Reserve a generation before writing external bytes (without advancing
         // it yet). Exhaustion must leave payload files untouched.
         control::read_control(&tx)?.committed_generation.next()?;
-        let config = NamespaceConfig::decode(
-            tx.open_table(NAMESPACE_TABLE)?
-                .get(namespace.get())?
-                .ok_or(StorageError::NamespaceNotFound(namespace.get()))?
-                .value(),
-        )?;
+        let config = super::namespace_state::require_namespace_active(&tx, namespace)?;
         if config.id != namespace {
             return Err(StorageError::MutationNamespaceMismatch);
         }
@@ -224,7 +287,7 @@ impl MetadataStore {
             config.embedding_dim,
             input.embedding.is_some(),
         )?;
-        let id = input.id.unwrap_or_else(MemoryId::new);
+        let id = self.allocate_memory_id(input.id, sampled_at)?;
         if id == MemoryId::nil() {
             return Err(StorageError::InvalidMutation("nil memory ID".into()));
         }
@@ -236,28 +299,7 @@ impl MetadataStore {
         {
             return Err(StorageError::DuplicateId(id.into_inner()));
         }
-        // Validate explicit targets and branches before staging. The common
-        // effect tail repeats endpoint checks inside this same transaction.
-        for target in [input.parent_id, input.supersedes].into_iter().flatten() {
-            if target == id {
-                return Err(StorageError::InvalidMutation("self link".into()));
-            }
-            let row = tx.open_table(META_TABLE)?;
-            let value = row
-                .get(target.as_bytes().as_slice())?
-                .ok_or(StorageError::NotFound(target.into_inner()))?;
-            let record = DiskRecord::from_bytes(value.value())?;
-            if record.id != *target.as_bytes() || record.namespace_id != namespace.get() {
-                return Err(StorageError::MutationNamespaceMismatch);
-            }
-        }
-        if input.supersedes.is_some_and(|target| {
-            existing_edges
-                .iter()
-                .any(|edge| edge.edge_type == EdgeType::Supersedes && edge.target == target)
-        }) {
-            return Err(StorageError::EdgeConflict("supersedes branch".into()));
-        }
+        validate_insert_targets(&tx, input, namespace, id, existing_edges)?;
         let mut record = DiskRecord {
             schema: None,
             version: 1,
@@ -279,34 +321,17 @@ impl MetadataStore {
             text_offset: 0,
             text_length: 0,
         };
-        record.encode()?;
-        stage(&config, &mut record, &normalized)?;
-        tx.open_table(META_TABLE)?
-            .insert(id.as_bytes().as_slice(), record.encode()?.as_slice())?;
-        for tag in &record.tags {
-            tx.open_multimap_table(TAG_INDEX)?
-                .insert(tag.as_str(), id.as_bytes().as_slice())?;
-        }
-        tx.open_multimap_table(NAMESPACE_INDEX)?
-            .insert(namespace.get(), id.as_bytes().as_slice())?;
-        let mut puts = Vec::new();
-        for (source, target, edge_type) in input
-            .parent_id
-            .map(|parent| (parent, id, EdgeType::ParentChild))
-            .into_iter()
-            .chain(input.supersedes.map(|old| (id, old, EdgeType::Supersedes)))
-        {
-            puts.push(PersistedEdge {
-                source,
-                target,
-                edge_type,
-                weight: 1.0,
-                auto_created: false,
-                created_at: sampled_at.max(0) as u64,
-            });
-        }
+        let puts = stage_insert(
+            &tx,
+            input,
+            &config,
+            &mut record,
+            &normalized,
+            sampled_at,
+            stage,
+        )?;
         self.finish_record_effects(
-            &guard,
+            guard,
             tx,
             ctx,
             hash,
@@ -315,7 +340,8 @@ impl MetadataStore {
             &[],
             false,
             false,
-            Some((&record, config.embedding_dim)),
+            effects::RecordMutation::Inserted(&record, config.embedding_dim),
+            child,
         )
         .map(|result| result.receipt)
     }
@@ -339,4 +365,130 @@ fn replay_insert(
     };
     let hash = input.request_hash(ctx, f32::from_bits(initial_stability_bits), embedding_dim)?;
     control::replay_or_check(tx, ctx, hash)
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    #[test]
+    fn insertion_independently_rejects_schema_policy_before_payload_stage() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MetadataStore::open(&dir.path().join("meta.db")).unwrap();
+        let mut config = NamespaceConfig::default_namespace(0);
+        config.embedding_dim = 4;
+        config.id = store.create_namespace(&config).unwrap();
+        config.schema = Some(crate::model::schema::NamespaceSchemaV2::from_legacy());
+        // Synthetic legacy schema row, bypassing the separately tested catalog
+        // admission solely to prove the final insertion boundary independently.
+        let tx = store.db.begin_write().unwrap();
+        tx.open_table(NAMESPACE_TABLE)
+            .unwrap()
+            .insert(
+                config.id.get(),
+                control::encode(&config).unwrap().as_slice(),
+            )
+            .unwrap();
+        tx.commit().unwrap();
+        let before = store.control_state().unwrap();
+        let input = InsertMemory {
+            id: None,
+            summary: "schema probe".into(),
+            full_text: None,
+            tags: vec![],
+            initial_stability: None,
+            created_at: None,
+            embedding: Some(vec![1., 0., 0., 0.]),
+            parent_id: None,
+            supersedes: None,
+        };
+        assert!(matches!(
+            store.insert_with_effects(
+                &store.mutation_guard().unwrap(),
+                &MutationContext::unkeyed(config.id),
+                &input,
+                123,
+                &[],
+                None,
+                &[],
+                |_, _, _| panic!("payload staged")
+            ),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        assert_eq!(store.control_state().unwrap(), before);
+        assert!(store.scan_all().unwrap().is_empty());
+    }
+}
+
+pub(super) fn validate_insert_targets(
+    tx: &redb::WriteTransaction,
+    input: &InsertMemory,
+    namespace: NamespaceId,
+    id: MemoryId,
+    existing_edges: &[PersistedEdge],
+) -> Result<(), StorageError> {
+    // Validate explicit targets and branches before staging. The common
+    // effect tail repeats endpoint checks inside this same transaction.
+    for target in [input.parent_id, input.supersedes].into_iter().flatten() {
+        if target == id {
+            return Err(StorageError::InvalidMutation("self link".into()));
+        }
+        let row = tx.open_table(META_TABLE)?;
+        let value = row
+            .get(target.as_bytes().as_slice())?
+            .ok_or(StorageError::NotFound(target.into_inner()))?;
+        let record = DiskRecord::from_bytes(value.value())?;
+        if record.id != *target.as_bytes() || record.namespace_id != namespace.get() {
+            return Err(StorageError::MutationNamespaceMismatch);
+        }
+    }
+    if input.supersedes.is_some_and(|target| {
+        existing_edges
+            .iter()
+            .any(|edge| edge.edge_type == EdgeType::Supersedes && edge.target == target)
+    }) {
+        return Err(StorageError::EdgeConflict("supersedes branch".into()));
+    }
+    Ok(())
+}
+pub(super) fn stage_insert(
+    tx: &redb::WriteTransaction,
+    input: &InsertMemory,
+    config: &NamespaceConfig,
+    record: &mut DiskRecord,
+    normalized: &[f32],
+    sampled_at: i64,
+    stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
+) -> Result<Vec<PersistedEdge>, StorageError> {
+    let id = MemoryId::from_bytes(record.id);
+    let namespace = config.id;
+    record.encode()?;
+    stage(config, record, normalized)?;
+    if let Some(reference) = record.schema.as_mut().and_then(|s| s.vector.as_mut()) {
+        reference.slot = record.vector_slot;
+    }
+    tx.open_table(META_TABLE)?
+        .insert(id.as_bytes().as_slice(), record.encode()?.as_slice())?;
+    for tag in &record.tags {
+        tx.open_multimap_table(TAG_INDEX)?
+            .insert(tag.as_str(), id.as_bytes().as_slice())?;
+    }
+    tx.open_multimap_table(NAMESPACE_INDEX)?
+        .insert(namespace.get(), id.as_bytes().as_slice())?;
+    let mut puts = Vec::new();
+    for (source, target, edge_type) in input
+        .parent_id
+        .map(|parent| (parent, id, EdgeType::ParentChild))
+        .into_iter()
+        .chain(input.supersedes.map(|old| (id, old, EdgeType::Supersedes)))
+    {
+        puts.push(PersistedEdge {
+            source,
+            target,
+            edge_type,
+            weight: 1.0,
+            auto_created: false,
+            created_at: sampled_at.max(0) as u64,
+        });
+    }
+    Ok(puts)
 }

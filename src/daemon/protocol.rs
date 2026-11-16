@@ -50,6 +50,12 @@ pub struct DaemonRpcError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FindSimilarParams {
+    /// False forbids retrieval-attributable writes; omission preserves v1 behavior.
+    #[serde(
+        rename = "recordAccess",
+        default = "crate::search::default_record_access"
+    )]
+    pub record_access: bool,
     /// Source memory ID.
     pub id: String,
     /// Maximum number of results.
@@ -63,6 +69,12 @@ pub struct FindSimilarParams {
 /// Parameters for the `get_memory` RPC method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetMemoryParams {
+    /// False forbids retrieval-attributable writes; omission preserves v1 behavior.
+    #[serde(
+        rename = "recordAccess",
+        default = "crate::search::default_record_access"
+    )]
+    pub record_access: bool,
     /// Memory ID to retrieve.
     pub id: String,
 }
@@ -101,6 +113,9 @@ pub struct ScanDuplicatesParams {
     pub threshold: f32,
     /// Maximum number of memories to sample.
     pub max_memories: usize,
+    /// Opt into a report object; omission preserves the legacy cluster array.
+    #[serde(default)]
+    pub include_coverage: bool,
 }
 
 /// Parameters for the `namespace_stats` RPC method.
@@ -129,11 +144,18 @@ pub const ERR_PARTIALLY_APPLIED: i32 = -32006;
 /// RPC error code: required provider/service is unavailable.
 pub const ERR_UNAVAILABLE: i32 = -32008;
 
+/// RPC error code: an explicit namespace assertion failed.
+pub const ERR_NAMESPACE_MISMATCH: i32 = -32007;
+
 // ── BridgeError conversion ───────────────────────────────────────────
 
 impl From<&BridgeError> for DaemonRpcError {
     fn from(e: &BridgeError) -> Self {
         match e {
+            BridgeError::NamespaceMismatch(msg) => DaemonRpcError {
+                code: ERR_NAMESPACE_MISMATCH,
+                message: msg.clone(),
+            },
             BridgeError::NotFound(msg) => DaemonRpcError {
                 code: ERR_NOT_FOUND,
                 message: msg.clone(),
@@ -174,6 +196,7 @@ impl DaemonRpcError {
     /// Converts this RPC error into the corresponding `BridgeError` variant.
     pub fn into_bridge_error(self) -> BridgeError {
         match self.code {
+            ERR_NAMESPACE_MISMATCH => BridgeError::NamespaceMismatch(self.message),
             ERR_NOT_FOUND => BridgeError::NotFound(self.message),
             ERR_INVALID_INPUT => BridgeError::InvalidInput(self.message),
             ERR_STORAGE => BridgeError::Storage(self.message),
@@ -443,7 +466,7 @@ async fn read_payload<R: AsyncRead + Unpin>(
 /// declares a frame and then goes quiet costs one [`PAYLOAD_CHUNK`] and at
 /// most one timeout, not a pinned connection task holding
 /// [`MAX_MESSAGE_SIZE`].
-async fn read_frame<R: AsyncRead + Unpin>(
+pub(crate) async fn read_frame<R: AsyncRead + Unpin>(
     reader: &mut R,
     limit: usize,
 ) -> Result<Vec<u8>, FrameError> {
@@ -510,8 +533,34 @@ pub async fn write_framed_message<W: AsyncWrite + Unpin>(
     response: &DaemonResponse,
     limit: usize,
 ) -> Result<(), FrameError> {
-    let payload = encode_frame(response, limit)?;
-    write_frame(writer, &payload).await
+    let encode = crate::performance::Timer::new("daemon.serialize");
+    let result = encode_frame(response, limit);
+    encode.outcome(result.is_ok());
+    let payload = result?;
+    crate::performance::event!(
+        kind = "transport_output",
+        transport = "daemon",
+        phase = "attempt",
+        source_bytes = payload.len(),
+        framing_bytes = 4
+    );
+    let delivery = crate::performance::Timer::new("daemon.write_flush");
+    let result = write_frame(writer, &payload).await;
+    crate::performance::event!(
+        kind = "transport_delivery",
+        transport = "daemon",
+        success = result.is_ok()
+    );
+    delivery.outcome(result.is_ok());
+    result?;
+    crate::performance::event!(
+        kind = "transport_output",
+        transport = "daemon",
+        phase = "complete",
+        source_bytes = payload.len(),
+        framing_bytes = 4
+    );
+    Ok(())
 }
 
 /// Writes a length-prefixed JSON-RPC request to the stream.

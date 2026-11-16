@@ -1,0 +1,22 @@
+[
+  {
+    "path": "setup.py",
+    "sdistEqualsOfficialTag": true,
+    "sha256": "4505a27d3974791803d6269a4a95ca14da80132d22d32605f524f2568054256d"
+  },
+  {
+    "path": "py/__init__.py",
+    "sdistEqualsOfficialTag": true,
+    "sha256": "422768f5ad9f6138b6e8a16cd1496ab14a8c40f2519e540515f68d28f7537030"
+  },
+  {
+    "path": "src/pytrec_eval.cpp",
+    "sdistEqualsOfficialTag": true,
+    "sha256": "e01856143788d387885a2ff2651ff928948a7602f15ea1f2771628a835d87a99"
+  },
+  {
+    "path": "LICENSE",
+    "sdistEqualsOfficialTag": true,
+    "sha256": "8ee975cb4e01e3175090ae133724b6f42cc77f4e6cdd8b339a82fe606353e281"
+  }
+]

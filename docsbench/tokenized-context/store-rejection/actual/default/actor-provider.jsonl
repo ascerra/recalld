@@ -1,0 +1,1 @@
+{"requestBody": "{\"model\":\"a6-public-synthetic-v1\",\"input\":[\"a6-document:amber\"],\"dimensions\":4,\"encoding_format\":\"float\"}", "status": 200, "environmentHash": "b54a42e2026e2a69623d8e4991e9e338addb4b20c27e720e0932bd115a257ba6", "deliveryOrdinal": 0, "cacheKeys": ["1f71b2ac5c18fcf7877255623df39a96e1897deba0234065ecea29ba5c9ba45d"]}

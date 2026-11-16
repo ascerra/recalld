@@ -1,0 +1,132 @@
+warning: unused import: `checkpoint::StagedCanonical`
+  --> src/storage/engine.rs:13:16
+   |
+13 | pub(crate) use checkpoint::StagedCanonical;
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1908:19
+     |
+1908 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `hydration`
+   --> src/api/handlers.rs:947:9
+    |
+947 |     let hydration = crate::performance::Timer::new("rest.hydration");
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hydration`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1497:9
+     |
+1497 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+warning: associated items `new_persistent` and `has_memories` are never used
+   --> src/bench/locomo.rs:336:25
+    |
+313 | impl BenchHarness {
+    | ----------------- associated items in this implementation
+...
+336 |     pub(super) async fn new_persistent(
+    |                         ^^^^^^^^^^^^^^
+...
+355 |     pub(super) fn has_memories(&self) -> bool {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `publish_edge_plan` is never used
+   --> src/graph/autolink.rs:221:21
+    |
+221 | pub(crate) async fn publish_edge_plan(
+    |                     ^^^^^^^^^^^^^^^^^
+
+warning: function `caller_hash` is never used
+   --> src/storage/batch.rs:305:15
+    |
+305 | pub(crate) fn caller_hash(
+    |               ^^^^^^^^^^^
+
+warning: function `resolution_hash` is never used
+   --> src/storage/batch.rs:332:15
+    |
+332 | pub(crate) fn resolution_hash(items: &[BatchItem]) -> Result<[u8; 32], super::StorageError> {
+    |               ^^^^^^^^^^^^^^^
+
+warning: method `insert_memory_with_work` is never used
+  --> src/storage/engine/insertion.rs:46:19
+   |
+ 4 | impl RedbStorageEngine {
+   | ---------------------- method in this implementation
+...
+46 |     pub(crate) fn insert_memory_with_work(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `batch_id` is never read
+   --> src/storage/metadata/batch.rs:941:9
+    |
+938 | pub(crate) struct NativeBatchBookkeepingRef {
+    |                   ------------------------- field in this struct
+...
+941 |     pub batch_id: Uuid,
+    |         ^^^^^^^^
+
+warning: method `acknowledge_derived_effects` is never used
+    --> src/storage/metadata/effects.rs:1030:19
+     |
+ 308 | impl MetadataStore {
+     | ------------------ method in this implementation
+...
+1030 |     pub(crate) fn acknowledge_derived_effects(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `tombstone_with_effects` is never used
+ --> src/storage/metadata/tombstone.rs:5:19
+  |
+4 | impl MetadataStore {
+  | ------------------ method in this implementation
+5 |     pub(crate) fn tombstone_with_effects(
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `compact_write_new_file` and `compact_finalize` are never used
+   --> src/storage/text.rs:392:19
+    |
+198 | impl TextStore {
+    | -------------- methods in this implementation
+...
+392 |     pub(super) fn compact_write_new_file(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+...
+402 |     pub(super) fn compact_finalize(&mut self) -> Result<(), StorageError> {
+    |                   ^^^^^^^^^^^^^^^^
+
+warning: method `finish_batch` is never used
+   --> src/storage/vectors.rs:536:19
+    |
+305 | impl VectorStore {
+    | ---------------- method in this implementation
+...
+536 |     pub(super) fn finish_batch(&mut self) -> Result<()> {
+    |                   ^^^^^^^^^^^^
+
+warning: `recalld` (lib test) generated 14 warnings (run `cargo fix --lib -p recalld --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 0.31s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-212d4a4f320696fe)
+
+running 2 tests
+test api::handlers::validation_tests::namespace_creation_typed_validation_and_unavailable_errors ... ok
+test api::handlers::validation_tests::namespace_creation_storage_failure_is_not_a_duplicate ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1270 filtered out; finished in 0.18s
+

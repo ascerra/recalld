@@ -1,0 +1,122 @@
+[
+  {
+    "accounting": {
+      "accountingVersion": 1,
+      "actorProcessErrors": "0",
+      "answerContextCapTokens": null,
+      "attemptedActions": "15",
+      "backendDurability": null,
+      "categories": {
+        "notification": "1",
+        "protocol_error": "1",
+        "success": "12",
+        "tool_error": "1"
+      },
+      "denominatorUnit": "complete-external-synthetic-episode",
+      "failedRpcObservations": "0",
+      "httpFramingBytes": null,
+      "incompleteActions": "0",
+      "latencyScope": "observed-client-rpc-no-nested-sum-no-performance-claim",
+      "measuredTokens": null,
+      "observedClientElapsedNsByStep": {
+        "1": "59633828",
+        "10": "4408961",
+        "11": "2164252",
+        "12": "2259668",
+        "13": "2043501",
+        "14": "2075042",
+        "15": "1577459",
+        "2": "12792",
+        "3": "1537793",
+        "4": "718250",
+        "5": "51459",
+        "6": "641459",
+        "7": "4653462",
+        "8": "3754044",
+        "9": "3349377"
+      },
+      "paidCallBasis": "declared-offline-synthetic-replay-only",
+      "paidExternalModelCalls": "0",
+      "productionCost": null,
+      "providerInternalRetries": null,
+      "providerRequestBodyBytes": "966",
+      "providerRequestsObserved": "9",
+      "providerResponseBodyBytesWrittenKnown": "930",
+      "providerResponseWriteUnknown": "0",
+      "providerStatuses": {
+        "200": "8",
+        "400": "1"
+      },
+      "requestBytesIntended": "2365",
+      "requestBytesWrittenKnown": "2365",
+      "requestWriteUnknownActions": "0",
+      "responseBytesReadKnown": "30009",
+      "sampled": false,
+      "terminalRpcObservations": "15",
+      "tokenUsageStatus": "unavailable-protocol-zero-is-synthetic-fixture",
+      "tokenizer": null
+    },
+    "run": "baseline",
+    "status": "passed"
+  },
+  {
+    "accounting": {
+      "accountingVersion": 1,
+      "actorProcessErrors": "0",
+      "answerContextCapTokens": null,
+      "attemptedActions": "15",
+      "backendDurability": null,
+      "categories": {
+        "notification": "1",
+        "protocol_error": "1",
+        "success": "12",
+        "tool_error": "1"
+      },
+      "denominatorUnit": "complete-external-synthetic-episode",
+      "failedRpcObservations": "0",
+      "httpFramingBytes": null,
+      "incompleteActions": "0",
+      "latencyScope": "observed-client-rpc-no-nested-sum-no-performance-claim",
+      "measuredTokens": null,
+      "observedClientElapsedNsByStep": {
+        "1": "54902283",
+        "10": "4347753",
+        "11": "2576002",
+        "12": "2474335",
+        "13": "2546377",
+        "14": "2457085",
+        "15": "1838835",
+        "2": "12083",
+        "3": "1685709",
+        "4": "825209",
+        "5": "186750",
+        "6": "925501",
+        "7": "4380044",
+        "8": "3395419",
+        "9": "3487752"
+      },
+      "paidCallBasis": "declared-offline-synthetic-replay-only",
+      "paidExternalModelCalls": "0",
+      "productionCost": null,
+      "providerInternalRetries": null,
+      "providerRequestBodyBytes": "966",
+      "providerRequestsObserved": "9",
+      "providerResponseBodyBytesWrittenKnown": "930",
+      "providerResponseWriteUnknown": "0",
+      "providerStatuses": {
+        "200": "8",
+        "400": "1"
+      },
+      "requestBytesIntended": "2365",
+      "requestBytesWrittenKnown": "2365",
+      "requestWriteUnknownActions": "0",
+      "responseBytesReadKnown": "30009",
+      "sampled": false,
+      "terminalRpcObservations": "15",
+      "tokenUsageStatus": "unavailable-protocol-zero-is-synthetic-fixture",
+      "tokenizer": null
+    },
+    "run": "changed-labels",
+    "status": "passed"
+  }
+]

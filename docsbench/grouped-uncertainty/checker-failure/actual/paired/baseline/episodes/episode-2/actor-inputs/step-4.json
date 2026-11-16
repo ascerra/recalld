@@ -1,0 +1,10 @@
+{
+  "currentQuestion": {
+    "queryId": "q3",
+    "text": "amber pine FUTURE_QUESTION_CANARY"
+  },
+  "deliveryOrdinal": 4,
+  "expectedMiss": false,
+  "phase": "query",
+  "startId": 13
+}

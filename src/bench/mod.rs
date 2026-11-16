@@ -5,3 +5,12 @@
 
 pub mod claude;
 pub mod locomo;
+
+/// Private evaluator-channel consumer, never an actor MCP tool.
+pub mod controls;
+
+/// Shared-clock evaluator constructor and bounded isolated checkpoint controls.
+pub mod frozen;
+
+mod checkpoint;
+mod native_prefix;

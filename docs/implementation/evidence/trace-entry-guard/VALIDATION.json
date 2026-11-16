@@ -1,0 +1,151 @@
+{
+  "runtime_source": "2919d64de20891a89765db9eeedb34ca95c28118",
+  "parent": "3cfa164453d5e1c0f149e123acbc2331eca384ab",
+  "source_files": 231,
+  "source_manifest_sha256": "35cc550b6952c5bad29ecfa6bbcc1c8c9851bc0f79a202def339149554f8815e",
+  "postrun_git_current_snapshot_equal": true,
+  "scope": "offline all-targets, not all-features; correctness only, no overhead evidence",
+  "runs": {
+    "focus": {
+      "log_sha256": "e8127063b4e8357f49f328cf38e8fa259fb240672e0bbad85386b645fb43cfa8",
+      "container_state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-15T22:15:42.451359672Z",
+        "FinishedAt": "2026-11-15T22:16:25.943372408Z"
+      },
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "network": "none",
+      "memory_bytes": 4294967296,
+      "cpus": 2.0,
+      "command_sha256": "d01c52a671b2826c8bb076e98dbf05f1ef1651155f4a982f19e53bd03e20cfd7",
+      "results": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1039 filtered out; finished in 1.01s",
+        "test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 1020 filtered out; finished in 2.56s",
+        "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 1029 filtered out; finished in 1.54s"
+      ],
+      "warnings": [
+        "warning: `recalld` (lib test) generated 10 warnings",
+        "warning: `recalld` (lib test) generated 10 warnings",
+        "warning: `recalld` (lib test) generated 10 warnings"
+      ],
+      "finished": [
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.06s",
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s",
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s"
+      ]
+    },
+    "full": {
+      "log_sha256": "ba8309dd2c5963ae34006704a53b20b53963666685915cc5ef6a2716c7829627",
+      "container_state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-15T22:16:54.002103136Z",
+        "FinishedAt": "2026-11-15T22:24:23.360489214Z"
+      },
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "network": "none",
+      "memory_bytes": 4294967296,
+      "cpus": 2.0,
+      "command_sha256": "457003efcca3ffb733c3c5cae0ce344738ab21471f3857d56992dfcf84115d3f",
+      "results": [
+        "test result: ok. 1042 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 390.96s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.29s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.23s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s"
+      ],
+      "warnings": [
+        "warning: `recalld` (lib test) generated 10 warnings",
+        "warning: `recalld` (lib) generated 27 warnings (6 duplicates)",
+        "warning: `recalld` (lib) generated 699 warnings (run `cargo clippy --fix --lib -p recalld` to apply 85 suggestions)",
+        "warning: `recalld` (bin \"recalld\") generated 1 warning",
+        "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+        "warning: `recalld` (lib test) generated 768 warnings (680 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 6 suggestions)"
+      ],
+      "finished": [
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.64s",
+        "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.45s"
+      ]
+    }
+  },
+  "executables": [
+    {
+      "path": "/target/debug/deps/lifecycle_cli-4843a41927cafc6b",
+      "bytes": 261276848,
+      "sha256": "c440559148e6e1306a478033e3476e81525fde83384e0b3093d8db0ca185acf0"
+    },
+    {
+      "path": "/target/debug/deps/recalld-c8392f2a5ef64898",
+      "bytes": 6908664,
+      "sha256": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b"
+    },
+    {
+      "path": "/target/debug/deps/recalld-e423ca3d07310388",
+      "bytes": 426520984,
+      "sha256": "a595090a146e32f82c283fed4123ac8dd0976af970ccca0131cc510dd3f6700c"
+    },
+    {
+      "path": "/target/debug/deps/recalld_cli-2dba722497aafcf6",
+      "bytes": 6357936,
+      "sha256": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f"
+    },
+    {
+      "path": "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb",
+      "bytes": 6358016,
+      "sha256": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41"
+    },
+    {
+      "path": "/target/debug/deps/text_migration_cli-92bf02c892a58814",
+      "bytes": 260774024,
+      "sha256": "749fe0dc15fbaf32ebd9374fe00139ef22d352ea49729a592e50e5d6b199f60e"
+    },
+    {
+      "path": "/target/debug/examples/offline_eval-17479300049544c8",
+      "bytes": 308757744,
+      "sha256": "fc8d325a03b347f7ff6705e7d0a37c5d8075337bb42fbea4ed8597108333e8dd"
+    },
+    {
+      "path": "/target/debug/examples/performance_probe-303f79832cca569c",
+      "bytes": 314478512,
+      "sha256": "5b833aeadc6fa1ae15a065dac5a4e39b52ea0e5a04b634e36e124bde17fd7558"
+    }
+  ],
+  "focus_executables_before_full": [
+    {
+      "path": "/tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity/debug/deps/recalld-e423ca3d07310388",
+      "size": 426520984,
+      "sha256": "a595090a146e32f82c283fed4123ac8dd0976af970ccca0131cc510dd3f6700c"
+    }
+  ],
+  "dependencies_unchanged": true,
+  "cli_binaries": [
+    {
+      "path": "/target/debug/recalld-text-migrate",
+      "bytes": 259430968,
+      "sha256": "e50df01bf02bce9e5f6562a14622a20f4dfb3fb91bcd9c688aaa3b02c8869ce9"
+    },
+    {
+      "path": "/target/debug/recalld",
+      "bytes": 353650080,
+      "sha256": "2aee943a5786d516c5a820edee71249fcc659b2c989e61326b34e47e11398ce8"
+    }
+  ]
+}

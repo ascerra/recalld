@@ -432,6 +432,10 @@ fn access_kind_from_u8(val: u8) -> Result<AccessKind, DecodeError> {
 /// Estimated size per entry: ~634 bytes (see Spec 01 section 3.4).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CachedRecord {
+    /// Exact persisted structured labels and provenance; no inference from tags.
+    pub labels: Option<crate::model::schema::StructuredLabels>,
+    /// Exact canonical lifecycle provenance; None for legacy physical records.
+    pub lifecycle: Option<crate::model::schema::LifecycleFields>,
     /// Unique identifier.
     pub id: MemoryId,
     /// Namespace this memory belongs to.
@@ -460,7 +464,7 @@ pub struct CachedRecord {
     pub edge_count: u16,
     /// Index into the namespace's vectors.dat.
     pub vector_slot: u32,
-    /// Named entities extracted from the summary (derived at load time).
+    /// Exact canonical entities, or entities parsed from retained legacy tags.
     pub entities: Vec<String>,
 }
 
@@ -469,7 +473,7 @@ impl CachedRecord {
     ///
     /// This is a best-effort estimate: it accounts for the struct's
     /// fixed fields, the heap-allocated summary string, the tags
-    /// vector, and the entities vector. It intentionally overestimates
+    /// vector, entities and canonical labels. It intentionally overestimates
     /// slightly (includes allocator overhead) to avoid cache overflows.
     pub fn estimated_size(&self) -> u32 {
         let fixed = std::mem::size_of::<Self>() as u32;
@@ -486,7 +490,16 @@ impl CachedRecord {
             .sum();
         let overhead = 64; // HashMap + allocator overhead
 
-        fixed + summary_heap + tags_heap + entities_heap + overhead
+        let labels_heap: u32 = self.labels.as_ref().map_or(0, |labels| {
+            labels
+                .entities
+                .iter()
+                .chain(&labels.topics)
+                .chain(&labels.emotions)
+                .map(|label| label.len() as u32 + 24)
+                .sum()
+        });
+        fixed + summary_heap + tags_heap + entities_heap + labels_heap + overhead
     }
 }
 
@@ -533,10 +546,16 @@ impl From<&Memory> for DiskRecord {
 impl From<&DiskRecord> for CachedRecord {
     /// Convert a DiskRecord to a CachedRecord for insertion into the
     /// moka cache. Drops full_text pointer and access_history (not
-    /// cached). Parses entities from stored tags (entity/ prefix).
+    /// cached). Preserves schema entities verbatim; schema-less records use
+    /// the existing retained-tag parser (entity/ prefix).
     fn from(d: &DiskRecord) -> Self {
-        let entities = crate::model::parse_structured_tags(&d.tags).entities;
+        let entities = d.schema.as_ref().map_or_else(
+            || crate::model::parse_structured_tags(&d.tags).entities,
+            |schema| schema.labels.entities.clone(),
+        );
         CachedRecord {
+            labels: d.schema.as_ref().map(|schema| schema.labels.clone()),
+            lifecycle: d.schema.as_ref().map(|s| s.lifecycle.clone()),
             id: MemoryId::from_bytes(d.id),
             namespace_id: NamespaceId::new(d.namespace_id),
             created_at: d.created_at,

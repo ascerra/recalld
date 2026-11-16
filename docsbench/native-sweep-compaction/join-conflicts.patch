@@ -1,0 +1,17 @@
+diff --cc src/storage/metadata/native_records/tests.rs
+index fc37669e,b1d41d04..00000000
+--- a/src/storage/metadata/native_records/tests.rs
++++ b/src/storage/metadata/native_records/tests.rs
+@@@ -18,8 -18,7 +18,12 @@@ mod readers
+  
+  #[path = "batch_tests.rs"]
+  mod batches;
+++<<<<<<< HEAD
+ +#[path = "exact_scan_tests.rs"]
+ +mod exact_scan;
+++=======
++ 
+++>>>>>>> 50da71abee66cea159988a203d286f570f091718
+  #[path = "sweep_tests.rs"]
+  mod sweep;
+  

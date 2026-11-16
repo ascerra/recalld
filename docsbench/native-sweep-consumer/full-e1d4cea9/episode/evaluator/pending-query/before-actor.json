@@ -1,0 +1,90 @@
+{
+  "readiness": {
+    "committedGeneration": "8",
+    "derived": [
+      {
+        "appliedGeneration": "8",
+        "name": "graph",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "8",
+        "name": "vectors",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "8",
+        "name": "fts",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "8",
+        "name": "entities",
+        "ready": true
+      }
+    ],
+    "pendingWork": 0,
+    "ready": true,
+    "storeId": "da30f844-2729-4628-870c-fa5efeca8d66"
+  },
+  "snapshot": {
+    "committed": {
+      "generation": "8",
+      "storeId": "da30f844-2729-4628-870c-fa5efeca8d66"
+    },
+    "logicalHash": "52dd9a1019c5076218f05a7ddd3bd54370c09c507f99a7dc64eb252fb0abc084",
+    "manifest": "/output/episode/runtime/recalld-frozen-canonical-mJa2o6/manifest.json",
+    "sha256": "9fe584199565b0b78c6b3090a5a0a714ce1fe45ce0a11a68f8b85def2cec9164",
+    "track": "isolated-native-sweep-checkpoint-v1"
+  },
+  "state": {
+    "committed": {
+      "generation": "8",
+      "storeId": "da30f844-2729-4628-870c-fa5efeca8d66"
+    },
+    "logicalHash": null,
+    "runtimeState": {
+      "allocation": {
+        "counter": 0,
+        "lastMemoryMillis": null,
+        "seed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "version": 1
+      },
+      "nowMillis": 1767225600000
+    },
+    "snapshot": false
+  }
+}

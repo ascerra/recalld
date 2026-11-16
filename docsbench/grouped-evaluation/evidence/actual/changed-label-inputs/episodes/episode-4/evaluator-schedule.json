@@ -1,0 +1,22 @@
+{
+  "futureQueryCanary": "FUTURE_QUESTION_CANARY",
+  "queries": [
+    {
+      "queryId": "q0",
+      "text": "amber elm"
+    },
+    {
+      "queryId": "q1",
+      "text": "amber elm"
+    },
+    {
+      "queryId": "q2",
+      "text": "amber elm"
+    },
+    {
+      "queryId": "q3",
+      "text": "amber elm FUTURE_QUESTION_CANARY"
+    }
+  ],
+  "scheduleVersion": 1
+}

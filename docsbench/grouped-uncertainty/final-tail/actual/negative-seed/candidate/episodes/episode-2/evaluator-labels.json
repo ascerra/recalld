@@ -1,0 +1,14 @@
+{
+  "adapterVersion": 1,
+  "annotationUnit": "synthetic-unit",
+  "labelCanary": "EVALUATOR_LABEL_CANARY_ONLY",
+  "relevant": {
+    "q0": [
+      "turn-0"
+    ],
+    "q1": [],
+    "q3": [
+      "turn-1"
+    ]
+  }
+}

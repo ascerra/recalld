@@ -256,7 +256,7 @@ fn insertion_canonical_effect_failure_retains_receipt_and_reopens_without_slot_r
         let error = engine
             .insert_memory_with_receipt(&ctx, &input, &[], 123)
             .unwrap_err();
-        let StorageError::CommittedInsertion { receipt, .. } = error else {
+        let StorageError::CommittedMutation { receipt, .. } = error else {
             panic!("{error}")
         };
         let id = crate::storage::insertion::inserted_id(&receipt).unwrap();
@@ -425,7 +425,7 @@ fn insertion_pending_plan_preflight_rejects_before_original_store_changes() {
         let ctx = context(&engine, "malformed");
         assert!(matches!(
             engine.insert_memory_with_receipt(&ctx, &request(), &[], 123),
-            Err(StorageError::CommittedInsertion { .. })
+            Err(StorageError::CommittedMutation { .. })
         ));
     }
     let dir = f.close();
@@ -638,7 +638,7 @@ fn reject_zero_insertion(supplied: bool) {
     let error = error.expect_err("zero-norm insertion must fail");
     assert!(
         if supplied {
-            matches!(error, StorageError::InvalidMutation(_))
+            matches!(error, StorageError::CallerVectorInvalid(_))
         } else {
             matches!(error, StorageError::ProviderVectorUnavailable(_))
         },
@@ -736,7 +736,7 @@ fn insertion_vector_boundary_normalizes_both_origins_and_preserves_request_ident
                 .unwrap_err();
             assert!(
                 if supplied {
-                    matches!(error, StorageError::InvalidMutation(_))
+                    matches!(error, StorageError::CallerVectorInvalid(_))
                 } else {
                     matches!(error, StorageError::ProviderVectorUnavailable(_))
                 },

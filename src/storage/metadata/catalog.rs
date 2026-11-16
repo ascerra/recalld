@@ -10,6 +10,18 @@ impl MetadataStore {
         config: &NamespaceConfig,
         prepare: impl FnOnce(NamespaceId) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
+        let guard = self.mutation_guard()?;
+        self.create_catalog_guarded(&guard, ctx, config, prepare)
+    }
+
+    pub(crate) fn create_catalog_guarded(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        config: &NamespaceConfig,
+        prepare: impl FnOnce(NamespaceId) -> Result<(), StorageError>,
+    ) -> Result<WriteReceipt, StorageError> {
+        guard.check(self)?;
         if ctx.scope != MutationScope::Catalog {
             return Err(StorageError::InvalidMutationContext(
                 "create requires catalog scope".into(),
@@ -19,11 +31,11 @@ impl MetadataStore {
         let policy = NamespacePolicy::from(config);
         let fields = control::encode(&(&config.name, config.embedding_dim, &policy))?;
         let hash = control::request_hash(ctx, "namespace_create_v1", &[&fields]);
-        let _guard = self.mutation_guard()?;
         let tx = self.db.begin_write()?;
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }
+        purge::require_no_active_write(&tx)?;
         control::read_control(&tx)?.committed_generation.next()?;
         let id;
         {
@@ -48,7 +60,7 @@ impl MetadataStore {
             stored.id = id;
             table.insert(id.get(), control::encode(&stored)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -67,6 +79,15 @@ impl MetadataStore {
         ctx: &MutationContext,
         policy: &NamespacePolicy,
     ) -> Result<WriteReceipt, StorageError> {
+        self.update_namespace_policy_with_work(ctx, policy, None)
+    }
+
+    pub(crate) fn update_namespace_policy_with_work(
+        &self,
+        ctx: &MutationContext,
+        policy: &NamespacePolicy,
+        parent: Option<&WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
         let MutationScope::Namespace(id) = ctx.scope else {
             return Err(StorageError::InvalidMutationContext(
                 "policy update requires namespace scope".into(),
@@ -75,19 +96,14 @@ impl MetadataStore {
         policy.validate()?;
         let fields = control::encode(policy)?;
         let hash = control::request_hash(ctx, "namespace_policy_update_v1", &[&fields]);
-        let _guard = self.mutation_guard()?;
+        let _guard = self.mutation_guard_with_work(parent)?;
         let tx = self.db.begin_write()?;
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }
         {
+            let mut config = namespace_state::require_namespace_active(&tx, id)?;
             let mut table = tx.open_table(NAMESPACE_TABLE)?;
-            let mut config = NamespaceConfig::decode(
-                table
-                    .get(id.get())?
-                    .ok_or(StorageError::NamespaceNotFound(id.get()))?
-                    .value(),
-            )?;
             if config.schema.is_some() {
                 return Err(StorageError::InvalidMutation(
                     "v2 policy and profile changes require a separate migration".into(),
@@ -96,7 +112,7 @@ impl MetadataStore {
             policy.apply(&mut config);
             table.insert(id.get(), control::encode(&config)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -106,7 +122,7 @@ impl MetadataStore {
         Ok(receipt)
     }
 
-    fn commit_catalog(
+    pub(super) fn commit_catalog(
         &self,
         tx: redb::WriteTransaction,
         receipt: &WriteReceipt,
@@ -128,10 +144,11 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.view_publication.canonical_committed();
         crate::storage::catalog::boundary("after_metadata_commit").map_err(|source| {
             self.mark_unavailable();
-            StorageError::CommittedEffectsPending {
-                operation_id: receipt.operation_id,
+            StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
                 source: Box::new(source),
             }
         })
@@ -328,3 +345,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "catalog/owned_clock_tests.rs"]
+mod owned_clock_tests;

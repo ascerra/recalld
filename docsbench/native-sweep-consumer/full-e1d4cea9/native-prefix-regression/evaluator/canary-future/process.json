@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/native-prefix-regression/runtime/config.toml",
+    "--data-root",
+    "/output/native-prefix-regression/runtime/canary-future",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--restore-checkpoint",
+    "/output/native-prefix-regression/runtime/recalld-frozen-canonical-0q1CMU/manifest.json",
+    "--checkpoint-sha256",
+    "45d7beac48fecd460231903f4eb0f369e3dfaf99b40e95cfd8fdc141022cc33c"
+  ],
+  "exitCode": 0,
+  "forced": false,
+  "negativeConstructorProbe": false,
+  "pid": 4322,
+  "priorJoined": true,
+  "status": "joined"
+}

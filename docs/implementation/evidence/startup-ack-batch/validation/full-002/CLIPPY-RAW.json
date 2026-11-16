@@ -1,0 +1,8 @@
+{
+  "rawPath": "/private/tmp/recalld-implementation/startup-ack-batch/.validation/full-002/output/clippy.stderr",
+  "bytes": 997309,
+  "sha256": "fd8a6fd4f4c786319a6030a5cc11bdbfc8b295fafed50af120285ed8dbaae956",
+  "warningLines": 1205,
+  "exit": 0,
+  "scope": "all targets, not all features; warnings are not claimed baseline-only"
+}

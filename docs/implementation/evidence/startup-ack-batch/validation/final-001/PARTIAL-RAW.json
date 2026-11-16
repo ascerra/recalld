@@ -1,0 +1,12 @@
+[
+  {
+    "rawPath": "/private/tmp/recalld-implementation/startup-ack-batch/.validation/final-001/output/full.stdout",
+    "bytes": 126402,
+    "sha256": "d79a4ede3962b19ca6e2e7c1d745b9b977dcee3ac68dc832ccb8eed654fa4f1c"
+  },
+  {
+    "rawPath": "/private/tmp/recalld-implementation/startup-ack-batch/.validation/final-001/output/full.stderr",
+    "bytes": 57529,
+    "sha256": "7ecfc87487bae643f5d8682650d99b9803f8d8f073517c5364654ef550ab1a4d"
+  }
+]

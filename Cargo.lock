@@ -2347,6 +2347,7 @@ dependencies = [
  "metrics",
  "moka",
  "rand 0.8.6",
+ "rand_chacha",
  "redb",
  "reqwest",
  "roaring",

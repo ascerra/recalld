@@ -1,0 +1,48 @@
+{
+  "exposure": {
+    "committedGeneration": "4",
+    "operationId": "7fefec69-11e0-4a9c-8cf8-7115dc7e40aa",
+    "outcome": {
+      "accesses": [
+        {
+          "accessedAt": 100,
+          "kind": "direct_retrieval",
+          "memoryId": "01a1dc6e-2f15-7fa0-a015-ffaf0ce1dea8"
+        }
+      ],
+      "kind": "exposuresRecorded"
+    },
+    "receiptVersion": 1,
+    "replayed": false,
+    "storeId": "762ed608-83d3-4a88-ada1-767130a08b2c"
+  },
+  "exposureExpectedGeneration": "3",
+  "feedback": {
+    "committedGeneration": "5",
+    "operationId": "8e0f4298-2bf5-416e-9de7-b3706428077d",
+    "outcome": {
+      "appliedAt": 200,
+      "kind": "legacyFeedbackRecorded",
+      "memoryId": "01a1dc6e-2f15-7fa0-a015-ffaf0ce1dea8",
+      "quality": 3
+    },
+    "receiptVersion": 1,
+    "replayed": false,
+    "storeId": "762ed608-83d3-4a88-ada1-767130a08b2c"
+  },
+  "feedbackExpectedGeneration": "4",
+  "forget": {
+    "committedGeneration": "6",
+    "operationId": "f31ba51c-79f0-4586-9029-ff48d2bad099",
+    "outcome": {
+      "kind": "memoryTombstoned",
+      "memoryId": "01a1dc6e-2f15-7fa0-a015-ffaf0ce1dea8",
+      "status": "tombstoned"
+    },
+    "receiptVersion": 1,
+    "replayed": false,
+    "storeId": "762ed608-83d3-4a88-ada1-767130a08b2c"
+  },
+  "forgetExpectedGeneration": "5",
+  "memoryId": "01a1dc6e-2f15-7fa0-a015-ffaf0ce1dea8"
+}

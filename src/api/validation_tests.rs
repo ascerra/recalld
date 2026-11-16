@@ -15,7 +15,15 @@ use crate::storage::StorageEngine as _;
 use crate::test_support::Fixture;
 
 fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
-    fixture_clients_with_provider(
+    let (state, bridge) = fixture_state(f);
+    (
+        crate::api::routes::router(state, &Default::default()),
+        bridge,
+    )
+}
+
+fn fixture_state(f: &Fixture) -> (AppState, crate::mcp::bridge::McpBridge) {
+    fixture_state_with_embedding(
         f,
         Arc::new(crate::embedding::PassthroughProvider::new(
             crate::test_support::DIM,
@@ -23,10 +31,21 @@ fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
     )
 }
 
-fn fixture_clients_with_provider(
+fn fixture_clients_with_embedding(
     f: &Fixture,
     embedding: Arc<dyn crate::embedding::EmbeddingProvider>,
 ) -> (Router, crate::mcp::bridge::McpBridge) {
+    let (state, bridge) = fixture_state_with_embedding(f, embedding);
+    (
+        crate::api::routes::router(state, &Default::default()),
+        bridge,
+    )
+}
+
+fn fixture_state_with_embedding(
+    f: &Fixture,
+    embedding: Arc<dyn crate::embedding::EmbeddingProvider>,
+) -> (AppState, crate::mcp::bridge::McpBridge) {
     use crate::search::adapters::*;
     let engine = Arc::new(crate::search::QueryEngine::new(
         Arc::new(StorageNamespaceResolver::new(f.storage.clone())),
@@ -41,7 +60,10 @@ fn fixture_clients_with_provider(
             Arc::new(crate::rif::RifEngine::new(Default::default())),
             f.graph.clone(),
         )),
-        Arc::new(StorageAccessRecorder::new(f.storage.clone())),
+        Arc::new(StorageAccessRecorder::new(
+            f.storage.clone(),
+            f.cache.clone(),
+        )),
     ));
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.search = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
@@ -94,16 +116,13 @@ fn fixture_clients_with_provider(
             config,
             false,
         )),
-        Arc::new(NamespaceRegistryAdapter::new(
-            f.storage.clone(),
-            embedding.clone(),
-        )),
+        Arc::new(
+            NamespaceRegistryAdapter::new(f.storage.clone(), embedding.clone())
+                .with_completion(f.completion()),
+        ),
         Arc::new(NoopMetricsCollector),
     );
-    (
-        crate::api::routes::router(state, &Default::default()),
-        bridge,
-    )
+    (state, bridge)
 }
 
 async fn post(app: &Router, path: &str, body: Value) -> (StatusCode, Value) {
@@ -154,7 +173,7 @@ async fn namespace_profile_http_mcp_use_active_width_before_catalog_allocation()
         "fixture-model".into(),
         8,
     ));
-    let (app, bridge) = fixture_clients_with_provider(&f, provider);
+    let (app, bridge) = fixture_clients_with_embedding(&f, provider);
     let before = namespace_tree(f.path());
     let generation = f
         .storage
@@ -278,7 +297,7 @@ async fn namespace_profile_invalid_runtime_is_unavailable_without_catalog_mutati
             profile: Some(crate::embedding::runtime::tests::profile()),
         },
     ] {
-        let (app, bridge) = fixture_clients_with_provider(&f, Arc::new(provider));
+        let (app, bridge) = fixture_clients_with_embedding(&f, Arc::new(provider));
         let input = json!({"name":"bad-runtime"});
         let (status, body) = post(&app, "/namespaces", input.clone()).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
@@ -292,7 +311,7 @@ async fn namespace_profile_invalid_runtime_is_unavailable_without_catalog_mutati
         assert_eq!(namespace_tree(f.path()), before);
     }
     // No descriptor remains allowed only as explicitly unverified v1 compatibility.
-    let (app, _) = fixture_clients_with_provider(
+    let (app, _) = fixture_clients_with_embedding(
         &f,
         Arc::new(Provider {
             dim: 4,
@@ -396,7 +415,7 @@ async fn http_namespace_rejects_exported_probe_values_without_creation() {
         );
     }
     for (name, dim) in [("one", 1), ("maximum", 8192)] {
-        let (app, _) = fixture_clients_with_provider(
+        let (app, _) = fixture_clients_with_embedding(
             &f,
             Arc::new(crate::embedding::PassthroughProvider::new(dim as usize)),
         );
@@ -597,15 +616,11 @@ async fn http_duplicate_coverage_reports_caps_missing_vectors_and_empty_samples(
     assert_eq!(coverage["complete"], false);
     assert_eq!(coverage["sampleCap"], 200);
     assert_eq!(coverage["neighborCap"], 11);
-    assert_eq!(coverage["countsAvailable"], false);
-    for key in [
-        "sampledCount",
-        "eligibleCount",
-        "skippedVectorCount",
-        "truncated",
-    ] {
-        assert!(coverage[key].is_null(), "{key}");
+    assert_eq!(coverage["countsAvailable"], true);
+    for key in ["sampledCount", "eligibleCount", "skippedVectorCount"] {
+        assert_eq!(coverage[key], 0, "{key}");
     }
+    assert_eq!(coverage["truncated"], false);
     for count in 0..=2 {
         if count > 0 {
             f.insert_memory().await;
@@ -636,4 +651,378 @@ async fn http_duplicate_coverage_reports_caps_missing_vectors_and_empty_samples(
             StatusCode::BAD_REQUEST
         );
     }
+}
+
+// Run the actual HTTP router and MCP dispatch against the same canonical fixture.
+async fn scope_request(app: &Router, method: &str, path: &str, body: Value) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned())),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scope_assertions_reject_wrong_namespace_before_access_search_or_mutation() {
+    let f = Fixture::new();
+    let other = f.create_namespace("other");
+    let id = f.insert_memory().await;
+    // Deliberately spoof cached scope. The guard must use disk, not cache.
+    let mut cached = crate::model::CachedRecord::from(&f.record(id).unwrap());
+    cached.id = id;
+    cached.namespace_id = other;
+    f.cache.insert(id, cached).await;
+    let before = format!("{:?}", f.record(id));
+    let (app, mut bridge) = fixture_clients(&f);
+    bridge.storage = Arc::new(f.storage_adapter());
+    bridge.default_namespace = "other".into();
+    for namespace in ["other", "missing"] {
+        for (method, suffix) in [
+            ("GET", ""),
+            ("DELETE", ""),
+            ("POST", "/reinforce"),
+            ("POST", "/similar"),
+        ] {
+            let path = if suffix == "/similar" {
+                format!("/similar/{id}")
+            } else if method == "POST" {
+                format!("/memories/{id}{suffix}")
+            } else {
+                format!("/memories/{id}?namespace={namespace}")
+            };
+            let (status, body) =
+                scope_request(&app, method, &path, json!({"namespace":namespace})).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{method} {path}: {body}");
+            assert_eq!(body["error"], "NAMESPACE_MISMATCH");
+            assert_eq!(before, format!("{:?}", f.record(id)));
+        }
+        for tool in [
+            "get_memory",
+            "reinforce_memory",
+            "forget_memory",
+            "find_similar_memories",
+        ] {
+            let result = crate::mcp::tools::dispatch_tool(
+                &bridge,
+                tool,
+                json!({"id":id.to_string(), "namespace":namespace}),
+            )
+            .await;
+            assert_eq!(result.is_error, Some(true), "{tool}");
+            assert!(
+                serde_json::to_string(&result)
+                    .unwrap()
+                    .contains("NAMESPACE_MISMATCH")
+            );
+            assert_eq!(before, format!("{:?}", f.record(id)));
+        }
+    }
+    // Assertion input cannot silently become omission, even if a valid record exists.
+    for value in [
+        Value::Null,
+        json!(42),
+        json!(false),
+        json!([]),
+        json!(""),
+        json!("bad space"),
+    ] {
+        for tool in [
+            "get_memory",
+            "reinforce_memory",
+            "forget_memory",
+            "find_similar_memories",
+        ] {
+            let result = crate::mcp::tools::dispatch_tool(
+                &bridge,
+                tool,
+                json!({"id":id.to_string(), "namespace":value}),
+            )
+            .await;
+            assert_eq!(result.is_error, Some(true), "{tool}: {value}");
+        }
+        for suffix in ["reinforce", "similar"] {
+            let (status, _) = scope_request(
+                &app,
+                "POST",
+                &if suffix == "similar" {
+                    format!("/similar/{id}")
+                } else {
+                    format!("/memories/{id}/{suffix}")
+                },
+                json!({"namespace":value}),
+            )
+            .await;
+            assert!(status.is_client_error(), "{suffix}: {value}");
+        }
+    }
+    assert_eq!(before, format!("{:?}", f.record(id)));
+    // Unknown IDs stay not found, rather than revealing/inferring a namespace.
+    let missing = crate::model::MemoryId::new();
+    let (status, _) = scope_request(
+        &app,
+        "GET",
+        &format!("/memories/{missing}?namespace=other"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Retained tombstones still have canonical scope to assert.
+    f.tombstone(id);
+    let (status, _) = scope_request(
+        &app,
+        "DELETE",
+        &format!("/memories/{id}?namespace=other"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scope_assertions_preserve_record_scope_despite_wrong_session_default() {
+    for asserted in [false, true] {
+        let f = Fixture::new();
+        f.create_namespace("other");
+        let records = f.create_namespace("records");
+        let id = f.insert_memory_in(records, &[]).await;
+        let (app, mut bridge) = fixture_clients(&f);
+        bridge.storage = Arc::new(f.storage_adapter());
+        bridge.default_namespace = "other".into();
+        let mut arguments = json!({"id":id.to_string()});
+        if asserted {
+            arguments["namespace"] = json!("RECORDS");
+        }
+        for tool in ["get_memory", "reinforce_memory", "forget_memory"] {
+            let result = crate::mcp::tools::dispatch_tool(&bridge, tool, arguments.clone()).await;
+            assert_ne!(result.is_error, Some(true), "{tool}: {result:?}");
+        }
+        assert_eq!(
+            f.record(id).unwrap().phase,
+            crate::model::DecayPhase::Tombstone
+        );
+        let id = f.insert_memory_in(records, &[]).await;
+        let suffix = if asserted { "?namespace=RECORDS" } else { "" };
+        let (status, body) =
+            scope_request(&app, "GET", &format!("/memories/{id}{suffix}"), json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["namespace"], "records");
+        assert!(!f.record(id).unwrap().access_history.is_empty());
+        let body = if asserted {
+            json!({"namespace":"RECORDS"})
+        } else {
+            json!({})
+        };
+        let (status, body) =
+            scope_request(&app, "POST", &format!("/memories/{id}/reinforce"), body).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, body) = scope_request(
+            &app,
+            "DELETE",
+            &format!("/memories/{id}{suffix}"),
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            f.record(id).unwrap().phase,
+            crate::model::DecayPhase::Tombstone
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scope_assertions_similarity_uses_canonical_source_scope_with_stale_cache() {
+    use crate::search::VectorIndex;
+    let f = Fixture::new();
+    let local = crate::model::NamespaceId::new(1);
+    let other = f.create_namespace("other");
+    let mut ids = vec![];
+    for namespace in [local, local, other] {
+        let id = f
+            .insert_memory_with(crate::test_support::MemorySpec {
+                embedding: Some(&[1.0, 0.0, 0.0, 0.0]),
+                ..crate::test_support::MemorySpec::new(namespace)
+            })
+            .await;
+        f.vector_index
+            .write()
+            .await
+            .add(
+                id,
+                &[1.0, 0.0, 0.0, 0.0],
+                crate::search::VectorMetadata {
+                    namespace_id: namespace,
+                    decay_phase: crate::model::DecayPhase::Full.as_u8(),
+                    tags: vec![],
+                },
+            )
+            .unwrap();
+        ids.push(id);
+    }
+    let mut cached = crate::model::CachedRecord::from(&f.record(ids[0]).unwrap());
+    cached.id = ids[0];
+    cached.namespace_id = other;
+    f.cache.insert(ids[0], cached).await;
+    let (_, mut bridge) = fixture_clients(&f);
+    bridge.default_namespace = "other".into();
+    for namespace in [None, Some("default")] {
+        let mut args = json!({"id":ids[0].to_string()});
+        if let Some(namespace) = namespace {
+            args["namespace"] = json!(namespace);
+        }
+        let result = crate::mcp::tools::dispatch_tool(&bridge, "find_similar_memories", args).await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let wire = serde_json::to_value(result).unwrap();
+        let data: Value =
+            serde_json::from_str(wire["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(data["count"], 1);
+        assert_eq!(data["memories"][0]["id"], ids[1].to_string());
+    }
+}
+
+#[path = "sweep_clock_tests.rs"]
+mod sweep_clock;
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn performance_sampling_actual_http_and_mcp_share_root_decision_and_keep_bytes() {
+    use crate::search::VectorIndex;
+    struct Fixed;
+    #[async_trait::async_trait]
+    impl crate::embedding::EmbeddingProvider for Fixed {
+        async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+            Ok(vec![1.0, 0.0, 0.0, 0.0])
+        }
+        fn dimensions(&self) -> usize {
+            4
+        }
+        fn model_name(&self) -> &str {
+            "test-fixed"
+        }
+    }
+    let f = Fixture::new();
+    let namespace = crate::model::NamespaceId::new(1);
+    let id = f
+        .insert_memory_with(crate::test_support::MemorySpec {
+            embedding: Some(&[1.0, 0.0, 0.0, 0.0]),
+            tags: &["entity/fixture"],
+            summary: "private-needle",
+            ..crate::test_support::MemorySpec::new(namespace)
+        })
+        .await;
+    f.vector_index
+        .write()
+        .await
+        .add(
+            id,
+            &[1.0, 0.0, 0.0, 0.0],
+            crate::search::VectorMetadata {
+                namespace_id: namespace,
+                decay_phase: 1,
+                tags: vec![],
+            },
+        )
+        .unwrap();
+    f.fts_index
+        .lock()
+        .await
+        .add(namespace, id, "private-needle", None, &[])
+        .unwrap();
+    let (app, bridge) = fixture_clients_with_embedding(&f, Arc::new(Fixed));
+    f.storage.write().unwrap().sync().unwrap();
+    let files = [
+        f.path().join("meta.db"),
+        f.path().join("fulltext.dat"),
+        f.namespace_dir("default").join("vectors.dat"),
+    ];
+    let before: Vec<_> = files.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    let mut sampled = 0;
+    let mut skipped = 0;
+    for ordinal in 1..=8 {
+        let ((status, body), http_events) = crate::performance::tests::capture_sampled(
+            ordinal,
+            post(
+                &app,
+                "/search",
+                json!({"query":"private-needle","tags":["entity/fixture"],"recordAccess":false}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.to_string().contains(&id.to_string()), "{body}");
+        let (response, mcp_events) = crate::performance::tests::capture_sampled(
+            ordinal,
+            crate::mcp::tools::dispatch_tool(
+                &bridge,
+                "recall_memories",
+                json!({"query":"private-needle", "tags":["entity/fixture"],"recordAccess":false}),
+            ),
+        )
+        .await;
+        assert_ne!(response.is_error, Some(true), "{response:?}");
+        assert!(
+            serde_json::to_string(&response)
+                .unwrap()
+                .contains(&id.to_string())
+        );
+        assert_eq!(http_events.is_empty(), mcp_events.is_empty());
+        if http_events.is_empty() {
+            skipped += 1;
+        } else {
+            sampled += 1;
+        }
+        for (operation, events) in [("rest.search", http_events), ("mcp.search", mcp_events)] {
+            if events.is_empty() {
+                continue;
+            }
+            assert!(events.iter().any(|e| e["fields"]["stage"] == operation));
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e["fields"]["stage"] == "engine.search")
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e["fields"]["kind"] == "canonical_read")
+            );
+            for event in &events {
+                for span in event["spans"].as_array().unwrap() {
+                    assert_eq!(span["root_ordinal"], ordinal);
+                    assert_eq!(span["sample_every"], 2);
+                }
+            }
+            assert!(
+                !serde_json::to_string(&events)
+                    .unwrap()
+                    .contains(&id.to_string())
+            );
+            assert!(
+                !serde_json::to_string(&events)
+                    .unwrap()
+                    .contains("entity/fixture")
+            );
+        }
+        tokio::task::yield_now().await;
+        assert_eq!(
+            before,
+            files
+                .iter()
+                .map(|p| std::fs::read(p).unwrap())
+                .collect::<Vec<_>>()
+        );
+    }
+    assert!(sampled > 0 && skipped > 0);
 }

@@ -101,6 +101,12 @@ impl Fixture {
             engine.create_namespace(&config).expect("create namespace");
         }
 
+        Self::from_open_engine(dir, engine)
+    }
+
+    /// The caller supplies the actual owned engine, including its explicit native
+    /// entry mode. This constructs empty views, never publishes or acknowledges.
+    pub(crate) fn from_open_engine(dir: tempfile::TempDir, engine: RedbStorageEngine) -> Self {
         let fts_index = crate::search::FtsIndex::new(dir.path()).expect("open fts index");
 
         Self {
@@ -277,6 +283,48 @@ impl Fixture {
             .expect("tombstone memory");
     }
 
+    /// Real read/search adapter over the isolated fixture, with no external provider.
+    pub(crate) fn search_adapter(&self) -> crate::mcp::bridge_adapters::McpSearchAdapter {
+        use crate::search::adapters::*;
+        let embedding = Arc::new(crate::embedding::PassthroughProvider::new(DIM));
+        let engine = Arc::new(crate::search::QueryEngine::new(
+            Arc::new(StorageNamespaceResolver::new(self.storage.clone())),
+            Arc::new(SingleEmbeddingRegistry::new(embedding.clone())),
+            Arc::new(SharedVectorIndexRegistry::new(self.vector_index.clone())),
+            Arc::new(SharedFtsIndexRegistry::new(self.fts_index.clone())),
+            Arc::new(SharedEntityIndexReader::new(self.entity_index.clone())),
+            Arc::new(CacheManagerAdapter::new(self.cache.clone())),
+            Arc::new(StorageMetadataAdapter::new(self.storage.clone())),
+            Arc::new(SharedGraphReader::new(self.graph.clone())),
+            Arc::new(RifProcessorAdapter::new(
+                Arc::new(crate::rif::RifEngine::new(Default::default())),
+                self.graph.clone(),
+            )),
+            Arc::new(StorageAccessRecorder::new(
+                self.storage.clone(),
+                self.cache.clone(),
+            )),
+        ));
+        crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            engine,
+            embedding,
+            self.storage.clone(),
+            self.graph.clone(),
+            chrono_tz::UTC,
+        )
+    }
+
+    pub(crate) fn completion(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+    }
+
     /// The MCP namespace adapter over this fixture's storage.
     pub(crate) fn namespace_adapter(&self) -> crate::mcp::bridge_adapters::McpNamespaceAdapter {
         crate::mcp::bridge_adapters::McpNamespaceAdapter::new(
@@ -383,6 +431,8 @@ impl crate::mcp::bridge::SearchPipeline for StubBridge {
         _: usize,
         _: Option<f32>,
         _: bool,
+        _record_access: bool,
+        _namespace: Option<&str>,
     ) -> Result<Vec<crate::mcp::bridge::SearchHit>, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before searching")
     }
@@ -407,10 +457,16 @@ impl crate::mcp::bridge::StorageEngine for StubBridge {
     async fn get_memory(
         &self,
         _: MemoryId,
+        _record_access: bool,
+        _namespace: Option<&str>,
     ) -> Result<Option<crate::mcp::bridge::MemoryRecord>, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before reading")
     }
-    async fn delete_memory(&self, _: MemoryId) -> Result<bool, crate::mcp::bridge::BridgeError> {
+    async fn delete_memory(
+        &self,
+        _: MemoryId,
+        _namespace: Option<&str>,
+    ) -> Result<bool, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before deleting")
     }
     async fn delete_memories(
@@ -428,6 +484,7 @@ impl crate::mcp::bridge::StorageEngine for StubBridge {
         &self,
         _: MemoryId,
         _: u8,
+        _namespace: Option<&str>,
     ) -> Result<crate::mcp::bridge::ReinforceResult, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before reinforcing")
     }
@@ -488,6 +545,7 @@ impl crate::mcp::bridge::HealthChecker for StubBridge {
 fn clone_bridge_error(e: &crate::mcp::bridge::BridgeError) -> crate::mcp::bridge::BridgeError {
     use crate::mcp::bridge::BridgeError as E;
     match e {
+        E::NamespaceMismatch(m) => E::NamespaceMismatch(m.clone()),
         E::NotFound(m) => E::NotFound(m.clone()),
         E::InvalidInput(m) => E::InvalidInput(m.clone()),
         E::Storage(m) => E::Storage(m.clone()),
@@ -497,4 +555,48 @@ fn clone_bridge_error(e: &crate::mcp::bridge::BridgeError) -> crate::mcp::bridge
         E::TooLarge(m) => E::TooLarge(m.clone()),
         E::PartiallyApplied(m) => E::PartiallyApplied(m.clone()),
     }
+}
+
+/// Explicit present-day adoption for a test that exercises dependent native work.
+/// This calls the real read-only preview and canonical writer; migration itself
+/// still leaves unknown inputs absent. No raw schema or provenance mutation.
+pub(crate) fn explicitly_adopt_inherited_policy(
+    path: &Path,
+    namespace: NamespaceId,
+    multiplier: f64,
+    sampled_at: i64,
+) -> crate::storage::control::WriteReceipt {
+    use crate::storage::control::{MutationContext, MutationScope};
+    use crate::storage::inherited_policy::{
+        AdoptInheritedDecay, adopt_inherited_decay, preview_inherited_decay,
+    };
+    let source = crate::storage::schema_migration::inspect_schema(path)
+        .unwrap()
+        .control
+        .generation_ref();
+    let preview = preview_inherited_decay(
+        path,
+        namespace,
+        multiplier,
+        source,
+        &crate::time::ManualClock::new(sampled_at),
+    )
+    .unwrap();
+    adopt_inherited_decay(
+        path,
+        &AdoptInheritedDecay {
+            context: MutationContext {
+                store_id: Some(source.store_id),
+                scope: MutationScope::Namespace(namespace),
+                idempotency_key: Some(format!(
+                    "explicit-fixture-adoption-{}",
+                    source.generation.get()
+                )),
+                expected_generation: Some(source.generation),
+                contract_version: 1,
+            },
+            preview,
+        },
+    )
+    .unwrap()
 }

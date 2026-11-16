@@ -1,0 +1,51 @@
+{
+  "source": "b563b355881ec9b89163b5f35f674cd1459882c0",
+  "tree": "b4204b168d56bb87c25f896f3833cdf88bc048a4",
+  "exit_code": 0,
+  "log_sha256": "173f05b47ac103127b1a604173a88a186de6b3f57cf54406310fe087b605178e",
+  "executables": [
+    {
+      "path": "debug/deps/lifecycle_cli-c369125dcd35855a",
+      "sha256": "67306b341277ffc228955b1f981dc2c1842cb21164c95e20332dff0ccd4ae962"
+    },
+    {
+      "path": "debug/deps/recalld-a60730f3f93b30b7",
+      "sha256": "f0e375306e5963e0f25d18253cb3371d265d4cae84a7e10adf5d4ed73e6930ba"
+    },
+    {
+      "path": "debug/deps/recalld-b2844bb1c4a63074",
+      "sha256": "bee2339a34929dda8934afc6d6bda608470e43f0bb49e29cd01767cd6845b259"
+    },
+    {
+      "path": "debug/deps/recalld_cli-8f457ab03bd2b416",
+      "sha256": "b8ff5ec9db2c4db3ee5f49f4b3296b74d80c1629a12ee35d6e5392a59786aac2"
+    },
+    {
+      "path": "debug/deps/recalld_text_migrate-e2e689a390b4efcc",
+      "sha256": "0663467c03121eda54a35a92e213ebb28d3d5bc755002f86572d54b8788ef77a"
+    },
+    {
+      "path": "debug/deps/text_migration_cli-c3debcbf7a93ee01",
+      "sha256": "cce86376d0b4cab94d7003ea787044bb048cad6450d6311945ab9425dedf5807"
+    }
+  ],
+  "result_lines": [
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1091 filtered out; finished in 0.37s",
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1091 filtered out; finished in 1.18s",
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1090 filtered out; finished in 2.72s",
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "warning: `recalld` (lib) generated 35 warnings (4 duplicates) (run `cargo fix --lib -p recalld` to apply 2 suggestions)",
+    "test result: ok. 1092 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 572.79s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.62s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.38s",
+    "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "warning: `recalld` (lib) generated 859 warnings (run `cargo clippy --fix --lib -p recalld` to apply 93 suggestions)",
+    "warning: `recalld` (lib test) generated 917 warnings (830 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 6 suggestions)"
+  ]
+}

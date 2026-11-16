@@ -26,11 +26,17 @@ use crate::serialization::ApiError;
 /// human-readable message, and an optional field name for validation errors.
 #[derive(Debug)]
 pub enum AppError {
-    CommittedInsertion {
+    /// A catalog worker/commit has no known complete receipt. Never invent one.
+    MutationUnknown {
+        operation_id: Option<uuid::Uuid>,
+        message: String,
+    },
+    CommittedMutation {
         receipt: crate::storage::control::WriteReceipt,
         message: String,
     },
 
+    Observation(crate::decay::observation::ObservationError),
     /// 404 -- Memory, namespace, or resource not found.
     NotFound {
         /// The kind of resource (e.g. "memory", "namespace").
@@ -50,6 +56,11 @@ pub enum AppError {
     /// 409 -- Resource already exists (e.g. duplicate namespace name).
     Conflict {
         /// Human-readable description.
+        message: String,
+    },
+
+    /// 409 -- Explicit by-ID namespace assertion failed.
+    NamespaceMismatch {
         message: String,
     },
 
@@ -87,13 +98,38 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        if let AppError::CommittedInsertion { receipt, message } = self {
+        if let AppError::Observation(error) = self {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "OBSERVATION_FAILED", "observation": error,
+                })),
+            )
+                .into_response();
+        }
+        if let AppError::MutationUnknown {
+            operation_id,
+            message,
+        } = self
+        {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "COMMIT_OUTCOME_UNKNOWN", "commitState": "unknown",
+                    "operationId": operation_id, "message": message,
+                })),
+            )
+                .into_response();
+        }
+        if let AppError::CommittedMutation { receipt, message } = self {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
                 "error": "INDEX_NOT_READY", "commitState": "committed", "ready": false, "receipt": receipt, "message": message,
             }))).into_response();
         }
         let (status, error_code, message, field) = match &self {
-            AppError::CommittedInsertion { .. } => unreachable!(),
+            AppError::Observation(_)
+            | AppError::CommittedMutation { .. }
+            | AppError::MutationUnknown { .. } => unreachable!(),
             AppError::NotFound { resource, id } => (
                 StatusCode::NOT_FOUND,
                 "NOT_FOUND".to_string(),
@@ -105,6 +141,12 @@ impl IntoResponse for AppError {
                 "BAD_REQUEST".to_string(),
                 message.clone(),
                 field.clone(),
+            ),
+            AppError::NamespaceMismatch { message } => (
+                StatusCode::CONFLICT,
+                "NAMESPACE_MISMATCH".into(),
+                message.clone(),
+                Some("namespace".into()),
             ),
             AppError::Conflict { message } => (
                 StatusCode::CONFLICT,
@@ -168,13 +210,20 @@ pub use crate::storage::StorageError;
 impl From<StorageError> for AppError {
     fn from(err: StorageError) -> Self {
         match &err {
-            StorageError::CommittedInsertion { receipt, source } => AppError::CommittedInsertion {
+            StorageError::CommittedMutation { receipt, source } => AppError::CommittedMutation {
                 receipt: (**receipt).clone(),
                 message: source.to_string(),
             },
             StorageError::CommitOutcomeUnknown { .. }
             | StorageError::ProviderVectorUnavailable(_) => AppError::ServiceUnavailable {
                 message: err.to_string(),
+            },
+            StorageError::NamespaceMismatch { .. } => AppError::NamespaceMismatch {
+                message: err.to_string(),
+            },
+            StorageError::InvalidNamespaceName { .. } => AppError::BadRequest {
+                message: err.to_string(),
+                field: Some("namespace".into()),
             },
             StorageError::NotFound(uuid) => AppError::NotFound {
                 resource: "memory",
@@ -185,10 +234,12 @@ impl From<StorageError> for AppError {
                     message: err.to_string(),
                 }
             }
-            StorageError::InvalidMutation(_) => AppError::UnprocessableEntity {
-                message: err.to_string(),
-                field: None,
-            },
+            StorageError::InvalidMutation(_) | StorageError::CallerVectorInvalid(_) => {
+                AppError::UnprocessableEntity {
+                    message: err.to_string(),
+                    field: None,
+                }
+            }
             StorageError::DuplicateId(uuid) => AppError::Conflict {
                 message: format!("memory {} already exists", uuid),
             },
@@ -237,7 +288,11 @@ impl From<EmbeddingError> for AppError {
 
 impl From<SearchError> for AppError {
     fn from(err: SearchError) -> Self {
+        if let SearchError::CanonicalRead(error) = err {
+            return (*error).into();
+        }
         match &err {
+            SearchError::Observation(error) => AppError::Observation(error.clone()),
             SearchError::Unavailable(message) => AppError::ServiceUnavailable {
                 message: message.clone(),
             },
@@ -251,6 +306,10 @@ impl From<SearchError> for AppError {
             SearchError::EmptyQuery => AppError::BadRequest {
                 message: "query text is required".to_string(),
                 field: Some("query".to_string()),
+            },
+            SearchError::InvalidEmbedding(message) => AppError::UnprocessableEntity {
+                message: message.clone(),
+                field: Some("embedding".into()),
             },
             SearchError::MemoryNotFound(id) => AppError::NotFound {
                 resource: "memory",
@@ -296,6 +355,9 @@ impl From<ValidationError> for AppError {
 impl From<GraphError> for AppError {
     fn from(err: GraphError) -> Self {
         match &err {
+            GraphError::Unavailable(message) => AppError::ServiceUnavailable {
+                message: message.clone(),
+            },
             GraphError::MemoryNotFound(id) => AppError::NotFound {
                 resource: "memory",
                 id: format!("{id}"),
@@ -313,6 +375,40 @@ impl From<GraphError> for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caller_vector_numeric_errors_preserve_422_provider_503_and_corruption_500() {
+        for values in [vec![0.; 4], vec![1.; 3], vec![f32::NAN; 4]] {
+            let caller =
+                crate::storage::insertion::normalize_embedding(&mut values.clone(), 4, true)
+                    .unwrap_err();
+            assert!(matches!(caller, StorageError::CallerVectorInvalid(_)));
+            assert_eq!(
+                AppError::from(caller).into_response().status(),
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
+            let provider =
+                crate::storage::insertion::normalize_embedding(&mut values.clone(), 4, false)
+                    .unwrap_err();
+            assert!(matches!(
+                provider,
+                StorageError::ProviderVectorUnavailable(_)
+            ));
+            assert_eq!(
+                AppError::from(provider).into_response().status(),
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+        }
+        for corruption in [
+            StorageError::OwnershipMismatch("canonical vector".into()),
+            StorageError::InvalidControl("record proof".into()),
+        ] {
+            assert_eq!(
+                AppError::from(corruption).into_response().status(),
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+        }
+    }
 
     #[test]
     fn validation_error_becomes_bad_request_with_field() {
@@ -355,5 +451,11 @@ mod tests {
             namespace: "default".to_string(),
         });
         assert!(matches!(err, AppError::UnprocessableEntity { .. }));
+    }
+}
+
+impl From<crate::decay::observation::ObservationError> for AppError {
+    fn from(error: crate::decay::observation::ObservationError) -> Self {
+        Self::Observation(error)
     }
 }

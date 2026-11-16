@@ -1,0 +1,26 @@
+{
+  "debug/deps/lifecycle_cli-ef7aa35bda05dfab": {
+    "sha256": "cc23430d3b0f0067c12cf83c8688ae41123532fe1607dfd27a7153deed4b6b82",
+    "bytes": 264341008
+  },
+  "debug/deps/recalld-27bbb81e23f12ff5": {
+    "sha256": "9b582c32ca5a36e46392584346e2bd238c4da72c71c6848c51709c62192e55b8",
+    "bytes": 6908664
+  },
+  "debug/deps/recalld-7025a4141187b374": {
+    "sha256": "b0ed6f70241a23290835d53e04d4942ba88585f6af3f272f4e348faaf496c017",
+    "bytes": 384489016
+  },
+  "debug/deps/recalld_cli-16a6b9f5f1a3f682": {
+    "sha256": "cd54291dbc43bf0933db0f91e2778f6d761f59b19001aaa1e7f370636c833176",
+    "bytes": 6357936
+  },
+  "debug/deps/recalld_text_migrate-b3ddbfaa472dba30": {
+    "sha256": "cc3a30679a3bccdf954e467e46ad603341622e14941d3d6a5fc329fad62061ac",
+    "bytes": 6358016
+  },
+  "debug/deps/text_migration_cli-c242142a48e76014": {
+    "sha256": "349167803d89bc6ac8d7c011e8215bbeacbeec64e0abfbb717b2bebf73ecd726",
+    "bytes": 263913216
+  }
+}

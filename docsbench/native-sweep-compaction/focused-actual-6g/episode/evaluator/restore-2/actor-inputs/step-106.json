@@ -1,0 +1,14 @@
+{
+  "currentAction": {
+    "arguments": {
+      "id": "01a1dcdb-b157-7472-be93-a1a56300613c",
+      "namespace": "default",
+      "recordAccess": false
+    },
+    "tag": "get:summary",
+    "tool": "get_memory"
+  },
+  "deliveryOrdinal": 106,
+  "phase": "action",
+  "startId": 104
+}

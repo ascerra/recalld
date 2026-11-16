@@ -1,0 +1,21 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/episode/runtime/config.toml",
+    "--data-root",
+    "/output/episode/runtime/original",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--native-prefix",
+    "--native-sweep"
+  ],
+  "exitCode": 0,
+  "forced": false,
+  "negativeConstructorProbe": false,
+  "pid": 1097,
+  "priorJoined": null,
+  "status": "joined"
+}

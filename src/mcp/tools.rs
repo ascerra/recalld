@@ -8,7 +8,7 @@
 use serde_json::json;
 
 use crate::mcp::args;
-use crate::mcp::bridge::{McpBridge, StoredMemory};
+use crate::mcp::bridge::{DUPLICATE_NEIGHBOR_CAP, DUPLICATE_SAMPLE_CAP, McpBridge, StoredMemory};
 use crate::mcp::protocol::{ToolAnnotations, ToolCallResult, ToolInfo};
 use crate::model::constants::{
     DEFAULT_LIST_LIMIT, DEFAULT_TAG_LIMIT, DUPLICATE_SIMILARITY_THRESHOLD, EMOTION_MAX_BYTES,
@@ -37,7 +37,7 @@ const FULL_TEXT_DESC: &str = "Detailed content. Removed as memory decays to ghos
 
 /// Return all tool definitions for `tools/list`.
 pub fn tool_definitions() -> Vec<ToolInfo> {
-    vec![
+    let mut tools = vec![
         store_memory_def(),
         store_memories_def(),
         recall_memories_def(),
@@ -52,7 +52,14 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         list_memories_def(),
         list_namespaces_def(),
         list_tags_def(),
-    ]
+    ];
+    for tool in &mut tools {
+        tool.input_schema["properties"]["contractVersion"] = json!({
+            "type": "integer", "enum": [1], "default": 1,
+            "description": "Application contract version. This server currently supports version 1 only."
+        });
+    }
+    tools
 }
 
 /// Every tool name [`dispatch_tool`] has an arm for.
@@ -86,6 +93,18 @@ pub async fn dispatch_tool(
 ) -> ToolCallResult {
     if let Err(e) = args::require_object(&arguments) {
         return ToolCallResult::error(e.to_string());
+    }
+    if let Err(error) = crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        .and_then(|version| version.require_supported())
+    {
+        return ToolCallResult::error(error.to_string());
+    }
+    // This branch is deliberately behind the shared unconditional v2 gate.
+    // Activation requires the native owner/serving and complete wire proof.
+    if crate::serialization::contract::ContractVersion::from_mcp(&arguments)
+        == Ok(crate::serialization::contract::ContractVersion::V2)
+    {
+        return dispatch_v2(bridge, name, arguments).await;
     }
     match name {
         "store_memory" => handle_store_memory(bridge, arguments).await,
@@ -210,7 +229,7 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
     // Extraction, type strictness, markup detection, and the shared
     // content limits all live in `args`, so this handler and the batch
     // one below cannot drift apart.
-    let input = match args::parse_store_input(&arguments, bridge.default_namespace()) {
+    let input = match args::parse_store_input_fields(&arguments, bridge.default_namespace()) {
         Ok(input) => input,
         Err(e) => {
             // Logged, never silently defaulted: a client whose
@@ -227,13 +246,18 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
         }
     };
 
-    match bridge.storage.store_memory(input).await {
-        Ok(stored) => match ToolCallResult::json(&stored) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to store memory: {e}")),
-    }
+    // The original single-tool embedding/initialStability fields remain ignored.
+    // Representation admission belongs to the actual owned backend format.
+    bridge
+        .storage
+        .store_api1(crate::serialization::store_api1::Request {
+            input,
+            profile_id: None,
+            created_at: None,
+            require_native: false,
+        })
+        .await
+        .mcp()
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -245,7 +269,8 @@ fn store_memories_def() -> ToolInfo {
         name: "store_memories".to_string(),
         title: Some("Store Memories (Batch)".to_string()),
         description: "Store multiple memories in a single call. Each item has the \
-            same schema as store_memory. Returns an array of results, one per \
+            store_memory fields, plus optional embedding and initialStability \
+            in the batch schema. Returns an array of results, one per \
             input memory. Saves round trips for bulk ingestion. \
             Items are stored in order and each is indexed before the next is \
             checked, so a result entry may carry a `nearDuplicates` object naming \
@@ -264,6 +289,8 @@ fn store_memories_def() -> ToolInfo {
                     "items": {
                         "type": "object",
                         "properties": {
+                            "embedding": {"type":["array","null"],"items":{"type":"number"},"minItems":1,"maxItems":8192,"description":"Optional raw supplied vector; exact input bits define retry identity, effective vector is normalized before storage."},
+                            "initialStability": {"type":["number","null"],"exclusiveMinimum":0,"description":"Omitted uses the namespace policy frozen by this reservation."},
                             "summary": {
                                 "type": "string",
                                 "description": SUMMARY_DESC,
@@ -318,7 +345,11 @@ fn store_memories_def() -> ToolInfo {
                         },
                         "required": ["summary"]
                     }
-                }
+                },
+                "storeId": {"type":"string","format":"uuid","description":"Store lineage for a durable retry."},
+                "batchOperationId": {"type":"string","format":"uuid","description":"Resume an existing reservation with storeId and the same full ordered payload, instead of idempotencyKey."},
+                "idempotencyKey": {"type":"string","description":"Resume with the same full ordered payload and session namespace; finalized failures require a new key."},
+                "batchResultVersion": {"type":"integer","enum":[1],"description":"Additive batch envelope version, not lifecycle/API v2 or whole-store CAS."}
             },
             "required": ["memories"]
         }),
@@ -382,6 +413,130 @@ fn store_result_entry(index: usize, stored: &StoredMemory) -> serde_json::Value 
     entry
 }
 
+fn use_durable_batch(bridge: &McpBridge, arguments: &serde_json::Value) -> bool {
+    bridge.storage.supports_durable_batches()
+        || [
+            "storeId",
+            "idempotencyKey",
+            "batchOperationId",
+            "batchResultVersion",
+            "batchMutationVersion",
+            "expectedGeneration",
+        ]
+        .iter()
+        .any(|key| arguments.get(key).is_some())
+}
+
+async fn handle_durable_batch(
+    bridge: &McpBridge,
+    arguments: &serde_json::Value,
+    kind: crate::storage::batch::BatchKind,
+    items: &[serde_json::Value],
+) -> ToolCallResult {
+    use crate::storage::batch::{BatchInput, BatchKind};
+    if arguments.get("expectedGeneration").is_some() {
+        return ToolCallResult::error("public whole-store expectedGeneration is not enabled");
+    }
+    // Parse optional fields strictly. Do not silently drop a malformed retry key.
+    let input = serde_json::from_value::<BatchInput>(json!({
+        "resultVersion":arguments.get("batchResultVersion").cloned().unwrap_or(json!(1)),
+        "mutationVersion":arguments.get("batchMutationVersion").cloned().unwrap_or(json!(1)),
+        "kind":kind,"items":items,"defaultNamespace":bridge.default_namespace(),
+        "storeId":arguments.get("storeId"),"idempotencyKey":arguments.get("idempotencyKey"),"batchOperationId":arguments.get("batchOperationId")
+    }));
+    let input = match input {
+        Ok(input) => input,
+        Err(e) => return ToolCallResult::error(format!("Invalid batch parameters: {e}")),
+    };
+    // The existing explicit private writer selector keeps its original route.
+    if kind == BatchKind::Insert && input.mutation_version == 1 {
+        return bridge
+            .storage
+            .store_batch_api1(crate::serialization::batch_api1::Request {
+                input,
+                surface: crate::serialization::batch_api1::Surface::Mcp,
+            })
+            .await
+            .mcp();
+    }
+    let outcome = match bridge.storage.mutate_batch(input).await {
+        Ok(outcome) => outcome,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+    durable_batch_result(outcome, kind, items)
+}
+
+pub(crate) fn durable_batch_result(
+    outcome: crate::storage::batch::BatchOutcome,
+    kind: crate::storage::batch::BatchKind,
+    items: &[serde_json::Value],
+) -> ToolCallResult {
+    use crate::storage::batch::{BatchKind, BatchStatus};
+    let results: Vec<_> = outcome
+        .items
+        .iter()
+        .map(|item| {
+            let mut result = item.result.clone().unwrap_or_else(|| json!({}));
+            let object = result.as_object_mut().expect("batch compatibility object");
+            object.insert("index".into(), json!(item.index));
+            object.insert("status".into(), json!(item.status));
+            object.insert("ready".into(), json!(item.ready));
+            if let Some(receipt) = &item.receipt {
+                object.insert("receipt".into(), json!(receipt));
+            }
+            let legacy_missing = kind == BatchKind::Forget
+                && item.error.as_ref().is_some_and(|e| e.code == "NOT_FOUND");
+            if legacy_missing {
+                object.insert("id".into(), items[item.index as usize].clone());
+                object.insert("deleted".into(), json!(false));
+            } else if let Some(error) = &item.error {
+                // Additive typed detail; retain the old string error member.
+                object.insert("error".into(), json!(error.code));
+                object.insert("errorDetail".into(), json!(error));
+                if let Some(field) = &error.field {
+                    object.insert("field".into(), json!(field));
+                }
+            } else if matches!(
+                item.status,
+                BatchStatus::NotAttempted | BatchStatus::Unknown
+            ) {
+                object.insert(
+                    "error".into(),
+                    json!("batch item unresolved; resubmit the same full request and key"),
+                );
+            }
+            result
+        })
+        .collect();
+    let errors = results
+        .iter()
+        .filter(|item| item.get("error").is_some())
+        .count();
+    let mut response =
+        json!({"results":results,"total":outcome.total,"errors":errors,"batch":outcome});
+    if kind == BatchKind::Insert {
+        response["stored"] = json!(outcome.succeeded);
+    } else {
+        response["deleted"] = json!(
+            results
+                .iter()
+                .filter(|item| item.get("deleted") == Some(&json!(true)))
+                .count()
+        );
+    }
+    match ToolCallResult::json(&response) {
+        Ok(mut result) => {
+            if !outcome.all_ready() {
+                result.is_error = Some(true);
+            }
+            result
+        }
+        Err(e) => {
+            ToolCallResult::error(format!("Committed batch result serialization failed: {e}"))
+        }
+    }
+}
+
 async fn handle_store_memories(bridge: &McpBridge, arguments: serde_json::Value) -> ToolCallResult {
     let memories_val = match arguments.get("memories") {
         Some(v) => v,
@@ -401,6 +556,16 @@ async fn handle_store_memories(bridge: &McpBridge, arguments: serde_json::Value)
         return ToolCallResult::error(format!(
             "Too many memories (maximum {MAX_BATCH_MEMORIES} per call)"
         ));
+    }
+
+    if use_durable_batch(bridge, &arguments) {
+        return handle_durable_batch(
+            bridge,
+            &arguments,
+            crate::storage::batch::BatchKind::Insert,
+            memories_arr,
+        )
+        .await;
     }
 
     let mut results: Vec<serde_json::Value> = Vec::with_capacity(memories_arr.len());
@@ -471,6 +636,10 @@ fn recall_memories_def() -> ToolInfo {
         input_schema: json!({
             "type": "object",
             "properties": {
+                "recordAccess": {
+                    "type": "boolean", "default": true,
+                    "description": "False disables retrieval access writes and behavioral record caches. Omitted/true synchronously records legacy exposure before success."
+                },
                 "query": {
                     "type": "string",
                     "description": "Natural language search query"
@@ -595,6 +764,9 @@ async fn handle_recall_memories(
                         if !hit.topics.is_empty() {
                             obj["topics"] = json!(hit.topics);
                         }
+                        if let Some(labels) = &hit.labels {
+                            obj["labels"] = json!(labels);
+                        }
                         obj
                     })
                     .collect();
@@ -641,6 +813,11 @@ fn get_memory_def() -> ToolInfo {
         input_schema: json!({
             "type": "object",
             "properties": {
+                "recordAccess": {
+                    "type": "boolean", "default": true,
+                    "description": "False disables retrieval access writes and behavioral record caches. Omitted/true synchronously records legacy exposure before success."
+                },
+                "namespace": {"type": "string", "description": "Optional assertion of the record's namespace. Mismatch fails before effects; omitted uses the record scope, regardless of session default. Null is invalid."},
                 "id": {
                     "type": "string",
                     "description": "Memory UUID"
@@ -649,15 +826,20 @@ fn get_memory_def() -> ToolInfo {
             "required": ["id"]
         }),
         annotations: Some(ToolAnnotations {
-            read_only_hint: Some(true),
+            read_only_hint: Some(false),
             destructive_hint: Some(false),
-            idempotent_hint: Some(true),
+            idempotent_hint: Some(false),
             open_world_hint: Some(false),
         }),
     }
 }
 
 async fn handle_get_memory(bridge: &McpBridge, arguments: serde_json::Value) -> ToolCallResult {
+    let namespace = match args::parse_namespace_assertion(&arguments) {
+        Ok(value) => value,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+
     let id_str = match arguments.get("id").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => return ToolCallResult::error("Missing required parameter: id"),
@@ -669,7 +851,15 @@ async fn handle_get_memory(bridge: &McpBridge, arguments: serde_json::Value) -> 
     };
     let id = crate::model::MemoryId::from_uuid(uuid);
 
-    match bridge.storage.get_memory(id).await {
+    let record_access = match args::record_access(&arguments) {
+        Ok(value) => value,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+    match bridge
+        .storage
+        .get_memory(id, record_access, namespace)
+        .await
+    {
         Ok(Some(record)) => match ToolCallResult::json(&record) {
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
@@ -695,6 +885,7 @@ fn reinforce_memory_def() -> ToolInfo {
         input_schema: json!({
             "type": "object",
             "properties": {
+                "namespace": {"type": "string", "description": "Optional assertion of the record's namespace. Mismatch fails before effects; omitted uses the record scope, regardless of session default. Null is invalid."},
                 "id": {
                     "type": "string",
                     "description": "Memory UUID to reinforce"
@@ -722,6 +913,11 @@ async fn handle_reinforce_memory(
     bridge: &McpBridge,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    let namespace = match args::parse_namespace_assertion(&arguments) {
+        Ok(value) => value,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+
     let id_str = match arguments.get("id").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => return ToolCallResult::error("Missing required parameter: id"),
@@ -738,13 +934,14 @@ async fn handle_reinforce_memory(
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge.storage.reinforce_memory(id, quality).await {
-        Ok(result) => match ToolCallResult::json(&result) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to reinforce memory: {e}")),
-    }
+    bridge
+        .storage
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, quality, namespace),
+            crate::serialization::native_lifecycle::Operation::Feedback,
+        )
+        .await
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -771,6 +968,7 @@ fn forget_memory_def() -> ToolInfo {
         input_schema: json!({
             "type": "object",
             "properties": {
+                "namespace": {"type": "string", "description": "Optional assertion of the record's namespace. Mismatch fails before effects; omitted uses the record scope, regardless of session default. Null is invalid."},
                 "id": {
                     "type": "string",
                     "description": "Memory UUID to forget. The memory moves to the \
@@ -790,6 +988,11 @@ fn forget_memory_def() -> ToolInfo {
 }
 
 async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) -> ToolCallResult {
+    let namespace = match args::parse_namespace_assertion(&arguments) {
+        Ok(value) => value,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+
     let id_str = match arguments.get("id").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => return ToolCallResult::error("Missing required parameter: id"),
@@ -801,19 +1004,14 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
     };
     let id = crate::model::MemoryId::from_uuid(uuid);
 
-    match bridge.storage.delete_memory(id).await {
-        Ok(deleted) => {
-            let response = json!({
-                "id": id_str,
-                "deleted": deleted,
-            });
-            match ToolCallResult::json(&response) {
-                Ok(r) => r,
-                Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-            }
-        }
-        Err(e) => ToolCallResult::error(format!("Failed to delete memory: {e}")),
-    }
+    bridge
+        .storage
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(id, 3, namespace),
+            crate::serialization::native_lifecycle::Operation::Forget,
+        )
+        .await
+        .mcp(id_str)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -841,7 +1039,11 @@ fn forget_memories_def() -> ToolInfo {
                     "items": { "type": "string", "format": "uuid" },
                     "description": "Memory UUIDs to forget. Each moves to the Tombstone \
                         phase; its graph edges are kept and its UUID is never reused."
-                }
+                },
+                "storeId": {"type":"string","format":"uuid","description":"Store lineage for a durable retry."},
+                "batchOperationId": {"type":"string","format":"uuid","description":"Resume an existing reservation with storeId and the same full ordered payload, instead of idempotencyKey."},
+                "idempotencyKey": {"type":"string","description":"Resume the same full ordered ID array. A new key is required to retry finalized failures."},
+                "batchResultVersion": {"type":"integer","enum":[1]}
             },
             "required": ["ids"]
         }),
@@ -878,6 +1080,16 @@ async fn handle_forget_memories(
         return ToolCallResult::error(format!(
             "Too many ids (maximum {MAX_BATCH_MEMORIES} per call)"
         ));
+    }
+
+    if use_durable_batch(bridge, &arguments) {
+        return handle_durable_batch(
+            bridge,
+            &arguments,
+            crate::storage::batch::BatchKind::Forget,
+            ids_arr,
+        )
+        .await;
     }
 
     // UUIDs are parsed here, not at the bridge, so one malformed id
@@ -947,6 +1159,12 @@ async fn handle_forget_memories(
                     });
                 }
             }
+            Err(crate::mcp::bridge::BridgeError::PartiallyApplied(detail)) => {
+                // The legacy Vec<bool> cannot encode a partially completed batch.
+                // Preserve receipt/unknown status instead of fabricating per-item
+                // failures with a zero-deleted success-shaped aggregate.
+                return ToolCallResult::error(detail);
+            }
             Err(e) => {
                 for (index, id) in &parsed {
                     results[*index] = json!({
@@ -993,6 +1211,10 @@ fn find_similar_memories_def() -> ToolInfo {
         input_schema: json!({
             "type": "object",
             "properties": {
+                "recordAccess": {
+                    "type": "boolean", "default": true,
+                    "description": "False disables retrieval access writes and behavioral record caches. Omitted/true synchronously records legacy exposure before success."
+                },
                 "mode": {
                     "type": "string",
                     "enum": ["single", "scan"],
@@ -1005,7 +1227,7 @@ fn find_similar_memories_def() -> ToolInfo {
                 },
                 "namespace": {
                     "type": ["string", "null"],
-                    "description": "Namespace for \"scan\" mode; omitted or null uses the configured session default, then \"default\". Ignored in \"single\" mode, which uses the source record namespace."
+                    "description": "Scan scope (omitted/null uses session default); in single mode an optional assertion against the source record namespace, checked before effects. Omit for record scope; null is invalid in single mode."
                 },
                 "limit": {
                     "type": "integer",
@@ -1035,9 +1257,9 @@ fn find_similar_memories_def() -> ToolInfo {
             }
         }),
         annotations: Some(ToolAnnotations {
-            read_only_hint: Some(true),
+            read_only_hint: Some(false),
             destructive_hint: Some(false),
-            idempotent_hint: Some(true),
+            idempotent_hint: Some(false),
             open_world_hint: Some(false),
         }),
     }
@@ -1078,7 +1300,13 @@ async fn handle_find_similar_single(
     bridge: &McpBridge,
     arguments: &serde_json::Value,
 ) -> ToolCallResult {
+    let namespace = match args::parse_namespace_assertion(arguments) {
+        Ok(value) => value,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+
     let args::FindSimilarArgs {
+        record_access,
         id,
         limit,
         min_score,
@@ -1098,7 +1326,14 @@ async fn handle_find_similar_single(
 
     match bridge
         .search
-        .find_similar(id, limit, min_score, same_namespace)
+        .find_similar(
+            id,
+            limit,
+            min_score,
+            same_namespace,
+            record_access,
+            namespace,
+        )
         .await
     {
         Ok(hits) => {
@@ -1141,34 +1376,35 @@ async fn handle_find_similar_scan(
         }
     };
 
-    // Max memories to sample from the namespace (bounded to 200).
-    const MAX_SCAN_MEMORIES: usize = 200;
-
     match bridge
         .search
-        .scan_duplicates(&namespace, threshold, MAX_SCAN_MEMORIES)
+        .scan_duplicates_with_coverage(&namespace, threshold, DUPLICATE_SAMPLE_CAP)
         .await
     {
-        Ok(clusters) => {
-            let response = json!({
-                "namespace": namespace,
-                "threshold": threshold,
-                "clusters": clusters,
-                "clusterCount": clusters.len(),
-                // The legacy bridge returns clusters only. Do not manufacture scan
-                // counts from cluster membership or from a separate racy catalog read.
-                "coverage": {
+        Ok(report) => {
+            let coverage = match report.coverage {
+                Some(coverage) => match serde_json::to_value(coverage) {
+                    Ok(value) => value,
+                    Err(e) => return ToolCallResult::error(format!("Serialization error: {e}")),
+                },
+                None => json!({
                     "algorithm": "sampledNearestNeighbors",
                     "sampledCount": null,
                     "eligibleCount": null,
                     "skippedVectorCount": null,
-                    "sampleCap": MAX_SCAN_MEMORIES,
-                    // Ten neighbors plus one candidate to allow for self-removal.
-                    "neighborCap": 11,
+                    "sampleCap": DUPLICATE_SAMPLE_CAP,
+                    "neighborCap": DUPLICATE_NEIGHBOR_CAP,
                     "complete": false,
                     "truncated": null,
                     "countsAvailable": false
-                },
+                }),
+            };
+            let response = json!({
+                "namespace": namespace,
+                "threshold": threshold,
+                "clusters": report.clusters,
+                "clusterCount": report.clusters.len(),
+                "coverage": coverage,
             });
             match ToolCallResult::json(&response) {
                 Ok(r) => r,
@@ -1253,6 +1489,19 @@ async fn handle_create_namespace(
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(message)) => {
+            match serde_json::from_str::<serde_json::Value>(&message)
+                .ok()
+                .filter(|v| v.is_object())
+            {
+                Some(evidence) => {
+                    let mut result = ToolCallResult::json(&evidence).expect("catalog failure JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(message),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to create namespace: {e}")),
     }
 }
@@ -1359,7 +1608,16 @@ async fn handle_delete_namespace(
         // "Failed to delete namespace" would tell the agent nothing
         // happened, when in fact memories were destroyed and the job
         // needs finishing — so the message passes through unwrapped.
-        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => ToolCallResult::error(msg),
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => {
+            match crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&msg) {
+                Some(payload) => {
+                    let mut result = ToolCallResult::json(&payload).expect("validated purge JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(msg),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to delete namespace: {e}")),
     }
 }
@@ -1642,6 +1900,90 @@ async fn handle_list_tags(bridge: &McpBridge, arguments: serde_json::Value) -> T
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
         Err(e) => ToolCallResult::error(format!("List tags failed: {e}")),
+    }
+}
+
+/// Prepared actual consumer, reachable only after the shared version gate opens.
+pub(crate) async fn dispatch_v2(
+    bridge: &McpBridge,
+    name: &str,
+    arguments: serde_json::Value,
+) -> ToolCallResult {
+    if name == "store_memory" {
+        use crate::serialization::native_single::{Reply, Request, mcp_result};
+        let reply = match Request::parse(&arguments, false, None, bridge.default_namespace()) {
+            Ok(request) => bridge.storage.store_native_wire(request).await,
+            Err(error) => Reply::invalid(error),
+        };
+        return mcp_result(reply);
+    }
+    if name == "store_memories" {
+        let result = match crate::serialization::native_batch::parse(
+            &arguments,
+            true,
+            None,
+            bridge.default_namespace(),
+        ) {
+            Ok(input) => bridge.storage.mutate_native_batch(input).await,
+            Err(e) => Err(e.into()),
+        };
+        let (status, envelope) = crate::serialization::native_batch::response(result);
+        return crate::serialization::native_batch::mcp_result(status, &envelope);
+    }
+    let lifecycle = match name {
+        "forget_memory" => Some(crate::serialization::native_lifecycle::Operation::Forget),
+        "reinforce_memory" => Some(crate::serialization::native_lifecycle::Operation::Feedback),
+        _ => None,
+    };
+    if let Some(operation) = lifecycle {
+        return crate::mcp::native_lifecycle_adapter::dispatch(
+            bridge.storage.as_ref(),
+            operation,
+            arguments,
+        )
+        .await
+        .mcp();
+    }
+    use crate::search::exact_scan::ExactScanData;
+    use crate::serialization::{
+        contract::{CommitState, Envelope, ErrorCategory, ExecutionError},
+        scan::ExactScanRequest,
+    };
+    let failure = |error: ExecutionError| {
+        let envelope = Envelope::<ExactScanData>::failure(None, error);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        result.is_error = Some(true);
+        result
+    };
+    if name != "find_similar_memories"
+        || arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
+    {
+        return failure(ExecutionError {
+            category: ErrorCategory::Unavailable,
+            code: "UNSUPPORTED_CONTRACT_VERSION".into(),
+            message: "this operation has no active v2 backend".into(),
+            field: Some("/contractVersion".into()),
+            retryable: false,
+            commit_state: CommitState::NotCommitted,
+            operation_id: None,
+        });
+    }
+    let mut request = match ExactScanRequest::from_mcp(&arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            return failure(
+                crate::search::exact_scan::ExactScanError::Input(error).execution_error(),
+            );
+        }
+    };
+    request
+        .namespace
+        .get_or_insert_with(|| bridge.default_namespace().into());
+    match bridge.search.scan_duplicate_pairs(request).await {
+        Ok(page) => ToolCallResult::json(&page.into_envelope())
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error")),
+        Err(error) => failure(error.execution_error()),
     }
 }
 
@@ -2046,6 +2388,8 @@ mod tests {
             _: usize,
             _: Option<f32>,
             _: bool,
+            _: bool,
+            _namespace: Option<&str>,
         ) -> Result<Vec<crate::mcp::bridge::SearchHit>, crate::mcp::bridge::BridgeError> {
             refuse!()
         }
@@ -2071,6 +2415,8 @@ mod tests {
         async fn get_memory(
             &self,
             _: crate::model::MemoryId,
+            _: bool,
+            _namespace: Option<&str>,
         ) -> Result<Option<crate::mcp::bridge::MemoryRecord>, crate::mcp::bridge::BridgeError>
         {
             refuse!()
@@ -2078,6 +2424,7 @@ mod tests {
         async fn delete_memory(
             &self,
             _: crate::model::MemoryId,
+            _namespace: Option<&str>,
         ) -> Result<bool, crate::mcp::bridge::BridgeError> {
             refuse!()
         }
@@ -2091,6 +2438,7 @@ mod tests {
             &self,
             _: crate::model::MemoryId,
             _: u8,
+            _namespace: Option<&str>,
         ) -> Result<crate::mcp::bridge::ReinforceResult, crate::mcp::bridge::BridgeError> {
             refuse!()
         }
@@ -2229,9 +2577,9 @@ mod tests {
 
     #[test]
     fn t38_read_only_tools_declare_the_read_only_hint() {
-        const READ_ONLY: [&str; 6] = [
-            "get_memory",
-            "find_similar_memories",
+        // Hints describe the omitted/default mode. Recall/similarity observe
+        // synchronously by default; only explicit false opts out.
+        const READ_ONLY: [&str; 4] = [
             "namespace_stats",
             "list_memories",
             "list_namespaces",
@@ -2718,17 +3066,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a4_mcp_get_does_not_change_the_record() {
+    async fn a4_mcp_get_false_is_unchanged_and_default_observes_once() {
         let fixture = crate::test_support::Fixture::new();
         let id = fixture.insert_memory().await;
         let mut bridge = crate::test_support::StubBridge::default().into_bridge();
         bridge.storage = std::sync::Arc::new(fixture.storage_adapter());
         let before = format!("{:?}", fixture.record(id).unwrap());
         for _ in 0..2 {
-            let result = dispatch_tool(&bridge, "get_memory", json!({"id": id.to_string()})).await;
+            let result = dispatch_tool(
+                &bridge,
+                "get_memory",
+                json!({"id": id.to_string(), "recordAccess": false}),
+            )
+            .await;
             assert_ne!(result.is_error, Some(true));
             assert_eq!(before, format!("{:?}", fixture.record(id).unwrap()));
         }
+        let count = fixture.record(id).unwrap().access_history.len();
+        let result = dispatch_tool(&bridge, "get_memory", json!({"id": id.to_string()})).await;
+        assert_ne!(result.is_error, Some(true));
+        assert_eq!(fixture.record(id).unwrap().access_history.len(), count + 1);
     }
 
     #[test]
@@ -2758,7 +3115,14 @@ mod tests {
             };
             if let Some(namespace) = properties.get("namespace") {
                 assert!(namespace.get("default").is_none(), "{}", def.name);
-                assert_eq!(namespace["type"], json!(["string", "null"]));
+                let expected_type = if ["get_memory", "reinforce_memory", "forget_memory"]
+                    .contains(&def.name.as_str())
+                {
+                    json!("string")
+                } else {
+                    json!(["string", "null"])
+                };
+                assert_eq!(namespace["type"], expected_type, "{}", def.name);
             }
         }
         let schema = create_namespace_def().input_schema;
