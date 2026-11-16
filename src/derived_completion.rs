@@ -4,6 +4,7 @@ pub(crate) mod catalog;
 mod native_decay;
 mod native_graph;
 mod native_purge;
+pub(crate) use native_purge::PurgeApi1Failure;
 mod native_store;
 mod text_compaction;
 
@@ -33,6 +34,28 @@ pub(crate) struct DerivedCompletion {
     pub vectors: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
     pub fts: Arc<tokio::sync::Mutex<FtsIndex>>,
     pub entities: Arc<tokio::sync::RwLock<EntityIndex>>,
+}
+
+#[derive(Debug, Default)]
+struct PurgePhysicalObservation {
+    directory_removed: Option<bool>,
+    fts_rows_removed: Option<usize>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CompletionFailure {
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+    #[error("completion worker outcome unknown; reconcile before retry")]
+    WorkerUnknown,
+}
+impl CompletionFailure {
+    fn into_storage(self) -> StorageError {
+        match self {
+            Self::Storage(source) => source,
+            Self::WorkerUnknown => failed("completion worker outcome unknown".into()),
+        }
+    }
 }
 
 impl DerivedCompletion {
@@ -313,6 +336,18 @@ impl DerivedCompletion {
         parent: Option<&WorkTicket>,
         rebuild_all: bool,
     ) -> Result<(), StorageError> {
+        self.complete_observing(parent, rebuild_all, None)
+            .await
+            .map(|_| ())
+            .map_err(CompletionFailure::into_storage)
+    }
+
+    async fn complete_observing(
+        &self,
+        parent: Option<&WorkTicket>,
+        rebuild_all: bool,
+        mut purge: Option<crate::storage::purge::PurgeCleanupObservation>,
+    ) -> Result<PurgePhysicalObservation, CompletionFailure> {
         crate::performance::measure("derived.complete", true, async {
             let work = self.accept_work(parent)?;
             self.cache.bind_storage(&self.storage);
@@ -340,17 +375,52 @@ impl DerivedCompletion {
             let mut entities = crate::performance::Hold::new("derived.entities.hold", entities);
             let storage = self.storage.clone();
             let cache = self.cache.clone();
-            let child = work.child()?;
+            let child = work.child().map_err(StorageError::from)?;
             let worker = crate::performance::Worker::new("derived.worker_queue");
             let result = tokio::task::spawn_blocking(move || {
                 worker.run(move || {
+                    // Retain publication through worker completion if its async
+                    // waiter is cancelled; preserve the inherited trace context.
+                    let _publication = _publication;
                     let wait = crate::performance::Timer::new("derived.storage.write.wait");
                     let storage = storage.write().map_err(|e| failed(e.to_string()))?;
                     wait.complete();
                     let mut storage =
                         crate::performance::Hold::new("derived.storage.write.hold", storage);
+                    let mut observations = PurgePhysicalObservation::default();
                     let result = (|| {
-                        storage.resume_pending_purges_with_work(Some(&child))?;
+                        if let Some(target) = &purge {
+                            let current = storage.lookup_namespace_purge(
+                                target.store_id,
+                                target.namespace_id,
+                                target.start_operation_id,
+                            )?;
+                            if current.as_ref().is_some_and(|p| {
+                                target.matches(p)
+                                    && p.stage != crate::storage::purge::PurgeStage::Complete
+                            }) {
+                                storage
+                                    .meta_store()
+                                    .invalidate_derived_view(DerivedView::Fts);
+                                observations.fts_rows_removed = Some(
+                                    fts.remove_namespace(target.namespace_id)
+                                        .map_err(|e| failed(e.to_string()))?,
+                                );
+                            }
+                        }
+                        storage.resume_pending_purges_observed(Some(&child), purge.as_mut())?;
+                        #[cfg(test)]
+                        if purge.is_some()
+                            && storage
+                                .meta_store()
+                                .native_purge_worker_fault
+                                .load(std::sync::atomic::Ordering::SeqCst)
+                                == 2
+                        {
+                            panic!("injected native purge completion worker loss");
+                        }
+                        observations.directory_removed =
+                            purge.as_ref().and_then(|p| p.directory_removed);
                         storage.ensure_available()?;
                         let publication = storage.meta_store().publication_state()?;
                         if !rebuild_all
@@ -544,16 +614,15 @@ impl DerivedCompletion {
                         })
                     })();
                     storage.meta_store().finish_work(child);
-                    result
+                    result.map(|_| observations)
                 })
             })
             .await
-            .map_err(|e| failed(e.to_string()))?;
-            // The root remains active until the worker and its derived guards have
-            // returned, and this outer publication lease has also been released.
-            drop(_publication);
+            .map_err(|_| CompletionFailure::WorkerUnknown)?;
+            // The root remains active until the worker and its derived guards,
+            // including its publication lease, have returned.
             self.finish_known_work(work);
-            result
+            result.map_err(CompletionFailure::Storage)
         })
         .await
     }

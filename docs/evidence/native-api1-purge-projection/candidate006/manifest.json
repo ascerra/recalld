@@ -1,0 +1,55 @@
+{
+  "sourceCommit": "4853c6e5ae351d32bb5e3e5d4edaf9e10fb52561",
+  "result": {
+    "passed": 11,
+    "failed": 1,
+    "seconds": 33.62,
+    "failure": "Actual max-chunk legacy daemon frame loses known committed receipt after canonical Complete",
+    "receiptBytes": 1464530,
+    "responseBytes": 1572891,
+    "frameLimit": 1048576
+  },
+  "rawRoot": "/tmp/recalld-native-api1-purge-validation/candidate006",
+  "artifacts": {
+    "source.json": {
+      "sha256": "1b999bb83c70b93c1d2ed8abaabd786d293c2f0b44f269aed73be2ef3ad7f11e",
+      "bytes": 57551
+    },
+    "focused.log": {
+      "sha256": "1cb7e65b29788087b605ea25dd086cae647cf1d48bdc1ab6824076465792405f",
+      "bytes": 39974
+    },
+    "fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "source-after.txt": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "executables.sha256": {
+      "sha256": "6de56b592ed3abf7ab1a16498d18e0dd98919db16fd441ff7a57e6e69f436c7c",
+      "bytes": 115
+    },
+    "memory-events.txt": {
+      "sha256": "941b94918cc97cf7b6155deb1959e6a8c80d0b717e9e03e935cd85b70dafe5f4",
+      "bytes": 72
+    },
+    "memory-peak.txt": {
+      "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "bytes": 11
+    },
+    "driver.exit": {
+      "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "bytes": 4
+    },
+    "command.json": {
+      "sha256": "5394292eda5ec6c9684b8bd5b465de4686fbf443d2e2955732aa26f566cd50a0",
+      "bytes": 1891
+    },
+    "rustc.txt": {
+      "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "bytes": 197
+    }
+  }
+}
