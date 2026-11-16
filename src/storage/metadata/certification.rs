@@ -181,6 +181,38 @@ impl MetadataStore {
         }
         let mut created = None;
         match &receipt.outcome {
+            MutationOutcome::NativeTextGenerationSelected { transition } => {
+                // The selection writer already compares the complete logical
+                // record digest before/after relocation and the copied text.
+                // Carry certification only for that exact owned generation and
+                // the typed descriptors selected in this same transaction.
+                transition.validate(receipt)?;
+                if transition.source != owned.at {
+                    return Err(StorageError::RecoveryRequired(
+                        "text relocation differs from owned vector generation".into(),
+                    ));
+                }
+                let catalog = tx.open_table(text_generation::CATALOG)?;
+                let active: uuid::Uuid = control::decode(
+                    catalog
+                        .get("active")?
+                        .ok_or(StorageError::InvalidTextRef)?
+                        .value(),
+                )?;
+                for descriptor in [&transition.before, &transition.after] {
+                    let retained = catalog
+                        .get(descriptor.id.to_string().as_str())?
+                        .ok_or(StorageError::InvalidTextRef)?;
+                    if control::decode::<text_generation::TextGeneration>(retained.value())?
+                        != *descriptor
+                    {
+                        return Err(StorageError::InvalidTextRef);
+                    }
+                }
+                if active != transition.after.id {
+                    return Err(StorageError::InvalidTextRef);
+                }
+            }
             MutationOutcome::NativeNamespaceCreated { transition } => {
                 transition.validate(receipt)?;
                 let binding = transition.vector_certification.as_ref().ok_or_else(|| {
