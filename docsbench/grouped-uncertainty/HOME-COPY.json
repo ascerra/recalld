@@ -1,0 +1,33 @@
+{
+  "executedSource": "427c57e9e00bfa32f09edff22a479b31e656d269",
+  "home": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-15-a6-grouped-uncertainty-427c57e9",
+  "filesSha256": {
+    "PLAN.md": "c31946b513a60cb7801114b6ebcd6973fc637b32e92fa7248ac05a94511753be",
+    "REPORT.md": "ab677c1276e11a3ffc8b9bb815f9f02dcf9ef62e29771d1a49b4e8f097b168c8",
+    "validation.json": "8627904ad8a5e6274c5a235cdd2d3e261e93fd15818b617982c037ca8bf6748a",
+    "statistical-policy.json": "2a8fa963b89b4871a51d9d3933b6b9bc8043369e400a109f37785ea9a08e1302",
+    "compile-failure/steps.json": "5827154902f88380a66c19c69f88c4b8124a51895963c0e6f6ffd70c6c94344e",
+    "compile-failure/step-3.log": "7f71bbf96212bb1dcc6ca6bb396f5689d7c059eea24f43384d98640cb230bb0e",
+    "checker-failure/step-3.log": "706b6cdcad2ff81a262efffefccba09b09fec2dc556c49dee84a0101990b8253",
+    "checker-failure/step-6.log": "d537328de327afecba12cb295c2fc536dd04ef1312f78fe91280e1aa709cc05a",
+    "checker-failure/declared-limit-diff.json": "42bf0f1bae7cde2a1f0d8083219e40e436fcac14e208737626bfc4e1e82050f5",
+    "final-tail/build.json": "4e9afc743bc413247d048265d8ca531671cb5c2e926673d5e2c2b3bf808a0bd7",
+    "final-tail/steps.json": "f48d495edd91e7368b2b32896a852971b594da407db27e0d819d12151df109da",
+    "final-tail/cgroup-step-3.json": "2380134a4ab6dc064a462f3ffbae1d9f04646f28c67111a78d159e4b81c957a6",
+    "final-tail/actual/validation.json": "7ebf0b90d66d8bda9819b9380006008e5732eaed50ac71e92f8b6c7a98fe6760",
+    "final-tail/actual/arm-comparison.json": "f628c4aa4fea0a8714c5beecb870253573e7d6d9279a8304d5fa625d0e32171a",
+    "final-tail/actual/receipts.json": "c927b8e5aaef9c8f20cc49afa6860a29e92fe73a0b1234c01388730eb8274eeb",
+    "final-tail/actual/frozen-before-outcomes.json": "21122cea6b681ba5b24e4855197c7efc0e733139ba80bac11e1af6d39f2edcc0",
+    "final-tail/actual/inputs/manifest.json": "9326d9fea7193e3435778db2cea2b59301134f40de11ea80043bdae7d835aac1",
+    "final-tail/actual/inputs/pair-contract.json": "fe0f78e7c9680ccc90ca79126292a89e514ff86d4f8b3c9d491f67e73d2caf1f",
+    "final-tail/actual/inputs/baseline/manifest.json": "5a1944110dc95ff4dce057fdde33bab3ce051c80d38aa669badf9212da346dcc",
+    "final-tail/actual/inputs/candidate/manifest.json": "8c4065abd658f0eb4f7dd85a6f2236a83c718bca8bf2fedced2c891a2ecf0162",
+    "final-tail/actual/paired/pair-status.json": "262772e84bb40b8f5cd37a617941052c0e5ef1ab6f6139433c2b4d16ed58d154",
+    "final-tail/actual/paired/paired-scores.json": "bab85cbd3be1b9cc12bc487ebf024882a133367957a38795be4e5790ba3c1425",
+    "final-tail/actual/paired/baseline/episode-status.json": "e5fc2669b58d1cf532d419febfd41f637430e516eb4c7ad263f3713f607c7a73",
+    "final-tail/actual/paired/candidate/episode-status.json": "61015a42c1200940ba58e802ebd7686b11e45417a8e546c09f79a0738682b8c3"
+  },
+  "reportSha256": "ab677c1276e11a3ffc8b9bb815f9f02dcf9ef62e29771d1a49b4e8f097b168c8",
+  "scope": "Compact source/result/failure/provenance evidence only; no raw databases, binary or build cache archive",
+  "copyManifestSha256": "beec3db66ee71e0998e3a7801602b29f517968291aa8f0ed99bac238a14a3441"
+}

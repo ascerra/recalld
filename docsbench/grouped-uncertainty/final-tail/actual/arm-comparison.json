@@ -1,0 +1,51 @@
+[
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-0",
+    "onlyDeclaredRequestLimitDiffers": true,
+    "providerInputsVectorsEqual": true
+  },
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-1",
+    "onlyDeclaredRequestLimitDiffers": true,
+    "providerInputsVectorsEqual": true
+  },
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-2",
+    "onlyDeclaredRequestLimitDiffers": true,
+    "providerInputsVectorsEqual": true
+  },
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-3",
+    "onlyDeclaredRequestLimitDiffers": true,
+    "providerInputsVectorsEqual": true
+  },
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-4",
+    "onlyDeclaredRequestLimitDiffers": true,
+    "providerInputsVectorsEqual": true
+  },
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-5",
+    "onlyDeclaredRequestLimitDiffers": true,
+    "providerInputsVectorsEqual": true
+  },
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-6",
+    "onlyDeclaredRequestLimitDiffers": true,
+    "providerInputsVectorsEqual": true
+  }
+]

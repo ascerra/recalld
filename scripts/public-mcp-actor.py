@@ -170,11 +170,12 @@ def run(args):
     else:
         query = projection["currentQuestion"]
         assert set(query) == {"queryId", "text"}
-        call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=1),
+        call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=args.retrieval_limit),
              "replay-miss" if projection["expectedMiss"] else "query:" + query["queryId"], error=projection["expectedMiss"])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--retrieval-limit", type=int, choices=(1,2), default=1)
     parser.add_argument("--accounting", action="store_true")
     for flag in ("read-fd", "write-fd", "deny-fd"):
         parser.add_argument("--" + flag, type=int, required=True)

@@ -1,0 +1,60 @@
+[
+  {
+    "command": [
+      "python3",
+      "scripts/test_grouped_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794776825.6616578
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_paired_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794776825.785517
+  },
+  {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--example",
+      "score_mcp_episode"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794776839.724622
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/check_paired_mcp_evaluation.py",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/actual"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "/target/debug/recalld": "05a8384b5444a18cae2e4fdd8ddb2a894a209b4240379ad79091bb4f94fed2e3",
+      "/target/debug/examples/score_mcp_episode": "d3549cb2488d1e3304b6a1f2cc0a6ac50e223ff061bdc896b797b30c13f6e74f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794776854.70659
+  }
+]
