@@ -14,7 +14,7 @@ fn native_origin_batch_process_exits_keep_reserved_child_and_origin() {
 #[test]
 fn native_origin_batch_pending_resume_final_rejection_and_forged_child() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let mut r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -136,7 +136,7 @@ fn native_origin_batch_all_invalid_parent_is_anchored_before_any_child() {
 #[test]
 fn native_origin_batch_request_codec_rejects_null_redundant_and_foreign_context() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let r = request(&d, s.metadata().control_state().unwrap().store_id);
     let before = readers::bytes(&d.path);

@@ -52,7 +52,7 @@ fn key(s: &NativeLifecycleSession, d: &Data, name: &str, api: u32) -> MutationCo
 async fn native_record_api1_insert_original_contract_replay_and_admission() {
     for api in [1, 2] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut s = open(&d, clock.clone());
         let mut original = input(&d);
@@ -217,7 +217,7 @@ fn native_record_api1_forget_original_contract_replay_and_roundtrip() {
 #[test]
 fn native_record_api1_preserves_scope_and_native_owner_guards() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();

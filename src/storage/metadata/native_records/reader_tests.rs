@@ -13,10 +13,14 @@ mod exposure_consumer;
 mod feedback_consumer;
 #[path = "forget_consumer_tests.rs"]
 mod forget_consumer;
+#[path = "graph_producer_tests.rs"]
+mod graph_producer;
 #[path = "native_query_admission_tests.rs"]
 mod native_query_admission;
 #[path = "replay_consumer_tests.rs"]
 mod replay_consumer;
+#[path = "supplied_query_certification_tests.rs"]
+mod supplied_query_certification;
 
 struct NoProvider;
 #[async_trait::async_trait]
@@ -226,7 +230,7 @@ fn assert_labels(record: &Value, id: MemoryId, labels: &crate::model::schema::St
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_read_only_bytes() {
     let mut root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let full = input(&d);
@@ -354,9 +358,18 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
                     serde_json::from_value(body.clone()).unwrap(),
                     crate::search::RetrievalSemantics::V2(crate::search::VersionMode::Current),
                 )
-                .await
-                .unwrap();
-            assert!(result.response.results.iter().any(|r| r.memory_id == id));
+                .await;
+            if body.get("queryEmbedding").is_some() {
+                // Native supplied-vector reads require the pinned entry below.
+                // The unpinned Rust compatibility entry cannot grant certification.
+                assert!(matches!(
+                    result,
+                    Err(crate::search::SearchError::Unavailable(_))
+                ));
+            } else {
+                let result = result.unwrap();
+                assert!(result.response.results.iter().any(|r| r.memory_id == id));
+            }
             let target = f
                 .storage
                 .read()
@@ -458,7 +471,7 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_forget_failed_publication_stays_blocked_until_real_retry_without_resurrection() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
@@ -512,7 +525,7 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let failure = publisher.complete().await.unwrap_err();
     let StorageError::CommittedMutation { receipt, .. } = failure else {
         panic!("publication failure lost full committed receipt: {failure:?}");
@@ -535,7 +548,7 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
             .effects_stamp()
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     publisher.complete().await.unwrap();
     let before = bytes(&d.path);
     let (status, body) = http(
@@ -560,7 +573,7 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
             .iter()
             .any(|r| r["id"] == json!(id))
     );
-    use crate::search::VectorIndex;
+
     assert!(f.vector_index.read().await.get_vector(id).is_none());
     assert!(f.vector_index.read().await.get_vector(d.parent).is_some());
     assert!(
@@ -598,7 +611,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
 {
     use crate::storage::native_maintenance::NativeDecayResult;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
@@ -629,7 +642,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
     };
     let tracker = f.storage.read().unwrap().meta_store().work_tracker();
     let work = tracker.begin().unwrap();
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let result = publisher
         .apply_native_decay_accepted(context.clone(), capture.clone(), policy.clone(), &work)
         .await;
@@ -657,7 +670,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
             .effects_stamp()
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let NativeDecayResult::Committed(replay) = publisher
         .apply_native_decay_accepted(context, capture, policy.clone(), &work)
         .await
@@ -740,7 +753,7 @@ async fn native_maintenance_accepted_publication_failure_replays_full_receipt_th
 async fn native_decay_cancelled_waiter_keeps_worker_publication_lease() {
     use std::time::Duration;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock);
     let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();

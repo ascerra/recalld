@@ -1,0 +1,23 @@
+{
+  "source_doc_commit": "4b7fb09a55302d40b27798d7ec0bdcb0fadbb566",
+  "runtime_head": "57e8e1190e17540aaf083b94d3544cf05466abc9",
+  "test_tail_head": "90d6f494028edb207ea30a8813130601210f4327",
+  "destination": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-15-certified-standalone-graph-57e8e119",
+  "files": {
+    "REPORT.md": {
+      "source": "docs/evidence/certified-standalone-graph/REPORT.md",
+      "sha256": "ff5edf7fbb5e7b4ab74101405c07520c10dca9d289ed94e9c5ea4d2b7eee61f7",
+      "bytes": 5988
+    },
+    "WORK-NOTE.md": {
+      "source": "docs/work-notes/2026-11-15-certified-standalone-graph.md",
+      "sha256": "755cf8efe5d1a95e4df6c46f00645c8b4efcdda58435d71117668895d7eabd4f",
+      "bytes": 4593
+    },
+    "VALIDATION.json": {
+      "source": "docs/evidence/certified-standalone-graph/VALIDATION.json",
+      "sha256": "44319612fb8cbbd9eb565705fa2c86b88a761d13c2e77f2a7bde7b36008d5d54",
+      "bytes": 1185
+    }
+  }
+}

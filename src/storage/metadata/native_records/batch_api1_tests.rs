@@ -1,6 +1,9 @@
 //! Public-route regressions and separately labeled private-history evidence.
 use super::*;
 
+#[path = "batch_postcommit_tests.rs"]
+mod postcommit;
+
 async fn batch_http(api: &axum::Router, body: Value) -> (u16, Value) {
     use tower::ServiceExt;
     let response = api
@@ -336,6 +339,68 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
     assert_eq!(bytes(&source), before_source);
     let mut fresh = r;
     fresh.idempotency_key = Some("fresh-timestamp".into());
+    // Historical replay above needs no retroactive certificate. Fresh writes
+    // must still reject until the private copy undergoes the real remedy.
+    let adopted_bytes = bytes(&d.path);
+    let adopted_control = f.storage.read().unwrap().control_state().unwrap();
+    let error = a
+        .run_batch_with_surface(
+            fresh.clone(),
+            Some(crate::mcp::batch_budget::BatchBudget::STANDARD),
+            Some(crate::serialization::batch_api1::Surface::Rest),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::mcp::bridge_adapters::StoreWriteError::Canonical(
+            StorageError::VectorCertificationRequired { namespace_id }
+        ) if namespace_id == d.ns.get()
+    ));
+    assert_eq!(bytes(&d.path), adopted_bytes);
+    assert_eq!(
+        f.storage.read().unwrap().control_state().unwrap(),
+        adopted_control
+    );
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
+    drop(a);
+    let temp = f.close();
+    let adopted_path = d.path.clone();
+    let closed_adopted_bytes = bytes(&adopted_path);
+    let d = certified_positive_fixture::certify_positive(temp.path(), d);
+    assert_eq!(bytes(&adopted_path), closed_adopted_bytes);
+    assert_eq!(bytes(&source), before_source);
+    let session = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(temp, session.engine);
+    readers::completion(&f).rebuild_all().await.unwrap();
+    let a = adapter(&f, provider.clone(), clock.clone(), Default::default());
+    {
+        let engine = f.storage.read().unwrap();
+        assert_eq!(
+            engine.control_state().unwrap().generation_ref().generation,
+            adopted_control.generation_ref().generation.next().unwrap()
+        );
+        let historical = engine
+            .meta_store()
+            .lookup_batch(fresh.store_id.unwrap(), old.outcome.batch_operation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(canonical(&historical), canonical(&retained));
+        let namespace = engine.get_namespace(d.ns).unwrap().unwrap();
+        assert!(
+            namespace
+                .schema
+                .as_ref()
+                .unwrap()
+                .inherited_decay
+                .as_ref()
+                .unwrap()
+                .matches_receipt(&adoption)
+        );
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.profiles.load(Ordering::SeqCst), 0);
     let out = a
         .run_batch_with_surface(
             fresh,

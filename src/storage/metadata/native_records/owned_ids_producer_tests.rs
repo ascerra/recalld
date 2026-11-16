@@ -5,7 +5,7 @@ use crate::storage::ids::{IdKind, IdSource, IdState, SeededIds};
 
 async fn seeded() -> (Fixture, Data, Arc<FixedClock>) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let engine =
         RedbStorageEngine::open_with_ids(&d.path, true, Box::new(SeededIds::new([7; 32]))).unwrap();
@@ -198,7 +198,7 @@ async fn owned_native_postcommit_repair_preserves_reserved_receipt_and_allocatio
     assert_eq!(Some(cursor(&f)), expected.checkpoint().unwrap());
     assert_eq!(clock.0.load(Ordering::SeqCst), 1);
     let before = cursor(&f);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let replay = a.run_batch(r).await.unwrap();
     assert!(replay.all_ready(), "{replay:?}");
     assert_eq!(

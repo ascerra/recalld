@@ -1,0 +1,27 @@
+{
+  "capture_run": "candidate037",
+  "source_manifest_sha256": "48679329e7b437afbcfbb94c2729a0ff15f931401e967ebbbd375f4517bd0864",
+  "test_result": "1 passed; four cases; 25.37s",
+  "files": {
+    "pending-v2-api2-generatedfalse.zip": {
+      "sha256": "98e1e4504893479eb1397667a2da09ba72f4f37c35201803e033b25b67c73158",
+      "bytes": 33324
+    },
+    "pending-v3-api2-generatedtrue.zip": {
+      "sha256": "7e2baf49f85dca8c3a781272c27680e2279f105c6ee0c54e173e4cb88cf0a0fd",
+      "bytes": 29542
+    },
+    "pending-v2-api2-generatedtrue.zip": {
+      "sha256": "6b2e7719e8f46b7c1a1ff32cad15d71f6b8d2d71ef4838fe13fdecd6bb092e95",
+      "bytes": 29232
+    },
+    "pending-v3-api1-generatedfalse.zip": {
+      "sha256": "3f05d404c1ef74af0f333b6ea3234540b2835c5a54dd7a355ed88fafbd7841ce",
+      "bytes": 34967
+    }
+  },
+  "before_binaries": {
+    "/tmp/recalld-vector-certification-fence-validation/before/recalld-test": "4d4cb1ff49af47f1cce157747d2250a98bb98a0063adcfaf43c2b785a052f10b",
+    "/tmp/recalld-vector-certification-validation/before159158/output/recalld-test": "60523070d43e2598df2642a96d80d2bcf1d9cc07b3cb78e65e4e162640e5aedf"
+  }
+}

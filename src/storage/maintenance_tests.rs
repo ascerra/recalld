@@ -305,7 +305,7 @@ async fn actual_manual_sweep_awaits_publication_and_keeps_receipt_on_failure() {
     use crate::api::FsrsEngine as _;
     let f = Fixture::new();
     let id = f.insert_memory().await;
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM + 1);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM + 1);
     let adapter = crate::api::adapters::FsrsEngineAdapter::new(
         f.storage.clone(),
         f.cache.clone(),
@@ -337,7 +337,7 @@ async fn actual_manual_sweep_awaits_publication_and_keeps_receipt_on_failure() {
             .unwrap()
             .is_empty()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(DIM);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM);
     let completion = crate::derived_completion::DerivedCompletion {
         storage: f.storage.clone(),
         cache: f.cache.clone(),

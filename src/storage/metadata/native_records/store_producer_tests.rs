@@ -7,6 +7,9 @@ use serde_json::json;
 #[path = "insertion_origin_tests.rs"]
 mod insertion_origin_tests;
 
+#[path = "selection_demand_tests.rs"]
+mod selection_demand;
+
 struct Provider {
     texts: std::sync::Mutex<Vec<String>>,
     profile: Option<crate::model::schema::EmbeddingProfile>,
@@ -14,7 +17,7 @@ struct Provider {
     calls: Arc<AtomicUsize>,
     entered: Option<Arc<tokio::sync::Notify>>,
     release: Option<Arc<tokio::sync::Notify>>,
-    corrupt: Option<Arc<tokio::sync::RwLock<crate::search::FlatVectorIndex>>>,
+    corrupt: Option<Arc<tokio::sync::RwLock<crate::search::VectorIndexOwner>>>,
 }
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for Provider {
@@ -38,7 +41,7 @@ impl crate::embedding::EmbeddingProvider for Provider {
             release.notified().await;
         }
         if let Some(index) = &self.corrupt {
-            *index.write().await = crate::search::FlatVectorIndex::new(8);
+            *index.write().await = crate::search::VectorIndexOwner::uniform(8);
         }
         Ok(vec![2., 0., 0., 0.])
     }
@@ -106,7 +109,7 @@ fn expected_replay(receipt: &WriteReceipt) -> WriteReceipt {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_completed_replay_skips_settings_provider_and_rediscovery() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -194,7 +197,7 @@ async fn linked_producer_completed_replay_skips_settings_provider_and_rediscover
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linked_producer_checked_empty_and_disabled_have_distinct_outcomes_and_read_generation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -238,7 +241,7 @@ async fn linked_producer_publication_failure_keeps_actual_child_receipt_then_rep
 }
 async fn batch_publication_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -257,7 +260,7 @@ async fn batch_publication_origin(contract: u32) {
     assert_eq!(p.calls.load(Ordering::SeqCst), 1);
     assert_eq!(f.storage.read().unwrap().scan_all().unwrap().len(), 2);
     let before = f.storage.read().unwrap().control_state().unwrap();
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let replay = a.run_batch(r).await.unwrap();
     assert!(replay.all_ready(), "{replay:?}");
     assert_eq!(replay.items[0].receipt, Some(expected_replay(receipt)));
@@ -271,7 +274,7 @@ async fn linked_producer_root_before_provider_completes_graph_descendants_while_
 }
 async fn batch_close_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -352,7 +355,7 @@ async fn linked_producer_unknown_child_reopens_exact_reserved_operation_without_
 }
 async fn batch_unknown_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -403,7 +406,7 @@ async fn batch_unknown_origin(contract: u32) {
 async fn linked_producer_unavailable_provider_leaves_only_reservation_and_resumes_frozen_settings()
 {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -471,7 +474,7 @@ fn single_context(f: &Fixture, d: &Data, key: &str) -> MutationContext {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_replay_preserves_receipt_without_provider_settings_clock_or_batch() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -554,7 +557,7 @@ async fn native_single_replay_preserves_receipt_without_provider_settings_clock_
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_publication_failure_carries_exact_receipt_and_reopens_without_provider() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -620,7 +623,7 @@ async fn native_single_publication_failure_carries_exact_receipt_and_reopens_wit
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_close_waits_provider_then_graph_without_storage_inversion() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -676,7 +679,7 @@ async fn native_single_close_waits_provider_then_graph_without_storage_inversion
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_provider_race_rejects_stale_plan_before_clock_or_allocation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -721,7 +724,7 @@ async fn native_single_provider_race_rejects_stale_plan_before_clock_or_allocati
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_original_vector_bits_and_checked_empty_identity() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -812,7 +815,7 @@ async fn native_single_process_exit_reopens_one_receipt_and_frozen_links() {
         "after_canonical_ack",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
         let before = s.metadata().control_state().unwrap();
@@ -891,7 +894,7 @@ async fn single_unknown_origin(contract: u32) {
         }
     }
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -938,7 +941,7 @@ async fn single_unknown_origin(contract: u32) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_scope_lineage_controls_do_not_replay_other_namespace_or_call_provider() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1032,7 +1035,7 @@ fn receipt_rows(f: &Fixture) -> Vec<(Vec<u8>, Vec<u8>)> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_profile_id_fresh_binding_replay_and_original_bits() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1120,7 +1123,7 @@ async fn native_single_profile_id_fresh_binding_replay_and_original_bits() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1258,7 +1261,7 @@ async fn native_single_profile_id_publication_error_preserves_exact_committed_re
 }
 async fn single_publication_origin(contract: u32) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1269,7 +1272,7 @@ async fn single_publication_origin(contract: u32) {
     key.contract_version = contract;
     let input = profile_wire_input(&d, false);
     let id = Some(d.profile.profile_id().unwrap());
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let error = a
         .store_native_single_by_profile_id(
             key.clone(),
@@ -1298,7 +1301,7 @@ async fn single_publication_origin(contract: u32) {
         Some(*receipt.clone())
     );
     let rows = receipt_rows(&f);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let replay = a
         .store_native_single_by_profile_id(key, input, id, NativePolicyInputs::default(), None)
         .await
@@ -1312,7 +1315,7 @@ async fn single_publication_origin(contract: u32) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn batch_profile_id_actual_wire_preserves_identity_and_current_generation_readiness() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1445,7 +1448,7 @@ async fn batch_profile_id_mismatch_and_invalid_pair_are_retained_without_provide
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn batch_profile_id_pending_reopen_uses_retained_binding_and_original_cas() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1518,7 +1521,7 @@ async fn batch_profile_id_pending_reopen_uses_retained_binding_and_original_cas(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_document_recipe_actual_single_provider_input() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1549,7 +1552,7 @@ async fn native_document_recipe_actual_single_provider_input() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_document_recipe_actual_batch_provider_input() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);
@@ -1692,7 +1695,7 @@ async fn native_document_recipe_old_receipts_replay_without_provider_or_rewritin
 async fn native_document_recipe_offline_actual_api1_and_api2() {
     for api in [1, 2] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock);
         let p = provider(&d);
@@ -1719,7 +1722,7 @@ async fn native_document_recipe_offline_actual_api1_and_api2() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_document_recipe_plain_batch_with_explicit_auxiliary_disable() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, s.engine);

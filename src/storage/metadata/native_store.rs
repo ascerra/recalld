@@ -57,7 +57,7 @@ impl MetadataStore {
             crate::storage::batch::native::store_hash(&child.context(), input, &child.defaults)?;
         let replay = super::batch::replay_child(&tx, child, hash)?;
         if replay.is_none() {
-            super::batch::check_policy(&tx, child)?;
+            super::batch::check_policy(self, &tx, child)?;
         }
         Ok(replay)
     }

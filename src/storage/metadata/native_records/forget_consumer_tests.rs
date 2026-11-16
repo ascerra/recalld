@@ -14,7 +14,7 @@ impl crate::time::Clock for CountingClock {
 }
 fn setup() -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(CountingClock {
         now: AtomicI64::new(5000),
         calls: AtomicUsize::new(0),
@@ -151,7 +151,7 @@ async fn native_forget_partial_publication_replays_before_policy_clock_and_cas()
     let (f, d, clock, id, context) = setup();
     let publisher = completion(&f);
     publisher.rebuild_all().await.unwrap();
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let result = publisher
         .forget_native_with_work(
             context.clone(),
@@ -184,7 +184,7 @@ async fn native_forget_partial_publication_replays_before_policy_clock_and_cas()
             .await
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let invalid_policy = NativePolicyInputs {
         multiplier: f64::NAN,
         ..Default::default()

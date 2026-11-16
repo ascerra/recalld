@@ -1,0 +1,112 @@
+{
+  "scope": "test-only isolated patch; no build/format/commit/shared edits",
+  "source_root": "/tmp/recalld-implementation/vector-certification",
+  "files": {
+    "src/storage/metadata/native_records/graph_tests.rs": {
+      "base_sha256": "327e6d5ace611b6fa26f8af30c74e3f179de50ffbded82a61b8bb5cec1e6f2a9",
+      "after_sha256": "5f13b13b1ea9572c0815f2f5bbf432e74355b0afdab93fa10365a0e2458cf9d6"
+    },
+    "src/storage/metadata/native_records/graph_nochange_tests.rs": {
+      "base_sha256": "98e17b74aee9fd1c2410b7fc2aeb12e35932ca5931e08be76a6494db30c124a8",
+      "after_sha256": "a27a5f623388dc055a1b408f33fc5816efd8c063137359b633fea632f7ff59b2"
+    },
+    "src/storage/metadata/native_records/graph_producer_tests.rs": {
+      "base_sha256": "545689c7ff1a63192f315cb1d50803a580f0ffdd4960e18fcdc3a876fa2be738",
+      "after_sha256": "b49bd1c913b26c1ed525da44d760ef065e7b2f160169fe4e76b4f71c9428ecb6"
+    },
+    "src/storage/metadata/native_records/exact_scan_tests.rs": {
+      "base_sha256": "a46f1b7a953797be9fa98b9ae105d1b6bafb4eb9d99b26f6d9ad0942e025b956",
+      "after_sha256": "28b08cc59c43f5e37e9481025691614c1719595743bcd30ad995a5f288d3d872"
+    }
+  },
+  "helper_sha256": "6a218c446a543c9d0cd3f76236207db3e0a136bd1471eb46c35ed5dc64d0e88d",
+  "patch_sha256": "35394936bed6a7b504e7019654d311cc597595aa21272eb9a072861113094dff",
+  "opt_in_sites": [
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_rejects_real_foreign_endpoint_and_preserves_unknown_profile() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_committed_and_unknown_failures_reconcile_without_duplicate_tokens() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_review_preserves_signed_zero_weight_bits() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_keyed_noop_never_reports_unbound_success_then_reexecutes() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "async fn reject_foreign_profile_commitment(profile: String, well_formed: bool, nochange: bool) {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_process_exit_recovery_before_after_metadata_and_edges() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_corrupt_proof_outbox_and_physical_edges_reject_before_live_open() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "async fn native_graph_export_import_restore_preserves_history_and_foreign_lineage_rejection() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_multi_edge_updates_noops_replay_and_history() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_capture_cas_scope_eligibility_and_input_bounds_reject_without_write() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_tests.rs",
+      "function": "fn native_graph_supersedes_cycle_branch_and_multi_source_token_once() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_nochange_tests.rs",
+      "function": "fn native_graph_nochange_failures_reconcile_without_peer_or_clock_changes() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_nochange_tests.rs",
+      "function": "fn native_graph_nochange_process_exit_recovers_key_once() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_nochange_tests.rs",
+      "function": "fn native_graph_nochange_rejects_changed_witness_action_or_missing_key_immutably() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/graph_producer_tests.rs",
+      "function": "fn prepared() -> (",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/exact_scan_tests.rs",
+      "function": "async fn exact_native_writer_205_pairs_transport_reopen_ghost_tombstone_and_stale_cursor() {",
+      "opt_ins": 1
+    },
+    {
+      "file": "src/storage/metadata/native_records/exact_scan_tests.rs",
+      "function": "async fn exact_native_generation_change_after_capture_discards_computed_page() {",
+      "opt_ins": 1
+    }
+  ],
+  "validation": "SOURCE ONLY. No build, test, rustfmt, commit, runtime or shared-file edit performed."
+}

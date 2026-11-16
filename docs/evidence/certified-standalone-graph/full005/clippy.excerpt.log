@@ -1,0 +1,18 @@
+...    |
+1012 | |             Ok(())
+1013 | |         })
+     | |_________^
+     |
+    ::: src/storage/error.rs:82:5
+     |
+  82 |       Redb(#[from] redb::Error),
+     |       ------------------------- the largest variant contains at least 160 bytes
+...
+  94 |       RedbTransaction(#[from] redb::TransactionError),
+     |       ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+     |
+     = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: `recalld` (lib test) generated 1275 warnings (1133 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 15 suggestions)
+    Finished `dev` profile [unoptimized] target(s) in 22.99s

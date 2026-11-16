@@ -68,7 +68,8 @@ pub struct SemanticsDiagnostics {
     pub fts: FtsDiagnostics,
     /// V2-only observations. None means legacy instrumentation is unavailable.
     pub channels: Option<BTreeMap<RetrievalChannel, ChannelDiagnostics>>,
-    /// Returned UUIDs only. Inherited evidence never exposes predecessor IDs.
+    /// Returned UUID keys only. Explanations may contain bounded eligible
+    /// scored origins, never intermediate/foreign/ineligible path identities.
     pub provenance: Option<BTreeMap<MemoryId, ResultProvenance>>,
     pub supersession_edges_examined: usize,
     pub unresolved: BTreeMap<UnresolvedReason, usize>,
@@ -119,7 +120,7 @@ pub struct SemanticsResponse {
 }
 
 /// Internal typed resolution; path IDs never enter aggregate diagnostics.
-enum Resolution {
+pub(super) enum Resolution {
     Current(CachedRecord),
     Resolved {
         terminal: CachedRecord,
@@ -152,7 +153,7 @@ pub(super) fn validate_record(record: &CachedRecord) -> Result<()> {
 }
 
 impl QueryEngine {
-    async fn resolve_path(
+    pub(super) async fn resolve_path(
         &self,
         origin: CachedRecord,
         namespace: NamespaceId,
@@ -287,6 +288,7 @@ impl QueryEngine {
             });
             if candidate.record.id != id {
                 replacement.provenance.inherit(&candidate);
+                replacement.inherit_score_sources(&candidate);
             }
             replacement.composite_score =
                 replacement.composite_score.max(candidate.composite_score);
@@ -314,6 +316,15 @@ impl QueryEngine {
             unreachable!("v2-only pipeline");
         };
         let stage_start = Instant::now();
+        let rejected_direct: HashMap<_, _> = candidates
+            .iter()
+            .filter(|c| Self::passes_hard_filters(&c.record, query, namespace))
+            .filter_map(|c| {
+                let evidence = DirectScoreEvidence::capture(c, query.min_score);
+                (evidence.disposition == MinScoreDisposition::Rejected)
+                    .then_some((c.record.id, evidence))
+            })
+            .collect();
         self.apply_filters(candidates, query, &query.entities, namespace);
         timings.apply_filters_us = stage_start.elapsed().as_micros() as u64;
         let stage_start = Instant::now();
@@ -322,7 +333,7 @@ impl QueryEngine {
         }
         timings.calculate_r_us = stage_start.elapsed().as_micros() as u64;
         let stage_start = Instant::now();
-        self.apply_boosts(candidates, query);
+        self.apply_boosts(candidates, query, true);
         for c in candidates.iter_mut() {
             if !c.composite_score.is_finite() {
                 return Err(SearchError::Internal("nonfinite composite score".into()));
@@ -408,7 +419,7 @@ impl QueryEngine {
                 c.entity_score = crate::model::entity_overlap(&query.entities, &c.record.entities);
                 discovered.push(c);
             }
-            self.apply_boosts(&mut discovered, query);
+            self.apply_boosts(&mut discovered, query, true);
             for candidate in &mut discovered {
                 candidate.provenance.own_score = Some(candidate.composite_score);
             }
@@ -435,6 +446,7 @@ impl QueryEngine {
                 .await?;
         }
         for c in candidates.iter_mut() {
+            c.rejected_direct = rejected_direct.get(&c.record.id).copied();
             if !c.composite_score.is_finite() {
                 return Err(SearchError::Internal("nonfinite final score".into()));
             }

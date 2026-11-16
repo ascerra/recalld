@@ -1,0 +1,23 @@
+{
+  "passed": 237,
+  "failed": 3,
+  "ignored": 1,
+  "seconds": 454.77,
+  "failures": [
+    {
+      "test": "forget_origin_known_publication_failure_keeps_full_receipt_and_replays_after_repair",
+      "cause": "VectorCertificationRequired on real fresh insertion; explicit certified positive setup required; original uncertified common fixture retained",
+      "owner": "Pascal source review; Feynman application/validation"
+    },
+    {
+      "test": "api1_public_native_failures_keep_receipts_and_unknown_identity",
+      "cause": "VectorCertificationRequired on real fresh insertion; explicit certified positive setup required; original uncertified common fixture retained",
+      "owner": "Pascal source review; Feynman application/validation"
+    },
+    {
+      "test": "api1_public_native_remote_decode_and_terminal_no_resurrection",
+      "cause": "VectorCertificationRequired on real fresh insertion; explicit certified positive setup required; original uncertified common fixture retained",
+      "owner": "Pascal source review; Feynman application/validation"
+    }
+  ]
+}

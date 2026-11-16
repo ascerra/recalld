@@ -154,6 +154,7 @@ pub(crate) fn read_state(
         ));
     }
     super::lifecycle_migration::validate_policy_history(read, control, &state)?;
+    super::vector_certification::validate_current(read, control)?;
     Ok(Some(state))
 }
 
