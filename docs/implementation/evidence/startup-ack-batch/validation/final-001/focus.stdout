@@ -1,0 +1,17 @@
+
+running 12 tests
+test storage::metadata::effects::ack_tests::startup_ack_accepted_completion_finishes_after_root_admission_closes ... ok
+test storage::metadata::effects::ack_tests::startup_ack_actual_rebuild_has_linear_validation_work ... ok
+test storage::metadata::effects::ack_tests::startup_ack_abort_and_lost_commit_result_preserve_recovery_and_unresolved_work ... ok
+test storage::metadata::effects::ack_tests::startup_ack_cancelled_waiter_cannot_cancel_owned_worker_or_claim_drained ... ok
+test storage::metadata::effects::ack_tests::startup_ack_corruption_and_unapplied_reject_without_partial_retirement ... ok
+test storage::metadata::effects::ack_tests::startup_ack_crash_child ... ok
+test storage::metadata::effects::ack_tests::startup_ack_crash_before_after_commit_preserves_canonical_history ... ok
+test storage::metadata::effects::ack_tests::startup_ack_guard_excludes_same_generation_ack_writer ... ok
+test storage::metadata::effects::ack_tests::startup_ack_requires_current_generation_and_every_actual_view_even_when_empty ... ok
+test storage::metadata::effects::ack_tests::startup_ack_same_generation_effect_change_and_leftovers_abort_atomically ... ok
+test storage::metadata::native_records::tests::startup_ack_native_typed_effect_counts_include_actual_guard ... ok
+test storage::metadata::effects::ack_tests::startup_ack_empty_small_large_real_publish_preserves_receipts_and_generation ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 1367 filtered out; finished in 7.21s
+

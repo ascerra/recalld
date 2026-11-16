@@ -83,6 +83,16 @@ pub use semantics::{
 pub trait NamespaceResolver: Send + Sync {
     /// Look up a namespace by name, returning its configuration.
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
+    /// Actual storage-owner format authority, never a query feature selector.
+    /// Legacy/custom resolvers have no native authority by default.
+    fn is_native_owned(&self) -> Result<bool> {
+        Ok(false)
+    }
+    fn check_native_vector_namespace(&self, _namespace: &NamespaceConfig) -> Result<()> {
+        Err(SearchError::Unavailable(
+            "native vector certification requires a pinned canonical view".into(),
+        ))
+    }
     /// Only an actual owned native canonical view can grant this admission.
     fn check_native_query_profile(
         &self,
@@ -825,7 +835,13 @@ impl QueryEngine {
         let stage_start = Instant::now();
         let query_embedding = match query.query_mode {
             QueryMode::MetadataOnly => None,
-            _ if query.query_embedding.is_some() => query.query_embedding.take(),
+            _ if query.query_embedding.is_some() => {
+                if self.namespace_resolver.is_native_owned()? {
+                    self.namespace_resolver
+                        .check_native_vector_namespace(&ns_config)?;
+                }
+                query.query_embedding.take()
+            }
             _ => {
                 let text = query.text.as_ref().ok_or(SearchError::EmptyQuery)?;
                 let profile = self.embedding_providers.profile();
@@ -883,8 +899,12 @@ impl QueryEngine {
             .map(|record| (record.id, record))
             .collect();
         let eligible_ids: HashSet<MemoryId> = eligible_records.keys().copied().collect();
-        tracing::trace!(target: "recalld::performance", kind = "eligibility",
-            examined, eligible = eligible_ids.len(), rejected = examined - eligible_ids.len());
+        crate::performance::event!(
+            kind = "eligibility",
+            examined,
+            eligible = eligible_ids.len(),
+            rejected = examined - eligible_ids.len()
+        );
         timings.eligibility_us = stage_start.elapsed().as_micros() as u64;
         performance.mark("hard_filter");
         if semantics != RetrievalSemantics::V1 {
@@ -1148,12 +1168,15 @@ impl QueryEngine {
 
         performance.mark("graph_filter_rank_supersession");
         if semantics != RetrievalSemantics::V1 {
-            tracing::trace!(target: "recalld::performance", kind = "graph_work", known = true,
+            crate::performance::event!(
+                kind = "graph_work",
+                known = true,
                 expanded_states = diagnostics.graph.expanded_states,
                 examined_edges = diagnostics.graph.examined_edges,
-                supersession_edges = diagnostics.supersession_edges_examined);
+                supersession_edges = diagnostics.supersession_edges_examined
+            );
         } else {
-            tracing::trace!(target: "recalld::performance", kind = "graph_work", known = false);
+            crate::performance::event!(kind = "graph_work", known = false);
         }
         // -- Stage 8d: Truncate -------------------------------------------
         diagnostics.result_limit_applied = candidates.len() > query.limit;
@@ -1186,10 +1209,16 @@ impl QueryEngine {
         };
 
         performance.mark("exposure");
-        tracing::trace!(target: "recalld::performance", kind = "selection",
-            vector_admitted = vector_ids.len(), fts_admitted = fts_ids.len(),
-            entity_admitted = entity_only_ids.len(), union_candidates = all_candidate_ids.len(),
-            pre_limit = total_matches, returned = results.len(), receipt_count = receipts.len());
+        crate::performance::event!(
+            kind = "selection",
+            vector_admitted = vector_ids.len(),
+            fts_admitted = fts_ids.len(),
+            entity_admitted = entity_only_ids.len(),
+            union_candidates = all_candidate_ids.len(),
+            pre_limit = total_matches,
+            returned = results.len(),
+            receipt_count = receipts.len()
+        );
         let response = SearchResponse {
             results,
             total_matches,
@@ -3472,9 +3501,9 @@ mod tests {
         vectors: &[(MemoryId, f32)],
     ) -> QueryEngine {
         use crate::search::adapters::{SharedEntityIndexReader, SharedVectorIndexRegistry};
-        use crate::search::{EntityIndex, FlatVectorIndex, VectorIndex, VectorMetadata};
+        use crate::search::{EntityIndex, VectorIndexOwner, VectorMetadata};
 
-        let mut index = FlatVectorIndex::new(2);
+        let mut index = VectorIndexOwner::uniform(2);
         for &(id, cosine) in vectors {
             // Deliberately stale derived metadata: canonical records must decide eligibility.
             index

@@ -176,10 +176,7 @@ async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
         .insert_prepared(
             &insert_ctx,
             &intent,
-            &crate::embedding::runtime::GeneratedEmbedding {
-                values: vec![],
-                profile: Some(profile()),
-            },
+            &crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], Some(profile())),
         )
         .unwrap();
     session.engine.sync().unwrap();

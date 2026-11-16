@@ -247,8 +247,8 @@ fn engine(
     edges: &[(usize, usize, EdgeType)],
 ) -> QueryEngine {
     use crate::search::adapters::*;
-    use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, VectorIndex, VectorMetadata};
-    let mut vectors = FlatVectorIndex::new(4);
+    use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner, VectorMetadata};
+    let mut vectors = VectorIndexOwner::uniform(4);
     let fts = FtsIndex::new(f._directory.path()).unwrap();
     let mut entities = EntityIndex::new();
     let mut graph = crate::graph::RelationshipGraph::new();
@@ -883,13 +883,13 @@ async fn returned_graph_result_uses_the_same_projection_as_admission_and_ranking
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_retrieval_graph_formulas_also_consume_explicit_policy_projection() {
     use crate::search::adapters::SharedVectorIndexRegistry;
-    use crate::search::{FlatVectorIndex, VectorIndex, VectorMetadata};
+    use crate::search::{VectorIndexOwner, VectorMetadata};
     let f = offline(2, LifecycleVersion::ExplicitFeedbackV2, |_, _| {}).await;
     let clock = CountingClock::new(DAY);
     let mut engine = engine(&f, clock.clone(), &[(0, 1, EdgeType::Associative)]);
     // Only the seed has a direct channel hit; the neighbor is graph-discovered.
     let item = f.view.record(f.ids[0]).unwrap().unwrap();
-    let mut index = FlatVectorIndex::new(4);
+    let mut index = VectorIndexOwner::uniform(4);
     index
         .add(
             f.ids[0],

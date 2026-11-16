@@ -229,7 +229,7 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
     // Extraction, type strictness, markup detection, and the shared
     // content limits all live in `args`, so this handler and the batch
     // one below cannot drift apart.
-    let input = match args::parse_store_input(&arguments, bridge.default_namespace()) {
+    let input = match args::parse_store_input_fields(&arguments, bridge.default_namespace()) {
         Ok(input) => input,
         Err(e) => {
             // Logged, never silently defaulted: a client whose
@@ -246,13 +246,18 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
         }
     };
 
-    match bridge.storage.store_memory(input).await {
-        Ok(stored) => match ToolCallResult::json(&stored) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Err(e) => ToolCallResult::error(format!("Failed to store memory: {e}")),
-    }
+    // The original single-tool embedding/initialStability fields remain ignored.
+    // Representation admission belongs to the actual owned backend format.
+    bridge
+        .storage
+        .store_api1(crate::serialization::store_api1::Request {
+            input,
+            profile_id: None,
+            created_at: None,
+            require_native: false,
+        })
+        .await
+        .mcp()
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -428,7 +433,7 @@ async fn handle_durable_batch(
     kind: crate::storage::batch::BatchKind,
     items: &[serde_json::Value],
 ) -> ToolCallResult {
-    use crate::storage::batch::{BatchInput, BatchKind, BatchStatus};
+    use crate::storage::batch::{BatchInput, BatchKind};
     if arguments.get("expectedGeneration").is_some() {
         return ToolCallResult::error("public whole-store expectedGeneration is not enabled");
     }
@@ -443,10 +448,30 @@ async fn handle_durable_batch(
         Ok(input) => input,
         Err(e) => return ToolCallResult::error(format!("Invalid batch parameters: {e}")),
     };
+    // The existing explicit private writer selector keeps its original route.
+    if kind == BatchKind::Insert && input.mutation_version == 1 {
+        return bridge
+            .storage
+            .store_batch_api1(crate::serialization::batch_api1::Request {
+                input,
+                surface: crate::serialization::batch_api1::Surface::Mcp,
+            })
+            .await
+            .mcp();
+    }
     let outcome = match bridge.storage.mutate_batch(input).await {
         Ok(outcome) => outcome,
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
+    durable_batch_result(outcome, kind, items)
+}
+
+pub(crate) fn durable_batch_result(
+    outcome: crate::storage::batch::BatchOutcome,
+    kind: crate::storage::batch::BatchKind,
+    items: &[serde_json::Value],
+) -> ToolCallResult {
+    use crate::storage::batch::{BatchKind, BatchStatus};
     let results: Vec<_> = outcome
         .items
         .iter()
@@ -1464,6 +1489,19 @@ async fn handle_create_namespace(
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
         },
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(message)) => {
+            match serde_json::from_str::<serde_json::Value>(&message)
+                .ok()
+                .filter(|v| v.is_object())
+            {
+                Some(evidence) => {
+                    let mut result = ToolCallResult::json(&evidence).expect("catalog failure JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(message),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to create namespace: {e}")),
     }
 }
@@ -1570,7 +1608,16 @@ async fn handle_delete_namespace(
         // "Failed to delete namespace" would tell the agent nothing
         // happened, when in fact memories were destroyed and the job
         // needs finishing — so the message passes through unwrapped.
-        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => ToolCallResult::error(msg),
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => {
+            match crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&msg) {
+                Some(payload) => {
+                    let mut result = ToolCallResult::json(&payload).expect("validated purge JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(msg),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to delete namespace: {e}")),
     }
 }
@@ -1862,6 +1909,27 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if name == "store_memory" {
+        use crate::serialization::native_single::{Reply, Request, mcp_result};
+        let reply = match Request::parse(&arguments, false, None, bridge.default_namespace()) {
+            Ok(request) => bridge.storage.store_native_wire(request).await,
+            Err(error) => Reply::invalid(error),
+        };
+        return mcp_result(reply);
+    }
+    if name == "store_memories" {
+        let result = match crate::serialization::native_batch::parse(
+            &arguments,
+            true,
+            None,
+            bridge.default_namespace(),
+        ) {
+            Ok(input) => bridge.storage.mutate_native_batch(input).await,
+            Err(e) => Err(e.into()),
+        };
+        let (status, envelope) = crate::serialization::native_batch::response(result);
+        return crate::serialization::native_batch::mcp_result(status, &envelope);
+    }
     let lifecycle = match name {
         "forget_memory" => Some(crate::serialization::native_lifecycle::Operation::Forget),
         "reinforce_memory" => Some(crate::serialization::native_lifecycle::Operation::Feedback),

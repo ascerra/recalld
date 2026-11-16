@@ -46,10 +46,11 @@ pub mod native_purge;
 mod native_purge_tests;
 pub mod native_records;
 pub mod native_store;
+pub mod native_text;
 pub mod offline_snapshot;
 pub(crate) mod ownership;
 pub(crate) mod publication;
-pub use publication::{DerivedReadiness, Readiness};
+pub use publication::{DerivedReadiness, ObservedDerived, Readiness, ReadinessObservation};
 pub mod purge;
 #[cfg(test)]
 mod purge_tests;
@@ -61,6 +62,7 @@ pub mod tombstone;
 #[cfg(test)]
 mod tombstone_tests;
 pub(crate) mod validation;
+pub mod vector_certification;
 pub mod vectors;
 pub mod work;
 

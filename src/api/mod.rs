@@ -15,12 +15,13 @@
 pub mod adapters;
 mod errors;
 mod handlers;
-#[cfg(test)]
-pub(crate) use handlers::scan_duplicates_v2;
+mod store_api1;
 #[cfg(test)]
 pub(crate) use handlers::search_v2;
 #[cfg(test)]
 pub(crate) use handlers::similar_v2;
+#[cfg(test)]
+pub(crate) use handlers::{batch_store_v2, scan_duplicates_v2, single_store_v2};
 mod middleware;
 pub(crate) mod models;
 mod routes;

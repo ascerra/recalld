@@ -282,6 +282,23 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Physical control format, never inferred from API version or a namespace.
+    async fn native_store_format(&self) -> Result<bool, StorageError> {
+        Ok(false)
+    }
+    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "store identity unavailable".into(),
+        ))
+    }
+    /// Concrete canonical/vector capture; no legacy backend fallback.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
     async fn forget_api1(
         &self,
         id: MemoryId,
@@ -347,19 +364,6 @@ pub trait StorageEngine: Send + Sync {
             ));
         }
         self.delete_memory(id, namespace).await
-    }
-    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
-        Err(StorageError::RecoveryRequired(
-            "store identity unavailable".into(),
-        ))
-    }
-    /// Concrete canonical/vector capture; no legacy backend fallback.
-    async fn scan_duplicate_pairs(
-        &self,
-        _request: crate::serialization::scan::ExactScanRequest,
-    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
-    {
-        Err(crate::search::exact_scan::ExactScanError::Unavailable)
     }
 
     /// Drain in-flight create/index publication before online derived repair.
@@ -499,6 +503,29 @@ pub trait RecordCache: Send + Sync {
 /// Relationship graph for edge traversal.
 #[async_trait::async_trait]
 pub trait RelationshipGraph: Send + Sync {
+    /// Standalone native edge intent. Ready success includes every derived view.
+    async fn put_native_edges(
+        &self,
+        _ctx: crate::storage::control::MutationContext,
+        _input: crate::storage::native_graph::NativeGraphInput,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "native graph completion owner is required".into(),
+        ))
+    }
+    /// Automatic selection is volatile and unkeyed. Never a creation callback.
+    async fn select_native_links(
+        &self,
+        _ctx: crate::storage::control::MutationContext,
+        _selection: crate::graph::native_producer::NativeLinkSelection,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "native graph completion owner is required".into(),
+        ))
+    }
+
     async fn tombstone_node_with_work(
         &self,
         id: MemoryId,
@@ -841,6 +868,9 @@ pub struct NamespaceListInfo {
 /// themselves -- they receive them through `AppState`.
 #[derive(Clone)]
 pub struct AppState {
+    /// Optional same-owner native batch producer. Absence fails closed.
+    pub native_batches: Option<Arc<dyn crate::mcp::bridge::StorageEngine>>,
+    pub default_namespace: String,
     /// The search pipeline: embedding, vector search, graph expansion.
     pub search: Arc<dyn SearchPipeline>,
 
@@ -867,6 +897,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn with_native_batches(
+        mut self,
+        producer: Arc<dyn crate::mcp::bridge::StorageEngine>,
+        default_namespace: String,
+    ) -> Self {
+        self.native_batches = Some(producer);
+        self.default_namespace = default_namespace;
+        self
+    }
+
     /// Construct a new `AppState` from pre-initialized subsystems.
     ///
     /// All subsystems must be fully initialized before the API server
@@ -881,6 +921,8 @@ impl AppState {
         metrics: Arc<dyn MetricsCollector>,
     ) -> Self {
         Self {
+            native_batches: None,
+            default_namespace: crate::model::constants::DEFAULT_NAMESPACE_NAME.into(),
             search,
             storage,
             cache,

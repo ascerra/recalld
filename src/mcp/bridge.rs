@@ -90,6 +90,62 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    fn supports_api1_store(&self) -> bool {
+        false
+    }
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::store_api1::Reply;
+        if request.require_native {
+            return Reply::unavailable();
+        }
+        if let Err(error) = request.validate_legacy() {
+            return Reply::Legacy(Err(error.to_string()));
+        }
+        Reply::Legacy(
+            self.store_memory(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+    async fn store_native_wire(
+        &self,
+        _request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        crate::serialization::native_single::Reply::failure(
+            crate::storage::StorageError::RecoveryRequired(
+                "native single consumer unavailable".into(),
+            ),
+        )
+    }
+    fn supports_api1_store_batch(&self) -> bool {
+        false
+    }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::batch_api1::Reply;
+        if let Err(e) = request.legacy() {
+            return Reply::invalid(e);
+        }
+        Reply::Legacy(
+            self.mutate_batch(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+    async fn mutate_native_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        Err(crate::serialization::native_batch::BatchFailure::unavailable())
+    }
     fn supports_api1_lifecycle(&self) -> bool {
         false
     }
@@ -242,6 +298,17 @@ pub trait NamespaceRegistry: Send + Sync {
         &self,
         input: DeleteNamespaceInput,
     ) -> Result<DeleteNamespaceResult, BridgeError>;
+
+    /// Transport-owned bound, never a field trusted from request JSON. The
+    /// default preserves existing implementors; native implementations must
+    /// override this to admit their complete commit evidence before work.
+    async fn delete_namespace_bounded(
+        &self,
+        input: DeleteNamespaceInput,
+        _frame_limit: usize,
+    ) -> Result<DeleteNamespaceResult, BridgeError> {
+        self.delete_namespace(input).await
+    }
 }
 
 /// Health check interface.

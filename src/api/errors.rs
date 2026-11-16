@@ -26,6 +26,11 @@ use crate::serialization::ApiError;
 /// human-readable message, and an optional field name for validation errors.
 #[derive(Debug)]
 pub enum AppError {
+    /// A catalog worker/commit has no known complete receipt. Never invent one.
+    MutationUnknown {
+        operation_id: Option<uuid::Uuid>,
+        message: String,
+    },
     CommittedMutation {
         receipt: crate::storage::control::WriteReceipt,
         message: String,
@@ -102,13 +107,29 @@ impl IntoResponse for AppError {
             )
                 .into_response();
         }
+        if let AppError::MutationUnknown {
+            operation_id,
+            message,
+        } = self
+        {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "COMMIT_OUTCOME_UNKNOWN", "commitState": "unknown",
+                    "operationId": operation_id, "message": message,
+                })),
+            )
+                .into_response();
+        }
         if let AppError::CommittedMutation { receipt, message } = self {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
                 "error": "INDEX_NOT_READY", "commitState": "committed", "ready": false, "receipt": receipt, "message": message,
             }))).into_response();
         }
         let (status, error_code, message, field) = match &self {
-            AppError::Observation(_) | AppError::CommittedMutation { .. } => unreachable!(),
+            AppError::Observation(_)
+            | AppError::CommittedMutation { .. }
+            | AppError::MutationUnknown { .. } => unreachable!(),
             AppError::NotFound { resource, id } => (
                 StatusCode::NOT_FOUND,
                 "NOT_FOUND".to_string(),
@@ -213,10 +234,12 @@ impl From<StorageError> for AppError {
                     message: err.to_string(),
                 }
             }
-            StorageError::InvalidMutation(_) => AppError::UnprocessableEntity {
-                message: err.to_string(),
-                field: None,
-            },
+            StorageError::InvalidMutation(_) | StorageError::CallerVectorInvalid(_) => {
+                AppError::UnprocessableEntity {
+                    message: err.to_string(),
+                    field: None,
+                }
+            }
             StorageError::DuplicateId(uuid) => AppError::Conflict {
                 message: format!("memory {} already exists", uuid),
             },
@@ -352,6 +375,40 @@ impl From<GraphError> for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caller_vector_numeric_errors_preserve_422_provider_503_and_corruption_500() {
+        for values in [vec![0.; 4], vec![1.; 3], vec![f32::NAN; 4]] {
+            let caller =
+                crate::storage::insertion::normalize_embedding(&mut values.clone(), 4, true)
+                    .unwrap_err();
+            assert!(matches!(caller, StorageError::CallerVectorInvalid(_)));
+            assert_eq!(
+                AppError::from(caller).into_response().status(),
+                StatusCode::UNPROCESSABLE_ENTITY
+            );
+            let provider =
+                crate::storage::insertion::normalize_embedding(&mut values.clone(), 4, false)
+                    .unwrap_err();
+            assert!(matches!(
+                provider,
+                StorageError::ProviderVectorUnavailable(_)
+            ));
+            assert_eq!(
+                AppError::from(provider).into_response().status(),
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+        }
+        for corruption in [
+            StorageError::OwnershipMismatch("canonical vector".into()),
+            StorageError::InvalidControl("record proof".into()),
+        ] {
+            assert_eq!(
+                AppError::from(corruption).into_response().status(),
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+        }
+    }
 
     #[test]
     fn validation_error_becomes_bad_request_with_field() {

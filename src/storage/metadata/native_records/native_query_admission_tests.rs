@@ -59,7 +59,7 @@ fn query_engine(f: &Fixture, provider: Provider, admit: bool) -> QueryEngine {
 async fn native_query_admission_matches_canonical_profile_before_provider_and_preserves_legacy_gate()
  {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let engine = RedbStorageEngine::open_native(&d.path).unwrap();
     let f = Fixture::from_open_engine(root, engine);
     completion(&f).rebuild_all().await.unwrap();

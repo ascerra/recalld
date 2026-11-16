@@ -19,7 +19,7 @@ fn setup_with_multiplier(
     multiplier: f64,
 ) -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(CountingClock {
         now: AtomicI64::new(5000),
         calls: AtomicUsize::new(0),
@@ -362,7 +362,7 @@ async fn native_feedback_partial_publication_retains_receipt_without_outbox_and_
     let (f, _d, clock, id, context) = setup();
     let publisher = completion(&f);
     publisher.rebuild_all().await.unwrap();
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let error = publisher
         .feedback_native_with_work(
             context.clone(),
@@ -407,7 +407,7 @@ async fn native_feedback_partial_publication_retains_receipt_without_outbox_and_
             .await
             .is_err()
     );
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     clock.now.store(i64::MIN, Ordering::SeqCst);
     let replay = publisher
         .feedback_native_with_work(

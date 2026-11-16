@@ -3,9 +3,9 @@
 use super::*;
 use std::sync::atomic::AtomicI64;
 
-struct RegressedClock {
-    time: AtomicI64,
-    calls: AtomicUsize,
+pub(super) struct RegressedClock {
+    pub(super) time: AtomicI64,
+    pub(super) calls: AtomicUsize,
 }
 impl Clock for RegressedClock {
     fn now_millis(&self) -> i64 {
@@ -305,7 +305,11 @@ fn malformed_phase_rule_or_wrong_transition_rejects_without_open_mutation() {
         "insertion",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = if case == "insertion" {
+            certified_fixture(root.path())
+        } else {
+            fixture(root.path())
+        };
         let clock = Arc::new(RegressedClock {
             time: AtomicI64::new(500),
             calls: AtomicUsize::new(0),

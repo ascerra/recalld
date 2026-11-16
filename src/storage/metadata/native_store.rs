@@ -11,9 +11,9 @@ pub(super) fn replay_store(
     input: &NativeStoreInput,
 ) -> Result<Option<WriteReceipt>, StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || !matches!(ctx.scope, MutationScope::Namespace(_)) {
+    if !matches!(ctx.scope, MutationScope::Namespace(_)) {
         return Err(StorageError::InvalidMutationContext(
-            "native linked store requires contract 2 and namespace scope".into(),
+            "native linked store requires namespace scope".into(),
         ));
     }
     let Some(stored) = control::keyed_receipt(tx, ctx)? else {
@@ -57,7 +57,7 @@ impl MetadataStore {
             crate::storage::batch::native::store_hash(&child.context(), input, &child.defaults)?;
         let replay = super::batch::replay_child(&tx, child, hash)?;
         if replay.is_none() {
-            super::batch::check_policy(&tx, child)?;
+            super::batch::check_policy(self, &tx, child)?;
         }
         Ok(replay)
     }

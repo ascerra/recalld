@@ -180,6 +180,16 @@ pub(crate) fn validate_policy_history(
             return Err(invalid("duplicate lifecycle generation"));
         }
         let namespace = match &receipt.outcome {
+            MutationOutcome::VectorsReembedded { transition: t } => {
+                native_history.push((
+                    receipt.clone(),
+                    t.before_namespace.namespace_id,
+                    t.before_namespace.schema.lifecycle_version,
+                    t.before_namespace.schema.policy_revision,
+                ));
+                Some(t.before_namespace.namespace_id)
+            }
+            MutationOutcome::NativeTextGenerationSelected { .. } => None,
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 native_history.push((
                     receipt.clone(),
@@ -623,6 +633,22 @@ pub(crate) fn validate_policy_history(
             ));
         }
     }
+    for row in read.open_table(control::RECEIPTS)?.iter()? {
+        let (_, bytes) = row?;
+        if let MutationOutcome::VectorsReembedded { transition } =
+            control::validate_receipt(bytes.value())?.receipt.outcome
+        {
+            let schema = creation_configs
+                .get_mut(&transition.before_namespace.namespace_id.get())
+                .and_then(|ns| ns.schema.as_mut())
+                .ok_or_else(|| invalid("cutover namespace absent"))?;
+            if schema.vector_certification.as_ref() != Some(&transition.certification) {
+                return Err(invalid("cutover creation binding mismatch"));
+            }
+            schema.vector_certification = None;
+            schema.required_features = transition.before_namespace.schema.required_features.clone();
+        }
+    }
     for (id, creation) in &namespace_creations {
         let ns = creation_configs
             .get(id)
@@ -772,6 +798,53 @@ pub(crate) fn validate_policy_history(
     // assumption that every token increment was a namespace policy migration.
     for receipt in suffix.values().rev() {
         match &receipt.outcome {
+            MutationOutcome::VectorsReembedded { transition: t } => {
+                let namespace = configs
+                    .get_mut(&t.before_namespace.namespace_id.get())
+                    .ok_or_else(|| invalid("cutover reverse namespace missing"))?;
+                let mut expected = t.before_namespace.clone();
+                expected.schema.vector_certification = Some(t.certification.clone());
+                expected.schema.required_features =
+                    vec![super::vector_certification::REQUIRED_FEATURE.into()];
+                let mut actual = super::native_purge::NativeNamespaceProof::capture(namespace)?;
+                // Policy migrations reverse their logical revision in this map;
+                // the materialized namespace schema retains its current revision.
+                let (version, revision) = current_policy
+                    .get(&namespace.id.get())
+                    .ok_or_else(|| invalid("cutover historical policy missing"))?;
+                actual.schema.lifecycle_version = *version;
+                actual.schema.policy_revision = *revision;
+                if actual != expected {
+                    return Err(invalid("cutover reverse namespace differs"));
+                }
+                let rows = records.entry(namespace.id.get()).or_default();
+                if rows
+                    .iter()
+                    .filter(|r| r.state.content.vector.is_some())
+                    .count()
+                    != t.records.len()
+                {
+                    return Err(invalid("cutover reverse inventory count differs"));
+                }
+                for replacement in &t.records {
+                    let current = rows
+                        .iter_mut()
+                        .find(|r| r.id == replacement.record.memory_id)
+                        .ok_or_else(|| invalid("cutover reverse row missing"))?;
+                    if current.state != replacement.record.after {
+                        return Err(invalid("cutover reverse row differs"));
+                    }
+                    current.state = replacement
+                        .record
+                        .before
+                        .clone()
+                        .ok_or_else(|| invalid("cutover reverse prior state absent"))?;
+                }
+                *namespace = t.before_namespace.namespace()?;
+            }
+            MutationOutcome::NativeTextGenerationSelected { transition } => {
+                transition.validate_records(records.values().flat_map(|rows| rows.iter()))?;
+            }
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 let ns = configs
                     .get(&t.before_namespace.namespace_id.get())

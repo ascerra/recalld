@@ -1,0 +1,29 @@
+running 2 tests
+
+thread 'storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_single_reads_edges_and_reopen_replay' (288) panicked at src/storage/metadata/native_records/selection_demand_tests.rs:110:5:
+selection work excess: ["off: actual=(1, 2) expected=(0, 0)", "entity: actual=(1, 2) expected=(1, 0)", "temporal: actual=(1, 2) expected=(1, 0)"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_single_reads_edges_and_reopen_replay ... FAILED
+
+thread 'storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_batch_reads_edges_and_reopen_replay' (287) panicked at src/storage/metadata/native_records/selection_demand_tests.rs:110:5:
+selection work excess: ["off: actual=(1, 2) expected=(0, 0)", "entity: actual=(1, 2) expected=(1, 0)", "temporal: actual=(1, 2) expected=(1, 0)"]
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_batch_reads_edges_and_reopen_replay ... FAILED
+
+failures:
+
+failures:
+    storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_batch_reads_edges_and_reopen_replay
+    storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_single_reads_edges_and_reopen_replay
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1334 filtered out; finished in 9.36s
+
+error: test failed, to rerun pass `--lib`
+low 0
+high 0
+max 466
+oom 0
+oom_kill 0
+oom_group_kill 0
+sock_throttled 0
+4294967296
+TEST_EXIT=101

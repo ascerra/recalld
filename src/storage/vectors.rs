@@ -351,9 +351,11 @@ impl VectorStore {
                     path: path.clone(),
                     source: e,
                 })?;
-            file.sync_all().map_err(|e| VectorError::Io {
-                path: path.clone(),
-                source: e,
+            crate::performance::sync_io("vector", "sync_all", || file.sync_all()).map_err(|e| {
+                VectorError::Io {
+                    path: path.clone(),
+                    source: e,
+                }
             })?;
         }
 
@@ -511,6 +513,31 @@ impl VectorStore {
         }
 
         let slot = self.allocate_slot()?;
+        self.write_allocated_vector(slot, vector)?;
+        Ok(slot)
+    }
+
+    /// Only the private checksummed logical importer uses this to fill its
+    /// reserved layout. Normal writers allocate a new slot; they never overwrite
+    /// a canonical reference. Interrupted imports repeat the same verified bytes.
+    pub(super) fn write_import_vector(&mut self, slot: u32, vector: &[f32]) -> Result<()> {
+        if slot >= self.slot_count || self.is_free(slot) {
+            return Err(VectorError::Corrupt {
+                path: self.path.clone(),
+                reason: "import slot was not reserved".into(),
+            });
+        }
+        if vector.len() != self.dimensions as usize {
+            return Err(VectorError::WrongVectorLength {
+                expected: self.dimensions as usize,
+                got: vector.len(),
+            });
+        }
+        self.write_allocated_vector(slot, vector)?;
+        self.remap()
+    }
+
+    fn write_allocated_vector(&mut self, slot: u32, vector: &[f32]) -> Result<()> {
         let offset = VectorFileHeader::data_offset(slot, self.stride);
 
         // Write vector data via the file descriptor (not through mmap).
@@ -527,7 +554,7 @@ impl VectorStore {
         })?;
         // Note: fsync is deferred to the caller's batch sync.
 
-        Ok(slot)
+        Ok(())
     }
 
     /// Finish a batch of `insert_vector_no_remap` calls by performing
@@ -750,9 +777,11 @@ impl VectorStore {
     /// Calls `sync_data()` on the underlying file descriptor. This
     /// ensures all written vector data and header updates reach disk.
     pub fn sync(&self) -> Result<()> {
-        self.file.sync_data().map_err(|e| VectorError::Io {
-            path: self.path.clone(),
-            source: e,
+        crate::performance::sync_io("vector", "sync_data", || self.file.sync_data()).map_err(|e| {
+            VectorError::Io {
+                path: self.path.clone(),
+                source: e,
+            }
         })
     }
 }

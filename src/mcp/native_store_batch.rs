@@ -17,9 +17,16 @@ impl McpStorageAdapter {
         child: &BatchChild,
         work: &WorkTicket,
     ) -> Result<(WriteReceipt, serde_json::Value), StoreWriteError> {
-        let BatchItemPlan::NativeStore { input, .. } = &item.plan else {
+        let BatchItemPlan::NativeStore {
+            input,
+            supplied_profile_id,
+            ..
+        } = &item.plan
+        else {
             return Err(StorageError::InvalidMutation("wrong linked batch plan".into()).into());
         };
+        let resolved = child.resolve_store_profile(input, supplied_profile_id.as_deref())?;
+        let input = &resolved;
         let replay = self
             .storage
             .read()
@@ -50,20 +57,12 @@ impl McpStorageAdapter {
                     &policy,
                 )?;
             let generated = if input.insert.memory.embedding.is_some() {
-                crate::embedding::runtime::GeneratedEmbedding {
-                    values: vec![],
-                    profile: None,
-                }
+                crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
             } else {
                 crate::embedding::runtime::generate_native(
                     self.embedding.as_ref(),
                     &intent.insert_intent().namespace,
-                    input
-                        .insert
-                        .memory
-                        .full_text
-                        .as_deref()
-                        .unwrap_or(&input.insert.memory.summary),
+                    &input.insert.document_v1(),
                 )
                 .await
                 .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?
@@ -73,11 +72,8 @@ impl McpStorageAdapter {
                     .storage
                     .read()
                     .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
-                let candidates = crate::graph::native_selection::capture(
-                    &engine,
-                    intent.insert_intent(),
-                    &generated,
-                )?;
+                let candidates =
+                    crate::graph::native_selection::capture(&engine, &intent, &generated)?;
                 engine.meta_store().prepare_native_store_links(
                     &intent,
                     &candidates.frozen_plan(&intent)?,

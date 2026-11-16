@@ -6,6 +6,8 @@ use serde_json::json;
 
 fn request(d: &Data, store_id: uuid::Uuid) -> BatchInput {
     BatchInput {
+        request_context: None,
+        expected_generation: None,
         mutation_version: 3,
         result_version: 1,
         kind: BatchKind::Insert,
@@ -70,8 +72,7 @@ fn commit(
         .unwrap();
     let intent = s.capture_store(scope(d), input, frozen).unwrap();
     let candidates =
-        crate::graph::native_selection::capture(&s.engine, intent.insert_intent(), &generated())
-            .unwrap();
+        crate::graph::native_selection::capture(&s.engine, &intent, &generated()).unwrap();
     let prepared = s
         .prepare_store_links(&intent, &candidates.frozen_plan(&intent).unwrap())
         .unwrap();
@@ -91,7 +92,7 @@ fn commit(
 #[test]
 fn linked_batch_same_tx_reserved_child_reopen_replay_before_mutable_settings() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -158,7 +159,7 @@ fn linked_batch_same_tx_reserved_child_reopen_replay_before_mutable_settings() {
 #[test]
 fn linked_batch_hash_domains_fixed_defaults_original_bits_and_unknown_versions() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let s = open(&d, clock);
     let r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -219,7 +220,7 @@ fn linked_batch_hash_domains_fixed_defaults_original_bits_and_unknown_versions()
 fn linked_batch_forged_version_settings_or_outcome_rejects_on_reopen() {
     for corruption in [0, 1, 2] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut s = open(&d, clock.clone());
         let r = request(&d, s.metadata().control_state().unwrap().store_id);
@@ -268,13 +269,25 @@ fn linked_batch_forged_version_settings_or_outcome_rejects_on_reopen() {
 
 #[tokio::test]
 async fn linked_batch_export_import_retained_restore_preserves_version_and_proof() {
+    export_import_and_restore(false, 2).await;
+}
+#[tokio::test]
+async fn batch_cas_export_import_retained_restore_preserves_original_proof() {
+    export_import_and_restore(true, 2).await;
+}
+async fn export_import_and_restore(cas: bool, contract: u32) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
-    let r = request(&d, s.metadata().control_state().unwrap().store_id);
+    let mut r = request(&d, s.metadata().control_state().unwrap().store_id);
+    r.request_context =
+        crate::storage::request_context::RetainedRequestContext::from_contract(contract).unwrap();
+    if cas {
+        r.expected_generation = Some(s.metadata().control_state().unwrap().committed_generation);
+    }
     let plans = plans(&r);
     let p = reserve(&s, &r, &plans);
     drop(s);
@@ -301,6 +314,8 @@ async fn linked_batch_export_import_retained_restore_preserves_version_and_proof
         })
         .unwrap();
     assert_eq!(replay.version, 3);
+    assert_eq!(replay.request_context, p.request_context);
+    assert_eq!(replay.reservation_precondition, p.reservation_precondition);
     assert_eq!(
         replay.items[0].state,
         BatchItemState::Ok {
@@ -349,6 +364,25 @@ async fn linked_batch_export_import_retained_restore_preserves_version_and_proof
         ),
         Err(StorageError::StoreLineageMismatch)
     ));
+    let tx = s.metadata().db.begin_read().unwrap();
+    let table = tx
+        .open_table(crate::storage::metadata::batch::BATCHES)
+        .unwrap();
+    let raw = table
+        .get(p.reservation_receipt.operation_id.as_bytes().as_slice())
+        .unwrap()
+        .unwrap();
+    let historical: batch::BatchProgress = control::decode(raw.value()).unwrap();
+    assert_eq!(
+        historical.reservation_precondition,
+        p.reservation_precondition
+    );
+    assert_eq!(historical.reservation_receipt, p.reservation_receipt);
+    assert_eq!(historical.request_context, p.request_context);
+    assert_eq!(
+        historical.reservation_expected_generation().unwrap(),
+        r.expected_generation
+    );
 }
 
 #[test]
@@ -386,8 +420,7 @@ fn linked_batch_process_child() {
         )
         .unwrap();
     let candidates =
-        crate::graph::native_selection::capture(&s.engine, intent.insert_intent(), &generated())
-            .unwrap();
+        crate::graph::native_selection::capture(&s.engine, &intent, &generated()).unwrap();
     let prepared = s
         .prepare_store_links(&intent, &candidates.frozen_plan(&intent).unwrap())
         .unwrap();
@@ -406,16 +439,30 @@ fn linked_batch_process_child() {
 }
 #[test]
 fn linked_batch_process_exit_before_after_child_commit_preserves_one_reserved_identity() {
+    process_child_boundaries(false, 2);
+}
+#[test]
+fn batch_cas_process_exit_before_after_child_commit_preserves_original_proof() {
+    process_child_boundaries(true, 2);
+}
+fn process_child_boundaries(cas: bool, contract: u32) {
     for point in [
         "before_metadata_commit",
         "after_metadata_commit",
         "after_canonical_ack",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let s = open(&d, clock.clone());
-        let r = request(&d, s.metadata().control_state().unwrap().store_id);
+        let mut r = request(&d, s.metadata().control_state().unwrap().store_id);
+        r.request_context =
+            crate::storage::request_context::RetainedRequestContext::from_contract(contract)
+                .unwrap();
+        if cas {
+            r.expected_generation =
+                Some(s.metadata().control_state().unwrap().committed_generation);
+        }
         let plans = plans(&r);
         let p = reserve(&s, &r, &plans);
         let child = p.child(0).unwrap();
@@ -460,3 +507,12 @@ fn linked_batch_process_exit_before_after_child_commit_preserves_one_reserved_id
         assert_eq!(s.engine.load_all_edges().unwrap().len(), edge_count);
     }
 }
+
+#[path = "batch_cas_tests.rs"]
+mod cas;
+
+#[path = "batch_wire_tests.rs"]
+mod wire;
+
+#[path = "batch_origin_tests.rs"]
+mod origin;

@@ -60,6 +60,83 @@ async fn similar_fixture() -> SimilarFixture {
 }
 
 async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
+    similar_fixture_certification(chain_edges, true).await
+}
+
+// Declared synthetic document recipe, never a lookup of old vector bytes.
+struct SimilarRecipe(crate::model::schema::EmbeddingProfile);
+#[async_trait::async_trait]
+impl crate::embedding::EmbeddingProvider for SimilarRecipe {
+    fn dimensions(&self) -> usize {
+        4
+    }
+    fn model_name(&self) -> &str {
+        &self.0.model_id
+    }
+    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+        Some(self.0.clone())
+    }
+    async fn embed(
+        &self,
+        document: &str,
+    ) -> std::result::Result<Vec<f32>, crate::embedding::EmbeddingError> {
+        let n = document
+            .split_whitespace()
+            .find_map(|v| v.parse::<u128>().ok())
+            .expect("synthetic retained document must contain its declared fixture number");
+        Ok(match n {
+            2002 => vec![0.96, 0.28, 0., 0.],
+            2003 => vec![0., 1., 0., 0.],
+            2004 => vec![0.8, 0.6, 0., 0.],
+            2005 => vec![0.9, 0.4358899, 0., 0.],
+            3000 => vec![0.6, 0.8, 0., 0.],
+            3001..=8000 => vec![0., 1., 0., 0.],
+            2001 | 9001 | 9002 => vec![1., 0., 0., 0.],
+            _ => panic!("unknown synthetic document {n}"),
+        })
+    }
+}
+
+async fn certify_similar_namespace(source: &std::path::Path, ns: NamespaceId) -> tempfile::TempDir {
+    use crate::storage::{
+        control::MutationScope,
+        vector_certification::{ReembedVectors, reembed_fresh},
+    };
+    let snapshot = crate::storage::offline_snapshot::OfflineSnapshot::open(source).unwrap();
+    let at = snapshot.control().generation_ref();
+    let namespace = snapshot.namespaces().iter().find(|n| n.id == ns).unwrap();
+    let crate::model::schema::EmbeddingBinding::Bound {
+        descriptor,
+        profile_id,
+        ..
+    } = &namespace.schema.as_ref().unwrap().embedding_binding
+    else {
+        panic!("Bound fixture")
+    };
+    let provider = SimilarRecipe(descriptor.clone());
+    let request = ReembedVectors {
+        source: at,
+        namespace_id: ns,
+        namespace_name: namespace.name.clone(),
+        profile_id: profile_id.clone(),
+        context: MutationContext {
+            store_id: Some(at.store_id),
+            expected_generation: Some(at.generation),
+            scope: MutationScope::Namespace(ns),
+            contract_version: 1,
+            idempotency_key: Some(format!("similar-fixture-remedy-{}", ns.get())),
+        },
+    };
+    drop(snapshot);
+    let target = tempfile::tempdir().unwrap();
+    std::fs::remove_dir(target.path()).unwrap();
+    reembed_fresh(source, target.path(), &request, &provider)
+        .await
+        .unwrap();
+    target
+}
+
+async fn similar_fixture_certification(chain_edges: usize, certify_donor: bool) -> SimilarFixture {
     use crate::storage::lifecycle_migration::{LifecycleMigrationOptions, migrate_lifecycle};
     use crate::storage::schema_migration::{
         MigrationOptions, ProfileAttestationInput, inspect_schema, migrate_schema,
@@ -129,15 +206,13 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
             );
         }
     }
-    for _ in 0..2 {
-        legacy
-            .insert_memory_with(crate::test_support::MemorySpec {
-                phase: DecayPhase::Ghost,
-                embedding: Some(&[1., 0., 0., 0.]),
-                tags: &["allow"],
-                ..crate::test_support::MemorySpec::new(NamespaceId::new(1))
-            })
-            .await;
+    // Retain documents until the real remedy finishes, then use real native
+    // phase transitions. Existing uncertified Ghosts cannot be re-embedded.
+    let mut ghosts = Vec::new();
+    for n in [9001, 9002] {
+        ghosts.push(
+            similar_insert(&o, NamespaceId::new(1), n, [1., 0., 0., 0.], "allow", None).await,
+        );
     }
     legacy.storage.write().unwrap().sync().unwrap();
     drop(o);
@@ -176,7 +251,7 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
         },
     )
     .unwrap();
-    let native = tempfile::tempdir().unwrap();
+    let mut native = tempfile::tempdir().unwrap();
     std::fs::remove_dir(native.path()).unwrap();
     migrate_lifecycle(
         canonical.path(),
@@ -197,7 +272,11 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
     // Migration preserves unknown inheritance; only real adoption enables them.
     let before_adoption = inspect_schema(native.path()).unwrap();
     for id in [NamespaceId::new(1), other] {
-        let ns = before_adoption.namespaces.iter().find(|n| n.id == id).unwrap();
+        let ns = before_adoption
+            .namespaces
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap();
         assert!(ns.schema.as_ref().unwrap().inherited_decay.is_none());
         assert!(matches!(
             crate::storage::inherited_policy::resolve_bound(ns, &Default::default(), 1.),
@@ -207,10 +286,44 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
     }
     let after_adoption = inspect_schema(native.path()).unwrap();
     for id in [mismatch, unknown] {
-        let before = before_adoption.namespaces.iter().find(|n| n.id == id).unwrap();
-        let after = after_adoption.namespaces.iter().find(|n| n.id == id).unwrap();
-        assert_eq!(crate::storage::control::encode(before).unwrap(), crate::storage::control::encode(after).unwrap());
+        let before = before_adoption
+            .namespaces
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap();
+        let after = after_adoption
+            .namespaces
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap();
+        assert_eq!(
+            crate::storage::control::encode(before).unwrap(),
+            crate::storage::control::encode(after).unwrap()
+        );
         assert!(after.schema.as_ref().unwrap().inherited_decay.is_none());
+    }
+    native = certify_similar_namespace(native.path(), NamespaceId::new(1)).await;
+    if certify_donor {
+        native = certify_similar_namespace(native.path(), other).await;
+    }
+    {
+        let mut session = crate::storage::native_lifecycle::NativeLifecycleSession::open(
+            native.path(),
+            Default::default(),
+            Arc::new(crate::time::ManualClock::new(864_000_000_000)),
+        )
+        .unwrap();
+        for id in ghosts {
+            for expected in [DecayPhase::Summary, DecayPhase::Ghost] {
+                session
+                    .maintain(&MutationContext::unkeyed(NamespaceId::new(1)), id)
+                    .unwrap();
+                assert_eq!(
+                    session.engine.get_record(id).unwrap().unwrap().phase,
+                    expected
+                );
+            }
+        }
     }
     let storage = crate::storage::RedbStorageEngine::open_native(native.path()).unwrap();
     let f = Fixture::from_open_engine(native, storage);
@@ -238,6 +351,31 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
         mismatch,
         unknown,
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn supplied_query_certification_all_compatible_donor_is_not_silently_dropped() {
+    let f = similar_fixture_certification(0, false).await;
+    let before = bytes(&f.f);
+    let local = f
+        .engine
+        .prepare_similar_selection(
+            f.source,
+            None,
+            similar_options(SimilarityScope::SameNamespace, VersionMode::Current, false),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(!local.rows.is_empty());
+    let args = serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"recordAccess":false,"namespaceScope":"allCompatible"});
+    let request = crate::serialization::query::SimilarRequest::from_mcp(&args).unwrap();
+    let result = f.engine.similar_contract(request).await;
+    assert_eq!(result.http_status, 503, "{result:?}");
+    assert!(result.envelope.data.is_none());
+    assert!(result.observation_receipts.is_empty());
+    assert!(result.envelope.receipt.is_none());
+    assert_eq!(bytes(&f.f), before);
 }
 fn similar_options(scope: SimilarityScope, mode: VersionMode, access: bool) -> SimilaritySelection {
     SimilaritySelection {

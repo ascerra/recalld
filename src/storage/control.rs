@@ -29,16 +29,26 @@ pub(crate) const KEYS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("mut
 pub(crate) struct ValidationWork {
     pub full_validations: usize,
     pub receipt_decodes: usize,
+    pub certification_scans: usize,
 }
 #[cfg(test)]
 thread_local! {
     static VALIDATION_WORK: std::cell::Cell<ValidationWork> = const {
-        std::cell::Cell::new(ValidationWork { full_validations: 0, receipt_decodes: 0 })
+        std::cell::Cell::new(ValidationWork { full_validations: 0, receipt_decodes: 0, certification_scans: 0 })
     };
 }
 #[cfg(test)]
 pub(crate) fn take_validation_work() -> ValidationWork {
     VALIDATION_WORK.with(|work| work.replace(ValidationWork::default()))
+}
+
+#[cfg(test)]
+pub(crate) fn certification_scan() {
+    VALIDATION_WORK.with(|work| {
+        let mut count = work.get();
+        count.certification_scans += 1;
+        work.set(count);
+    });
 }
 
 /// Final exposure assertion, checked with canonical records in the write transaction.
@@ -237,6 +247,9 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    VectorsReembedded {
+        transition: super::vector_certification::VectorsReembedded,
+    },
     InheritedDecayAdopted {
         transition: super::inherited_policy::InheritedDecayAdopted,
     },
@@ -374,6 +387,9 @@ pub enum MutationOutcome {
         #[serde(rename = "attestedNamespaces")]
         attested_namespaces: u64,
     },
+    NativeTextGenerationSelected {
+        transition: super::native_text::NativeTextRelocation,
+    },
     TextGenerationSelected {
         #[serde(rename = "generationId")]
         generation_id: Uuid,
@@ -476,12 +492,16 @@ pub(crate) fn validate_existing(
             .value(),
     )?;
     let ancestry = super::lineage::read_lineage(tx, &state)?;
+    super::lineage::validate_text_anchor(tx, &state, ancestry.as_ref())?;
     super::canonical_schema::read_state(tx, &state)?;
     for entry in receipts.iter()? {
         let (key, value) = entry?;
         let (lineage, scope, operation) = decode_scope(key.value())?;
         let stored = validate_receipt(value.value())?;
         let scope_matches = match &stored.receipt.outcome {
+            MutationOutcome::VectorsReembedded { transition } => {
+                scope == MutationScope::Namespace(transition.before_namespace.namespace_id)
+            }
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 scope == MutationScope::Namespace(t.before_namespace.namespace_id)
             }
@@ -491,7 +511,11 @@ pub(crate) fn validate_existing(
             MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::BatchReserved { .. }
             | MutationOutcome::BatchItemRejected { .. }
-            | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            | MutationOutcome::NativeNamespaceCreated { .. }
+            | MutationOutcome::TextGenerationSelected { .. }
+            | MutationOutcome::NativeTextGenerationSelected { .. } => {
+                scope == MutationScope::Catalog
+            }
             MutationOutcome::InheritedDecayAdopted { transition } => {
                 scope == MutationScope::Namespace(transition.preview.namespace_id)
             }
@@ -533,6 +557,8 @@ pub(crate) fn validate_existing(
         if matches!(
             stored.receipt.outcome,
             MutationOutcome::NativeNamespacePurgeStarted { .. }
+                | MutationOutcome::VectorsReembedded { .. }
+                | MutationOutcome::NativeTextGenerationSelected { .. }
                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                 | MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
@@ -718,6 +744,35 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         ));
     }
     match &stored.receipt.outcome {
+        MutationOutcome::VectorsReembedded { transition } => {
+            transition.validate(&stored.receipt)?;
+            let namespace = transition.before_namespace.namespace()?;
+            let request = super::vector_certification::ReembedVectors {
+                context: MutationContext {
+                    store_id: Some(stored.receipt.store_id),
+                    scope: MutationScope::Namespace(namespace.id),
+                    expected_generation: Some(transition.source.generation),
+                    contract_version: transition.contract_version,
+                    idempotency_key: None,
+                },
+                source: transition.source,
+                namespace_id: namespace.id,
+                namespace_name: namespace.name.clone(),
+                profile_id: super::native_records::profile_id(&namespace).ok_or_else(|| {
+                    StorageError::InvalidControl("cutover profile missing".into())
+                })?,
+            };
+            if request.hash(
+                &transition.source_origins,
+                transition.before_inventory_root,
+                transition.documents_root()?,
+            )? != stored.request_hash
+            {
+                return Err(StorageError::InvalidControl(
+                    "vector cutover original request hash mismatch".into(),
+                ));
+            }
+        }
         MutationOutcome::InheritedDecayAdopted { transition } => {
             transition.validate(&stored.receipt)?;
             let request = super::inherited_policy::AdoptInheritedDecay {
@@ -733,6 +788,34 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
             if request.hash()? != stored.request_hash {
                 return Err(StorageError::InvalidControl(
                     "inherited policy original request hash mismatch".into(),
+                ));
+            }
+        }
+        MutationOutcome::NativeTextGenerationSelected { transition } => {
+            transition.validate_stored(&stored)?;
+        }
+        MutationOutcome::TextGenerationSelected {
+            generation_id,
+            format_version,
+            ..
+        } => {
+            let previous = Generation(stored.receipt.committed_generation.get() - 1);
+            let ctx = super::native_text::request_context(GenerationRef {
+                store_id: stored.receipt.store_id,
+                generation: previous,
+            });
+            let operation = match format_version {
+                1 => "registerLegacyText",
+                2 => "compactText",
+                _ => {
+                    return Err(StorageError::InvalidControl(
+                        "invalid legacy text selection format".into(),
+                    ));
+                }
+            };
+            if generation_id.is_nil() || stored.request_hash != request_hash(&ctx, operation, &[]) {
+                return Err(StorageError::InvalidControl(
+                    "legacy text selection request hash mismatch".into(),
                 ));
             }
         }
@@ -788,7 +871,6 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::LifecyclePolicyMigrated { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
-        | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::AccessRecorded { .. }
         | MutationOutcome::NamespaceCreated { .. }
         | MutationOutcome::NamespacePolicyUpdated { .. }
@@ -904,6 +986,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
             }
         }
         MutationOutcome::AccessRecorded { .. }
+        | MutationOutcome::VectorsReembedded { .. }
         | MutationOutcome::NativeNamespacePurgeStarted { .. }
         | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
         | MutationOutcome::NativeNamespacePolicyUnchanged { .. }
@@ -928,6 +1011,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
+        | MutationOutcome::NativeTextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
         MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::BatchReserved { .. }

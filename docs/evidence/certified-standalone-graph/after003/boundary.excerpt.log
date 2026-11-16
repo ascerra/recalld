@@ -1,0 +1,15 @@
+     Running unittests src/lib.rs (/target/debug/deps/recalld-212d4a4f320696fe)
+
+running 6 tests
+test storage::metadata::native_records::tests::readers::graph_producer::certification::certified_standalone_certification_does_not_mask_source_or_candidate_corruption ... ok
+test storage::metadata::native_records::tests::readers::graph_producer::certification::certified_standalone_exact_namespace_and_generation_preflight_and_final_metadata_writer_race ... ok
+test storage::metadata::native_records::tests::readers::graph_producer::certification::certified_standalone_missing_owner_is_recovery_not_absence_and_never_reads_vectors ... ok
+test storage::metadata::native_records::tests::readers::graph_producer::certification::certified_standalone_certified_actual_semantic_edges_and_zero_cap_reopen ... ok
+actual Semantic api=1 cap=0 outcome=Err(VectorCertificationRequired { namespace_id: 1 }) reads=0 clock=0 unchanged=true
+actual Semantic api=1 cap=1 outcome=Err(VectorCertificationRequired { namespace_id: 1 }) reads=0 clock=0 unchanged=true
+actual Semantic api=2 cap=0 outcome=Err(VectorCertificationRequired { namespace_id: 1 }) reads=0 clock=0 unchanged=true
+actual Semantic api=2 cap=1 outcome=Err(VectorCertificationRequired { namespace_id: 1 }) reads=0 clock=0 unchanged=true
+test storage::metadata::native_records::tests::readers::graph_producer::certification::certified_standalone_uncertified_semantic_actual_trait_rejects_before_reads_even_zero_cap ... ok
+test storage::metadata::native_records::tests::readers::graph_producer::certification::certified_standalone_uncertified_structural_actual_traits_remain_available ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1432 filtered out; finished in 32.05s

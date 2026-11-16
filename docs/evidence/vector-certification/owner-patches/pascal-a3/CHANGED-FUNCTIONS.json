@@ -1,0 +1,35 @@
+{
+  "feedback_consumer_tests.rs": [
+    "setup_with_multiplier"
+  ],
+  "exposure_consumer_tests.rs": [
+    "setup"
+  ],
+  "forget_consumer_tests.rs": [
+    "setup"
+  ],
+  "sweep_tests.rs": [
+    "setup_with_multiplier",
+    "native_sweep_rechecks_donor_and_fan_after_capture_without_resampling_clock"
+  ],
+  "replay_consumer_tests.rs": [
+    "retired_replay"
+  ],
+  "phase_clock_tests.rs": [
+    "malformed_phase_rule_or_wrong_transition_rejects_without_open_mutation"
+  ],
+  "maintenance_tests.rs": [
+    "native_maintenance_one_phase_retains_ghost_vector_then_deletes_with_witness_peers_and_replay",
+    "native_maintenance_rechecks_canonical_donors_and_fan_with_original_clock_for_phase_and_strength_only",
+    "native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_without_receipts",
+    "native_harddelete_process_exit_recovers_exact_incident_edges_before_and_after_commit",
+    "native_maintenance_precommit_failure_and_unknown_commit_reconcile_real_transactions",
+    "native_maintenance_pass_pins_one_clock_and_never_advances_an_id_twice",
+    "native_harddelete_foreign_peer_requires_actual_policy_history",
+    "native_maintenance_export_import_fork_and_foreign_malformed_witnesses_remain_strict",
+    "native_harddelete_pending_recovery_rejects_unproven_dangling_edges_without_source_writes",
+    "native_maintenance_actual_policy_migration_invalidates_plan_but_replays_old_receipt_first",
+    "native_maintenance_pure_threshold_boundaries_are_inclusive_and_never_skip_phases",
+    "native_maintenance_missing_summary_permastore_and_unknown_phase_marker_are_preserved"
+  ]
+}

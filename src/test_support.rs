@@ -79,7 +79,7 @@ pub(crate) struct Fixture {
     pub(crate) cache: Arc<crate::cache::CacheManager>,
     /// Held on the fixture, not built per adapter call, so a test can
     /// assert on the same index the adapter under test just wrote to.
-    pub(crate) vector_index: Arc<tokio::sync::RwLock<crate::search::FlatVectorIndex>>,
+    pub(crate) vector_index: Arc<tokio::sync::RwLock<crate::search::VectorIndexOwner>>,
     /// See [`vector_index`](Self::vector_index).
     pub(crate) fts_index: Arc<tokio::sync::Mutex<crate::search::FtsIndex>>,
     /// See [`vector_index`](Self::vector_index).
@@ -122,7 +122,7 @@ impl Fixture {
                 None,
             )),
             vector_index: Arc::new(tokio::sync::RwLock::new(
-                crate::search::FlatVectorIndex::new(DIM),
+                crate::search::VectorIndexOwner::uniform(DIM),
             )),
             fts_index: Arc::new(tokio::sync::Mutex::new(fts_index)),
             entity_index: Arc::new(tokio::sync::RwLock::new(crate::search::EntityIndex::new())),
@@ -312,6 +312,17 @@ impl Fixture {
             self.graph.clone(),
             chrono_tz::UTC,
         )
+    }
+
+    pub(crate) fn completion(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
     }
 
     /// The MCP namespace adapter over this fixture's storage.

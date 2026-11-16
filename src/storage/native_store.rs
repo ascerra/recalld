@@ -94,6 +94,36 @@ impl NativeStoreInput {
         let original = self
             .insert
             .request_hash(ctx, stability, difficulty, dimensions, profile)?;
+        self.hash_insert(ctx, original, settings)
+    }
+
+    pub(crate) fn request_hash_with_profile_id(
+        &self,
+        ctx: &MutationContext,
+        stability: f32,
+        difficulty: f32,
+        dimensions: u32,
+        profile: &str,
+        settings: &NativeStoreSettings,
+        supplied_profile: Option<&str>,
+    ) -> Result<[u8; 32], StorageError> {
+        let original = self.insert.request_hash_with_profile_id(
+            ctx,
+            stability,
+            difficulty,
+            dimensions,
+            profile,
+            supplied_profile,
+        )?;
+        self.hash_insert(ctx, original, settings)
+    }
+
+    fn hash_insert(
+        &self,
+        ctx: &MutationContext,
+        original: [u8; 32],
+        settings: &NativeStoreSettings,
+    ) -> Result<[u8; 32], StorageError> {
         let expansion = super::control::encode(&(self.check_duplicates, settings))?;
         Ok(super::control::request_hash(
             ctx,
@@ -146,6 +176,12 @@ pub struct NativeAdvisoryMatch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeStoreWrite {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub vector_execution: Option<super::vector_certification::VectorExecution>,
     pub namespace_id: NamespaceId,
     pub memory_id: MemoryId,
     pub lifecycle_version: LifecycleVersion,
@@ -192,6 +228,9 @@ impl NativeStoreWrite {
         Ok(())
     }
     pub(crate) fn validate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
+        if let Some(execution) = &self.vector_execution {
+            execution.validate(&self.primary()?.after, receipt)?;
+        }
         self.settings
             .validate()
             .map_err(|_| invalid("invalid linked creation settings"))?;

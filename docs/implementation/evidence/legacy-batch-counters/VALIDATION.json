@@ -1,0 +1,247 @@
+{
+  "schema": 1,
+  "scope": "local offline all-targets correctness, not all-features or performance",
+  "parent": "3cfa164453d5e1c0f149e123acbc2331eca384ab",
+  "plan": "9514ac59cac58de176544869c80837a5558a16ab",
+  "runtime_source": "30abe0d6e5029fb483aa5c70f8f2db3f94d75e26",
+  "production_source": "f08fb6f2183b589bbf17ac412ee03da2b2deae50",
+  "source_files": 232,
+  "final_source_verification": "inside before compilation and after execution, host snapshot/current source/Git blobs exact",
+  "environment": {
+    "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "network": "none",
+    "nano_cpus": 2000000000,
+    "memory_bytes": 4294967296,
+    "env": [
+      "CARGO_TARGET_DIR=/target",
+      "RUSTUP_TOOLCHAIN=1.94.1",
+      "CARGO_BUILD_JOBS=2",
+      "CARGO_HOME=/cargo"
+    ],
+    "mounts": [
+      {
+        "source": "/tmp/recalld-implementation/coherent-v2-similar/.validation/cargo",
+        "destination": "/cargo",
+        "writable": true
+      },
+      {
+        "source": "/tmp/recalld-implementation/legacy-batch-counters/.validation/legacy-batch-green/source.sha256",
+        "destination": "/source.sha256",
+        "writable": false
+      },
+      {
+        "source": "/tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity",
+        "destination": "/target",
+        "writable": true
+      },
+      {
+        "source": "/tmp/recalld-implementation/legacy-batch-counters/.validation/legacy-batch-green/validate.sh",
+        "destination": "/validate.sh",
+        "writable": false
+      },
+      {
+        "source": "/tmp/recalld-implementation/legacy-batch-counters/.validation/legacy-batch-green/source",
+        "destination": "/work",
+        "writable": false
+      }
+    ],
+    "started_at": "2026-11-15T21:32:13.535217847Z",
+    "finished_at": "2026-11-15T21:40:46.803760474Z"
+  },
+  "executables": [
+    {
+      "path": "/target/debug/deps/recalld-e423ca3d07310388",
+      "sha256": "395317225c63b9c4dc5cf5aad97f7f6be22899a8fa07cc48fa8b90f01a686e26"
+    },
+    {
+      "path": "/target/debug/deps/recalld-c8392f2a5ef64898",
+      "sha256": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b"
+    },
+    {
+      "path": "/target/debug/deps/recalld_cli-2dba722497aafcf6",
+      "sha256": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f"
+    },
+    {
+      "path": "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb",
+      "sha256": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41"
+    },
+    {
+      "path": "/target/debug/deps/lifecycle_cli-4843a41927cafc6b",
+      "sha256": "64277873bace7396841ae803ef28a09d04e52149e7a09cc910dd339683cdc91d"
+    },
+    {
+      "path": "/target/debug/deps/text_migration_cli-92bf02c892a58814",
+      "sha256": "452005bd158b6ee26ea327f2143cc99f0cf6ef19f0ec3425d01d19f40cd32a62"
+    },
+    {
+      "path": "/target/debug/examples/offline_eval-17479300049544c8",
+      "sha256": "7fb9875c8f6a930194cbbf1c90e3eb0e48f916dc76680da7cdd68adb354c1588"
+    },
+    {
+      "path": "/target/debug/examples/performance_probe-303f79832cca569c",
+      "sha256": "db118a0704b145bf810e281a5cf07eb564562448ea429fb407648d117ba7821f"
+    }
+  ],
+  "attempts": [
+    {
+      "run": "legacy-batch-red",
+      "source": "7e9fb6fbea78dac693083071b85591953dccb55f",
+      "source_manifest_sha256": "eb3d85b4f087064ceb6055aaa8cc673f43ea982860163e19cc4c0304cc4dffb5",
+      "log_sha256": "2237e48a0d3cbcb7defec7e652a9f6b7a3dc40d5ba31e8c1ee743b0aa3797da8",
+      "driver_sha256": "3d1d412e74c7601d7e13965710d871303428cea3ab20c8828333cdd1ffb2de7a",
+      "exit_code": 101,
+      "oom_killed": false,
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "source_precheck": true,
+      "source_postcheck": [
+        "SOURCE_POSTCHECK_OK original_exit=101"
+      ],
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1039 filtered out; finished in 0.16s"
+      ],
+      "compiler_errors": [
+        "error: test failed, to rerun pass `--lib`"
+      ],
+      "executables": "7caa6013abfd1e9836ab8073abb4dab4d3dc6bd89f4913526f81c1a93c4ffca4  /tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity/debug/deps/recalld-e423ca3d07310388"
+    },
+    {
+      "run": "legacy-batch-red2",
+      "source": "17687d53fdd77e73cb64aa56eedd0a577da074bb",
+      "source_manifest_sha256": "4bce5c08c8778ccf92833698a47b3e4305108f9c98a59196e055f6c679773365",
+      "log_sha256": "13e99f8c2ba6853bb374c30c972a57ac0e167195499929cca5a01521fe23f33c",
+      "driver_sha256": "3d1d412e74c7601d7e13965710d871303428cea3ab20c8828333cdd1ffb2de7a",
+      "exit_code": 101,
+      "oom_killed": false,
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "source_precheck": true,
+      "source_postcheck": [
+        "SOURCE_POSTCHECK_OK original_exit=101"
+      ],
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1039 filtered out; finished in 0.17s"
+      ],
+      "compiler_errors": [
+        "error: test failed, to rerun pass `--lib`"
+      ],
+      "executables": "10c996e5e37288afd1f83b58a35d091c8f55b59e369fb95397dde42fa2db54fa  /tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity/debug/deps/recalld-e423ca3d07310388"
+    },
+    {
+      "run": "legacy-batch-red3",
+      "source": "1fa2752519468f08752ea33a0407057e8ede5d14",
+      "source_manifest_sha256": "05e06bee61a9e1833c2e3fd1c6709bd7763e13729c0d31c4258afd464cb22969",
+      "log_sha256": "2d5dd3527dafb40f4fe40464242a2731b8a9bee5c9764db7b5b394adc4cf2120",
+      "driver_sha256": "3d1d412e74c7601d7e13965710d871303428cea3ab20c8828333cdd1ffb2de7a",
+      "exit_code": 101,
+      "oom_killed": false,
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "source_precheck": true,
+      "source_postcheck": [
+        "SOURCE_POSTCHECK_OK original_exit=101"
+      ],
+      "test_results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1039 filtered out; finished in 0.19s"
+      ],
+      "compiler_errors": [
+        "error: test failed, to rerun pass `--lib`"
+      ],
+      "executables": "2eeba586edf43d922423253174f2fba997f81c136256d037f1ce4ce2b59b6b72  /tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity/debug/deps/recalld-e423ca3d07310388"
+    },
+    {
+      "run": "legacy-batch-focus",
+      "source": "f08fb6f2183b589bbf17ac412ee03da2b2deae50",
+      "source_manifest_sha256": "bf6582767aa4fd3de6933bae33dae7b01a44f030bdac7d659ca736afeb541634",
+      "log_sha256": "5a63bd4ef2a28d8e9db3040e8f9141fb35f8ced851109858e576fc9c23e4406f",
+      "driver_sha256": "e2af7adbf981e75bc4d4602ce80518b5133694d82c338a165b804e6fbf94afcd",
+      "exit_code": 101,
+      "oom_killed": false,
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "source_precheck": true,
+      "source_postcheck": [
+        "SOURCE_POSTCHECK_OK original_exit=101"
+      ],
+      "test_results": [],
+      "compiler_errors": [
+        "error[E0616]: field `embedding` of struct `mcp::bridge_adapters::McpStorageAdapter` is private",
+        "error: could not compile `recalld` (lib test) due to 1 previous error; 2 warnings emitted"
+      ],
+      "executables": null
+    },
+    {
+      "run": "legacy-batch-focus2",
+      "source": "e320ecb7f7e16b5949759cd09295f728ac327c2b",
+      "source_manifest_sha256": "806a641d7f58198f34c72a66e41c9e35d01ea51efbc46fe920f4bdc29d0809b2",
+      "log_sha256": "7464e8c778d5727de198ffc786025e984fc24db0e875b438a3b8d3048050382e",
+      "driver_sha256": "d2a46e99dd7026f6292583b57f8713a1b8629cd54157955b52b57c6e7bdae4d2",
+      "exit_code": 101,
+      "oom_killed": false,
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "source_precheck": true,
+      "source_postcheck": [
+        "SOURCE_POSTCHECK_OK original_exit=101"
+      ],
+      "test_results": [
+        "test result: FAILED. 7 passed; 3 failed; 0 ignored; 0 measured; 1038 filtered out; finished in 2.55s"
+      ],
+      "compiler_errors": [
+        "error: test failed, to rerun pass `--lib`"
+      ],
+      "executables": "10f01be07092a23622da83f6f1260434fe982c23e1d390da68977893286ea6bc  /tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity/debug/deps/recalld-e423ca3d07310388"
+    },
+    {
+      "run": "legacy-batch-focus3",
+      "source": "30abe0d6e5029fb483aa5c70f8f2db3f94d75e26",
+      "source_manifest_sha256": "5da31a4ffb4f6565e01bbc7e93fdd5846f768bb10d05dd5b570e50b3e705ac97",
+      "log_sha256": "7a4fc21d670ab5f5aad6050dc60c8ae214f9496159d1d376a6fadb5a843ca6b0",
+      "driver_sha256": "d2a46e99dd7026f6292583b57f8713a1b8629cd54157955b52b57c6e7bdae4d2",
+      "exit_code": 0,
+      "oom_killed": false,
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "source_precheck": true,
+      "source_postcheck": [
+        "SOURCE_POSTCHECK_OK original_exit=0"
+      ],
+      "test_results": [
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 1038 filtered out; finished in 2.89s",
+        "test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 1021 filtered out; finished in 4.07s"
+      ],
+      "compiler_errors": [],
+      "executables": "395317225c63b9c4dc5cf5aad97f7f6be22899a8fa07cc48fa8b90f01a686e26  /tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity/debug/deps/recalld-e423ca3d07310388"
+    },
+    {
+      "run": "legacy-batch-green",
+      "source": "30abe0d6e5029fb483aa5c70f8f2db3f94d75e26",
+      "source_manifest_sha256": "5da31a4ffb4f6565e01bbc7e93fdd5846f768bb10d05dd5b570e50b3e705ac97",
+      "log_sha256": "27e5b98589a0a2d5a3e6f3b0bb0afc82a4939d06c7af9d37355089e82f01ee7c",
+      "driver_sha256": "f69bd2fbf3f1a0ede3e40780561cefc9f236a4d554189222ca1521d1c5bd2d9e",
+      "exit_code": 0,
+      "oom_killed": false,
+      "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+      "source_precheck": true,
+      "source_postcheck": [
+        "SOURCE_POSTCHECK_OK original_exit=0"
+      ],
+      "test_results": [
+        "test result: ok. 1048 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 419.91s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.55s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s"
+      ],
+      "compiler_errors": [],
+      "executables": null
+    }
+  ],
+  "warnings": [
+    "warning: `recalld` (lib) generated 27 warnings",
+    "warning: `recalld` (lib test) generated 10 warnings (6 duplicates)",
+    "warning: `recalld` (lib) generated 702 warnings (run `cargo clippy --fix --lib -p recalld` to apply 85 suggestions)",
+    "warning: `recalld` (bin \"recalld\") generated 1 warning",
+    "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+    "warning: `recalld` (lib test) generated 771 warnings (683 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 6 suggestions)"
+  ],
+  "final_log_sha256": "27e5b98589a0a2d5a3e6f3b0bb0afc82a4939d06c7af9d37355089e82f01ee7c",
+  "cleanup": "owned containers removed after exit capture; raw roots protected until PR/results recording and central release; one private cargo/target retained; no raw archives"
+}

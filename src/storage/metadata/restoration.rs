@@ -29,6 +29,9 @@ pub(crate) struct CapturedSnapshot {
     /// Completed immutable manifests, including reserved IDs and final errors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch_progress: Option<Rows>,
+    /// Inspection result, never authority to certify a different selected store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_certification: Option<crate::storage::vector_certification::CertificationSummary>,
 }
 
 /// Layouts whose canonical tables have explicit consumers. Native owned open
@@ -110,7 +113,9 @@ pub(crate) fn capture(path: &Path) -> Result<CapturedSnapshot, StorageError> {
             })
             .collect()
     };
+    let certification = crate::storage::vector_certification::validate_current(&read, &control)?;
     Ok(CapturedSnapshot {
+        vector_certification: (!certification.selected.is_empty()).then_some(certification),
         control,
         lineage,
         ledger,
@@ -175,6 +180,39 @@ pub(crate) fn reconcile(
     new_store_id: Uuid,
     archive_sha256: [u8; 32],
 ) -> Result<LineageState, StorageError> {
+    for captured in std::iter::once(snapshot).chain(target) {
+        let mut required = crate::storage::vector_certification::CertificationSummary::default();
+        for (_, bytes) in &captured.receipts {
+            let receipt = control::validate_receipt(bytes)?.receipt;
+            let binding = match receipt.outcome {
+                MutationOutcome::VectorsReembedded { transition } => Some((
+                    transition.before_namespace.namespace_id.get(),
+                    transition.certification,
+                )),
+                MutationOutcome::NativeNamespaceCreated { transition } => transition
+                    .vector_certification
+                    .map(|binding| (transition.namespace_id.get(), binding)),
+                _ => None,
+            };
+            if let Some((namespace, binding)) = binding {
+                if required.selected.insert(namespace, binding).is_some() {
+                    return Err(StorageError::InvalidControl(
+                        "restore capture has conflicting certification anchors".into(),
+                    ));
+                }
+            }
+        }
+        let required = (!required.selected.is_empty()).then_some(required);
+        if captured.vector_certification != required {
+            return Err(StorageError::InvalidControl(
+                "restore capture lost or changed required vector certification".into(),
+            ));
+        }
+    }
+    crate::storage::vector_certification::validate_restore_pair(
+        snapshot.vector_certification.as_ref(),
+        target.and_then(|t| t.vector_certification.as_ref()),
+    )?;
     if target.is_some_and(|t| !compatible(snapshot, t))
         || (mode == RestoreMode::Serving && target.is_none())
     {
@@ -263,7 +301,7 @@ pub(crate) fn reconcile(
     if ancestors.contains_key(&new_store_id) || new_store_id.is_nil() {
         return Err(StorageError::StoreLineageMismatch);
     }
-    let lineage = LineageState {
+    let mut lineage = LineageState {
         version: 1,
         active_store_id: new_store_id,
         operation_id,
@@ -279,6 +317,7 @@ pub(crate) fn reconcile(
             })
             .collect(),
         ledger_sources: sources,
+        native_text_anchor: None,
     };
     let db = redb::Database::open(stage.join("meta.db"))?;
     let read = db.begin_read()?;
@@ -448,12 +487,6 @@ pub(crate) fn reconcile(
     let mut control = snapshot.control.clone();
     control.store_id = new_store_id;
     control.committed_generation = Generation::default().next()?;
-    control.restore_lineage_version = Some(1);
-    lineage.validate(&control)?;
-    tx.open_table(control::CONTROL)?
-        .insert("state", control::encode(&control)?.as_slice())?;
-    tx.open_table(lineage::LINEAGE)?
-        .insert("state", control::encode(&lineage)?.as_slice())?;
     if let Some(target) = target {
         merge_rows(&tx, control::RECEIPTS, &target.receipts)?;
         merge_rows(&tx, control::KEYS, &target.keys)?;
@@ -464,6 +497,26 @@ pub(crate) fn reconcile(
             merge_rows(&tx, batch::BATCHES, rows)?;
         }
     }
+    // Both captured inputs and the private archive stage were strictly validated.
+    // Anchor the exact original rows retained by this actual merge, never an
+    // attacker-supplied root and never a newly reconstructed receipt encoding.
+    let mut anchor = lineage::TextAnchorBuilder::new();
+    for row in tx.open_table(control::RECEIPTS)?.iter()? {
+        let (key, value) = row?;
+        anchor.push(new_store_id, key.value(), value.value())?;
+    }
+    lineage.native_text_anchor = anchor.finish();
+    lineage.version = if lineage.native_text_anchor.is_some() {
+        2
+    } else {
+        1
+    };
+    control.restore_lineage_version = Some(lineage.version);
+    lineage.validate(&control)?;
+    tx.open_table(control::CONTROL)?
+        .insert("state", control::encode(&control)?.as_slice())?;
+    tx.open_table(lineage::LINEAGE)?
+        .insert("state", control::encode(&lineage)?.as_slice())?;
     if has_purge_schema {
         tx.open_table(purge::SCHEMA)?.insert("version", 1)?;
         let mut table = tx.open_table(purge::PROGRESS)?;

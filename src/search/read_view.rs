@@ -156,6 +156,12 @@ fn canonical_read_error(error: crate::storage::StorageError) -> SearchError {
 
 #[async_trait::async_trait]
 impl NamespaceResolver for CanonicalReadView {
+    fn is_native_owned(&self) -> Result<bool> {
+        Ok(CanonicalReadView::is_native_owned(self))
+    }
+    fn check_native_vector_namespace(&self, namespace: &NamespaceConfig) -> Result<()> {
+        CanonicalReadView::check_native_vector_namespace(self, namespace).map_err(unavailable)
+    }
     fn check_native_query_profile(
         &self,
         namespace: &NamespaceConfig,

@@ -10,6 +10,9 @@
 pub(crate) mod batch;
 mod canonical_vector_snapshot;
 mod catalog;
+#[cfg(test)]
+mod catalog_completion_tests;
+mod certification;
 pub(crate) mod effects;
 mod inherited_policy;
 mod insertion;
@@ -24,10 +27,13 @@ mod native_namespace_binding;
 mod native_policy;
 pub(crate) mod native_records;
 mod native_store;
+mod native_store_profile;
+pub(crate) use native_store_profile::NativeStoreProfileResolution;
 mod observation;
 mod publication;
 pub(crate) use publication::CanonicalReadView;
 pub(crate) mod purge;
+mod purge_budget;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
 pub(crate) mod text_generation;
@@ -99,6 +105,10 @@ pub struct MetadataStore {
     db: Database,
     ids: Box<dyn super::ids::IdSource>,
     native_lifecycle_only: bool,
+    // A validated position in canonical history, never a generation allocator.
+    // Only this owner's guarded commit paths can move it to a committed receipt.
+    vector_validation:
+        std::sync::Arc<std::sync::RwLock<Option<certification::OwnedVectorValidation>>>,
     work_tracker: WorkTracker,
     view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
     unavailable: std::sync::atomic::AtomicBool,
@@ -107,14 +117,36 @@ pub struct MetadataStore {
     derived_dirty: std::sync::atomic::AtomicBool,
     effects_epoch: std::sync::atomic::AtomicU64,
     #[cfg(test)]
+    pub(crate) ack_work_probe:
+        std::sync::Mutex<Option<std::sync::mpsc::Sender<effects::ack_tests::AckWork>>>,
+    #[cfg(test)]
+    pub(crate) ack_test_hook: std::sync::Mutex<Option<effects::ack_tests::AckHook>>,
+    #[cfg(test)]
+    pub(crate) ack_test_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
+    pub(crate) vector_publication_failure_nth: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
     #[cfg(test)]
+    pub(crate) catalog_test_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
     pub(crate) fail_purge_child_commit: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub(crate) native_purge_pause: std::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<super::purge::PurgeProgress>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
+    #[cfg(test)]
+    pub(crate) native_purge_worker_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
+    pub(crate) purge_lookup_count: std::sync::atomic::AtomicUsize,
     /// Store-local lost-ack probes: 1 reservation, 2 rejection, 3 child.
     #[cfg(test)]
     pub(crate) fail_batch_commit: std::sync::atomic::AtomicU8,
@@ -260,9 +292,16 @@ impl MetadataStore {
         // Legacy checkpoints have no generation watermark. Always rebuild
         // from canonical records, even for direct MetadataStore callers.
         let store = Self {
+            #[cfg(test)]
+            ack_work_probe: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            ack_test_hook: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            ack_test_fault: std::sync::atomic::AtomicU8::new(0),
             db,
             ids,
             native_lifecycle_only,
+            vector_validation: std::sync::Arc::new(std::sync::RwLock::new(None)),
             work_tracker: WorkTracker::new(store_id),
             view_publication: std::sync::Arc::new(
                 super::publication::PublicationRegistry::default(),
@@ -275,12 +314,22 @@ impl MetadataStore {
             #[cfg(test)]
             observation_fault: std::sync::atomic::AtomicU8::new(0),
             #[cfg(test)]
+            vector_publication_failure_nth: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
             tombstone_publication_fault: std::sync::atomic::AtomicBool::new(false),
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
+            catalog_test_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
             fail_purge_child_commit: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            native_purge_pause: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            native_purge_worker_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            purge_lookup_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             fail_batch_commit: std::sync::atomic::AtomicU8::new(0),
             publication: std::sync::RwLock::new(()),
@@ -293,6 +342,9 @@ impl MetadataStore {
                 .any(|p| p.stage != crate::storage::purge::PurgeStage::Complete),
             std::sync::atomic::Ordering::SeqCst,
         );
+        if native_lifecycle_only {
+            store.initialize_vector_validation()?;
+        }
         let records = store.scan_all_for_recovery()?;
         let phases: Vec<_> = records
             .iter()
@@ -353,7 +405,7 @@ impl MetadataStore {
         Ok(())
     }
 
-    fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
+    pub(crate) fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
         if self.native_lifecycle_only {
             return Err(StorageError::RecoveryRequired(
                 "operation does not participate in native lifecycle proof".into(),
@@ -1089,6 +1141,7 @@ impl MetadataStore {
         &self,
         namespace_id: NamespaceId,
     ) -> Result<Vec<DiskRecord>, StorageError> {
+        self.ensure_available()?;
         let timer = crate::performance::Timer::new("canonical.namespace_read");
         let instrumented = crate::performance::enabled();
         let mut encoded_bytes = 0usize;
@@ -1116,8 +1169,12 @@ impl MetadataStore {
                 result.push(record);
             }
         }
-        tracing::trace!(target: "recalld::performance", kind = "canonical_read",
-            examined, records = result.len(), encoded_record_bytes = encoded_bytes);
+        crate::performance::event!(
+            kind = "canonical_read",
+            examined,
+            records = result.len(),
+            encoded_record_bytes = encoded_bytes
+        );
         timer.complete();
         Ok(result)
     }

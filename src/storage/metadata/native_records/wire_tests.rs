@@ -17,6 +17,28 @@ async fn setup() -> (
 ) {
     setup_policy(LifecycleVersion::ExplicitFeedbackV2).await
 }
+// Only callers that create fresh native vectors opt into certification.
+// Default lifecycle-only/history setups remain genuinely uncertified.
+async fn setup_certified() -> (
+    Fixture,
+    Data,
+    Arc<FixedClock>,
+    McpBridge,
+    crate::api::AppState,
+) {
+    // Select the real lifecycle policy and adoption first, then release every
+    // owner before the offline remedy. Preserve this public operation clock.
+    let (f, d, clock, bridge, state) = setup().await;
+    drop((bridge, state));
+    let root = f.close();
+    let d = certified_positive_fixture::certify_positive(root.path(), d);
+    let session = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, session.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let (bridge, state) =
+        configured_public_adapters(&f, clock.clone(), NativePolicyInputs::default());
+    (f, d, clock, bridge, state)
+}
 async fn setup_policy(
     version: LifecycleVersion,
 ) -> (
@@ -40,9 +62,11 @@ async fn setup_policy(
     let session = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, session.engine);
     completion(&f).rebuild_all().await.unwrap();
-    let (bridge, state) =
-        configured_public_adapters(&f, clock.clone(), NativePolicyInputs::default());
+    let (bridge, state) = public_adapters(&f, clock.clone());
     (f, d, clock, bridge, state)
+}
+fn public_adapters(f: &Fixture, clock: Arc<dyn Clock>) -> (McpBridge, crate::api::AppState) {
+    configured_public_adapters(f, clock, NativePolicyInputs::default())
 }
 fn configured_public_adapters(
     f: &Fixture,
@@ -368,7 +392,7 @@ async fn native_lifecycle_wire_strict_invalid_scope_and_public_gates_are_immutab
 async fn native_lifecycle_wire_publication_failure_retains_receipt_and_replay_recovers() {
     let (f, d, clock, bridge, state) = setup().await;
     let original = request(&f, &d, "publication");
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
     let (status, error) = prepared_http(
         state.clone(),
         d.parent,
@@ -381,7 +405,7 @@ async fn native_lifecycle_wire_publication_failure_retains_receipt_and_replay_re
     assert!(error["receipt"]["operationId"].is_string());
     assert!(error.get("readiness").is_none());
     assert_eq!(clock.0.load(Ordering::SeqCst), 1);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let retry = mcp(&bridge, Operation::Feedback, original).await;
     assert_eq!(retry["status"], "ok", "{retry}");
     assert_eq!(
@@ -751,6 +775,9 @@ async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocate
 
 #[path = "public_api1_tests.rs"]
 mod public_api1;
+
+#[path = "public_matrix_tests.rs"]
+mod public_matrix;
 
 #[path = "adopted_public_tests.rs"]
 mod adopted_public;

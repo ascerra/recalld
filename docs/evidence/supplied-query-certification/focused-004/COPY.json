@@ -1,0 +1,15 @@
+{
+  "source-manifest.json": "0eac50be66011ace500897f20dc0646314906de111ea2f8b36eb9438634068f1",
+  "memory.events": "5ab5007963568850b4b37836bfa9550a7f4bb7d69cd290e9fbedf7f2c5e087cc",
+  "focused.exit": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+  "runtime.txt": "d3dc9f7693994f9927aa9c768f54a4538d39ff7751ee6a2c35fddac6dccba9f4",
+  "memory.peak": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+  "clean.log": "0f5b9c3bccb183f338a189d270acbda1d3bad28b4f494a1caa789bc05a8af135",
+  "runtime.patch": "565fcee78101b74c6226417ad40f8384c6be1d613a5390b918d4313ecc3d7f0f",
+  "run.sh": "564aa15e90202ae91726e174ccfd614119c2571fbf49c581751128ea73441ccd",
+  "container.json": "318fd06d431b89265a7d9be8d2928f4747997ec0aaaa1f9ae46782fda1eead22",
+  "source-verified.json": "2e75cc8a97bf57cb23c47951011d9bc3b6ddf7c9c09fae7a9ed4727e26a128c4",
+  "executables.sha256": "a1b65425f69208a176ce527ecc9012768d0e6df91140904e458b3f5df93ac1c7",
+  "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+  "focused.log": "656b098247015e0188730f6125098888b702a3fc20d01f7b5804506c452e691d"
+}

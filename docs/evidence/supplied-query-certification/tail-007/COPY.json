@@ -1,0 +1,18 @@
+{
+  "source-manifest.json": "7fb821416b81b99a48f3fdee72c06d8849b3831a561f96847610b52b614e2f69",
+  "memory.events": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+  "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "cli.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "source-delta.json": "8d3e80310b6f06fc2ec4166fc16baa91fcf957fe22c70c36ef15ab6fd87d9be9",
+  "runtime.txt": "4c447b48dc8113f511032638acd1e6fa37c0e39c929ef03ecc89dac726b5524b",
+  "memory.peak": "86931a4a1005f84fd33440d0df3a2f12db9994bf9bed4f40b58a0507b5e7be9f",
+  "clean.log": "37a88e3bfbc981af7079c604516dcb742699774d4f910c45d3529a42ee671cc2",
+  "fmt.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "executed-binaries.json": "cb39b4ca75191dac652a7dfa7ced679f4a320b3bc2d4478077f2fa5f459c05fe",
+  "run.sh": "d2c613c12b66e314309c466c6c9a3a8e9f9489cb788c80e8ad78f10ae1482c1b",
+  "container.json": "d54e03bea70f8b5cee36368b702edde3f89b826756f7837f69e56bace27be27c",
+  "source-verified.json": "2e75cc8a97bf57cb23c47951011d9bc3b6ddf7c9c09fae7a9ed4727e26a128c4",
+  "cli.log": "3e9da9975a62125b45322412698185c6dff287e6d3f6e0fc938d4f18b8d813fb",
+  "executables.sha256": "32c88e82e901c217daf27ccd74577fd4bd95a9bc354fa334d8d63e8efd2bb4db",
+  "rustc.txt": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+}

@@ -49,8 +49,8 @@ pub fn router(state: AppState, config: &ApiConfig) -> Router {
 
     let memory_routes = Router::new()
         .route("/", get(handlers::list_memories))
-        .route("/", post(handlers::create_memory))
-        .route("/batch", post(handlers::batch_store))
+        .route("/", post(handlers::single_store_versioned))
+        .route("/batch", post(handlers::batch_store_versioned))
         .route("/{id}", get(handlers::get_memory))
         .route("/{id}", delete(super::native_lifecycle::delete))
         .route("/{id}/reinforce", post(super::native_lifecycle::feedback));

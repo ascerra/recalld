@@ -6,7 +6,7 @@ use crate::storage::native_maintenance::NativeDecayResult;
 use crate::storage::native_store::{FrozenInsertLinks, NativeStoreInput, NativeStoreSettings};
 use crate::storage::{logical_export, validation};
 
-fn linked(s: &mut NativeLifecycleSession, d: &Data, key: &str) -> MemoryId {
+pub(super) fn linked(s: &mut NativeLifecycleSession, d: &Data, key: &str) -> MemoryId {
     let mut original = input(d);
     original.memory.initial_stability = Some(1.);
     let original = NativeStoreInput {
@@ -38,7 +38,7 @@ fn linked(s: &mut NativeLifecycleSession, d: &Data, key: &str) -> MemoryId {
         _ => panic!("wrong creation proof"),
     }
 }
-fn graph(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId) {
+pub(super) fn graph(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId) {
     let input = NativeGraphInput {
         edges: vec![NativeEdgeInput {
             source: id,
@@ -75,7 +75,7 @@ fn graph(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId) {
     assert_eq!(replay.committed_generation, receipt.committed_generation);
     assert_eq!(s.engine.control_state().unwrap(), before);
 }
-fn phases(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId, count: usize) {
+pub(super) fn phases(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId, count: usize) {
     let policy = NativePolicyInputs::default();
     let original = s.engine.get_record(id).unwrap().unwrap();
     for n in 0..count {
@@ -105,7 +105,7 @@ fn phases(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId, count: usize) 
         }
     }
 }
-fn purge(s: &mut NativeLifecycleSession, d: &Data) {
+pub(super) fn purge(s: &mut NativeLifecycleSession, d: &Data) {
     let mut p = s
         .engine
         .begin_namespace_purge(&ctx(s, d, "purge"), true)
@@ -121,7 +121,7 @@ fn purge(s: &mut NativeLifecycleSession, d: &Data) {
 #[test]
 fn mixed_history_harddelete_reverses_removed_edges_before_graph_noop_and_store() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let id = linked(&mut s, &d, "linked");
     graph(&mut s, &d, id);
@@ -133,7 +133,7 @@ fn mixed_history_harddelete_reverses_removed_edges_before_graph_noop_and_store()
 #[test]
 fn mixed_history_purge_binds_retired_namespace_before_graph_and_store_validation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let id = linked(&mut s, &d, "linked");
     graph(&mut s, &d, id);
@@ -158,7 +158,7 @@ fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
     visit(path, &mut result);
     result
 }
-fn receipts(path: &Path) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
+pub(super) fn receipts(path: &Path) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
     use redb::ReadableTable;
     let (_copy, db) = validation::inspect_database(&path.join("meta.db")).unwrap();
     let read = db.begin_read().unwrap();
@@ -172,7 +172,7 @@ fn receipts(path: &Path) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
         })
         .collect()
 }
-fn payloads(stream: &Path) -> Vec<serde_json::Value> {
+pub(super) fn payloads(stream: &Path) -> Vec<serde_json::Value> {
     std::fs::read_to_string(stream)
         .unwrap()
         .lines()
@@ -231,7 +231,7 @@ fn kept(s: &mut NativeLifecycleSession, d: &Data) -> MemoryId {
         .unwrap();
     inserted(&r)
 }
-async fn export_import_fork(root: &Path, d: &Data) -> PathBuf {
+pub(super) async fn export_import_fork(root: &Path, d: &Data) -> PathBuf {
     let original = receipts(&d.path);
     let stream = root.join("mixed.jsonl");
     let imported = root.join("imported");
@@ -279,7 +279,7 @@ async fn export_import_fork(root: &Path, d: &Data) -> PathBuf {
 #[tokio::test]
 async fn mixed_history_policy_graph_maintenance_purge_export_import_fork_preserves_payload() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let deleted = linked(&mut s, &d, "deleted");
@@ -375,7 +375,7 @@ async fn mixed_history_policy_graph_maintenance_purge_export_import_fork_preserv
 async fn mixed_history_foreign_purged_bindings_and_noop_key_reject_immutably() {
     use redb::ReadableTable;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let mut s = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
     let id = linked(&mut s, &d, "linked");
     graph(&mut s, &d, id);
@@ -483,7 +483,7 @@ async fn mixed_history_foreign_purged_bindings_and_noop_key_reject_immutably() {
 #[test]
 fn mixed_history_pending_purge_outbox_reopens_against_prior_graph_proofs() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let id = linked(&mut s, &d, "linked");

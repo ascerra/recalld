@@ -1,10 +1,7 @@
 //! One prepared lifecycle consumer for direct MCP, private RPC and REST adapters.
 use crate::{
     derived_completion::DerivedCompletion,
-    serialization::{
-        contract::{DerivedReadiness, Readiness},
-        native_lifecycle::{Operation, Reply, Request},
-    },
+    serialization::native_lifecycle::{Operation, Reply, Request},
     storage::{
         StorageEngine, StorageError,
         control::{GenerationRef, MutationContext, MutationScope},
@@ -250,21 +247,7 @@ pub(crate) async fn execute_with_projection(
     match report {
         Ok(report) => {
             let mut reply = Reply::committed(scope, receipt, request.id);
-            reply.readiness = Some(Readiness {
-                store_id: report.store_id,
-                committed_generation: report.committed_generation,
-                ready: report.ready,
-                pending_work: report.pending_work,
-                derived: report
-                    .derived
-                    .into_iter()
-                    .map(|d| DerivedReadiness {
-                        name: d.name.into(),
-                        applied_generation: d.applied_generation,
-                        ready: d.ready,
-                    })
-                    .collect(),
-            });
+            reply.readiness = Some(report.into());
             reply
         }
         Err(source) => {

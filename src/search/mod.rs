@@ -34,7 +34,9 @@ mod response;
 
 // --- CS-14 re-exports ---
 pub use index::{FilterEntry, FlatVectorIndex, TagInterner};
+mod vector_owner;
 pub use simd::{dot_product_simd, is_normalized, normalize_l2};
+pub use vector_owner::VectorIndexOwner;
 
 // --- Near-duplicate detection ---
 pub use duplicates::find_near_duplicates;

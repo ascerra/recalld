@@ -71,7 +71,7 @@ fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
 #[test]
 fn native_store_atomic_edges_tokens_temporal_clock_and_replay() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let input = original(&d);
@@ -111,10 +111,7 @@ fn native_store_atomic_edges_tokens_temporal_clock_and_replay() {
         .store_prepared(
             &key,
             &prepared,
-            &GeneratedEmbedding {
-                values: vec![f32::NAN],
-                profile: None,
-            },
+            &GeneratedEmbedding::unverified(vec![f32::NAN], None),
         )
         .unwrap();
     assert!(replay.replayed);
@@ -145,10 +142,7 @@ fn native_store_atomic_edges_tokens_temporal_clock_and_replay() {
         .store_prepared(
             &key,
             &current_prepared,
-            &GeneratedEmbedding {
-                values: vec![],
-                profile: None,
-            },
+            &GeneratedEmbedding::unverified(vec![], None),
         )
         .unwrap();
     assert!(replay.replayed);
@@ -189,7 +183,7 @@ fn native_store_atomic_edges_tokens_temporal_clock_and_replay() {
 #[test]
 fn native_store_plan_generation_scope_profile_and_provider_faults_precede_allocation() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let input = original(&d);
@@ -248,13 +242,10 @@ fn native_store_plan_generation_scope_profile_and_provider_faults_precede_alloca
         let result = session.store_prepared(
             &ctx(&session, &d, "bad-vector"),
             &prepared,
-            &GeneratedEmbedding {
-                values: vec![0.; 4],
-                profile: Some(d.profile.clone()),
-            },
+            &GeneratedEmbedding::unverified(vec![0.; 4], Some(d.profile.clone())),
         );
         assert!(if supplied {
-            matches!(result, Err(StorageError::InvalidMutation(_)))
+            matches!(result, Err(StorageError::CallerVectorInvalid(_)))
         } else {
             matches!(result, Err(StorageError::ProviderVectorUnavailable(_)))
         });
@@ -265,7 +256,7 @@ fn native_store_plan_generation_scope_profile_and_provider_faults_precede_alloca
 #[test]
 fn native_store_advisory_disabled_checked_empty_and_temporal_uuid_ties() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock);
     for requested in [false, true] {
@@ -356,7 +347,7 @@ fn native_store_process_exit_never_loses_links_or_reexecutes_completed_selection
         "after_canonical_ack",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let id = MemoryId::new();
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let session = open(&d, clock.clone());
@@ -430,7 +421,7 @@ async fn reject_foreign_store_binding(wrong_dimension: bool) {
     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
     use crate::storage::logical_export::{export_store, import_store};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let input = original(&d);
@@ -542,7 +533,7 @@ async fn reject_foreign_store_binding(wrong_dimension: bool) {
 #[test]
 fn native_store_proof_rejects_bad_tokens_edges_advisory_and_old_proof_widening() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock);
     let input = original(&d);
@@ -576,6 +567,7 @@ fn native_store_proof_rejects_bad_tokens_edges_advisory_and_old_proof_widening()
     // The old two-edge outcome remains strict even if all common fields fit.
     let p = proof(&receipt);
     let old = NativeRecordWrite {
+        vector_execution: None,
         namespace_id: p.namespace_id,
         memory_id: p.memory_id,
         lifecycle_version: p.lifecycle_version,
@@ -595,7 +587,7 @@ fn native_store_proof_rejects_bad_tokens_edges_advisory_and_old_proof_widening()
 fn native_store_canonical_foreign_and_terminal_candidates_reject_without_writes() {
     let root = tempfile::tempdir().unwrap();
     let mut foreign = MemoryId::nil();
-    let d = fixture_with_seed(root.path(), |engine| {
+    let d = certified_fixture_with_seed(root.path(), |engine| {
         let mut ns = NamespaceConfig::default_namespace(0);
         ns.name = "foreign".into();
         ns.embedding_dim = 4;

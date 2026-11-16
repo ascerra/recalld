@@ -1,0 +1,478 @@
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1908:19
+     |
+1908 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1497:9
+     |
+1497 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+warning: associated items `new_persistent` and `has_memories` are never used
+   --> src/bench/locomo.rs:336:25
+    |
+313 | impl BenchHarness {
+    | ----------------- associated items in this implementation
+...
+336 |     pub(super) async fn new_persistent(
+    |                         ^^^^^^^^^^^^^^
+...
+355 |     pub(super) fn has_memories(&self) -> bool {
+    |                   ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated functions `execute_sweep_at` and `update_record_state` are never used
+    --> src/decay/sweep.rs:673:25
+     |
+ 662 | impl DecaySweepRunner {
+     | --------------------- associated functions in this implementation
+...
+ 673 |     pub(crate) async fn execute_sweep_at(
+     |                         ^^^^^^^^^^^^^^^^
+...
+1285 |     async fn update_record_state(
+     |              ^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `apply_transition` is never used
+    --> src/decay/sweep.rs:1462:14
+     |
+1461 | impl DecaySweepRunner {
+     | --------------------- associated function in this implementation
+1462 |     async fn apply_transition(
+     |              ^^^^^^^^^^^^^^^^
+
+warning: method `insert` is never used
+  --> src/derived_completion.rs:45:18
+   |
+29 | impl DerivedCompletion {
+   | ---------------------- method in this implementation
+...
+45 |     pub async fn insert(
+   |                  ^^^^^^
+
+warning: methods `native_graph` and `native_graph_accepted` are never used
+  --> src/derived_completion/native_graph.rs:11:25
+   |
+10 | impl DerivedCompletion {
+   | ---------------------- methods in this implementation
+11 |     pub(crate) async fn native_graph(
+   |                         ^^^^^^^^^^^^
+...
+28 |     async fn native_graph_accepted(
+   |              ^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `store_native_profile_with_work`, `store_native_with_work`, and `store_native_accepted` are never used
+  --> src/derived_completion/native_store.rs:12:25
+   |
+11 | impl DerivedCompletion {
+   | ---------------------- methods in this implementation
+12 |     pub(crate) async fn store_native_profile_with_work(
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+58 |     pub(crate) async fn store_native_with_work(
+   |                         ^^^^^^^^^^^^^^^^^^^^^^
+...
+76 |     async fn store_native_accepted(
+   |              ^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `readiness_barrier` is never used
+ --> src/derived_readiness.rs:8:25
+  |
+7 | impl DerivedCompletion {
+  | ---------------------- method in this implementation
+8 |     pub(crate) async fn readiness_barrier(
+  |                         ^^^^^^^^^^^^^^^^^
+
+warning: function `persist_edges` is never used
+   --> src/graph/autolink.rs:165:21
+    |
+165 | pub(crate) async fn persist_edges(
+    |                     ^^^^^^^^^^^^^
+
+warning: function `publish_edge_plan` is never used
+   --> src/graph/autolink.rs:221:21
+    |
+221 | pub(crate) async fn publish_edge_plan(
+    |                     ^^^^^^^^^^^^^^^^^
+
+warning: field `record_generation` is never read
+  --> src/graph/native_selection.rs:18:9
+   |
+16 | pub(crate) struct NativeCandidate {
+   |                   --------------- field in this struct
+17 |     pub id: MemoryId,
+18 |     pub record_generation: Generation,
+   |         ^^^^^^^^^^^^^^^^^
+   |
+   = note: `NativeCandidate` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `temporal_links` is never used
+   --> src/graph/native_selection.rs:295:19
+    |
+182 | impl NativeCandidates {
+    | --------------------- method in this implementation
+...
+295 |     pub(crate) fn temporal_links(
+    |                   ^^^^^^^^^^^^^^
+
+warning: struct `NativeSingleResult` is never constructed
+  --> src/mcp/native_store_single.rs:10:19
+   |
+10 | pub(crate) struct NativeSingleResult {
+   |                   ^^^^^^^^^^^^^^^^^^
+
+warning: methods `store_native_single_by_profile_id`, `store_native_single`, and `native_single_result` are never used
+  --> src/mcp/native_store_single.rs:19:25
+   |
+16 | impl McpStorageAdapter {
+   | ---------------------- methods in this implementation
+...
+19 |     pub(crate) async fn store_native_single_by_profile_id(
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+49 |     pub(crate) async fn store_native_single(
+   |                         ^^^^^^^^^^^^^^^^^^^
+...
+76 |     fn native_single_result(
+   |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `caller_hash` is never used
+   --> src/storage/batch.rs:305:15
+    |
+305 | pub(crate) fn caller_hash(
+    |               ^^^^^^^^^^^
+
+warning: function `resolution_hash` is never used
+   --> src/storage/batch.rs:332:15
+    |
+332 | pub(crate) fn resolution_hash(items: &[BatchItem]) -> Result<[u8; 32], super::StorageError> {
+    |               ^^^^^^^^^^^^^^^
+
+warning: methods `add_edge` and `batch_add_edges` are never used
+   --> src/storage/edges.rs:233:19
+    |
+179 | impl EdgeStore {
+    | -------------- methods in this implementation
+...
+233 |     pub(super) fn add_edge(
+    |                   ^^^^^^^^
+...
+367 |     pub(super) fn batch_add_edges(&self, edges: &[PersistedEdge]) -> Result<(), StorageError> {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: methods `edge_store`, `vector_manager`, and `vector_manager_mut` are never used
+   --> src/storage/engine.rs:836:19
+    |
+347 | impl RedbStorageEngine {
+    | ---------------------- methods in this implementation
+...
+836 |     pub(crate) fn edge_store(&self) -> &EdgeStore {
+    |                   ^^^^^^^^^^
+...
+841 |     pub(crate) fn vector_manager(&self) -> &VectorManager {
+    |                   ^^^^^^^^^^^^^^
+...
+846 |     pub(crate) fn vector_manager_mut(&mut self) -> &mut VectorManager {
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: method `acknowledge_graph_effects` is never used
+   --> src/storage/engine/effects.rs:101:19
+    |
+  6 | impl RedbStorageEngine {
+    | ---------------------- method in this implementation
+...
+101 |     pub(crate) fn acknowledge_graph_effects(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `insert_memory_with_work`, `insert_memory_with_profile`, and `insert_memory_with_profile_and_work` are never used
+   --> src/storage/engine/insertion.rs:46:19
+    |
+  4 | impl RedbStorageEngine {
+    | ---------------------- methods in this implementation
+...
+ 46 |     pub(crate) fn insert_memory_with_work(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 84 |     pub(crate) fn insert_memory_with_profile(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+102 |     pub(crate) fn insert_memory_with_profile_and_work(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `update_record` is never used
+   --> src/storage/metadata.rs:348:8
+    |
+338 | impl MetadataStore {
+    | ------------------ method in this implementation
+...
+348 |     fn update_record<F>(&self, id: &MemoryId, f: F) -> Result<DiskRecord, StorageError>
+    |        ^^^^^^^^^^^^^
+
+warning: method `batch_update_records_locked` is never used
+    --> src/storage/metadata.rs:1282:8
+     |
+1239 | impl MetadataStore {
+     | ------------------ method in this implementation
+...
+1282 |     fn batch_update_records_locked(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scan_namespace_records` and `purge_one_chunk` are never used
+    --> src/storage/metadata.rs:1672:8
+     |
+1413 | impl MetadataStore {
+     | ------------------ methods in this implementation
+...
+1672 |     fn scan_namespace_records(&self, ns: u32) -> Result<Vec<(MemoryId, DiskRecord)>, StorageError> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1691 |     fn purge_one_chunk(
+     |        ^^^^^^^^^^^^^^^
+
+warning: methods `pending_batch_items`, `reserve_batch`, `reserve_or_resume_batch`, and `finalize_batch_error` are never used
+   --> src/storage/metadata/batch.rs:367:19
+    |
+366 | impl MetadataStore {
+    | ------------------ methods in this implementation
+367 |     pub(crate) fn pending_batch_items(&self) -> Result<usize, StorageError> {
+    |                   ^^^^^^^^^^^^^^^^^^^
+...
+394 |     pub(crate) fn reserve_batch(
+    |                   ^^^^^^^^^^^^^
+...
+402 |     pub(crate) fn reserve_or_resume_batch(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+...
+766 |     pub(crate) fn finalize_batch_error(
+    |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `batch_id` is never read
+   --> src/storage/metadata/batch.rs:941:9
+    |
+938 | pub(crate) struct NativeBatchBookkeepingRef {
+    |                   ------------------------- field in this struct
+...
+941 |     pub batch_id: Uuid,
+    |         ^^^^^^^^
+
+warning: method `create_catalog` is never used
+ --> src/storage/metadata/catalog.rs:7:19
+  |
+6 | impl MetadataStore {
+  | ------------------ method in this implementation
+7 |     pub(crate) fn create_catalog(
+  |                   ^^^^^^^^^^^^^^
+
+warning: methods `acknowledge_rebuilt_effects` and `acknowledge_derived_effects` are never used
+   --> src/storage/metadata/effects.rs:301:19
+    |
+278 | impl MetadataStore {
+    | ------------------ methods in this implementation
+...
+301 |     pub(crate) fn acknowledge_rebuilt_effects(&self) -> Result<(), StorageError> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+886 |     pub(crate) fn acknowledge_derived_effects(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `insert_with_effects` is never used
+   --> src/storage/metadata/insertion.rs:161:19
+    |
+120 | impl MetadataStore {
+    | ------------------ method in this implementation
+...
+161 |     pub(crate) fn insert_with_effects(
+    |                   ^^^^^^^^^^^^^^^^^^^
+
+warning: variant `Feedback` is never constructed
+  --> src/storage/metadata/lifecycle_updates.rs:16:5
+   |
+15 | enum LegacyPatch<'a> {
+   |      ----------- variant in this enum
+16 |     Feedback(&'a FeedbackPlan),
+   |     ^^^^^^^^
+   |
+   = note: `LegacyPatch` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: enum `NativeStoreProfileResolution` is never used
+ --> src/storage/metadata/native_store_profile.rs:7:17
+  |
+7 | pub(crate) enum NativeStoreProfileResolution {
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `resolve_native_store_profile` is never used
+  --> src/storage/metadata/native_store_profile.rs:13:19
+   |
+12 | impl MetadataStore {
+   | ------------------ method in this implementation
+13 |     pub(crate) fn resolve_native_store_profile(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `removal_ledger_export` and `ensure_uuid_not_terminal` are never used
+   --> src/storage/metadata/removal_ledger.rs:348:19
+    |
+347 | impl MetadataStore {
+    | ------------------ methods in this implementation
+348 |     pub(crate) fn removal_ledger_export(&self) -> Result<LedgerExport, StorageError> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+...
+355 |     pub(crate) fn ensure_uuid_not_terminal(&self, id: MemoryId) -> Result<(), StorageError> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `tombstone_with_effects` is never used
+ --> src/storage/metadata/tombstone.rs:5:19
+  |
+4 | impl MetadataStore {
+  | ------------------ method in this implementation
+5 |     pub(crate) fn tombstone_with_effects(
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `frozen_publication_state` and `freeze_current_metadata` are never used
+   --> src/storage/metadata/work.rs:125:19
+    |
+ 59 | impl MetadataStore {
+    | ------------------ methods in this implementation
+...
+125 |     pub(crate) fn frozen_publication_state(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+146 |     pub(crate) fn freeze_current_metadata(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `request_hash_with_profile_id` is never used
+   --> src/storage/native_store.rs:100:19
+    |
+ 84 | impl NativeStoreInput {
+    | --------------------- method in this implementation
+...
+100 |     pub(crate) fn request_hash_with_profile_id(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `ready_report` is never used
+  --> src/storage/publication.rs:88:19
+   |
+87 | impl PublicationState {
+   | --------------------- method in this implementation
+88 |     pub(crate) fn ready_report(&self) -> Result<Readiness, super::StorageError> {
+   |                   ^^^^^^^^^^^^
+
+warning: methods `compact_write_new_file` and `compact_finalize` are never used
+   --> src/storage/text.rs:388:19
+    |
+194 | impl TextStore {
+    | -------------- methods in this implementation
+...
+388 |     pub(super) fn compact_write_new_file(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+...
+398 |     pub(super) fn compact_finalize(&mut self) -> Result<(), StorageError> {
+    |                   ^^^^^^^^^^^^^^^^
+
+warning: method `finish_batch` is never used
+   --> src/storage/vectors.rs:536:19
+    |
+305 | impl VectorStore {
+    | ---------------- method in this implementation
+...
+536 |     pub(super) fn finish_batch(&mut self) -> Result<()> {
+    |                   ^^^^^^^^^^^^
+
+warning: method `readiness_barrier` is never used
+   --> src/system.rs:909:25
+    |
+254 | impl Recalld {
+    | ------------ method in this implementation
+...
+909 |     pub(crate) async fn readiness_barrier(
+    |                         ^^^^^^^^^^^^^^^^^
+
+warning: `recalld` (lib) generated 40 warnings (run `cargo fix --lib -p recalld` to apply 2 suggestions)
+   Compiling recalld v1.0.0 (/work)
+warning: method `batch_add_edges` is never used
+   --> src/storage/edges.rs:367:19
+    |
+179 | impl EdgeStore {
+    | -------------- method in this implementation
+...
+367 |     pub(super) fn batch_add_edges(&self, edges: &[PersistedEdge]) -> Result<(), StorageError> {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: method `insert_memory_with_work` is never used
+  --> src/storage/engine/insertion.rs:46:19
+   |
+ 4 | impl RedbStorageEngine {
+   | ---------------------- method in this implementation
+...
+46 |     pub(crate) fn insert_memory_with_work(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `acknowledge_derived_effects` is never used
+   --> src/storage/metadata/effects.rs:886:19
+    |
+278 | impl MetadataStore {
+    | ------------------ method in this implementation
+...
+886 |     pub(crate) fn acknowledge_derived_effects(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `recalld` (lib test) generated 14 warnings (11 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.23s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-7025a4141187b374)
+
+running 14 tests
+test storage::metadata::native_records::tests::store_producers::native_single_original_vector_bits_and_checked_empty_identity ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_process_child ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_close_waits_provider_then_graph_without_storage_inversion ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_before_fixture ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_fresh_binding_replay_and_original_bits ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_publication_error_preserves_exact_committed_receipt ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_replays_genuine_before_fixture_bytes ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_provider_race_rejects_stale_plan_before_clock_or_allocation ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_publication_failure_carries_exact_receipt_and_reopens_without_provider ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_process_exit_reopens_one_receipt_and_frozen_links ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_replay_preserves_receipt_without_provider_settings_clock_or_batch ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_scope_lineage_controls_do_not_replay_other_namespace_or_call_provider ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_unknown_commit_retains_identity_and_unresolved_work_until_reopen ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 1066 filtered out; finished in 18.35s
+
+     Running unittests src/main.rs (/target/debug/deps/recalld-27bbb81e23f12ff5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-16a6b9f5f1a3f682)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-b3ddbfaa472dba30)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-ef7aa35bda05dfab)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-c242142a48e76014)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

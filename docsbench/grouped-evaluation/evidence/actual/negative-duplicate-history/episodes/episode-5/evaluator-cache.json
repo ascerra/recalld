@@ -1,0 +1,48 @@
+{
+  "dimension": 4,
+  "entries": {
+    "a6-document:amber ash": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "a6-document:birch ash": [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ],
+    "a6-document:foreign ash": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "a6-document:health check": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "a6-document:olive ash": [
+      0.0,
+      0.0,
+      1.0,
+      0.0
+    ],
+    "a6-query:amber ash": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "a6-query:amber ash FUTURE_QUESTION_CANARY": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "model": "a6-public-synthetic-v1"
+}

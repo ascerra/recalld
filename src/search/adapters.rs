@@ -25,7 +25,7 @@ use super::pipeline::{
     RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
 };
 use super::read_handle::{FtsHandle, ReadHandle};
-use super::{EntityIndex, FlatVectorIndex, FtsIndex, SearchFilter, VectorIndex};
+use super::{EntityIndex, FtsIndex, SearchFilter, VectorIndexOwner};
 
 // Explicit offline harness adapter. Ordinary storage open still rejects schema
 // v2. Snapshot ownership pins canonical files; this adapter has no write API.
@@ -95,6 +95,16 @@ impl StorageNamespaceResolver {
 
 #[async_trait]
 impl NamespaceResolver for StorageNamespaceResolver {
+    fn is_native_owned(&self) -> Result<bool> {
+        Ok(self
+            .storage
+            .read()
+            .map_err(|_| SearchError::Unavailable("storage owner poisoned".into()))?
+            .meta_store()
+            .uses_native_lifecycle())
+    }
+    // Native semantic admission still uses the trait's rejecting default here:
+    // only the pinned CanonicalReadView can validate namespace certification at G.
     async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
         let storage = self.storage.clone();
         tokio::task::spawn_blocking(move || {
@@ -168,21 +178,21 @@ impl EmbeddingProviderRegistry for SingleEmbeddingRegistry {
 
 // ── VectorIndexRegistry ────────────────────────────────────────────
 
-/// Adapts a shared `FlatVectorIndex` to `VectorIndexRegistry`.
+/// Adapts a shared `VectorIndexOwner` to `VectorIndexRegistry`.
 ///
 /// All namespaces share one index; the namespace_id is passed through
 /// the search filter to the underlying `VectorIndex::search`.
 pub struct SharedVectorIndexRegistry {
-    index: ReadHandle<FlatVectorIndex>,
+    index: ReadHandle<VectorIndexOwner>,
 }
 
 impl SharedVectorIndexRegistry {
-    pub fn new(index: Arc<tokio::sync::RwLock<FlatVectorIndex>>) -> Self {
+    pub fn new(index: Arc<tokio::sync::RwLock<VectorIndexOwner>>) -> Self {
         Self {
             index: ReadHandle::Live(index),
         }
     }
-    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<FlatVectorIndex>>) -> Self {
+    pub(crate) fn pinned(value: Arc<tokio::sync::OwnedRwLockReadGuard<VectorIndexOwner>>) -> Self {
         Self {
             index: ReadHandle::Pinned(value),
         }
@@ -206,7 +216,7 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
             ..Default::default()
         };
         let results = index
-            .search_eligible(query_vec, k, &filter, eligible_ids)
+            .search_scoped(namespace_id, query_vec, k, &filter, eligible_ids)
             .map_err(|e| SearchError::VectorIndexError(e.to_string()))?;
         Ok(results
             .into_iter()
@@ -882,10 +892,8 @@ impl GraphReader for SharedGraphReader {
 
 /// Adapts a shared `EntityIndex` to `EntityIndexReader`.
 ///
-/// Canonical eligible IDs are scoped to the resolved namespace by the pipeline.
-/// Apply them before the result cap, so foreign or filtered postings cannot
-/// crowd out eligible records. Namespace-partitioned postings can later avoid
-/// scanning those foreign postings without changing this admission contract.
+/// Namespace postings and canonical eligible IDs are selected before the
+/// adapter's candidate cap, so foreign or filtered records cannot crowd out hits.
 pub struct SharedEntityIndexReader {
     entity_index: ReadHandle<EntityIndex>,
 }
@@ -1054,21 +1062,27 @@ mod entity_namespace_tests {
         let other = NamespaceId::new(2);
         let mut index = EntityIndex::new();
         let entities = vec!["John Smith".into(), "José".into()];
+        let mut eligible = HashSet::new();
         for _ in 0..100 {
-            index.add(other, MemoryId::new(), &entities);
+            let foreign = MemoryId::new();
+            index.add(other, foreign, &entities);
+            eligible.insert(foreign);
         }
+        // Higher-count local postings must also be filtered before the cap.
+        index.add(ns, MemoryId::new(), &entities);
         let local = MemoryId::new();
         index.add(ns, local, &["José".into()]);
+        eligible.insert(local);
         let reader = SharedEntityIndexReader::new(Arc::new(tokio::sync::RwLock::new(index)));
         let hits = reader
-            .find_by_entities(ns, &entities, MemoryId::new(), 1, &HashSet::from([local]))
+            .find_by_entities(ns, &entities, MemoryId::new(), 1, &eligible)
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].memory_id, local);
         assert_eq!(hits[0].shared_count, 1);
         assert!(
             reader
-                .find_by_entities(ns, &entities, local, 1, &HashSet::from([local]))
+                .find_by_entities(ns, &entities, local, 1, &eligible)
                 .unwrap()
                 .is_empty()
         );

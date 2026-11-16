@@ -1,0 +1,93 @@
+[
+  {
+    "target": "unittests src/lib.rs",
+    "passed": 1638,
+    "ignored": 3,
+    "executable": "/work/target/debug/deps/recalld-8b31964f64b2cfc4",
+    "sha256": "6e59f92053afbe4b078e28da9eb80765efcb9fa6437cf5877d5dde6882e7a892"
+  },
+  {
+    "target": "unittests src/main.rs",
+    "passed": 0,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/recalld-e3511e97d96c1bb5",
+    "sha256": "f71093e4cbe4652973ee7691af9ad8921469ade9d27a096675cf631b160725ac"
+  },
+  {
+    "target": "unittests src/bin/recalld_cli.rs",
+    "passed": 0,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/recalld_cli-af23d66ef4eb6fd9",
+    "sha256": "a15f28d7483a736af20f6dc9e131034efb67986a659b881eb533aa2bf8fb469e"
+  },
+  {
+    "target": "unittests src/bin/recalld_text_migrate.rs",
+    "passed": 0,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/recalld_text_migrate-89ef39f5299d9e87",
+    "sha256": "6efabe98ca2f5c7789e2488923b414373825d3f09c4eb4cab7dcd8de36089090"
+  },
+  {
+    "target": "tests/inherited_policy_cli.rs",
+    "passed": 1,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/inherited_policy_cli-4560ea4fe142dcf8",
+    "sha256": "c6ff5ad7cb75c901f2bdc942abdb818b9c868b9740478bdfc8a569cd2cf9ad9c"
+  },
+  {
+    "target": "tests/lifecycle_cli.rs",
+    "passed": 1,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/lifecycle_cli-804868469b715f2b",
+    "sha256": "8db023dc928dff61ec548694d5e6b56738b0075d6acb4361cffb949246b2fc32"
+  },
+  {
+    "target": "tests/text_migration_cli.rs",
+    "passed": 1,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/text_migration_cli-3c82895165fac14b",
+    "sha256": "aa8ab8f2f141fc932532fad20fab31d11cc786e5995fa714aef07480d74031c7"
+  },
+  {
+    "target": "tests/vector_certification_cli.rs",
+    "passed": 2,
+    "ignored": 0,
+    "executable": "/work/target/debug/deps/vector_certification_cli-9b2ce2a99762f26a",
+    "sha256": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6"
+  },
+  {
+    "target": "unittests examples/native_prefix_fixture.rs",
+    "passed": 0,
+    "ignored": 0,
+    "executable": "/work/target/debug/examples/native_prefix_fixture-d5e400b9a5e43be0",
+    "sha256": "7373ab4316ab71adf80b132879ccb25c02ed8efe4566809e671ebff34164964d"
+  },
+  {
+    "target": "unittests examples/offline_eval.rs",
+    "passed": 6,
+    "ignored": 0,
+    "executable": "/work/target/debug/examples/offline_eval-a4d9b061895d675e",
+    "sha256": "61b8e3a6da269a102b896a725c2862e44e71a2f1c0c4818963f9f31069474626"
+  },
+  {
+    "target": "unittests examples/owned_evaluator.rs",
+    "passed": 0,
+    "ignored": 0,
+    "executable": "/work/target/debug/examples/owned_evaluator-962f1919193c8893",
+    "sha256": "d7b81aeb012c113f9f412195a57bf0f8156ccd3385032f46b38d990c384139ff"
+  },
+  {
+    "target": "unittests examples/performance_probe.rs",
+    "passed": 1,
+    "ignored": 0,
+    "executable": "/work/target/debug/examples/performance_probe-1ba5be5867dfd2ed",
+    "sha256": "1f3378d9abbe685f0ef8988d98dcf3321ce9d412297fef50373208a673b2a65c"
+  },
+  {
+    "target": "unittests examples/score_mcp_episode.rs",
+    "passed": 8,
+    "ignored": 0,
+    "executable": "/work/target/debug/examples/score_mcp_episode-cf46f9fa17b90ad6",
+    "sha256": "0e4dd42a379142d9d4161fc36559b238ac53bc130a441b5de613b2c3a515c70f"
+  }
+]

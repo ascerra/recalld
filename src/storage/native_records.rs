@@ -30,6 +30,35 @@ pub struct NativeInsert {
     pub embedding_profile: Option<EmbeddingProfile>,
 }
 impl NativeInsert {
+    /// Fresh provider input for the declared recalld-document-v1 recipe.
+    /// Keep caller fields untouched for identity, and perform replay before this.
+    pub(crate) fn document_v1(&self) -> String {
+        use crate::model::constants::{EMOTION_TAG_PREFIX, ENTITY_TAG_PREFIX, TOPIC_TAG_PREFIX};
+        let mut tags: Vec<String> = self.memory.tags.iter().map(ToString::to_string).collect();
+        for (values, prefix) in [
+            (&self.entities, ENTITY_TAG_PREFIX),
+            (&self.topics, TOPIC_TAG_PREFIX),
+            (&self.emotions, EMOTION_TAG_PREFIX),
+        ] {
+            for value in values {
+                let tag = format!("{prefix}{}", value.to_lowercase());
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        let mut text = self.memory.summary.clone();
+        if let Some(full_text) = &self.memory.full_text {
+            text.push_str("\n\n");
+            text.push_str(full_text);
+        }
+        if !tags.is_empty() {
+            text.push(' ');
+            text.push_str(&tags.join(" "));
+        }
+        text
+    }
+
     pub(crate) fn labels(&self) -> StructuredLabels {
         StructuredLabels {
             entities: self.entities.clone(),
@@ -94,13 +123,34 @@ impl NativeInsert {
     ) -> Result<[u8; 32], StorageError> {
         // Reuse exact original caller float bits/default expansion. The v2
         // operation tag and additional fields keep its identity distinct.
-        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let supplied_profile = self
             .embedding_profile
             .as_ref()
             .map(|p| p.profile_id())
             .transpose()
             .map_err(StorageError::InvalidMutation)?;
+        self.request_hash_with_profile_id(
+            ctx,
+            stability,
+            difficulty,
+            dimensions,
+            profile_id,
+            supplied_profile.as_deref(),
+        )
+    }
+
+    /// The wire supplies an ID, not a descriptor. Preserve the existing hash
+    /// encoding so historical replay needs no live descriptor or provider.
+    pub(crate) fn request_hash_with_profile_id(
+        &self,
+        ctx: &MutationContext,
+        stability: f32,
+        difficulty: f32,
+        dimensions: u32,
+        profile_id: &str,
+        supplied_profile: Option<&str>,
+    ) -> Result<[u8; 32], StorageError> {
+        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let extra = super::control::encode(&(
             self.observed_at,
             &self.entities,
@@ -368,6 +418,12 @@ impl From<&super::edges::PersistedEdge> for NativeEdgeProof {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeRecordWrite {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub vector_execution: Option<super::vector_certification::VectorExecution>,
     pub namespace_id: crate::model::NamespaceId,
     pub memory_id: MemoryId,
     pub lifecycle_version: LifecycleVersion,
@@ -455,6 +511,12 @@ impl NativeRecordWrite {
         receipt: &WriteReceipt,
         insertion: bool,
     ) -> Result<(), StorageError> {
+        if let Some(execution) = &self.vector_execution {
+            if !insertion {
+                return Err(invalid("non-vector mutation has vector execution evidence"));
+            }
+            execution.validate(&self.primary()?.after, receipt)?;
+        }
         if self.namespace_id.is_unset()
             || self.memory_id == MemoryId::nil()
             || self.capture_generation.store_id != receipt.store_id
@@ -589,6 +651,8 @@ impl NativeRecordWrite {
 pub(crate) struct CreationCommitment {
     pub namespace_id: crate::model::NamespaceId,
     pub primary: NativeRecordChange,
+    /// Validated typed replacement, not a rewrite of the original receipt.
+    pub reembedded_vector: Option<VectorReference>,
 }
 impl CreationCommitment {
     pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
@@ -603,6 +667,7 @@ pub(crate) fn creation_proofs(
 ) -> Result<HashMap<MemoryId, CreationCommitment>, StorageError> {
     use redb::ReadableTable;
     let mut result = HashMap::new();
+    let mut replacements = HashMap::new();
     for row in read.open_table(super::control::RECEIPTS)?.iter()? {
         let (_, value) = row?;
         let receipt = super::control::validate_receipt(value.value())?.receipt;
@@ -612,6 +677,7 @@ pub(crate) fn creation_proofs(
                 CreationCommitment {
                     namespace_id: transition.namespace_id,
                     primary: transition.primary()?.clone(),
+                    reembedded_vector: None,
                 },
             )),
             MutationOutcome::NativeMemoryInsertedWithLinks { transition } => Some((
@@ -619,14 +685,42 @@ pub(crate) fn creation_proofs(
                 CreationCommitment {
                     namespace_id: transition.namespace_id,
                     primary: transition.primary()?.clone(),
+                    reembedded_vector: None,
                 },
             )),
+            MutationOutcome::VectorsReembedded { transition } => {
+                for replacement in &transition.records {
+                    if replacements
+                        .insert(replacement.record.memory_id, replacement.record.clone())
+                        .is_some()
+                    {
+                        return Err(invalid("ambiguous vector replacement history"));
+                    }
+                }
+                None
+            }
             _ => None,
         };
         if let Some((id, proof)) = creation {
             if result.insert(id, proof).is_some() {
                 return Err(invalid("duplicate native creation identity"));
             }
+        }
+    }
+    for (id, replacement) in replacements {
+        if let Some(creation) = result.get_mut(&id) {
+            let before = replacement
+                .before
+                .as_ref()
+                .ok_or_else(|| invalid("replacement source missing"))?;
+            if before.content.vector != creation.primary.after.content.vector
+                || before.content.profile_id != creation.primary.after.content.profile_id
+            {
+                return Err(invalid(
+                    "replacement differs from original creation vector/profile",
+                ));
+            }
+            creation.reembedded_vector = replacement.after.content.vector;
         }
     }
     Ok(result)
@@ -673,7 +767,12 @@ pub(crate) fn validate_retained_creation(
             && (current.tags_sha256 != expected.tags_sha256
                 || current.labels_sha256 != expected.labels_sha256))
         || (mask & FULL_TEXT == 0 && (record.text_length != 0) != original.lifecycle.has_text)
-        || (mask & EMBEDDING == 0 && current.vector != expected.vector)
+        || (mask & EMBEDDING == 0
+            && current.vector.as_ref()
+                != creation
+                    .reembedded_vector
+                    .as_ref()
+                    .or(expected.vector.as_ref()))
     {
         return Err(invalid(
             "retained native record disagrees with its creation commitment",
@@ -773,19 +872,12 @@ impl super::native_lifecycle::NativeLifecycleSession {
         }
         let intent = self.capture_insert(scope, input)?;
         let generated = if input.memory.embedding.is_some() {
-            crate::embedding::runtime::GeneratedEmbedding {
-                values: vec![],
-                profile: None,
-            }
+            crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
         } else {
             crate::embedding::runtime::generate_native(
                 provider,
                 &intent.namespace,
-                input
-                    .memory
-                    .full_text
-                    .as_deref()
-                    .unwrap_or(&input.memory.summary),
+                &input.document_v1(),
             )
             .await
             .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?

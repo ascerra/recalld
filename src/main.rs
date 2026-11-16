@@ -489,6 +489,8 @@ async fn run_serve(
         }
     };
 
+    let mcp_bridge = create_direct_mcp_bridge(&system, default_namespace);
+
     let app_state = {
         use recalld::api::adapters::*;
 
@@ -512,15 +514,24 @@ async fn run_serve(
         );
         let cache: Arc<dyn recalld::api::RecordCache> =
             Arc::new(RecordCacheAdapter::new(system.cache().clone()));
-        let graph: Arc<dyn recalld::api::RelationshipGraph> =
-            Arc::new(RelationshipGraphAdapter::new(
+        let graph: Arc<dyn recalld::api::RelationshipGraph> = Arc::new(
+            RelationshipGraphAdapter::new(
                 system.graph().clone(),
                 system.vector_index().clone(),
                 system.entity_index().clone(),
                 system.storage().clone(),
                 system.cache().clone(),
                 Arc::new(system.config().clone()),
-            ));
+            )
+            .with_native_completion(
+                system.fts_index().clone(),
+                system.clock().clone(),
+                recalld::storage::native_lifecycle::NativePolicyInputs {
+                    global: recalld::decay::DecayConfig::default(),
+                    multiplier: system.config().decay.decay_rate_multiplier,
+                },
+            ),
+        );
         let decay: Arc<dyn recalld::api::FsrsEngine> = Arc::new(
             FsrsEngineAdapter::new(
                 system.storage().clone(),
@@ -537,16 +548,18 @@ async fn run_serve(
             ),
         );
         let namespaces: Arc<dyn recalld::api::NamespaceRegistry> = Arc::new(
-            NamespaceRegistryAdapter::new(system.storage().clone())
-                .with_clock(system.clock().clone()),
+            NamespaceRegistryAdapter::from_system(&system).with_clock(system.clock().clone()),
         );
         let metrics: Arc<dyn recalld::api::MetricsCollector> = Arc::new(NoopMetricsCollector);
 
         recalld::api::AppState::new(search, storage, cache, graph, decay, namespaces, metrics)
+            .with_native_batches(
+                mcp_bridge.storage.clone(),
+                mcp_bridge.default_namespace().into(),
+            )
     };
 
     // Build MCP bridge and router for the /mcp endpoint.
-    let mcp_bridge = create_direct_mcp_bridge(&system, default_namespace);
     let mcp_handler: Arc<dyn recalld::mcp::McpHandler> = Arc::new(mcp_bridge);
     let mcp_router = recalld::mcp::mcp_router(mcp_handler, mcp_http_config);
 

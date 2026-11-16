@@ -124,6 +124,7 @@ impl MetadataStore {
             return Err(invalid("native control schema required"));
         }
         crate::storage::lineage::ensure_serving(read, &state)?;
+        self.require_vector_validation_at(state.generation_ref())?;
         Ok(state)
     }
     pub(super) fn native_guard(&self) -> Result<MutationGuard<'_>, StorageError> {
@@ -528,6 +529,7 @@ impl MetadataStore {
     ) -> Result<Option<WriteReceipt>, StorageError> {
         if let Some(receipt) = &receipt {
             if !receipt.replayed {
+                let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
                 let committed = tx.commit();
                 // A durable transaction can still be reported as an I/O error.
                 // Exercise reconciliation against the actual committed database.
@@ -548,6 +550,7 @@ impl MetadataStore {
                         source,
                     }
                 })?;
+                self.publish_vector_validation_commit(certification, receipt)?;
                 self.view_publication.canonical_committed();
             }
         }

@@ -1,0 +1,18 @@
+{
+  "mappings": {
+    "01a1dcec-b775-79a3-9ff3-06469b0497b6": [
+      "turn-0"
+    ],
+    "01a1dcec-b77a-78f1-90cb-8e973fba2f02": [
+      "turn-1"
+    ],
+    "01a1dcec-b77c-7461-8eb6-2d2647258022": [
+      "turn-2"
+    ],
+    "01a1dcec-b780-7a02-90a4-336faa707b83": [
+      "turn-3"
+    ]
+  },
+  "prefixProvenanceSha256": "989ed35381fb0461b9bf91c2a89f93e053a53923063ce053f336c7af9fa23cfc",
+  "sourceMappingVersion": 1
+}

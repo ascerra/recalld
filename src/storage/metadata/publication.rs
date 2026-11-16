@@ -2,6 +2,7 @@
 use super::*;
 use crate::model::CachedRecord;
 use crate::storage::publication::{DerivedView, PublicationState};
+use std::sync::{Arc, RwLock};
 
 impl MetadataStore {
     pub(crate) fn publication_state(&self) -> Result<PublicationState, StorageError> {
@@ -125,6 +126,7 @@ pub(crate) struct CanonicalReadView {
     read: redb::ReadTransaction,
     pub at: control::GenerationRef,
     native_owned: bool,
+    vector_validation: Arc<RwLock<Option<super::certification::OwnedVectorValidation>>>,
 }
 
 impl MetadataStore {
@@ -165,6 +167,7 @@ impl MetadataStore {
             read,
             at: state.generation_ref(),
             native_owned: self.native_lifecycle_only,
+            vector_validation: self.vector_validation.clone(),
         })
     }
 
@@ -195,12 +198,17 @@ impl MetadataStore {
 }
 
 impl CanonicalReadView {
-    /// Owner-aware semantic admission on the same validated canonical snapshot.
-    /// A namespace descriptor or provider alone cannot grant native serving.
-    pub(crate) fn check_native_query_profile(
+    /// Constructor-validated owner format, never a request or profile inference.
+    pub(crate) fn is_native_owned(&self) -> bool {
+        self.native_owned
+    }
+
+    /// Semantic inventory admission on this exact owned canonical snapshot.
+    /// Supplied query vectors need this same scope/certification proof without
+    /// claiming that an active provider produced the caller's vector.
+    pub(crate) fn check_native_vector_namespace(
         &self,
         namespace: &NamespaceConfig,
-        active: Option<&crate::model::schema::EmbeddingProfile>,
     ) -> Result<(), StorageError> {
         if !self.native_owned {
             return Err(StorageError::RecoveryRequired(
@@ -217,10 +225,28 @@ impl CanonicalReadView {
                 "native query canonical scope mismatch".into(),
             ));
         }
+        self.vector_validation
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?
+            .as_ref()
+            .ok_or_else(|| {
+                StorageError::RecoveryRequired("owned vector validation missing".into())
+            })?
+            .require_namespace(self.at, &actual)
+    }
+
+    /// Generated queries additionally require the active provider's identity.
+    /// A namespace descriptor or provider alone cannot grant native serving.
+    pub(crate) fn check_native_query_profile(
+        &self,
+        namespace: &NamespaceConfig,
+        active: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<(), StorageError> {
+        self.check_native_vector_namespace(namespace)?;
         let active = active.ok_or_else(|| {
             StorageError::RecoveryRequired("native query provider identity missing".into())
         })?;
-        crate::embedding::profile::require_compatible(&actual, active)
+        crate::embedding::profile::require_compatible(namespace, active)
             .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
         Ok(())
     }
@@ -294,8 +320,24 @@ impl CanonicalReadView {
 pub(super) fn check_current_pending(
     read: &redb::ReadTransaction,
     state: &ControlState,
-    mut check: impl FnMut() -> Result<(), StorageError>,
+    check: impl FnMut() -> Result<(), StorageError>,
 ) -> Result<(), StorageError> {
+    let (effects, purges) = current_pending_counts(read, state, check)?;
+    if effects != 0 || purges != 0 {
+        return Err(StorageError::RecoveryRequired(format!(
+            "durable work pending: {effects} effects, {purges} purges"
+        )));
+    }
+    Ok(())
+}
+
+fn current_pending_counts(
+    read: &redb::ReadTransaction,
+    state: &ControlState,
+    mut check: impl FnMut() -> Result<(), StorageError>,
+) -> Result<(u64, usize), StorageError> {
+    let mut effects_count = 0;
+    let mut purges_count = 0usize;
     use super::{effects, purge};
     use redb::{MultimapTableHandle, TableHandle};
     let reserved = [
@@ -339,11 +381,7 @@ pub(super) fn check_current_pending(
             ));
         }
         if records.name() == effects::EFFECTS.name() {
-            if !read.open_table(records)?.is_empty()? {
-                return Err(StorageError::RecoveryRequired(
-                    "durable effects pending".into(),
-                ));
-            }
+            effects_count = read.open_table(records)?.len()?;
         } else {
             for row in read.open_table(records)?.iter()? {
                 check()?;
@@ -372,12 +410,71 @@ pub(super) fn check_current_pending(
                             "active purge has foreign lineage".into(),
                         ));
                     }
-                    return Err(StorageError::RecoveryRequired(
-                        "durable purge work pending".into(),
-                    ));
+                    purges_count = purges_count
+                        .checked_add(1)
+                        .ok_or(StorageError::GenerationExhausted)?;
                 }
             }
         }
     }
-    check()
+    check()?;
+    Ok((effects_count, purges_count))
+}
+
+impl MetadataStore {
+    /// Caller retains the actual engine read guard and publication coordinator
+    /// read lease. Never closes admission or waits on the caller's own root.
+    pub(crate) fn observe_readiness(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<crate::storage::ReadinessObservation, StorageError> {
+        let check = || {
+            if std::time::Instant::now() >= deadline {
+                return Err(StorageError::RecoveryRequired(
+                    "readiness observation deadline expired".into(),
+                ));
+            }
+            Ok(())
+        };
+        check()?;
+        let _publication = self.publication.try_read().map_err(|_| {
+            StorageError::RecoveryRequired("metadata publication busy or poisoned".into())
+        })?;
+        self.ensure_handle_available()?;
+        let read = self.db.begin_read()?;
+        let state = if self.native_lifecycle_only {
+            self.native_control_at(&read)?
+        } else {
+            self.ensure_legacy_operation()?;
+            let table = read.open_table(control::CONTROL)?;
+            let bytes = table
+                .get("state")?
+                .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
+            ControlState::decode(bytes.value())?
+        };
+        crate::storage::lineage::ensure_serving(&read, &state)?;
+        let (pending_effects, pending_purges) = current_pending_counts(&read, &state, check)?;
+        let pending_batch_items = Self::pending_batch_items_at(&read, check)?;
+        let state = self.view_publication.state(state.generation_ref());
+        let work = self.work_tracker.status();
+        check()?;
+        Ok(crate::storage::ReadinessObservation {
+            canonical: state.canonical,
+            derived: ["graph", "vectors", "fts", "entities"]
+                .into_iter()
+                .zip(state.applied)
+                .map(|(name, applied)| crate::storage::ObservedDerived {
+                    name,
+                    applied,
+                    matches_canonical: applied == Some(state.canonical),
+                })
+                .collect(),
+            accepted_work: work.pending,
+            unresolved_work: work.unresolved,
+            admission_open: work.admission_open,
+            pending_effects,
+            pending_purges,
+            pending_batch_items,
+        })
+    }
 }

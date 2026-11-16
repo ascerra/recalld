@@ -1,0 +1,65 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"commitEvidenceScope\": \"purgeStart\",\n  \"commitState\": \"unknown\",\n  \"error\": \"COMMIT_OUTCOME_UNKNOWN\",\n  \"message\": \"A later purge step has an unknown outcome. The attached receipt proves only the committed purge start. Do not retry deletion by name.\",\n  \"operationId\": \"44444444-4444-4444-8444-444444444444\",\n  \"receipt\": {\n    \"committedGeneration\": \"11\",\n    \"operationId\": \"22222222-2222-4222-8222-222222222222\",\n    \"outcome\": {\n      \"kind\": \"nativeNamespacePurgeStarted\",\n      \"transition\": {\n        \"beforeNamespace\": {\n          \"createdAt\": 1000,\n          \"embeddingDim\": 4,\n          \"name\": \"scratch\",\n          \"namespaceId\": 7,\n          \"policy\": {\n            \"decayRateMultiplier\": 1.0,\n            \"defaultDifficulty\": 5.0,\n            \"desiredRetention\": 0.75,\n            \"initialStability\": 4.0,\n            \"permastoreThreshold\": 1024.0,\n            \"thresholds\": [\n              0.5,\n              0.25,\n              0.125\n            ]\n          },\n          \"schema\": {\n            \"embeddingBinding\": {\n              \"state\": \"unknownLegacy\"\n            },\n            \"extensions\": {},\n            \"lifecycleVersion\": \"legacy_access_v1\",\n            \"namespaceSchemaVersion\": 2,\n            \"policyRevision\": \"0\",\n            \"requiredFeatures\": []\n          }\n        },\n        \"previousGeneration\": \"10\",\n        \"request\": {\n          \"context\": {\n            \"contractVersion\": 1,\n            \"proofVersion\": 1\n          },\n          \"expectedGeneration\": null,\n          \"force\": true\n        }\n      }\n    },\n    \"receiptVersion\": 1,\n    \"replayed\": false,\n    \"storeId\": \"11111111-1111-4111-8111-111111111111\"\n  }\n}"
+    }
+  ],
+  "structuredContent": {
+    "error": "COMMIT_OUTCOME_UNKNOWN",
+    "commitState": "unknown",
+    "commitEvidenceScope": "purgeStart",
+    "receipt": {
+      "storeId": "11111111-1111-4111-8111-111111111111",
+      "operationId": "22222222-2222-4222-8222-222222222222",
+      "committedGeneration": "11",
+      "receiptVersion": 1,
+      "outcome": {
+        "kind": "nativeNamespacePurgeStarted",
+        "transition": {
+          "request": {
+            "context": {
+              "proofVersion": 1,
+              "contractVersion": 1
+            },
+            "force": true,
+            "expectedGeneration": null
+          },
+          "previousGeneration": "10",
+          "beforeNamespace": {
+            "namespaceId": 7,
+            "name": "scratch",
+            "embeddingDim": 4,
+            "createdAt": 1000,
+            "policy": {
+              "initialStability": 4.0,
+              "defaultDifficulty": 5.0,
+              "thresholds": [
+                0.5,
+                0.25,
+                0.125
+              ],
+              "permastoreThreshold": 1024.0,
+              "desiredRetention": 0.75,
+              "decayRateMultiplier": 1.0
+            },
+            "schema": {
+              "namespaceSchemaVersion": 2,
+              "lifecycleVersion": "legacy_access_v1",
+              "policyRevision": "0",
+              "embeddingBinding": {
+                "state": "unknownLegacy"
+              },
+              "requiredFeatures": [],
+              "extensions": {}
+            }
+          }
+        }
+      },
+      "replayed": false
+    },
+    "operationId": "44444444-4444-4444-8444-444444444444",
+    "message": "A later purge step has an unknown outcome. The attached receipt proves only the committed purge start. Do not retry deletion by name."
+  },
+  "isError": true
+}

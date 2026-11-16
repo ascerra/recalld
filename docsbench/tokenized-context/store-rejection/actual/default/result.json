@@ -1,0 +1,35 @@
+{
+  "actorActions": 8,
+  "actorCodeSha256": "8cb559a799643696552cb14a1ed01d86d6c407853f7e557e73a73391cd86aa74",
+  "artifactsSha256": {
+    "actor-code.py": "8cb559a799643696552cb14a1ed01d86d6c407853f7e557e73a73391cd86aa74",
+    "actor-inputs/step-0.json": "88231f35c851be393550c7e94a1a754c1cf488b99a572a321c252a6f6f3c49e2",
+    "actor-projection.json": "88231f35c851be393550c7e94a1a754c1cf488b99a572a321c252a6f6f3c49e2",
+    "actor-provider.jsonl": "43d55e5d1eb186c3baa021f68714f40e69974aeeb09081ae783c3d495ce6bdf6",
+    "actor-wire.jsonl": "e20c927dd1dc272a33445febd740697bc049006f1e3441f5dc1dc744af7314aa",
+    "actor.log": "9587f3ffdb1d405d089cb99486bb41c19383f74c78b47c2157479d8892b3038c",
+    "config.toml": "4b81393ccd40d7fc084c626671d2db354b7c66c915d6d4da476bb5be5468f4c0",
+    "evaluator/source-events.jsonl": "6d650c02947b9a9193c94c9aaa858bc84f89b2934e7bca926c6210b7b6a9666a",
+    "runtime.log": "525561b9832ed95c77babeafbaa6bf6154e64e9cd2c23cc7f614dde7e81c0035",
+    "source-mappings.json": "1911bea5aeca790494615ee89a24f71dbffabb69c5fefef0487bb414852ef327",
+    "trace.jsonl": "8538198bd5465996ad6b34127486ae30cacbccbdb9458355ea04ae31e107f342"
+  },
+  "capabilities": {
+    "barrier": false,
+    "canonicalSchemaAttested": false,
+    "clock": "system-uncontrolled",
+    "clockAdvance": false,
+    "coherentReadView": false,
+    "deterministicIds": false,
+    "deterministicRng": false,
+    "fullA6": false,
+    "publicMcp": true,
+    "publicV2": false,
+    "reset": false,
+    "snapshot": false
+  },
+  "environmentHash": "b54a42e2026e2a69623d8e4991e9e338addb4b20c27e720e0932bd115a257ba6",
+  "error": "actor exited 1 at delivery 0",
+  "status": "failed",
+  "storeMappings": 1
+}

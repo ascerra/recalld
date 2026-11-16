@@ -1,0 +1,239 @@
+[
+  {
+    "controlRequestId": 1034,
+    "executionCompleted": true,
+    "phase": "completed",
+    "readiness": {
+      "committedGeneration": "12",
+      "derived": [
+        {
+          "appliedGeneration": "12",
+          "name": "graph",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "12",
+          "name": "vectors",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "12",
+          "name": "fts",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "12",
+          "name": "entities",
+          "ready": true
+        }
+      ],
+      "pendingWork": 0,
+      "ready": true,
+      "storeId": "dbf09151-3cd6-4f35-9e72-c375dd8c9030"
+    },
+    "result": {
+      "compactionTriggered": false,
+      "decayDisabledSkipped": 0,
+      "deletions": 0,
+      "errors": [],
+      "exemptSkipped": 0,
+      "fullToSummary": 4,
+      "knownCommitError": null,
+      "knownCommittedReceipt": null,
+      "memoriesScanned": 4,
+      "missingSummarySkipped": 0,
+      "permastoreSkipped": 0,
+      "publicationError": null,
+      "savedByConnectionBonus": 0,
+      "staleSkipped": 0,
+      "summaryToGhost": 0,
+      "transitions": [
+        {
+          "fromPhase": "full",
+          "id": "01a1dcb1-37a8-7203-b925-8fd73d4eeb9f",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "summary"
+        },
+        {
+          "fromPhase": "full",
+          "id": "01a1dcb1-37ad-7540-9488-c11c67cc6790",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "summary"
+        },
+        {
+          "fromPhase": "full",
+          "id": "01a1dcb1-37af-7903-a779-640cef46715e",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "summary"
+        },
+        {
+          "fromPhase": "full",
+          "id": "01a1dcb1-37b8-7710-8826-7f7cd768ffe4",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "summary"
+        }
+      ],
+      "uncertainOperation": null,
+      "unchangedSkipped": 0
+    },
+    "sampledAtMillis": 4920825600000
+  },
+  {
+    "controlRequestId": 1049,
+    "executionCompleted": true,
+    "phase": "completed",
+    "readiness": {
+      "committedGeneration": "16",
+      "derived": [
+        {
+          "appliedGeneration": "16",
+          "name": "graph",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "16",
+          "name": "vectors",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "16",
+          "name": "fts",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "16",
+          "name": "entities",
+          "ready": true
+        }
+      ],
+      "pendingWork": 0,
+      "ready": true,
+      "storeId": "dbf09151-3cd6-4f35-9e72-c375dd8c9030"
+    },
+    "result": {
+      "compactionTriggered": false,
+      "decayDisabledSkipped": 0,
+      "deletions": 0,
+      "errors": [],
+      "exemptSkipped": 0,
+      "fullToSummary": 0,
+      "knownCommitError": null,
+      "knownCommittedReceipt": null,
+      "memoriesScanned": 4,
+      "missingSummarySkipped": 0,
+      "permastoreSkipped": 0,
+      "publicationError": null,
+      "savedByConnectionBonus": 0,
+      "staleSkipped": 0,
+      "summaryToGhost": 4,
+      "transitions": [
+        {
+          "fromPhase": "summary",
+          "id": "01a1dcb1-37a8-7203-b925-8fd73d4eeb9f",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "ghost"
+        },
+        {
+          "fromPhase": "summary",
+          "id": "01a1dcb1-37ad-7540-9488-c11c67cc6790",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "ghost"
+        },
+        {
+          "fromPhase": "summary",
+          "id": "01a1dcb1-37af-7903-a779-640cef46715e",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "ghost"
+        },
+        {
+          "fromPhase": "summary",
+          "id": "01a1dcb1-37b8-7710-8826-7f7cd768ffe4",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "ghost"
+        }
+      ],
+      "uncertainOperation": null,
+      "unchangedSkipped": 0
+    },
+    "sampledAtMillis": 4920825600000
+  },
+  {
+    "controlRequestId": 1064,
+    "executionCompleted": true,
+    "phase": "completed",
+    "readiness": {
+      "committedGeneration": "20",
+      "derived": [
+        {
+          "appliedGeneration": "20",
+          "name": "graph",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "20",
+          "name": "vectors",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "20",
+          "name": "fts",
+          "ready": true
+        },
+        {
+          "appliedGeneration": "20",
+          "name": "entities",
+          "ready": true
+        }
+      ],
+      "pendingWork": 0,
+      "ready": true,
+      "storeId": "dbf09151-3cd6-4f35-9e72-c375dd8c9030"
+    },
+    "result": {
+      "compactionTriggered": false,
+      "decayDisabledSkipped": 0,
+      "deletions": 4,
+      "errors": [],
+      "exemptSkipped": 0,
+      "fullToSummary": 0,
+      "knownCommitError": null,
+      "knownCommittedReceipt": null,
+      "memoriesScanned": 4,
+      "missingSummarySkipped": 0,
+      "permastoreSkipped": 0,
+      "publicationError": null,
+      "savedByConnectionBonus": 0,
+      "staleSkipped": 0,
+      "summaryToGhost": 0,
+      "transitions": [
+        {
+          "fromPhase": "ghost",
+          "id": "01a1dcb1-37a8-7203-b925-8fd73d4eeb9f",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "deleted"
+        },
+        {
+          "fromPhase": "ghost",
+          "id": "01a1dcb1-37ad-7540-9488-c11c67cc6790",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "deleted"
+        },
+        {
+          "fromPhase": "ghost",
+          "id": "01a1dcb1-37af-7903-a779-640cef46715e",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "deleted"
+        },
+        {
+          "fromPhase": "ghost",
+          "id": "01a1dcb1-37b8-7710-8826-7f7cd768ffe4",
+          "retrievability": 0.020824532955884933,
+          "toPhase": "deleted"
+        }
+      ],
+      "uncertainOperation": null,
+      "unchangedSkipped": 0
+    },
+    "sampledAtMillis": 4920825600000
+  }
+]

@@ -93,6 +93,7 @@ impl MetadataStore {
                 "native insertion requires an explicitly bound namespace profile".into(),
             ));
         }
+        self.require_certified_namespace(capture.generation, &namespace)?;
         Ok(NativeInsertIntent {
             scope,
             original: input.clone(),
@@ -166,7 +167,7 @@ impl MetadataStore {
             crate::storage::batch::native::insert_hash(&child.context(), input, &child.defaults)?;
         let replay = super::batch::replay_child(&tx, child, hash)?;
         if replay.is_none() {
-            super::batch::check_policy(&tx, child)?;
+            super::batch::check_policy(self, &tx, child)?;
         }
         Ok(replay)
     }
@@ -186,7 +187,7 @@ impl MetadataStore {
         let hash = control::request_hash(&child.context(), "native_tombstone", &[id.as_bytes()]);
         let replay = super::batch::replay_child(&tx, child, hash)?;
         if replay.is_none() {
-            super::batch::check_policy(&tx, child)?;
+            super::batch::check_policy(self, &tx, child)?;
         }
         Ok(replay)
     }
@@ -199,6 +200,7 @@ impl MetadataStore {
         policy: &NativePolicyInputs,
         clock: &dyn Clock,
         embedding: &[f32],
+        generated: &crate::embedding::runtime::GeneratedEmbedding,
         profile: &crate::model::schema::EmbeddingProfile,
         existing_edges: &[PersistedEdge],
         text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
@@ -241,7 +243,7 @@ impl MetadataStore {
             if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
                 return Ok(receipt);
             }
-            super::batch::check_policy(&tx, child)?;
+            super::batch::check_policy(self, &tx, child)?;
         }
         let replay = if let Some(input) = &store_input {
             super::native_store::replay_store(&tx, ctx, input)?
@@ -276,6 +278,16 @@ impl MetadataStore {
             .memory
             .initial_stability
             .unwrap_or(ns.initial_stability);
+        if ns
+            .schema
+            .as_ref()
+            .is_some_and(|s| s.vector_certification.is_some())
+            && input.memory.embedding.is_none()
+        {
+            generated
+                .verify_document(&input.document_v1())
+                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
+        }
         if !stability.is_finite() || stability <= 0. {
             return Err(StorageError::InvalidMutation(
                 "invalid initial stability".into(),
@@ -451,6 +463,9 @@ impl MetadataStore {
                 .as_ref()
                 .map(|s| hash_bytes(s.as_bytes())),
         )?;
+        let vector_execution = crate::storage::vector_certification::VectorExecution::for_insert(
+            &ns, &record, input, generated,
+        )?;
         let mut records = vec![NativeRecordChange {
             memory_id: id,
             before: None,
@@ -501,6 +516,7 @@ impl MetadataStore {
             effects::RecordMutation::NativeStored(
                 &record,
                 crate::storage::native_store::NativeStoreWrite {
+                    vector_execution,
                     namespace_id: ns.id,
                     memory_id: id,
                     lifecycle_version: intent.capture.version,
@@ -529,6 +545,7 @@ impl MetadataStore {
             )
         } else {
             let transition = NativeRecordWrite {
+                vector_execution,
                 namespace_id: ns.id,
                 memory_id: id,
                 lifecycle_version: intent.capture.version,
@@ -620,7 +637,7 @@ impl MetadataStore {
             if let Some(receipt) = super::batch::replay_child(&tx, child, hash)? {
                 return Ok(receipt);
             }
-            super::batch::check_policy(&tx, child)?;
+            super::batch::check_policy(self, &tx, child)?;
         } else if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok(receipt);
         }
@@ -669,6 +686,7 @@ impl MetadataStore {
             )?;
         }
         let transition = NativeRecordWrite {
+            vector_execution: None,
             namespace_id: ns.id,
             memory_id: intent.memory_id,
             lifecycle_version: intent.capture.version,
@@ -714,7 +732,7 @@ pub(crate) fn check_child_context(
     child: &BatchChild,
 ) -> Result<(), StorageError> {
     if !matches!(child.version, 2 | 3)
-        || ctx.contract_version != 2
+        || ctx.contract_version != child.context().contract_version
         || ctx.store_id != Some(child.store_id)
         || ctx.scope != MutationScope::Namespace(child.namespace())
         || ctx.idempotency_key.is_some()

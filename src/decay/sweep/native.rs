@@ -109,8 +109,24 @@ impl DecaySweepRunner {
                 tokio::task::yield_now().await;
             }
         }
-        // No legacy compaction or side-channel phase-index persistence here.
-        // The canonical writer and awaited publisher own every native effect.
+        // Physical relocation is a separate internal-contract1 commit after
+        // successful lifecycle work. Never consume a fresh ID/generation after
+        // a partial/unknown phase failure; its in-hand identity stays primary.
+        if result.errors.is_empty()
+            && result.publication_error.is_none()
+            && (result.deletions > 0 || result.full_to_summary > 0)
+        {
+            match completion.compact_text_with_work(Some(work)).await {
+                Ok(compaction) => {
+                    result.compaction_triggered = true;
+                    result.compaction_receipt = Some(compaction.receipt);
+                    result.compaction_cleanup_pending = compaction.cleanup_pending;
+                }
+                Err(error) => result.retain_publication_failure(&error),
+            }
+        }
+        // Phase-index publication is owned by the canonical writer/completion;
+        // there is no independent native phase-index persistence transaction.
         result.duration = start.elapsed();
         result
     }

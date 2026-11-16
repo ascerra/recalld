@@ -16,6 +16,10 @@ import threading
 import time
 import uuid
 
+CONTEXT = runpy.run_path(str(Path(__file__).with_name("context-mcp-evaluation.py")))
+PAIRED = runpy.run_path(str(Path(__file__).with_name("paired-mcp-evaluation.py")))
+BEIR = runpy.run_path(str(Path(__file__).with_name("beir-mcp-evaluation.py")))
+GROUPED = runpy.run_path(str(Path(__file__).with_name("grouped-mcp-evaluation.py")))
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 MODEL = "a6-public-synthetic-v1"
 CONFORMANCE = runpy.run_path(str(Path(__file__).with_name("public-mcp-conformance.py")))
@@ -23,6 +27,7 @@ OWNED = runpy.run_path(str(Path(__file__).with_name("owned-mcp-supervisor.py")))
 RESET = runpy.run_path(str(Path(__file__).with_name("reset-mcp-supervisor.py")))
 SWEEP = runpy.run_path(str(Path(__file__).with_name("sweep-mcp-supervisor.py")))
 NATIVE = runpy.run_path(str(Path(__file__).with_name("native-prefix-mcp-supervisor.py")))
+NATIVE_SWEEP = runpy.run_path(str(Path(__file__).with_name("native-sweep-mcp-supervisor.py")))
 ROOT = Path(__file__).resolve().parents[1]
 CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadView=False,
                     barrier=False, reset=False, snapshot=False, clock="system-uncontrolled",
@@ -30,8 +35,45 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
                     canonicalSchemaAttested=False)
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
-EXTRA = ("scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
-         "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py")
+EXTRA = (
+         "tests/query-schema-requirements.txt", "tests/query_schema_conformance.py",
+         # Exact native replay inputs; no directory wildcard or ambient scratch.
+         'src/storage/vector_certification/fixtures/pending-before-certification.zip',
+         'src/storage/vector_certification/fixtures/pending-multi-provenance.json',
+         'src/storage/vector_certification/fixtures/pending-v2-api2-generatedfalse.zip',
+         'src/storage/vector_certification/fixtures/pending-v2-api2-generatedtrue.zip',
+         'src/storage/vector_certification/fixtures/pending-v3-api1-generatedfalse.zip',
+         'src/storage/vector_certification/fixtures/pending-v3-api2-generatedtrue.zip',
+         'src/storage/metadata/native_records/fixtures/document-recipe-legacy-receipts.json',
+         'src/storage/metadata/native_records/fixtures/document-recipe-legacy.jsonl',
+         'tests/fixtures/native-api1-batch-before158/PROVENANCE.json',
+         'tests/fixtures/native-api1-batch-before158/README.md',
+         'tests/fixtures/native-api1-batch-before158/before-probe.rs.txt',
+         'tests/fixtures/native-api1-batch-before158/manifest.json',
+         'tests/fixtures/native-api1-batch-before158/store.zip',
+         'tests/fixtures/native-batch-before106-oversize/completed.zip',
+         'tests/fixtures/native-batch-before106-oversize/pending.zip',
+         'tests/fixtures/native-batch-before106-oversize/provenance.json',
+         'tests/fixtures/native-batch-before106-oversize/request.json',
+         'tests/fixtures/native-batch-before106-oversize/reservation.json',
+         'tests/fixtures/native-batch-before106/provenance.json',
+         'tests/fixtures/native-batch-before106/v1-manifest.json',
+         'tests/fixtures/native-batch-before106/v1-request.json',
+         'tests/fixtures/native-batch-before106/v1-reservation.json',
+         'tests/fixtures/native-batch-before106/v1-store.zip',
+         'tests/fixtures/native-batch-before106/v2-manifest.json',
+         'tests/fixtures/native-batch-before106/v2-request.json',
+         'tests/fixtures/native-batch-before106/v2-reservation.json',
+         'tests/fixtures/native-batch-before106/v2.jsonl',
+         'tests/fixtures/native-batch-before106/v3-manifest.json',
+         'tests/fixtures/native-batch-before106/v3-request.json',
+         'tests/fixtures/native-batch-before106/v3-reservation.json',
+         'tests/fixtures/native-batch-before106/v3.jsonl',
+         'src/mcp/fixtures/legacy-lifecycle-old-api1.json', 'src/mcp/fixtures/legacy-lifecycle-old-api1.zip', 'src/storage/metadata/native_records/fixtures/original-api-old2.zip', 'src/storage/metadata/native_records/fixtures/request-context-api2.zip',
+         "scripts/beir-mcp-evaluation.py", "scripts/beir-reference-lock.json", "scripts/test_beir_mcp_evaluation.py", "scripts/check_beir_mcp_evaluation.py", "scripts/paired-mcp-evaluation.py", "scripts/test_paired_mcp_evaluation.py", "scripts/check_paired_mcp_evaluation.py", "scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py", "scripts/test_trace_accounting.py", "scripts/check_trace_accounting.py", "scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+         "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py", "scripts/native-sweep-mcp-supervisor.py", "scripts/test_native_sweep_episode.py", "src/storage/engine/fixtures/text-compaction-before.zip",
+         *["docsbench/native-sweep-consumer/full-e1d4cea9/inputs/"+name for name in ("manifest.json","actor-inputs.json","evaluator-labels.json","evaluator-cache.json","evaluator-schedule.json")])
+EXTRA += ("scripts/context-mcp-evaluation.py", "scripts/context_tokenizer.py", "scripts/context-tokenizer-lock.json", "scripts/context-encoding.json", "scripts/TIKTOKEN-LICENSE.txt", "scripts/prepare-context-assets.py", "scripts/test_context_mcp_evaluation.py", "scripts/check_context_mcp_evaluation.py",)
 
 
 def encoded(value):
@@ -55,7 +97,166 @@ def exact_keys(value, keys):
         raise ValueError("unsupported or missing fields")
 
 
+ACCOUNTING_TRACK = "serialized-mcp-accounting-synthetic-diagnostic-v1"
+ACCOUNTING_POLICY = dict(accountingVersion=1, transport="mcp-stdio-client-buffers-v1",
+    provider="synthetic-replay-http-bodies-v1", traceDelivery="append-flush-before-outcome-consumption",
+    tokenizer=None, answerContextCapTokens=None, productionPricing=None,
+    unknownOutcome="preserve-no-rollback-or-retry", sampled=False)
+
+
+class TraceRecorder:
+    """Supervisor-owned context; actor only supplies current public RPC facts."""
+    def __init__(self, path, environment, episode, embedding=None):
+        self.file = path.open("x")
+        self.environment, self.episode, self.embedding = environment, episode, embedding
+        self.pending, self.seen, self.sequence = {}, set(), 0
+
+    def append(self, event, row, category=None):
+        self.sequence += 1
+        observed = None
+        if event == "outcome" and row.get("tag", "").startswith("query:"):
+            try:
+                payload = json.loads(row["response"]["result"]["content"][0]["text"])
+                observed = [dict(publicResponseRank=str(i + 1), memoryId=v["id"], publicScore=v.get("score")) for i,v in enumerate(payload["memories"])]
+            except (KeyError, TypeError, ValueError):
+                pass  # Preserve the raw public response; do not invent candidate fields.
+        value = dict(traceSchemaVersion=1, accountingVersion=1, sequence=str(self.sequence), eventKind=event,
+            runId=self.environment, episodeId=self.episode, groupId="synthetic-regression", environmentHash=self.environment,
+            stepId=row.get("stepId"), deliveryOrdinal=row.get("deliveryOrdinal"), action=row.get("request"),
+            outcome=row.get("response"), accounting=row.get("accounting"), errorCategory=category,
+            sourceId=row.get("tag", "")[6:] if row.get("tag", "").startswith("store:") else None,
+            sourceMappingsFile="source-mappings.json", publicRankObservations=observed,
+            providerEvidence=dict(file="actor-provider.jsonl", deliveryOrdinal=row.get("deliveryOrdinal"),
+                scope="delivery-window-includes-shared-startup-not-per-rpc", configuredModel=MODEL, activeEmbedding=self.embedding),
+            readGeneration=None, readiness=dict(available=False), simulatedTimeMs=None, snapshot=None, reward=None)
+        self.file.write(json.dumps(value) + "\n"); self.file.flush()
+
+    def consume(self, row):
+        kind = row["event"]
+        if kind == "isolation": return
+        identity = row["stepId"]
+        if kind == "attempt":
+            if identity in self.seen: raise ValueError("duplicate RPC attempt")
+            self.seen.add(identity); self.pending[identity] = row
+        elif kind in ("outcome", "error"):
+            prior = self.pending.pop(identity, None)
+            if prior is None or prior["request"] != row["request"]: raise ValueError("unmatched RPC outcome")
+        else: raise ValueError("unknown actor event")
+        self.append(kind, row, row["accounting"]["category"] if kind == "error" else None)
+
+    def interrupted(self, category):
+        for row in self.pending.values(): self.append("incomplete", row, category)
+        self.pending.clear()
+
+    def process_error(self, category): self.append("process_error", {}, category)
+
+    def close(self):
+        self.interrupted("supervisor_finalization"); self.file.close()
+
+
+def run_accounted_actor(command, projection, wire, actor_log, root, env, pass_fds, trace, timeout=90):
+    child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=actor_log,
+                             cwd=root, env=env, pass_fds=pass_fds, bufsize=0)
+    pending = bytearray(); deadline = time.monotonic() + timeout
+    try:
+        child.stdin.write(encoded(projection)); child.stdin.close()
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([child.stdout], [], [], remaining)[0]:
+                raise TimeoutError("actor event stream timeout")
+            chunk = os.read(child.stdout.fileno(), 65536)
+            if not chunk: break
+            pending.extend(chunk)
+            if len(pending) > 16 * 1024 * 1024: raise ValueError("actor event limit exceeded")
+            while b"\n" in pending:
+                line, _, rest = pending.partition(b"\n"); pending = bytearray(rest)
+                wire.write(line + b"\n"); wire.flush()
+                # The prior attempt's append/flush completes before the next event is consumed.
+                trace.consume(json.loads(line))
+        if pending:
+            wire.write(pending); wire.flush(); raise ValueError("partial actor event")
+        code = child.wait(timeout=max(.001, deadline - time.monotonic()))
+        if code or trace.pending:
+            trace.process_error("actor_exit_or_unfinished_rpc"); trace.interrupted("actor_exit_unknown")
+            code = code or 1
+        return subprocess.CompletedProcess(command, code)
+    except BaseException:
+        trace.process_error("actor_stream_failure"); trace.interrupted("actor_stream_unknown")
+        raise
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            try: child.wait(timeout=5)
+            except subprocess.TimeoutExpired: child.kill(); child.wait()
+        child.stdout.close()
+        if not child.stdin.closed: child.stdin.close()
+
+
+def reconcile_accounting(trace_rows, provider_rows):
+    attempts, terminal, process_errors = {}, {}, 0
+    for index, row in enumerate(trace_rows, 1):
+        if row["sequence"] != str(index): raise ValueError("trace sequence gap")
+        kind = row["eventKind"]; identity = row["stepId"]
+        if kind == "process_error": process_errors += 1; continue
+        if kind == "attempt":
+            if identity in attempts: raise ValueError("duplicate trace attempt")
+            attempts[identity] = row
+        elif kind in ("outcome", "error", "incomplete"):
+            if identity not in attempts or identity in terminal or row["action"] != attempts[identity]["action"]:
+                raise ValueError("unmatched/duplicate trace completion")
+            terminal[identity] = row
+        else: raise ValueError("unsupported trace event")
+        facts = row["accounting"]
+        outgoing = bytes.fromhex(facts["requestWireHex"]); incoming = bytes.fromhex(facts["responseWireHex"])
+        if str(len(outgoing)) != facts["requestBytesIntended"] or str(len(incoming)) != facts["responseBytesRead"] or json.loads(outgoing) != row["action"]:
+            raise ValueError("buffer byte/accounting mismatch")
+        if type(facts["accountingVersion"]) is not int or facts["accountingVersion"] != 1:
+            raise ValueError("unsupported buffer accounting version")
+        elapsed = facts["observedClientElapsedNs"]
+        if elapsed is not None and (not isinstance(elapsed, str) or not elapsed.isascii() or not elapsed.isdecimal()):
+            raise ValueError("invalid observed duration")
+        if kind == "outcome":
+            if facts["category"] == "notification":
+                if incoming or row["outcome"] is not None: raise ValueError("notification has response")
+            elif json.loads(incoming) != row["outcome"]: raise ValueError("response buffer/outcome mismatch")
+        written = facts["requestBytesWritten"]
+        if written is not None and (not written.isdecimal() or int(written) > len(outgoing)):
+            raise ValueError("invalid completed request bytes")
+    if attempts.keys() != terminal.keys(): raise ValueError("missing terminal or explicit incomplete action")
+    values = list(terminal.values())
+    categories = sorted({v["accounting"]["category"] for v in values if v["eventKind"] != "incomplete"})
+    known = [v["accounting"] for v in values if v["eventKind"] != "incomplete"]
+    for row in provider_rows:
+        fact = row["accounting"]
+        if str(len(bytes.fromhex(fact["requestBodyHex"]))) != fact["requestBodyBytes"] or str(len(bytes.fromhex(fact["responseBodyHex"]))) != fact["responseBodyBytesIntended"]:
+            raise ValueError("provider body accounting mismatch")
+        if fact["responseBodyBytesWritten"] is not None and int(fact["responseBodyBytesWritten"]) > int(fact["responseBodyBytesIntended"]):
+            raise ValueError("invalid provider write bytes")
+    provider_known = [r["accounting"] for r in provider_rows if r["accounting"]["responseBodyBytesWritten"] is not None]
+    return dict(accountingVersion=1, denominatorUnit="complete-external-synthetic-episode", sampled=False,
+        attemptedActions=str(len(attempts)), terminalRpcObservations=str(sum(v["eventKind"] == "outcome" for v in values)),
+        failedRpcObservations=str(sum(v["eventKind"] == "error" for v in values)), incompleteActions=str(sum(v["eventKind"] == "incomplete" for v in values)),
+        actorProcessErrors=str(process_errors), categories={c:str(sum(v["eventKind"] != "incomplete" and v["accounting"]["category"] == c for v in values)) for c in categories},
+        requestBytesIntended=str(sum(int(v["accounting"]["requestBytesIntended"]) for v in attempts.values())),
+        requestBytesWrittenKnown=str(sum(int(v["requestBytesWritten"]) for v in known if v["requestBytesWritten"] is not None)),
+        requestWriteUnknownActions=str(sum(v["eventKind"] == "incomplete" or v["accounting"]["requestBytesWritten"] is None for v in values)),
+        responseBytesReadKnown=str(sum(int(v["responseBytesRead"]) for v in known)),
+        observedClientElapsedNsByStep={k:v["accounting"]["observedClientElapsedNs"] if v["eventKind"] != "incomplete" else None for k,v in terminal.items()},
+        providerRequestsObserved=str(len(provider_rows)), providerStatuses={str(s):str(sum(r["status"] == s for r in provider_rows)) for s in sorted({r["status"] for r in provider_rows})},
+        providerRequestBodyBytes=str(sum(int(r["accounting"]["requestBodyBytes"]) for r in provider_rows)),
+        providerResponseBodyBytesWrittenKnown=str(sum(int(v["responseBodyBytesWritten"]) for v in provider_known)),
+        providerResponseWriteUnknown=str(len(provider_rows)-len(provider_known)),
+        providerInternalRetries=None, httpFramingBytes=None, backendDurability=None,
+        tokenizer=None, measuredTokens=None, answerContextCapTokens=None, productionCost=None,
+        paidExternalModelCalls="0", paidCallBasis="declared-offline-synthetic-replay-only",
+        tokenUsageStatus="unavailable-protocol-zero-is-synthetic-fixture", latencyScope="observed-client-rpc-no-nested-sum-no-performance-claim")
+
+
 def track_profile(track):
+    if track == NATIVE_SWEEP["TRACK"]:
+        versions, capabilities = track_profile(NATIVE["TRACK"])
+        return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1, physicalCompactionContractVersion=1, nativePrefixFixtureVersion=3, inheritedPolicyAdoptionVersion=1), dict(capabilities,
+            nativeSweep=True, nativePhysicalCompaction=True, sweepDecayRateMultiplier=1.0, namespaceDecayMultipliers={"foreign":0.0})
     if track == NATIVE["TRACK"]:
         versions, capabilities = track_profile(RESET["TRACK"])
         return dict(versions, canonicalSchemaVersion=2, canonicalRepresentation="strict-native-prefix", logicalHashContract=NATIVE["HASH_CONTRACT"], lifecycleVersion="legacy_access_v1"), dict(capabilities,
@@ -75,6 +276,10 @@ def track_profile(track):
 
 
 def fixtures(track=TRACK):
+    if track == BEIR["TRACK"]:
+        return BEIR["fixtures"](globals())
+    if track == NATIVE_SWEEP["TRACK"]:
+        return NATIVE_SWEEP["fixtures"](fixtures, NATIVE)
     if track == NATIVE["TRACK"]:
         return NATIVE["fixtures"](fixtures)
     if track == SWEEP["TRACK"]:
@@ -85,7 +290,7 @@ def fixtures(track=TRACK):
         return OWNED["fixtures"](fixtures)
     if track == CONFORMANCE["TRACK"]:
         return CONFORMANCE["fixtures"](fixtures)
-    if track != TRACK:
+    if track not in (TRACK, ACCOUNTING_TRACK):
         raise ValueError("unsupported diagnostic track")
     sources = []
     for i, (text, namespace) in enumerate((("amber", "default"), ("birch", "default"), ("olive", "default"), ("foreign", "foreign"))):
@@ -105,17 +310,15 @@ def fixtures(track=TRACK):
     return actor, labels, cache, schedule
 
 
-def validate(manifest_path, binary, scorer, source_root):
-    # Complete input validation before creating episode output, provider, or store.
-    raw = manifest_path.read_bytes()
-    m = json.loads(raw)
-    exact_keys(m, ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
-                   "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
-                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset"))
+COMMON_FIELDS = ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+                 "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "activeEmbedding", "scoringProfile")
+
+
+def validate_build(m, binary, scorer, source_root):
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
     versions, capabilities = track_profile(m["track"])
-    if m["track"] not in (TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
+    if m["track"] not in (TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], PAIRED["ARM_TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -131,24 +334,44 @@ def validate(manifest_path, binary, scorer, source_root):
     required |= {"Cargo.toml", "Cargo.lock", *EXTRA}
     if not required <= m["sourceFilesSha256"].keys():
         raise ValueError("missing source pins")
-    expected_executables = {"ownedEvaluator" if m["track"] in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]) else "recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}
-    if m["track"] == NATIVE["TRACK"]:
+    expected_executables = {"ownedEvaluator" if m["track"] in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}
+    if m["track"] in (NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]):
         expected_executables["nativePrefixFixture"] = digest(binary.with_name("native_prefix_fixture").read_bytes())
     if m["executables"] != expected_executables:
         raise ValueError("executable hash mismatch")
+    profile = json.loads(subprocess.check_output([str(scorer), "--profile"], env={"PATH": "/usr/bin:/bin"}))
+    if (profile["sourceCommit"] != m["sourceCommit"] or profile["containerImageId"] != m["containerImageId"] or
+            profile["sourceTreeSha256"] != digest(encoded(m["sourceFilesSha256"]))):
+        raise ValueError("compiled provenance mismatch")
+    if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
+        raise ValueError("configuration profile mismatch")
+
+
+def validate_artifacts(root, m, expected=None, prefix=""):
     artifacts = []
     for key, name in (("actorInputs", "actor-inputs.json"), ("evaluatorLabels", "evaluator-labels.json"), ("replayCache", "evaluator-cache.json"), ("evaluatorSchedule", "evaluator-schedule.json")):
         exact_keys(m[key], ("file", "sha256"))
-        p = manifest_path.parent / name
-        if m[key]["file"] != name or not p.is_file() or p.is_symlink() or digest(p.read_bytes()) != m[key]["sha256"]:
+        name = prefix + name
+        p = root / name
+        if m[key]["file"] != name or not p.is_file() or p.is_symlink() or not p.resolve().is_relative_to(root.resolve()) or digest(p.read_bytes()) != m[key]["sha256"]:
             raise ValueError("artifact hash/reference mismatch")
         artifacts.append(json.loads(p.read_text()))
     actor, labels, cache, schedule = artifacts
-    expected_actor, _, expected_cache, expected_schedule = (NATIVE["fixtures"](fixtures, schedule.get("futureVariant") == "changed")
-        if m["track"] == NATIVE["TRACK"] else fixtures(m["track"]))
+    if expected is not None:
+        expected_actor, _, expected_cache, expected_schedule = expected
+    elif m["track"] == CONTEXT["TRACK"]:
+        expected_actor, _, expected_cache, expected_schedule = CONTEXT["fixtures"](globals(), m["contextFixture"])
+    elif m["track"] == BEIR["TRACK"]:
+        expected_actor, _, expected_cache, expected_schedule = BEIR["fixtures"](globals(), schedule.get("futureVariant") == "changed")
+    elif m["track"] == NATIVE_SWEEP["TRACK"]:
+        expected_actor, _, expected_cache, expected_schedule = NATIVE_SWEEP["fixtures"](fixtures, NATIVE, schedule.get("futureVariant") == "changed")
+    elif m["track"] == NATIVE["TRACK"]:
+        expected_actor, _, expected_cache, expected_schedule = NATIVE["fixtures"](fixtures, schedule.get("futureVariant") == "changed")
+    else:
+        expected_actor, _, expected_cache, expected_schedule = fixtures(m["track"])
     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
-    exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
+    exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary", *(("metricQrels",) if m["track"] == BEIR["TRACK"] else ())))
     if type(labels["adapterVersion"]) is not int or labels["adapterVersion"] != 1 or labels["annotationUnit"] != "synthetic-unit" or not isinstance(labels["labelCanary"], str) or not labels["labelCanary"]:
         raise ValueError("unsupported annotations")
     if not isinstance(labels["relevant"], dict) or not set(labels["relevant"]) <= {q["queryId"] for q in schedule["queries"]}:
@@ -159,25 +382,62 @@ def validate(manifest_path, binary, scorer, source_root):
     if m["dataset"] != dict(kind="generated-synthetic", upstreamRevision=None, upstreamUrl=None, thirdPartyLicense=None,
                             actorArtifactSha256=m["actorInputs"]["sha256"], intendedUse="contract-diagnostic-only"):
         raise ValueError("unsupported dataset claim")
-    profile = json.loads(subprocess.check_output([str(scorer), "--profile"], env={"PATH": "/usr/bin:/bin"}))
-    if (profile["sourceCommit"] != m["sourceCommit"] or profile["containerImageId"] != m["containerImageId"] or
-            profile["sourceTreeSha256"] != digest(encoded(m["sourceFilesSha256"]))):
-        raise ValueError("compiled provenance mismatch")
-    if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
-        raise ValueError("configuration profile mismatch")
-    return m, actor, labels, cache, schedule, digest(raw)
+    return actor, labels, cache, schedule
+
+
+def validate(manifest_path, binary, scorer, source_root, beir_reference=None, *, context_assets=None):
+    # Complete input validation before creating episode output, provider, or store.
+    raw = manifest_path.read_bytes()
+    m = json.loads(raw)
+    accounted = m.get("track") == ACCOUNTING_TRACK
+    context = m.get("track") == CONTEXT["TRACK"]
+    exact_keys(m, (*(("accountingPolicy",) if accounted else ()), *(("metricPolicy", "referenceBundleSha256") if m.get("track") == BEIR["TRACK"] else ()), "manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+                   "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
+                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset", *(("contextPolicy", "contextFixture") if context else ())))
+    if accounted and encoded(m["accountingPolicy"]) != encoded(ACCOUNTING_POLICY):
+        raise ValueError("unsupported accounting/token/context/cost policy")
+    validate_build(m, binary, scorer, source_root)
+    artifacts = validate_artifacts(manifest_path.parent, m)
+    if m["track"] == BEIR["TRACK"]:
+        actor, labels, cache, schedule = artifacts
+        BEIR["preflight"](m, labels, actor, schedule, beir_reference)
+    if context:
+        CONTEXT["preflight"](m, artifacts[3], context_assets)
+    return m, *artifacts, digest(raw)
+
+
+def build_manifest(args, build):
+    return dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
+        capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
+        containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
+        executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
+        activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
 
 
 def prepare(args):
+    if getattr(args, "track", TRACK) == PAIRED["TRACK"]:
+        return PAIRED["prepare"](args, globals())
+    if getattr(args, "track", TRACK) == GROUPED["TRACK"]:
+        return GROUPED["prepare"](args, globals())
+    reference_sha = BEIR["verify_reference"](getattr(args, "beir_reference", None)) if args.track == BEIR["TRACK"] else None
+    context = getattr(args, "track", TRACK) == CONTEXT["TRACK"]
+    if context:
+        profile, kind = CONTEXT["PROFILES"][args.context_profile]
+        CONTEXT["TOKEN"]["load"](args.context_assets)
     args.out.mkdir()
     build = json.loads(args.build.read_text())
-    actor, labels, cache, schedule = fixtures(args.track)
+    actor, labels, cache, schedule = CONTEXT["fixtures"](globals(),kind) if context else fixtures(args.track)
     m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=args.track, versions=track_profile(args.track)[0],
              capabilities=track_profile(args.track)[1], sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
-             executables={"ownedEvaluator" if args.track in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
+             executables={"ownedEvaluator" if args.track in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
              activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
-    if args.track == NATIVE["TRACK"]:
+    if context: m.update(track=CONTEXT["TRACK"],contextPolicy=CONTEXT["TOKEN"]["policy"](profile),contextFixture=kind)
+    if args.track == BEIR["TRACK"]:
+        m.update(metricPolicy=BEIR["POLICY"], referenceBundleSha256=reference_sha)
+    if getattr(args, "track", TRACK) == ACCOUNTING_TRACK:
+        m.update(track=ACCOUNTING_TRACK, accountingPolicy=ACCOUNTING_POLICY)
+    if args.track in (NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]):
         m["executables"]["nativePrefixFixture"] = digest(args.binary.with_name("native_prefix_fixture").read_bytes())
     for key, name, value in (("actorInputs", "actor-inputs.json", actor), ("evaluatorLabels", "evaluator-labels.json", labels), ("replayCache", "evaluator-cache.json", cache), ("evaluatorSchedule", "evaluator-schedule.json", schedule)):
         save(args.out / name, value)
@@ -193,6 +453,8 @@ class Replay(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
     def do_POST(self):
+        if getattr(self.server, "accounted", False):
+            return self.accounted_post()
         raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         status = 200
         try:
@@ -204,7 +466,7 @@ class Replay(http.server.BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             status, body = 400, dict(error=dict(message="offline replay miss; no fallback"))
         with self.server.log.open("a") as log:
-            log.write(json.dumps(dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])], **({"responseVectors": vectors if status == 200 else None} if self.server.owned else {}))) + "\n")
+            log.write(json.dumps(dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])], **({"responseVectors": vectors if status == 200 else None} if self.server.owned or getattr(self.server, "grouped", False) else {}))) + "\n")
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -212,16 +474,53 @@ class Replay(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def accounted_post(self):
+        raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        status, request, vectors, category = 200, {}, [], "cache_hit"
+        try:
+            request = json.loads(raw)
+            if self.path != "/v1/embeddings" or request["model"] != MODEL or request["dimensions"] != 4 or request["encoding_format"] != "float":
+                raise ValueError("unsupported profile")
+            vectors = [self.server.entries[self.server.key(text)] for text in request["input"]]
+            body = dict(data=[dict(index=i, embedding=v) for i, v in enumerate(vectors)], usage=dict(prompt_tokens=0, total_tokens=0))
+        except (ValueError, KeyError, TypeError):
+            status, category, body = 400, "replay_miss_or_invalid_request", dict(error=dict(message="offline replay miss; no fallback"))
+        data = json.dumps(body).encode(); written = None
+        try:
+            self.send_response(status); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data))); self.end_headers()
+            count = self.wfile.write(data)
+            if type(count) is int and 0 <= count <= len(data): written = str(count)
+        finally:
+            inputs = request.get("input", []) if isinstance(request, dict) else []
+            with self.server.log.open("a") as log:
+                log.write(json.dumps(dict(requestBody=raw.decode("utf-8", errors="replace"), status=status,
+                    environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery,
+                    cacheKeys=[self.server.key(t) for t in inputs if isinstance(t, str)],
+                    responseVectors=vectors if status == 200 else None,
+                    accounting=dict(accountingVersion=1, requestBodyHex=raw.hex(), requestBodyBytes=str(len(raw)),
+                        responseBodyHex=data.hex(), responseBodyBytesIntended=str(len(data)), responseBodyBytesWritten=written,
+                        returnedVectors=str(len(vectors)) if status == 200 else "0", category=category,
+                        tokenUsageStatus="synthetic-fixture-not-measured", framingBytes=None))) + "\n")
+                log.flush()
 
-def run_episode(args):
-    if json.loads(args.manifest.read_text()).get("track") == NATIVE["TRACK"]:
+
+def run_episode(args, prepared=None):
+    if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == PAIRED["TRACK"]:
+        return PAIRED["run"](args, globals())
+    if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == GROUPED["TRACK"]:
+        return GROUPED["run"](args, globals())
+    if prepared is None and json.loads(args.manifest.read_text()).get("track") == NATIVE_SWEEP["TRACK"]:
+        return NATIVE["run"](args, globals(), NATIVE_SWEEP)
+    if prepared is None and json.loads(args.manifest.read_text()).get("track") == NATIVE["TRACK"]:
         return NATIVE["run"](args, globals())
-    if json.loads(args.manifest.read_text()).get("track") in (RESET["TRACK"], SWEEP["TRACK"]):
+    if prepared is None and json.loads(args.manifest.read_text()).get("track") in (RESET["TRACK"], SWEEP["TRACK"]):
         return RESET["run"](args, globals())
-    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
+    m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root, beir_reference=getattr(args, "beir_reference", None), context_assets=getattr(args, "context_assets", None))
     owned = m["track"] == OWNED["TRACK"]
-    scripted = owned or m["track"] == CONFORMANCE["TRACK"]
-    conformance = scripted and not owned
+    beir = m["track"] == BEIR["TRACK"]
+    scripted = owned or beir or m["track"] == CONFORMANCE["TRACK"]
+    conformance = scripted and not owned and not beir
     adapter = OWNED if owned else CONFORMANCE
     args.out.mkdir()
     evaluator = args.out / "evaluator"
@@ -231,7 +530,11 @@ def run_episode(args):
     (args.out / "actor-inputs").mkdir()
     # Cache server receives only the actor cache projection, never evaluator labels.
     stub = http.server.HTTPServer(("127.0.0.1", 0), Replay)
+    accounted = m["track"] == ACCOUNTING_TRACK
+    trace = TraceRecorder(args.out / "trace.jsonl", environment, args.out.name, m["activeEmbedding"]) if accounted else None
+    stub.accounted = accounted
     stub.owned = owned
+    stub.grouped = "groupContext" in m
     stub.log, stub.environment, stub.delivery = args.out / "actor-provider.jsonl", environment, 0
     stub.key = lambda text: digest(encoded(dict(environmentHash=environment, model=MODEL, dimension=4, prefixedInput=text)))
     stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:") and (not conformance or text.removeprefix("a6-document:") in {CONFORMANCE["document_text"](s) for s in actor["sources"][:3]} or text == "a6-document:health check")}
@@ -316,6 +619,10 @@ warm_file_enabled = false
                 shutil.copyfile(actor_path, args.out / "actor-code.py")
                 result["actorCodeSha256"] = digest(actor_path.read_bytes())
                 assert digest(actor_path.read_bytes()) == m["sourceFilesSha256"]["scripts/public-mcp-actor.py"]
+                if "contextPolicy" in m:
+                    for name in ("context_tokenizer.py","context-tokenizer-lock.json"):
+                        shutil.copyfile(Path(__file__).with_name(name),root/name)
+                        assert digest((root/name).read_bytes())==m["sourceFilesSha256"]["scripts/"+name]
                 start_id = 0
                 # The supervisor owns this schedule. Each actor process sees only its current question.
                 for ordinal in range(len(schedule["steps"]) + 1 if scripted else len(schedule["queries"]) + 2):
@@ -346,11 +653,17 @@ warm_file_enabled = false
                             stub.entries[stub.key(text)] = cache["entries"][text]
                         projection = dict(phase="query", startId=start_id, deliveryOrdinal=ordinal,
                                           currentQuestion=question, expectedMiss=miss)
+                    if "contextPolicy" in m and ordinal>0: projection["contextPolicy"]=m["contextPolicy"]
                     save(args.out / "actor-inputs" / f"step-{ordinal}.json", projection)
-                    child = subprocess.run([sys.executable, str(actor_path), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read), *[arg for fd in control_fds for arg in ("--deny-control-fd", str(fd))]],
-                        input=encoded(projection), stdout=wire, stderr=actor_log, cwd=root,
-                        env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC"),
-                        pass_fds=(process.stdin.fileno(), process.stdout.fileno()), timeout=90)
+                    if accounted:
+                        child = run_accounted_actor([sys.executable, str(actor_path), *(["--retrieval-limit", str(m["pairedArm"]["retrievalLimit"])] if "pairedArm" in m else []), "--accounting", "--write-fd", str(process.stdin.fileno()),
+                            "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read)], projection, wire, actor_log, root,
+                            dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC"), (process.stdin.fileno(), process.stdout.fileno()), trace)
+                    else:
+                        child = subprocess.run([sys.executable, str(actor_path), *(["--context-bundle", str(args.context_assets)] if "contextPolicy" in m else []), *(["--retrieval-limit", str(m["pairedArm"]["retrievalLimit"])] if "pairedArm" in m else []), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read), *[arg for fd in control_fds for arg in ("--deny-control-fd", str(fd))]],
+                            input=encoded(projection), stdout=wire, stderr=actor_log, cwd=root,
+                            env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC", PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1"),
+                            pass_fds=(process.stdin.fileno(), process.stdout.fileno()), timeout=90)
                     wire.flush()
                     delivered = rows(args.out / "actor-wire.jsonl")
                     acknowledgments = [r for r in delivered if r["event"] == "outcome"]
@@ -381,7 +694,7 @@ warm_file_enabled = false
                 source_id = row["tag"][6:]
                 if row["event"] == "attempt":
                     events.extend([dict(sourceId=source_id, status=s, reason="public-mcp-raw-synthetic") for s in ("seen", "attempted")])
-                else:
+                elif row["event"] == "outcome":
                     tool = row["response"]["result"]
                     if tool.get("isError"):
                         events.append(dict(sourceId=source_id, status="rejected", reason="public-tool-error"))
@@ -391,24 +704,36 @@ warm_file_enabled = false
                         mappings[memory] = [source_id]
                         events.append(dict(sourceId=source_id, status="accepted", reason="public-success-no-readiness-claim", memoryId=memory))
             elif row["tag"].startswith("query:") and row["event"] == "outcome":
-                value = json.loads(row["response"]["result"]["content"][0]["text"])
+                response = row["response"]
+                if response.get("error") is not None or response.get("result", {}).get("isError"):
+                    # Retain the primary public error and finish writing raw evidence.
+                    # The final failure below prevents this page from being scored.
+                    runtime_failure = f"public {row['tag']} failed: {json.dumps(response)}"
+                    continue
+                value = json.loads(response["result"]["content"][0]["text"])
                 returned = value["memories"] + (value.get("graphContext", {}).get("neighbors", []) if owned else [])
                 queries.append(dict(queryId=row["tag"][6:], memoryIds=[r["id"] for r in returned]))
         event_text = "".join(json.dumps(e) + "\n" for e in events)
         (evaluator / "source-events.jsonl").write_text(event_text)
         save(args.out / "source-mappings.json", dict(sourceMappingVersion=1, actorArtifactSha256=m["actorInputs"]["sha256"], mappings=mappings, sources=actor["sources"]))
-        with (args.out / "trace.jsonl").open("w") as trace:
-            for row in outcomes:
-                trace.write(json.dumps(dict(traceSchemaVersion=1, runId=environment, episodeId=args.out.name, groupId="synthetic-regression",
-                    stepId=row["stepId"], environmentHash=environment, action=row["request"], outcome=row["response"],
-                    readGeneration=None, readiness=(dict(available=True, scope="post-delivery-barrier-not-response-readview", receiptFile="evaluator/readiness-receipts.json", deliveryOrdinal=row["deliveryOrdinal"]) if owned else dict(available=False)), simulatedTimeMs=None, snapshot=None, reward=None)) + "\n")
+        if "groupContext" in m:
+            save(evaluator / "group-context.json", m["groupContext"])
+        if not accounted:
+            with (args.out / "trace.jsonl").open("w") as legacy_trace:
+                for row in outcomes:
+                    legacy_trace.write(json.dumps(dict(traceSchemaVersion=1, runId=environment, episodeId=args.out.name, groupId=m.get("groupContext", {}).get("groupId", "synthetic-regression"),
+                        stepId=row["stepId"], environmentHash=environment, action=row["request"], outcome=row["response"],
+                        readGeneration=None, readiness=(dict(available=True, scope="post-delivery-barrier-not-response-readview", receiptFile="evaluator/readiness-receipts.json", deliveryOrdinal=row["deliveryOrdinal"]) if owned else dict(available=False)), simulatedTimeMs=None, snapshot=None, reward=None)) + "\n")
         if runtime_failure:
             result.update(actorActions=len(outcomes), storeMappings=len(mappings))
             raise RuntimeError(runtime_failure)
         score_input = dict(profile=m["scoringProfile"], environmentHash=environment, sourceIds=[s["sourceId"] for s in actor["sources"]], mappings=mappings,
                            relevant=labels["relevant"], queries=queries, sourceEvents=event_text, sourceEventsSha256=digest(event_text.encode()))
+        if beir:
+            BEIR["consume"](args, globals(), m, actor, labels, schedule, wire, score_input)
         save(evaluator / "score-input.json", score_input)
         subprocess.run([str(args.scorer), "--input", str(evaluator / "score-input.json"), "--out", str(evaluator / "scores.json")], check=True)
+        if "contextPolicy" in m: CONTEXT["consume"](args,globals(),m,schedule,wire,score_input)
         for name in ("actor-projection.json", "actor-wire.jsonl", "actor-provider.jsonl", "source-mappings.json", "trace.jsonl"):
             if labels["labelCanary"].encode() in (args.out / name).read_bytes():
                 raise RuntimeError("evaluator canary leaked to actor channel")
@@ -447,8 +772,16 @@ warm_file_enabled = false
         os.close(guard_write)
         stub.shutdown()
         stub.server_close()
+        accounting_error = None
+        if trace is not None:
+            trace.close()
+            try:
+                save(evaluator / "accounting.json", reconcile_accounting(rows(args.out / "trace.jsonl"), rows(stub.log) if stub.log.exists() else []))
+            except BaseException as error:
+                accounting_error = error; result.update(status="failed", accountingError=str(error))
         result["artifactsSha256"] = {str(p.relative_to(args.out)): digest(p.read_bytes()) for p in sorted(args.out.rglob("*")) if p.is_file() and p.name != "result.json"}
         save(args.out / "result.json", result)
+        if accounting_error is not None: raise RuntimeError("accounting reconciliation failed") from accounting_error
 
 
 def host(args):
@@ -520,10 +853,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
-    p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"]), default=TRACK)
+    p.add_argument("--track", choices=(TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
+    p.add_argument("--beir-reference", type=Path)
+    p.add_argument("--context-profile", choices=tuple(CONTEXT["PROFILES"]), default="default")
+    p.add_argument("--context-assets", type=Path)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
+    p.add_argument("--beir-reference", type=Path)
+    p.add_argument("--context-assets", type=Path)
     p = sub.add_parser("host")
     p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"]), default=TRACK)
     p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True); p.add_argument("--library-evidence", type=Path)
