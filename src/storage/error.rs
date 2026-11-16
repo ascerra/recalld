@@ -109,7 +109,7 @@ pub enum StorageError {
     ProviderConfigurationUnavailable,
 
     #[error("active embedding profile does not match {field}")]
-    EmbeddingProfileMismatch { field: &'static str },
+    NamespaceEmbeddingProfileMismatch { field: &'static str },
     /// Caller-supplied vector failed the shared numeric boundary. Keep the
     /// legacy diagnostic text while allowing typed transport classification.
     #[error("invalid storage mutation: {0}")]

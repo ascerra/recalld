@@ -370,7 +370,7 @@ fn failure(error: CatalogError) -> (u16, CatalogEnvelope) {
                 None,
                 false,
             ),
-            StorageError::EmbeddingProfileMismatch { field } => (
+            StorageError::NamespaceEmbeddingProfileMismatch { field } => (
                 409,
                 Conflict,
                 "EMBEDDING_PROFILE_MISMATCH",

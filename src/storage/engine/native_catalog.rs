@@ -36,7 +36,7 @@ impl RedbStorageEngine {
             .embedding_dim
             .is_some_and(|dim| dim != profile.dimension)
         {
-            return Err(StorageError::EmbeddingProfileMismatch {
+            return Err(StorageError::NamespaceEmbeddingProfileMismatch {
                 field: "embeddingDim",
             });
         }
@@ -45,7 +45,7 @@ impl RedbStorageEngine {
             .as_ref()
             .is_some_and(|id| *id != profile_id)
         {
-            return Err(StorageError::EmbeddingProfileMismatch {
+            return Err(StorageError::NamespaceEmbeddingProfileMismatch {
                 field: "embeddingProfileId",
             });
         }
