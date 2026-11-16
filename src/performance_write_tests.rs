@@ -828,6 +828,8 @@ fn online_producer_aborted_root_keeps_queued_worker_context_and_owned_guards() {
     });
 }
 
+#[path = "performance_batch_tests.rs"]
+mod batch;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn trace_provenance_actual_mcp_after_unsubscribed_first_callsite() {
     const CHILD: &str = "RECALLD_MCP_COLD_TRACE_CHILD";
