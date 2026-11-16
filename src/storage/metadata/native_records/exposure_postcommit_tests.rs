@@ -20,7 +20,7 @@ async fn postcommit_failure(nth: usize, origin: u32, query: bool) {
             tags: vec![],
             initial_stability: None,
             created_at: Some(1000),
-            embedding: None,
+            embedding: Some(vec![1., 0., 0., 0.]),
             parent_id: None,
             supersedes: None,
         };
