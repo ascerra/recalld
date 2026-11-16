@@ -386,7 +386,8 @@ async fn catalog_completion_invalid_duplicate_unbound_finish_only_known_work() {
     let h = Harness::new().await;
     let before = h.raw();
     let published = h.publication();
-    let unbound = NamespaceRegistryAdapter::new(h.system.storage().clone());
+    let unbound =
+        NamespaceRegistryAdapter::new(h.system.storage().clone(), h.system.embedding().clone());
     let error = unbound
         .create("unbound", Some(4), 1., 0.9, None)
         .await
