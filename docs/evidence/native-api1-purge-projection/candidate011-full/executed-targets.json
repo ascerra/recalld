@@ -1,0 +1,68 @@
+[
+  {
+    "target": "unittests src/lib.rs",
+    "containerPath": "/work/target/debug/deps/recalld-b2844bb1c4a63074",
+    "sha256": "a1a7424c34c1ac28b6dcdaccfbd6f998eb76495b40754c8dbd6ec30ef7329a7c",
+    "bytes": 128216992
+  },
+  {
+    "target": "unittests src/main.rs",
+    "containerPath": "/work/target/debug/deps/recalld-a60730f3f93b30b7",
+    "sha256": "f0e375306e5963e0f25d18253cb3371d265d4cae84a7e10adf5d4ed73e6930ba",
+    "bytes": 1059120
+  },
+  {
+    "target": "unittests src/bin/recalld_cli.rs",
+    "containerPath": "/work/target/debug/deps/recalld_cli-8f457ab03bd2b416",
+    "sha256": "b8ff5ec9db2c4db3ee5f49f4b3296b74d80c1629a12ee35d6e5392a59786aac2",
+    "bytes": 1057744
+  },
+  {
+    "target": "unittests src/bin/recalld_text_migrate.rs",
+    "containerPath": "/work/target/debug/deps/recalld_text_migrate-e2e689a390b4efcc",
+    "sha256": "0663467c03121eda54a35a92e213ebb28d3d5bc755002f86572d54b8788ef77a",
+    "bytes": 1057760
+  },
+  {
+    "target": "tests/inherited_policy_cli.rs",
+    "containerPath": "/work/target/debug/deps/inherited_policy_cli-3a03e21f2687a056",
+    "sha256": "38d52deea7ac46066ac83d113607ad487c47ac8ee90b3d6f094f799fa4464318",
+    "bytes": 14306408
+  },
+  {
+    "target": "tests/lifecycle_cli.rs",
+    "containerPath": "/work/target/debug/deps/lifecycle_cli-c369125dcd35855a",
+    "sha256": "453cfd36db6e7918b967c763bdb1cbae55a4ad108a04c2b66f311970d1963c44",
+    "bytes": 14395104
+  },
+  {
+    "target": "tests/text_migration_cli.rs",
+    "containerPath": "/work/target/debug/deps/text_migration_cli-c3debcbf7a93ee01",
+    "sha256": "904aaa3f134cfa9b67bcafae95b1d3892277a2b124f82fc80c01a984e659bd0b",
+    "bytes": 14096640
+  },
+  {
+    "target": "unittests examples/native_prefix_fixture.rs",
+    "containerPath": "/work/target/debug/examples/native_prefix_fixture-877c63fb4f1710ad",
+    "sha256": "7b59d14596abed56377495e6fb35eca95d583811fb3157875301030d788cd65e",
+    "bytes": 1057760
+  },
+  {
+    "target": "unittests examples/offline_eval.rs",
+    "containerPath": "/work/target/debug/examples/offline_eval-8f96f72b35ec6c08",
+    "sha256": "bb579660a1b62e1bdb526b910aa024427e6e0a6dd07cc91b8ae338cc422eb9b9",
+    "bytes": 57002152
+  },
+  {
+    "target": "unittests examples/performance_probe.rs",
+    "containerPath": "/work/target/debug/examples/performance_probe-4b2a2dbd9e2548bd",
+    "sha256": "b3e8fd1520112e975ab70123b91970e4f82f467038e33bb35c9141dfbbdc1050",
+    "bytes": 56233304
+  },
+  {
+    "target": "unittests examples/score_mcp_episode.rs",
+    "containerPath": "/work/target/debug/examples/score_mcp_episode-21b377aa1f2c6355",
+    "sha256": "2c7b63b0403d38b38f275e53eb7ef348ab0809982117725f945706d2b313a7cf",
+    "bytes": 4220848
+  }
+]

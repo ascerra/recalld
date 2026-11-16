@@ -239,9 +239,9 @@ async fn handle_connection(
                         } else if matches!(method.as_str(), "feedback_api1_v1" | "forget_api1_v1" | "store_api1_v1" | "store_batch_api1_v1") && peer_limit < MAX_MESSAGE_SIZE {
                             Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
                         } else {
-                            dispatch(
+                            dispatch_bounded(
                                 &*search, &*storage, &*namespaces, &*health,
-                                &request.method, request.params,
+                                &request.method, request.params, Some(peer_limit),
                             ).await
                         };
 
@@ -420,6 +420,7 @@ fn parse_memory_id(s: &str) -> Result<MemoryId, BridgeError> {
     Ok(MemoryId::from_uuid(uuid))
 }
 
+#[cfg(test)]
 async fn dispatch(
     search: &dyn SearchPipeline,
     storage: &dyn BridgeStorageEngine,
@@ -427,6 +428,18 @@ async fn dispatch(
     health: &dyn HealthChecker,
     method: &str,
     params: serde_json::Value,
+) -> Result<serde_json::Value, BridgeError> {
+    dispatch_bounded(search, storage, namespaces, health, method, params, None).await
+}
+
+async fn dispatch_bounded(
+    search: &dyn SearchPipeline,
+    storage: &dyn BridgeStorageEngine,
+    namespaces: &dyn NamespaceRegistry,
+    health: &dyn HealthChecker,
+    method: &str,
+    params: serde_json::Value,
+    frame_limit: Option<usize>,
 ) -> Result<serde_json::Value, BridgeError> {
     let (method, namespace) = match method {
         "get_memory_scoped_read_only" | "find_similar_scoped_read_only" => {
@@ -764,7 +777,10 @@ async fn dispatch(
         "delete_namespace" => {
             let input: DeleteNamespaceInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
-            let result = namespaces.delete_namespace(input).await?;
+            let result = match frame_limit {
+                Some(limit) => namespaces.delete_namespace_bounded(input, limit).await?,
+                None => namespaces.delete_namespace(input).await?,
+            };
             serde_json::to_value(result).map_err(|e| BridgeError::Internal(e.to_string()))
         }
 
@@ -1583,6 +1599,72 @@ pub(crate) async fn native_lifecycle_test_remote(
         crate::daemon::bridge_adapters::RemoteStorageAdapter::new(client),
         task,
     )
+}
+
+/// Isolated actual framed namespace connection for catalog completion regressions.
+#[cfg(test)]
+pub(crate) async fn native_purge_test_legacy_rpc(
+    namespaces: Arc<dyn NamespaceRegistry>,
+) -> DaemonResponse {
+    native_purge_test_rpc(namespaces, LEGACY_MAX_MESSAGE_SIZE).await
+}
+
+#[cfg(test)]
+pub(crate) async fn native_purge_test_rpc(
+    namespaces: Arc<dyn NamespaceRegistry>,
+    limit: usize,
+) -> DaemonResponse {
+    let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(handle_connection(
+        stub.clone(),
+        stub.clone(),
+        namespaces,
+        stub,
+        server,
+        Arc::new(AtomicU32::new(1)),
+        Arc::new(AtomicI64::new(0)),
+        rx,
+        tx.clone(),
+    ));
+    if limit > LEGACY_MAX_MESSAGE_SIZE {
+        write_framed_request(
+            &mut client,
+            &DaemonRequest {
+                jsonrpc: "2.0".into(),
+                id: 0,
+                method: "ping".into(),
+                params: serde_json::json!({"protocolVersion": 2, "maxMessageSize": limit}),
+            },
+            LEGACY_MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        let negotiated = read_framed_response(&mut client, limit).await.unwrap();
+        assert_eq!(
+            negotiated.result.unwrap()["maxMessageSize"],
+            MAX_MESSAGE_SIZE
+        );
+    }
+    write_framed_request(
+        &mut client,
+        &DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            method: "delete_namespace".into(),
+            params: serde_json::json!({"name":"doomed","force":true}),
+        },
+        limit,
+    )
+    .await
+    .unwrap();
+    let response = read_framed_response(&mut client, limit).await.unwrap();
+    assert!(serde_json::to_vec(&response).unwrap().len() <= limit);
+    tx.send(true).unwrap();
+    drop(client);
+    task.await.unwrap();
+    response
 }
 
 /// Isolated actual framed namespace connection for catalog completion regressions.

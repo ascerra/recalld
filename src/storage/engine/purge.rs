@@ -1,7 +1,7 @@
 //! Bounded canonical purge steps and automatic recovery before admission.
 use super::*;
 use crate::storage::metadata::purge::CHUNK_LIMIT;
-use crate::storage::purge::{PurgeProgress, PurgeStage};
+use crate::storage::purge::{PurgeCleanupObservation, PurgeProgress, PurgeStage};
 use uuid::Uuid;
 
 impl RedbStorageEngine {
@@ -22,12 +22,33 @@ impl RedbStorageEngine {
         self.meta_store.begin_purge_with_work(ctx, force, parent)
     }
 
+    pub(crate) fn begin_native_purge_named_admitted(
+        &mut self,
+        name: &str,
+        force: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        receipt_limit: usize,
+    ) -> Result<Option<PurgeProgress>, StorageError> {
+        self.meta_store.ensure_handle_available()?;
+        self.meta_store.begin_native_purge_named_admitted(
+            name,
+            force,
+            parent,
+            &self.edge_store,
+            receipt_limit,
+        )
+    }
+
     pub fn lookup_namespace_purge(
         &self,
         store_id: Uuid,
         namespace: NamespaceId,
         parent: Uuid,
     ) -> Result<Option<PurgeProgress>, StorageError> {
+        #[cfg(test)]
+        self.meta_store
+            .purge_lookup_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.meta_store
             .lookup_namespace_purge(store_id, namespace, parent)
     }
@@ -54,6 +75,16 @@ impl RedbStorageEngine {
         p: &PurgeProgress,
         limit: usize,
         parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::metadata::effects::EffectResult>, StorageError> {
+        self.purge_step_observed(p, limit, parent, None)
+    }
+
+    fn purge_step_observed(
+        &mut self,
+        p: &PurgeProgress,
+        limit: usize,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        observation: Option<&mut PurgeCleanupObservation>,
     ) -> Result<Option<crate::storage::metadata::effects::EffectResult>, StorageError> {
         self.meta_store.ensure_handle_available()?;
         match p.stage {
@@ -97,6 +128,7 @@ impl RedbStorageEngine {
                 drop(self.vector_manager.remove(p.namespace_id));
                 let path = self.namespace_dir(&p.name)?;
                 let root = &self.db_path;
+                let mut removed = false;
                 self.meta_store.finish_purge_cleanup(&guard, p, || {
                     // Name validity and the durable lease were checked before
                     // mutation. Refuse symlink/non-directory replacement.
@@ -107,6 +139,7 @@ impl RedbStorageEngine {
                                 return Err(StorageError::InvalidPath);
                             }
                             std::fs::remove_dir_all(&path)?;
+                            removed = true;
                         }
                         Ok(_) => return Err(StorageError::InvalidPath),
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -116,6 +149,9 @@ impl RedbStorageEngine {
                     crate::storage::metadata::effects::crash_point("after_purge_directory_cleanup");
                     Ok(())
                 })?;
+                if let Some(observation) = observation.filter(|o| o.matches(p)) {
+                    observation.directory_removed = Some(removed);
+                }
                 Ok(None)
             }
         }
@@ -132,6 +168,14 @@ impl RedbStorageEngine {
         &mut self,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), StorageError> {
+        self.resume_pending_purges_observed(parent, None)
+    }
+
+    pub(crate) fn resume_pending_purges_observed(
+        &mut self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        mut observation: Option<&mut PurgeCleanupObservation>,
+    ) -> Result<(), StorageError> {
         loop {
             let active = self
                 .meta_store
@@ -141,7 +185,7 @@ impl RedbStorageEngine {
             let Some(p) = active else {
                 return Ok(());
             };
-            self.purge_step(&p, CHUNK_LIMIT, parent)?;
+            self.purge_step_observed(&p, CHUNK_LIMIT, parent, observation.as_deref_mut())?;
         }
     }
 

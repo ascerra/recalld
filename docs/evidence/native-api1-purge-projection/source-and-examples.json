@@ -1,0 +1,47 @@
+{
+  "sourceRefs": {
+    "actualMain": "b481942dd8f998291cfef2abc175197fbeaa29fa",
+    "reviewed176Composition": "e1320179143b8434d7fcaa2a032e1096dc57de6e",
+    "feynmanPlan": "0de1d9314ca94238cf97a417d55131a325746bd3",
+    "frozen179": "72e1431e95cad8577e72ea57a017971547d9e5e5"
+  },
+  "reviewedSourceSHA256": {
+    "src/derived_completion/native_purge.rs": "b7af2d36dfc905de858f6abf2017d061f5a255c8b264a5266627dba7bcba292d",
+    "src/derived_completion.rs": "7a07dcbeb4cb9a85288f666b1435d1da3b24ac8e244bf57dd019e466415ddc08",
+    "src/storage/engine/purge.rs": "11f83baa9916f1f0257a39f62b01b1f450fbafd92ceb8e8e0fd8163a176d5f5a",
+    "src/storage/purge.rs": "a880d97617163830a8097d61f515f3185e602e6adccb3f991fdcf2425c254720",
+    "src/storage/native_purge.rs": "4b02554c2ef6eb207cbb745f78b24167b594891ddf7de3bd474c5dd0f41fcec4",
+    "src/storage/control.rs": "43b5adc5d9e2d38abb48d1ebf0496a72492ae068821c1214e1eb4df8965a80be",
+    "src/storage/native_catalog.rs": "4e888f805cd75c5c754c01ca879d9e0495dc618511d8dc3c39d1c80112c2ccd7",
+    "src/storage/request_context.rs": "31012b993516e80600d1d83f77f7c78e1b3b6b6086bd67a520c1a2c6717d4a00",
+    "src/model/schema.rs": "61a917515424e2be05f961a560e6ad2346f921d5bb2fc7f377f0f4100228ce86",
+    "src/mcp/bridge.rs": "63d1aa194f91d5aa9c915a28a18e8d7788d3f2eda1724ac05aebec58b77fae96",
+    "src/mcp/bridge_adapters.rs": "2a37328db93e79495d284e59ef714a4aff993e9f5303858f4615bb612820f9c2",
+    "src/mcp/tools.rs": "4f1a5fc30594750b5129cae349e85cb5477fa07573e5c14c00ffc1a8d1a83de0",
+    "src/mcp/protocol.rs": "c893e0b0cf97c9f4d59a0eb5886825203f3b896fd27e24b45cc283f17272f225",
+    "src/daemon/protocol.rs": "ad19a6e5bfc8c4342331843536257de4d917c4467733aa67cfa5d14863db154b",
+    "src/daemon/client.rs": "affe25c069d71555efd6a36d954666648e9248f3030f873b45c1add3fe84fa83",
+    "src/search/fts.rs": "288553fcb9525a142717a63254cafcb6e278ac280a23ab8fceb928dcddedc422"
+  },
+  "examples": "Illustrative JSON values only; no genuine execution, typed Rust deserialization or frame-size proof claimed. UUIDs/counts/history authored for schema discussion.",
+  "jsonRoundTrips": "all text/structured/RPC-message payload equalities checked with Python stdlib",
+  "exampleSHA256": {
+    "child-unknown.mcp.json": "77236436544d1b4ded55fbc7995817a10ea3536357f8a20b63921a0df63a4767",
+    "child-unknown.payload.json": "46ca95e44e32f1ef8483eace524d324224cd760177201e771f78d89d3743fbcb",
+    "child-unknown.rpc.json": "6e02da42ac416ab14b499ed6065430871be9f5f8c9d1e22b67a4a9c45ecb6a47",
+    "metrics-unavailable.legacy-mcp.json": "01abf2bd4a7b51664675505499b2d3a174f4a736a38ac5946bbdf5d70cc0c715",
+    "metrics-unavailable.mcp.json": "7e164a2c80eb2a5e018288687170f9f9c9b4bc6ad1e4e9d172949fddad5cc2eb",
+    "metrics-unavailable.payload.json": "3f953e5dabe5790aa436ff9fd23f645d7ab4ff8723d8cb3e3b28d0a4cbc872ce",
+    "metrics-unavailable.rpc.json": "1009b37e0eac790d189d5e830307d9a25327fef36efa93dcefad5671e46f835f",
+    "request.rpc.json": "90347163022abc653114dd5c61f39fa41722fd9db586d3356db7631e50723568",
+    "start-only-failure.mcp.json": "4c72664c33d8c013e14b17b7880829ee4a27155b1cc490aa44d5d02480003d2c",
+    "start-only-failure.payload.json": "b941e3866fb35b12c32c27e5ae8c0049c0c6d9b42822515bc7af07aa02471b7d",
+    "start-only-failure.rpc.json": "ef1810416510a198a80c957c1d184c078f59d3a0fad2cfb537a96e7895013696",
+    "success.mcp.json": "f69469726b0f79a54a6cfe67911c9ac9312bb2c9830b5fe2536f9fecc169437e",
+    "success.payload.json": "31519d3d7ad96b9f8df02f83dc2d97d82a038688723c1e970fd969b003b2d4bb",
+    "success.rpc.json": "dccdbb88edecd52508749f5897d45fbc21a9726a7dd9a9b686195dff185032a6",
+    "worker-unknown.mcp.json": "606a5018baedbf75fb90a35d1e661d73f3da4d2d925268baa409a59561667762",
+    "worker-unknown.payload.json": "23e3cc3498b66449c60c77822dd07c2ea4132114310244640c9a9dafb0b13385",
+    "worker-unknown.rpc.json": "8fc83c3db44626a3445a9cdd5af25ee17039bd28210058222a6d732a1f3077b3"
+  }
+}

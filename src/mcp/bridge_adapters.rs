@@ -8,6 +8,8 @@
 mod batch_adapters;
 #[path = "native_batch.rs"]
 mod native_batch;
+#[path = "native_purge_api1.rs"]
+pub(crate) mod native_purge_api1;
 #[path = "native_store_batch.rs"]
 mod native_store_batch;
 #[path = "native_store_single.rs"]
@@ -2829,6 +2831,24 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         &self,
         input: bridge::DeleteNamespaceInput,
     ) -> Result<bridge::DeleteNamespaceResult, bridge::BridgeError> {
+        self.delete_namespace_with_budget(input, None).await
+    }
+    async fn delete_namespace_bounded(
+        &self,
+        input: bridge::DeleteNamespaceInput,
+        frame_limit: usize,
+    ) -> Result<bridge::DeleteNamespaceResult, bridge::BridgeError> {
+        self.delete_namespace_with_budget(input, Some(frame_limit))
+            .await
+    }
+}
+
+impl McpNamespaceAdapter {
+    async fn delete_namespace_with_budget(
+        &self,
+        input: bridge::DeleteNamespaceInput,
+        frame_limit: Option<usize>,
+    ) -> Result<bridge::DeleteNamespaceResult, bridge::BridgeError> {
         use crate::model::constants::DEFAULT_NAMESPACE_NAME;
 
         // Validated before anything else, and for a blunter reason than
@@ -2864,6 +2884,18 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
                  it would leave a stale vectors.dat that a new namespace could silently \
                  reuse."
             )));
+        }
+
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| bridge::BridgeError::Storage(format!("storage lock poisoned: {e}")))?
+            .meta_store()
+            .uses_native_lifecycle();
+        if native {
+            return self
+                .delete_native_namespace(input.name, input.force, frame_limit)
+                .await;
         }
 
         // Lookup, refuse-check and purge all happen inside ONE

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "method": "delete_namespace",
+  "params": {
+    "name": "scratch",
+    "force": true
+  }
+}
