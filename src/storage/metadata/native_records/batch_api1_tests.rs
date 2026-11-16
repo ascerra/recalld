@@ -298,7 +298,9 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
     assert_eq!(namespace.id, d.ns);
     let policy = crate::storage::native_lifecycle::NativePolicyInputs {
         global: crate::decay::DecayConfig::default(),
-        multiplier: crate::config::RecalldConfig::default().decay.decay_rate_multiplier,
+        multiplier: crate::config::RecalldConfig::default()
+            .decay
+            .decay_rate_multiplier,
     };
     let resolution = policy.resolve(&namespace);
     eprintln!(
