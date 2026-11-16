@@ -43,7 +43,8 @@ async fn native_api1_purge_retains_known_receipt_on_publication_failure() {
     };
     let payload: serde_json::Value = serde_json::from_str(&message)
         .expect("known native purge failure must preserve a typed full receipt");
-    let receipt: control::WriteReceipt = serde_json::from_value(payload["receipt"].clone()).unwrap();
+    let receipt: control::WriteReceipt =
+        serde_json::from_value(payload["receipt"].clone()).unwrap();
     let canonical = fx
         .storage
         .read()
@@ -57,6 +58,26 @@ async fn native_api1_purge_retains_known_receipt_on_publication_failure() {
         .unwrap()
         .unwrap();
     assert_eq!(receipt, canonical);
+    let pending = fx
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .pending_effects()
+        .unwrap();
+    assert_eq!(receipt, pending.first().unwrap().receipt);
+    let control::MutationOutcome::NativeNamespacePurgeAdvanced { transition } = &receipt.outcome
+    else {
+        panic!("expected matched purge child");
+    };
+    assert_eq!(
+        transition.parent_operation_id,
+        progress.start_receipt.operation_id
+    );
+    assert_eq!(transition.namespace_id, namespace);
+    assert_eq!(transition.stage, PurgeStage::Deleting);
+    assert!(receipt.committed_generation < progress.last_receipt.committed_generation);
+    assert_eq!(payload["commitEvidenceScope"], "purgeStep");
     assert_eq!(payload["error"], "SERVICE_UNAVAILABLE");
     assert_eq!(payload["commitState"], "committed");
     for field in ["ready", "readiness", "applied", "pendingWork", "data"] {

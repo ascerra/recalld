@@ -95,6 +95,16 @@ appear in either error. Typed unknown errors retain the actual unknown operation
 and any separately known prior receipt; a missing ID/receipt stays absent. Receipt
 serialization is complete; no fabricated references or historical rewriting.
 
+Foreign-first correction, explicitly approved after actual BEFORE: completion's
+first pending effect can belong to another operation. Retain that original typed
+failure internally, but project only in-hand purge evidence verified against the
+same store, namespace and parent operation. A matching child takes precedence over
+the known start; an unrelated receipt cannot acquire a purge scope. No error-path
+readback upgrades evidence. A matching Deleting receipt remains purgeStep even if
+separate inspection proves a later canonical Complete receipt. Only the successful
+completion/validated final lookup can support MetricsUnavailable. Add an actual
+foreign-first pending-effect regression, not just a fabricated payload test.
+
 The deterministic race pauses caller A after its actual begin receipt/lease release.
 Caller B drives that same operation through the existing completion worker. After B
 finishes, A's existing validated lookup provides the exact final receipt but A has

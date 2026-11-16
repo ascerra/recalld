@@ -1583,7 +1583,16 @@ async fn handle_delete_namespace(
         // "Failed to delete namespace" would tell the agent nothing
         // happened, when in fact memories were destroyed and the job
         // needs finishing — so the message passes through unwrapped.
-        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => ToolCallResult::error(msg),
+        Err(crate::mcp::bridge::BridgeError::PartiallyApplied(msg)) => {
+            match crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&msg) {
+                Some(payload) => {
+                    let mut result = ToolCallResult::json(&payload).expect("validated purge JSON");
+                    result.is_error = Some(true);
+                    result
+                }
+                None => ToolCallResult::error(msg),
+            }
+        }
         Err(e) => ToolCallResult::error(format!("Failed to delete namespace: {e}")),
     }
 }
