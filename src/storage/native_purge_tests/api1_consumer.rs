@@ -131,8 +131,24 @@ fn payload(error: BridgeError) -> serde_json::Value {
     let BridgeError::PartiallyApplied(message) = error else {
         panic!("wrong error {error:?}");
     };
-    crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&message)
-        .expect("typed full evidence")
+    let parsed = crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&message);
+    if parsed.is_none() {
+        let value: serde_json::Value = serde_json::from_str(&message).unwrap();
+        let receipt = serde_json::from_value::<control::WriteReceipt>(value["receipt"].clone());
+        eprintln!(
+            "CLASSIFIER_REJECT code={} state={} scope={} receipt_decode_error={:?} roundtrip_equal={:?}",
+            value["error"],
+            value["commitState"],
+            value["commitEvidenceScope"],
+            receipt.as_ref().err(),
+            receipt
+                .as_ref()
+                .ok()
+                .map(|r| serde_json::to_value(r).unwrap() == value["receipt"])
+        );
+        eprintln!("CLASSIFIER_REJECT_MESSAGE {message}");
+    }
+    parsed.expect("typed full evidence")
 }
 fn no_readiness(payload: &serde_json::Value) {
     for key in [
