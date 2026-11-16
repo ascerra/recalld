@@ -302,7 +302,7 @@ async fn startup_ack_guard_excludes_same_generation_ack_writer() {
         ));
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
-        let writer = scope.spawn(|| {
+        let writer = scope.spawn(move || {
             started_tx.send(()).unwrap();
             let result = meta.acknowledge_derived_effects(operation);
             done_tx.send(()).unwrap();

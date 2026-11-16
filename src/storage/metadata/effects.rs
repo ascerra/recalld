@@ -456,7 +456,9 @@ impl MetadataStore {
         #[cfg(test)]
         let committed = committed.and_then(|()| {
             if self.ack_test_fault.load(Ordering::SeqCst) == 2 {
-                Err(std::io::Error::other("injected lost ACK commit result").into())
+                Err(redb::CommitError::from(redb::StorageError::Io(
+                    std::io::Error::other("injected lost ACK commit result"),
+                )))
             } else {
                 Ok(())
             }
