@@ -1,0 +1,40 @@
+   Compiling recalld v1.0.0 (/work)
+error[E0599]: no function or associated item named `new` found for struct `storage::control::Generation` in the current scope
+   --> src/storage/metadata/native_records/maintenance_tests.rs:689:51
+    |
+689 |             expected_policy_revision: Generation::new(1).unwrap(),
+    |                                                   ^^^ function or associated item not found in `storage::control::Generation`
+    |
+   ::: src/storage/control.rs:56:1
+    |
+ 56 | pub struct Generation(u64);
+    | --------------------- function or associated item `new` not found for this struct
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following traits define an item `new`, perhaps you need to implement one of them:
+            candidate #1: `Bit`
+            candidate #2: `KeyInit`
+            candidate #3: `KeyIvInit`
+            candidate #4: `TryKeyInit`
+            candidate #5: `UniformSampler`
+            candidate #6: `VariableOutputCore`
+            candidate #7: `aws_lc_rs::aead::BoundKey`
+            candidate #8: `crypto_common::KeyInit`
+            candidate #9: `crypto_common::KeyIvInit`
+            candidate #10: `digest::VariableOutput`
+            candidate #11: `digest::core_api::VariableOutputCore`
+            candidate #12: `digest::digest::Digest`
+            candidate #13: `digest::mac::Mac`
+            candidate #14: `parking_lot_core::thread_parker::ThreadParkerT`
+            candidate #15: `ring::aead::BoundKey`
+            candidate #16: `sha2::Digest`
+            candidate #17: `vsimd::isa::InstructionSet`
+            candidate #18: `zip::read::magic_finder::FinderDirection`
+help: there is a method `ne` with a similar name
+    |
+689 -             expected_policy_revision: Generation::new(1).unwrap(),
+689 +             expected_policy_revision: Generation::ne(1).unwrap(),
+    |
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `recalld` (lib test) due to 1 previous error

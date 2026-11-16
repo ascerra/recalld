@@ -54,9 +54,30 @@ impl MetadataFreeze<'_> {
     pub fn generation(&self) -> GenerationRef {
         self.generation
     }
+
+    /// The whole-core coordinator drops outer leases before reopening roots.
+    pub(crate) fn release_publication(self) -> WorkFreeze {
+        let Self {
+            _publication,
+            _admission,
+            ..
+        } = self;
+        drop(_publication);
+        _admission
+    }
 }
 
 impl MetadataStore {
+    /// Allocation state is meaningful only while the same owner's admission
+    /// and metadata publication remain frozen. No live restore/rewind API.
+    pub(crate) fn frozen_id_state(
+        &self,
+        frozen: &MetadataFreeze<'_>,
+    ) -> Result<Option<crate::storage::ids::IdState>, StorageError> {
+        frozen._admission.check(&self.work_tracker)?;
+        self.ids.checkpoint()
+    }
+
     /// Clone under a brief outer storage read lock, then release that lock
     /// BEFORE close_and_drain. Workers need the outer lock to finish.
     pub fn work_tracker(&self) -> WorkTracker {

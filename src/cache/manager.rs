@@ -348,6 +348,13 @@ impl CacheManager {
         self.cache.run_pending_tasks().await;
     }
 
+    /// Isolated evaluator boundary only. Caller retains whole-core admission
+    /// closure and publication leases; RIF must be disabled in that track.
+    pub(crate) async fn clear_for_frozen_fixture(&self) {
+        self.cache.invalidate_all();
+        self.cache.run_pending_tasks().await;
+    }
+
     /// Get a record by ID with read-through semantics.
     ///
     /// On cache hit: returns the cached `Arc<CachedRecord>`.

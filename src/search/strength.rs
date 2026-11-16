@@ -1,6 +1,6 @@
 //! Operation-local A3 projection. No materialization, policy migration or cache.
 use super::*;
-use crate::decay::lifecycle::{EffectiveLifecyclePolicy, project, resolve_policy};
+use crate::decay::lifecycle::{EffectiveLifecyclePolicy, project};
 use crate::model::schema::{LifecycleVersion, NamespaceSchemaV2};
 use crate::storage::control::Generation;
 
@@ -32,13 +32,19 @@ impl StrengthContext {
             .as_ref()
             .map_or(LifecycleVersion::LegacyAccessV1, |s| s.lifecycle_version);
         let explicit = lifecycle_version == LifecycleVersion::ExplicitFeedbackV2;
-        if explicit && record_access {
+        if explicit && record_access && !engine.access_recorder.supports_native_exposure() {
             return Err(SearchError::Internal(
                 "explicit-feedback exposure writer unavailable; recordAccess must be false".into(),
             ));
         }
         let policy = explicit
-            .then(|| resolve_policy(ns, &engine.decay_policy, engine.decay_multiplier))
+            .then(|| {
+                crate::storage::inherited_policy::resolve_bound(
+                    ns,
+                    &engine.decay_policy,
+                    engine.decay_multiplier,
+                )
+            })
             .transpose()
             .map_err(|e| SearchError::MetadataError(e.to_string()))?;
         Ok(Self {

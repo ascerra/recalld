@@ -1,0 +1,63 @@
+{
+  "environmentHash": "62cfd94d02962255a5b791e4cce7c0b4e24ddfa024b873306ef05c5df2a51db1",
+  "mappings": {
+    "01a1e107-e8a1-7b13-acd4-f4669100de3e": [
+      "turn-0"
+    ],
+    "01a1e107-e8a4-79d3-b69b-af1e7544d2db": [
+      "turn-1"
+    ],
+    "01a1e107-e8a8-7903-900d-8fa06a97f204": [
+      "turn-2"
+    ],
+    "01a1e107-e8ab-7251-a0f2-daa0ad4b09f2": [
+      "turn-3"
+    ]
+  },
+  "profile": "synthetic-unique-source-v1",
+  "queries": [
+    {
+      "memoryIds": [
+        "01a1e107-e8a1-7b13-acd4-f4669100de3e"
+      ],
+      "queryId": "q0"
+    },
+    {
+      "memoryIds": [
+        "01a1e107-e8a1-7b13-acd4-f4669100de3e"
+      ],
+      "queryId": "q1"
+    },
+    {
+      "memoryIds": [
+        "01a1e107-e8a1-7b13-acd4-f4669100de3e"
+      ],
+      "queryId": "q2"
+    },
+    {
+      "memoryIds": [
+        "01a1e107-e8a1-7b13-acd4-f4669100de3e"
+      ],
+      "queryId": "q3"
+    }
+  ],
+  "relevant": {
+    "q0": [
+      "turn-0",
+      "turn-1"
+    ],
+    "q1": [],
+    "q3": [
+      "turn-0",
+      "turn-3"
+    ]
+  },
+  "sourceEvents": "{\"sourceId\": \"turn-0\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-0\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-0\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e107-e8a1-7b13-acd4-f4669100de3e\"}\n{\"sourceId\": \"turn-1\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-1\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-1\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e107-e8a4-79d3-b69b-af1e7544d2db\"}\n{\"sourceId\": \"turn-2\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-2\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-2\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e107-e8a8-7903-900d-8fa06a97f204\"}\n{\"sourceId\": \"turn-3\", \"status\": \"seen\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-3\", \"status\": \"attempted\", \"reason\": \"public-mcp-raw-synthetic\"}\n{\"sourceId\": \"turn-3\", \"status\": \"accepted\", \"reason\": \"public-success-no-readiness-claim\", \"memoryId\": \"01a1e107-e8ab-7251-a0f2-daa0ad4b09f2\"}\n",
+  "sourceEventsSha256": "1d4a56dc03c783b6b09711a3544421ec64dcdc3c0c6a4744e8293639ce192d5e",
+  "sourceIds": [
+    "turn-0",
+    "turn-1",
+    "turn-2",
+    "turn-3"
+  ]
+}

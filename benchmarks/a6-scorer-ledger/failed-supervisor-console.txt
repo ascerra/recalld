@@ -1,0 +1,16 @@
+Captured output from supervisor session 17121 (exit 1), frozen source 8ecaf571527e09ae0a37c35db01df7ceb36efcc4:
+failed: /var/folders/lg/pd7snpz15137ng972h102kqc0000gp/T/recalld-evaluation-89m009f4/output
+Traceback (most recent call last):
+  File "/private/tmp/recalld-implementation/a6-scorer-ledger/scripts/offline-evaluation.py", line 418, in <module>
+    main()
+    ~~~~^^
+  File "/private/tmp/recalld-implementation/a6-scorer-ledger/scripts/offline-evaluation.py", line 403, in main
+    verify_manifest_outputs(output, args.runs)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/recalld-implementation/a6-scorer-ledger/scripts/offline-evaluation.py", line 265, in verify_manifest_outputs
+    verify_scoring_outputs(directory, evaluator)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/recalld-implementation/a6-scorer-ledger/scripts/offline-evaluation.py", line 203, in verify_scoring_outputs
+    assert action["outcome"]["warmup"] is False
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'warmup'

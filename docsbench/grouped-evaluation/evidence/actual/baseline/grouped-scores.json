@@ -1,0 +1,203 @@
+{
+  "bootstrap": null,
+  "environmentHash": "81bcd251484651fd6a97085086a08f366c20c086c7ff14450851b179825ba9c8",
+  "episodes": "7",
+  "groupMapSha256": "7928db2870b7545850e833d880842ba9893f8260014a3f5f9abc8443e79537d2",
+  "groupMapVersion": 1,
+  "profile": "synthetic-grouped-unique-source-v1",
+  "semanticQualityClaim": false,
+  "splitMapSha256": "e4beebf686bb7207cf87ff1657662d7cd4f049c316deb2c412c95ce7241ec23c",
+  "splitMapVersion": 1,
+  "splits": {
+    "development": {
+      "groupMacro": {
+        "allRequiredEvidenceRate": 0.5,
+        "denominatorUnit": "scored-history-group",
+        "groups": "1",
+        "means": {
+          "binarySourceNdcgAt10": 0.6532867981913646,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.625,
+          "retrievalRecallAt20": 0.625,
+          "retrievalRecallAt5": 0.625
+        },
+        "scoredGroups": "1",
+        "unscoredGroups": "0"
+      },
+      "groups": {
+        "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4": {
+          "allRequiredEvidenceRate": 0.5,
+          "denominatorUnit": "measured-query-event",
+          "means": {
+            "binarySourceNdcgAt10": 0.6532867981913646,
+            "extractionEvidenceRetention": 1.0,
+            "retrievalRecallAt10": 0.625,
+            "retrievalRecallAt20": 0.625,
+            "retrievalRecallAt5": 0.625
+          },
+          "profile": "synthetic-unique-source-v1",
+          "queryEvents": "8",
+          "scored": "4",
+          "semanticQualityClaim": false,
+          "unknownAnnotations": "4",
+          "zeroLabelUnscored": "0"
+        }
+      },
+      "queryMicro": {
+        "allRequiredEvidenceRate": 0.5,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 0.6532867981913646,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.625,
+          "retrievalRecallAt20": 0.625,
+          "retrievalRecallAt5": 0.625
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "8",
+        "scored": "4",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "4",
+        "zeroLabelUnscored": "0"
+      }
+    },
+    "test": {
+      "groupMacro": {
+        "allRequiredEvidenceRate": 1.0,
+        "denominatorUnit": "scored-history-group",
+        "groups": "1",
+        "means": {
+          "binarySourceNdcgAt10": 1.0,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 1.0,
+          "retrievalRecallAt20": 1.0,
+          "retrievalRecallAt5": 1.0
+        },
+        "scoredGroups": "1",
+        "unscoredGroups": "0"
+      },
+      "groups": {
+        "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595": {
+          "allRequiredEvidenceRate": 1.0,
+          "denominatorUnit": "measured-query-event",
+          "means": {
+            "binarySourceNdcgAt10": 1.0,
+            "extractionEvidenceRetention": 1.0,
+            "retrievalRecallAt10": 1.0,
+            "retrievalRecallAt20": 1.0,
+            "retrievalRecallAt5": 1.0
+          },
+          "profile": "synthetic-unique-source-v1",
+          "queryEvents": "4",
+          "scored": "1",
+          "semanticQualityClaim": false,
+          "unknownAnnotations": "3",
+          "zeroLabelUnscored": "0"
+        }
+      },
+      "queryMicro": {
+        "allRequiredEvidenceRate": 1.0,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 1.0,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 1.0,
+          "retrievalRecallAt20": 1.0,
+          "retrievalRecallAt5": 1.0
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "4",
+        "scored": "1",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "3",
+        "zeroLabelUnscored": "0"
+      }
+    },
+    "train": {
+      "groupMacro": {
+        "allRequiredEvidenceRate": 0.25,
+        "denominatorUnit": "scored-history-group",
+        "groups": "3",
+        "means": {
+          "binarySourceNdcgAt10": 0.4032867981913646,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.375,
+          "retrievalRecallAt20": 0.375,
+          "retrievalRecallAt5": 0.375
+        },
+        "scoredGroups": "1",
+        "unscoredGroups": "2"
+      },
+      "groups": {
+        "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff": {
+          "allRequiredEvidenceRate": 0.25,
+          "denominatorUnit": "measured-query-event",
+          "means": {
+            "binarySourceNdcgAt10": 0.4032867981913646,
+            "extractionEvidenceRetention": 1.0,
+            "retrievalRecallAt10": 0.375,
+            "retrievalRecallAt20": 0.375,
+            "retrievalRecallAt5": 0.375
+          },
+          "profile": "synthetic-unique-source-v1",
+          "queryEvents": "8",
+          "scored": "4",
+          "semanticQualityClaim": false,
+          "unknownAnnotations": "2",
+          "zeroLabelUnscored": "2"
+        },
+        "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05": {
+          "allRequiredEvidenceRate": null,
+          "denominatorUnit": "measured-query-event",
+          "means": {
+            "binarySourceNdcgAt10": null,
+            "extractionEvidenceRetention": null,
+            "retrievalRecallAt10": null,
+            "retrievalRecallAt20": null,
+            "retrievalRecallAt5": null
+          },
+          "profile": "synthetic-unique-source-v1",
+          "queryEvents": "4",
+          "scored": "0",
+          "semanticQualityClaim": false,
+          "unknownAnnotations": "0",
+          "zeroLabelUnscored": "4"
+        },
+        "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697": {
+          "allRequiredEvidenceRate": null,
+          "denominatorUnit": "measured-query-event",
+          "means": {
+            "binarySourceNdcgAt10": null,
+            "extractionEvidenceRetention": null,
+            "retrievalRecallAt10": null,
+            "retrievalRecallAt20": null,
+            "retrievalRecallAt5": null
+          },
+          "profile": "synthetic-unique-source-v1",
+          "queryEvents": "4",
+          "scored": "0",
+          "semanticQualityClaim": false,
+          "unknownAnnotations": "4",
+          "zeroLabelUnscored": "0"
+        }
+      },
+      "queryMicro": {
+        "allRequiredEvidenceRate": 0.25,
+        "denominatorUnit": "measured-query-event",
+        "means": {
+          "binarySourceNdcgAt10": 0.4032867981913646,
+          "extractionEvidenceRetention": 1.0,
+          "retrievalRecallAt10": 0.375,
+          "retrievalRecallAt20": 0.375,
+          "retrievalRecallAt5": 0.375
+        },
+        "profile": "synthetic-unique-source-v1",
+        "queryEvents": "16",
+        "scored": "4",
+        "semanticQualityClaim": false,
+        "unknownAnnotations": "6",
+        "zeroLabelUnscored": "6"
+      }
+    }
+  }
+}

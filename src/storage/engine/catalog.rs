@@ -23,8 +23,8 @@ impl RedbStorageEngine {
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
+        // Keep the accepted mutation guard through filesystem/handle publication.
         let meta = &self.meta_store;
-        // Retain the accepted owner through canonical commit and handle installation.
         let guard = meta.mutation_guard_with_work(parent)?;
         publish_namespace(meta, &mut self.vector_manager, &self.db_path, |prepare| {
             meta.create_catalog_guarded(&guard, ctx, config, |id| {
@@ -148,7 +148,7 @@ pub(super) fn publish_namespace(
 
 /// Publish a prepared directory without replacing even an empty existing one.
 /// The supported local platforms already provide an atomic no-replace rename.
-fn rename_new_directory(source: &Path, target: &Path) -> Result<(), StorageError> {
+pub(crate) fn rename_new_directory(source: &Path, target: &Path) -> Result<(), StorageError> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::os::unix::ffi::OsStrExt;

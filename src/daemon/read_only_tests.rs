@@ -458,7 +458,7 @@ async fn http_call(
     )
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn read_only_http_get_search_and_similarity_success() {
+async fn read_only_http_get_search_and_vector_similarity_succeed_without_effects() {
     let h = Harness::new().await;
     let before = h.snapshot().await;
     let get = format!("/memories/{}", h.ids[0]);
@@ -480,16 +480,29 @@ async fn read_only_http_get_search_and_similarity_success() {
     .await;
     assert!(status.is_success(), "{body}");
     assert_eq!(body["hits"].as_array().unwrap().len(), 3);
-    // Joined vector support succeeds while false mode bypasses the source cache.
-    let (status, _) = http_call(
+    // Main's vector-query path now succeeds; false mode must still bypass caches
+    // and leave canonical records, graph, vectors and indexes unchanged.
+    let (status, body) = http_call(
         h.http(),
         "POST",
         &format!("/similar/{}", h.ids[0]),
         json!({"recordAccess":false}),
     )
     .await;
-    assert!(status.is_success());
-    assert!(h.f.cache.get(h.ids[0]).await.is_none());
+    assert!(status.is_success(), "{body}");
+    let hits = body["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 2);
+    for hit in hits {
+        assert_ne!(hit["memory"]["id"], h.ids[0].to_string());
+        assert!(
+            h.ids[1..]
+                .iter()
+                .any(|id| hit["memory"]["id"] == id.to_string())
+        );
+    }
+    for id in &h.ids {
+        assert!(h.f.cache.get(*id).await.is_none());
+    }
     h.assert_quiet(&before).await;
     for suffix in ["", "?recordAccess=true"] {
         assert!(
@@ -1009,6 +1022,14 @@ async fn scoped_read_only_controls_survive_http_mcp_and_framed_daemon() {
             if namespace == "other" { 409 } else { 200 },
             "{body}"
         );
+        if namespace == "default" {
+            let hits = body["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 2);
+            for hit in hits {
+                assert_ne!(hit["memory"]["id"], h.ids[0].to_string());
+                assert_eq!(hit["memory"]["namespace"], namespace);
+            }
+        }
     }
     // A true-mode mismatch also fails before queued observation work.
     let (status, _) = http_call(
@@ -1600,5 +1621,141 @@ async fn coherent_payload_actual_wrappers_publish_before_ready_barrier() {
                 .unwrap()
                 .unwrap();
         }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn coherent_by_id_framed_daemon_copies_payload_and_preserves_failed_exposure_receipt() {
+    for similar in [false, true] {
+        let mut h = Harness::new().await;
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: h.f.storage.clone(),
+            cache: h.f.cache.clone(),
+            graph: h.f.graph.clone(),
+            vectors: h.f.vector_index.clone(),
+            fts: h.f.fts_index.clone(),
+            entities: h.f.entity_index.clone(),
+        };
+        owner.rebuild_all().await.unwrap();
+        let receipt = owner
+            .insert(
+                crate::storage::control::MutationContext::unkeyed(NamespaceId::new(1)),
+                crate::storage::insertion::InsertMemory {
+                    id: None,
+                    summary: "daemon owned payload".into(),
+                    full_text: Some("daemon coherent résumé".into()),
+                    tags: vec![],
+                    initial_stability: None,
+                    created_at: Some(NOW),
+                    embedding: Some(VECTOR.to_vec()),
+                    parent_id: None,
+                    supersedes: None,
+                },
+                Vec::new().into(),
+                NOW,
+            )
+            .await
+            .unwrap();
+        let inserted = crate::storage::insertion::inserted_id(&receipt.receipt).unwrap();
+        h.ids.push(inserted);
+        h.engine = Arc::new(Arc::try_unwrap(h.engine).ok().unwrap().with_coherent_owner(
+            owner.clone(),
+            Arc::new(crate::rif::RifEngine::new(Default::default())),
+        ));
+        let bridge = h.bridge();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("by-id.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let tx = shutdown_tx.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            handle_connection(
+                bridge.search,
+                bridge.storage,
+                bridge.namespaces,
+                bridge.health,
+                stream,
+                Arc::new(AtomicU32::new(1)),
+                Arc::new(AtomicI64::new(0)),
+                shutdown_rx,
+                tx,
+            )
+            .await;
+        });
+        let client = crate::daemon::client::DaemonClient::connect(&path)
+            .await
+            .unwrap();
+        let id = if similar { h.ids[0] } else { inserted };
+        let method = if similar {
+            "find_similar"
+        } else {
+            "get_memory"
+        };
+        let args = json!({"id":id,"recordAccess":false,"limit":10,"sameNamespace":true});
+        let before = h.snapshot().await;
+        let value = client.call(method, args.clone()).await.unwrap();
+        assert!(
+            value.to_string().contains("daemon coherent résumé"),
+            "{value}"
+        );
+        h.assert_quiet(&before).await;
+        // The actual frame must retain the committed exposure receipt and omit
+        // copied text when the awaited publication tail fails.
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .observation_fault
+            .store(2, Ordering::SeqCst);
+        let mut args = args;
+        args["recordAccess"] = json!(true);
+        let error = client.call(method, args).await.unwrap_err();
+        assert!(
+            matches!(error, bridge::BridgeError::PartiallyApplied(_)),
+            "{error}"
+        );
+        let text = error.to_string();
+        let start = text.find("{\"commitState\"").expect(&text);
+        let details: Value = serde_json::Deserializer::from_str(&text[start..])
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(details["commitState"], "committed");
+        let receipts: Vec<crate::storage::control::WriteReceipt> =
+            serde_json::from_value(details["receipts"].clone()).unwrap();
+        assert_eq!(receipts.len(), 1);
+        for receipt in &receipts {
+            assert!(matches!(
+                receipt.outcome,
+                crate::storage::control::MutationOutcome::ExposuresRecorded { .. }
+            ));
+        }
+        assert!(!text.contains("daemon coherent résumé"));
+        drop(client);
+        let _ = shutdown_tx.send(true);
+        tokio::time::timeout(Duration::from_secs(10), server)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(owner);
+        let Harness {
+            f, engine, access, ..
+        } = h;
+        drop(engine);
+        drop(access);
+        let directory = f.close();
+        let reopened = crate::storage::RedbStorageEngine::open(directory.path()).unwrap();
+        let actual = reopened
+            .meta_store()
+            .lookup_operation(
+                receipts[0].store_id,
+                crate::storage::control::MutationScope::Namespace(NamespaceId::new(1)),
+                receipts[0].operation_id,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(actual, receipts[0]);
     }
 }

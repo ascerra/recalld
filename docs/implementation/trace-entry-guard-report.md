@@ -1,0 +1,36 @@
+# Performance entry guard: candidate and callsite audit
+
+Hume, direct165. Validated runtime/test source `2919d64de20891a89765db9eeedb34ca95c28118`. Dependencies unchanged. This contains the application-level cold-registration defect; it does not correct upstream tracing, arbitrary callsites or establish the cause of historical c65 integration failure. The standalone raw-dependency probe retains its demonstrated defect.
+
+Production change is restricted to `performance::target_enabled`: public static/global TRACE checks, then `NoSubscriber` inspection, followed by the original target-specific `enabled!` outside the dispatcher callback. `REQUEST` continues to take precedence. No sampling, context, clock, ownership, schema or canonical behavior change is intended.
+
+## Complete performance-target audit
+
+`rg` over every Rust source found one production target-enabled callsite, one shared event macro and three direct request spans, all in performance.rs. All other performance event sites use `performance::event!`; no direct target events or spans exist elsewhere. Filter strings in tests and module documentation are not emission sites.
+
+| Site/path | Admission and context |
+| --- | --- |
+| Shared event macro | Checks `enabled()` before invoking tracing or evaluating fields. Without REQUEST it uses the guarded entry; inherited decisions are unchanged. |
+| Three request spans | Constructed only when `decision.selected`; the root decision uses target_enabled, while nested requests inherit REQUEST. Unselected requests use Span::none. |
+| Timer end/drop, Timeline mark/drop, receipts, sync_io, Hold drop | Emissions go through the shared event macro; disabled Timer/Timeline starts are None. Hold releases the real guard before reporting. |
+| RequestDrop | Restores the selected span's captured dispatcher/span and REQUEST before dropping the pinned future. The unselected path retains its false decision. No new drop implementation. |
+| Worker construction/run/queued timer | Captures dispatcher/span only if enabled; queued clock starts only with captured context. run restores REQUEST and selected dispatcher/span before worker work and queued completion. Unselected work retains the false decision. An unused queued timer's Drop uses the same gated event path. |
+| Transport, provider, insertion, publication, storage, observation and search counters | Invoke only the shared macro; all cold event registrations are behind the common gate. Existing worker call sites wrap blocking closures in Worker::run. |
+
+There is no uncovered production performance callsite requiring a scattered guard. This audit covers the actual165 source, not unrelated targets, future source joins or arbitrary external use of tracing. Existing tests verify captured workers/cancellation; new tests exercise cold scoped entry, global dispatch, untraced real MCP work, target-specific filtering, repeated scope entry/exit and disabled clock/allocation state.
+
+Halley's exact daemon test handoff is `16885f96b1af2014b2e4fcaef04a23ed71176fdc`, two-file patch only, with test-only capture visibility. He reports actual fresh-child RED: successful framed store/canonical1/readiness followed by empty trace, exit101 and fmt pass. His original c65 failure remains unattributed. Our earlier actual MCP RED source/executable and standalone mechanism remain in the prior report/VALIDATION.
+
+No production dummy subscriber, global serialization, per-request cache rebuild, changed interest declaration or dependency patch. Test-only subprocesses isolate process-global callsites without serializing the suite or mutating the parent's environment. No overhead/default-enable or general tracing fix claim.
+
+## Final validation and provenance
+
+- Focus: 3 fresh-process regression tests pass. The actual MCP test runs four independent child processes (scoped, global, untraced and target-filtered), preserving actual provider/store/response/flush/readiness assertions; traced modes require input bytes, completed output and request ancestry. The exact daemon regression passes. The third test checks cold disabled paths, repeated scope entry/exit, zero allocations, absent Timer/Timeline/Worker clock starts and lazy event-field evaluation. Existing performance filter22 and online-producer filter13 also pass; these filters overlap and are not 38 unique tests.
+- One full `cargo test --offline --all-targets`: **1042 library +2 CLI +4 example/harness tests passed**; zero failed. This is not all-features validation. `cargo fmt --all -- --check` and `cargo clippy --offline --all-targets` exit0. Compile warnings: lib27 (6 duplicates), lib-test10. Clippy warnings: lib699, lib-test768 (680 duplicates), bin1 (also repeated for its test target); no warnings were suppressed to obtain a pass.
+- Both runs use Rust1.94.1 and `recalld-ci:1.94` image `sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef`, network-none, two CPUs, 4GiB and only owned source/cache/target mounts. No home, credentials, Docker socket or personal daemon/data mounts. Focus and full exit0, OOMKilled=false. Container durations and test timings are validation evidence, not performance measurements.
+- Complete committed source exported atomically: 231 files. In-container preflight occurs before any Cargo/rustfmt invocation, and postflight passes for both runs. Final host snapshot/worktree/Git blob comparison passes for all231. Package-clean only the sole owner target before the focused build; full uses the identical immutable source. No source switch, mounted edit, retry or replacement. Focus and full library executable hashes are identical: `a595090a146e32f82c283fed4123ac8dd0976af970ccca0131cc510dd3f6700c`.
+- [VALIDATION.json](evidence/trace-entry-guard/VALIDATION.json) records log/command/source/executable hashes, container limits, exits and warnings; [SOURCE.json](evidence/trace-entry-guard/SOURCE.json) pins every compiled input; [RESULTS.txt](evidence/trace-entry-guard/RESULTS.txt) and the two committed drivers retain compact results. Eight test/harness executables plus the two actual CLI binaries are recorded. Earlier actual MCP RED and raw-dependency proof remain separately attributed in the prior report; Halley's daemon RED binary is `e8414d5b7965841c59466d9ebc4ac9a532224a4711b468ec3ba987a0a342e612`.
+
+The complete-file comparison against Halley's diagnostic branch initially differed only in its pre-existing assertion-message diagnostic. The imported 102-line regression itself matches his handed-off test byte-for-byte (SHA256 `35a1176971b029cf6b5c1f09a89854ea06194acbbfa7c8291c46477653c65605`); that unrelated message-only parent change was intentionally not imported. No test failure or source correction resulted from this verification distinction.
+
+Both owned validation containers were removed. No new cargo/target clone was made. Active retained roots are `.validation/probe1`, `.validation/actual-mcp-red`, `.validation/upstream-review` and `.validation/entry-guard-green` in this worktree, pending reviewed publication/results and central cleanup handoff; sole cargo/target remain protected. Previously released171 roots remain deleted. No raw data is staged or archived to HOME. Publication and exact-head CI are pending; no READY handoff or frozen165 push occurs in this step.

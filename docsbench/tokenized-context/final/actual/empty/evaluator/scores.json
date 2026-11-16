@@ -1,0 +1,84 @@
+{
+  "environmentHash": "68cf696108fb3883ac284642fd93de4c2b16368c0e05a26fda161a028c7e080e",
+  "profile": "synthetic-unique-source-v1",
+  "scoring": {
+    "allRequiredEvidenceRate": null,
+    "denominatorUnit": "measured-query-event",
+    "means": {
+      "binarySourceNdcgAt10": null,
+      "extractionEvidenceRetention": null,
+      "retrievalRecallAt10": null,
+      "retrievalRecallAt20": null,
+      "retrievalRecallAt5": null
+    },
+    "profile": "synthetic-unique-source-v1",
+    "queryEvents": "4",
+    "scored": "0",
+    "semanticQualityClaim": false,
+    "unknownAnnotations": "1",
+    "zeroLabelUnscored": "3"
+  },
+  "semanticQualityClaim": false,
+  "trace": [
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q0",
+      "retrievedSourceIds": []
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q1",
+      "retrievedSourceIds": []
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": null,
+        "annotationStatus": "unknown",
+        "reason": "missing_annotations",
+        "scored": false
+      },
+      "queryId": "q2",
+      "retrievedSourceIds": []
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q3",
+      "retrievedSourceIds": []
+    }
+  ],
+  "turnCoverage": {
+    "acceptedMemoryCoverage": null,
+    "countUnit": "unique-source-turn",
+    "eligible": "0",
+    "eventCount": "0",
+    "ledgerVersion": 1,
+    "pending": "0",
+    "processed": "0",
+    "processedCoverage": null,
+    "propositionPreservation": "not measured",
+    "statuses": {
+      "accepted": "0",
+      "attempted": "0",
+      "no_op": "0",
+      "rejected": "0",
+      "seen": "0",
+      "truncated": "0"
+    },
+    "unseen": "0"
+  }
+}

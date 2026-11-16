@@ -32,9 +32,9 @@ pub(crate) fn request_hash(
     input: &NamespacePolicy,
 ) -> Result<[u8; 32], StorageError> {
     ctx.validate()?;
-    if ctx.contract_version != 2 || !matches!(ctx.scope, control::MutationScope::Namespace(_)) {
+    if !matches!(ctx.scope, control::MutationScope::Namespace(_)) {
         return Err(StorageError::InvalidMutationContext(
-            "native policy requires contract2 namespace scope".into(),
+            "native policy requires namespace scope".into(),
         ));
     }
     Ok(control::request_hash(
@@ -55,6 +55,14 @@ pub struct NativeNamespacePolicyUpdated {
     pub capture_generation: GenerationRef,
     pub before: NamespacePolicyState,
     pub after: NamespacePolicyState,
+    /// An explicit-to-inherited transition requires fresh adoption. Preserve the
+    /// old binding only in its proof, never reactivate stale inputs implicitly.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub cleared_inherited_decay: Option<super::inherited_policy::InheritedDecayBinding>,
     pub record_count: u64,
     pub record_token_digest: String,
 }
@@ -99,6 +107,14 @@ impl NativeNamespacePolicyUpdated {
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         {
             return Err(invalid("invalid native numeric policy proof"));
+        }
+        if let Some(binding) = &self.cleared_inherited_decay {
+            binding.validate()?;
+            if self.before.decay_rate_multiplier.is_none()
+                || self.after.decay_rate_multiplier.is_some()
+            {
+                return Err(invalid("invalid inherited binding clearance"));
+            }
         }
         for state in [&self.before, &self.after] {
             let mut ns = NamespaceConfig::default_namespace(0);

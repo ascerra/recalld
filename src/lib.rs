@@ -39,6 +39,7 @@ pub(crate) mod index_cleanup;
 pub mod mcp;
 pub mod model;
 pub mod native_catalog_adapter;
+pub(crate) mod performance;
 pub mod rif;
 pub mod search;
 pub mod serialization;

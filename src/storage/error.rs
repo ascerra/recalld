@@ -53,6 +53,11 @@ pub enum StorageError {
         source: redb::CommitError,
     },
 
+    /// A worker was lost without returning its canonical outcome. No operation
+    /// ID or receipt can be invented; recover and reconcile the original intent.
+    #[error("worker outcome unknown: {0}")]
+    WorkerOutcomeUnknown(String),
+
     /// Canonical metadata is durable; materialization must resume after reopen.
     #[error("operation {operation_id} committed; canonical effects unavailable: {source}")]
     CommittedEffectsPending {
@@ -101,6 +106,11 @@ pub enum StorageError {
 
     #[error("invalid storage mutation: {0}")]
     InvalidMutation(String),
+
+    #[error(
+        "operation too large for this response transport or its bounded admission scan; no new purge was started"
+    )]
+    PurgeResponseTooLarge,
 
     #[error("storage recovery required: {0}")]
     RecoveryRequired(String),

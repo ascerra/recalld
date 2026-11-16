@@ -1,0 +1,389 @@
+{
+  "candidate1": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate1",
+    "artifacts": {
+      "source.json": {
+        "sha256": "fa7ce981fed3a85db8055ef87a340944a05bd3114a4e55efaa35090c0306c3f4",
+        "bytes": 34939
+      },
+      "build.log": {
+        "sha256": "f639b615356cd5ccd083117a5e9be9b568a84f2efe320585d7efb00042bd0036",
+        "bytes": 135
+      },
+      "driver.exit": {
+        "sha256": "16dc368a89b428b2485484313ba67a3912ca03f2b2b42429174a4f8b3dc84e44",
+        "bytes": 3
+      },
+      "memory-events.txt": {
+        "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+        "bytes": 70
+      },
+      "memory-peak.txt": {
+        "sha256": "a56735059e918f35cc059804ba45b5d3b0044ecbfe63e646ec83e4243c64e6aa",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {}
+  },
+  "candidate10": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate10",
+    "artifacts": {
+      "source.json": {
+        "sha256": "086adbb2697e3f68e36d191226798dac461daeee872436305d16790a03ed8a65",
+        "bytes": 35156
+      },
+      "binary.sha256": {
+        "sha256": "f6ed1de0ca93ee36a5c3f1a10d669333b60f3e53f5e67c3ba9104f86d2bcf9e6",
+        "bytes": 64
+      },
+      "build.log": {
+        "sha256": "b263c7d7374a10b28c951b497e6d277415737861c704e02e87431d3252215ef9",
+        "bytes": 105
+      },
+      "focused.log": {
+        "sha256": "7c03bf4e5f783f530ee7c423f9421ae4de479fd302c75986faeff1e50442dd7c",
+        "bytes": 3350
+      },
+      "driver.exit": {
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        "bytes": 1
+      },
+      "memory-events.txt": {
+        "sha256": "f0405b0ee6ffc6e5472d96e8150bb665ec0803825e3265b56471102a7770c026",
+        "bytes": 72
+      },
+      "memory-peak.txt": {
+        "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {
+      "focused.log": [
+        "test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 1232 filtered out; finished in 16.37s"
+      ]
+    }
+  },
+  "candidate2": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate2",
+    "artifacts": {
+      "source.json": {
+        "sha256": "5c930500cda2a001375bc1c87063096931cdd086c10c27db6df1647fa582d0b7",
+        "bytes": 34939
+      },
+      "binary.sha256": {
+        "sha256": "53293f61c884bb4d12c526b2ff38e114efc6acf67c51ec75df538644159c0c5b",
+        "bytes": 64
+      },
+      "build.log": {
+        "sha256": "bce6b17ee1d0fbd05ea5883db24cd4cb4d0b4ac58b68bef1a36df9c40993153c",
+        "bytes": 105
+      },
+      "focused.log": {
+        "sha256": "829391edbf90fc69286cbdcbffaa4207ed93a4954d820b760b8af194e0fc3278",
+        "bytes": 583
+      },
+      "driver.exit": {
+        "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+        "bytes": 1
+      },
+      "memory-events.txt": {
+        "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+        "bytes": 70
+      },
+      "memory-peak.txt": {
+        "sha256": "a74051eec7e2d2f543c19ce8a8c502685ef7da6c4013f14de0b598c2a1beff68",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {
+      "focused.log": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1232 filtered out; finished in 3.90s"
+      ]
+    }
+  },
+  "candidate3": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate3",
+    "artifacts": {
+      "source.json": {
+        "sha256": "aab1b7a3116e787aeefaf629ec4fc7add225ea9e1a1ad9c41cb30cc664ebdde8",
+        "bytes": 35051
+      },
+      "build.log": {
+        "sha256": "fd686023f5cabf09b65370543477552e21a5c61621b4a18baba41be19673e095",
+        "bytes": 133
+      },
+      "driver.exit": {
+        "sha256": "16dc368a89b428b2485484313ba67a3912ca03f2b2b42429174a4f8b3dc84e44",
+        "bytes": 3
+      },
+      "memory-events.txt": {
+        "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+        "bytes": 70
+      },
+      "memory-peak.txt": {
+        "sha256": "ae4bb4776387b4a76ba76fb3e74c5b407e97d55955df358dfcca0666d7ea0eea",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {}
+  },
+  "candidate4": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate4",
+    "artifacts": {
+      "source.json": {
+        "sha256": "d8ec650123e88ceac7eeba121a5057d53538bb154df4f6ec04758384a730bb87",
+        "bytes": 35051
+      },
+      "binary.sha256": {
+        "sha256": "290f78b8d6bf3b3570b22460abade63d26c52f553206d5430b6afcb132d5feb2",
+        "bytes": 64
+      },
+      "build.log": {
+        "sha256": "0ce1c72893d585c5b56c6224430d5999fccf347bac84c16c5709f644ab339276",
+        "bytes": 105
+      },
+      "focused.log": {
+        "sha256": "ec57dffa222b51bb6e52316f6f9b6199c167e9e39090f1c8bd6bdba3a9948dcf",
+        "bytes": 2351
+      },
+      "full.log": {
+        "sha256": "4d2e05a02a2a6ffc0ac9374bc98c70ed7f0191620fb354a9f1385c311394695b",
+        "bytes": 246266
+      },
+      "driver.exit": {
+        "sha256": "16dc368a89b428b2485484313ba67a3912ca03f2b2b42429174a4f8b3dc84e44",
+        "bytes": 3
+      },
+      "memory-events.txt": {
+        "sha256": "95bf7fbf30816c1d174884c6cd781a84920c83b66e8d0dce40fd30df74b84b9f",
+        "bytes": 72
+      },
+      "memory-peak.txt": {
+        "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {
+      "focused.log": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1232 filtered out; finished in 12.33s"
+      ],
+      "full.log": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1237 filtered out; finished in 0.13s",
+        "test result: FAILED. 1097 passed; 141 failed; 0 ignored; 0 measured; 0 filtered out; finished in 348.56s"
+      ]
+    }
+  },
+  "candidate5": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate5",
+    "artifacts": {
+      "source.json": {
+        "sha256": "96a1e5a4ec57279680f148467c6a5703e40b647c12a396fcd3906036ffdda42d",
+        "bytes": 35051
+      },
+      "build.log": {
+        "sha256": "71618bdd990dcf82089686ab1ae3706b97f2f428a804c13ea1905be1e44abac8",
+        "bytes": 134
+      },
+      "driver.exit": {
+        "sha256": "16dc368a89b428b2485484313ba67a3912ca03f2b2b42429174a4f8b3dc84e44",
+        "bytes": 3
+      },
+      "memory-events.txt": {
+        "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+        "bytes": 70
+      },
+      "memory-peak.txt": {
+        "sha256": "e3f9f3b868e5c8767d4ca793d6576f1322bd0d64a6421dee8e61e88c7cc836fe",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {}
+  },
+  "candidate6": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate6",
+    "artifacts": {
+      "source.json": {
+        "sha256": "857ef23d2a68df5f1c0749fc3e6c015b572e45daed27c93af5cd37f77d46405d",
+        "bytes": 35051
+      },
+      "binary.sha256": {
+        "sha256": "6a480c99b4f467b7428806400281945f7fb6f87454108fb0e5bbe44b0fec1c4f",
+        "bytes": 64
+      },
+      "build.log": {
+        "sha256": "04c8d4bc2ca7e0106f03597650d5eccee3f8007c158398614a73f7869c3c892a",
+        "bytes": 105
+      },
+      "focused.log": {
+        "sha256": "aec8e064bfaab4f9ecf3882dbd16ffcc59009bdf4b0d3918ef525af0db1018f4",
+        "bytes": 2820
+      },
+      "driver.exit": {
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        "bytes": 1
+      },
+      "memory-events.txt": {
+        "sha256": "3f235c73b16edbd50ad9863e8641998b295f0437422a370a051f90f27870f9b4",
+        "bytes": 72
+      },
+      "memory-peak.txt": {
+        "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {
+      "focused.log": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 1232 filtered out; finished in 12.50s"
+      ]
+    }
+  },
+  "candidate7": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate7",
+    "artifacts": {
+      "source.json": {
+        "sha256": "dac87969d56745957f6ebdeb166b71316c6b17cb32c4d98a1cf6543b071552c0",
+        "bytes": 35156
+      },
+      "binary.sha256": {
+        "sha256": "c59bc0e8cebf01dc9e4bb4f1db58be88aa5472974c3afa70381ec7d9bac0ffaf",
+        "bytes": 64
+      },
+      "build.log": {
+        "sha256": "ddd59d63767e1084c78fbc292f98c4a2e79be847461a4e3119f54d37923183f4",
+        "bytes": 105
+      },
+      "focused.log": {
+        "sha256": "58686ba266322d3153c760dc4ded5843aceb505d521176c8783839ab04fc2733",
+        "bytes": 2721
+      },
+      "full.log": {
+        "sha256": "5f9b0c8ba7a9c3fbc8f8dda7b33c8b2c061326f378f6af87dd4ff055c18c9cd3",
+        "bytes": 153277
+      },
+      "driver.exit": {
+        "sha256": "16dc368a89b428b2485484313ba67a3912ca03f2b2b42429174a4f8b3dc84e44",
+        "bytes": 3
+      },
+      "memory-events.txt": {
+        "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+        "bytes": 70
+      },
+      "memory-peak.txt": {
+        "sha256": "622a03612387637a31fe97a7e469f8f9027a3a4834b01b6f1c55e7a9101eea51",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {
+      "focused.log": [
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 1232 filtered out; finished in 17.21s"
+      ],
+      "full.log": [
+        "test result: FAILED. 1230 passed; 11 failed; 0 ignored; 0 measured; 0 filtered out; finished in 502.63s"
+      ]
+    }
+  },
+  "candidate8-ghost": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate8-ghost",
+    "artifacts": {
+      "source.json": {
+        "sha256": "f607c1f620d7649708570178852b8d4db7fb5e9b932088b612702a0a6818299e",
+        "bytes": 35156
+      },
+      "binary.sha256": {
+        "sha256": "195e54a9c79371698c1b58eed1084aff2fbbac1f288f4c9f7973560668386241",
+        "bytes": 64
+      },
+      "build.log": {
+        "sha256": "8b948c9dcea1ca814996bffeac084f37e7427b76b1fc89fece97b78876a2b9f3",
+        "bytes": 105
+      },
+      "focused.log": {
+        "sha256": "434db8027fbf75d9e4a643ffdc3473f997e65053e653bf9f3a08b3dc5b400ca2",
+        "bytes": 3394
+      },
+      "driver.exit": {
+        "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+        "bytes": 1
+      },
+      "memory-events.txt": {
+        "sha256": "de344d6da19c0c6334385512aabe8f7c7ddd73ca47ebfb6c0d58de61bed9c735",
+        "bytes": 73
+      },
+      "memory-peak.txt": {
+        "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {
+      "focused.log": [
+        "test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 1232 filtered out; finished in 16.71s"
+      ]
+    }
+  },
+  "candidate9": {
+    "root": "/tmp/recalld-inherited-policy-adoption-validation/candidate9",
+    "artifacts": {
+      "source.json": {
+        "sha256": "1dc7d9d292efeb449deceef5e271d83cd9f1d654f9153e033eade38ce404211d",
+        "bytes": 35156
+      },
+      "build.log": {
+        "sha256": "fd686023f5cabf09b65370543477552e21a5c61621b4a18baba41be19673e095",
+        "bytes": 133
+      },
+      "driver.exit": {
+        "sha256": "16dc368a89b428b2485484313ba67a3912ca03f2b2b42429174a4f8b3dc84e44",
+        "bytes": 3
+      },
+      "memory-events.txt": {
+        "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+        "bytes": 70
+      },
+      "memory-peak.txt": {
+        "sha256": "bfbfba9509cb40301aa01b39ed465922eefa5920080c70620fd93243b290123e",
+        "bytes": 11
+      },
+      "source-after.txt": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "results": {}
+  }
+}

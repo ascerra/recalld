@@ -34,7 +34,15 @@ impl TextStore {
         dir: &Path,
         store_id: Uuid,
     ) -> Result<(Self, Uuid), StorageError> {
-        let id = Uuid::new_v4();
+        Self::create_generation_with_ids(dir, store_id, &crate::storage::ids::SystemIds)
+    }
+
+    pub(crate) fn create_generation_with_ids(
+        dir: &Path,
+        store_id: Uuid,
+        ids: &dyn crate::storage::ids::IdSource,
+    ) -> Result<(Self, Uuid), StorageError> {
+        let id = ids.uuid(crate::storage::ids::IdKind::TextGeneration)?;
         let path = dir.join(generation_filename(id));
         let mut file = OpenOptions::new()
             .read(true)

@@ -1,0 +1,14 @@
+{
+  "currentAction": {
+    "arguments": {
+      "checkDuplicates": false,
+      "namespace": "default",
+      "summary": "blocked-worker-canary"
+    },
+    "tag": "pending-store",
+    "tool": "store_memory"
+  },
+  "deliveryOrdinal": 201,
+  "phase": "action",
+  "startId": 100
+}

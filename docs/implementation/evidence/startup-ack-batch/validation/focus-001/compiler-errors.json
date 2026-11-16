@@ -1,0 +1,407 @@
+[
+  {
+    "rendered": "error[E0277]: the trait bound `CommitError: From<std::io::Error>` is not satisfied\n   --> src/storage/metadata/effects.rs:459:78\n    |\n459 |                 Err(std::io::Error::other(\"injected lost ACK commit result\").into())\n    |                                                                              ^^^^ the trait `From<std::io::Error>` is not implemented for `CommitError`\n    |\nhelp: the trait `From<std::io::Error>` is not implemented for `CommitError`\n      but trait `From<redb::StorageError>` is implemented for it\n   --> /cargo/registry/src/index.crates.io-1949cf8c6b5b557f/redb-2.6.3/src/error.rs:498:1\n    |\n498 | impl From<StorageError> for CommitError {\n    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for that trait implementation, expected `redb::StorageError`, found `std::io::Error`\n    = note: required for `std::io::Error` to implement `Into<CommitError>`\n\n",
+    "$message_type": "diagnostic",
+    "children": [
+      {
+        "children": [],
+        "code": null,
+        "level": "help",
+        "message": "the trait `From<std::io::Error>` is not implemented for `CommitError`\nbut trait `From<redb::StorageError>` is implemented for it",
+        "rendered": null,
+        "spans": [
+          {
+            "byte_end": 15536,
+            "byte_start": 15497,
+            "column_end": 40,
+            "column_start": 1,
+            "expansion": null,
+            "file_name": "/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/redb-2.6.3/src/error.rs",
+            "is_primary": true,
+            "label": null,
+            "line_end": 498,
+            "line_start": 498,
+            "suggested_replacement": null,
+            "suggestion_applicability": null,
+            "text": [
+              {
+                "highlight_end": 40,
+                "highlight_start": 1,
+                "text": "impl From<StorageError> for CommitError {"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "children": [],
+        "code": null,
+        "level": "help",
+        "message": "for that trait implementation, expected `redb::StorageError`, found `std::io::Error`",
+        "rendered": null,
+        "spans": []
+      },
+      {
+        "children": [],
+        "code": null,
+        "level": "note",
+        "message": "required for `std::io::Error` to implement `Into<CommitError>`",
+        "rendered": null,
+        "spans": []
+      }
+    ],
+    "level": "error",
+    "message": "the trait bound `CommitError: From<std::io::Error>` is not satisfied",
+    "spans": [
+      {
+        "byte_end": 19193,
+        "byte_start": 19189,
+        "column_end": 82,
+        "column_start": 78,
+        "expansion": null,
+        "file_name": "src/storage/metadata/effects.rs",
+        "is_primary": true,
+        "label": "the trait `From<std::io::Error>` is not implemented for `CommitError`",
+        "line_end": 459,
+        "line_start": 459,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": [
+          {
+            "highlight_end": 82,
+            "highlight_start": 78,
+            "text": "                Err(std::io::Error::other(\"injected lost ACK commit result\").into())"
+          }
+        ]
+      }
+    ],
+    "code": {
+      "code": "E0277",
+      "explanation": "You tried to use a type which doesn't implement some trait in a place which\nexpected that trait.\n\nErroneous code example:\n\n```compile_fail,E0277\n// here we declare the Foo trait with a bar method\ntrait Foo {\n    fn bar(&self);\n}\n\n// we now declare a function which takes an object implementing the Foo trait\nfn some_func<T: Foo>(foo: T) {\n    foo.bar();\n}\n\nfn main() {\n    // we now call the method with the i32 type, which doesn't implement\n    // the Foo trait\n    some_func(5i32); // error: the trait bound `i32 : Foo` is not satisfied\n}\n```\n\nIn order to fix this error, verify that the type you're using does implement\nthe trait. Example:\n\n```\ntrait Foo {\n    fn bar(&self);\n}\n\n// we implement the trait on the i32 type\nimpl Foo for i32 {\n    fn bar(&self) {}\n}\n\nfn some_func<T: Foo>(foo: T) {\n    foo.bar(); // we can now use this method since i32 implements the\n               // Foo trait\n}\n\nfn main() {\n    some_func(5i32); // ok!\n}\n```\n\nOr in a generic context, an erroneous code example would look like:\n\n```compile_fail,E0277\nfn some_func<T>(foo: T) {\n    println!(\"{:?}\", foo); // error: the trait `core::fmt::Debug` is not\n                           //        implemented for the type `T`\n}\n\nfn main() {\n    // We now call the method with the i32 type,\n    // which *does* implement the Debug trait.\n    some_func(5i32);\n}\n```\n\nNote that the error here is in the definition of the generic function. Although\nwe only call it with a parameter that does implement `Debug`, the compiler\nstill rejects the function. It must work with all possible input types. In\norder to make this example compile, we need to restrict the generic type we're\naccepting:\n\n```\nuse std::fmt;\n\n// Restrict the input type to types that implement Debug.\nfn some_func<T: fmt::Debug>(foo: T) {\n    println!(\"{:?}\", foo);\n}\n\nfn main() {\n    // Calling the method is still fine, as i32 implements Debug.\n    some_func(5i32);\n\n    // This would fail to compile now:\n    // struct WithoutDebug;\n    // some_func(WithoutDebug);\n}\n```\n\nRust only looks at the signature of the called function, as such it must\nalready specify all requirements that will be used for every type parameter.\n"
+    }
+  },
+  {
+    "rendered": "error[E0373]: closure may outlive the current function, but it borrows `done_tx`, which is owned by the current function\n   --> src/storage/metadata/effects/ack_tests.rs:305:34\n    |\n294 |     std::thread::scope(|scope| {\n    |                         ----- has type `&'1 std::thread::Scope<'1, '_>`\n...\n305 |         let writer = scope.spawn(|| {\n    |                                  ^^ may outlive borrowed value `done_tx`\n...\n308 |             done_tx.send(()).unwrap();\n    |             ------- `done_tx` is borrowed here\n    |\nnote: function requires argument type to outlive `'1`\n   --> src/storage/metadata/effects/ack_tests.rs:305:22\n    |\n305 |           let writer = scope.spawn(|| {\n    |  ______________________^\n306 | |             started_tx.send(()).unwrap();\n307 | |             let result = meta.acknowledge_derived_effects(operation);\n308 | |             done_tx.send(()).unwrap();\n309 | |             result\n310 | |         });\n    | |__________^\nhelp: to force the closure to take ownership of `done_tx` (and any other referenced variables), use the `move` keyword\n    |\n305 |         let writer = scope.spawn(move || {\n    |                                  ++++\n\n",
+    "$message_type": "diagnostic",
+    "children": [
+      {
+        "children": [],
+        "code": null,
+        "level": "note",
+        "message": "function requires argument type to outlive `'1`",
+        "rendered": null,
+        "spans": [
+          {
+            "byte_end": 12414,
+            "byte_start": 12217,
+            "column_end": 11,
+            "column_start": 22,
+            "expansion": null,
+            "file_name": "src/storage/metadata/effects/ack_tests.rs",
+            "is_primary": true,
+            "label": null,
+            "line_end": 310,
+            "line_start": 305,
+            "suggested_replacement": null,
+            "suggestion_applicability": null,
+            "text": [
+              {
+                "highlight_end": 38,
+                "highlight_start": 22,
+                "text": "        let writer = scope.spawn(|| {"
+              },
+              {
+                "highlight_end": 42,
+                "highlight_start": 1,
+                "text": "            started_tx.send(()).unwrap();"
+              },
+              {
+                "highlight_end": 70,
+                "highlight_start": 1,
+                "text": "            let result = meta.acknowledge_derived_effects(operation);"
+              },
+              {
+                "highlight_end": 39,
+                "highlight_start": 1,
+                "text": "            done_tx.send(()).unwrap();"
+              },
+              {
+                "highlight_end": 19,
+                "highlight_start": 1,
+                "text": "            result"
+              },
+              {
+                "highlight_end": 11,
+                "highlight_start": 1,
+                "text": "        });"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "children": [],
+        "code": null,
+        "level": "help",
+        "message": "to force the closure to take ownership of `done_tx` (and any other referenced variables), use the `move` keyword",
+        "rendered": null,
+        "spans": [
+          {
+            "byte_end": 12229,
+            "byte_start": 12229,
+            "column_end": 34,
+            "column_start": 34,
+            "expansion": null,
+            "file_name": "src/storage/metadata/effects/ack_tests.rs",
+            "is_primary": true,
+            "label": null,
+            "line_end": 305,
+            "line_start": 305,
+            "suggested_replacement": "move ",
+            "suggestion_applicability": "MachineApplicable",
+            "text": [
+              {
+                "highlight_end": 34,
+                "highlight_start": 34,
+                "text": "        let writer = scope.spawn(|| {"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "level": "error",
+    "message": "closure may outlive the current function, but it borrows `done_tx`, which is owned by the current function",
+    "spans": [
+      {
+        "byte_end": 12365,
+        "byte_start": 12358,
+        "column_end": 20,
+        "column_start": 13,
+        "expansion": null,
+        "file_name": "src/storage/metadata/effects/ack_tests.rs",
+        "is_primary": false,
+        "label": "`done_tx` is borrowed here",
+        "line_end": 308,
+        "line_start": 308,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": [
+          {
+            "highlight_end": 20,
+            "highlight_start": 13,
+            "text": "            done_tx.send(()).unwrap();"
+          }
+        ]
+      },
+      {
+        "byte_end": 12231,
+        "byte_start": 12229,
+        "column_end": 36,
+        "column_start": 34,
+        "expansion": null,
+        "file_name": "src/storage/metadata/effects/ack_tests.rs",
+        "is_primary": true,
+        "label": "may outlive borrowed value `done_tx`",
+        "line_end": 305,
+        "line_start": 305,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": [
+          {
+            "highlight_end": 36,
+            "highlight_start": 34,
+            "text": "        let writer = scope.spawn(|| {"
+          }
+        ]
+      },
+      {
+        "byte_end": 11745,
+        "byte_start": 11740,
+        "column_end": 30,
+        "column_start": 25,
+        "expansion": null,
+        "file_name": "src/storage/metadata/effects/ack_tests.rs",
+        "is_primary": false,
+        "label": "has type `&'1 std::thread::Scope<'1, '_>`",
+        "line_end": 294,
+        "line_start": 294,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": [
+          {
+            "highlight_end": 30,
+            "highlight_start": 25,
+            "text": "    std::thread::scope(|scope| {"
+          }
+        ]
+      }
+    ],
+    "code": {
+      "code": "E0373",
+      "explanation": "A captured variable in a closure may not live long enough.\n\nErroneous code example:\n\n```compile_fail,E0373\nfn foo() -> Box<dyn Fn(u32) -> u32> {\n    let x = 0u32;\n    Box::new(|y| x + y)\n}\n```\n\nThis error occurs when an attempt is made to use data captured by a closure,\nwhen that data may no longer exist. It's most commonly seen when attempting to\nreturn a closure as shown in the previous code example.\n\nNotice that `x` is stack-allocated by `foo()`. By default, Rust captures\nclosed-over data by reference. This means that once `foo()` returns, `x` no\nlonger exists. An attempt to access `x` within the closure would thus be\nunsafe.\n\nAnother situation where this might be encountered is when spawning threads:\n\n```compile_fail,E0373\nfn foo() {\n    let x = 0u32;\n    let y = 1u32;\n\n    let thr = std::thread::spawn(|| {\n        x + y\n    });\n}\n```\n\nSince our new thread runs in parallel, the stack frame containing `x` and `y`\nmay well have disappeared by the time we try to use them. Even if we call\n`thr.join()` within foo (which blocks until `thr` has completed, ensuring the\nstack frame won't disappear), we will not succeed: the compiler cannot prove\nthat this behavior is safe, and so won't let us do it.\n\nThe solution to this problem is usually to switch to using a `move` closure.\nThis approach moves (or copies, where possible) data into the closure, rather\nthan taking references to it. For example:\n\n```\nfn foo() -> Box<dyn Fn(u32) -> u32> {\n    let x = 0u32;\n    Box::new(move |y| x + y)\n}\n```\n\nNow that the closure has its own copy of the data, there's no need to worry\nabout safety.\n\nThis error may also be encountered while using `async` blocks:\n\n```compile_fail,E0373,edition2018\nuse std::future::Future;\n\nasync fn f() {\n    let v = vec![1, 2, 3i32];\n    spawn(async { //~ ERROR E0373\n        println!(\"{:?}\", v)\n    });\n}\n\nfn spawn<F: Future + Send + 'static>(future: F) {\n    unimplemented!()\n}\n```\n\nSimilarly to closures, `async` blocks are not executed immediately and may\ncapture closed-over data by reference. For more information, see\n<https://rust-lang.github.io/async-book/03_async_await/01_chapter.html>.\n"
+    }
+  },
+  {
+    "rendered": "error[E0373]: closure may outlive the current function, but it borrows `started_tx`, which is owned by the current function\n   --> src/storage/metadata/effects/ack_tests.rs:305:34\n    |\n294 |     std::thread::scope(|scope| {\n    |                         ----- has type `&'1 std::thread::Scope<'1, '_>`\n...\n305 |         let writer = scope.spawn(|| {\n    |                                  ^^ may outlive borrowed value `started_tx`\n306 |             started_tx.send(()).unwrap();\n    |             ---------- `started_tx` is borrowed here\n    |\nnote: function requires argument type to outlive `'1`\n   --> src/storage/metadata/effects/ack_tests.rs:305:22\n    |\n305 |           let writer = scope.spawn(|| {\n    |  ______________________^\n306 | |             started_tx.send(()).unwrap();\n307 | |             let result = meta.acknowledge_derived_effects(operation);\n308 | |             done_tx.send(()).unwrap();\n309 | |             result\n310 | |         });\n    | |__________^\nhelp: to force the closure to take ownership of `started_tx` (and any other referenced variables), use the `move` keyword\n    |\n305 |         let writer = scope.spawn(move || {\n    |                                  ++++\n\n",
+    "$message_type": "diagnostic",
+    "children": [
+      {
+        "children": [],
+        "code": null,
+        "level": "note",
+        "message": "function requires argument type to outlive `'1`",
+        "rendered": null,
+        "spans": [
+          {
+            "byte_end": 12414,
+            "byte_start": 12217,
+            "column_end": 11,
+            "column_start": 22,
+            "expansion": null,
+            "file_name": "src/storage/metadata/effects/ack_tests.rs",
+            "is_primary": true,
+            "label": null,
+            "line_end": 310,
+            "line_start": 305,
+            "suggested_replacement": null,
+            "suggestion_applicability": null,
+            "text": [
+              {
+                "highlight_end": 38,
+                "highlight_start": 22,
+                "text": "        let writer = scope.spawn(|| {"
+              },
+              {
+                "highlight_end": 42,
+                "highlight_start": 1,
+                "text": "            started_tx.send(()).unwrap();"
+              },
+              {
+                "highlight_end": 70,
+                "highlight_start": 1,
+                "text": "            let result = meta.acknowledge_derived_effects(operation);"
+              },
+              {
+                "highlight_end": 39,
+                "highlight_start": 1,
+                "text": "            done_tx.send(()).unwrap();"
+              },
+              {
+                "highlight_end": 19,
+                "highlight_start": 1,
+                "text": "            result"
+              },
+              {
+                "highlight_end": 11,
+                "highlight_start": 1,
+                "text": "        });"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "children": [],
+        "code": null,
+        "level": "help",
+        "message": "to force the closure to take ownership of `started_tx` (and any other referenced variables), use the `move` keyword",
+        "rendered": null,
+        "spans": [
+          {
+            "byte_end": 12229,
+            "byte_start": 12229,
+            "column_end": 34,
+            "column_start": 34,
+            "expansion": null,
+            "file_name": "src/storage/metadata/effects/ack_tests.rs",
+            "is_primary": true,
+            "label": null,
+            "line_end": 305,
+            "line_start": 305,
+            "suggested_replacement": "move ",
+            "suggestion_applicability": "MachineApplicable",
+            "text": [
+              {
+                "highlight_end": 34,
+                "highlight_start": 34,
+                "text": "        let writer = scope.spawn(|| {"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "level": "error",
+    "message": "closure may outlive the current function, but it borrows `started_tx`, which is owned by the current function",
+    "spans": [
+      {
+        "byte_end": 12256,
+        "byte_start": 12246,
+        "column_end": 23,
+        "column_start": 13,
+        "expansion": null,
+        "file_name": "src/storage/metadata/effects/ack_tests.rs",
+        "is_primary": false,
+        "label": "`started_tx` is borrowed here",
+        "line_end": 306,
+        "line_start": 306,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": [
+          {
+            "highlight_end": 23,
+            "highlight_start": 13,
+            "text": "            started_tx.send(()).unwrap();"
+          }
+        ]
+      },
+      {
+        "byte_end": 12231,
+        "byte_start": 12229,
+        "column_end": 36,
+        "column_start": 34,
+        "expansion": null,
+        "file_name": "src/storage/metadata/effects/ack_tests.rs",
+        "is_primary": true,
+        "label": "may outlive borrowed value `started_tx`",
+        "line_end": 305,
+        "line_start": 305,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": [
+          {
+            "highlight_end": 36,
+            "highlight_start": 34,
+            "text": "        let writer = scope.spawn(|| {"
+          }
+        ]
+      },
+      {
+        "byte_end": 11745,
+        "byte_start": 11740,
+        "column_end": 30,
+        "column_start": 25,
+        "expansion": null,
+        "file_name": "src/storage/metadata/effects/ack_tests.rs",
+        "is_primary": false,
+        "label": "has type `&'1 std::thread::Scope<'1, '_>`",
+        "line_end": 294,
+        "line_start": 294,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": [
+          {
+            "highlight_end": 30,
+            "highlight_start": 25,
+            "text": "    std::thread::scope(|scope| {"
+          }
+        ]
+      }
+    ],
+    "code": {
+      "code": "E0373",
+      "explanation": "A captured variable in a closure may not live long enough.\n\nErroneous code example:\n\n```compile_fail,E0373\nfn foo() -> Box<dyn Fn(u32) -> u32> {\n    let x = 0u32;\n    Box::new(|y| x + y)\n}\n```\n\nThis error occurs when an attempt is made to use data captured by a closure,\nwhen that data may no longer exist. It's most commonly seen when attempting to\nreturn a closure as shown in the previous code example.\n\nNotice that `x` is stack-allocated by `foo()`. By default, Rust captures\nclosed-over data by reference. This means that once `foo()` returns, `x` no\nlonger exists. An attempt to access `x` within the closure would thus be\nunsafe.\n\nAnother situation where this might be encountered is when spawning threads:\n\n```compile_fail,E0373\nfn foo() {\n    let x = 0u32;\n    let y = 1u32;\n\n    let thr = std::thread::spawn(|| {\n        x + y\n    });\n}\n```\n\nSince our new thread runs in parallel, the stack frame containing `x` and `y`\nmay well have disappeared by the time we try to use them. Even if we call\n`thr.join()` within foo (which blocks until `thr` has completed, ensuring the\nstack frame won't disappear), we will not succeed: the compiler cannot prove\nthat this behavior is safe, and so won't let us do it.\n\nThe solution to this problem is usually to switch to using a `move` closure.\nThis approach moves (or copies, where possible) data into the closure, rather\nthan taking references to it. For example:\n\n```\nfn foo() -> Box<dyn Fn(u32) -> u32> {\n    let x = 0u32;\n    Box::new(move |y| x + y)\n}\n```\n\nNow that the closure has its own copy of the data, there's no need to worry\nabout safety.\n\nThis error may also be encountered while using `async` blocks:\n\n```compile_fail,E0373,edition2018\nuse std::future::Future;\n\nasync fn f() {\n    let v = vec![1, 2, 3i32];\n    spawn(async { //~ ERROR E0373\n        println!(\"{:?}\", v)\n    });\n}\n\nfn spawn<F: Future + Send + 'static>(future: F) {\n    unimplemented!()\n}\n```\n\nSimilarly to closures, `async` blocks are not executed immediately and may\ncapture closed-over data by reference. For more information, see\n<https://rust-lang.github.io/async-book/03_async_await/01_chapter.html>.\n"
+    }
+  }
+]

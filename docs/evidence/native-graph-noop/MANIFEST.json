@@ -1,0 +1,82 @@
+{
+  "runtime_sha": "38035646bd7fa774d857126b7ef19eb964f1d20f",
+  "base_sha": "292fb290e24736f5ff86baf345f5b2794d17aa9d",
+  "base_pr": 97,
+  "branch": "impl/native-graph-noop",
+  "home_evidence": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-native-graph-noop-3803564",
+  "environment": {
+    "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "rust": "1.94.1",
+    "runtime_network": "none",
+    "cpus": 2,
+    "memory_bytes": 4294967296,
+    "cargo_build_jobs": 2,
+    "source": "immutable allowlist mounted /work:ro",
+    "cargo_target": "private reflink copies; cargo clean -p recalld in own target before each frozen build",
+    "no_home_credentials_socket_mounts": true
+  },
+  "runs": [
+    {
+      "name": "run-1",
+      "status": "compile failed: missing MutationOutcome import; no tests ran",
+      "post_validation": {
+        "source_manifest_sha256": "ca49d28ac6c47e4683dd533c1bc10922ebe99ef1e15df0f06cce940dc85c2e6d",
+        "file_count": 213,
+        "snapshot_verified_after": true,
+        "exit_code": 101,
+        "oom_killed": false,
+        "validation_log_sha256": "d8ca78e73a78fcb6a5bee340bf8cb57373864749d51107862950835ef38052ba"
+      },
+      "artifacts": {
+        "post-validation.json": "b9f6c924ecbe21c77bce6cb7df90d7c986c61d87c5365ee55d134f0215bf9451",
+        "source.json": "ca49d28ac6c47e4683dd533c1bc10922ebe99ef1e15df0f06cce940dc85c2e6d",
+        "validate.sh": "a285fb6f1f5db371fb41466c00bbc339ef74d041c1875a4112ed2f4ae65e0de9",
+        "validation.log": "d8ca78e73a78fcb6a5bee340bf8cb57373864749d51107862950835ef38052ba"
+      }
+    },
+    {
+      "name": "run-2",
+      "status": "19 focused + 945 library + 2 CLI PASS; fmt PASS; clippy 0 with warnings",
+      "post_validation": {
+        "source_manifest_sha256": "95ee63a5c5e8350a733b19aff94d7c565d8ae38069e8ce539d92ff26575bef50",
+        "file_count": 213,
+        "snapshot_verified_after": true,
+        "exit_code": 0,
+        "oom_killed": false,
+        "validation_log_sha256": "7c3081672aec54f32db717d5bb5a1df288173bb423861e84cde593a6584a4e9c",
+        "working_source_verified": true,
+        "focused": 19,
+        "library": 945,
+        "cli": 2,
+        "ignored_doctests": 4,
+        "fmt": "PASS",
+        "clippy": "exit 0 with warnings",
+        "clippy_summaries": [
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib test) generated 1 warning",
+          "warning: `recalld` (lib) generated 2 warnings",
+          "warning: `recalld` (lib) generated 612 warnings (run `cargo clippy --fix --lib -p recalld` to apply 82 suggestions)",
+          "warning: `recalld` (bin \"recalld\" test) generated 1 warning",
+          "warning: `recalld` (bin \"recalld\") generated 1 warning (1 duplicate)",
+          "warning: `recalld` (lib test) generated 651 warnings (611 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 3 suggestions)"
+        ],
+        "binary_sha256": {
+          "/target/debug/deps/lifecycle_cli-4843a41927cafc6b": "6aeab248d96ccce8feac37ad8330a29390f090d1c639916513f3daf4e5023757",
+          "/target/debug/deps/recalld-c8392f2a5ef64898": "2ada201856ff68dcfc63b16da06621a40a8216dc092e17cb27da5b9ef583a61b",
+          "/target/debug/deps/recalld-e423ca3d07310388": "c72ba73bb4c20f3884d833d54b44496636161190f13a5238392c400b45e71fea",
+          "/target/debug/deps/recalld_cli-2dba722497aafcf6": "74ed83548d351e9802b6d7d19f3877043322de7c02a1b99dcf68d0ffa251003f",
+          "/target/debug/deps/recalld_text_migrate-46e63a13ed2022bb": "61efbd26d0983dcc269f41f462d80716f89f5eb1dfd3172dfd2538f51b93ce41",
+          "/target/debug/deps/text_migration_cli-92bf02c892a58814": "435db38dc27708e8f59b51694459142924066e6afcc77ef01f09499f769dc162",
+          "/target/debug/recalld": "f8b5edbe96ff6d126b7bce7fec98ff1b6427a261f724a0ed362af8fae77be69b"
+        }
+      },
+      "artifacts": {
+        "post-validation.json": "49048a719202a213026baaebc19476da6975eb4f516a4946caec47ef9b4061a1",
+        "source.json": "95ee63a5c5e8350a733b19aff94d7c565d8ae38069e8ce539d92ff26575bef50",
+        "validate.sh": "a285fb6f1f5db371fb41466c00bbc339ef74d041c1875a4112ed2f4ae65e0de9",
+        "validation.log": "7c3081672aec54f32db717d5bb5a1df288173bb423861e84cde593a6584a4e9c"
+      }
+    }
+  ],
+  "observed_completion_utc": "2026-11-14T19:03:18.407048+00:00"
+}

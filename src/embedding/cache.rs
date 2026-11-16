@@ -49,7 +49,15 @@ impl CachedProvider {
 
     async fn cached_embed(&self, task: Task, text: &str) -> Result<Vec<f32>, EmbeddingError> {
         let key = (task, text.to_owned());
-        if let Some(embedding) = self.cache.get(&key).await {
+        let lookup = crate::performance::Timer::new("embedding.cache_lookup");
+        let cached = self.cache.get(&key).await;
+        lookup.complete();
+        crate::performance::event!(
+            kind = "embedding_cache",
+            hit = cached.is_some(),
+            requested_vectors = 1
+        );
+        if let Some(embedding) = cached {
             return Ok(embedding);
         }
         let embedding = match task {

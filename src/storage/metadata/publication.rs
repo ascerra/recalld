@@ -124,6 +124,7 @@ mod tests {
 pub(crate) struct CanonicalReadView {
     read: redb::ReadTransaction,
     pub at: control::GenerationRef,
+    native_owned: bool,
 }
 
 impl MetadataStore {
@@ -163,6 +164,7 @@ impl MetadataStore {
         Ok(CanonicalReadView {
             read,
             at: state.generation_ref(),
+            native_owned: self.native_lifecycle_only,
         })
     }
 
@@ -193,6 +195,36 @@ impl MetadataStore {
 }
 
 impl CanonicalReadView {
+    /// Owner-aware semantic admission on the same validated canonical snapshot.
+    /// A namespace descriptor or provider alone cannot grant native serving.
+    pub(crate) fn check_native_query_profile(
+        &self,
+        namespace: &NamespaceConfig,
+        active: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<(), StorageError> {
+        if !self.native_owned {
+            return Err(StorageError::RecoveryRequired(
+                "native query requires an owned native read view".into(),
+            ));
+        }
+        let actual = self
+            .namespaces()?
+            .into_iter()
+            .find(|ns| ns.id == namespace.id)
+            .ok_or(StorageError::NamespaceNotFound(namespace.id.get()))?;
+        if control::encode(&actual)? != control::encode(namespace)? {
+            return Err(StorageError::RecoveryRequired(
+                "native query canonical scope mismatch".into(),
+            ));
+        }
+        let active = active.ok_or_else(|| {
+            StorageError::RecoveryRequired("native query provider identity missing".into())
+        })?;
+        crate::embedding::profile::require_compatible(&actual, active)
+            .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+        Ok(())
+    }
+
     pub(crate) fn get(&self, id: MemoryId) -> Result<Option<CachedRecord>, StorageError> {
         Ok(self.disk_record(id)?.as_ref().map(CachedRecord::from))
     }
@@ -318,12 +350,19 @@ pub(super) fn check_current_pending(
                 let (key, value) = row?;
                 let progress: crate::storage::purge::PurgeProgress =
                     control::decode(value.value())?;
-                if progress.version != 1
+                if !matches!(progress.version, 1 | 2)
+                    || (progress.version == 2 && state.control_schema_version != 2)
+                    || !purge::start_matches(&progress)
                     || key.value() != progress.start_receipt.operation_id.as_bytes()
                 {
                     return Err(StorageError::InvalidControl(
                         "invalid current purge identity".into(),
                     ));
+                }
+                if progress.version == 2
+                    && progress.stage == crate::storage::purge::PurgeStage::Complete
+                {
+                    purge::check_completed_native_progress(read, &progress)?;
                 }
                 // Completed restored ancestry was verified at open and is not
                 // forbidden just because it belongs to an earlier lineage.
