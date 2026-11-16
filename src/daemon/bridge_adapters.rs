@@ -190,6 +190,31 @@ impl bridge::StorageEngine for RemoteStorageAdapter {
             Err(_) => Reply::uncertain(),
         }
     }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::batch_api1::Reply;
+        if let Err(e) = request.validate() {
+            return Reply::invalid(e);
+        }
+        let legacy = request
+            .legacy()
+            .ok()
+            .and_then(|_| serde_json::to_value(&request.input).ok());
+        let params = match serde_json::to_value(&request) {
+            Ok(v) => v,
+            Err(_) => return Reply::Uncertain(None),
+        };
+        match self.client.call_api1_store_batch(params, legacy).await {
+            Ok((true, value)) => Reply::decode(value, &request),
+            Ok((false, value)) => match serde_json::from_value(value) {
+                Ok(out) => Reply::Legacy(Ok(out)),
+                Err(_) => Reply::Uncertain(None),
+            },
+            Err(_) => Reply::Uncertain(None),
+        }
+    }
     async fn mutate_native_batch(
         &self,
         input: crate::storage::batch::BatchInput,

@@ -969,9 +969,6 @@ async fn native_single_scope_lineage_controls_do_not_replay_other_namespace_or_c
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
 }
 
-#[path = "owned_ids_producer_tests.rs"]
-mod owned_ids;
-
 // Run against the pre-profile-resolver runtime to retain a genuine historical
 // descriptor-input receipt. The later resolver must replay these exact bytes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1738,3 +1735,6 @@ async fn native_document_recipe_plain_batch_with_explicit_auxiliary_disable() {
         vec!["header\n\nbody raw entity/alice raw entity/bob topic/rust emotion/calm"]
     );
 }
+
+#[path = "owned_ids_producer_tests.rs"]
+mod owned_ids;

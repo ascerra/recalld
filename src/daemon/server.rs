@@ -236,7 +236,7 @@ async fn handle_connection(
                             Err(BridgeError::InvalidInput(
                                 format!("native observed writes require ping negotiation with protocolVersion {PROTOCOL_VERSION} and maxMessageSize {MAX_MESSAGE_SIZE} before execution"),
                             ))
-                        } else if matches!(method.as_str(), "feedback_api1_v1" | "forget_api1_v1" | "store_api1_v1") && peer_limit < MAX_MESSAGE_SIZE {
+                        } else if matches!(method.as_str(), "feedback_api1_v1" | "forget_api1_v1" | "store_api1_v1" | "store_batch_api1_v1") && peer_limit < MAX_MESSAGE_SIZE {
                             Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
                         } else {
                             dispatch(
@@ -479,8 +479,30 @@ async fn dispatch(
             "maxMessageSize": MAX_MESSAGE_SIZE,
             "api1LifecycleV1": storage.supports_api1_lifecycle(),
             "api1StoreV1": storage.supports_api1_store(),
+            "api1StoreBatchV1": storage.supports_api1_store_batch(),
         })),
 
+        "store_batch_api1_v1" => {
+            use crate::serialization::batch_api1::{Reply, Request};
+            if !storage.supports_api1_store_batch() {
+                return Err(BridgeError::Unavailable(
+                    "API1 batch capability unavailable".into(),
+                ));
+            }
+            let reply = match serde_json::from_value::<Request>(params) {
+                Ok(request) => storage.store_batch_api1(request).await,
+                Err(_) => Reply::invalid(BridgeError::InvalidInput(
+                    "invalid API1 batch parameters".into(),
+                )),
+            };
+            serde_json::to_vec(&reply)
+                .and_then(|bytes| serde_json::from_slice(&bytes))
+                .map_err(|_| {
+                    BridgeError::PartiallyApplied(
+                        "API1 batch reply serialization failed; reconcile original identity".into(),
+                    )
+                })
+        }
         "store_api1_v1" => {
             if !storage.supports_api1_store() {
                 return Err(BridgeError::InvalidInput(

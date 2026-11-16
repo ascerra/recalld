@@ -17,6 +17,23 @@ const ENVELOPE_BYTES: usize = 16 * 1024;
 // Includes the response-only advisory's three 240-byte summaries with JSON
 // escaping, bounded field diagnostics, stored result and per-item framing.
 const ITEM_BYTES: usize = 8 * 1024;
+// Upper bound for ONE added API1 compatibility entry (including nested objects):
+// <=40 fixed ASCII keys/structural slots at32 bytes; <=12 numeric/boolean tokens
+// at32 bytes;128 array/object punctuation bytes. String payload budgets include
+// 6 UUIDs, namespace64, formatted timestamp64,3 summaries of240, and512 bytes
+// for phase/status/generation/advisory warning + repeated closed error/field.
+// Each payload byte is charged at JSON's maximum6-byte control escape. This
+// deliberately bounds impossible simultaneous option combinations as well.
+pub(crate) const API1_COMPAT_ITEM_BYTES: usize = 40 * 32
+    + 12 * 32
+    + 128
+    + 6 * (6 * 36
+        + crate::model::constants::NAMESPACE_NAME_MAX_BYTES
+        + 64
+        + crate::model::constants::MAX_NEAR_DUPLICATE_MATCHES
+            * crate::model::constants::NEAR_DUPLICATE_SUMMARY_MAX_BYTES
+        + 512);
+
 // NativeRecordChange has at most two fixed numeric/hash states: no original
 // summary, text, labels or profile descriptor. Profile ID is fixed 68 bytes.
 const RECORD_CHANGE_BYTES: usize = 8 * 1024;
@@ -31,6 +48,15 @@ impl BatchBudget {
     pub(crate) const STANDARD: Self = Self {
         limit: MAX_BATCH_JSON_BYTES,
     };
+    /// API1 compatibility duplicates bounded result/advisory fields alongside
+    /// the retained batch. Charge the derived compatibility bound per index; receipts still
+    /// occur once. This affects transport admission, never request identity.
+    pub(crate) fn api1(items: usize) -> Self {
+        Self {
+            limit: MAX_BATCH_JSON_BYTES
+                .saturating_sub(items.saturating_mul(API1_COMPAT_ITEM_BYTES)),
+        }
+    }
     fn error(receipt: Option<&WriteReceipt>) -> StorageError {
         StorageError::BatchResponseTooLarge {
             reservation_receipt: receipt.cloned().map(Box::new),
@@ -386,6 +412,29 @@ mod tests {
             failed: 0,
             unresolved: 0,
         };
+        // API1 actual projection, same typed serializer-stress fixture as below.
+        // Missing stored identity deliberately exercises fail-closed retention.
+        use crate::serialization::batch_api1::{Reply as Api1Reply, Surface};
+        let (_, api1_rest) = Api1Reply::Owned(Ok(outcome.clone().into())).response(Surface::Rest);
+        let api1_mcp = Api1Reply::Owned(Ok(outcome.clone().into())).mcp();
+        let api1_daemon = crate::daemon::protocol::DaemonResponse::success(
+            u64::MAX,
+            serde_json::to_value(Api1Reply::Owned(Ok(outcome.clone().into()))).unwrap(),
+        );
+        for bytes in [
+            serde_json::to_vec(&api1_rest).unwrap(),
+            serde_json::to_vec(&api1_daemon).unwrap(),
+            serde_json::to_vec(
+                &serde_json::json!({"jsonrpc":"2.0","id":u64::MAX,"result":api1_mcp}),
+            )
+            .unwrap(),
+        ] {
+            assert!(
+                bytes.len() < crate::daemon::protocol::MAX_MESSAGE_SIZE,
+                "full API1 retained response {}",
+                bytes.len()
+            );
+        }
         let reply =
             crate::serialization::native_batch::NativeBatchReply::Outcome(outcome.clone().into());
         let daemon = crate::daemon::protocol::DaemonResponse::success(

@@ -871,8 +871,6 @@ mod store_batches;
 
 #[path = "mixed_history_tests.rs"]
 mod mixed_history;
-#[path = "store_producer_tests.rs"]
-mod store_producers;
 
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
@@ -882,3 +880,6 @@ mod request_context;
 
 #[path = "compaction_tests.rs"]
 mod compaction;
+
+#[path = "store_producer_tests.rs"]
+mod store_producers;

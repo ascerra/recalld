@@ -2091,8 +2091,8 @@ pub async fn batch_store_versioned(
         .into_response();
     }
     if version == ContractVersion::V1 {
-        return match Json::<BatchStoreRequest>::from_request(request, &state).await {
-            Ok(body) => batch_store(State(state), body).await.into_response(),
+        return match Json::<super::store_api1::BatchRequest>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::batch(state, body).await,
             Err(e) => e.into_response(),
         };
     }

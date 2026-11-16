@@ -513,3 +513,6 @@ async fn native_api1_store_remote_negotiation_small_peer_and_native_reopen() {
     );
     drop((reopened, root));
 }
+
+#[path = "batch_api1_tests.rs"]
+mod batch_api1;

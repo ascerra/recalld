@@ -117,3 +117,89 @@ pub(super) async fn create(state: AppState, body: Request) -> Response {
         }
     }
 }
+
+#[derive(Deserialize)]
+pub(super) struct BatchRequest {
+    memories: Vec<Request>,
+}
+
+pub(super) async fn batch(state: AppState, body: BatchRequest) -> Response {
+    use crate::serialization::batch_api1::{self, Surface};
+    if body.memories.is_empty() || body.memories.len() > crate::model::constants::MAX_BATCH_MEMORIES
+    {
+        return AppError::BadRequest {
+            message: "memories must contain 1–100 items".into(),
+            field: Some("memories".into()),
+        }
+        .into_response();
+    }
+    let native = match state.storage.native_store_format().await {
+        Ok(v) => v,
+        Err(e) => return AppError::from(e).into_response(),
+    };
+    if !native {
+        if body.memories.iter().any(|m| m.profile.is_some()) {
+            return error(native_single::Reply::invalid(InputError {
+                code: "UNSUPPORTED_CONSTRAINT",
+                field: "/memories/embeddingProfileId".into(),
+                message: "legacy storage cannot verify an explicit embedding profile ID",
+            }));
+        }
+        return super::handlers::batch_store(
+            State(state),
+            Json(super::models::BatchStoreRequest {
+                memories: body.memories.into_iter().map(|m| m.memory).collect(),
+            }),
+        )
+        .await
+        .into_response();
+    }
+    let Some(producer) = state.native_batches.as_ref() else {
+        return batch_reply(batch_api1::Reply::Owned(Err(
+            crate::serialization::native_batch::BatchFailure::unavailable(),
+        )));
+    };
+    let items=body.memories.into_iter().map(|m|{
+        let r=m.memory;
+        let mut value=serde_json::json!({"summary":r.summary,"namespace":r.namespace,"tags":r.tags,"entities":r.entities,"topics":r.topics,"emotions":r.emotions});
+        // Match the typed REST extractor's omission/null semantics. These are
+        // caller values, not sampled defaults. Never derive a profile descriptor.
+        if let Some(v)=r.full_text {value["fullText"]=serde_json::json!(v);}
+        if let Some(v)=r.embedding {value["embedding"]=serde_json::json!(v);}
+        if let Some(v)=r.initial_stability {value["initialStability"]=serde_json::json!(v);}
+        if let Some(v)=r.created_at {value["createdAt"]=serde_json::json!(v);}
+        if let Some(v)=r.parent_id {value["parentId"]=serde_json::json!(v);}
+        if let Some(v)=r.supersedes {value["supersedes"]=serde_json::json!(v);}
+        if let Some(v)=r.check_duplicates {value["checkDuplicates"]=serde_json::json!(v);}
+        if let Some(v)=m.profile {value["embeddingProfileId"]=v;}
+        value
+    }).collect();
+    let input = crate::storage::batch::BatchInput {
+        request_context: None,
+        expected_generation: None,
+        result_version: 1,
+        mutation_version: 1,
+        kind: crate::storage::batch::BatchKind::Insert,
+        items,
+        default_namespace: state.default_namespace.clone(),
+        store_id: None,
+        idempotency_key: None,
+        batch_operation_id: None,
+    };
+    batch_reply(
+        producer
+            .store_batch_api1(batch_api1::Request {
+                input,
+                surface: Surface::Rest,
+            })
+            .await,
+    )
+}
+fn batch_reply(reply: crate::serialization::batch_api1::Reply) -> Response {
+    let (status, value) = reply.response(crate::serialization::batch_api1::Surface::Rest);
+    (
+        axum::http::StatusCode::from_u16(status).expect("fixed status"),
+        Json(value),
+    )
+        .into_response()
+}

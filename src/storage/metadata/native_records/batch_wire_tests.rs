@@ -750,6 +750,22 @@ async fn batch_wire_historical_oversize_completed_pending_retained_bytes_and_set
                 }
                 let failure = a.mutate_native_batch(replay.clone()).await.unwrap_err();
                 assert_eq!(failure.error.code, "RESPONSE_TOO_LARGE");
+                // Actual BEFORE106 retained failure, projected through the new
+                // API1 serializer only. This is NOT an original1 replay claim.
+                use crate::serialization::batch_api1::{Reply as Api1Reply, Surface};
+                let (api1_status, api1_value) =
+                    Api1Reply::Owned(Err(failure.clone())).response(Surface::Rest);
+                assert_eq!(api1_status, 400);
+                assert_eq!(api1_value["error"]["commitState"], "committed");
+                let mut api1_expected = reservation.clone();
+                api1_expected.replayed = true;
+                assert_eq!(api1_value["reservationReceipt"], canonical(&api1_expected));
+                assert!(api1_value.get("batch").is_none());
+                assert!(api1_value.get("receipt").is_none());
+                assert!(api1_value.get("readiness").is_none());
+                let api1_mcp = Api1Reply::Owned(Err(failure.clone())).mcp();
+                assert_eq!(api1_mcp.is_error, Some(true));
+                assert!(serde_json::to_vec(&api1_mcp).unwrap().len() < 64 * 1024);
                 let rpc = NativeBatchReply::Failure(failure);
                 let daemon =
                     crate::daemon::protocol::DaemonResponse::success(u64::MAX, canonical(&rpc));
