@@ -21,6 +21,71 @@ pub enum ChannelParticipation {
     Completed,
 }
 
+/// Unit of actual source work; counts with different units must not be summed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExaminationUnit {
+    VectorEntries,
+    EntityPostings,
+    FtsRows,
+    ScoredVectors,
+    /// Canonical records actually presented to the post-projection hard filter.
+    CanonicalRecords,
+}
+
+/// First actual short-circuit rejection; never IDs or predicate values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HardFilterRejection {
+    Namespace,
+    Tombstone,
+    Ghost,
+    Phase,
+    Strength,
+    Permastore,
+    Labels,
+    RequiredTag,
+    ExcludedTag,
+}
+
+/// Shared canonical eligibility work, independent of channel participation.
+/// Counts loop rows, not physical storage reads, skipped upstream work or UUIDs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalEligibilityDiagnostics {
+    pub examined_unit: ExaminationUnit,
+    pub examined: usize,
+    pub passed: usize,
+    pub first_rejections: BTreeMap<HardFilterRejection, usize>,
+}
+
+impl Default for CanonicalEligibilityDiagnostics {
+    fn default() -> Self {
+        Self {
+            examined_unit: ExaminationUnit::CanonicalRecords,
+            examined: 0,
+            passed: 0,
+            first_rejections: BTreeMap::new(),
+        }
+    }
+}
+
+/// Facts captured by a producer during its actual scan, before union/ranking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceCoverage {
+    pub examined_unit: ExaminationUnit,
+    pub examined: usize,
+    /// Distinct valid scored/qualified IDs before the candidate cap.
+    pub eligible: usize,
+    pub exhausted: bool,
+    pub candidate_limited: bool,
+    pub budget_exhausted: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceResults<T> {
+    pub results: Vec<T>,
+    /// None for an adapter that cannot measure its source operation.
+    pub coverage: Option<SourceCoverage>,
+}
+
 /// Counts overlap across channels and must not be summed as unique matches.
 /// None means unmeasured, not zero or exhausted. Source-level counts precede
 /// downstream fusion/minScore/version resolution and final result truncation.
@@ -32,6 +97,7 @@ pub struct ChannelDiagnostics {
     /// Eligible channel members entering the candidate pool after its cap.
     pub admitted: Option<usize>,
     pub examined: Option<usize>,
+    pub examined_unit: Option<ExaminationUnit>,
     pub eligible: Option<usize>,
     pub exhausted: Option<bool>,
     pub candidate_limited: Option<bool>,
@@ -85,6 +151,22 @@ pub(super) fn empty_channels() -> BTreeMap<RetrievalChannel, ChannelDiagnostics>
 }
 
 impl SemanticsDiagnostics {
+    pub(super) fn observe_source(
+        &mut self,
+        channel: RetrievalChannel,
+        coverage: Option<SourceCoverage>,
+    ) {
+        if let (Some(channels), Some(coverage)) = (&mut self.channels, coverage) {
+            let observation = channels.get_mut(&channel).unwrap();
+            observation.examined = Some(coverage.examined);
+            observation.examined_unit = Some(coverage.examined_unit);
+            observation.eligible = Some(coverage.eligible);
+            observation.exhausted = Some(coverage.exhausted);
+            observation.candidate_limited = Some(coverage.candidate_limited);
+            observation.budget_exhausted = Some(coverage.budget_exhausted);
+        }
+    }
+
     pub(super) fn observe_channel(
         &mut self,
         channel: RetrievalChannel,
@@ -140,6 +222,7 @@ impl SemanticsDiagnostics {
                     offered: Some(coverage.admitted),
                     admitted: Some(admitted(RetrievalChannel::Fts)),
                     examined: Some(coverage.examined),
+                    examined_unit: Some(ExaminationUnit::FtsRows),
                     eligible: Some(coverage.eligible),
                     exhausted: Some(coverage.exhausted),
                     candidate_limited: Some(coverage.candidate_limited),
@@ -160,6 +243,10 @@ impl SemanticsDiagnostics {
                 .unwrap()
                 .get_mut(&RetrievalChannel::Metadata)
                 .unwrap();
+            if let Some(facts) = &self.canonical_eligibility {
+                metadata.examined = Some(facts.examined);
+                metadata.examined_unit = Some(facts.examined_unit);
+            }
             metadata.eligible = Some(eligible);
             metadata.exhausted = Some(true); // Canonical namespace enumeration completed.
             metadata.budget_exhausted = Some(false); // No early examination ceiling.

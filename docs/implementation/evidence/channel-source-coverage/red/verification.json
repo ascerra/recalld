@@ -1,0 +1,25 @@
+{
+  "source_commit": "02aaefae62e6eea6ce1c9f15c8edcd123be4d2f6",
+  "source_files": 233,
+  "manifest_sha256": "430b29fd41087fbcd007e104e76c780991a0dfb4f1c3f4ab9c6859ad0a51dbfd",
+  "inside_precompile_postrun_match": true,
+  "host_snapshot_worktree_commit_match": true,
+  "library_executable_sha256": "b365d9aa49c567c9e94e2f9c64a5fcdb2427ff186cf66aaf85d49afd33344974",
+  "log_sha256": "25f4c24fb49c8782e88f5540383a3e8a5a4c6d9b9096cb054f94bbdd491abd1d",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 101,
+    "Error": "",
+    "StartedAt": "2026-11-15T01:31:06.081655756Z",
+    "FinishedAt": "2026-11-15T01:32:07.825060487Z"
+  },
+  "results": [
+    "test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1042 filtered out; finished in 0.01s"
+  ]
+}
