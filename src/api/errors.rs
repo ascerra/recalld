@@ -26,6 +26,11 @@ use crate::serialization::ApiError;
 /// human-readable message, and an optional field name for validation errors.
 #[derive(Debug)]
 pub enum AppError {
+    /// A catalog worker/commit has no known complete receipt. Never invent one.
+    MutationUnknown {
+        operation_id: Option<uuid::Uuid>,
+        message: String,
+    },
     CommittedMutation {
         receipt: crate::storage::control::WriteReceipt,
         message: String,
@@ -102,13 +107,29 @@ impl IntoResponse for AppError {
             )
                 .into_response();
         }
+        if let AppError::MutationUnknown {
+            operation_id,
+            message,
+        } = self
+        {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "COMMIT_OUTCOME_UNKNOWN", "commitState": "unknown",
+                    "operationId": operation_id, "message": message,
+                })),
+            )
+                .into_response();
+        }
         if let AppError::CommittedMutation { receipt, message } = self {
             return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
                 "error": "INDEX_NOT_READY", "commitState": "committed", "ready": false, "receipt": receipt, "message": message,
             }))).into_response();
         }
         let (status, error_code, message, field) = match &self {
-            AppError::Observation(_) | AppError::CommittedMutation { .. } => unreachable!(),
+            AppError::Observation(_)
+            | AppError::CommittedMutation { .. }
+            | AppError::MutationUnknown { .. } => unreachable!(),
             AppError::NotFound { resource, id } => (
                 StatusCode::NOT_FOUND,
                 "NOT_FOUND".to_string(),

@@ -1445,3 +1445,40 @@ pub(crate) async fn native_lifecycle_test_remote(
         task,
     )
 }
+
+/// Isolated actual framed namespace connection for catalog completion regressions.
+#[cfg(test)]
+pub(crate) async fn catalog_test_remote(
+    namespaces: Arc<dyn NamespaceRegistry>,
+    path: &std::path::Path,
+) -> (
+    Arc<crate::daemon::bridge_adapters::RemoteNamespaceAdapter>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        handle_connection(
+            stub.clone(),
+            stub.clone(),
+            namespaces,
+            stub,
+            stream,
+            Arc::new(AtomicU32::new(1)),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            tx,
+        )
+        .await;
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(path).await.unwrap());
+    client.ping().await.unwrap();
+    (
+        Arc::new(crate::daemon::bridge_adapters::RemoteNamespaceAdapter::new(
+            client,
+        )),
+        task,
+    )
+}

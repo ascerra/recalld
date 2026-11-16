@@ -1,0 +1,88 @@
+[
+  {
+    "path": "default/vectors.dat",
+    "before_len": 64,
+    "after_len": 64,
+    "before_sha256": "726e9f5481f7cfefb34786f7d78c1f24fdfc1f989caf08d3ddf39cd32a8352a7",
+    "after_sha256": "726e9f5481f7cfefb34786f7d78c1f24fdfc1f989caf08d3ddf39cd32a8352a7",
+    "differences": []
+  },
+  {
+    "path": "edges.db",
+    "before_len": 1589248,
+    "after_len": 1589248,
+    "before_sha256": "c047911837f9620ed0e5f4267ac86dee5556d2fe25d8588484762bdc2d689084",
+    "after_sha256": "c047911837f9620ed0e5f4267ac86dee5556d2fe25d8588484762bdc2d689084",
+    "differences": []
+  },
+  {
+    "path": "foreign/vectors.dat",
+    "before_len": 64,
+    "after_len": 64,
+    "before_sha256": "726e9f5481f7cfefb34786f7d78c1f24fdfc1f989caf08d3ddf39cd32a8352a7",
+    "after_sha256": "726e9f5481f7cfefb34786f7d78c1f24fdfc1f989caf08d3ddf39cd32a8352a7",
+    "differences": []
+  },
+  {
+    "path": "fts.db",
+    "before_len": 4096,
+    "after_len": 4096,
+    "before_sha256": "42f67cde08aaa4db17432058fdd3521a7199a1dfd4afe740ca486d6b49226302",
+    "after_sha256": "42f67cde08aaa4db17432058fdd3521a7199a1dfd4afe740ca486d6b49226302",
+    "differences": []
+  },
+  {
+    "path": "fts.db-shm",
+    "before_len": 32768,
+    "after_len": 32768,
+    "before_sha256": "95429dd05b56db68bb73406491cbb036f51651d8ca6a8d8fe7a40fdf04663ec6",
+    "after_sha256": "e3a8e7261d8a6dba20141768629d8489cd0606fca3e6e4533204a9175dbd72ea",
+    "differences": [
+      {
+        "offset": 104,
+        "before": 14,
+        "after": 19
+      }
+    ]
+  },
+  {
+    "path": "fts.db-wal",
+    "before_len": 78312,
+    "after_len": 78312,
+    "before_sha256": "77fa442152f0b1faf5d9679d61ad85bec27df76bbdf42af7c4a6c74a4797abce",
+    "after_sha256": "77fa442152f0b1faf5d9679d61ad85bec27df76bbdf42af7c4a6c74a4797abce",
+    "differences": []
+  },
+  {
+    "path": "fulltext.2501d2b1-8432-450e-a7a2-25ddb700db48.dat",
+    "before_len": 48,
+    "after_len": 48,
+    "before_sha256": "7653610f0afedf43bfd5bd267022edfc0c628a4b4bd0b14a86090d66e1f0b70e",
+    "after_sha256": "7653610f0afedf43bfd5bd267022edfc0c628a4b4bd0b14a86090d66e1f0b70e",
+    "differences": []
+  },
+  {
+    "path": "fulltext.dat",
+    "before_len": 48,
+    "after_len": 48,
+    "before_sha256": "7653610f0afedf43bfd5bd267022edfc0c628a4b4bd0b14a86090d66e1f0b70e",
+    "after_sha256": "7653610f0afedf43bfd5bd267022edfc0c628a4b4bd0b14a86090d66e1f0b70e",
+    "differences": []
+  },
+  {
+    "path": "meta.db",
+    "before_len": 1589248,
+    "after_len": 1589248,
+    "before_sha256": "96a9fe21e99206c07d091579df06b036537d38a6a8dfa0fa222e91921557e342",
+    "after_sha256": "96a9fe21e99206c07d091579df06b036537d38a6a8dfa0fa222e91921557e342",
+    "differences": []
+  },
+  {
+    "path": "recalld.lock",
+    "before_len": 0,
+    "after_len": 0,
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "differences": []
+  }
+]
