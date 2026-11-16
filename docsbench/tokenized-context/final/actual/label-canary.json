@@ -1,0 +1,130 @@
+{
+  "actorCodeEqual": true,
+  "actorInputsEqual": true,
+  "evidenceIdentityOnly": true,
+  "perRunComparison": [
+    {
+      "left": {
+        "evidenceTokens": 32,
+        "fullTokens": 55,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q0",
+        "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+      },
+      "queryId": "q0",
+      "right": {
+        "evidenceTokens": 35,
+        "fullTokens": 58,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q0",
+        "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+      },
+      "selectedPrefixDiverged": false
+    },
+    {
+      "left": {
+        "evidenceTokens": 32,
+        "fullTokens": 55,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q1",
+        "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+      },
+      "queryId": "q1",
+      "right": {
+        "evidenceTokens": 35,
+        "fullTokens": 58,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q1",
+        "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+      },
+      "selectedPrefixDiverged": false
+    },
+    {
+      "left": {
+        "evidenceTokens": 32,
+        "fullTokens": 55,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q2",
+        "renderedSha256": "3becdca559a3862af0d363d565efc1ea3d7f312ae15df7409ace62268f7d43f3"
+      },
+      "queryId": "q2",
+      "right": {
+        "evidenceTokens": 35,
+        "fullTokens": 58,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q2",
+        "renderedSha256": "2571276f35b286a0f58a9f52775b746cdb15744d19a6bed9cbaa1dca26ab2fff"
+      },
+      "selectedPrefixDiverged": false
+    },
+    {
+      "left": {
+        "evidenceTokens": 32,
+        "fullTokens": 60,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q3",
+        "renderedSha256": "514a9af970db68275c9fa512f15847e3d2fa8c7bc16ce7d870ca6011988c8a32"
+      },
+      "queryId": "q3",
+      "right": {
+        "evidenceTokens": 35,
+        "fullTokens": 63,
+        "includedSources": [
+          "turn-0"
+        ],
+        "omittedSources": [
+          "turn-1",
+          "turn-2"
+        ],
+        "queryId": "q3",
+        "renderedSha256": "bd980523452348b07862713f70f6c4b8895e7712e359e08e8e5674d8f5239baa"
+      },
+      "selectedPrefixDiverged": false
+    }
+  ],
+  "providerInputsVectorsEqual": true,
+  "rawRenderOrTokenEqualityClaim": false,
+  "requestsEqual": true
+}

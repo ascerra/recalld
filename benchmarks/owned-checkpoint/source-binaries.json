@@ -1,0 +1,13 @@
+{
+  "sha256": {
+    "target/debug/deps/recalld-27bbb81e23f12ff5": "613d5896e230b65d20512188b12dd3b0a9928b1ca95d1e00ef46f7fbd5418a26",
+    "target/debug/deps/recalld-7025a4141187b374": "09beb5f3a20178e899cc115263766bb302414f1e0fc62d6942a04f34d0fd2799",
+    "target/debug/deps/recalld-db4c01372257a80b": "95949662dd69056267758217cfde8e526cea53fa1a726ec7790e28bff49b1ca6",
+    "target/debug/deps/recalld-eb419297c7400d31": "8d41cabba5078d5245620012b9a5be05e033410ae55c0dc57ce2bb608ff1ae45",
+    "target/debug/examples/owned_evaluator": "621ff77911028b19cf9fc040cbddd613a87e5f86f0c647627ce5847bd87e5eac",
+    "target/debug/recalld-cli": "62fe74636aeca1a30e101e733c66c4791e8d1895cceaf7275b1cf0a9eb22da83",
+    "target/debug/recalld-schema": "6c5964a4e273038b8747279f02b87acc6ebd608d7bd85a1734bfe7c5ce7d8368",
+    "target/debug/recalld-text-migrate": "af1a876792e305a2762f95c30aa016eeb6619867927937e4cb42dee71ff14380"
+  },
+  "sourceCommit": "2920dec86c3d9f7a0788ef01433a3ab4f9093bab"
+}

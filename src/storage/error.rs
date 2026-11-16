@@ -8,6 +8,12 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    /// Existing item receipts remain retained. This is reservation evidence only,
+    /// never an assertion that the batch committed atomically or became ready.
+    #[error("RESPONSE_TOO_LARGE: complete native batch result exceeds transport budget")]
+    BatchResponseTooLarge {
+        reservation_receipt: Option<Box<crate::storage::control::WriteReceipt>>,
+    },
     #[error("LIFECYCLE_CONFLICT: {0}")]
     LifecycleConflict(String),
     #[error("CONTENT_UNAVAILABLE")]
@@ -36,6 +42,10 @@ pub enum StorageError {
     #[error("IDEMPOTENCY_CONFLICT")]
     IdempotencyConflict,
 
+    /// A well-formed caller selector conflicts with the canonical binding.
+    #[error("EMBEDDING_PROFILE_MISMATCH")]
+    EmbeddingProfileMismatch,
+
     #[error("NAMESPACE_MISMATCH")]
     MutationNamespaceMismatch,
 
@@ -52,6 +62,11 @@ pub enum StorageError {
         #[source]
         source: redb::CommitError,
     },
+
+    /// A worker was lost without returning its canonical outcome. No operation
+    /// ID or receipt can be invented; recover and reconcile the original intent.
+    #[error("worker outcome unknown: {0}")]
+    WorkerOutcomeUnknown(String),
 
     /// Canonical metadata is durable; materialization must resume after reopen.
     #[error("operation {operation_id} committed; canonical effects unavailable: {source}")]
@@ -90,11 +105,26 @@ pub enum StorageError {
     #[error("EMBEDDING_UNAVAILABLE: invalid provider vector: {0}")]
     ProviderVectorUnavailable(String),
 
+    /// Exact owned canonical state proves the namespace has no certificate.
+    /// This is a known precommit admission failure, never a commit outcome.
+    #[error("namespace {namespace_id} vectors require explicit offline re-embedding certification")]
+    VectorCertificationRequired { namespace_id: u32 },
+
+    /// Caller-supplied vector failed the shared numeric boundary. Keep the
+    /// legacy diagnostic text while allowing typed transport classification.
+    #[error("invalid storage mutation: {0}")]
+    CallerVectorInvalid(String),
+
     #[error("EDGE_CONFLICT: {0}")]
     EdgeConflict(String),
 
     #[error("invalid storage mutation: {0}")]
     InvalidMutation(String),
+
+    #[error(
+        "operation too large for this response transport or its bounded admission scan; no new purge was started"
+    )]
+    PurgeResponseTooLarge,
 
     #[error("storage recovery required: {0}")]
     RecoveryRequired(String),
@@ -127,6 +157,9 @@ pub enum StorageError {
     /// No namespace exists for the given ID.
     #[error("namespace not found: {0}")]
     NamespaceNotFound(u32),
+
+    #[error("namespace not found: {0}")]
+    NamespaceNameNotFound(String),
 
     /// An explicit namespace assertion does not match the record's immutable scope.
     #[error("NAMESPACE_MISMATCH: memory {id} does not belong to namespace '{namespace}'")]

@@ -9,6 +9,8 @@ mod commands;
 mod config;
 mod import;
 mod output;
+mod policy;
+mod vector_certification;
 
 pub use client::RecalldClient;
 pub use commands::Cli;
@@ -67,6 +69,11 @@ pub type Result<T> = std::result::Result<T, CliError>;
 /// It creates the HTTP client, selects the output formatter, and
 /// dispatches to the appropriate command handler.
 pub async fn run(cli: Cli, config: CliConfig) -> Result<()> {
+    let command = match cli.command {
+        Command::ReembedVectors(args) => return vector_certification::run(args).await,
+        Command::Policy(args) => return policy::run(args),
+        other => other,
+    };
     let client = RecalldClient::new(&config.server_url)?;
     let format = cli.format.clone().unwrap_or(config.default_format.clone());
     let formatter: Box<dyn OutputFormatter> = match format {
@@ -74,7 +81,11 @@ pub async fn run(cli: Cli, config: CliConfig) -> Result<()> {
         OutputFormat::Human => Box::new(HumanFormatter),
     };
 
-    match cli.command {
+    match command {
+        Command::ReembedVectors(_) => {
+            unreachable!("offline re-embedding dispatched before client construction")
+        }
+        Command::Policy(_) => unreachable!("offline policy dispatched before client construction"),
         Command::Store(args) => cmd_store(&client, &*formatter, args).await,
         Command::Recall(args) => cmd_recall(&client, &*formatter, args).await,
         Command::Get(args) => cmd_get(&client, &*formatter, args).await,

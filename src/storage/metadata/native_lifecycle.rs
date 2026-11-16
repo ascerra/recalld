@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 thread_local! {
-    static FAIL_AFTER_NATIVE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(super) static FAIL_AFTER_NATIVE_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static CAPTURE_CHECKED: std::cell::Cell<Option<std::sync::mpsc::Sender<()>>> = const { std::cell::Cell::new(None) };
 }
 
@@ -18,6 +18,42 @@ fn capture_checked() {
             sender.send(()).unwrap();
         }
     });
+}
+
+fn native_context(ctx: &MutationContext, namespace: NamespaceId) -> Result<(), StorageError> {
+    ctx.validate()?;
+    if ctx.scope != MutationScope::Namespace(namespace) {
+        return Err(StorageError::MutationNamespaceMismatch);
+    }
+    Ok(())
+}
+
+fn native_request_hash(
+    ctx: &MutationContext,
+    scope: &LifecycleScope,
+    original: &[(MemoryId, AccessKind)],
+    quality: Option<u8>,
+) -> Result<[u8; 32], StorageError> {
+    native_context(ctx, scope.namespace_id)?;
+    let semantic = control::encode(&(scope, original, quality))?;
+    Ok(control::request_hash(
+        ctx,
+        if quality.is_some() {
+            "native_feedback"
+        } else {
+            "native_exposure"
+        },
+        &[&semantic],
+    ))
+}
+
+fn feedback_quality(quality: u8) -> Result<(), StorageError> {
+    if !(1..=4).contains(&quality) {
+        return Err(StorageError::InvalidMutation(
+            "quality must be in 1..=4".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn policy_hash(
@@ -88,6 +124,7 @@ impl MetadataStore {
             return Err(invalid("native control schema required"));
         }
         crate::storage::lineage::ensure_serving(read, &state)?;
+        self.require_vector_validation_at(state.generation_ref())?;
         Ok(state)
     }
     pub(super) fn native_guard(&self) -> Result<MutationGuard<'_>, StorageError> {
@@ -152,11 +189,7 @@ impl MetadataStore {
         quality: u8,
         policy: &NativePolicyInputs,
     ) -> Result<FeedbackIntent, StorageError> {
-        if !(1..=4).contains(&quality) {
-            return Err(StorageError::InvalidMutation(
-                "quality must be in 1..=4".into(),
-            ));
-        }
+        feedback_quality(quality)?;
         self.ensure_available()?;
         #[cfg(test)]
         capture_checked();
@@ -202,6 +235,17 @@ impl MetadataStore {
         policy: &NativePolicyInputs,
         live_only: bool,
     ) -> Result<CapturedLifecycle, StorageError> {
+        self.capture_policy_at(read, scope, ids, policy, live_only, true)
+    }
+    pub(super) fn capture_policy_at(
+        &self,
+        read: &redb::ReadTransaction,
+        scope: &LifecycleScope,
+        ids: &[MemoryId],
+        policy: &NativePolicyInputs,
+        live_only: bool,
+        require_binding: bool,
+    ) -> Result<CapturedLifecycle, StorageError> {
         let state = self.native_control_at(read)?;
         let ns = {
             let table = read.open_table(NAMESPACE_TABLE)?;
@@ -217,7 +261,11 @@ impl MetadataStore {
             .schema
             .as_ref()
             .ok_or_else(|| invalid("native namespace schema missing"))?;
-        let resolved = policy.resolve(&ns)?;
+        let resolved = if require_binding {
+            policy.resolve(&ns)?
+        } else {
+            policy.resolve_unbound(&ns)?
+        };
         let mut records = Vec::new();
         let table = read.open_table(META_TABLE)?;
         for id in ids {
@@ -258,6 +306,25 @@ impl MetadataStore {
         ),
         StorageError,
     > {
+        self.check_native_policy_capture(tx, scope, capture, policy, live_only, true)
+    }
+    pub(super) fn check_native_policy_capture(
+        &self,
+        tx: &redb::WriteTransaction,
+        scope: &LifecycleScope,
+        capture: &CapturedLifecycle,
+        policy: &NativePolicyInputs,
+        live_only: bool,
+        require_binding: bool,
+    ) -> Result<
+        (
+            ControlState,
+            NamespaceConfig,
+            crate::decay::lifecycle::EffectiveLifecyclePolicy,
+            HashMap<MemoryId, DiskRecord>,
+        ),
+        StorageError,
+    > {
         let state = control::read_control(tx)?;
         if state.store_id != capture.generation.store_id {
             return Err(StorageError::StoreLineageMismatch);
@@ -275,7 +342,11 @@ impl MetadataStore {
             .schema
             .as_ref()
             .ok_or_else(|| invalid("native namespace schema missing"))?;
-        let resolved = policy.resolve(&ns)?;
+        let resolved = if require_binding {
+            policy.resolve(&ns)?
+        } else {
+            policy.resolve_unbound(&ns)?
+        };
         if schema.lifecycle_version != capture.version
             || schema.policy_revision != capture.revision
             || policy_hash(&ns, &resolved)? != capture.policy_hash
@@ -365,7 +436,17 @@ impl MetadataStore {
         policy: &NativePolicyInputs,
         clock: &dyn Clock,
     ) -> Result<WriteReceipt, StorageError> {
-        let guard = self.native_guard()?;
+        self.apply_native_feedback_with_work(ctx, intent, policy, clock, None)
+    }
+    pub(crate) fn apply_native_feedback_with_work(
+        &self,
+        ctx: &MutationContext,
+        intent: &FeedbackIntent,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        let guard = self.native_guard_with_work(parent)?;
         let (tx, receipt) = self.prepare_native(
             &guard,
             ctx,
@@ -379,6 +460,68 @@ impl MetadataStore {
         self.commit_native(tx, receipt)?
             .ok_or_else(|| invalid("feedback receipt missing"))
     }
+    pub(crate) fn lookup_native_feedback(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        quality: u8,
+        asserted_namespace: Option<&str>,
+        parent: Option<&WorkTicket>,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        feedback_quality(quality)?;
+        let MutationScope::Namespace(namespace) = ctx.scope else {
+            return Err(StorageError::MutationNamespaceMismatch);
+        };
+        native_context(ctx, namespace)?;
+        let guard = self.native_guard_with_work(parent)?;
+        let tx = self.db.begin_write()?;
+        let Some(stored) = control::keyed_receipt(&tx, ctx)? else {
+            return Ok(None);
+        };
+        let MutationOutcome::LifecycleFeedbackApplied { transition } = &stored.receipt.outcome
+        else {
+            return Err(StorageError::IdempotencyConflict);
+        };
+        if transition.namespace_id != namespace
+            || transition.records.len() != 1
+            || transition.records[0].memory_id != id
+            || transition.feedback.as_ref().map(|f| f.quality) != Some(quality)
+        {
+            return Err(StorageError::IdempotencyConflict);
+        }
+        // Recover only original identity under this same guard/transaction.
+        // Numeric policy, clock and current name resolution do not participate.
+        let binding = self
+            .replay_namespace_binding_at(&guard, &tx, namespace)
+            .map_err(|source| StorageError::CommittedMutation {
+                receipt: Box::new(stored.receipt.clone()),
+                source: Box::new(source),
+            })?;
+        let scope = LifecycleScope {
+            namespace_id: namespace,
+            namespace_name: binding.name,
+            source: None,
+        };
+        let hash = native_request_hash(
+            ctx,
+            &scope,
+            &[(id, AccessKind::ManualReinforcement)],
+            Some(quality),
+        )?;
+        let receipt = control::replay_or_check(&tx, ctx, hash)?;
+        if let (Some(receipt), Some(name)) = (&receipt, asserted_namespace) {
+            if scope.namespace_name != name {
+                return Err(StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(StorageError::NamespaceMismatch {
+                        id: id.into_inner(),
+                        namespace: name.to_owned(),
+                    }),
+                });
+            }
+        }
+        Ok(receipt)
+    }
     fn commit_native(
         &self,
         tx: redb::WriteTransaction,
@@ -386,6 +529,7 @@ impl MetadataStore {
     ) -> Result<Option<WriteReceipt>, StorageError> {
         if let Some(receipt) = &receipt {
             if !receipt.replayed {
+                let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
                 let committed = tx.commit();
                 // A durable transaction can still be reported as an I/O error.
                 // Exercise reconciliation against the actual committed database.
@@ -406,6 +550,7 @@ impl MetadataStore {
                         source,
                     }
                 })?;
+                self.publish_vector_validation_commit(certification, receipt)?;
                 self.view_publication.canonical_committed();
             }
         }
@@ -424,20 +569,7 @@ impl MetadataStore {
         clock: &dyn Clock,
     ) -> Result<(redb::WriteTransaction, Option<WriteReceipt>), StorageError> {
         publication.check(self)?;
-        ctx.validate()?;
-        if ctx.scope != MutationScope::Namespace(scope.namespace_id) {
-            return Err(StorageError::MutationNamespaceMismatch);
-        }
-        let semantic = control::encode(&(scope, original, quality))?;
-        let hash = control::request_hash(
-            ctx,
-            if quality.is_some() {
-                "native_feedback"
-            } else {
-                "native_exposure"
-            },
-            &[&semantic],
-        );
+        let hash = native_request_hash(ctx, scope, original, quality)?;
         let tx = self.db.begin_write()?;
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok((tx, Some(receipt)));
@@ -514,7 +646,7 @@ impl MetadataStore {
         } else {
             MutationOutcome::LifecycleExposureRecorded { transition }
         };
-        let receipt = control::record_receipt(&tx, ctx, hash, outcome)?;
+        let receipt = self.record_receipt(&tx, ctx, hash, outcome)?;
         Ok((tx, Some(receipt)))
     }
 }

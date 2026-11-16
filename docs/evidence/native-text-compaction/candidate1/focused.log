@@ -1,0 +1,9 @@
+
+running 4 tests
+test storage::engine::text_compaction::tests::compaction_required_guard_only_is_insufficient_before_probe ... ok
+test storage::engine::text_compaction::tests::compaction_required_native_guard_and_reopen ... ok
+test storage::engine::text_compaction::tests::compaction_required_published_error_receipt ... ok
+test storage::engine::text_compaction::tests::compaction_required_selected_error_receipt ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1172 filtered out; finished in 1.21s
+

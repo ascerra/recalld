@@ -1,0 +1,20 @@
+
+running 2 tests
+
+thread 'storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_feedback_quality_binds_success_error_and_malformed_receipts' (39) panicked at src/storage/metadata/native_records/wire_tests.rs:589:5:
+mismatched native receipt accepted by ["success", "error", "malformed"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_feedback_quality_binds_success_error_and_malformed_receipts ... FAILED
+
+thread 'storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_namespace_binds_success_error_and_malformed_receipts' (40) panicked at src/storage/metadata/native_records/wire_tests.rs:589:5:
+mismatched native receipt accepted by ["success", "error", "malformed"]
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_namespace_binds_success_error_and_malformed_receipts ... FAILED
+
+failures:
+
+failures:
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_feedback_quality_binds_success_error_and_malformed_receipts
+    storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_namespace_binds_success_error_and_malformed_receipts
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 1.35s
+

@@ -50,7 +50,16 @@ struct OfflineFixture {
 async fn offline(
     count: usize,
     version: LifecycleVersion,
+    edit: impl FnMut(usize, &mut DiskRecord),
+) -> OfflineFixture {
+    offline_with_policy(count, version, edit, 1., None).await
+}
+async fn offline_with_policy(
+    count: usize,
+    version: LifecycleVersion,
     mut edit: impl FnMut(usize, &mut DiskRecord),
+    multiplier: f64,
+    explicit: Option<f32>,
 ) -> OfflineFixture {
     let fixture = Fixture::new();
     let foreign = fixture.create_namespace("foreign");
@@ -154,6 +163,38 @@ async fn offline(
             path = destination;
         }
     }
+    if version == LifecycleVersion::ExplicitFeedbackV2 {
+        for namespace in [ns(), foreign] {
+            crate::test_support::explicitly_adopt_inherited_policy(
+                &path, namespace, multiplier, 100,
+            );
+        }
+        if let Some(value) = explicit {
+            let mut owner = crate::storage::native_lifecycle::NativeLifecycleSession::open(
+                &path,
+                crate::storage::native_lifecycle::NativePolicyInputs {
+                    multiplier,
+                    ..Default::default()
+                },
+                Arc::new(crate::time::ManualClock::new(100)),
+            )
+            .unwrap();
+            let config = owner.engine.get_namespace(ns()).unwrap().unwrap();
+            let mut policy = crate::storage::catalog::NamespacePolicy::from(&config);
+            policy.decay_rate_multiplier = Some(value);
+            owner
+                .update_policy(
+                    &crate::storage::control::MutationContext::unkeyed(ns()),
+                    crate::storage::native_lifecycle::LifecycleScope {
+                        namespace_id: ns(),
+                        namespace_name: config.name,
+                        source: None,
+                    },
+                    &policy,
+                )
+                .unwrap();
+        }
+    }
     let files = crate::storage::validation::canonical_files(&path).unwrap();
     let view = Arc::new(OfflineSnapshot::open(&path).unwrap()); // full canonical validation
     OfflineFixture {
@@ -206,8 +247,8 @@ fn engine(
     edges: &[(usize, usize, EdgeType)],
 ) -> QueryEngine {
     use crate::search::adapters::*;
-    use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex, VectorIndex, VectorMetadata};
-    let mut vectors = FlatVectorIndex::new(4);
+    use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner, VectorMetadata};
+    let mut vectors = VectorIndexOwner::uniform(4);
     let fts = FtsIndex::new(f._directory.path()).unwrap();
     let mut entities = EntityIndex::new();
     let mut graph = crate::graph::RelationshipGraph::new();
@@ -333,7 +374,17 @@ async fn canonical_clock_projection_is_read_only_and_retains_committed_phase_and
     assert_eq!(clock.calls.load(Ordering::SeqCst), 2);
     let observed = second.diagnostics.strength.unwrap();
     assert_eq!(observed.evaluated_at, 30 * DAY);
-    assert_eq!(observed.policy_revision, Some(revision("1")));
+    assert_eq!(
+        observed.policy_revision,
+        f.view
+            .namespaces()
+            .iter()
+            .find(|n| n.id == ns())
+            .unwrap()
+            .schema
+            .as_ref()
+            .map(|s| s.policy_revision)
+    );
     assert_eq!(
         observed.lifecycle_version,
         LifecycleVersion::ExplicitFeedbackV2
@@ -585,27 +636,32 @@ impl NamespaceResolver for PinnedNamespace {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn query_pins_current_revision_and_resolves_namespace_override_before_global() {
-    let f = offline(1, LifecycleVersion::ExplicitFeedbackV2, |_, r| {
-        r.last_accessed_at = DAY;
-    })
-    .await;
     let clock = CountingClock::new(9 * DAY);
     let mut observed = Vec::new();
     for multiplier in [None, Some(0.0), Some(1.0), Some(2.0)] {
+        let f = offline_with_policy(
+            1,
+            LifecycleVersion::ExplicitFeedbackV2,
+            |_, r| {
+                r.last_accessed_at = DAY;
+            },
+            2.,
+            multiplier,
+        )
+        .await;
         let mut engine = engine(&f, clock.clone(), &[]).with_lifecycle_inputs(
             clock.clone(),
             crate::decay::DecayConfig::default(),
             2.0,
         );
-        let mut ns = f
+        let ns = f
             .view
             .namespaces()
             .iter()
             .find(|n| n.id == ns())
             .unwrap()
             .clone();
-        ns.decay_rate_multiplier = multiplier;
-        ns.schema.as_mut().unwrap().policy_revision = revision("3");
+        let expected_revision = ns.schema.as_ref().unwrap().policy_revision;
         let pinned = Arc::new(PinnedNamespace {
             config: ns,
             calls: AtomicUsize::new(0),
@@ -618,7 +674,7 @@ async fn query_pins_current_revision_and_resolves_namespace_override_before_glob
         assert_eq!(pinned.calls.load(Ordering::SeqCst), 1);
         assert_eq!(
             out.diagnostics.strength.unwrap().policy_revision,
-            Some(revision("3"))
+            Some(expected_revision)
         );
         observed.push(result(&out, f.ids[0]).retrievability);
     }
@@ -827,13 +883,13 @@ async fn returned_graph_result_uses_the_same_projection_as_admission_and_ranking
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_retrieval_graph_formulas_also_consume_explicit_policy_projection() {
     use crate::search::adapters::SharedVectorIndexRegistry;
-    use crate::search::{FlatVectorIndex, VectorIndex, VectorMetadata};
+    use crate::search::{VectorIndexOwner, VectorMetadata};
     let f = offline(2, LifecycleVersion::ExplicitFeedbackV2, |_, _| {}).await;
     let clock = CountingClock::new(DAY);
     let mut engine = engine(&f, clock.clone(), &[(0, 1, EdgeType::Associative)]);
     // Only the seed has a direct channel hit; the neighbor is graph-discovered.
     let item = f.view.record(f.ids[0]).unwrap().unwrap();
-    let mut index = FlatVectorIndex::new(4);
+    let mut index = VectorIndexOwner::uniform(4);
     index
         .add(
             f.ids[0],

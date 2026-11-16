@@ -1,0 +1,87 @@
+{
+  "probe-dab12d0": {
+    "sourceCommit": "dab12d0fe3ab70ef4f20ab9d275065ae59700f57",
+    "status": "0",
+    "results": {
+      "probe.log": [
+        "SYNTHETIC_NOT_NATIVE record_bytes=3802 receipt_bytes=4110022 mcp_bytes=8483341 frame_limit=8388608",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1132 filtered out; finished in 0.52s"
+      ]
+    },
+    "binaries": {
+      "/tmp/recalld-implementation/compaction-review-7281918/target/debug/deps/recalld-7025a4141187b374": "3296357b16f2f2d3860e90fbf447c73c028e07f1e2c45bc30ac10d56f631cf17"
+    }
+  },
+  "before-single-max": {
+    "sourceCommit": "d7c4d5fa3d39e14f3bc2dc4be5554e2e1bf1c8c8",
+    "status": "0",
+    "results": {
+      "probe.log": [
+        "GENUINE_BEFORE_SINGLE {\"compactMcpBytes\":6648160,\"edges\":1024,\"existingPrettyMcpBytes\":12305907,\"frameLimit\":8388608,\"receiptBytes\":3220502,\"records\":1025}",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1080 filtered out; finished in 62.83s"
+      ]
+    },
+    "binaries": {
+      "/tmp/recalld-implementation/compaction-review-7281918/target/debug/deps/recalld-7025a4141187b374": "7d97d8a5c7010892e5d57423942272f696fde252eee981651ef9cc2b8566b9e9"
+    },
+    "instrumentation": "one appended test only; original test file prefix equals sealed d7c4d5 bytes"
+  },
+  "focused-c9f4654": {
+    "sourceCommit": "c9f46543861e214cb101828b936cfc10912d88ea",
+    "status": "0",
+    "results": {
+      "actual-contract.log": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1132 filtered out; finished in 0.00s"
+      ],
+      "actual-observation.log": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1135 filtered out; finished in 0.24s"
+      ],
+      "actual-unknown.log": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1135 filtered out; finished in 0.22s"
+      ],
+      "contract.log": [
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1136 filtered out; finished in 0.00s"
+      ],
+      "observation.log": [
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1136 filtered out; finished in 0.00s"
+      ],
+      "profile.log": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1133 filtered out; finished in 3.68s"
+      ]
+    },
+    "binaries": {
+      "/tmp/recalld-implementation/compaction-review-7281918/target/debug/deps/recalld-7025a4141187b374": "71bddfd6dd6aa4ab94cad46ab922339f46b46b23e34026ed16f554a24d2dedf5"
+    },
+    "correctedFiltersStatus": "0"
+  },
+  "transport-855bd6f": {
+    "sourceCommit": "855bd6ff316d722b54fee2061e4c3fb25c2de46b",
+    "status": "101",
+    "results": {
+      "wire.log": [
+        "test result: FAILED. 5 passed; 2 failed; 0 ignored; 0 measured; 1130 filtered out; finished in 60.40s"
+      ]
+    },
+    "binaries": {
+      "/tmp/recalld-implementation/compaction-review-7281918/target/debug/deps/recalld-7025a4141187b374": "9b94d7f326a72dad4ec36e67e5964e5fbb29f3f58c8e92ec614c0aa7f4752319"
+    }
+  },
+  "faults-2cb4946": {
+    "sourceCommit": "2cb4946c4fcf02f2100ddfa071f8237376fc341d",
+    "status": "0",
+    "results": {
+      "final-barrier.log": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1136 filtered out; finished in 4.63s"
+      ],
+      "profile.log": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1134 filtered out; finished in 5.31s"
+      ],
+      "publication.log": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1136 filtered out; finished in 1.84s"
+      ]
+    },
+    "binaries": {
+      "/tmp/recalld-implementation/compaction-review-7281918/target/debug/deps/recalld-7025a4141187b374": "b765fd65c544ee2b2b98e23b9464f5a9d0d532b1debca23810be90cf9bb47544"
+    }
+  }
+}

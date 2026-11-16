@@ -1,0 +1,70 @@
+--- a/src/storage/metadata/certification.rs
++++ b/src/storage/metadata/certification.rs
+@@ -181,6 +181,38 @@
+         }
+         let mut created = None;
+         match &receipt.outcome {
++            MutationOutcome::NativeTextGenerationSelected { transition } => {
++                // The selection writer already compares the complete logical
++                // record digest before/after relocation and the copied text.
++                // Carry certification only for that exact owned generation and
++                // the typed descriptors selected in this same transaction.
++                transition.validate(receipt)?;
++                if transition.source != owned.at {
++                    return Err(StorageError::RecoveryRequired(
++                        "text relocation differs from owned vector generation".into(),
++                    ));
++                }
++                let catalog = tx.open_table(text_generation::CATALOG)?;
++                let active: uuid::Uuid = control::decode(
++                    catalog
++                        .get("active")?
++                        .ok_or(StorageError::InvalidTextRef)?
++                        .value(),
++                )?;
++                for descriptor in [&transition.before, &transition.after] {
++                    let retained = catalog
++                        .get(descriptor.id.to_string().as_str())?
++                        .ok_or(StorageError::InvalidTextRef)?;
++                    if control::decode::<text_generation::TextGeneration>(retained.value())?
++                        != *descriptor
++                    {
++                        return Err(StorageError::InvalidTextRef);
++                    }
++                }
++                if active != transition.after.id {
++                    return Err(StorageError::InvalidTextRef);
++                }
++            }
+             MutationOutcome::NativeNamespaceCreated { transition } => {
+                 transition.validate(receipt)?;
+                 let binding = transition.vector_certification.as_ref().ok_or_else(|| {
+--- a/src/storage/metadata/native_records/compaction_tests.rs
++++ b/src/storage/metadata/native_records/compaction_tests.rs
+@@ -1,6 +1,26 @@
+ use super::*;
+ use crate::storage::ids::{IdKind, IdSource, SeededIds};
+ use crate::storage::{logical_export, validation};
++
++#[test]
++fn certified_compaction_actual_owned_dispatch_participates() {
++    let root = tempfile::tempdir().unwrap();
++    let d = certified_fixture(root.path());
++    let mut engine = RedbStorageEngine::open_native(&d.path).unwrap();
++    let before = engine.control_state().unwrap();
++    let result = engine.compact_text_log();
++    eprintln!("actual certified text selection result: {result:?}");
++    if result.is_err() {
++        assert_eq!(engine.control_state().unwrap(), before);
++    }
++    let result = result.expect(
++        "native physical relocation must participate in the owned certification generation",
++    );
++    assert_eq!(
++        result.receipt.committed_generation,
++        before.committed_generation.next().unwrap()
++    );
++}
+ 
+ fn completion(f: &crate::test_support::Fixture) -> crate::derived_completion::DerivedCompletion {
+     crate::derived_completion::DerivedCompletion {

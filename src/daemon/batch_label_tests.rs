@@ -108,6 +108,9 @@ async fn batch_labels_actual_mcp_and_daemon_reject_before_provider_and_child_pay
         let before = payloads(&f);
         let state = f.storage.read().unwrap().control_state().unwrap();
         let input = BatchInput {
+            request_context: None,
+            expected_generation: None,
+            mutation_version: 1,
             result_version: 1,
             kind: BatchKind::Insert,
             items: fields.iter().map(|(_, v)| v.clone()).collect(),
@@ -199,6 +202,9 @@ async fn batch_labels_positive_normalization_survives_rebuild_and_reopen() {
     let f = Fixture::new();
     let adapter = adapter(&f, Arc::new(Provider::default()));
     let input = BatchInput {
+        request_context: None,
+        expected_generation: None,
+        mutation_version: 1,
         result_version: 1,
         kind: BatchKind::Insert,
         items: vec![

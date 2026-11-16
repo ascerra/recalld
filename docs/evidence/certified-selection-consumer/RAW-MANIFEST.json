@@ -1,0 +1,226 @@
+{
+  "focus001/admission.exit": {
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "bytes": 4
+  },
+  "focus001/admission.log": {
+    "sha256": "5fb21208661b3f862a0d42f3c7dbf232d01680766a5bc2b200e916377c17cae6",
+    "bytes": 2760
+  },
+  "focus001/advisory.exit": {
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "bytes": 4
+  },
+  "focus001/advisory.log": {
+    "sha256": "5fb21208661b3f862a0d42f3c7dbf232d01680766a5bc2b200e916377c17cae6",
+    "bytes": 2760
+  },
+  "focus001/clean.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus001/clean.log": {
+    "sha256": "735d0b5e8eb0cfaa7ad7e5c580b7053b9ba5b95c61de89ca17f04148ce0903ce",
+    "bytes": 38
+  },
+  "focus001/command.json": {
+    "sha256": "524d0b414e829639bb64b874923cfc0b170e1d122dc0d646045b3661f3fb5010",
+    "bytes": 2536
+  },
+  "focus001/demand.exit": {
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "bytes": 4
+  },
+  "focus001/demand.log": {
+    "sha256": "5fb21208661b3f862a0d42f3c7dbf232d01680766a5bc2b200e916377c17cae6",
+    "bytes": 2760
+  },
+  "focus001/driver.exit": {
+    "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "bytes": 2
+  },
+  "focus001/executed-binaries.json": {
+    "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+    "bytes": 3
+  },
+  "focus001/memory-events.txt": {
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+    "bytes": 70
+  },
+  "focus001/memory-peak.txt": {
+    "sha256": "8acfdaa1811e08b33623acb372e1520544dacb540aeed6bb280c6cf608e798f7",
+    "bytes": 11
+  },
+  "focus001/publication.exit": {
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "bytes": 4
+  },
+  "focus001/publication.log": {
+    "sha256": "5fb21208661b3f862a0d42f3c7dbf232d01680766a5bc2b200e916377c17cae6",
+    "bytes": 2760
+  },
+  "focus001/rustc.txt": {
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+    "bytes": 197
+  },
+  "focus001/selection.exit": {
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "bytes": 4
+  },
+  "focus001/selection.log": {
+    "sha256": "5fb21208661b3f862a0d42f3c7dbf232d01680766a5bc2b200e916377c17cae6",
+    "bytes": 2760
+  },
+  "focus001/source-unchanged.json": {
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+    "bytes": 5
+  },
+  "focus001/source.json": {
+    "sha256": "5b06618b3c181910f2af14cd8f399dddd1d6f9d0fa6729fbb360e122e284e2cb",
+    "bytes": 42232
+  },
+  "focus001/unknown.exit": {
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "bytes": 4
+  },
+  "focus001/unknown.log": {
+    "sha256": "5fb21208661b3f862a0d42f3c7dbf232d01680766a5bc2b200e916377c17cae6",
+    "bytes": 2760
+  },
+  "focus002/admission.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus002/admission.log": {
+    "sha256": "f42974b31194653fae9d7b6613f95e2c512591714e94997b104535d6e61d37e8",
+    "bytes": 24341
+  },
+  "focus002/advisory.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus002/advisory.log": {
+    "sha256": "45d69f1cc059517c780f79a47706960825adfae7635f0520633aa22ca645488f",
+    "bytes": 24363
+  },
+  "focus002/command.json": {
+    "sha256": "258bc6fe85a7680029daf47ce5c71803f7ab20d7fe8f81c020529457191de75a",
+    "bytes": 2755
+  },
+  "focus002/demand.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus002/demand.log": {
+    "sha256": "dcc412cd8a432bbea622814fbdb3b8d5005e7a71e5e5aa60478c8a7b90788982",
+    "bytes": 25043
+  },
+  "focus002/driver.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus002/executed-binaries.json": {
+    "sha256": "b7a2018c6acb9a748881f1ed49c51480717c58c536a6bb3ad4bbcee6eba89227",
+    "bytes": 120
+  },
+  "focus002/memory-events.txt": {
+    "sha256": "656ca41293b5ea0554999e3e3bb3b15620015e97a8e7de5428ef7e082aff371c",
+    "bytes": 73
+  },
+  "focus002/memory-peak.txt": {
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+    "bytes": 11
+  },
+  "focus002/publication.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus002/publication.log": {
+    "sha256": "ee5a7ef7eec4c3f047ac099449f307bdc3e6eaba9b6caaa43bf8fe9a554358eb",
+    "bytes": 26559
+  },
+  "focus002/rustc.txt": {
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+    "bytes": 197
+  },
+  "focus002/selection.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus002/selection.log": {
+    "sha256": "2bb72cbc1dacece084c39de79b3ae4047c77b0fbdea43c240dc71ce62bc059db",
+    "bytes": 24931
+  },
+  "focus002/source-unchanged.json": {
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+    "bytes": 5
+  },
+  "focus002/source.json": {
+    "sha256": "cfddc1a0f122aecee2ed9bd50dc54c42656f83fadc0ff3f1cda82f512a88215c",
+    "bytes": 42232
+  },
+  "focus002/unknown.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "focus002/unknown.log": {
+    "sha256": "35dc188cffd0707fb485338257a74281dccb1801322b3e8e8bf6e7c7df4c5d82",
+    "bytes": 24810
+  },
+  "full003/clippy.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "full003/clippy.log": {
+    "sha256": "0b26c6170741d412e7e92e5b2b9c4a22c2b23ee0c7581a87e9ae2620341fb2c3",
+    "bytes": 1103026
+  },
+  "full003/command.json": {
+    "sha256": "e576995c6cd175600a6e472e05738932fd30d99c823deb853c8e0641bcce8a52",
+    "bytes": 1625
+  },
+  "full003/driver.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "full003/executed-binaries.json": {
+    "sha256": "9f34faba4a683c9b038bc7780180f8f8278932ed2c78fee5c8b45476748687b7",
+    "bytes": 1655
+  },
+  "full003/fmt.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "full003/fmt.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "full003/full.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "full003/full.log": {
+    "sha256": "ce697a293a6e4aa3dec39083c9cd92bd658f9ea0dce562b13e31562a4a7fb2ce",
+    "bytes": 213606
+  },
+  "full003/memory-events.txt": {
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+    "bytes": 70
+  },
+  "full003/memory-peak.txt": {
+    "sha256": "39d930cb9031f1cb48739127001d8364712a4ee00ee450b89a6490e0a83a4033",
+    "bytes": 11
+  },
+  "full003/rustc.txt": {
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+    "bytes": 197
+  },
+  "full003/source-unchanged.json": {
+    "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+    "bytes": 5
+  },
+  "full003/source.json": {
+    "sha256": "cfddc1a0f122aecee2ed9bd50dc54c42656f83fadc0ff3f1cda82f512a88215c",
+    "bytes": 42232
+  }
+}

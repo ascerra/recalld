@@ -1,0 +1,168 @@
+diff --git a/src/storage/logical_export.rs b/src/storage/logical_export.rs
+index 122c4ee9..01e44f08 100644
+--- a/src/storage/logical_export.rs
++++ b/src/storage/logical_export.rs
+@@ -120,6 +120,9 @@ fn table_kind(name: &str) -> Option<TableKind> {
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase", deny_unknown_fields)]
+ struct LogicalMemory {
++    // Required-feature-gated physical reconstruction hint; excluded from logical hash.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    vector_placement: Option<u32>,
+     record: Vec<u8>,
+     full_text: Option<String>,
+     embedding_bits: Option<Vec<u32>>,
+@@ -221,6 +224,7 @@ fn logical_memory_for(
+         reference.slot = 0;
+     }
+     Ok(LogicalMemory {
++        vector_placement: None,
+         record: item.record.encode()?,
+         full_text: item.full_text,
+         embedding_bits: item
+@@ -336,11 +340,12 @@ fn visit_items_for(
+         }
+     }
+     snapshot.for_each_record(|record| {
+-        visit(Item::Memory(if isolated_legacy {
+-            logical_memory_for(record, true)?
+-        } else {
+-            logical_memory(record)?
+-        }))
++        let placement = snapshot.namespaces().iter().find(|ns| ns.id.get() == record.record.namespace_id)
++            .is_some_and(|ns| ns.schema.as_ref().is_some_and(|s| s.vector_certification.is_some()))
++            .then_some(record.record.vector_slot).filter(|_| record.embedding.is_some());
++        let mut memory = if isolated_legacy { logical_memory_for(record, true)? } else { logical_memory(record)? };
++        memory.vector_placement = placement;
++        visit(Item::Memory(memory))
+     })?;
+     let read = snapshot.edges.begin_read()?;
+     for table in read.list_tables()? {
+@@ -389,7 +394,11 @@ impl LogicalHash {
+         // Catalog history is retained in the transport checksum, but new text
+         // selection/physical offsets are not logical fidelity requirements.
+         if !self.physical {
+-            let bytes = encoded(item)?;
++            let bytes = if let Item::Memory(memory) = item {
++                let mut logical = memory.clone();
++                logical.vector_placement = None;
++                encoded(&Item::Memory(logical))?
++            } else { encoded(item)? };
+             self.hash.update((bytes.len() as u64).to_be_bytes());
+             self.hash.update(bytes);
+         }
+@@ -775,7 +784,10 @@ fn initialize_stage(
+     Ok(())
+ }
+ 
++mod vector_layout;
++
+ struct Importer {
++    vector_layout: vector_layout::VectorLayout,
+     meta: redb::Database,
+     edges: redb::Database,
+     vectors: super::VectorManager,
+@@ -787,6 +799,7 @@ impl Importer {
+         path: &Path,
+         summary: &ExportSummary,
+         final_chain: [u8; 32],
++        vector_layout: vector_layout::VectorLayout,
+     ) -> Result<Self, StorageError> {
+         super::validation::require_file(&path.join("meta.db"))?;
+         super::validation::require_file(&path.join("edges.db"))?;
+@@ -806,6 +819,7 @@ impl Importer {
+             }
+         }
+         Ok(Self {
++            vector_layout,
+             meta,
+             edges: redb::Database::open(path.join("edges.db"))?,
+             vectors,
+@@ -871,6 +885,7 @@ impl Importer {
+                 }
+             },
+             Item::Memory(memory) => {
++                self.vector_layout.prepare(&mut self.vectors)?;
+                 let mut record = DiskRecord::from_bytes(&memory.record)?;
+                 if let Some(bits) = &memory.embedding_bits {
+                     let vector: Vec<_> = bits.iter().map(|b| f32::from_bits(*b)).collect();
+@@ -878,7 +893,10 @@ impl Importer {
+                         .vectors
+                         .get_mut(crate::model::NamespaceId::new(record.namespace_id))
+                         .ok_or(StorageError::NamespaceNotFound(record.namespace_id))?;
+-                    record.vector_slot = store.insert_vector(&vector)?;
++                    record.vector_slot = if let Some(slot) = memory.vector_placement {
++                        store.write_import_vector(slot, &vector)?;
++                        slot
++                    } else { store.insert_vector(&vector)? };
+                     store.sync()?;
+                     record
+                         .schema
+@@ -933,7 +951,8 @@ impl Importer {
+         checkpoint("chunk_committed");
+         Ok(())
+     }
+-    fn select_text(self, path: &Path) -> Result<(), StorageError> {
++    fn select_text(mut self, path: &Path) -> Result<(), StorageError> {
++        vector_layout::VectorLayout::reclaim_placeholders(&self.meta, &mut self.vectors)?;
+         let descriptor = self.text.seal(
+             self.progress.summary.source.store_id,
+             self.progress.text.id,
+@@ -980,7 +999,9 @@ fn validate_logical_snapshot(
+ /// destination is overwritten; an already-complete matching import is verified.
+ pub fn import_store(input: &Path, destination: &Path) -> Result<ExportSummary, StorageError> {
+     let mut vector_slack = 0u64;
++    let mut vector_layout = vector_layout::VectorLayout::default();
+     let (header, summary, final_chain) = scan_stream(input, |_, chunk, _| {
++        vector_layout.observe(&chunk.item)?;
+         if let Item::Namespace(ns) = &chunk.item {
+             vector_slack = vector_slack
+                 .checked_add(
+@@ -1030,7 +1051,7 @@ pub fn import_store(input: &Path, destination: &Path) -> Result<ExportSummary, S
+         super::fsync::fsync_dir(&parent)?;
+     }
+     checkpoint("initialized");
+-    let mut importer = Importer::open(&stage, &summary, final_chain)?;
++    let mut importer = Importer::open(&stage, &summary, final_chain, vector_layout)?;
+     let (_, verified, verified_chain) =
+         scan_stream(input, |_, chunk, table| importer.chunk(chunk, table))?;
+     if verified != summary || verified_chain != final_chain {
+diff --git a/src/storage/vectors.rs b/src/storage/vectors.rs
+index 0d4d77e2..0fb2d461 100644
+--- a/src/storage/vectors.rs
++++ b/src/storage/vectors.rs
+@@ -511,6 +511,25 @@ impl VectorStore {
+         }
+ 
+         let slot = self.allocate_slot()?;
++        self.write_allocated_vector(slot, vector)?;
++        Ok(slot)
++    }
++
++    /// Only the private checksummed logical importer uses this to fill its
++    /// reserved layout. Normal writers allocate a new slot; they never overwrite
++    /// a canonical reference. Interrupted imports repeat the same verified bytes.
++    pub(super) fn write_import_vector(&mut self, slot: u32, vector: &[f32]) -> Result<()> {
++        if slot >= self.slot_count || self.is_free(slot) {
++            return Err(VectorError::Corrupt { path: self.path.clone(), reason: "import slot was not reserved".into() });
++        }
++        if vector.len() != self.dimensions as usize {
++            return Err(VectorError::WrongVectorLength { expected: self.dimensions as usize, got: vector.len() });
++        }
++        self.write_allocated_vector(slot, vector)?;
++        self.remap()
++    }
++
++    fn write_allocated_vector(&mut self, slot: u32, vector: &[f32]) -> Result<()> {
+         let offset = VectorFileHeader::data_offset(slot, self.stride);
+ 
+         // Write vector data via the file descriptor (not through mmap).
+@@ -527,7 +546,7 @@ impl VectorStore {
+         })?;
+         // Note: fsync is deferred to the caller's batch sync.
+ 
+-        Ok(slot)
++        Ok(())
+     }
+ 
+     /// Finish a batch of `insert_vector_no_remap` calls by performing

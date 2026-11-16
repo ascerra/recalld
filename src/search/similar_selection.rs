@@ -275,6 +275,11 @@ impl QueryEngine {
             let profile = bound_profile(&source_ns)?
                 .cloned()
                 .ok_or_else(|| unavailable("source embedding provenance is unknown"))?;
+            if canonical.is_native_owned() {
+                canonical
+                    .check_native_vector_namespace(&source_ns)
+                    .map_err(unavailable)?;
+            }
             let mut vector = engine
                 .vector_indexes
                 .get_vector(id)
@@ -312,6 +317,11 @@ impl QueryEngine {
                 if let Some(reason) = exclusion {
                     coverage.excluded.insert(ns.id, reason);
                     continue;
+                }
+                if canonical.is_native_owned() {
+                    canonical
+                        .check_native_vector_namespace(&ns)
+                        .map_err(unavailable)?;
                 }
                 coverage.searched.push(ns.id);
                 let mut filter = options.filter.clone();

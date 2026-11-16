@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "/work/source/scripts/public-mcp-evaluation.py", line 618, in <module>
+    main()
+  File "/work/source/scripts/public-mcp-evaluation.py", line 614, in main
+    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+  File "/work/source/scripts/public-mcp-evaluation.py", line 366, in run_episode
+    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root)
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/public-mcp-evaluation.py", line 232, in validate
+    exact_keys(m, (*(("accountingPolicy",) if accounted else ()), "manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+  File "/work/source/scripts/public-mcp-evaluation.py", line 50, in exact_keys
+    raise ValueError("unsupported or missing fields")
+ValueError: unsupported or missing fields

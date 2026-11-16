@@ -280,6 +280,8 @@ impl FlatVectorIndex {
             });
         }
 
+        let instrumented = crate::performance::enabled();
+        let mut dots = 0usize;
         let min_score = filter.min_score.unwrap_or(f32::NEG_INFINITY);
 
         // Min-heap of size K via reversed Ord on ScoredEntry.
@@ -295,6 +297,7 @@ impl FlatVectorIndex {
 
             let offset = i * self.dim;
             let candidate = &self.vectors[offset..offset + self.dim];
+            dots += usize::from(instrumented);
             let score = dot_product_simd(query, candidate);
             if !score.is_finite() {
                 return Err(VectorError::CorruptIndex("nonfinite vector score".into()));
@@ -337,6 +340,12 @@ impl FlatVectorIndex {
             })
             .collect();
 
+        crate::performance::event!(
+            kind = "vector_scan",
+            examined = self.entries.len(),
+            dot_products = dots,
+            admitted = results.len()
+        );
         coverage.candidate_limited = coverage.eligible > k;
         Ok(super::SourceResults {
             results,

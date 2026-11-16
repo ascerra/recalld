@@ -1,0 +1,19 @@
+{
+  "sourceCommit": "fe99020926eb81a6994c7e9214ad4623180eeed1",
+  "test": "before_106_oversize_retained_artifacts",
+  "mcpResponseBytes": 96660111,
+  "files": {
+    "pending/edges.db": "83c0427836ec55ba5606c119abb8c765524b60018964f0817ad95328a48f14a8",
+    "pending/fulltext.ba6e7025-4756-4f7b-9ba9-300c9abc1616.dat": "6aa9af0fb1367476ffc8f1fe22a1fea60b69929473a6eb3050136d6ff4e933dc",
+    "pending/fulltext.dat": "60a0860d279b4a0e45c76780a3fbd7989bca84dfffcd76f8f430ed86fb416f00",
+    "pending/meta.db": "bfe9100514e998d3fcd206bb65d2208a9d3f644577e425780ef1372f790774ee",
+    "pending/native/vectors.dat": "c6f2943bdd50879df4ab4b65803f2bfe46c46004bc9fab15e475d02baaceb36d",
+    "pending/recalld.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "completed/edges.db": "713a6b96b50af2d9274dbe67b0c4b008f25e509f4968b6076faf7b13dd59222e",
+    "completed/fulltext.ba6e7025-4756-4f7b-9ba9-300c9abc1616.dat": "6aa9af0fb1367476ffc8f1fe22a1fea60b69929473a6eb3050136d6ff4e933dc",
+    "completed/fulltext.dat": "60a0860d279b4a0e45c76780a3fbd7989bca84dfffcd76f8f430ed86fb416f00",
+    "completed/meta.db": "186d9420b33072e552961acddce5f7830514c3e56c69f5a927e9582ad20074ac",
+    "completed/native/vectors.dat": "e70fad25f4e4d2d1846d70564298a8b5db4bac2eb0a025073371460519c1402e",
+    "completed/recalld.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

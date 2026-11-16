@@ -24,8 +24,7 @@ use crate::graph::{self, RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, DiskRecord, MemoryId, NamespaceId};
 use crate::rif::{RifConfig, RifEngine};
 use crate::search::{
-    EntityIndex, FlatVectorIndex, FtsIndex, QueryEngine, VectorError, VectorIndex as _,
-    VectorMetadata,
+    EntityIndex, FtsIndex, QueryEngine, VectorError, VectorIndexOwner, VectorMetadata,
 };
 use crate::storage::engine::RedbStorageEngine;
 // Import the StorageEngine trait so its methods are in scope.
@@ -79,7 +78,7 @@ impl VectorLoadStats {
 
 /// Fill `index` from the vectors already on disk.
 ///
-/// [`FlatVectorIndex`] is pure RAM. It is created empty, and until this
+/// [`VectorIndexOwner`] is pure RAM. It is created empty, and until this
 /// existed nothing but the store path ever put anything in it — so every
 /// restart began with an empty index and stayed empty until the process
 /// stored its first memory. `find_similar_memories` failed outright
@@ -101,7 +100,7 @@ impl VectorLoadStats {
 fn load_vector_index(
     storage: &RedbStorageEngine,
     records: &[(MemoryId, DiskRecord)],
-    index: &mut FlatVectorIndex,
+    index: &mut VectorIndexOwner,
 ) -> VectorLoadStats {
     let mut stats = VectorLoadStats::default();
 
@@ -112,7 +111,11 @@ fn load_vector_index(
         .iter()
         .filter(|(_, r)| r.phase != DecayPhase::Tombstone)
         .count();
-    index.reserve(live);
+    if let Err(error) = index.reserve(live) {
+        tracing::warn!(%error, "vector reservation rejected");
+        stats.unreadable = live;
+        return stats;
+    }
 
     for (memory_id, record) in records {
         if record.phase == DecayPhase::Tombstone {
@@ -226,7 +229,7 @@ pub struct Recalld {
 
     // -- Search -------------------------------------------------------
     /// Flat vector index for SIMD similarity search.
-    vector_index: Arc<RwLock<FlatVectorIndex>>,
+    vector_index: Arc<RwLock<VectorIndexOwner>>,
 
     /// FTS5 full-text search index (single SQLite database for all namespaces).
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -268,25 +271,63 @@ impl Recalld {
         config: RecalldConfig,
         clock: Arc<dyn crate::time::Clock>,
     ) -> Result<Self> {
+        Self::with_runtime_sources(config, clock, Box::new(crate::storage::ids::SystemIds)).await
+    }
+
+    pub(crate) async fn with_runtime_sources(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        ids: Box<dyn crate::storage::ids::IdSource>,
+    ) -> Result<Self> {
+        let engine = RedbStorageEngine::open_with_ids(&config.storage.data_dir, false, ids)
+            .map_err(|e| RecalldError::Init {
+                step: "open_storage",
+                message: format!("failed to open storage at {}: {e}", config.storage.data_dir),
+                source: Some(Box::new(e)),
+            })?;
+        Self::with_owned_storage(config, clock, engine).await
+    }
+
+    /// Internal construction over one already-owned engine. Selection and
+    /// bootstrap authority belong to the caller, never to an API version flag.
+    pub(crate) async fn with_owned_storage(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        engine: RedbStorageEngine,
+    ) -> Result<Self> {
+        let validate = || -> anyhow::Result<bool> {
+            anyhow::ensure!(
+                std::path::Path::new(&config.storage.data_dir).canonicalize()? == engine.db_path(),
+                "owned engine/config root mismatch"
+            );
+            let native = engine.control_state()?.control_schema_version == 2;
+            if native {
+                anyhow::ensure!(
+                    config.decay.disable_sweep
+                        && !config.rif.enabled
+                        && !config.graph.autolink_enabled,
+                    "native prefix requires explicit disabled sweep, RIF and autolink"
+                );
+                let default = engine
+                    .get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)?;
+                anyhow::ensure!(
+                    default.is_some_and(|ns| ns.schema.is_some()),
+                    "native prefix requires an existing schema2 default namespace"
+                );
+            }
+            Ok(native)
+        };
+        let native_prefix = validate().map_err(|e| RecalldError::Init {
+            step: "owned_storage_preflight",
+            message: e.to_string(),
+            source: None,
+        })?;
         let config = Arc::new(config);
         let (shutdown_tx, _) = watch::channel(false);
         let drain_notify = Arc::new(Notify::new());
         let inflight_count = Arc::new(AtomicU32::new(0));
-
-        tracing::info!("starting Recalld");
-
-        // -- Step 1: Open storage engine ------------------------------
-        let storage = {
-            let data_dir = &config.storage.data_dir;
-            tracing::info!(data_dir = %data_dir, "opening storage engine");
-            let engine = RedbStorageEngine::open(data_dir).map_err(|e| RecalldError::Init {
-                step: "open_storage",
-                message: format!("failed to open storage at {}: {}", data_dir, e),
-                source: Some(Box::new(e)),
-            })?;
-            tracing::info!("storage engine opened");
-            Arc::new(std::sync::RwLock::new(engine))
-        };
+        let storage = Arc::new(std::sync::RwLock::new(engine));
+        tracing::info!("starting Recalld with owned storage");
 
         let effects_rebuild = storage
             .read()
@@ -425,6 +466,37 @@ impl Recalld {
             Arc::from(provider)
         };
 
+        if native_prefix {
+            let profile = embedding.profile().ok_or_else(|| RecalldError::Init {
+                step: "native_profile",
+                message: "provider profile missing".into(),
+                source: None,
+            })?;
+            let storage_r = storage.read().map_err(|e| RecalldError::Init {
+                step: "native_profile",
+                message: e.to_string(),
+                source: None,
+            })?;
+            for namespace in
+                storage_r
+                    .meta_store()
+                    .list_namespaces()
+                    .map_err(|e| RecalldError::Init {
+                        step: "native_profile",
+                        message: e.to_string(),
+                        source: Some(Box::new(e)),
+                    })?
+            {
+                crate::embedding::profile::require_compatible(&namespace, &profile).map_err(
+                    |e| RecalldError::Init {
+                        step: "native_profile",
+                        message: e.to_string(),
+                        source: None,
+                    },
+                )?;
+            }
+        }
+
         // -- Step 5: Create RIF engine --------------------------------
         let rif_engine = {
             let rif_cfg = RifConfig {
@@ -444,9 +516,27 @@ impl Recalld {
             Arc::new(engine)
         };
 
-        // -- Step 6: Create FlatVectorIndex and load persisted vectors -
+        // -- Step 6: Create VectorIndexOwner and load persisted vectors -
         let vector_index = {
-            let mut index = FlatVectorIndex::new(config.embedding.dimensions);
+            let mut index = if native_prefix {
+                let storage = storage.read().map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: None,
+                })?;
+                let namespaces = storage.list_namespaces().map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: Some(Box::new(e)),
+                })?;
+                VectorIndexOwner::from_namespaces(&namespaces).map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: Some(Box::new(e)),
+                })?
+            } else {
+                VectorIndexOwner::uniform(config.embedding.dimensions)
+            };
 
             // The index lives in RAM only; without this the process
             // starts semantically blind and stays that way until it
@@ -676,6 +766,11 @@ impl Recalld {
                 config.decay.decay_rate_multiplier,
             )
             .with_coherent_owner(completion, rif_engine.clone());
+            let engine = if native_prefix {
+                engine.with_native_query_admission()
+            } else {
+                engine
+            };
             tracing::info!("query engine initialized");
             Arc::new(engine)
         };
@@ -859,7 +954,7 @@ impl Recalld {
     }
 
     /// Access the flat vector index.
-    pub fn vector_index(&self) -> &Arc<RwLock<FlatVectorIndex>> {
+    pub fn vector_index(&self) -> &Arc<RwLock<VectorIndexOwner>> {
         &self.vector_index
     }
 
@@ -902,6 +997,17 @@ impl Recalld {
             .await
     }
 
+    pub(crate) fn derived_owner(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+    }
+
     /// Internal owned-core barrier. Returns a readiness observation, not a
     /// retained freeze lease or snapshot/reset authorization. No public wire
     /// capability is enabled by this entry point.
@@ -919,6 +1025,25 @@ impl Recalld {
             entities: self.entity_index.clone(),
         }
         .readiness_barrier(target, deadline)
+        .await
+    }
+
+    /// Actual canonical/component/work observation for a committed-error
+    /// envelope. This never drains the caller's root or claims barrier readiness.
+    pub async fn readiness_observation(
+        &self,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<crate::storage::ReadinessObservation, crate::storage::StorageError>
+    {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .observe_readiness(deadline)
         .await
     }
 
@@ -1115,10 +1240,10 @@ mod tests {
 
     /// Run the startup load against a fixture's storage, into a fresh
     /// index of `dim` — which is what step 6 does, minus the logging.
-    fn load(fx: &Fixture, dim: usize) -> (FlatVectorIndex, VectorLoadStats) {
+    fn load(fx: &Fixture, dim: usize) -> (VectorIndexOwner, VectorLoadStats) {
         let storage_r = fx.storage.read().expect("storage lock");
         let records = storage_r.scan_all().expect("scan_all");
-        let mut index = FlatVectorIndex::new(dim);
+        let mut index = VectorIndexOwner::uniform(dim);
         let stats = load_vector_index(&storage_r, &records, &mut index);
         (index, stats)
     }
@@ -1408,7 +1533,7 @@ mod tests {
 
     // ── the regression ───────────────────────────────────────────────
 
-    /// THE bug. `FlatVectorIndex` is RAM-only and was only ever filled
+    /// THE bug. `VectorIndexOwner` is RAM-only and was only ever filled
     /// by the store path, so every restart came up with an empty index:
     /// `find_similar_memories` failed with "no embedding found for
     /// memory <id>" and `recall_memories` quietly fell back to FTS and
@@ -1523,7 +1648,7 @@ mod tests {
 
         let engine = RedbStorageEngine::open(dir.path()).expect("reopen engine");
         let records = engine.scan_all().expect("scan_all");
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&engine, &records, &mut index);
 
         assert_eq!(stats.loaded, 2);
@@ -1573,7 +1698,7 @@ mod tests {
             .expect("two records");
         orphan.1.vector_slot = 9_999;
 
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&storage_r, &records, &mut index);
 
         assert_eq!(stats.missing, 1);
@@ -1594,7 +1719,7 @@ mod tests {
         let mut records = storage_r.scan_all().expect("scan_all");
         records[0].1.namespace_id = 4_242;
 
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&storage_r, &records, &mut index);
 
         assert_eq!(stats.unreadable, 1);
@@ -1761,3 +1886,11 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "system_inherited_policy_tests.rs"]
+mod inherited_policy_tests;
+
+#[cfg(test)]
+#[path = "system_heterogeneous_tests.rs"]
+mod heterogeneous_tests;

@@ -108,8 +108,9 @@ fn table_kind(name: &str) -> Option<TableKind> {
         | "mutation_keys"
         | "mutation_effects"
         | "removal_ledger"
-        | "namespace_purge_progress" => Some(TableKind::BytesBytes),
-        "namespace_counter" | "effects_schema" | "namespace_purge_schema" => {
+        | "namespace_purge_progress"
+        | "mutation_batches" => Some(TableKind::BytesBytes),
+        "namespace_counter" | "effects_schema" | "namespace_purge_schema" | "batch_schema" => {
             Some(TableKind::StrU32)
         }
         _ => None,
@@ -119,6 +120,13 @@ fn table_kind(name: &str) -> Option<TableKind> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct LogicalMemory {
+    // Required-feature-gated physical reconstruction hint; excluded from logical hash.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::storage::request_context::deserialize_present"
+    )]
+    vector_placement: Option<u32>,
     record: Vec<u8>,
     full_text: Option<String>,
     embedding_bits: Option<Vec<u32>>,
@@ -189,8 +197,16 @@ fn write_line(writer: &mut impl Write, line: &Line) -> Result<(), StorageError> 
     Ok(())
 }
 
-fn logical_memory(mut item: OfflineRecord) -> Result<LogicalMemory, StorageError> {
-    if item.record.version != 2 || item.record.schema.is_none() {
+fn logical_memory(item: OfflineRecord) -> Result<LogicalMemory, StorageError> {
+    logical_memory_for(item, false)
+}
+
+fn logical_memory_for(
+    mut item: OfflineRecord,
+    isolated_legacy: bool,
+) -> Result<LogicalMemory, StorageError> {
+    let legacy = isolated_legacy && item.record.version == 1 && item.record.schema.is_none();
+    if !legacy && (item.record.version != 2 || item.record.schema.is_none()) {
         return Err(invalid("migrate canonical schema before logical export"));
     }
     if item.record.phase == DecayPhase::Tombstone
@@ -203,10 +219,16 @@ fn logical_memory(mut item: OfflineRecord) -> Result<LogicalMemory, StorageError
     item.record.text_offset = 0;
     item.record.text_length = 0;
     item.record.vector_slot = 0;
-    if let Some(reference) = item.record.schema.as_mut().unwrap().vector.as_mut() {
+    if let Some(reference) = item
+        .record
+        .schema
+        .as_mut()
+        .and_then(|schema| schema.vector.as_mut())
+    {
         reference.slot = 0;
     }
     Ok(LogicalMemory {
+        vector_placement: None,
         record: item.record.encode()?,
         full_text: item.full_text,
         embedding_bits: item
@@ -217,9 +239,19 @@ fn logical_memory(mut item: OfflineRecord) -> Result<LogicalMemory, StorageError
 
 fn visit_items(
     snapshot: &OfflineSnapshot,
+    visit: impl FnMut(Item) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    visit_items_for(snapshot, false, visit)
+}
+
+fn visit_items_for(
+    snapshot: &OfflineSnapshot,
+    isolated_legacy: bool,
     mut visit: impl FnMut(Item) -> Result<(), StorageError>,
 ) -> Result<(), StorageError> {
-    if snapshot.control().control_schema_version != 2 {
+    if snapshot.control().control_schema_version != 2
+        && !(isolated_legacy && snapshot.control().control_schema_version == 1)
+    {
         return Err(invalid("migrate canonical schema before logical export"));
     }
     let read = snapshot.metadata.begin_read()?;
@@ -249,7 +281,19 @@ fn visit_items(
         }
         tables.insert(
             name.to_owned(),
-            table_kind(name).ok_or_else(|| invalid("unknown canonical table"))?,
+            table_kind(name)
+                .or_else(|| {
+                    if isolated_legacy {
+                        match name {
+                            "batch_schema" => Some(TableKind::StrU32),
+                            "mutation_batches" => Some(TableKind::BytesBytes),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| invalid("unknown canonical table"))?,
         );
     }
     for ns in snapshot.namespaces() {
@@ -299,7 +343,26 @@ fn visit_items(
             }
         }
     }
-    snapshot.for_each_record(|record| visit(Item::Memory(logical_memory(record)?)))?;
+    snapshot.for_each_record(|record| {
+        let placement = snapshot
+            .namespaces()
+            .iter()
+            .find(|ns| ns.id.get() == record.record.namespace_id)
+            .is_some_and(|ns| {
+                ns.schema
+                    .as_ref()
+                    .is_some_and(|s| s.vector_certification.is_some())
+            })
+            .then_some(record.record.vector_slot)
+            .filter(|_| record.embedding.is_some());
+        let mut memory = if isolated_legacy {
+            logical_memory_for(record, true)?
+        } else {
+            logical_memory(record)?
+        };
+        memory.vector_placement = placement;
+        visit(Item::Memory(memory))
+    })?;
     let read = snapshot.edges.begin_read()?;
     for table in read.list_tables()? {
         if !matches!(table.name(), "edges_forward" | "edges_reverse") {
@@ -347,12 +410,58 @@ impl LogicalHash {
         // Catalog history is retained in the transport checksum, but new text
         // selection/physical offsets are not logical fidelity requirements.
         if !self.physical {
-            let bytes = encoded(item)?;
+            let bytes = if let Item::Memory(memory) = item {
+                let mut logical = memory.clone();
+                logical.vector_placement = None;
+                encoded(&Item::Memory(logical))?
+            } else {
+                encoded(item)?
+            };
             self.hash.update((bytes.len() as u64).to_be_bytes());
             self.hash.update(bytes);
         }
         Ok(())
     }
+}
+
+/// Private legacy fixture checkpoint hash. This does not change export format,
+/// enable native serving, or certify runtime/cache/ID state. The caller already
+/// owns a strictly validated disposable stage, never a second live-core owner.
+pub(crate) fn isolated_legacy_hash(
+    snapshot: &OfflineSnapshot,
+    deadline: std::time::Instant,
+) -> Result<[u8; 32], StorageError> {
+    if snapshot.control().control_schema_version != 1 {
+        return Err(invalid("isolated legacy hash requires schema 1"));
+    }
+    let mut hash = LogicalHash::new(snapshot.control().generation_ref())?;
+    hash.hash.update(b"recalld-isolated-legacy-logical-v1");
+    visit_items_for(snapshot, true, |item| {
+        if std::time::Instant::now() >= deadline {
+            return Err(invalid("checkpoint hash deadline"));
+        }
+        hash.item(&item)
+    })?;
+    Ok(hash.hash.finalize().into())
+}
+
+/// Native checkpoint fidelity uses the existing export walker/hash unchanged,
+/// without writing an export envelope or allocating an export identity.
+pub(crate) fn isolated_native_hash(
+    snapshot: &OfflineSnapshot,
+    deadline: std::time::Instant,
+) -> Result<[u8; 32], StorageError> {
+    if snapshot.control().control_schema_version != 2 {
+        return Err(invalid("isolated native hash requires schema 2"));
+    }
+    let mut hash = LogicalHash::new(snapshot.control().generation_ref())?;
+    visit_items(snapshot, |item| {
+        if std::time::Instant::now() >= deadline {
+            return Err(invalid("checkpoint hash deadline"));
+        }
+        hash.item(&item)
+    })?;
+    Ok(hash.hash.finalize().into())
 }
 
 /// Publishes a new export file only after the entire retained-state stream is
@@ -370,7 +479,17 @@ pub fn export_store(source: &Path, output: &Path) -> Result<ExportSummary, Stora
     }
     let mut temporary = tempfile::NamedTempFile::new_in(&parent)?;
     let header = Header {
-        export_format_version: 1,
+        export_format_version: if super::vector_certification::validate_current(
+            &snapshot.metadata.begin_read()?,
+            snapshot.control(),
+        )?
+        .selected
+        .is_empty()
+        {
+            1
+        } else {
+            2
+        },
         canonical_schema_version: 2,
         export_id: Uuid::new_v4(),
         source: snapshot.control().generation_ref(),
@@ -556,13 +675,13 @@ impl Order {
 fn scan_stream(
     path: &Path,
     mut visit: impl FnMut(&Header, &Chunk, &str) -> Result<(), StorageError>,
-) -> Result<(Header, ExportSummary, [u8; 32]), StorageError> {
+) -> Result<(Header, ExportSummary, [u8; 32], vector_layout::VectorLayout), StorageError> {
     super::validation::require_file(path)?;
     let mut reader = BufReader::new(std::fs::File::open(path)?);
     let Some(Line::Header(header)) = read_line(&mut reader)? else {
         return Err(invalid("missing header"));
     };
-    if header.export_format_version != 1
+    if !matches!(header.export_format_version, 1 | 2)
         || header.canonical_schema_version != 2
         || header.export_id.is_nil()
         || header.source.store_id.is_nil()
@@ -573,6 +692,7 @@ fn scan_stream(
     let mut count = 0u64;
     let mut logical = LogicalHash::new(header.source)?;
     let mut order = Order::default();
+    let mut layout = vector_layout::VectorLayout::new(header.export_format_version);
     loop {
         match read_line(&mut reader)? {
             Some(Line::Chunk(chunk)) => {
@@ -585,6 +705,7 @@ fn scan_stream(
                     return Err(invalid("chunk sequence/checksum mismatch"));
                 }
                 order.check(&chunk.item)?;
+                layout.observe(&chunk.item, &order.table)?;
                 logical.item(&chunk.item)?;
                 visit(&header, &chunk, &order.table)?;
                 previous = chunk.sha256;
@@ -603,7 +724,8 @@ fn scan_stream(
                 {
                     return Err(invalid("footer/fidelity mismatch or trailing input"));
                 }
-                return Ok((header, summary, previous));
+                layout.finish()?;
+                return Ok((header, summary, previous, layout));
             }
             _ => return Err(invalid("missing footer or duplicate header")),
         }
@@ -693,7 +815,12 @@ fn initialize_stage(
     Ok(())
 }
 
+mod vector_layout;
+#[cfg(test)]
+mod vector_layout_tests;
+
 struct Importer {
+    vector_layout: vector_layout::VectorLayout,
     meta: redb::Database,
     edges: redb::Database,
     vectors: super::VectorManager,
@@ -705,6 +832,7 @@ impl Importer {
         path: &Path,
         summary: &ExportSummary,
         final_chain: [u8; 32],
+        vector_layout: vector_layout::VectorLayout,
     ) -> Result<Self, StorageError> {
         super::validation::require_file(&path.join("meta.db"))?;
         super::validation::require_file(&path.join("edges.db"))?;
@@ -724,6 +852,7 @@ impl Importer {
             }
         }
         Ok(Self {
+            vector_layout,
             meta,
             edges: redb::Database::open(path.join("edges.db"))?,
             vectors,
@@ -789,6 +918,7 @@ impl Importer {
                 }
             },
             Item::Memory(memory) => {
+                self.vector_layout.prepare(&mut self.vectors)?;
                 let mut record = DiskRecord::from_bytes(&memory.record)?;
                 if let Some(bits) = &memory.embedding_bits {
                     let vector: Vec<_> = bits.iter().map(|b| f32::from_bits(*b)).collect();
@@ -796,7 +926,12 @@ impl Importer {
                         .vectors
                         .get_mut(crate::model::NamespaceId::new(record.namespace_id))
                         .ok_or(StorageError::NamespaceNotFound(record.namespace_id))?;
-                    record.vector_slot = store.insert_vector(&vector)?;
+                    record.vector_slot = if let Some(slot) = memory.vector_placement {
+                        store.write_import_vector(slot, &vector)?;
+                        slot
+                    } else {
+                        store.insert_vector(&vector)?
+                    };
                     store.sync()?;
                     record
                         .schema
@@ -851,7 +986,9 @@ impl Importer {
         checkpoint("chunk_committed");
         Ok(())
     }
-    fn select_text(self, path: &Path) -> Result<(), StorageError> {
+    fn select_text(mut self, path: &Path) -> Result<(), StorageError> {
+        self.vector_layout
+            .reclaim_placeholders(&self.meta, &mut self.vectors)?;
         let descriptor = self.text.seal(
             self.progress.summary.source.store_id,
             self.progress.text.id,
@@ -898,7 +1035,7 @@ fn validate_logical_snapshot(
 /// destination is overwritten; an already-complete matching import is verified.
 pub fn import_store(input: &Path, destination: &Path) -> Result<ExportSummary, StorageError> {
     let mut vector_slack = 0u64;
-    let (header, summary, final_chain) = scan_stream(input, |_, chunk, _| {
+    let (header, summary, final_chain, vector_layout) = scan_stream(input, |_, chunk, _| {
         if let Item::Namespace(ns) = &chunk.item {
             vector_slack = vector_slack
                 .checked_add(
@@ -908,6 +1045,9 @@ pub fn import_store(input: &Path, destination: &Path) -> Result<ExportSummary, S
         }
         Ok(())
     })?;
+    vector_slack = vector_slack
+        .checked_add(vector_layout.capacity())
+        .ok_or_else(|| invalid("staging size overflow"))?;
     let absolute = std::path::absolute(destination)?;
     let parent = absolute
         .parent()
@@ -948,8 +1088,8 @@ pub fn import_store(input: &Path, destination: &Path) -> Result<ExportSummary, S
         super::fsync::fsync_dir(&parent)?;
     }
     checkpoint("initialized");
-    let mut importer = Importer::open(&stage, &summary, final_chain)?;
-    let (_, verified, verified_chain) =
+    let mut importer = Importer::open(&stage, &summary, final_chain, vector_layout)?;
+    let (_, verified, verified_chain, _) =
         scan_stream(input, |_, chunk, table| importer.chunk(chunk, table))?;
     if verified != summary || verified_chain != final_chain {
         return Err(invalid("export changed during import"));

@@ -9,6 +9,55 @@ use crate::model::schema::{EmbeddingProfile, Normalization, PreprocessingIdentit
 pub struct GeneratedEmbedding {
     pub values: Vec<f32>,
     pub profile: Option<EmbeddingProfile>,
+    // The public compatibility payload can be changed by a caller. The private
+    // seal binds all execution inputs and the raw result, checked before final
+    // normalization. A document digest alone would not bind the returned vector.
+    seal: Option<GeneratedSeal>,
+}
+
+#[derive(Debug, Clone)]
+struct GeneratedSeal {
+    document: [u8; 32],
+    profile_id: String,
+    raw_vector: [u8; 32],
+}
+
+fn vector_digest(values: &[f32]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for value in values {
+        hash.update(value.to_le_bytes());
+    }
+    hash.finalize().into()
+}
+
+impl GeneratedEmbedding {
+    /// Raw/supplied compatibility input is deliberately not provider evidence.
+    pub(crate) fn unverified(values: Vec<f32>, profile: Option<EmbeddingProfile>) -> Self {
+        Self {
+            values,
+            profile,
+            seal: None,
+        }
+    }
+    pub(crate) fn verify_document(&self, text: &str) -> Result<(), EmbeddingError> {
+        let expected = self
+            .profile
+            .as_ref()
+            .ok_or_else(|| EmbeddingError::InvalidResponse("generated profile missing".into()))?
+            .profile_id()
+            .map_err(EmbeddingError::InvalidResponse)?;
+        if self.seal.as_ref().is_none_or(|seal| {
+            seal.document != crate::storage::native_records::hash_bytes(text.as_bytes())
+                || seal.profile_id != expected
+                || seal.raw_vector != vector_digest(&self.values)
+        }) {
+            return Err(EmbeddingError::InvalidResponse(
+                "generated document/profile/output evidence mismatch".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl From<Vec<f32>> for GeneratedEmbedding {
@@ -16,6 +65,7 @@ impl From<Vec<f32>> for GeneratedEmbedding {
         Self {
             values,
             profile: None,
+            seal: None,
         }
     }
 }
@@ -74,17 +124,64 @@ pub async fn generate(
     let profile = provider.profile();
     check_namespace(namespace, profile.as_ref())
         .map_err(|e| EmbeddingError::Unavailable(e.to_string()))?;
+    generate_checked(provider, namespace, text, profile).await
+}
+
+/// Private participating native writers already hold owned native admission.
+/// This checks provenance without opening the ordinary schema-v2 serving gate.
+pub(crate) async fn generate_native(
+    provider: &dyn EmbeddingProvider,
+    namespace: &NamespaceConfig,
+    text: &str,
+) -> Result<GeneratedEmbedding, EmbeddingError> {
+    let profile = provider
+        .profile()
+        .ok_or_else(|| EmbeddingError::Unavailable("provider identity missing".into()))?;
+    super::profile::require_compatible(namespace, &profile)
+        .map_err(|e| EmbeddingError::Unavailable(e.to_string()))?;
+    generate_checked(provider, namespace, text, Some(profile)).await
+}
+async fn generate_checked(
+    provider: &dyn EmbeddingProvider,
+    namespace: &NamespaceConfig,
+    text: &str,
+    profile: Option<EmbeddingProfile>,
+) -> Result<GeneratedEmbedding, EmbeddingError> {
     if provider.dimensions() != namespace.embedding_dim as usize {
         return Err(EmbeddingError::Unavailable(
             "provider dimension differs from namespace".into(),
         ));
     }
-    let values = provider.embed(text).await?;
+    crate::performance::event!(
+        kind = "embedding_request",
+        requested_vectors = 1,
+        source_bytes = text.len()
+    );
+    let call = crate::performance::Timer::new("embedding.request");
+    let result = provider.embed(text).await;
+    call.outcome(result.is_ok());
+    let values = result?;
     // Validate without replacing the raw result: advisory and final transaction
     // must each normalize the same original values (rounding is not idempotent).
     super::validation::normalize_vector(&mut values.clone(), namespace.embedding_dim as usize)
         .map_err(EmbeddingError::InvalidResponse)?;
-    Ok(GeneratedEmbedding { values, profile })
+    let seal = profile
+        .as_ref()
+        .map(|profile| {
+            Ok::<_, EmbeddingError>(GeneratedSeal {
+                document: crate::storage::native_records::hash_bytes(text.as_bytes()),
+                profile_id: profile
+                    .profile_id()
+                    .map_err(EmbeddingError::InvalidResponse)?,
+                raw_vector: vector_digest(&values),
+            })
+        })
+        .transpose()?;
+    Ok(GeneratedEmbedding {
+        values,
+        profile,
+        seal,
+    })
 }
 
 /// Factory boundary inside the cache: invalid outputs never become cache hits.
@@ -100,13 +197,83 @@ impl CheckedProvider {
 #[async_trait::async_trait]
 impl EmbeddingProvider for CheckedProvider {
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
-        self.checked(self.0.embed(text).await?)
+        crate::performance::event!(
+            kind = "provider_call",
+            task = "document",
+            phase = "attempt",
+            requested_vectors = 1,
+            source_bytes = text.len()
+        );
+        let call = crate::performance::Timer::new("provider.document");
+        let result = self.0.embed(text).await;
+        crate::performance::event!(
+            kind = "provider_return",
+            task = "document",
+            success = result.is_ok()
+        );
+        call.outcome(result.is_ok());
+        let values = result?;
+        crate::performance::event!(
+            kind = "provider_vectors",
+            task = "document",
+            returned_vectors = 1,
+            returned_dimensions = values.len()
+        );
+        let validation = crate::performance::Timer::new("provider.validate");
+        let result = self.checked(values);
+        validation.outcome(result.is_ok());
+        result
     }
     async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
-        self.checked(self.0.embed_query(text).await?)
+        crate::performance::event!(
+            kind = "provider_call",
+            task = "query",
+            phase = "attempt",
+            requested_vectors = 1,
+            source_bytes = text.len()
+        );
+        let call = crate::performance::Timer::new("provider.query");
+        let result = self.0.embed_query(text).await;
+        crate::performance::event!(
+            kind = "provider_return",
+            task = "query",
+            success = result.is_ok()
+        );
+        call.outcome(result.is_ok());
+        let values = result?;
+        crate::performance::event!(
+            kind = "provider_vectors",
+            task = "query",
+            returned_vectors = 1,
+            returned_dimensions = values.len()
+        );
+        let validation = crate::performance::Timer::new("provider.validate");
+        let result = self.checked(values);
+        validation.outcome(result.is_ok());
+        result
     }
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        let values = self.0.embed_batch(texts).await?;
+        crate::performance::event!(
+            kind = "provider_call",
+            task = "document_batch",
+            phase = "attempt",
+            requested_vectors = texts.len(),
+            source_bytes = texts.iter().map(|t| t.len()).sum::<usize>()
+        );
+        let call = crate::performance::Timer::new("provider.document_batch");
+        let result = self.0.embed_batch(texts).await;
+        crate::performance::event!(
+            kind = "provider_return",
+            task = "document_batch",
+            success = result.is_ok()
+        );
+        call.outcome(result.is_ok());
+        let values = result?;
+        crate::performance::event!(
+            kind = "provider_vectors",
+            task = "document_batch",
+            returned_vectors = values.len()
+        );
         if values.len() != texts.len() {
             return Err(EmbeddingError::InvalidResponse(
                 "embedding batch count mismatch".into(),
@@ -175,6 +342,33 @@ pub(crate) mod tests {
         fn profile(&self) -> Option<EmbeddingProfile> {
             self.profile.clone()
         }
+    }
+
+    #[tokio::test]
+    async fn generated_document_seal_binds_actual_input_profile_and_raw_output() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = Output {
+            calls: calls.clone(),
+            profile: Some(profile()),
+            values: vec![0.3, 0.4, 0., 0.],
+            batch_count: 1,
+        };
+        let namespace = bound();
+        let generated = generate_native(&provider, &namespace, "actual document")
+            .await
+            .unwrap();
+        generated.verify_document("actual document").unwrap();
+        assert!(generated.verify_document("different document").is_err());
+        let mut wrong_values = generated.clone();
+        wrong_values.values = vec![1., 0., 0., 0.];
+        assert!(wrong_values.verify_document("actual document").is_err());
+        let mut wrong_profile = generated.clone();
+        wrong_profile.profile.as_mut().unwrap().model_id = "different-model".into();
+        assert!(wrong_profile.verify_document("actual document").is_err());
+        let unverified =
+            GeneratedEmbedding::unverified(generated.values.clone(), generated.profile.clone());
+        assert!(unverified.verify_document("actual document").is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

@@ -1,0 +1,11 @@
+runtime 1d9e7d16915941ce6dacdaaeac63bdbd50efea28
+full log SHA256 d9648805201d6142c219d83f567355eb50fad41f1b68dc107626e570310deda1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.24s
+test result: ok. 1080 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 561.06s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.38s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.63s

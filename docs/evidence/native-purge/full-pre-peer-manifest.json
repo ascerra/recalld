@@ -1,0 +1,57 @@
+{
+  "source": "0053acdfe5f91f9ef954318558b7187bc395dbf7",
+  "tree": "b9fe04a356c5c528136d475a35c43d529a88b7c5",
+  "runtime": "c6df03a8c1b9f38513ce21cddfdfcb229f7389eb",
+  "exit_code": 0,
+  "log_sha256": "914d48a85c2d40d75a6fe9af86d9053d38f03e83a341fac9d3b6b89cc23d4332",
+  "results": [
+    "warning: `recalld` (lib) generated 7 warnings (run `cargo fix --lib -p recalld` to apply 2 suggestions)",
+    "test result: ok. 964 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 391.80s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.09s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s",
+    "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "warning: `recalld` (lib) generated 680 warnings (run `cargo clippy --fix --lib -p recalld` to apply 85 suggestions)",
+    "warning: `recalld` (lib test) generated 714 warnings (674 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 3 suggestions)"
+  ],
+  "executables": [
+    {
+      "name": "lifecycle_cli-c369125dcd35855a",
+      "sha256": "e0d66d67dc5092a707dbb7a9acfb0c13f4cb974280b95201e99486f9d403d53e"
+    },
+    {
+      "name": "recalld-a60730f3f93b30b7",
+      "sha256": "f0e375306e5963e0f25d18253cb3371d265d4cae84a7e10adf5d4ed73e6930ba"
+    },
+    {
+      "name": "recalld_cli-8f457ab03bd2b416",
+      "sha256": "b8ff5ec9db2c4db3ee5f49f4b3296b74d80c1629a12ee35d6e5392a59786aac2"
+    },
+    {
+      "name": "recalld-b2844bb1c4a63074",
+      "sha256": "2c7eba26304ce8eaea5889ce0eb34e0d0c1c9e92a9190b2e33a33e1d628aef9d"
+    },
+    {
+      "name": "recalld_cli-1eeb647232914a85",
+      "sha256": "83bf8b703698e507bb93dd8f3fb749f079d8e9d1855045f046d5bcb77e63a4d6"
+    },
+    {
+      "name": "text_migration_cli-c3debcbf7a93ee01",
+      "sha256": "039dbd7a64a4f6995f612ea8208f0fe8900222b8245de76223e1ada0338d8971"
+    },
+    {
+      "name": "recalld_text_migrate-9e1311bf36e47336",
+      "sha256": "4f01b8f73a624f82127ec4ef889c2ce9918f7bfd069f37194b6b3301d28d2e81"
+    },
+    {
+      "name": "recalld-e70475283dff0fcc",
+      "sha256": "dfb3e2c93e171b1d2aed306eb4dd51e448166361c4f5ef922e11468510b6548f"
+    },
+    {
+      "name": "recalld_text_migrate-e2e689a390b4efcc",
+      "sha256": "0663467c03121eda54a35a92e213ebb28d3d5bc755002f86572d54b8788ef77a"
+    }
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "workerVersion": 1,
+  "kind": "startup-diagnostic",
+  "childExit": -15,
+  "timedOut": true,
+  "childWallSeconds": 60.11169354201411,
+  "processGroupGone": true,
+  "responseParseError": null,
+  "concurrentDrainsJoined": true,
+  "drainErrors": [],
+  "replayThreadJoined": true,
+  "providerRequests": [],
+  "startupStages": [
+    {
+      "elapsedUs": 147,
+      "event": "begin",
+      "stage": "preflight_open",
+      "version": 1
+    },
+    {
+      "elapsedUs": 301066,
+      "event": "end",
+      "stage": "preflight_open",
+      "version": 1
+    },
+    {
+      "elapsedUs": 301112,
+      "event": "begin",
+      "stage": "canonical_before",
+      "version": 1
+    },
+    {
+      "elapsedUs": 307802,
+      "event": "end",
+      "stage": "canonical_before",
+      "version": 1
+    },
+    {
+      "elapsedUs": 0,
+      "event": "begin",
+      "stage": "with_clock",
+      "version": 1
+    },
+    {
+      "elapsedUs": 0,
+      "event": "begin",
+      "stage": "ack_batch",
+      "version": 1
+    },
+    {
+      "elapsedUs": 15649,
+      "event": "planned",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 1,
+      "elapsedUs": 43989,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 256,
+      "elapsedUs": 6840740,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 512,
+      "elapsedUs": 13294725,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 768,
+      "elapsedUs": 19332813,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 1024,
+      "elapsedUs": 25161888,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 1280,
+      "elapsedUs": 30670768,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 1536,
+      "elapsedUs": 35718266,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 1792,
+      "elapsedUs": 40457027,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 2048,
+      "elapsedUs": 44811737,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 2304,
+      "elapsedUs": 48851938,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 2560,
+      "elapsedUs": 52570064,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    },
+    {
+      "completed": 2816,
+      "elapsedUs": 55916391,
+      "event": "progress",
+      "stage": "ack_batch",
+      "total": 5183,
+      "version": 1
+    }
+  ],
+  "ftsRecords": [],
+  "constructorRecords": [],
+  "malformedRecords": [],
+  "response": null,
+  "binaryBefore": "26984986969f1f11ac4d5ee9782eecab4fb77ff029b9bb8140675c0ad6441836",
+  "binaryAfter": "26984986969f1f11ac4d5ee9782eecab4fb77ff029b9bb8140675c0ad6441836",
+  "usageScope": "actual cached local encoder WordPiece counts, not OpenAI/model-price tokens"
+}

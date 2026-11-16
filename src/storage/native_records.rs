@@ -30,6 +30,35 @@ pub struct NativeInsert {
     pub embedding_profile: Option<EmbeddingProfile>,
 }
 impl NativeInsert {
+    /// Fresh provider input for the declared recalld-document-v1 recipe.
+    /// Keep caller fields untouched for identity, and perform replay before this.
+    pub(crate) fn document_v1(&self) -> String {
+        use crate::model::constants::{EMOTION_TAG_PREFIX, ENTITY_TAG_PREFIX, TOPIC_TAG_PREFIX};
+        let mut tags: Vec<String> = self.memory.tags.iter().map(ToString::to_string).collect();
+        for (values, prefix) in [
+            (&self.entities, ENTITY_TAG_PREFIX),
+            (&self.topics, TOPIC_TAG_PREFIX),
+            (&self.emotions, EMOTION_TAG_PREFIX),
+        ] {
+            for value in values {
+                let tag = format!("{prefix}{}", value.to_lowercase());
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        let mut text = self.memory.summary.clone();
+        if let Some(full_text) = &self.memory.full_text {
+            text.push_str("\n\n");
+            text.push_str(full_text);
+        }
+        if !tags.is_empty() {
+            text.push(' ');
+            text.push_str(&tags.join(" "));
+        }
+        text
+    }
+
     pub(crate) fn labels(&self) -> StructuredLabels {
         StructuredLabels {
             entities: self.entities.clone(),
@@ -94,13 +123,34 @@ impl NativeInsert {
     ) -> Result<[u8; 32], StorageError> {
         // Reuse exact original caller float bits/default expansion. The v2
         // operation tag and additional fields keep its identity distinct.
-        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let supplied_profile = self
             .embedding_profile
             .as_ref()
             .map(|p| p.profile_id())
             .transpose()
             .map_err(StorageError::InvalidMutation)?;
+        self.request_hash_with_profile_id(
+            ctx,
+            stability,
+            difficulty,
+            dimensions,
+            profile_id,
+            supplied_profile.as_deref(),
+        )
+    }
+
+    /// The wire supplies an ID, not a descriptor. Preserve the existing hash
+    /// encoding so historical replay needs no live descriptor or provider.
+    pub(crate) fn request_hash_with_profile_id(
+        &self,
+        ctx: &MutationContext,
+        stability: f32,
+        difficulty: f32,
+        dimensions: u32,
+        profile_id: &str,
+        supplied_profile: Option<&str>,
+    ) -> Result<[u8; 32], StorageError> {
+        let original = self.memory.request_hash(ctx, stability, dimensions)?;
         let extra = super::control::encode(&(
             self.observed_at,
             &self.entities,
@@ -171,6 +221,35 @@ pub struct ContentProof {
     pub profile_id: Option<String>,
 }
 impl ContentProof {
+    /// Shared shape check also applies to historical receipts whose records
+    /// were removed after a restore. None preserves unknown legacy provenance.
+    pub(crate) fn validate_profile_commitment(&self) -> Result<(), StorageError> {
+        if let Some(profile) = &self.profile_id {
+            if profile.len() != 68
+                || !profile.starts_with("ep1:")
+                || !profile.as_bytes()[4..]
+                    .iter()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+            {
+                return Err(invalid("invalid native profile commitment"));
+            }
+        }
+        Ok(())
+    }
+    /// Bind retained proof content to the immutable, validated namespace profile.
+    /// Unknown legacy provenance requires None, including in foreign history.
+    pub(crate) fn validate_namespace_profile(
+        &self,
+        namespace: &NamespaceConfig,
+    ) -> Result<(), StorageError> {
+        self.validate_profile_commitment()?;
+        if namespace.schema.is_none() || self.profile_id != profile_id(namespace) {
+            return Err(invalid(
+                "native profile commitment differs from namespace binding",
+            ));
+        }
+        Ok(())
+    }
     pub(crate) fn capture(
         record: &DiskRecord,
         namespace: &NamespaceConfig,
@@ -339,6 +418,12 @@ impl From<&super::edges::PersistedEdge> for NativeEdgeProof {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeRecordWrite {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub vector_execution: Option<super::vector_certification::VectorExecution>,
     pub namespace_id: crate::model::NamespaceId,
     pub memory_id: MemoryId,
     pub lifecycle_version: LifecycleVersion,
@@ -374,6 +459,46 @@ where
     PhaseTimeRule::deserialize(deserializer).map(Some)
 }
 
+pub(crate) fn validate_creation_primary(
+    change: &NativeRecordChange,
+    sampled_at: i64,
+    committed_generation: Generation,
+) -> Result<(), StorageError> {
+    let after = &change.after;
+    let fields = &after.lifecycle.lifecycle;
+    let n = &after.lifecycle;
+    if change.before.is_some()
+        || fields.record_generation != Generation::default().next()?
+        || fields.timestamp_origin != TimestampOrigin::Native
+        || fields.retrieved_at.is_some()
+        || fields.reinforced_at.is_some()
+        || fields.decay_anchor_at != n.created_at
+        || fields.phase_changed_at != n.created_at
+        || fields.lifecycle_updated_at != sampled_at.max(n.created_at)
+        || n.last_accessed_at != n.created_at
+        || n.phase != DecayPhase::Full
+        || !n.has_summary
+        || n.is_permastore
+        || n.strength.get() != 1.
+        || n.decay_strength.get() != 1.
+        || after.history_sha256 != history_hash(&[])?
+        || after.content.label_provenance != LabelProvenance::NativeV2
+        || after.content.profile_id.is_none()
+        || after.content.vector.is_none()
+        || after.content.extensions_sha256
+            != hash_value(&BTreeMap::<String, serde_json::Value>::new())?
+        || (n.has_text != after.content.text_sha256.is_some())
+    {
+        return Err(invalid("invalid native creation evidence"));
+    }
+    if after.content.vector.as_ref().unwrap().allocation_epoch != committed_generation {
+        return Err(invalid(
+            "native allocation epoch disagrees with its origin transaction",
+        ));
+    }
+    Ok(())
+}
+
 impl NativeRecordWrite {
     pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
         self.records
@@ -386,6 +511,12 @@ impl NativeRecordWrite {
         receipt: &WriteReceipt,
         insertion: bool,
     ) -> Result<(), StorageError> {
+        if let Some(execution) = &self.vector_execution {
+            if !insertion {
+                return Err(invalid("non-vector mutation has vector execution evidence"));
+            }
+            execution.validate(&self.primary()?.after, receipt)?;
+        }
         if self.namespace_id.is_unset()
             || self.memory_id == MemoryId::nil()
             || self.capture_generation.store_id != receipt.store_id
@@ -420,16 +551,7 @@ impl NativeRecordWrite {
             let after = &change.after;
             let fields = &after.lifecycle.lifecycle;
             after.lifecycle.validate()?;
-            if let Some(profile) = &after.content.profile_id {
-                if profile.len() != 68
-                    || !profile.starts_with("ep1:")
-                    || !profile.as_bytes()[4..]
-                        .iter()
-                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
-                {
-                    return Err(invalid("invalid native profile commitment"));
-                }
-            }
+            after.content.validate_profile_commitment()?;
             if let Some(before) = &change.before {
                 before.lifecycle.validate()?;
             }
@@ -442,38 +564,11 @@ impl NativeRecordWrite {
             }
             if change.memory_id == self.memory_id {
                 if insertion {
-                    let n = &after.lifecycle;
-                    if change.before.is_some()
-                        || fields.record_generation != Generation::default().next()?
-                        || fields.timestamp_origin != TimestampOrigin::Native
-                        || fields.retrieved_at.is_some()
-                        || fields.reinforced_at.is_some()
-                        || fields.decay_anchor_at != n.created_at
-                        || fields.phase_changed_at != n.created_at
-                        || fields.lifecycle_updated_at != self.sampled_at.max(n.created_at)
-                        || n.last_accessed_at != n.created_at
-                        || n.phase != DecayPhase::Full
-                        || !n.has_summary
-                        || n.is_permastore
-                        || n.strength.get() != 1.
-                        || n.decay_strength.get() != 1.
-                        || after.history_sha256 != history_hash(&[])?
-                        || after.content.label_provenance != LabelProvenance::NativeV2
-                        || after.content.profile_id.is_none()
-                        || after.content.vector.is_none()
-                        || after.content.extensions_sha256
-                            != hash_value(&BTreeMap::<String, serde_json::Value>::new())?
-                        || (n.has_text != after.content.text_sha256.is_some())
-                    {
-                        return Err(invalid("invalid native creation evidence"));
-                    }
-                    if after.content.vector.as_ref().unwrap().allocation_epoch
-                        != receipt.committed_generation
-                    {
-                        return Err(invalid(
-                            "native allocation epoch disagrees with its origin transaction",
-                        ));
-                    }
+                    validate_creation_primary(
+                        change,
+                        self.sampled_at,
+                        receipt.committed_generation,
+                    )?;
                 } else {
                     let before = change
                         .before
@@ -552,20 +647,80 @@ impl NativeRecordWrite {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CreationCommitment {
+    pub namespace_id: crate::model::NamespaceId,
+    pub primary: NativeRecordChange,
+    /// Validated typed replacement, not a rewrite of the original receipt.
+    pub reembedded_vector: Option<VectorReference>,
+}
+impl CreationCommitment {
+    pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
+        Ok(&self.primary)
+    }
+}
+
 /// Creation commitments survive a fork. Actual retained text is checked by the
 /// canonical inventory consumer, not trusted merely because the receipt hashes it.
 pub(crate) fn creation_proofs(
     read: &redb::ReadTransaction,
-) -> Result<HashMap<MemoryId, NativeRecordWrite>, StorageError> {
+) -> Result<HashMap<MemoryId, CreationCommitment>, StorageError> {
     use redb::ReadableTable;
     let mut result = HashMap::new();
+    let mut replacements = HashMap::new();
     for row in read.open_table(super::control::RECEIPTS)?.iter()? {
         let (_, value) = row?;
         let receipt = super::control::validate_receipt(value.value())?.receipt;
-        if let MutationOutcome::NativeMemoryInserted { transition } = receipt.outcome {
-            if result.insert(transition.memory_id, transition).is_some() {
+        let creation = match &receipt.outcome {
+            MutationOutcome::NativeMemoryInserted { transition } => Some((
+                transition.memory_id,
+                CreationCommitment {
+                    namespace_id: transition.namespace_id,
+                    primary: transition.primary()?.clone(),
+                    reembedded_vector: None,
+                },
+            )),
+            MutationOutcome::NativeMemoryInsertedWithLinks { transition } => Some((
+                transition.memory_id,
+                CreationCommitment {
+                    namespace_id: transition.namespace_id,
+                    primary: transition.primary()?.clone(),
+                    reembedded_vector: None,
+                },
+            )),
+            MutationOutcome::VectorsReembedded { transition } => {
+                for replacement in &transition.records {
+                    if replacements
+                        .insert(replacement.record.memory_id, replacement.record.clone())
+                        .is_some()
+                    {
+                        return Err(invalid("ambiguous vector replacement history"));
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+        if let Some((id, proof)) = creation {
+            if result.insert(id, proof).is_some() {
                 return Err(invalid("duplicate native creation identity"));
             }
+        }
+    }
+    for (id, replacement) in replacements {
+        if let Some(creation) = result.get_mut(&id) {
+            let before = replacement
+                .before
+                .as_ref()
+                .ok_or_else(|| invalid("replacement source missing"))?;
+            if before.content.vector != creation.primary.after.content.vector
+                || before.content.profile_id != creation.primary.after.content.profile_id
+            {
+                return Err(invalid(
+                    "replacement differs from original creation vector/profile",
+                ));
+            }
+            creation.reembedded_vector = replacement.after.content.vector;
         }
     }
     Ok(result)
@@ -574,7 +729,7 @@ pub(crate) fn creation_proofs(
 pub(crate) fn validate_retained_creation(
     record: &DiskRecord,
     namespace: &NamespaceConfig,
-    creation: Option<&NativeRecordWrite>,
+    creation: Option<&CreationCommitment>,
     ledger: Option<&super::metadata::removal_ledger::LedgerExport>,
 ) -> Result<(), StorageError> {
     let schema = record
@@ -612,7 +767,12 @@ pub(crate) fn validate_retained_creation(
             && (current.tags_sha256 != expected.tags_sha256
                 || current.labels_sha256 != expected.labels_sha256))
         || (mask & FULL_TEXT == 0 && (record.text_length != 0) != original.lifecycle.has_text)
-        || (mask & EMBEDDING == 0 && current.vector != expected.vector)
+        || (mask & EMBEDDING == 0
+            && current.vector.as_ref()
+                != creation
+                    .reembedded_vector
+                    .as_ref()
+                    .or(expected.vector.as_ref()))
     {
         return Err(invalid(
             "retained native record disagrees with its creation commitment",
@@ -622,7 +782,7 @@ pub(crate) fn validate_retained_creation(
 }
 pub(crate) fn validate_retained_text(
     record: &DiskRecord,
-    creation: Option<&NativeRecordWrite>,
+    creation: Option<&CreationCommitment>,
     text: &str,
 ) -> Result<(), StorageError> {
     if let Some(creation) = creation {
@@ -712,35 +872,15 @@ impl super::native_lifecycle::NativeLifecycleSession {
         }
         let intent = self.capture_insert(scope, input)?;
         let generated = if input.memory.embedding.is_some() {
-            crate::embedding::runtime::GeneratedEmbedding {
-                values: vec![],
-                profile: None,
-            }
+            crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
         } else {
-            let profile = provider.profile().ok_or_else(|| {
-                StorageError::ProviderVectorUnavailable("provider identity missing".into())
-            })?;
-            crate::embedding::profile::require_compatible(&intent.namespace, &profile)
-                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
-            if provider.dimensions() != intent.namespace.embedding_dim as usize {
-                return Err(StorageError::ProviderVectorUnavailable(
-                    "provider dimension differs".into(),
-                ));
-            }
-            let values = provider
-                .embed(
-                    input
-                        .memory
-                        .full_text
-                        .as_deref()
-                        .unwrap_or(&input.memory.summary),
-                )
-                .await
-                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
-            crate::embedding::runtime::GeneratedEmbedding {
-                values,
-                profile: Some(profile),
-            }
+            crate::embedding::runtime::generate_native(
+                provider,
+                &intent.namespace,
+                &input.document_v1(),
+            )
+            .await
+            .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?
         };
         self.engine.insert_native_record(
             ctx,
@@ -750,5 +890,21 @@ impl super::native_lifecycle::NativeLifecycleSession {
             self.clock.as_ref(),
             Some(root),
         )
+    }
+}
+
+/// Transport admission for auxiliary store work that has no native canonical
+/// proof/workflow yet. Historical receipt replay must precede this check.
+/// The flag covers semantic, entity and temporal linking in the legacy producer.
+pub(crate) fn native_store_execution_blocker(
+    config: &crate::config::RecalldConfig,
+    check_duplicates: bool,
+) -> Option<&'static str> {
+    if config.graph.autolink_enabled {
+        Some("graph.autolinkEnabled")
+    } else if check_duplicates {
+        Some("checkDuplicates")
+    } else {
+        None
     }
 }

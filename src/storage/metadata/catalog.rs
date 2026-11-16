@@ -60,7 +60,7 @@ impl MetadataStore {
             stored.id = id;
             table.insert(id.get(), control::encode(&stored)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -112,7 +112,7 @@ impl MetadataStore {
             policy.apply(&mut config);
             table.insert(id.get(), control::encode(&config)?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -122,11 +122,12 @@ impl MetadataStore {
         Ok(receipt)
     }
 
-    fn commit_catalog(
+    pub(super) fn commit_catalog(
         &self,
         tx: redb::WriteTransaction,
         receipt: &WriteReceipt,
     ) -> Result<(), StorageError> {
+        let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
         crate::storage::catalog::boundary("before_metadata_commit")?;
         let result = tx.commit();
         #[cfg(test)]
@@ -144,11 +145,12 @@ impl MetadataStore {
                 source,
             }
         })?;
+        self.publish_vector_validation_commit(certification, receipt)?;
         self.view_publication.canonical_committed();
         crate::storage::catalog::boundary("after_metadata_commit").map_err(|source| {
             self.mark_unavailable();
-            StorageError::CommittedEffectsPending {
-                operation_id: receipt.operation_id,
+            StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
                 source: Box::new(source),
             }
         })
@@ -345,3 +347,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "catalog/owned_clock_tests.rs"]
+mod owned_clock_tests;

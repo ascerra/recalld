@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized] target(s) in 36.73s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-212d4a4f320696fe)
+
+running 5 tests
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_consumers_keep_semantic_and_advisory_corruption_checks ... ok
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_batch_reads_edges_and_reopen_replay ... ok
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_all_off_uncertified_actual_consumers_reject_before_work ... ok
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_uncomputed_scores_cannot_be_used_and_off_still_validates_input ... ok
+test storage::metadata::native_records::tests::store_producers::selection_demand::selection_demand_actual_single_reads_edges_and_reopen_replay ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1417 filtered out; finished in 48.44s

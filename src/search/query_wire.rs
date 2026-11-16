@@ -1,6 +1,6 @@
 //! Actual prepared query consumer; public version admission is separate.
 use super::*;
-use crate::serialization::contract::{CommitState, DerivedReadiness, Readiness};
+use crate::serialization::contract::CommitState;
 use crate::serialization::query::QueryRequest;
 use crate::serialization::query_response::{QueryReply, project};
 
@@ -206,23 +206,7 @@ impl QueryEngine {
                 ))
             };
             match result {
-                Ok(ready) => {
-                    reply.envelope.readiness = Some(Readiness {
-                        store_id: ready.store_id,
-                        committed_generation: ready.committed_generation,
-                        ready: ready.ready,
-                        pending_work: ready.pending_work,
-                        derived: ready
-                            .derived
-                            .into_iter()
-                            .map(|d| DerivedReadiness {
-                                name: d.name.into(),
-                                applied_generation: d.applied_generation,
-                                ready: d.ready,
-                            })
-                            .collect(),
-                    })
-                }
+                Ok(ready) => reply.envelope.readiness = Some(ready.into()),
                 Err(error) => {
                     let mut failed = QueryReply::failure(SearchError::Observation(
                         crate::decay::observation::ObservationError::not_ready(

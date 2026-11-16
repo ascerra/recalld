@@ -258,6 +258,9 @@ async fn apply_explicit_edge(
     storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: &Arc<CacheManager>,
 ) -> EdgeApplication {
+    if let Err(error) = super::autolink::require_legacy_owner(storage) {
+        return EdgeApplication::Unavailable(error.to_string());
+    }
     let work = match crate::storage::work::accept_work(storage, None) {
         Ok(work) => work,
         Err(e) => return EdgeApplication::Unavailable(e.to_string()),

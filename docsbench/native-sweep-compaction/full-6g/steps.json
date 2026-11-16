@@ -1,0 +1,320 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794706974.1951709
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794706974.3298812
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_native_prefix_episode.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794706974.39396
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_native_sweep_episode.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794706974.457115
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--lib"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/lifecycle_cli-ef7aa35bda05dfab": "8c5fc3cf10eb0ffe7e037a7ad66690ef40a0dc68d52bca2fd0fbda33609008f1",
+      "debug/deps/recalld-7025a4141187b374": "64b34f60d32dc17b9e76ba08edd99b39d626702dfd72c9bb25b32ebae08aa53a",
+      "debug/deps/text_migration_cli-c242142a48e76014": "4e1f137f254174a1dd09dc3c9a156dcf787e076a872477d5c0f4f3d37bec2e2a",
+      "debug/deps/recalld-db4c01372257a80b": "a0808a23d20c0f213d256dc4ee1837406628b555125407fb9d35652e5f90bec8"
+    },
+    "finished": 1794707580.5027876
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--test",
+      "lifecycle_cli",
+      "--test",
+      "text_migration_cli"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/lifecycle_cli-ef7aa35bda05dfab": "b19362ea32137ec4645c817c52fc6248e4ffe6e4414cf5eda7d7f872b0c16a6f",
+      "debug/deps/recalld-7025a4141187b374": "64b34f60d32dc17b9e76ba08edd99b39d626702dfd72c9bb25b32ebae08aa53a",
+      "debug/deps/text_migration_cli-c242142a48e76014": "fd419456806b5df6e9218b087a95a6f1f964b6392be64f7c7dcb1eadfaa7112d",
+      "debug/deps/recalld-db4c01372257a80b": "79b2f9fa02cf16ed09827ee2bbf6d149db2e483fcb7a1dc8eebd2a0e3b48f57b"
+    },
+    "finished": 1794707618.5892541
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--example",
+      "score_mcp_episode"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794707623.4094634
+  },
+  {
+    "command": [
+      "cargo",
+      "clippy",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--all-targets"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794707656.0664246
+  },
+  {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--example",
+      "owned_evaluator",
+      "--example",
+      "native_prefix_fixture",
+      "--example",
+      "score_mcp_episode"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794707670.8550835
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "prepare",
+      "--track",
+      "serialized-native-sweep-synthetic-diagnostic-v2",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/inputs"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794707671.8946009
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/inputs/manifest.json",
+      "--out",
+      "/output/episode"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794707860.528945
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "prepare",
+      "--track",
+      "serialized-native-prefix-synthetic-diagnostic-v1",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/native-prefix-regression-inputs"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794707861.9454193
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/native-prefix-regression-inputs/manifest.json",
+      "--out",
+      "/output/native-prefix-regression"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794707954.1220243
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "prepare",
+      "--track",
+      "serialized-owned-sweep-synthetic-diagnostic-v1",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/legacy-sweep-regression-inputs"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794707955.3623443
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-mcp-evaluation.py",
+      "run",
+      "--binary",
+      "/target/debug/examples/owned_evaluator",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--manifest",
+      "/output/legacy-sweep-regression-inputs/manifest.json",
+      "--out",
+      "/output/legacy-sweep-regression"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794708022.0053086
+  },
+  {
+    "command": [
+      "python3",
+      "/output/check-negative-manifests.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794708023.8082097
+  },
+  {
+    "command": [
+      "python3",
+      "/output/check-negative-fixtures.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "owned_evaluator": "0611c3198ce9eb2d6410c2b62baa0f360b0cfb2edb5d99dbd1532e767d7f4fb4",
+      "native_prefix_fixture": "a16a866dbb23b0cdefe97c971bb01904ff61696682b100a13a00401a00e2ff7b",
+      "score_mcp_episode": "7b81be6a07c23c84b12f0733d2b9175d416ad9fca63643e88a75206abc97ad5f"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794708024.6468291
+  }
+]

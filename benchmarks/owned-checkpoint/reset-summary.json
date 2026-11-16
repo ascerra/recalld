@@ -1,0 +1,30 @@
+{
+  "checkpoint": {
+    "committed": {
+      "generation": "3",
+      "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+    },
+    "logicalHash": "631bf0d265d9670fc183d68417e0c099633acb751063c9fef18793234029b430",
+    "manifest": "/work/output/reset/recalld-frozen-canonical-kRLtx3/manifest.json",
+    "sha256": "ada665a6c9947e3e8ee0df73fb11a15906e62902e63e8a32757181f8c3e56026",
+    "track": "isolated-legacy-checkpoint-v1"
+  },
+  "claim": "bounded legacy-v1 fixture exact IDs/runtime/receipt logical hash and complete semantic observations; no native-v2/all-ties/full-A6 claim",
+  "freshOwnerSuffixReplays": 3,
+  "logicalSuffixHash": "5a00c13f9072e0f76cd5048875e5bc26d1f8d22c8743714ca515d8fb46d8f19c",
+  "negativeCases": [
+    "old-owner-active",
+    "unknown-schema",
+    "unknown-field",
+    "clock-regressed",
+    "exhausted-allocation",
+    "foreign-generation",
+    "config-mismatch",
+    "existing-destination-unchanged",
+    "bounded-manifest-rejected",
+    "live-clone-exclusion-0",
+    "live-clone-exclusion-1",
+    "live-clone-exclusion-2",
+    "unsupported-clock-not-published"
+  ]
+}

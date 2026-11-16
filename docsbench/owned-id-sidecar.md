@@ -1,0 +1,18 @@
+# Owned ID/RNG sidecar boundary
+
+Current ownership: Halley retained this work after Curie confirmed overlapping producer work.
+The actual scoped source and frozen consumer are measured at d09ca498; see
+[owned controls report](../benchmarks/owned-controls/REPORT.md). The proposed
+worker split below is historical, not an outstanding delegation.
+
+Proposed base: bb1a0863b2ab0eba940e767941ca4e85fe9b8e77, actual native82 runtime fb804a0a72ccf7dde0a6ee7eaea2e91a6b7ba2db. Main assigns the additional worker. Halley is not editing these allocation sites.
+
+Own one explicit allocation source on the existing MetadataStore, constructor plumbing through RedbStorageEngine, and canonical allocations: control initialization/receipt IDs; metadata memory-ID allocation shared by legacy/native insert; standalone metadata operation IDs; lifecycle updates; batch child reservations; purge continuation operations; selected text generation identity. Use ordinary production generation by default. No process-global RNG override, new registry, new clock, second session, or change to production restore/fork identity semantics.
+
+The isolated implementation takes the existing operation's sampled timestamp for UUIDv7 allocation. Versioned seed/cursor state must be serializable and reject invalid/exhausted states. Halley captures that state under the actual retained whole-core freeze and restores it only into a fresh owner before actions. Do not expose arbitrary live cursor reset or a fake frozen-state control. Preserve explicit-ID validation, UUID reference consistency and allocation collision rejection. Existing keyed replay must return its original receipt and consume no new identity; document consumption on failed attempts rather than silently rewinding live state.
+
+Files owned by sidecar: new storage allocation module; scoped field/constructors in storage/metadata.rs and engine.rs; necessary control.rs allocation parameters and canonical allocation callers listed above. Keep edits surgical in shared files. Halley owns system.rs and owned_evaluator constructor/control integration, search/read_view.rs, publication registry, barrier/freeze/reset. Coordinate with Feynman/Curie for newer native catalog/batch call sites at their eventual joins.
+
+Required actual tests: default production behavior retained; two isolated owners do not share state; checkpointed cursor restoration yields the same next memory/operation/text-generation IDs and valid references; explicit IDs and idempotent replay do not unexpectedly consume the stream; malformed/exhausted/colliding identities fail closed; native and legacy insertion use the same scoped source. No deterministic full-replay claim: stable query/graph ties, caches/config, clock and all later unjoined producers remain required.
+
+Separate noncanonical randomness: HTTP request IDs, MCP session IDs, provider retry jitter. Inventory them; do not claim all randomness controlled by changing only storage allocations. Export ID and production restoration/new-lineage operations keep their existing identity contracts unless separately assigned.

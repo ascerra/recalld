@@ -550,7 +550,7 @@ async fn strict_query_actual_original2_observer_and_current_barrier() {
         ready
             .derived
             .iter()
-            .all(|d| d.ready && d.applied_generation == ready.committed_generation)
+            .all(|d| d.ready && d.applied_generation == Some(ready.committed_generation))
     );
     assert!(reply.envelope.read_generation.unwrap().generation < receipt.committed_generation);
 }

@@ -74,7 +74,7 @@ fn health_report_cache()
 ///
 /// The Full/Summary guarantee is enforced HERE, not by the
 /// `decay_phases` filter `find_near_duplicates` hands the vector index:
-/// `FlatVectorIndex` writes each entry's `decay_phase` once at add time
+/// `VectorIndexOwner` writes each entry's `decay_phase` once at add time
 /// (always Full) and `VectorIndex::update_metadata` has no callers, so
 /// that filter is inert in production. A candidate whose record is
 /// missing or past Summary is dropped here instead.
@@ -157,6 +157,96 @@ async fn near_duplicate_report(
 /// 7. Insert into RAM cache and vector index.
 /// 8. Create the `parent_id` and `supersedes` edges in the graph.
 /// 9. Return 201 with the created memory.
+pub async fn single_store_versioned(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::{
+        contract::{ContractVersion, InputError, KEY_HEADER},
+        native_single::Reply,
+    };
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return single_reply_response(Reply::invalid(error));
+    }
+    if version == ContractVersion::V1 {
+        return match Json::<super::store_api1::Request>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::create(state, body).await,
+            Err(error) => error.into_response(),
+        };
+    }
+    let mut keys = request.headers().get_all(KEY_HEADER).iter();
+    let key = keys
+        .next()
+        .map(|v| v.to_str().map(str::to_owned))
+        .transpose();
+    if keys.next().is_some() || key.is_err() {
+        return single_reply_response(Reply::invalid(InputError {
+            code: "INVALID_TYPE",
+            field: "/idempotencyKey".into(),
+            message: "at most one ASCII idempotency key header is allowed",
+        }));
+    }
+    let body = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            return single_reply_response(Reply::invalid(InputError {
+                code: "INVALID_TYPE",
+                field: String::new(),
+                message: "body must be a JSON object",
+            }));
+        }
+    };
+    let Some(producer) = state.native_batches.as_deref() else {
+        return single_reply_response(Reply::failure(
+            crate::storage::StorageError::RecoveryRequired(
+                "native single consumer unavailable".into(),
+            ),
+        ));
+    };
+    single_store_v2(
+        producer,
+        &state.default_namespace,
+        &body,
+        key.unwrap().as_deref(),
+    )
+    .await
+}
+fn single_reply_response(
+    reply: crate::serialization::native_single::Reply,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (status, envelope) = reply.response();
+    (
+        StatusCode::from_u16(status).expect("fixed single status"),
+        Json(envelope),
+    )
+        .into_response()
+}
+pub(crate) async fn single_store_v2(
+    producer: &dyn crate::mcp::bridge::StorageEngine,
+    default_namespace: &str,
+    body: &serde_json::Value,
+    key: Option<&str>,
+) -> axum::response::Response {
+    use crate::serialization::native_single::{Reply, Request};
+    let reply = match Request::parse(body, true, key, default_namespace) {
+        Ok(request) => producer.store_native_wire(request).await,
+        Err(error) => Reply::invalid(error),
+    };
+    single_reply_response(reply)
+}
+
 pub async fn create_memory(
     State(state): State<AppState>,
     Json(req): Json<CreateMemoryApiRequest>,
@@ -515,67 +605,23 @@ pub async fn delete_memory(
     Path(id): Path<String>,
     Query(scope): Query<MemoryScopeQuery>,
 ) -> Result<Json<ApiResponse<DeleteResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-        if let Some(namespace) = scope.namespace.as_deref() {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-
-        // Read record first for entity index cleanup (Issue 14)
-        let existing_record = state.storage.get_record(memory_id).await;
-
-        let existed = state
-            .storage
-            .delete_memory_with_work(memory_id, scope.namespace.as_deref(), work.as_ref())
-            .await?;
-        if existed {
-            state.cache.remove(memory_id).await;
-            state.search.remove_from_index(memory_id).await;
-
-            // Issue 14: Clean up FTS5 index
-            state.search.fts_remove(memory_id).await;
-
-            // Issue 14: Clean up entity index
-            if let Some(ref record) = existing_record {
-                state
-                    .search
-                    .entity_index_remove(NamespaceId::new(record.namespace_id), memory_id)
-                    .await;
-            }
-
-            // Issue 13: Tombstone the graph node instead of removing it
-            if let Err(e) = state
-                .graph
-                .tombstone_node_with_work(memory_id, work.as_ref())
-                .await
-            {
-                tracing::warn!(
-                    memory_id = %memory_id,
-                    %e,
-                    "graph tombstone failed (non-fatal)"
-                );
-            }
-        }
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: DeleteResponse {
-                id: memory_id,
-                deleted: existed,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let mut reply = state
+        .storage
+        .forget_api1(memory_id, scope.namespace.as_deref())
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Forget { deleted }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: DeleteResponse {
+            id: memory_id,
+            deleted,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// POST /memories/:id/reinforce -- manual reinforcement.
@@ -591,44 +637,28 @@ pub async fn reinforce_memory(
     Path(id): Path<String>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<ApiResponse<ReinforceResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-
-        let namespace =
-            crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
-        if let Some(namespace) = namespace {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-        let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
-
-        let updated = state
-            .decay
-            .reinforce_with_work(memory_id, quality, namespace, work.as_ref())
-            .await
-            .map_err(|e| feedback_error(e, &id))?;
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: ReinforceResponse {
-                id: memory_id,
-                strength: updated.strength,
-                stability: updated.stability,
-                phase: format!("{:?}", updated.phase),
-                is_permastore: updated.is_permastore,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let namespace = crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
+    let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
+    let mut reply = state
+        .decay
+        .feedback_api1(memory_id, quality, namespace)
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Feedback { result }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: ReinforceResponse {
+            id: memory_id,
+            strength: result.strength,
+            stability: result.stability,
+            phase: result.phase,
+            is_permastore: result.is_permastore,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// Preserve typed lifecycle outcomes instead of classifying display strings.
@@ -900,12 +930,12 @@ pub async fn search_memories(
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
     let work = state.search.accept_work()?;
-    let result = async {
+    let result = crate::performance::measure("rest.search", req.record_access, async {
         let stamp = state.storage.effects_stamp().await?;
         let observed =
             search_memories_admitted(State(state.clone()), Json(req), stamp, work.as_ref()).await;
         observed?.finish(check_read_admission(&state, stamp).await)
-    }
+    })
     .await;
     state.search.finish_work(work);
     result
@@ -997,11 +1027,13 @@ async fn search_memories_admitted(
         .search
         .prepare_coherent_search_with_work(search_query.clone(), req.include_embeddings, parent)
         .await?;
+    let hydration = crate::performance::Timer::new("rest.hydration");
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
             // This serializer returns ranked hits only; reject unexpected
             // supplemental rows before exposing any unreturned neighbor.
             let exposures = prepared.exposures(false)?;
+            let hydration = crate::performance::Timer::new("rest.hydration");
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -1045,6 +1077,7 @@ async fn search_memories_admitted(
                     score: selected.score.unwrap_or(0.0),
                 });
             }
+            hydration.complete();
             (hits, exposures, Some(prepared.evaluated_at))
         } else {
             let results = state
@@ -1052,6 +1085,7 @@ async fn search_memories_admitted(
                 .prepare_search_with_work(search_query, parent)
                 .await?;
 
+            let hydration = crate::performance::Timer::new("rest.hydration");
             // Batch-load embeddings with a single lock acquisition if requested.
             let embeddings = if req.include_embeddings {
                 let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
@@ -1099,6 +1133,7 @@ async fn search_memories_admitted(
                 });
             }
 
+            hydration.complete();
             (hits, exposures, None)
         };
 
@@ -1444,7 +1479,22 @@ pub async fn create_namespace(
 
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {
     use crate::decay::lifecycle::LifecycleError;
+    use crate::derived_completion::catalog::CatalogCreateError;
     use crate::storage::StorageError;
+    let error: Box<dyn std::error::Error + Send + Sync> = match error
+        .downcast::<CatalogCreateError>()
+    {
+        Ok(error) => match *error {
+            CatalogCreateError::Storage(error) => Box::new(error),
+            CatalogCreateError::WorkerUnknown => {
+                return AppError::MutationUnknown {
+                    operation_id: None,
+                    message: "namespace worker outcome unavailable; reconcile before retry".into(),
+                };
+            }
+        },
+        Err(error) => error,
+    };
     if matches!(
         error.downcast_ref::<LifecycleError>(),
         Some(LifecycleError::InvalidInput(_))
@@ -1463,8 +1513,10 @@ fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> Ap
                 message,
                 field: None,
             },
-            error @ StorageError::CommitOutcomeUnknown { .. } => AppError::ServiceUnavailable {
-                message: error.to_string(),
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => AppError::MutationUnknown {
+                operation_id: Some(operation_id),
+                message: "namespace commit acknowledgement unavailable; reconcile before retry"
+                    .into(),
             },
             error => error.into(),
         },
@@ -2008,6 +2060,108 @@ pub async fn batch_store(
     ))
 }
 
+/// Preserve the v1 typed extractor/shape; v2 uses the same native runner as MCP.
+pub async fn batch_store_versioned(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::{ContractVersion, KEY_HEADER};
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(v) => v,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(e) = version.require_supported() {
+        return AppError::BadRequest {
+            message: e.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version == ContractVersion::V1 {
+        return match Json::<super::store_api1::BatchRequest>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::batch(state, body).await,
+            Err(e) => e.into_response(),
+        };
+    }
+    let mut keys = request.headers().get_all(KEY_HEADER).iter();
+    let key = keys
+        .next()
+        .map(|v| v.to_str().map(str::to_owned))
+        .transpose();
+    if keys.next().is_some() || key.is_err() {
+        return batch_failure_response(
+            crate::serialization::contract::InputError {
+                code: "INVALID_TYPE",
+                field: "/idempotencyKey".into(),
+                message: "one ASCII idempotency key header is required",
+            }
+            .into(),
+        );
+    }
+    let body = match Json::<serde_json::Value>::from_request(request, &state).await {
+        Ok(Json(body)) => body,
+        Err(_) => {
+            return batch_failure_response(
+                crate::serialization::contract::InputError {
+                    code: "INVALID_TYPE",
+                    field: String::new(),
+                    message: "body must be a JSON object",
+                }
+                .into(),
+            );
+        }
+    };
+    let Some(producer) = state.native_batches.as_deref() else {
+        return batch_failure_response(
+            crate::serialization::native_batch::BatchFailure::unavailable(),
+        );
+    };
+    batch_store_v2(
+        producer,
+        &state.default_namespace,
+        &body,
+        key.unwrap().as_deref(),
+    )
+    .await
+}
+fn batch_failure_response(
+    error: crate::serialization::native_batch::BatchFailure,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (status, envelope) = crate::serialization::native_batch::response(Err(error));
+    (
+        StatusCode::from_u16(status).expect("fixed batch status"),
+        Json(envelope),
+    )
+        .into_response()
+}
+pub(crate) async fn batch_store_v2(
+    producer: &dyn crate::mcp::bridge::StorageEngine,
+    default_namespace: &str,
+    body: &serde_json::Value,
+    key: Option<&str>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let result =
+        match crate::serialization::native_batch::parse(body, false, key, default_namespace) {
+            Ok(input) => producer.mutate_native_batch(input).await,
+            Err(e) => Err(e.into()),
+        };
+    let (status, envelope) = crate::serialization::native_batch::response(result);
+    (
+        StatusCode::from_u16(status).expect("fixed batch status"),
+        Json(envelope),
+    )
+        .into_response()
+}
+
 /// POST /namespaces/:name/duplicates -- scan for duplicate memories (Issue 16).
 ///
 /// Uses vector similarity to find clusters of near-duplicate memories
@@ -2210,24 +2364,29 @@ pub async fn metrics(
 
 /// POST /decay/sweep -- trigger an immediate decay sweep.
 ///
-/// Accepts an optional `as_of` field (milliseconds since epoch) to run
-/// the sweep as if the current time were the given timestamp. This is
-/// used by the replay driver to simulate time-appropriate decay during
-/// historical seeding.
+/// Uses the configured clock. Caller-supplied time overrides are rejected
+/// before accepting work; isolated replay controls its existing owned clock.
 pub async fn trigger_decay_sweep(
     State(state): State<AppState>,
     Json(req): Json<TriggerSweepRequest>,
 ) -> Result<Json<ApiResponse<TriggerSweepResponse>>, AppError> {
-    let result = state
-        .decay
-        .trigger_sweep(req.as_of)
-        .await
-        .map_err(
-            |error| match error.downcast::<crate::storage::StorageError>() {
-                Ok(storage) => AppError::from(*storage),
-                Err(source) => AppError::Internal { source },
-            },
-        )?;
+    if req.fields.contains_key("asOf") || req.fields.contains_key("as_of") {
+        return Err(AppError::BadRequest {
+            message: "Public sweeps use the configured clock; remove asOf/as_of".into(),
+            field: Some("asOf".into()),
+        });
+    }
+    let result =
+        state
+            .decay
+            .trigger_sweep(None)
+            .await
+            .map_err(
+                |error| match error.downcast::<crate::storage::StorageError>() {
+                    Ok(storage) => AppError::from(*storage),
+                    Err(source) => AppError::Internal { source },
+                },
+            )?;
 
     Ok(Json(ApiResponse {
         data: TriggerSweepResponse {

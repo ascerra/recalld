@@ -1,0 +1,114 @@
+   Compiling recalld v1.0.0 (/work)
+error[E0425]: cannot find function `bytes` in this scope
+   --> src/storage/metadata/native_records/store_api1_tests.rs:190:18
+    |
+190 |     let before = bytes(&d.path);
+    |                  ^^^^^ not found in this scope
+    |
+note: these functions exist but are inaccessible
+   --> src/backup/schema_manifest/tests.rs:94:1
+    |
+ 94 | fn bytes(source: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::backup::schema_manifest::tests::bytes`: not accessible
+    |
+   ::: src/search/read_view.rs:473:5
+    |
+473 |     fn bytes(f: &Fixture) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::search::pipeline::read_view::tests::bytes`: not accessible
+    |
+   ::: src/storage/metadata/native_records/graph_tests.rs:590:1
+    |
+590 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::metadata::native_records::tests::graph::bytes`: not accessible
+    |
+   ::: src/storage/metadata/native_records/mixed_history_tests.rs:146:1
+    |
+146 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::metadata::native_records::tests::mixed_history::bytes`: not accessible
+    |
+   ::: src/storage/metadata/native_records/store_tests.rs:55:1
+    |
+ 55 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::metadata::native_records::tests::store::bytes`: not accessible
+    |
+   ::: src/storage/native_catalog_tests.rs:87:1
+    |
+ 87 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::native_catalog::tests::bytes`: not accessible
+    |
+   ::: src/storage/native_purge_tests/request_context.rs:5:1
+    |
+  5 | fn bytes(path: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::native_purge_tests::request_context::bytes`: not accessible
+help: consider importing this function
+    |
+  2 + use crate::storage::metadata::native_records::tests::readers::bytes;
+    |
+
+error[E0425]: cannot find function `bytes` in this scope
+   --> src/storage/metadata/native_records/store_api1_tests.rs:225:20
+    |
+225 |         assert_eq!(bytes(&d.path), before);
+    |                    ^^^^^ not found in this scope
+    |
+note: these functions exist but are inaccessible
+   --> src/backup/schema_manifest/tests.rs:94:1
+    |
+ 94 | fn bytes(source: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::backup::schema_manifest::tests::bytes`: not accessible
+    |
+   ::: src/search/read_view.rs:473:5
+    |
+473 |     fn bytes(f: &Fixture) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::search::pipeline::read_view::tests::bytes`: not accessible
+    |
+   ::: src/storage/metadata/native_records/graph_tests.rs:590:1
+    |
+590 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::metadata::native_records::tests::graph::bytes`: not accessible
+    |
+   ::: src/storage/metadata/native_records/mixed_history_tests.rs:146:1
+    |
+146 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::metadata::native_records::tests::mixed_history::bytes`: not accessible
+    |
+   ::: src/storage/metadata/native_records/store_tests.rs:55:1
+    |
+ 55 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::metadata::native_records::tests::store::bytes`: not accessible
+    |
+   ::: src/storage/native_catalog_tests.rs:87:1
+    |
+ 87 | fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::native_catalog::tests::bytes`: not accessible
+    |
+   ::: src/storage/native_purge_tests/request_context.rs:5:1
+    |
+  5 | fn bytes(path: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `crate::storage::native_purge_tests::request_context::bytes`: not accessible
+help: consider importing this function
+    |
+  2 + use crate::storage::metadata::native_records::tests::readers::bytes;
+    |
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1908:19
+     |
+1908 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1497:9
+     |
+1497 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+For more information about this error, try `rustc --explain E0425`.
+warning: `recalld` (lib test) generated 2 warnings
+error: could not compile `recalld` (lib test) due to 2 previous errors; 2 warnings emitted

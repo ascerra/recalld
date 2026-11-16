@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/output/build-reference.py", line 29, in <module>
+    save('build-result.json',dict(exitCode=r.returncode));assert r.returncode==0,'reference extension build failed; retained build.log'
+                                                                 ^^^^^^^^^^^^^^^
+AssertionError: reference extension build failed; retained build.log

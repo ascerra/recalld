@@ -1,0 +1,66 @@
+--- a/src/storage/metadata/native_records/wire_tests.rs
++++ b/src/storage/metadata/native_records/wire_tests.rs
+@@ -16,6 +16,28 @@
+     crate::api::AppState,
+ ) {
+     setup_policy(LifecycleVersion::ExplicitFeedbackV2).await
++}
++// Only callers that create fresh native vectors opt into certification.
++// Default lifecycle-only/history setups remain genuinely uncertified.
++async fn setup_certified() -> (
++    Fixture,
++    Data,
++    Arc<FixedClock>,
++    McpBridge,
++    crate::api::AppState,
++) {
++    // Select the real lifecycle policy and adoption first, then release every
++    // owner before the offline remedy. Preserve this public operation clock.
++    let (f, d, clock, bridge, state) = setup().await;
++    drop((bridge, state));
++    let root = f.close();
++    let d = certified_positive_fixture::certify_positive(root.path(), d);
++    let session = open(&d, clock.clone());
++    let f = Fixture::from_open_engine(root, session.engine);
++    completion(&f).rebuild_all().await.unwrap();
++    let (bridge, state) =
++        configured_public_adapters(&f, clock.clone(), NativePolicyInputs::default());
++    (f, d, clock, bridge, state)
+ }
+ async fn setup_policy(
+     version: LifecycleVersion,
+--- a/src/storage/metadata/native_records/forget_origin_tests.rs
++++ b/src/storage/metadata/native_records/forget_origin_tests.rs
+@@ -95,7 +95,7 @@
+ 
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ async fn forget_origin_known_publication_failure_keeps_full_receipt_and_replays_after_repair() {
+-    let (f, d, clock, bridge, _state) = setup().await;
++    let (f, d, clock, bridge, _state) = setup_certified().await;
+     // Keep a real live vector after forgetting the target; an empty vector view
+     // does not exercise dimension validation during publication.
+     let survivor = {
+--- a/src/storage/metadata/native_records/public_api1_tests.rs
++++ b/src/storage/metadata/native_records/public_api1_tests.rs
+@@ -117,7 +117,11 @@
+ async fn api1_public_native_failures_keep_receipts_and_unknown_identity() {
+     for operation in [Operation::Feedback, Operation::Forget] {
+         for http in [false, true] {
+-            let (f, d, clock, bridge, state) = setup().await;
++            let (f, d, clock, bridge, state) = if operation == Operation::Forget {
++                setup_certified().await
++            } else {
++                setup().await
++            };
+             if operation == Operation::Forget {
+                 let mut engine = f.storage.write().unwrap();
+                 let policy = NativePolicyInputs::default();
+@@ -245,7 +249,7 @@
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ async fn api1_public_native_remote_decode_and_terminal_no_resurrection() {
+     use crate::serialization::lifecycle_api1 as api1;
+-    let (f, d, clock, bridge, state) = setup().await;
++    let (f, d, clock, bridge, state) = setup_certified().await;
+     // Actual canonical insertions build a retained fan of edges. Forget must
+     // leave that graph intact without growing the tombstone receipt by degree.
+     {

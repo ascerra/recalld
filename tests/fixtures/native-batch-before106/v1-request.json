@@ -1,0 +1,1 @@
+{"resultVersion":1,"kind":"insert","items":[{"checkDuplicates":false,"embedding":[1.0,0.0,0.0,0.0],"summary":"before legacy batch"}],"defaultNamespace":"native","storeId":"1033f5fb-8ccc-4f03-93bb-a629fc7d091a","idempotencyKey":"before-one","batchOperationId":null}

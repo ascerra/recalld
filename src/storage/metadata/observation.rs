@@ -153,7 +153,7 @@ impl MetadataStore {
                 });
             }
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -212,7 +212,8 @@ impl MetadataStore {
             ctx,
             id,
             quality,
-            sampled_at,
+            || sampled_at,
+            &crate::decay::DecayConfig::default(),
             global_multiplier,
             expected_namespace,
         )?;
@@ -236,10 +237,80 @@ impl MetadataStore {
             ctx,
             id,
             quality,
-            sampled_at,
+            || sampled_at,
+            &crate::decay::DecayConfig::default(),
             global_multiplier,
             None,
         )
+    }
+
+    /// The clock is sampled inside the actual transaction, after matching replay
+    /// and CAS. Existing pre-sampled Rust callers retain their original API.
+    pub(crate) fn record_legacy_feedback_clock_with_work(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        quality: u8,
+        clock: &dyn crate::time::Clock,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        asserted_namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        let publication = self.mutation_guard_with_work(parent)?;
+        let (tx, receipt) = self.prepare_feedback_scoped(
+            &publication,
+            ctx,
+            id,
+            quality,
+            || clock.now_millis(),
+            &policy.global,
+            policy.multiplier,
+            asserted_namespace,
+        )?;
+        self.commit_observation(tx, &receipt)?;
+        Ok(receipt)
+    }
+
+    /// Fresh API1 projection captured from the same transaction, never a replay view.
+    pub(crate) fn record_legacy_feedback_projected_with_work(
+        &self,
+        ctx: &MutationContext,
+        id: MemoryId,
+        quality: u8,
+        clock: &dyn crate::time::Clock,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        asserted_namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(WriteReceipt, crate::decay::lifecycle::FeedbackPlan), StorageError> {
+        if ctx.contract_version != 1 || ctx.idempotency_key.is_some() {
+            return Err(StorageError::InvalidMutationContext(
+                "fresh API1 projection requires unkeyed original1".into(),
+            ));
+        }
+        let publication = self.mutation_guard_with_work(parent)?;
+        let (tx, receipt) = self.prepare_feedback_scoped(
+            &publication,
+            ctx,
+            id,
+            quality,
+            || clock.now_millis(),
+            &policy.global,
+            policy.multiplier,
+            asserted_namespace,
+        )?;
+        let MutationScope::Namespace(namespace) = ctx.scope else {
+            return Err(StorageError::MutationNamespaceMismatch);
+        };
+        let record = read_record(&tx.open_table(META_TABLE)?, id, namespace)?;
+        let view = crate::decay::lifecycle::FeedbackPlan {
+            timestamp: record.last_accessed_at,
+            stability: record.stability,
+            strength: record.strength,
+            phase: record.phase,
+            is_permastore: record.is_permastore != 0,
+        };
+        self.commit_observation(tx, &receipt)?;
+        Ok((receipt, view))
     }
 
     fn prepare_feedback_scoped(
@@ -248,7 +319,8 @@ impl MetadataStore {
         ctx: &MutationContext,
         id: MemoryId,
         quality: u8,
-        sampled_at: i64,
+        sample: impl FnOnce() -> i64,
+        global: &crate::decay::DecayConfig,
         global_multiplier: f64,
         expected_namespace: Option<&str>,
     ) -> Result<(redb::WriteTransaction, WriteReceipt), StorageError> {
@@ -268,19 +340,24 @@ impl MetadataStore {
         if let Some(receipt) = control::replay_or_check(&tx, ctx, hash)? {
             return Ok((tx, receipt));
         }
-        validate_observation_time(sampled_at)?;
         let policy = read_namespace(&tx, namespace)?;
         if expected_namespace.is_some_and(|name| name != policy.name) {
             return Err(StorageError::MutationNamespaceMismatch);
         }
-        super::removal_ledger::ensure_insertable(&tx, id)?;
+        super::removal_ledger::ensure_insertable(&tx, id).map_err(|error| match error {
+            // A retained terminal UUID is unavailable for feedback, not a
+            // duplicate insertion attempt. Keep every other ledger error strict.
+            StorageError::DuplicateId(_) => StorageError::LifecycleContentUnavailable,
+            other => other,
+        })?;
         let mut record = read_record(&tx.open_table(META_TABLE)?, id, namespace)?;
-        let resolved = crate::decay::lifecycle::resolve_policy(
-            &policy,
-            &crate::decay::DecayConfig::default(),
-            global_multiplier,
-        )
-        .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
+        let resolved = crate::decay::lifecycle::resolve_policy(&policy, global, global_multiplier)
+            .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
+        if matches!(record.phase, DecayPhase::Ghost | DecayPhase::Tombstone) {
+            return Err(StorageError::LifecycleContentUnavailable);
+        }
+        let sampled_at = sample();
+        validate_observation_time(sampled_at)?;
         let plan = crate::decay::lifecycle::plan_feedback(&record, &resolved, sampled_at, quality)
             .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
         validate_observation_time(plan.timestamp)?;
@@ -291,7 +368,7 @@ impl MetadataStore {
         }
         tx.open_table(META_TABLE)?
             .insert(id.as_bytes().as_slice(), record.to_bytes().as_slice())?;
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -310,6 +387,7 @@ impl MetadataStore {
         receipt: &WriteReceipt,
     ) -> Result<(), StorageError> {
         if !receipt.replayed {
+            let certification = self.prepare_vector_validation_commit(&tx, receipt)?;
             tx.commit().map_err(|source| {
                 self.mark_unavailable();
                 StorageError::CommitOutcomeUnknown {
@@ -317,6 +395,7 @@ impl MetadataStore {
                     source,
                 }
             })?;
+            self.publish_vector_validation_commit(certification, receipt)?;
             self.view_publication.canonical_committed();
         }
         Ok(())

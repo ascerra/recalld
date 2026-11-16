@@ -1,0 +1,52 @@
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn before_single_max_link_receipt_framing() {
+    let output = std::path::PathBuf::from("/logs/artifacts");
+    std::fs::create_dir_all(&output).unwrap();
+    let root = tempfile::tempdir_in(&output).unwrap();
+    let d = fixture_with_seed(root.path(), |engine| {
+        for i in 0..1024 {
+            let input = crate::storage::insertion::InsertMemory {
+                id: None, summary: format!("old single dense peer {i}"), full_text: Some(format!("retained text {i}")),
+                tags: vec![], initial_stability: None, created_at: Some(1000),
+                embedding: Some(vec![1.,0.,0.,0.]), parent_id: None, supersedes: None,
+            };
+            engine.insert_memory_with_receipt(&MutationContext::unkeyed(NamespaceId::new(1)), &input, &[], 1000).unwrap();
+        }
+    });
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let session = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, session.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let mut config = crate::config::RecalldConfig::default();
+    config.graph.max_auto_links = 1024;
+    config.graph.max_entity_links = 0;
+    config.graph.max_temporal_links = 0;
+    config.graph.temporal_window_ms = 0;
+    let p = provider(&d);
+    let a = adapter(&f, p.clone(), clock.clone(), config);
+    let mut input = single_input(&d, false);
+    input.insert.memory.parent_id = None;
+    input.check_duplicates = true;
+    input.insert.observed_at = None;
+    let wire_request = json!({"namespaceId":d.ns,"storeId":f.storage.read().unwrap().control_state().unwrap().store_id,"idempotencyKey":"before-max-single","summary":input.insert.memory.summary,"fullText":input.insert.memory.full_text,"tags":[],"entities":input.insert.entities,"topics":input.insert.topics,"emotions":input.insert.emotions,"createdAt":input.insert.memory.created_at,"embedding":input.insert.memory.embedding,"embeddingProfileId":d.profile.profile_id().unwrap(),"checkDuplicates":true});
+    std::fs::write(output.join("request.json"),serde_json::to_vec(&wire_request).unwrap()).unwrap();
+    let result = a.store_native_single(single_context(&f, &d, "before-max-single"), input, NativePolicyInputs::default(), None).await.unwrap();
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    let MutationOutcome::NativeMemoryInsertedWithLinks { transition } = &result.receipt.outcome else { panic!() };
+    assert_eq!(transition.edges.len(), 1024);
+    assert_eq!(transition.records.len(), 1025);
+    let text = serde_json::to_string(&result.receipt).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let compact = json!({"jsonrpc":"2.0","id":i64::MAX,"result":{"content":[{"type":"text","text":text}],"structuredContent":value}});
+    let pretty = crate::mcp::protocol::ToolCallResult::json(&result.receipt).unwrap();
+    let metrics = json!({"receiptBytes":text.len(),"compactMcpBytes":serde_json::to_vec(&compact).unwrap().len(),"existingPrettyMcpBytes":serde_json::to_vec(&pretty).unwrap().len(),"edges":transition.edges.len(),"records":transition.records.len(),"frameLimit":crate::daemon::protocol::MAX_MESSAGE_SIZE});
+    println!("GENUINE_BEFORE_SINGLE {metrics}");
+    std::fs::write(output.join("metrics.json"),serde_json::to_vec_pretty(&metrics).unwrap()).unwrap();
+    std::fs::write(output.join("receipt.json"),text).unwrap();
+    std::fs::write(output.join("profile.json"),serde_json::to_vec(&d.profile).unwrap()).unwrap();
+    drop(a); let kept=f.close().keep();
+    let reopened=open(&d,clock);
+    assert_eq!(reopened.metadata().control_state().unwrap().committed_generation,result.receipt.committed_generation);
+    drop(reopened);
+    std::fs::write(output.join("path.txt"),kept.to_string_lossy().as_bytes()).unwrap();
+}

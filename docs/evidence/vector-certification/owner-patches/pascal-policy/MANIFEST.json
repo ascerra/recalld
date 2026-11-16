@@ -1,0 +1,26 @@
+{
+  "status": "source-only; no Rust execution or formatting",
+  "owner_ack": "Feynman exact four files/hunks frozen; user approved isolated patch",
+  "reference_commit": "3f3ca05d160cad917b716758dd360412a652e9d9",
+  "candidate024_source_manifest_sha256": "9ae1b79e225315e6c01d1b77ecdf430a24a8b4f1278d2523f53ba1b6c5e6a076",
+  "files": {
+    "src/storage/metadata/native_records/exposure_consumer_tests.rs": {
+      "before_sha256": "53810f844aeaa2a1f2d1b56931e5fd4fa40396ce90ea644c83d8a7fcb37bdfe4",
+      "after_sha256": "d00e0ca8e264d84de2ab01800d2c6e91d0cb8582449940855cbcdb9eda5998d5"
+    },
+    "src/storage/metadata/native_records/public_api1_tests.rs": {
+      "before_sha256": "0bb42ca633294bb799faab29b1f6703e0e09babf9e270cc4f221da7e7353c40f",
+      "after_sha256": "340e17c7fd4b1d5a8050e6a6c88de27b77eae4df3716064b038f1ab5cef8c915"
+    },
+    "src/storage/metadata/native_records/request_context_tests.rs": {
+      "before_sha256": "1a32b54463487b06fe298ab5f8e6da1d430caba1883ad2c683b95b2af5432ee5",
+      "after_sha256": "3a4eb5e868ca5b7cfea66db3cb090a0a4a74ce4a380124a64cedf3ca8086a17a"
+    },
+    "src/storage/metadata/native_records/wire_tests.rs": {
+      "before_sha256": "a338164d4e69acf5166ed7a5ce1c4e95a95402a24e4d46dba9395cbdd1b717da",
+      "after_sha256": "e5ad5f96413e112d00954c67e9d6f93948cdcdde10be50a82aa7a2bdfbdba3ca"
+    }
+  },
+  "patch_sha256": "e38b683a754f5ea681c7b822af1dc1ff6112b956477ee220c790fb46249f1912",
+  "historical_zip_sha256": "d9f61e87b45de34ae8622dbb3145fd577fe45333943d7777294bf5aea5a4af78"
+}
