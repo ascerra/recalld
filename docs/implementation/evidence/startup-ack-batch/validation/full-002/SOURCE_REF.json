@@ -1,0 +1,6 @@
+{
+  "source": "/private/tmp/recalld-implementation/startup-ack-batch/.validation/final-001/source",
+  "manifest": "/private/tmp/recalld-implementation/startup-ack-batch/.validation/final-001/SOURCE.json",
+  "manifestSha256": "e6fe5bff07147287035a13876dff311c6af2a10fc89be6fffc95aa49074915b5",
+  "commit": "72b9a51ff0f0e35c83fb77bb1e3a3dc20715368e"
+}
