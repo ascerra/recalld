@@ -240,6 +240,50 @@ mod tests {
             .map(|r| (r.id, r.score.to_bits(), r.decay_phase))
             .collect()
     }
+    #[tokio::test]
+    async fn vector_owner_legacy_autolink_rejects_partitioned_even_at_zero_cap() {
+        use crate::storage::StorageEngine as _;
+        let fixture = crate::test_support::Fixture::new();
+        let namespaces = fixture.storage.read().unwrap().list_namespaces().unwrap();
+        let ns = namespaces[0].id;
+        let vectors = std::sync::Arc::new(tokio::sync::RwLock::new(
+            VectorIndexOwner::from_namespaces(&namespaces).unwrap(),
+        ));
+        let before = fixture
+            .storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref();
+        let result = crate::graph::perform_autolink(
+            MemoryId::new(),
+            ns,
+            &vec![0.; namespaces[0].embedding_dim as usize],
+            &[],
+            0.5,
+            0,
+            &vectors,
+            &fixture.graph,
+            &fixture.storage,
+            &fixture.cache,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(crate::graph::AutoLinkError::VectorSearch(_))
+        ));
+        assert_eq!(
+            fixture
+                .storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .generation_ref(),
+            before
+        );
+    }
     #[test]
     fn vector_owner_partition_preserves_kernel_ties_filters_and_foreign_eligibility() {
         let mut owner =

@@ -10,7 +10,7 @@ use crate::cache::CacheManager;
 use crate::graph::SharedGraph;
 use crate::graph::structure::RelationshipGraph;
 use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
-use crate::search::{EntityIndex, SearchFilter, VectorIndexOwner};
+use crate::search::{EntityIndex, SearchFilter, VectorIndex, VectorIndexOwner};
 use crate::storage::PersistedEdge;
 use crate::storage::engine::RedbStorageEngine;
 use crate::storage::work::WorkTicket;
