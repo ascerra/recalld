@@ -105,6 +105,11 @@ pub enum StorageError {
     #[error("EMBEDDING_UNAVAILABLE: invalid provider vector: {0}")]
     ProviderVectorUnavailable(String),
 
+    #[error("active embedding provider configuration is unavailable or invalid")]
+    ProviderConfigurationUnavailable,
+
+    #[error("active embedding profile does not match {field}")]
+    NamespaceEmbeddingProfileMismatch { field: &'static str },
     /// Exact owned canonical state proves the namespace has no certificate.
     /// This is a known precommit admission failure, never a commit outcome.
     #[error("namespace {namespace_id} vectors require explicit offline re-embedding certification")]
