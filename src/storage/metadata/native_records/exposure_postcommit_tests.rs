@@ -203,20 +203,26 @@ async fn postcommit_failure(nth: usize, origin: u32, query: bool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn native_exposure_postcommit_first_group_retains_durable_receipt() {
-    for origin in [1, 2] {
-        postcommit_failure(1, origin, false).await;
-    }
+async fn native_exposure_postcommit_first_group_api1() {
+    postcommit_failure(1, 1, false).await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn native_exposure_postcommit_later_group_retains_ordered_durable_receipts() {
-    for origin in [1, 2] {
-        postcommit_failure(2, origin, false).await;
-    }
+async fn native_exposure_postcommit_first_group_api2() {
+    postcommit_failure(1, 2, false).await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn native_exposure_postcommit_query_rejects_whole_page_with_receipt() {
-    for origin in [1, 2] {
-        postcommit_failure(1, origin, true).await;
-    }
+async fn native_exposure_postcommit_later_group_api1() {
+    postcommit_failure(2, 1, false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_exposure_postcommit_later_group_api2() {
+    postcommit_failure(2, 2, false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_exposure_postcommit_whole_query_page_api1() {
+    postcommit_failure(1, 1, true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_exposure_postcommit_whole_query_page_api2() {
+    postcommit_failure(1, 2, true).await;
 }
