@@ -346,7 +346,7 @@ impl DerivedCompletion {
         &self,
         parent: Option<&WorkTicket>,
         rebuild_all: bool,
-        mut purge: Option<crate::storage::purge::PurgeCleanupObservation>,
+        purge: Option<crate::storage::purge::PurgeCleanupObservation>,
     ) -> Result<PurgePhysicalObservation, CompletionFailure> {
         self.complete_observing_bounded(parent, rebuild_all, purge, None)
             .await
@@ -360,7 +360,12 @@ impl DerivedCompletion {
         self.complete_observing_bounded(parent, false, None, admission.cloned())
             .await
             .map(|_| ())
-            .map_err(CompletionFailure::into_storage)
+            .map_err(|failure| match failure {
+                CompletionFailure::WorkerUnknown if admission.is_some() => {
+                    StorageError::WorkerOutcomeUnknown("maintenance completion worker lost".into())
+                }
+                failure => failure.into_storage(),
+            })
     }
 
     async fn complete_observing_bounded(
@@ -374,6 +379,25 @@ impl DerivedCompletion {
             let work = self.accept_work(parent)?;
             self.cache.bind_storage(&self.storage);
             let gate = publication_gate(&self.storage).await?;
+            #[cfg(test)]
+            if admission
+                .as_ref()
+                .is_some_and(|a| a.snapshot().is_ok_and(|s| !s.1.is_empty()))
+            {
+                let pause = self
+                    .storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .bounded_completion_pause
+                    .lock()
+                    .unwrap()
+                    .take();
+                if let Some((entered, release)) = pause {
+                    entered.send(()).unwrap();
+                    release.await.unwrap();
+                }
+            }
             let wait = crate::performance::Timer::new("derived.publication.wait");
             let _publication = gate.write_owned().await;
             wait.complete();
@@ -409,6 +433,20 @@ impl DerivedCompletion {
                     wait.complete();
                     let mut storage =
                         crate::performance::Hold::new("derived.storage.write.hold", storage);
+                    #[cfg(test)]
+                    if admission.is_some()
+                        && storage
+                            .meta_store()
+                            .bounded_completion_failure_nth
+                            .fetch_update(
+                                std::sync::atomic::Ordering::SeqCst,
+                                std::sync::atomic::Ordering::SeqCst,
+                                |n| n.checked_sub(1),
+                            )
+                            == Ok(1)
+                    {
+                        panic!("injected bounded completion worker loss");
+                    }
                     let mut observations = PurgePhysicalObservation::default();
                     let result = (|| {
                         // Bounded sweeps never consume another producer's work.

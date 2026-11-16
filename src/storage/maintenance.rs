@@ -2,7 +2,9 @@
 use super::control::WriteReceipt;
 
 mod evidence;
-pub(crate) use evidence::{FailureKind, ReceiptAdmission, ReceiptSizeLimit};
+pub(crate) use evidence::{
+    FailureKind, InvalidReceiptEvidence, ReceiptAdmission, ReceiptSizeLimit,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecaySkip {

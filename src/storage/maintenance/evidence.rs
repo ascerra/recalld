@@ -61,6 +61,17 @@ struct Evidence {
     operations: HashSet<Uuid>,
     failure: Option<FailureKind>,
     failed_receipt: Option<WriteReceipt>,
+    unadmitted: Vec<WriteReceipt>,
+}
+
+/// Internal admission violation; never project it as an ordinary small failure.
+#[derive(Debug, thiserror::Error)]
+#[error("maintenance receipt admission invariant violated")]
+pub(crate) struct InvalidReceiptEvidence {
+    pub(crate) prior: Vec<WriteReceipt>,
+    pub(crate) unadmitted: Vec<WriteReceipt>,
+    pub(crate) failed_receipt: Option<WriteReceipt>,
+    pub(crate) unknown: Option<Option<Uuid>>,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +90,7 @@ impl ReceiptAdmission {
             operations: HashSet::new(),
             failure: None,
             failed_receipt: None,
+            unadmitted: Vec::new(),
         }))))
     }
 
@@ -171,7 +183,9 @@ impl ReceiptAdmission {
         evidence.operations.insert(receipt.operation_id);
         evidence.charged = cost;
         if conflict {
-            evidence.failure = Some(FailureKind::Conflict);
+            if !matches!(evidence.failure, Some(FailureKind::Unknown(_))) {
+                evidence.failure = Some(FailureKind::Conflict);
+            }
             return Err(StorageError::ReceiptEvidenceConflict);
         }
         Ok(())
@@ -188,6 +202,13 @@ impl ReceiptAdmission {
                         failed_receipt = Some((**receipt).clone());
                     }
                     if let Err(error) = self.record(receipt) {
+                        if !matches!(error, StorageError::ReceiptEvidenceConflict) {
+                            self.0
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .unadmitted
+                                .push((**receipt).clone());
+                        }
                         evidence_error = Some(error);
                     }
                     leaf = source;
@@ -223,12 +244,26 @@ impl ReceiptAdmission {
 
     pub(crate) fn snapshot(
         &self,
-    ) -> (Option<FailureKind>, Vec<WriteReceipt>, Option<WriteReceipt>) {
+    ) -> Result<
+        (Option<FailureKind>, Vec<WriteReceipt>, Option<WriteReceipt>),
+        InvalidReceiptEvidence,
+    > {
         let evidence = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        (
+        if !evidence.unadmitted.is_empty() {
+            return Err(InvalidReceiptEvidence {
+                prior: evidence.entries.iter().map(|e| e.0.clone()).collect(),
+                unadmitted: evidence.unadmitted.clone(),
+                failed_receipt: evidence.failed_receipt.clone(),
+                unknown: match evidence.failure {
+                    Some(FailureKind::Unknown(id)) => Some(id),
+                    _ => None,
+                },
+            });
+        }
+        Ok((
             evidence.failure,
             evidence.entries.iter().map(|e| e.0.clone()).collect(),
             evidence.failed_receipt.clone(),
-        )
+        ))
     }
 }

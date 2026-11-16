@@ -84,6 +84,10 @@ async fn fixture() -> (Fixture, Vec<MemoryId>, Arc<SweepClock>) {
 }
 
 fn app(f: &Fixture, clock: Arc<SweepClock>) -> Router {
+    app_with_limit(f, clock, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+}
+
+fn app_with_limit(f: &Fixture, clock: Arc<SweepClock>, limit: usize) -> Router {
     let (mut state, _bridge) = fixture_state(f);
     state.decay = Arc::new(
         FsrsEngineAdapter::new(
@@ -99,6 +103,7 @@ fn app(f: &Fixture, clock: Arc<SweepClock>) -> Router {
             f.entity_index.clone(),
         )
         .with_clock(clock)
+        .with_sweep_evidence_limit(limit)
         .with_native_lifecycle_policy(NativePolicyInputs::default()),
     );
     crate::api::routes::router(state, &Default::default())
@@ -123,6 +128,10 @@ fn receipt_snapshot(path: &std::path::Path) -> Vec<(Vec<u8>, Vec<u8>)> {
 }
 
 async fn request(app: &Router, body: &str) -> (StatusCode, Value) {
+    request_with_limit(app, body, crate::daemon::protocol::MAX_MESSAGE_SIZE).await
+}
+
+async fn request_with_limit(app: &Router, body: &str, limit: usize) -> (StatusCode, Value) {
     let response = app
         .clone()
         .oneshot(
@@ -135,6 +144,11 @@ async fn request(app: &Router, body: &str) -> (StatusCode, Value) {
         .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert!(
+        bytes.len() <= limit,
+        "actual HTTP bytes {} exceed {limit}",
+        bytes.len()
+    );
     println!(
         "HTTP status={status} raw_body={}",
         String::from_utf8_lossy(&bytes)
@@ -143,6 +157,10 @@ async fn request(app: &Router, body: &str) -> (StatusCode, Value) {
 }
 
 async fn probe(nth: usize, known: bool) {
+    probe_with_limit(nth, known, crate::daemon::protocol::MAX_MESSAGE_SIZE).await
+}
+
+async fn probe_with_limit(nth: usize, known: bool, limit: usize) {
     let (f, ids, clock) = fixture().await;
     let path = f.storage.read().unwrap().db_path().to_owned();
     let before = f.storage.read().unwrap().control_state().unwrap();
@@ -160,8 +178,8 @@ async fn probe(nth: usize, known: bool) {
             .record_commit_failure_nth
             .store(nth, Ordering::SeqCst);
     }
-    let router = app(&f, clock.clone());
-    let (status, reply) = request(&router, "{}").await;
+    let router = app_with_limit(&f, clock.clone(), limit);
+    let (status, reply) = request_with_limit(&router, "{}", limit).await;
     assert_eq!(clock.0.load(Ordering::SeqCst), 1);
     if !known {
         let engine = f.storage.read().unwrap();
@@ -390,4 +408,337 @@ async fn http_sweep_override_rejects_before_armed_commit_hook() {
         );
     }
     assert_eq!(engine.meta_store().work_tracker().status().pending, 0);
+}
+
+fn canonical(f: &Fixture) -> Vec<u8> {
+    let engine = f.storage.read().unwrap();
+    let (_copy, db) =
+        crate::storage::validation::inspect_database_copy(&engine.db_path().join("meta.db"), true)
+            .unwrap();
+    let read = db.begin_read().unwrap();
+    let mut tables = Vec::new();
+    for table in [
+        control::RECEIPTS,
+        crate::storage::metadata::effects::EFFECTS,
+        crate::storage::metadata::removal_ledger::LEDGER,
+    ] {
+        tables.push(
+            read.open_table(table)
+                .unwrap()
+                .iter()
+                .unwrap()
+                .map(|row| {
+                    let (key, value) = row.unwrap();
+                    (key.value().to_vec(), value.value().to_vec())
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+    serde_json::to_vec(&(
+        engine.control_state().unwrap(),
+        engine.list_namespaces().unwrap(),
+        engine
+            .scan_all()
+            .unwrap()
+            .into_iter()
+            .map(|(id, r)| (id, r.encode().unwrap()))
+            .collect::<Vec<_>>(),
+        engine.load_all_edges().unwrap(),
+        engine.meta_store().text_selection().unwrap(),
+        tables,
+    ))
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_first_and_later_budget_reject_before_canonical_commit() {
+    for (limit, committed) in [(2048, 0), (10_000, 1)] {
+        let (f, ids, clock) = fixture().await;
+        let old = canonical(&f);
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let path = f.storage.read().unwrap().db_path().to_owned();
+        let before_receipts = receipt_snapshot(&path);
+        let originals: Vec<_> = ids
+            .iter()
+            .map(|id| f.record(*id).unwrap().encode().unwrap())
+            .collect();
+        let router = app_with_limit(&f, clock.clone(), limit);
+        let (status, reply) = request_with_limit(&router, "{}", limit).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(reply["error"], "SWEEP_RESPONSE_LIMIT");
+        assert_eq!(
+            reply["commitState"],
+            if committed == 0 {
+                "notCommitted"
+            } else {
+                "committed"
+            }
+        );
+        assert_eq!(reply["complete"], false);
+        assert_eq!(reply["retryable"], false);
+        assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+        let values: Vec<WriteReceipt> = serde_json::from_value(reply["receipts"].clone()).unwrap();
+        assert_eq!(values.len(), committed);
+        let rows = receipt_snapshot(&path);
+        assert_eq!(rows.len(), before_receipts.len() + committed);
+        assert!(before_receipts.iter().all(|r| rows.contains(r)));
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get(),
+            before.committed_generation.get() + committed as u64
+        );
+        if committed == 0 {
+            assert_eq!(canonical(&f), old);
+        }
+        for receipt in &values {
+            assert!(
+                rows.iter().any(
+                    |(_, bytes)| control::validate_receipt(bytes).unwrap().receipt == *receipt
+                )
+            );
+            assert!(matches!(
+                receipt.outcome,
+                MutationOutcome::NativePhaseMaterialized { .. }
+            ));
+        }
+        let unchanged = ids
+            .iter()
+            .zip(&originals)
+            .filter(|(id, old)| f.record(**id).unwrap().encode().unwrap() == **old)
+            .count();
+        assert_eq!(unchanged, ids.len() - committed);
+        drop(router);
+        let _root = f.close();
+        let reopened =
+            NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();
+        assert_eq!(
+            reopened
+                .engine
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get(),
+            before.committed_generation.get() + committed as u64
+        );
+        assert_eq!(receipt_snapshot(&path), rows);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_admitted_known_wrapper_fits_actual_bounded_body() {
+    // A real complete ~3.5KiB phase proof plus array/alias fits this cap; a
+    // second complete proof does not. No arbitrary oversized fake outcome.
+    probe_with_limit(1, true, 10_000).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_read_only_capture_loss_is_not_a_mutation_unknown() {
+    let (f, _ids, clock) = fixture().await;
+    let before = canonical(&f);
+    f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .sweep_capture_fault
+        .store(true, Ordering::SeqCst);
+    let router = app(&f, clock.clone());
+    let (status, reply) = request(&router, "{}").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(reply["commitState"], "notCommitted");
+    assert_eq!(reply["error"], "SWEEP_UNAVAILABLE");
+    assert_eq!(reply["receipts"], json!([]));
+    assert!(reply["operationId"].is_null());
+    assert_eq!(canonical(&f), before);
+    let work = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .work_tracker()
+        .status();
+    assert_eq!((work.pending, work.unresolved), (0, 0));
+    assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_completion_worker_loss_preserves_unknown_and_prior_receipt() {
+    for after_commit in [false, true] {
+        let (f, _ids, clock) = fixture().await;
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let path = f.storage.read().unwrap().db_path().to_owned();
+        let before_receipts = receipt_snapshot(&path);
+        let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .bounded_completion_failure_nth
+            .store(if after_commit { 2 } else { 1 }, Ordering::SeqCst);
+        let router = app(&f, clock.clone());
+        let (status, reply) = request(&router, "{}").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(reply["commitState"], "unknown");
+        assert!(reply["operationId"].is_null());
+        assert!(reply.get("receipt").is_none());
+        assert_eq!(reply["ready"], false);
+        let known: Vec<WriteReceipt> = serde_json::from_value(reply["receipts"].clone()).unwrap();
+        assert_eq!(known.len(), usize::from(after_commit));
+        assert!(tracker.status().unresolved > 0);
+        drop(router);
+        let _root = f.close();
+        let reopened =
+            NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();
+        let rows = receipt_snapshot(&path);
+        assert_eq!(
+            rows.len(),
+            before_receipts.len() + usize::from(after_commit)
+        );
+        assert!(before_receipts.iter().all(|r| rows.contains(r)));
+        assert_eq!(
+            reopened
+                .engine
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get(),
+            before.committed_generation.get() + u64::from(after_commit)
+        );
+        for receipt in known {
+            assert!(
+                rows.iter()
+                    .any(|(_, bytes)| control::validate_receipt(bytes).unwrap().receipt == receipt)
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_peer_effect_and_purge_race_refuse_without_foreign_ack() {
+    for purge in [false, true] {
+        let (f, ids, clock) = fixture().await;
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (release, resume) = tokio::sync::oneshot::channel();
+        *f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .bounded_completion_pause
+            .lock()
+            .unwrap() = Some((entered, resume));
+        let router = app(&f, clock.clone());
+        let task = tokio::spawn(async move { request(&router, "{}").await });
+        tokio::time::timeout(std::time::Duration::from_secs(10), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        let (own, foreign, pending, progress, after_peer) = {
+            let mut engine = f.storage.write().unwrap();
+            let own = engine.meta_store().pending_effects().unwrap()[0]
+                .receipt
+                .clone();
+            let (foreign, progress) = if purge {
+                let p = engine
+                    .begin_native_purge_named_admitted(
+                        "default",
+                        true,
+                        None,
+                        crate::daemon::protocol::MAX_MESSAGE_SIZE,
+                    )
+                    .unwrap()
+                    .unwrap();
+                (p.start_receipt.clone(), Some(p))
+            } else {
+                let peer = *ids
+                    .iter()
+                    .find(|id| engine.get_record(**id).unwrap().unwrap().phase == DecayPhase::Full)
+                    .unwrap();
+                let intent = engine
+                    .meta_store()
+                    .capture_native_decay(
+                        peer,
+                        NamespaceId::new(1),
+                        &NativePolicyInputs::default(),
+                        NOW,
+                    )
+                    .unwrap();
+                let result = engine
+                    .apply_native_decay(
+                        &MutationContext::unkeyed(NamespaceId::new(1)),
+                        &intent,
+                        &NativePolicyInputs::default(),
+                        None,
+                    )
+                    .unwrap();
+                let crate::storage::native_maintenance::NativeDecayResult::Committed(receipt) =
+                    result
+                else {
+                    panic!("actual peer must commit");
+                };
+                (receipt, None)
+            };
+            let pending = engine.meta_store().pending_effects().unwrap();
+            (
+                own,
+                foreign,
+                serde_json::to_vec(&pending).unwrap(),
+                progress,
+                engine.control_state().unwrap(),
+            )
+        };
+        assert_eq!(
+            after_peer.committed_generation.get(),
+            before.committed_generation.get() + 2
+        );
+        release.send(()).unwrap();
+        let (status, reply) = tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(reply["error"], "SWEEP_UNAVAILABLE");
+        assert_eq!(reply["commitState"], "committed");
+        assert_eq!(reply["ready"], false);
+        let known: Vec<WriteReceipt> = serde_json::from_value(reply["receipts"].clone()).unwrap();
+        assert_eq!(known, vec![own]);
+        assert!(!known.contains(&foreign));
+        let engine = f.storage.read().unwrap();
+        assert_eq!(
+            engine.control_state().unwrap().generation_ref(),
+            after_peer.generation_ref()
+        );
+        assert_eq!(
+            serde_json::to_vec(&engine.meta_store().pending_effects().unwrap()).unwrap(),
+            pending
+        );
+        if purge {
+            assert!(engine.meta_store().publication_state().is_err());
+        } else {
+            assert!(
+                !engine
+                    .meta_store()
+                    .publication_state()
+                    .unwrap()
+                    .matches_canonical()
+            );
+        }
+        if let Some(progress) = progress {
+            assert_eq!(
+                engine
+                    .lookup_namespace_purge(
+                        progress.store_id,
+                        progress.namespace_id,
+                        progress.start_receipt.operation_id
+                    )
+                    .unwrap(),
+                Some(progress)
+            );
+        }
+        assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+    }
 }

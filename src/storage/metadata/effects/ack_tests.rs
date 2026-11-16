@@ -7,6 +7,90 @@ use std::sync::mpsc::Sender;
 
 pub(crate) type AckHook = Box<dyn FnOnce(&MetadataStore) + Send>;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounded_empty_ack_rejects_same_generation_addition_without_dirty_clear() {
+    let f = seeded(1);
+    let effect = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .pending_effects()
+        .unwrap()
+        .pop()
+        .unwrap();
+    publisher(&f).rebuild_all().await.unwrap();
+    let storage = f.storage.read().unwrap();
+    let meta = storage.meta_store();
+    let at = storage.control_state().unwrap().generation_ref();
+    let receipts = rows(meta, control::RECEIPTS);
+    meta.derived_dirty.store(true, Ordering::SeqCst);
+    *meta.ack_test_hook.lock().unwrap() = Some(Box::new(move |meta| {
+        // Deliberate private-table fault at the existing hook. Legitimate
+        // writers cannot pass the held metadata mutation guard here.
+        let tx = meta.db.begin_write().unwrap();
+        tx.open_table(EFFECTS)
+            .unwrap()
+            .insert(
+                effect.receipt.operation_id.as_bytes().as_slice(),
+                control::encode(&effect).unwrap().as_slice(),
+            )
+            .unwrap();
+        tx.commit().unwrap();
+    }));
+    let admission = crate::storage::maintenance::ReceiptAdmission::new(8192).unwrap();
+    assert!(
+        meta.acknowledge_rebuilt_effects_at_bounded(at, None, Some(&admission))
+            .is_err()
+    );
+    assert_eq!(meta.pending_effects().unwrap().len(), 1);
+    assert!(meta.needs_effects_rebuild());
+    assert_eq!(storage.control_state().unwrap().generation_ref(), at);
+    assert_eq!(rows(meta, control::RECEIPTS), receipts);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounded_pending_validation_cost_depends_on_current_rows_not_history() {
+    let mut counts = Vec::new();
+    for historical in [1, 65] {
+        let f = seeded(historical);
+        publisher(&f).rebuild_all().await.unwrap();
+        let storage = f.storage.write().unwrap();
+        let (id, before) = storage.scan_all().unwrap().into_iter().next().unwrap();
+        let ns = storage
+            .get_namespace(NamespaceId::new(before.namespace_id))
+            .unwrap()
+            .unwrap();
+        let result = storage
+            .apply_legacy_decay_with_receipt(
+                &MutationContext::unkeyed(ns.id),
+                id,
+                &before,
+                &ns,
+                before.phase,
+                0.5,
+                0.5,
+            )
+            .unwrap();
+        let crate::storage::maintenance::DecayMutationResult::Committed(receipt) = result else {
+            panic!("actual materialization required");
+        };
+        let admission = crate::storage::maintenance::ReceiptAdmission::new(8192).unwrap();
+        admission.record(&receipt).unwrap();
+        control::take_validation_work();
+        storage
+            .meta_store()
+            .check_receipt_admission(Some(&admission))
+            .unwrap();
+        let work = control::take_validation_work();
+        assert_eq!(work.full_validations, 0);
+        assert_eq!(work.receipt_decodes, 1);
+        println!("bounded_pending history_insertions={historical} current_pending=1 {work:?}");
+        counts.push(work.receipt_decodes);
+    }
+    assert_eq!(counts, vec![1, 1]);
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct AckWork {
     pub validation_calls: usize,

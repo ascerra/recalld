@@ -153,6 +153,17 @@ pub struct MetadataStore {
     /// Instance-local Nth successful record-effects commit loses its ACK.
     #[cfg(test)]
     pub(crate) record_commit_failure_nth: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub(crate) sweep_capture_fault: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub(crate) bounded_completion_failure_nth: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub(crate) bounded_completion_pause: std::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
     // Lock order: engine gate -> publication -> redb -> phase_index.
     // Hold across commit and bitmap publication, including direct callers.
     publication: std::sync::RwLock<()>,
@@ -337,6 +348,12 @@ impl MetadataStore {
             fail_batch_commit: std::sync::atomic::AtomicU8::new(0),
             #[cfg(test)]
             record_commit_failure_nth: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            sweep_capture_fault: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            bounded_completion_failure_nth: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            bounded_completion_pause: std::sync::Mutex::new(None),
             publication: std::sync::RwLock::new(()),
             phase_index: std::sync::RwLock::new(PhaseIndex::new()),
         };

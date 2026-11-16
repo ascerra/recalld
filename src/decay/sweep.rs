@@ -1069,7 +1069,7 @@ impl DecaySweepRunner {
                 }
                 Err(e) => {
                     if let Some(admission) = admission {
-                        admission.fail(&crate::storage::StorageError::WorkerOutcomeUnknown(
+                        admission.fail(&crate::storage::StorageError::RecoveryRequired(
                             e.to_string(),
                         ));
                     }

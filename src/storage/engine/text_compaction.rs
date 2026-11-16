@@ -23,7 +23,7 @@ impl RedbStorageEngine {
         &mut self,
         mut boundary: impl FnMut(Stage) -> Result<(), StorageError>,
     ) -> Result<CompactionResult, StorageError> {
-        self.compact_text_at_with_work(&mut boundary, None, None)
+        self.compact_text_at_with_work(&mut boundary, None)
     }
 
     pub(crate) fn compact_text_log_with_work(
@@ -38,10 +38,18 @@ impl RedbStorageEngine {
         parent: Option<&crate::storage::work::WorkTicket>,
         admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
     ) -> Result<CompactionResult, StorageError> {
-        self.compact_text_at_with_work(|_| Ok(()), parent, admission)
+        self.compact_text_at_with_work_bounded(|_| Ok(()), parent, admission)
     }
 
     fn compact_text_at_with_work(
+        &mut self,
+        boundary: impl FnMut(Stage) -> Result<(), StorageError>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<CompactionResult, StorageError> {
+        self.compact_text_at_with_work_bounded(boundary, parent, None)
+    }
+
+    fn compact_text_at_with_work_bounded(
         &mut self,
         mut boundary: impl FnMut(Stage) -> Result<(), StorageError>,
         parent: Option<&crate::storage::work::WorkTicket>,

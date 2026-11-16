@@ -44,6 +44,14 @@ impl DecaySweepRunner {
             let engine = engine
                 .read()
                 .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+            #[cfg(test)]
+            if engine
+                .meta_store()
+                .sweep_capture_fault
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                panic!("injected read-only sweep capture loss");
+            }
             let mut intents = Vec::new();
             for ns in engine.list_namespaces()? {
                 intents.extend(
@@ -66,7 +74,9 @@ impl DecaySweepRunner {
             }
             Err(error) => {
                 if let Some(admission) = admission {
-                    admission.fail(&StorageError::WorkerOutcomeUnknown(error.to_string()));
+                    // This worker only captured read-only intents; no mutation
+                    // was dispatched and no canonical outcome is ambiguous.
+                    admission.fail(&StorageError::RecoveryRequired(error.to_string()));
                 }
                 result.publication_error = Some(error.to_string());
                 return result;

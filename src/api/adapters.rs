@@ -1421,6 +1421,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
 
 /// Adapts the decay subsystem to the API `FsrsEngine` trait.
 pub struct FsrsEngineAdapter {
+    #[cfg(test)]
+    sweep_evidence_limit: Option<usize>,
     native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
@@ -1432,6 +1434,11 @@ pub struct FsrsEngineAdapter {
 }
 
 impl FsrsEngineAdapter {
+    #[cfg(test)]
+    pub(crate) fn with_sweep_evidence_limit(mut self, limit: usize) -> Self {
+        self.sweep_evidence_limit = Some(limit);
+        self
+    }
     pub(crate) async fn trigger_sweep_with_origin(
         &self,
         as_of_millis: Option<i64>,
@@ -1500,7 +1507,7 @@ impl FsrsEngineAdapter {
                 admission.fail(&crate::storage::StorageError::MaintenanceDependencyUnavailable);
             }
             if let Some(failure) =
-                crate::decay::sweep::evidence::SweepFailure::from_admission(admission)
+                crate::decay::sweep::evidence::SweepFailure::from_admission(admission)?
             {
                 return Err(Box::new(failure));
             }
@@ -1547,6 +1554,8 @@ impl FsrsEngineAdapter {
         cache.bind_storage(&storage);
         Self {
             native_policy: None,
+            #[cfg(test)]
+            sweep_evidence_limit: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
             cache,
@@ -1716,9 +1725,10 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         &self,
         as_of_millis: Option<i64>,
     ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
-        let admission = crate::storage::maintenance::ReceiptAdmission::new(
-            crate::daemon::protocol::MAX_MESSAGE_SIZE,
-        )?;
+        let limit = crate::daemon::protocol::MAX_MESSAGE_SIZE;
+        #[cfg(test)]
+        let limit = self.sweep_evidence_limit.unwrap_or(limit);
+        let admission = crate::storage::maintenance::ReceiptAdmission::new(limit)?;
         self.trigger_sweep_with_origin_bounded(as_of_millis, 1, Some(&admission))
             .await
     }
