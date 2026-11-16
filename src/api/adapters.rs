@@ -1705,16 +1705,52 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
+    native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     clock: Arc<dyn crate::time::Clock>,
 }
 
 impl NamespaceRegistryAdapter {
+    #[cfg(test)]
+    pub(crate) fn with_catalog_fault(mut self, point: &'static str) -> Self {
+        self.native_catalog.as_mut().unwrap().failure = Some(point);
+        self
+    }
+
+    /// Bind actual provider, frozen inherited policy and clock from this owner.
+    pub fn with_native_catalog(
+        mut self,
+        provider: Arc<dyn EmbeddingProvider>,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+        clock: Arc<dyn crate::time::Clock>,
+        cache: Arc<CacheManager>,
+        graph: crate::graph::SharedGraph,
+        vectors: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
+        fts: Arc<tokio::sync::Mutex<FtsIndex>>,
+        entities: Arc<tokio::sync::RwLock<EntityIndex>>,
+    ) -> Self {
+        self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
+            crate::derived_completion::DerivedCompletion {
+                storage: self.storage.clone(),
+                cache,
+                graph,
+                vectors,
+                fts,
+                entities,
+            },
+            provider,
+            policy,
+            clock,
+        ));
+        self
+    }
+
     /// Storage-only reads. Creation requires `from_system` to bind actual publishers.
     pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
         Self {
             completion: None,
+            native_catalog: None,
             storage,
             clock: Arc::new(crate::time::SystemClock),
         }
@@ -1751,6 +1787,32 @@ impl NamespaceRegistryAdapter {
 
 #[async_trait]
 impl state::NamespaceRegistry for NamespaceRegistryAdapter {
+    async fn update_native_policy(
+        &self,
+        request: crate::serialization::policy::PolicyRequest,
+    ) -> Result<
+        crate::native_catalog_adapter::PolicyOutcome,
+        crate::native_catalog_adapter::CatalogError,
+    > {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .update_policy(request)
+            .await
+    }
+
+    async fn create_native_namespace(
+        &self,
+        request: crate::serialization::catalog::CreateNamespaceRequest,
+    ) -> Result<crate::storage::control::WriteReceipt, crate::native_catalog_adapter::CatalogError>
+    {
+        self.native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
+            .create(request)
+            .await
+    }
+
     fn resolve(&self, name: &str) -> Option<NamespaceConfig> {
         tokio::task::block_in_place(|| {
             let storage_r = self.storage.read().ok()?;
