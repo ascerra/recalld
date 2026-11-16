@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tracing::instrument::WithSubscriber;
 
 #[derive(Clone, Default)]
-struct Capture(Arc<Mutex<Vec<u8>>>);
+pub(crate) struct Capture(pub(crate) Arc<Mutex<Vec<u8>>>);
 impl Write for Capture {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.0.lock().unwrap().extend_from_slice(bytes);
@@ -23,7 +23,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
         self.clone()
     }
 }
-fn subscriber(capture: Capture) -> impl tracing::Subscriber + Send + Sync {
+pub(crate) fn subscriber(capture: Capture) -> impl tracing::Subscriber + Send + Sync {
     tracing_subscriber::fmt()
         .json()
         .without_time()
@@ -634,6 +634,73 @@ fn sampling_disabled_and_skipped_paths_allocate_no_instrumentation_state() {
     });
 }
 
+#[test]
+fn trace_provenance_cold_disabled_paths_keep_zero_allocations_and_clocks() {
+    const CHILD: &str = "RECALLD_COLD_TRACE_COST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "performance::tests::trace_provenance_cold_disabled_paths_keep_zero_allocations_and_clocks", "--nocapture"])
+            .env(CHILD, "1").output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    fn forbidden() -> u64 {
+        panic!("disabled field evaluated")
+    }
+    fn disabled() {
+        assert_eq!(
+            allocation_probe::count(|| {
+                assert!(!enabled());
+                assert!(Timer::new("cold").start.is_none());
+                let timeline = Timeline::new();
+                assert!(timeline.start.is_none() && timeline.last.is_none());
+                let worker = Worker::new("cold");
+                assert!(worker.context.is_none() && worker.queued.start.is_none());
+                worker.run(|| {
+                    crate::performance::event!(kind = "must_not_evaluate", value = forbidden())
+                });
+            }),
+            0
+        );
+    }
+    // No subscriber at all, then a live scoped subscriber on an untraced thread.
+    disabled();
+    let capture = Capture::default();
+    let dispatch = tracing::Dispatch::new(subscriber(capture.clone()));
+    disabled();
+    for _ in 0..3 {
+        tracing::dispatcher::with_default(&dispatch, || {
+            assert!(target_enabled());
+            crate::performance::event!(kind = "cold_scope_control");
+        });
+        disabled();
+    }
+    assert_eq!(events(&capture).len(), 3);
+    drop(dispatch);
+    // TRACE remains globally possible but this target must still be filtered out.
+    let filtered = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .json()
+            .without_time()
+            .with_env_filter("off,trace_control=trace")
+            .with_writer(capture)
+            .finish(),
+    );
+    tracing::dispatcher::with_default(&filtered, || {
+        assert_eq!(
+            tracing::level_filters::LevelFilter::current(),
+            tracing::level_filters::LevelFilter::TRACE
+        );
+        assert!(!target_enabled()); // Registration is outside the measured request path.
+        disabled();
+    });
+}
+
 // Reuse actual HTTP/MCP fixture clients without exposing a production sampler API.
 pub(crate) async fn capture_sampled<T>(
     ordinal: u64,
@@ -656,6 +723,23 @@ pub(crate) async fn capture_sampled<T>(
         .unwrap()
         .lines()
         .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    (result, rows)
+}
+
+#[path = "performance_write_tests.rs"]
+mod writes;
+
+/// Actual producer tests capture without inventing an outer request intent.
+pub(crate) async fn capture_full<T>(
+    future: impl Future<Output = T>,
+) -> (T, Vec<serde_json::Value>) {
+    let capture = Capture::default();
+    let result = future.with_subscriber(subscriber(capture.clone())).await;
+    let rows = String::from_utf8(capture.0.lock().unwrap().clone())
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
         .collect();
     (result, rows)
 }
