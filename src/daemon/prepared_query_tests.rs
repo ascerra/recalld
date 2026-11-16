@@ -461,7 +461,7 @@ async fn prepared_remote_whole_budget_and_unnegotiated_alias_precede_exposure() 
             )
             .await
             .unwrap();
-        ids.push(crate::storage::insertion::inserted_id(&receipt).unwrap());
+        ids.push(crate::storage::insertion::inserted_id(&receipt.receipt).unwrap());
     }
     let snapshot = || {
         (
