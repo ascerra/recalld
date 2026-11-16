@@ -68,3 +68,25 @@ are retained in focused-005. The approved test correction asserts this rejection
 keeps direct nonsemantic success, and leaves the original pinned result/labels/
 generation/byte assertions intact. Native Rust callers must use the owned pinned
 coherent entry; there is no silent fallback or public activation.
+
+## Frozen runtime result
+
+Exact runtime `9bd4e8820bf063902e9e2f4d205d4b1d6f550617`, immutable final-006:
+- Affected8 passed: seven certification tests and the corrected inherited actual
+  native writer/read/reopen test, with pinned and direct metadata positives intact.
+- Full `cargo test --offline --locked --all-features`:1460 library passed,
+  0 failed,2 ignored,1258.96s; five CLI passed; four doctests ignored.
+- `cargo fmt --all -- --check` and all-feature/all-target Clippy exited0,
+  with existing warnings. No broad warning cleanup.
+-404 source files verified pre/post and against the worktree before the tail;
+  nine executed binaries hashed before target cleanup;21 evidence files copied
+  and verified under final-006/COPY.json.
+- Source manifest SHA256:
+  `89e4b2f828f5c87316de090b4a97d621a3aa23c0d167b29968edca53c353ee0a`.
+  Executed-binary manifest SHA256:
+  `b5bf608c33a5870b33018f8e3baff33cffe6646b61936976325be3f2478a3558`.
+- Memory peak4294967296 bytes; max3593,oom0,oom_kill0. Reclaim pressure, not OOM.
+
+This is exact runtime proof before the separately approved PR175 test-only tail.
+No production change is planned after this source. The full run is not attributed
+to the future final docs/test-tail head; exact-head GitHub CI remains required.
