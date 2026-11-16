@@ -198,6 +198,11 @@ impl MetadataStore {
 }
 
 impl CanonicalReadView {
+    /// Constructor-validated owner format, never a request or profile inference.
+    pub(crate) fn is_native_owned(&self) -> bool {
+        self.native_owned
+    }
+
     /// Semantic inventory admission on this exact owned canonical snapshot.
     /// Supplied query vectors need this same scope/certification proof without
     /// claiming that an active provider produced the caller's vector.
