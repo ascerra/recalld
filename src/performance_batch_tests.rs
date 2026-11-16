@@ -475,7 +475,7 @@ async fn legacy_batch_committed_unready_keeps_receipt_and_repairs_on_replay() {
     let fx = Fixture::new();
     let adapter = fx.storage_adapter();
     let input = typed_request(&fx, vec![explicit_item()]);
-    *fx.vector_index.write().await = FlatVectorIndex::new(5);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(5);
     let capture = Capture::default();
     let first = adapter
         .mutate_batch(input.clone())
@@ -491,7 +491,7 @@ async fn legacy_batch_committed_unready_keeps_receipt_and_repairs_on_replay() {
             .any(|e| e["kind"] == "batch_child" && e["state"] == "committed_unready")
     );
     let committed = generation(&fx);
-    *fx.vector_index.write().await = FlatVectorIndex::new(4);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let capture = Capture::default();
     let replay = adapter
         .mutate_batch(input)
