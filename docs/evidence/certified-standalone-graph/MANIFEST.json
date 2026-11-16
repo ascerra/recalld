@@ -3,6 +3,10 @@
     "bytes": 4684,
     "sha256": "c6d67af8d924fac473829e0a7aa503944cfd3f29c7bde850b2443142ba3a3a9a"
   },
+  "HOME-COPY.json": {
+    "bytes": 966,
+    "sha256": "87a3ea7d575d260967c8b72baf0d2cb69fae4fcbdb94026fde5326e2ac090a41"
+  },
   "OWNER-REVIEW.md": {
     "bytes": 1389,
     "sha256": "ae3ac56b7e135b16edebc13e10133a919ea71e597d774b440623f0c5f05da51f"
