@@ -904,3 +904,59 @@ mod request_context;
 
 #[path = "compaction_tests.rs"]
 mod compaction;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_ack_native_typed_effect_counts_include_actual_guard() {
+    let root = tempfile::tempdir().unwrap();
+    let data = fixture(root.path());
+    let mut storage = RedbStorageEngine::open_native(&data.path).unwrap();
+    let policy = crate::storage::native_lifecycle::NativePolicyInputs::default();
+    let intent = storage
+        .meta_store()
+        .capture_native_tombstone(data.parent, None, &policy)
+        .unwrap();
+    let receipt = storage
+        .tombstone_native_record(
+            &MutationContext::unkeyed(data.ns),
+            &intent,
+            &policy,
+            &crate::time::ManualClock::new(86_400_000),
+            None,
+        )
+        .unwrap();
+    let at = storage.control_state().unwrap().generation_ref();
+    let n = storage.meta_store().pending_effects().unwrap().len();
+    assert!(n > 0);
+    let (send, receive) = std::sync::mpsc::channel();
+    *storage.meta_store().ack_work_probe.lock().unwrap() = Some(send);
+    let f = crate::test_support::Fixture::from_open_engine(root, storage);
+    readers::completion(&f).rebuild_all().await.unwrap();
+    let work = receive
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    eprintln!("STARTUP_ACK_NATIVE backlog={n} {work:?}");
+    assert_eq!(work.validation_calls, 1);
+    assert_eq!(work.effect_rows, n);
+    assert_eq!(work.commit_successes, 1);
+    let storage = f.storage.read().unwrap();
+    assert_eq!(storage.control_state().unwrap().generation_ref(), at);
+    assert_eq!(
+        storage
+            .meta_store()
+            .lookup_operation(
+                at.store_id,
+                MutationScope::Namespace(data.ns),
+                receipt.operation_id
+            )
+            .unwrap(),
+        Some(receipt)
+    );
+    assert!(storage.meta_store().pending_effects().unwrap().is_empty());
+    assert!(
+        storage
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+}
