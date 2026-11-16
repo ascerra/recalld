@@ -10,7 +10,7 @@ use crate::cache::CacheManager;
 use crate::graph::SharedGraph;
 use crate::graph::structure::RelationshipGraph;
 use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
-use crate::search::{EntityIndex, SearchFilter, VectorIndex, VectorIndexOwner};
+use crate::search::{EntityIndex, SearchFilter, VectorIndexOwner};
 use crate::storage::PersistedEdge;
 use crate::storage::engine::RedbStorageEngine;
 use crate::storage::work::WorkTicket;
@@ -370,6 +370,9 @@ pub(crate) async fn perform_autolink_with_work(
         let search_limit = max_links * 2 + 1;
         let candidates: Vec<(MemoryId, f32)> = {
             let index = vector_index.read().await;
+            let index = index
+                .uniform_index()
+                .map_err(|e| AutoLinkError::VectorSearch(e.to_string()))?;
             let filter = SearchFilter {
                 namespace_id: Some(namespace_id),
                 decay_phases: Some(vec![DecayPhase::Full.as_u8(), DecayPhase::Summary.as_u8()]),

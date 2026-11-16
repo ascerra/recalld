@@ -560,7 +560,7 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
             .iter()
             .any(|r| r["id"] == json!(id))
     );
-    use crate::search::VectorIndex;
+
     assert!(f.vector_index.read().await.get_vector(id).is_none());
     assert!(f.vector_index.read().await.get_vector(d.parent).is_some());
     assert!(

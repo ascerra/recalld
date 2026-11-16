@@ -3336,7 +3336,7 @@ mod tests {
         vectors: &[(MemoryId, f32)],
     ) -> QueryEngine {
         use crate::search::adapters::{SharedEntityIndexReader, SharedVectorIndexRegistry};
-        use crate::search::{EntityIndex, VectorIndex, VectorIndexOwner, VectorMetadata};
+        use crate::search::{EntityIndex, VectorIndexOwner, VectorMetadata};
 
         let mut index = VectorIndexOwner::uniform(2);
         for &(id, cosine) in vectors {

@@ -25,7 +25,7 @@ use super::pipeline::{
     RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
 };
 use super::read_handle::{FtsHandle, ReadHandle};
-use super::{EntityIndex, FtsIndex, SearchFilter, VectorIndex, VectorIndexOwner};
+use super::{EntityIndex, FtsIndex, SearchFilter, VectorIndexOwner};
 
 // Explicit offline harness adapter. Ordinary storage open still rejects schema
 // v2. Snapshot ownership pins canonical files; this adapter has no write API.

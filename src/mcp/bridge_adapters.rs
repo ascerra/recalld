@@ -3417,7 +3417,6 @@ mod tests {
 
     #[tokio::test]
     async fn insertion_adapter_rejects_bad_provider_and_caller_vectors_and_normalizes_advisory() {
-        use crate::search::VectorIndex as _;
         struct Provider(Vec<f32>);
         #[async_trait::async_trait]
         impl EmbeddingProvider for Provider {
@@ -3747,10 +3746,7 @@ mod tests {
             "FTS row survived the delete"
         );
         assert_eq!(
-            {
-                use crate::search::VectorIndex;
-                fx.vector_index.read().await.len()
-            },
+            { fx.vector_index.read().await.len() },
             0,
             "vector index entry survived the delete"
         );
@@ -3812,13 +3808,7 @@ mod tests {
         assert_eq!(flags, vec![true, true]);
 
         assert!(fx.fts_index.lock().await.is_empty().expect("fts"));
-        assert_eq!(
-            {
-                use crate::search::VectorIndex;
-                fx.vector_index.read().await.len()
-            },
-            0
-        );
+        assert_eq!({ fx.vector_index.read().await.len() }, 0);
         assert_eq!(fx.entity_index.read().await.len(), 0);
         let graph_r = fx.graph.read().await;
         for id in &ids {
@@ -4002,13 +3992,7 @@ mod tests {
             vec![other],
             "completion rebuilds canonical survivors"
         );
-        assert_eq!(
-            {
-                use crate::search::VectorIndex;
-                fx.vector_index.read().await.len()
-            },
-            1
-        );
+        assert_eq!({ fx.vector_index.read().await.len() }, 1);
         assert_eq!(fx.entity_index.read().await.len(), 0);
         assert!(
             !fx.graph.read().await.contains(&id),

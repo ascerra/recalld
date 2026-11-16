@@ -247,7 +247,7 @@ fn engine(
     edges: &[(usize, usize, EdgeType)],
 ) -> QueryEngine {
     use crate::search::adapters::*;
-    use crate::search::{EntityIndex, FtsIndex, VectorIndex, VectorIndexOwner, VectorMetadata};
+    use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner, VectorMetadata};
     let mut vectors = VectorIndexOwner::uniform(4);
     let fts = FtsIndex::new(f._directory.path()).unwrap();
     let mut entities = EntityIndex::new();
@@ -877,7 +877,7 @@ async fn returned_graph_result_uses_the_same_projection_as_admission_and_ranking
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_retrieval_graph_formulas_also_consume_explicit_policy_projection() {
     use crate::search::adapters::SharedVectorIndexRegistry;
-    use crate::search::{VectorIndex, VectorIndexOwner, VectorMetadata};
+    use crate::search::{VectorIndexOwner, VectorMetadata};
     let f = offline(2, LifecycleVersion::ExplicitFeedbackV2, |_, _| {}).await;
     let clock = CountingClock::new(DAY);
     let mut engine = engine(&f, clock.clone(), &[(0, 1, EdgeType::Associative)]);

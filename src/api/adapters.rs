@@ -293,7 +293,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     }
 
     async fn index_memory(&self, id: MemoryId, embedding: &[f32], namespace_id: NamespaceId) {
-        use crate::search::{VectorIndex, VectorMetadata};
+        use crate::search::VectorMetadata;
         let mut index = self.vector_index.write().await;
         let metadata = VectorMetadata {
             namespace_id,
@@ -304,13 +304,11 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     }
 
     async fn remove_from_index(&self, id: MemoryId) {
-        use crate::search::VectorIndex;
         let mut index = self.vector_index.write().await;
         let _ = index.remove(id);
     }
 
     fn get_embedding(&self, id: MemoryId) -> Option<Vec<f32>> {
-        use crate::search::VectorIndex;
         let index = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.vector_index.read())
         });
@@ -321,7 +319,6 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         &self,
         ids: &[MemoryId],
     ) -> std::collections::HashMap<MemoryId, Vec<f32>> {
-        use crate::search::VectorIndex;
         // Acquire the lock once for the entire batch instead of
         // once per ID, amortizing the block_in_place overhead.
         let index = tokio::task::block_in_place(|| {
@@ -337,7 +334,6 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     }
 
     fn indexed_count(&self) -> usize {
-        use crate::search::VectorIndex;
         let index = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.vector_index.read())
         });
@@ -1806,7 +1802,7 @@ impl state::MetricsCollector for NoopMetricsCollector {
 mod tests {
     use super::*;
     use crate::api::state::StorageEngine as _;
-    use crate::search::{VectorIndex as _, VectorMetadata};
+    use crate::search::VectorMetadata;
     use crate::test_support::{DIM, Fixture, MemorySpec};
 
     #[tokio::test]

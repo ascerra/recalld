@@ -24,8 +24,7 @@ use crate::graph::{self, RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, DiskRecord, MemoryId, NamespaceId};
 use crate::rif::{RifConfig, RifEngine};
 use crate::search::{
-    EntityIndex, FtsIndex, QueryEngine, VectorError, VectorIndex as _, VectorIndexOwner,
-    VectorMetadata,
+    EntityIndex, FtsIndex, QueryEngine, VectorError, VectorIndexOwner, VectorMetadata,
 };
 use crate::storage::engine::RedbStorageEngine;
 // Import the StorageEngine trait so its methods are in scope.

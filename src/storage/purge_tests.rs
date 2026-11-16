@@ -1,7 +1,7 @@
 //! Synthetic actual-engine/consumer proofs for resumable namespace deletion.
 use super::*;
 use crate::model::{NamespaceConfig, NamespaceId};
-use crate::search::VectorIndex;
+
 use crate::storage::control::{MutationContext, MutationScope};
 use crate::storage::purge::PurgeStage;
 use crate::test_support::{DIM, Fixture};

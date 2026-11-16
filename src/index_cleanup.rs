@@ -96,7 +96,6 @@ pub(crate) async fn purge_from_indexes(
 
     // 3. Vector index.
     {
-        use crate::search::VectorIndex;
         let mut vector_index = handles.vector_index.write().await;
         for id in &ids {
             match vector_index.remove(*id) {

@@ -19,7 +19,7 @@ mod native_forget;
 use crate::cache::CacheManager;
 use crate::graph::{RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, NamespaceId};
-use crate::search::{EntityIndex, FtsIndex, VectorIndex, VectorIndexOwner, VectorMetadata};
+use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner, VectorMetadata};
 use crate::storage::publication::{DerivedView, REQUIRED_VIEWS};
 use crate::storage::work::WorkTicket;
 use crate::storage::{RedbStorageEngine, StorageEngine, StorageError, TextRef};
