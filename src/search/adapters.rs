@@ -22,7 +22,7 @@ use super::error::{Result, SearchError};
 use super::pipeline::{
     AccessRecorder, EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult,
     FtsIndexRegistry, FtsResult, GraphReader, MetadataStore, NamespaceResolver, RecordCache,
-    RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
+    RifProcessor, RifSuppression, ScoredResult, SourceResults, VectorIndexRegistry,
 };
 use super::read_handle::{FtsHandle, ReadHandle};
 use super::{EntityIndex, FlatVectorIndex, FtsIndex, SearchFilter, VectorIndex};
@@ -197,21 +197,37 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
         k: usize,
         eligible_ids: Option<&HashSet<MemoryId>>,
     ) -> Result<Vec<ScoredResult>> {
+        Ok(self
+            .search_measured(namespace_id, query_vec, k, eligible_ids)?
+            .results)
+    }
+
+    fn search_measured(
+        &self,
+        namespace_id: NamespaceId,
+        query_vec: &[f32],
+        k: usize,
+        eligible_ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<SourceResults<ScoredResult>> {
         let index = self.index.read();
         let filter = SearchFilter {
             namespace_id: Some(namespace_id),
             ..Default::default()
         };
         let results = index
-            .search_eligible(query_vec, k, &filter, eligible_ids)
+            .search_eligible_measured(query_vec, k, &filter, eligible_ids)
             .map_err(|e| SearchError::VectorIndexError(e.to_string()))?;
-        Ok(results
-            .into_iter()
-            .map(|r| ScoredResult {
-                memory_id: r.id,
-                score: r.score,
-            })
-            .collect())
+        Ok(SourceResults {
+            coverage: results.coverage,
+            results: results
+                .results
+                .into_iter()
+                .map(|r| ScoredResult {
+                    memory_id: r.id,
+                    score: r.score,
+                })
+                .collect(),
+        })
     }
 
     fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>> {
@@ -861,21 +877,39 @@ impl EntityIndexReader for SharedEntityIndexReader {
         k: usize,
         eligible_ids: &HashSet<MemoryId>,
     ) -> Result<Vec<EntityRecallResult>> {
-        if entities.is_empty() {
-            return Ok(Vec::new());
-        }
+        Ok(self
+            .find_by_entities_measured(namespace_id, entities, exclude_id, k, eligible_ids)?
+            .results)
+    }
+
+    fn find_by_entities_measured(
+        &self,
+        namespace_id: NamespaceId,
+        entities: &[String],
+        exclude_id: MemoryId,
+        k: usize,
+        eligible_ids: &HashSet<MemoryId>,
+    ) -> Result<SourceResults<EntityRecallResult>> {
         let index = self.entity_index.read();
-        let results = index.find_by_entities_filtered(namespace_id, entities, exclude_id, |id| {
-            eligible_ids.contains(&id)
-        });
-        Ok(results
-            .into_iter()
-            .take(k)
-            .map(|(memory_id, shared_count)| EntityRecallResult {
-                memory_id,
-                shared_count,
-            })
-            .collect())
+        let mut source =
+            index.find_by_entities_measured(namespace_id, entities, exclude_id, |id| {
+                eligible_ids.contains(&id)
+            });
+        if let Some(coverage) = &mut source.coverage {
+            coverage.candidate_limited = source.results.len() > k;
+        }
+        Ok(SourceResults {
+            coverage: source.coverage,
+            results: source
+                .results
+                .into_iter()
+                .take(k)
+                .map(|(memory_id, shared_count)| EntityRecallResult {
+                    memory_id,
+                    shared_count,
+                })
+                .collect(),
+        })
     }
 }
 

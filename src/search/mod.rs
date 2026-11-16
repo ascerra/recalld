@@ -49,14 +49,14 @@ pub use entity_normalize::canonicalize_entity;
 // --- CS-16 re-exports ---
 pub use error::SearchError;
 pub use pipeline::{
-    AccessRecorder, ChannelDiagnostics, ChannelParticipation, CoherentGetResponse,
+    AccessRecorder, CanonicalEligibilityDiagnostics, ChannelDiagnostics, ChannelParticipation, CoherentGetResponse,
     CoherentSearchResponse, CoherentSimilarResponse, DirectScoreEvidence,
-    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, FtsAvailability,
-    FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, InheritedScoreExplanation,
+    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, ExaminationUnit, FtsAvailability,
+    FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, HardFilterRejection, InheritedScoreExplanation,
     MAX_EXPLANATION_SOURCES, MetadataStore, MinScoreDisposition, NamespaceResolver,
     OwnScoreExplanation, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
     RetrievalSemantics, RifProcessor, RifSuppression, ScoreExplanation, ScoreFormula, ScoredResult,
-    SemanticsDiagnostics, SemanticsResponse, StrengthDiagnostics, UnresolvedReason,
+    SemanticsDiagnostics, SemanticsResponse, SourceCoverage, SourceResults, StrengthDiagnostics, UnresolvedReason,
     VectorIndexRegistry, VersionMode, VersionStatus,
 };
 pub(crate) use pipeline::{

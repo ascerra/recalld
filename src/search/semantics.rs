@@ -68,6 +68,8 @@ pub struct SemanticsDiagnostics {
     pub fts: FtsDiagnostics,
     /// V2-only observations. None means legacy instrumentation is unavailable.
     pub channels: Option<BTreeMap<RetrievalChannel, ChannelDiagnostics>>,
+    /// Actual shared post-projection filter work; not Metadata participation.
+    pub canonical_eligibility: Option<CanonicalEligibilityDiagnostics>,
     /// Returned UUID keys only. Explanations may contain bounded eligible
     /// scored origins, never intermediate/foreign/ineligible path identities.
     pub provenance: Option<BTreeMap<MemoryId, ResultProvenance>>,
@@ -89,6 +91,7 @@ impl SemanticsDiagnostics {
             fts: FtsDiagnostics::default(),
             channels: (semantics != RetrievalSemantics::V1)
                 .then(super::diagnostics::empty_channels),
+            canonical_eligibility: None,
             provenance: (semantics != RetrievalSemantics::V1).then(BTreeMap::new),
             supersession_edges_examined: 0,
             unresolved: BTreeMap::new(),
