@@ -155,6 +155,25 @@ rows, and no remaining unvalidated rows in the ACK transaction. The old wrapper
 supplies None. This closes same-G effects changes without weakening the existing
 ACK proof or relying solely on a broad claim about every possible direct writer.
 
+Include the empty-pending case: the current ACK helper can invoke its test hook
+then clear dirty/return before opening the final transaction. Bounded ACK must
+revalidate current G, views and empty authority in the final guarded transaction
+before that early success/dirty clear, detecting a same-G inserted effect too.
+Do not change the ordinary None path under this release. Empty validation need
+not create a canonical operation or commit an otherwise empty metadata write.
+
+Preserve the main182 healthy-handle validation boundary: these checks inspect
+only current pending effects and their keyed canonical receipts. Do not call
+whole-store `control::validate_existing`, strict schema-history validation or scan
+the lifetime receipt table on each mutation/completion. Strict startup/offline
+proof remains unchanged. The existing effects validator's normal initialized-table
+path checks current rows by keyed lookup; its absent-schema historical fallback
+must not accidentally become the new bounded hot path. Prefer rejecting a foreign
+row before collecting an unbounded foreign outbox, but do not weaken validation to
+do so. Retain existing instrumentation and add a small-vs-large retained-history
+decode-count regression with the same current pending set at the actual guarded
+helper boundary; no timing or whole-sweep complexity claim follows.
+
 If a peer commits after this pass's producer but before completion takes its
 exclusive guards, bounded completion refuses that peer's pending effect. Return
 this pass's own known receipt(s), not-ready/incomplete and typed dependency failure.
