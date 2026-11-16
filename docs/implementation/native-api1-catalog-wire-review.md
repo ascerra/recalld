@@ -106,3 +106,27 @@ retry. Actual tests must compare the estimator with the emitted complete frames,
 including heavily escaped string IDs/profile fields, modern and legacy eras,
 known/unknown outcomes, and the exact just-under/over limits. Remote send and
 correlation state requires its separate reviewed same-connection handoff.
+
+## Wire review constraints (Huygens, source review)
+
+Review of `cdc2348e` and producer `04406c8b` confirmed the transaction placement
+and emitter sequence, not the final carrier, capacity proof or runtime behavior.
+No transport-file ownership transfer follows from that review.
+
+Candidate admission must count both the known-committed wrapper and an unknown
+outcome carrying the same separately known receipt, including the maximum real
+allocated-ID, boolean and fixed-message fields. A typed publication boundary
+must establish `INDEX_NOT_READY`; `CommittedMutation` alone does not establish it.
+Count the actual failure Value and complete emitter representation, not a
+multiplier over typed receipt bytes. The E1 collector limit is independent of
+the MCP pretty-text plus structured-content limit. Completion may accept only
+the recorded own receipt, never silently collect foreign evidence.
+
+For Remote calls, the upstream MCP request's actual ID and era constraints must
+reach downstream precommit admission. Admission must satisfy both the actual
+daemon frame capacity and the upstream emitted-response capacity. A downstream
+8MiB peer alone cannot establish this bound. The local native reply policy value,
+private dispatcher capability signature and malformed-Remote evidence projection
+remain unresolved; no transport implementation or serving activation is approved
+by this source review. Refusing an oversized echoed ID before canonical work
+does not establish that its own error response fits the response policy.
