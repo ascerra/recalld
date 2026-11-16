@@ -2734,9 +2734,16 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
     ) -> Result<bridge::NamespaceInfo, bridge::BridgeError> {
         use crate::model::NamespaceConfig;
 
-        if self.storage.read().map_err(|_| bridge::BridgeError::Storage("storage lock poisoned".into()))?
-            .meta_store().uses_native_lifecycle() {
-            return Err(bridge::BridgeError::InvalidInput("native namespace creation requires local response admission".into()));
+        if self
+            .storage
+            .read()
+            .map_err(|_| bridge::BridgeError::Storage("storage lock poisoned".into()))?
+            .meta_store()
+            .uses_native_lifecycle()
+        {
+            return Err(bridge::BridgeError::InvalidInput(
+                "native namespace creation requires local response admission".into(),
+            ));
         }
 
         // Validated here as well as at the tool layer, and this is the
@@ -2791,14 +2798,27 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
     ) -> Result<bridge::NamespaceInfo, bridge::BridgeError> {
         use crate::serialization::catalog_api1;
-        let native = self.storage.read().map_err(|_| bridge::BridgeError::Storage("storage lock poisoned".into()))?
-            .meta_store().uses_native_lifecycle();
-        if !native { return self.create_namespace(input).await; }
-        let adapter = self.native_catalog.as_ref().ok_or_else(||
-            catalog_api1::bridge_failure(crate::native_catalog_adapter::CatalogError::Unavailable))?;
-        let receipt = adapter.create_api1_bounded(catalog_api1::input(input), admission.with_timezone(self.timezone))
-            .await.map_err(catalog_api1::bridge_failure)?;
-        let ns = catalog_api1::committed_namespace(receipt).map_err(catalog_api1::bridge_failure)?;
+        let native = self
+            .storage
+            .read()
+            .map_err(|_| bridge::BridgeError::Storage("storage lock poisoned".into()))?
+            .meta_store()
+            .uses_native_lifecycle();
+        if !native {
+            return self.create_namespace(input).await;
+        }
+        let adapter = self.native_catalog.as_ref().ok_or_else(|| {
+            catalog_api1::bridge_failure(crate::native_catalog_adapter::CatalogError::Unavailable)
+        })?;
+        let receipt = adapter
+            .create_api1_bounded(
+                catalog_api1::input(input),
+                admission.with_timezone(self.timezone),
+            )
+            .await
+            .map_err(catalog_api1::bridge_failure)?;
+        let ns =
+            catalog_api1::committed_namespace(receipt).map_err(catalog_api1::bridge_failure)?;
         Ok(catalog_api1::info(ns, self.timezone))
     }
 

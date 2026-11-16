@@ -1493,7 +1493,12 @@ pub(crate) async fn handle_create_namespace_bounded(
     };
 
     let result = match admission {
-        Some(admission) => bridge.namespaces.create_namespace_bounded(input, admission).await,
+        Some(admission) => {
+            bridge
+                .namespaces
+                .create_namespace_bounded(input, admission)
+                .await
+        }
         None => bridge.namespaces.create_namespace(input).await,
     };
     match result {

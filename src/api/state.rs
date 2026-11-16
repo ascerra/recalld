@@ -750,10 +750,18 @@ pub trait NamespaceRegistry: Send + Sync {
         input: crate::mcp::bridge::CreateNamespaceInput,
         _admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
-        self.create(&input.name, input.embedding_dim.map(u32::from),
-            input.initial_stability.unwrap_or(crate::model::constants::DEFAULT_INITIAL_STABILITY),
-            input.desired_retention.unwrap_or(crate::model::constants::DEFAULT_DESIRED_RETENTION),
-            input.decay_rate_multiplier).await
+        self.create(
+            &input.name,
+            input.embedding_dim.map(u32::from),
+            input
+                .initial_stability
+                .unwrap_or(crate::model::constants::DEFAULT_INITIAL_STABILITY),
+            input
+                .desired_retention
+                .unwrap_or(crate::model::constants::DEFAULT_DESIRED_RETENTION),
+            input.decay_rate_multiplier,
+        )
+        .await
     }
 
     /// Unbounded compatibility entry, deliberately unavailable on native owners.

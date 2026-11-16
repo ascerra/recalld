@@ -1533,14 +1533,21 @@ async fn create_namespace_v1(
     // Create namespace (registry checks for duplicates)
     let result = state
         .namespaces
-        .create_bounded(req, crate::serialization::catalog_api1::CatalogReplyAdmission::http())
+        .create_bounded(
+            req,
+            crate::serialization::catalog_api1::CatalogReplyAdmission::http(),
+        )
         .await;
     let ns = match result {
         Ok(ns) => ns,
         Err(error) => match error.downcast::<crate::native_catalog_adapter::CatalogError>() {
             Ok(error) => {
                 let (status, value) = crate::serialization::catalog_api1::failure(&error);
-                return (StatusCode::from_u16(status).expect("catalog HTTP status"), Json(value)).into_response();
+                return (
+                    StatusCode::from_u16(status).expect("catalog HTTP status"),
+                    Json(value),
+                )
+                    .into_response();
             }
             Err(error) => return namespace_create_error(error).into_response(),
         },
@@ -1566,7 +1573,8 @@ async fn create_namespace_v1(
             data: response,
             took_us: Some(took),
         }),
-    ).into_response()
+    )
+        .into_response()
 }
 
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {

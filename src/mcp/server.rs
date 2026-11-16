@@ -312,13 +312,25 @@ impl McpDispatcher {
                     .map_err(|error| error.to_string())
             });
         let mut result = match version {
-            Ok(()) if params.name == "create_namespace" && matches!(
-                crate::serialization::contract::ContractVersion::from_mcp(&params.arguments),
-                Ok(crate::serialization::contract::ContractVersion::V1)
-            ) => self.handler.call_catalog_tool(
-                params.arguments,
-                crate::serialization::catalog_api1::CatalogReplyAdmission::mcp(id.clone(), ctx.era),
-            ).await,
+            Ok(())
+                if params.name == "create_namespace"
+                    && matches!(
+                        crate::serialization::contract::ContractVersion::from_mcp(
+                            &params.arguments
+                        ),
+                        Ok(crate::serialization::contract::ContractVersion::V1)
+                    ) =>
+            {
+                self.handler
+                    .call_catalog_tool(
+                        params.arguments,
+                        crate::serialization::catalog_api1::CatalogReplyAdmission::mcp(
+                            id.clone(),
+                            ctx.era,
+                        ),
+                    )
+                    .await
+            }
             Ok(()) => self.handler.call_tool(&params.name, params.arguments).await,
             Err(error) => ToolCallResult::error(error),
         };

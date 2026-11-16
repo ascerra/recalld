@@ -39,8 +39,14 @@ impl NativeCatalogAdapter {
         // local envelope before accepting work or sampling provider/clock/IDs.
         let admission = surface.admit_native()?;
         let root = self.completion.accept_work(None)?;
-        let result = self.create_api1_accepted(input, surface, &admission, &root).await;
-        if !result.as_ref().err().is_some_and(crate::serialization::catalog_api1::outcome_unknown) {
+        let result = self
+            .create_api1_accepted(input, surface, &admission, &root)
+            .await;
+        if !result
+            .as_ref()
+            .err()
+            .is_some_and(crate::serialization::catalog_api1::outcome_unknown)
+        {
             self.completion.finish_known_work(root);
         }
         result
@@ -53,7 +59,10 @@ impl NativeCatalogAdapter {
         admission: &crate::storage::maintenance::ReceiptAdmission,
         root: &crate::storage::work::WorkTicket,
     ) -> Result<WriteReceipt, CatalogError> {
-        let lease = crate::derived_completion::publication_gate(&self.storage).await?.read_owned().await;
+        let lease = crate::derived_completion::publication_gate(&self.storage)
+            .await?
+            .read_owned()
+            .await;
         let child = root.child().map_err(StorageError::from)?;
         let this = self.clone();
         let worker_admission = admission.clone();
@@ -61,26 +70,45 @@ impl NativeCatalogAdapter {
             let _lease = lease;
             #[cfg(test)]
             let _fault = tests::Fault::enter(this.failure);
-            let mut storage = this.storage.write().map_err(|_| CatalogError::WorkerUnknown)?;
+            let mut storage = this
+                .storage
+                .write()
+                .map_err(|_| CatalogError::WorkerUnknown)?;
             let ctx = crate::serialization::contract::WriteOptions::default()
                 .context(MutationScope::Catalog, ContractVersion::V1);
             let result = storage.create_native_namespace_with_provider_bounded(
-                &ctx, &input, this.provider.as_ref(), &this.policy, this.clock.as_ref(),
-                Some(&child), Some(&worker_admission), |receipt| surface.check_candidate(receipt),
+                &ctx,
+                &input,
+                this.provider.as_ref(),
+                &this.policy,
+                this.clock.as_ref(),
+                Some(&child),
+                Some(&worker_admission),
+                |receipt| surface.check_candidate(receipt),
             );
             storage.meta_store().finish_work(child);
             result.map_err(CatalogError::Storage)
-        }).await.map_err(|_| CatalogError::WorkerUnknown)?;
+        })
+        .await
+        .map_err(|_| CatalogError::WorkerUnknown)?;
         let receipt = result?;
-        admission.record(&receipt).map_err(|source| CatalogError::Storage(StorageError::CommittedMutation {
-            receipt: Box::new(receipt.clone()), source: Box::new(source),
-        }))?;
+        admission.record(&receipt).map_err(|source| {
+            CatalogError::Storage(StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(source),
+            })
+        })?;
         // The actual worker has dropped storage/publication locks. This pass
         // admits only the receipt returned above, never foreign pending work.
-        self.completion.complete_with_admission(Some(root), Some(admission)).await
-            .map_err(|source| CatalogError::Storage(StorageError::CommittedMutation {
-                receipt: Box::new(receipt.clone()), source: Box::new(source),
-            }))?;
+        self.completion
+            .complete_with_admission(Some(root), Some(admission))
+            .await
+            .map_err(|source| {
+                CatalogError::Storage(StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(source),
+                })
+            })?;
         Ok(receipt)
     }
 
