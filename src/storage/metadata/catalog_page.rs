@@ -13,14 +13,6 @@ use crate::{
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-fn label_anchor(bucket: usize, label: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(b"recalld-catalog-label-v1");
-    h.update((bucket as u64).to_be_bytes());
-    h.update((label.len() as u64).to_be_bytes());
-    h.update(label.as_bytes());
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
 fn add(n: &mut u64) -> Result<(), CatalogError> {
     *n = n
         .checked_add(1)
@@ -292,10 +284,9 @@ impl MetadataStore {
                     let total = counter(entries.len() as u64)?;
                     let start =
                         if let Some(anchor) = cursor.and_then(|c| c.tag_after[bucket].as_ref()) {
-                            let mut matching = entries
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, e)| label_anchor(bucket, &e.name) == *anchor);
+                            let mut matching = entries.iter().enumerate().filter(|(_, e)| {
+                                CatalogCursor::label_anchor(bucket, &e.name) == *anchor
+                            });
                             let (index, _) = matching.next().ok_or_else(CatalogCursor::invalid)?;
                             if matching.next().is_some() {
                                 return Err(CatalogCursor::invalid().into());
@@ -309,7 +300,8 @@ impl MetadataStore {
                     let mut items = Vec::new();
                     for entry in entries.into_iter().skip(start).take(request.limit) {
                         retain(&entry, &mut retained)?;
-                        next.tag_after[bucket] = Some(label_anchor(bucket, &entry.name));
+                        next.tag_after[bucket] =
+                            Some(CatalogCursor::label_anchor(bucket, &entry.name));
                         items.push(entry);
                     }
                     output.push(LabelBucket {

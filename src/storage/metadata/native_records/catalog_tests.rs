@@ -137,6 +137,34 @@ async fn catalog_page_native_unicode_empty_provenance_actual_transports_and_reop
         .unwrap(),
         first
     );
+    // R2 actual native producer -> owned adapter -> framed Remote -> MCP.
+    // Existing public HTTP result above remains an independent transport control.
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, remote_task) = crate::daemon::server::native_lifecycle_test_remote(
+        bridge.storage.clone(),
+        &socket.path().join("catalog.sock"),
+    )
+    .await;
+    let mut remote_bridge = crate::test_support::StubBridge::default().into_bridge();
+    remote_bridge.default_namespace = bridge.default_namespace.clone();
+    remote_bridge.storage = Arc::new(remote);
+    assert_eq!(mcp(&remote_bridge, "list_tags", args.clone()).await, first);
+    let list_args = json!({"contractVersion":2,"namespace":"native","limit":200});
+    assert_eq!(
+        mcp(&remote_bridge, "list_memories", list_args.clone()).await,
+        mcp(&bridge, "list_memories", list_args).await
+    );
+    assert_eq!(
+        mcp(
+            &remote_bridge,
+            "list_namespaces",
+            json!({"contractVersion":2})
+        )
+        .await,
+        mcp(&bridge, "list_namespaces", json!({"contractVersion":2})).await
+    );
+    drop(remote_bridge);
+    remote_task.await.unwrap();
     let namespaces = mcp(&bridge, "list_namespaces", json!({"contractVersion":2})).await;
     assert_eq!(
         namespaces["data"]["namespaces"][0]["profileCompatibility"],
@@ -174,10 +202,22 @@ async fn catalog_page_native_unicode_empty_provenance_actual_transports_and_reop
     let mut r = CatalogPageRequest::from_mcp(&args, CatalogKind::Tags).unwrap();
     r.cursor = Some(cursor);
     r.limit = 2;
-    let next = catalog_page::read(f.storage.clone(), r)
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        Arc::new(storage_adapter(&f, Arc::new(NoProvider))),
+        &socket.path().join("reopen.sock"),
+    )
+    .await;
+    let next = crate::mcp::bridge::StorageEngine::list_catalog_page(&remote, r.clone())
         .await
-        .unwrap()
-        .into_envelope();
+        .unwrap();
+    let local = catalog_page::read(f.storage.clone(), r).await.unwrap();
+    assert_eq!(
+        serde_json::to_vec(&next.data).unwrap(),
+        serde_json::to_vec(&local.data).unwrap()
+    );
+    drop(remote);
+    task.await.unwrap();
+    let next = next.into_envelope();
     let next = serde_json::to_value(next).unwrap();
     assert_eq!(next["readGeneration"], first["readGeneration"]);
     assert_eq!(

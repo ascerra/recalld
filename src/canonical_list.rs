@@ -12,7 +12,7 @@ use crate::{
         control::Generation,
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 // Encoded metadata bound per decode, including unrelated rows. The total scan
@@ -22,8 +22,8 @@ pub(crate) const MAX_ROW_BYTES: usize = 1024 * 1024;
 // alongside exact canonical labels. Oversize rejects the entire page, no skips.
 pub(crate) const MAX_PAGE_BYTES: usize =
     (crate::daemon::protocol::MAX_MESSAGE_SIZE - 64 * 1024) / 32;
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListEntry {
     pub id: MemoryId,
     pub summary: String,
@@ -62,8 +62,8 @@ impl ListEntry {
         }
     }
 }
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListData {
     pub memories: Vec<ListEntry>,
     /// Exact filtered live count before continuation; decimal, never JSON number.
