@@ -62,9 +62,19 @@ async fn prepared_remote_native_query_similar_exact_and_known_publication_failur
     transition.validate(receipt,false).unwrap();
     assert_eq!(transition.records.len(),1);
     assert_eq!(transition.records[0].memory_id,f.live);
-    assert_eq!(f.f.record(f.live).unwrap().access_history.last().unwrap().timestamp,10_000);
+    // The injected publication fault makes the live owner unavailable. Inspect
+    // the actual retained record/receipt only after ordinary native recovery.
+    assert!(f.f.storage.read().unwrap().get_record(f.live).is_err());
+    let receipt=receipt.clone();
     drop(remote);
     daemon.finish().await;
+    drop(adapter);
+    drop(engine);
+    drop(f.owner);
+    let root=f.f.close();
+    let reopened=crate::storage::RedbStorageEngine::open_native(root.path()).unwrap();
+    assert_eq!(reopened.get_record(f.live).unwrap().unwrap().access_history.last().unwrap().timestamp,10_000);
+    assert_eq!(reopened.lookup_operation(receipt.store_id,crate::storage::control::MutationScope::Namespace(NamespaceId::new(1)),receipt.operation_id).unwrap(),Some(receipt));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

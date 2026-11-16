@@ -194,7 +194,11 @@ fn data(
         require(searched.contains(&data.source_namespace.namespace_id))?;
         require(c.searched_namespace_ids == scope_ids)?;
         if !e.all {
-            require(scope_name == Some(data.source_namespace.namespace.as_str()))?;
+            require(
+                scope_name.is_some_and(|name| {
+                    name.eq_ignore_ascii_case(&data.source_namespace.namespace)
+                }),
+            )?;
         }
         let mut excluded = BTreeSet::new();
         for item in &c.excluded_namespaces {
@@ -213,7 +217,10 @@ fn data(
             hit(row, e, &mut ids)?;
             require(searched.contains(&row.namespace_id))?;
             if row.namespace_id == data.source_namespace.namespace_id {
-                require(row.namespace == data.source_namespace.namespace)?;
+                require(
+                    row.namespace
+                        .eq_ignore_ascii_case(&data.source_namespace.namespace),
+                )?;
             }
             returned.insert(row.memory_id, (row.namespace_id, true));
             if let Some(x) = &row.explanation {
@@ -274,7 +281,10 @@ fn data(
         reasons(&c.supplemental.unresolved_neighbors)?;
         for row in &data.results {
             hit(row, e, &mut ids)?;
-            require(scope_ids == [row.namespace_id] && scope_name == Some(row.namespace.as_str()))?;
+            require(
+                scope_ids == [row.namespace_id]
+                    && scope_name.is_some_and(|name| name.eq_ignore_ascii_case(&row.namespace)),
+            )?;
             returned.insert(row.memory_id, (row.namespace_id, false));
             if let Some(x) = &row.explanation {
                 require(
@@ -305,7 +315,7 @@ fn data(
                     && ids.insert(n.memory_id)
                     && ranked.contains(&n.connected_to)
                     && scope_ids == [n.namespace_id]
-                    && scope_name == Some(n.namespace.as_str()),
+                    && scope_name.is_some_and(|name| name.eq_ignore_ascii_case(&n.namespace)),
             )?;
             if let Some(labels) = &n.labels {
                 labels.validate().map_err(|_| ())?;
