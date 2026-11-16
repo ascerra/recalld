@@ -1,0 +1,5 @@
+ACTUAL_MAX_CHUNK_FRAME rows=1000 canonical=Complete full_receipt_bytes=1464530 response=DaemonResponse { jsonrpc: "2.0", id: 1, result: None, error: Some(DaemonRpcError { code: -32005, message: "response is 1572891 bytes, exceeding the 1048576 byte message limit. Reduce `limit`, or fetch large memories individually with get_memory." }) }
+assertion `left == right` failed: full actual receipt lost at legacy frame boundary: DaemonRpcError { code: -32005, message: "response is 1572891 bytes, exceeding the 1048576 byte message limit. Reduce `limit`, or fetch large memories individually with get_memory." }
+  left: -32005
+ right: -32006
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 33.62s

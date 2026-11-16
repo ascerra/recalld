@@ -1,0 +1,51 @@
+{
+  "sourceCommit": "8c990c010355243863e7f2bd4865e516b73efa63",
+  "runtimeCommit": "369d8e9219441a031b5502edd3d1ea435334c576",
+  "result": {
+    "passed": 22,
+    "failed": 0,
+    "seconds": 40.64
+  },
+  "artifacts": {
+    "source.json": {
+      "sha256": "b4f7fa4bd89c061e54c4de36969a3901987eddda5b94d104bfd75c755a614df7",
+      "bytes": 57725
+    },
+    "focused.log": {
+      "sha256": "04cf1cec13a1689019663e115413523f8db35c71ae3a3dbd14d9b51803712a60",
+      "bytes": 41129
+    },
+    "fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "source-after.txt": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "executables.sha256": {
+      "sha256": "a9fc33b33633c6e05d15679cc29ade1ac2d3a8a9e8d0eed47b8d78400d2d137e",
+      "bytes": 115
+    },
+    "memory-events.txt": {
+      "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+      "bytes": 70
+    },
+    "memory-peak.txt": {
+      "sha256": "2ce862ae9e7fc27063d297d724481090472aa610cc67a281d3428c9bd6739711",
+      "bytes": 11
+    },
+    "driver.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "command.json": {
+      "sha256": "5056874d9d7ae5390b87d6a66b14a75c5ebcd30b50ed4520bae7818c7de7219e",
+      "bytes": 1891
+    },
+    "rustc.txt": {
+      "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+      "bytes": 197
+    }
+  }
+}

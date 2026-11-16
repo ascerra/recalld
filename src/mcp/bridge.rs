@@ -286,6 +286,17 @@ pub trait NamespaceRegistry: Send + Sync {
         &self,
         input: DeleteNamespaceInput,
     ) -> Result<DeleteNamespaceResult, BridgeError>;
+
+    /// Transport-owned bound, never a field trusted from request JSON. The
+    /// default preserves existing implementors; native implementations must
+    /// override this to admit their complete commit evidence before work.
+    async fn delete_namespace_bounded(
+        &self,
+        input: DeleteNamespaceInput,
+        _frame_limit: usize,
+    ) -> Result<DeleteNamespaceResult, BridgeError> {
+        self.delete_namespace(input).await
+    }
 }
 
 /// Health check interface.

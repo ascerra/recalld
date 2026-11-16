@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "result": {
+    "name": "scratch",
+    "id": 7,
+    "deleted": true,
+    "memoriesDeleted": 2,
+    "tombstonesPurged": 1,
+    "edgesRemoved": 4,
+    "ftsRowsRemoved": 3,
+    "vectorFileRemoved": true
+  }
+}
