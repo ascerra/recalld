@@ -249,7 +249,7 @@ async fn legacy_semantic_export_genuine157_faults() {
                 .fail_batch_commit
                 .store(3, Ordering::SeqCst);
         } else {
-            *f.vector_index.write().await = crate::search::FlatVectorIndex::new(8);
+            *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
         }
         release.notify_one();
         let reply = task.await.unwrap();
