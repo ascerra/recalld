@@ -59,6 +59,14 @@ fn readers_with_exposure(
     clock: Arc<dyn Clock>,
     native_exposure: bool,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
+    readers_with_policy(f, clock, native_exposure, NativePolicyInputs::default())
+}
+fn readers_with_policy(
+    f: &Fixture,
+    clock: Arc<dyn Clock>,
+    native_exposure: bool,
+    policy: NativePolicyInputs,
+) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
     let provider = Arc::new(NoProvider);
     let recorder =
         StorageAccessRecorder::new(f.storage.clone(), f.cache.clone()).with_clock(clock.clone());
@@ -82,7 +90,7 @@ fn readers_with_exposure(
         )),
         Arc::new(recorder),
     )
-    .with_lifecycle_inputs(clock.clone(), crate::decay::DecayConfig::default(), 1.0);
+    .with_lifecycle_inputs(clock.clone(), policy.global.clone(), policy.multiplier);
     let engine = Arc::new(if native_exposure {
         engine.with_coherent_owner(
             completion(f),
