@@ -418,6 +418,7 @@ impl McpStorageAdapter {
                         if let BatchItemPlan::Invalid { error, .. } = &prepared.plan {
                             final_error = error.clone();
                         }
+                        let expected_rejection = final_error.clone();
                         let storage = self.storage.clone();
                         let worker = work.child().map_err(StorageError::from)?;
                         let trace_worker = Worker::new_if("batch.rejection.queue", legacy_trace);
@@ -464,6 +465,41 @@ impl McpStorageAdapter {
                                 outcome.items[index] = current;
                                 outcome.bookkeeping_receipts =
                                     progress.bookkeeping_receipts.clone();
+                            }
+                            Ok(Err(error @ StorageError::CommittedMutation { .. })) => {
+                                let StorageError::CommittedMutation { receipt, .. } = &error else {
+                                    unreachable!()
+                                };
+                                let MutationOutcome::BatchItemRejected {
+                                    batch_operation_id,
+                                    index: rejected_index,
+                                    error: rejected,
+                                } = &receipt.outcome
+                                else {
+                                    return Err(error.into());
+                                };
+                                if receipt.store_id != outcome.store_id
+                                    || receipt.receipt_version != 1
+                                    || receipt.operation_id.is_nil()
+                                    || receipt.committed_generation
+                                        == crate::storage::control::Generation::default()
+                                    || *batch_operation_id != outcome.batch_operation_id
+                                    || *rejected_index as usize != index
+                                    || *rejected != expected_rejection
+                                {
+                                    // Preserve unexpected evidence as a typed failure;
+                                    // it cannot establish this item's rejection.
+                                    return Err(error.into());
+                                }
+                                // Rejection and bookkeeping receipt committed together.
+                                // This is not a successful child receipt. Do not read
+                                // progress back through the now-unavailable owner.
+                                outcome.items[index].status = BatchStatus::Error;
+                                outcome.items[index].error = Some(rejected.clone());
+                                outcome.items[index].retryable = false;
+                                outcome.bookkeeping_receipts.push((**receipt).clone());
+                                mark_unready(&mut outcome);
+                                return Ok(outcome);
                             }
                             Ok(Err(StorageError::CommitOutcomeUnknown {
                                 operation_id, ..
