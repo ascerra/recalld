@@ -68,7 +68,12 @@ impl DaemonServer {
                 system.graph().clone(),
                 tz,
             )
-            .with_clock(system.clock().clone()),
+            .with_clock(system.clock().clone())
+            .with_native_catalog(
+                system.embedding().clone(),
+                system.query_engine().native_policy_inputs(),
+                system.clock().clone(),
+            ),
         );
         let health: Arc<dyn HealthChecker> =
             Arc::new(McpHealthAdapter::new(system.storage().clone()));

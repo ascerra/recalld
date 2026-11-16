@@ -2,9 +2,11 @@
 //! entry does not activate ordinary schema-v2 serving or certify derived views.
 use serde::{Deserialize, Serialize};
 
-use super::control::{self, Generation, MutationContext, MutationScope, WriteReceipt};
+use super::StorageError;
+use super::control::{self, Generation, MutationContext, WriteReceipt};
 use super::native_lifecycle::{FiniteF32, invalid};
-use super::{StorageEngine, StorageError};
+#[cfg(test)]
+use super::{StorageEngine, control::MutationScope};
 use crate::model::schema::{
     BindingProvenance, EmbeddingBinding, EmbeddingProfile, NamespaceSchemaV2,
 };
@@ -267,25 +269,10 @@ impl super::native_lifecycle::NativeLifecycleSession {
         input: &NativeNamespaceInput,
         provider: &dyn crate::embedding::EmbeddingProvider,
     ) -> Result<WriteReceipt, StorageError> {
-        if let Some(receipt) = self
-            .engine
-            .meta_store()
-            .lookup_native_namespace_replay(ctx, input)?
-        {
-            return Ok(receipt);
-        }
-        let profile = provider.profile().ok_or_else(|| {
-            StorageError::InvalidMutation("active embedding profile is unknown".into())
-        })?;
-        if provider.dimensions() != profile.dimension as usize {
-            return Err(StorageError::InvalidMutation(
-                "active provider dimension mismatch".into(),
-            ));
-        }
-        self.engine.create_native_namespace(
+        self.engine.create_native_namespace_with_provider(
             ctx,
             input,
-            &profile,
+            provider,
             &self.policy,
             self.clock.as_ref(),
             None,
