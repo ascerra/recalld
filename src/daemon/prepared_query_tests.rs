@@ -59,10 +59,14 @@ fn query_input(access: bool, namespace: &str) -> crate::serialization::query::Qu
     .unwrap()
 }
 
-pub(crate) async fn peer_query(
-    input: crate::serialization::query::QueryRequest,
+async fn peer_connection(
+    method: &'static str,
     result: serde_json::Value,
-) -> crate::serialization::query_response::QueryReply {
+) -> (
+    Arc<crate::daemon::DaemonClient>,
+    tokio::task::JoinHandle<()>,
+    tempfile::TempDir,
+) {
     use crate::daemon::protocol::{read_framed_message, write_framed_message};
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("peer.sock");
@@ -73,8 +77,7 @@ pub(crate) async fn peer_query(
             .await
             .unwrap();
         assert_eq!(ping.method, "ping");
-        let caps =
-            json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"preparedQueriesV1":true});
+        let caps = json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"preparedQueriesV1":true,"exactPairsBitsV1":true});
         write_framed_message(
             &mut stream,
             &DaemonResponse::success(ping.id, caps.clone()),
@@ -85,7 +88,7 @@ pub(crate) async fn peer_query(
         let query = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
             .await
             .unwrap();
-        assert_eq!(query.method, crate::daemon::prepared_query::QUERY);
+        assert_eq!(query.method, method);
         write_framed_message(
             &mut stream,
             &DaemonResponse::success(query.id, result),
@@ -109,8 +112,29 @@ pub(crate) async fn peer_query(
         .unwrap();
     });
     let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+    (client, task, root)
+}
+
+pub(crate) async fn peer_query(
+    input: crate::serialization::query::QueryRequest,
+    result: serde_json::Value,
+) -> crate::serialization::query_response::QueryReply {
+    let (client, task, _root) = peer_connection(crate::daemon::prepared_query::QUERY, result).await;
     let reply = RemoteSearchAdapter::new(client.clone())
         .query_contract(input)
+        .await;
+    client.ping().await.unwrap();
+    task.await.unwrap();
+    reply
+}
+
+pub(crate) async fn peer_pairs(
+    input: crate::serialization::scan::ExactScanRequest,
+    result: serde_json::Value,
+) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError> {
+    let (client, task, _root) = peer_connection(crate::daemon::prepared_query::PAIRS, result).await;
+    let reply = RemoteSearchAdapter::new(client.clone())
+        .scan_duplicate_pairs(input)
         .await;
     client.ping().await.unwrap();
     task.await.unwrap();
@@ -525,6 +549,42 @@ async fn prepared_remote_whole_budget_and_unnegotiated_alias_precede_exposure() 
     assert!(mcp.len() <= MAX_MESSAGE_SIZE && rest.len() <= MAX_MESSAGE_SIZE);
     drop(remote);
     daemon.finish().await;
+}
+
+#[tokio::test]
+async fn prepared_remote_exact_bits_capability_refuses_old_peer_before_send() {
+    use crate::daemon::protocol::{read_framed_message, write_framed_message};
+    for (bits, limit) in [(false, MAX_MESSAGE_SIZE), (true, LEGACY_MAX_MESSAGE_SIZE)] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("old-pairs.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            for _ in 0..2 {
+                let request = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    request.method, "ping",
+                    "no old/new pair request or fallback to unsupported peer"
+                );
+                write_framed_message(&mut stream,&DaemonResponse::success(request.id,json!({
+                    "protocolVersion":2,"maxMessageSize":limit,"preparedQueriesV1":true,"exactPairsBitsV1":bits
+                })),MAX_MESSAGE_SIZE).await.unwrap();
+            }
+        });
+        let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+        let input =
+            crate::serialization::scan::ExactScanRequest::from_http(&json!({}), "default").unwrap();
+        assert!(
+            RemoteSearchAdapter::new(client.clone())
+                .scan_duplicate_pairs(input)
+                .await
+                .is_err()
+        );
+        client.ping().await.unwrap();
+        task.await.unwrap();
+    }
 }
 
 #[tokio::test]

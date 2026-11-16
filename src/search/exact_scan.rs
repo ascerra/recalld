@@ -375,6 +375,18 @@ mod tests {
             warnings: vec!["Some live namespace records lack comparable vectors; terminal coverage cannot be complete.".into()],
             diagnostics: Some(ScanDiagnostics {rows:0,record_encoded_bytes:0,vector_examined_bytes:0,vector_copied_bytes:0,capture_time:Duration::ZERO,comparison_time:Duration::ZERO}),
         };
+        let private = crate::daemon::prepared_query::pair_reply(&page).unwrap();
+        let private_bytes =
+            serde_json::to_vec(&crate::daemon::DaemonResponse::success(u64::MAX, private)).unwrap();
+        eprintln!(
+            "R1_EXACT_BITS_MAX_PAIRS count={MAX_RESPONSE_PAIRS} frame={} limit={}",
+            private_bytes.len(),
+            crate::daemon::prepared_query::response_limit()
+        );
+        assert!(private_bytes.len() <= crate::daemon::prepared_query::response_limit());
+        assert!(crate::daemon::prepared_query::admitted_frame(
+            &private_bytes
+        ));
         let envelope = page.into_envelope();
         assert!(serde_json::to_vec(&envelope).unwrap().len() <= MAX_SCAN_RESPONSE_BYTES);
         let result = crate::mcp::protocol::ToolCallResult::json(&envelope).unwrap();

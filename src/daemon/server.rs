@@ -504,6 +504,7 @@ async fn dispatch_bounded(
             "api1StoreV1": storage.supports_api1_store(),
             "api1StoreBatchV1": storage.supports_api1_store_batch(),
             "preparedQueriesV1": search.supports_prepared_queries(),
+            "exactPairsBitsV1": search.supports_prepared_queries(),
         })),
 
         "store_batch_api1_v1" => {

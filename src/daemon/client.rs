@@ -117,6 +117,7 @@ struct ClientState {
     api1_store: Option<bool>,
     api1_store_batch: Option<bool>,
     prepared_queries: Option<bool>,
+    exact_pairs_bits: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -233,7 +234,10 @@ impl DaemonClient {
                     result: None,
                 };
             }
-            if state.prepared_queries != Some(true) || state.frame_limit < MAX_MESSAGE_SIZE {
+            if state.prepared_queries != Some(true)
+                || state.frame_limit < MAX_MESSAGE_SIZE
+                || (method == super::prepared_query::PAIRS && !state.exact_pairs_bits)
+            {
                 return PreparedExchange {
                     phase: TransmissionPhase::BeforeSend,
                     result: None,
@@ -360,6 +364,7 @@ impl DaemonClient {
                 api1_store: None,
                 api1_store_batch: None,
                 prepared_queries: None,
+                exact_pairs_bits: false,
             }),
             connected: AtomicBool::new(true),
         })
@@ -606,6 +611,7 @@ impl DaemonClient {
         state.api1_store = None;
         state.api1_store_batch = None;
         state.prepared_queries = None;
+        state.exact_pairs_bits = false;
         let mut last: Option<String> = None;
 
         for (attempt, backoff_ms) in RECONNECT_BACKOFF_MS.iter().enumerate() {
@@ -617,6 +623,7 @@ impl DaemonClient {
                     state.api1_store = None;
                     state.api1_store_batch = None;
                     state.prepared_queries = None;
+                    state.exact_pairs_bits = false;
                     match state.negotiate().await {
                         Ok(()) => return Ok(()),
                         Err(e) => {
@@ -686,6 +693,10 @@ impl ClientState {
                 .and_then(serde_json::Value::as_bool)
                 == Some(true),
         );
+        self.exact_pairs_bits = result
+            .get("exactPairsBitsV1")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
         Ok(())
     }
 

@@ -41,6 +41,22 @@ fn object(value: &Value) -> Result<&Map<String, Value>, InputError> {
         .as_object()
         .ok_or_else(|| error("INVALID_TYPE", "", "arguments must be an object"))
 }
+
+/// Private RPC scalar: fixed-width bits avoid decimal JSON reparse drift.
+pub(crate) fn scalar_bits(value: f64) -> String {
+    format!("{:016x}", value.to_bits())
+}
+pub(crate) fn scalar_from_bits(value: &str) -> Option<f64> {
+    if value.len() != 16
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return None;
+    }
+    let value = f64::from_bits(u64::from_str_radix(value, 16).ok()?);
+    value.is_finite().then_some(value)
+}
 impl ExactScanRequest {
     pub(crate) fn rpc_arguments(&self) -> Result<Value, InputError> {
         if !self.threshold.is_finite() {
@@ -57,8 +73,38 @@ impl ExactScanRequest {
         if let Some(cursor) = &self.cursor {
             value["cursor"] = json!(cursor);
         }
-        Self::from_mcp(&value)?;
+        let canonical = Self::from_mcp(&value)?;
+        value.as_object_mut().unwrap().remove("threshold");
+        value["thresholdBits"] = json!(scalar_bits(canonical.threshold));
         Ok(value)
+    }
+
+    pub(crate) fn from_rpc(value: &Value) -> Result<Self, InputError> {
+        let original = object(value)?;
+        let threshold = original
+            .get("thresholdBits")
+            .and_then(Value::as_str)
+            .and_then(scalar_from_bits)
+            .filter(|n| (0.0..=1.0).contains(n) && (*n != 0.0 || n.to_bits() == 0))
+            .ok_or_else(|| {
+                error(
+                    "OUT_OF_RANGE",
+                    "/thresholdBits",
+                    "expected canonical finite threshold bits in 0..1",
+                )
+            })?;
+        if original.contains_key("threshold") {
+            return Err(error(
+                "INVALID_COMBINATION",
+                "/threshold",
+                "private exact scan requires thresholdBits only",
+            ));
+        }
+        let mut public = value.clone();
+        public.as_object_mut().unwrap().remove("thresholdBits");
+        // Number::from_f64 stores the exact bits; do not decimal-serialize/reparse.
+        public["threshold"] = Value::Number(serde_json::Number::from_f64(threshold).unwrap());
+        Self::from_mcp(&public)
     }
 
     pub(crate) fn from_mcp(value: &Value) -> Result<Self, InputError> {
@@ -205,6 +251,64 @@ impl ExactScanRequest {
             "pairBudget":{"type":"integer","minimum":1,"maximum":MAX_PAIR_BUDGET,"default":DEFAULT_PAIR_BUDGET,"description":"Maximum unordered pairs compared, including nonmatching pairs; no coercion or clamping."},
             "cursor":{"type":"string","minLength":1,"maxLength":MAX_CURSOR_BYTES,"description":"Opaque continuation; omit for first page. Server limit is 4096 UTF-8 bytes; malformed, stale or differently bound cursors fail."}
         }})
+    }
+}
+
+#[cfg(test)]
+mod private_scalar_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_exact_private_threshold_bits_are_strict_and_lossless() {
+        for n in [0.0, f64::from_bits(1), 0.9599999979972839, 1.0] {
+            let request = ExactScanRequest {
+                namespace: Some("default".into()),
+                threshold: n,
+                pair_budget: 2,
+                cursor: None,
+            };
+            let value = request.rpc_arguments().unwrap();
+            assert!(value.get("threshold").is_none());
+            let wire: Value = serde_json::from_slice(&serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(
+                ExactScanRequest::from_rpc(&wire)
+                    .unwrap()
+                    .threshold
+                    .to_bits(),
+                n.to_bits()
+            );
+        }
+        let public = json!({"contractVersion":2,"mode":"scan","threshold":-0.0});
+        let request = ExactScanRequest::from_mcp(&public).unwrap();
+        assert_eq!(request.threshold.to_bits(), 0);
+        let valid = request.rpc_arguments().unwrap();
+        for bad in [
+            Value::Null,
+            json!(1),
+            json!("0"),
+            json!("3FF0000000000000"),
+            json!("+000000000000000"),
+            json!("00000000000000000"),
+            json!("gggggggggggggggg"),
+            json!("7ff0000000000000"),
+            json!("7ff8000000000000"),
+            json!("fff0000000000000"),
+            json!("8000000000000000"),
+            json!(scalar_bits(-0.1)),
+            json!(scalar_bits(1.0f64.next_up())),
+        ] {
+            let mut value = valid.clone();
+            value["thresholdBits"] = bad;
+            assert!(ExactScanRequest::from_rpc(&value).is_err(), "{value}");
+        }
+        let mut missing = valid.clone();
+        missing.as_object_mut().unwrap().remove("thresholdBits");
+        assert!(ExactScanRequest::from_rpc(&missing).is_err());
+        for field in ["threshold", "extra"] {
+            let mut value = valid.clone();
+            value[field] = json!(0);
+            assert!(ExactScanRequest::from_rpc(&value).is_err());
+        }
     }
 }
 

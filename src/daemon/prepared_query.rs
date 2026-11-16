@@ -14,13 +14,16 @@ mod shape;
 
 pub(crate) const QUERY: &str = "query_contract_v1";
 pub(crate) const SIMILAR: &str = "similar_contract_v1";
-pub(crate) const PAIRS: &str = "exact_pairs_v1";
+pub(crate) const PAIRS: &str = "exact_pairs_bits_v1";
 
 pub(crate) async fn remote_pairs(
     client: &super::DaemonClient,
-    request: crate::serialization::scan::ExactScanRequest,
+    mut request: crate::serialization::scan::ExactScanRequest,
 ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError> {
     use crate::search::exact_scan::ExactScanError as Error;
+    if request.threshold == 0.0 {
+        request.threshold = 0.0; // Existing public/cursor canonical zero.
+    }
     let arguments = request.rpc_arguments()?;
     let exchange = client
         .call_prepared(
@@ -163,16 +166,12 @@ pub(crate) async fn dispatch(
         .ok_or_else(|| BridgeError::InvalidInput("missing prepared arguments".into()))?;
     if method == PAIRS {
         use crate::search::exact_scan::ExactScanError as Error;
-        let request = crate::serialization::scan::ExactScanRequest::from_mcp(arguments)
+        let request = crate::serialization::scan::ExactScanRequest::from_rpc(arguments)
             .map_err(|error| BridgeError::InvalidInput(error.to_string()))?;
         let outcome = search.scan_duplicate_pairs(request).await;
         let error = match outcome {
             Ok(page) => {
-                let value = compact_value(&Reply {
-                    wire_version: 1,
-                    http_status: 200,
-                    reply: &page,
-                })?;
+                let value = pair_reply(&page)?;
                 // Exact pages are read-only; whole-page refusal keeps the caller's
                 // cursor unchanged and never truncates matches or coverage.
                 let full = super::protocol::DaemonResponse::success(u64::MAX, value.clone());
@@ -219,6 +218,12 @@ pub(crate) async fn dispatch(
         http_status: reply.http_status,
         reply: &reply,
     })
+}
+
+pub(crate) fn pair_reply(
+    page: &crate::search::exact_scan::ExactScanPage,
+) -> Result<Value, crate::mcp::bridge::BridgeError> {
+    Ok(serde_json::json!({"wireVersion":1,"httpStatus":200,"reply":pairs::encode(page)?}))
 }
 
 /// This is an INNER ToolCallResult/daemon ceiling, not a bound on arbitrary

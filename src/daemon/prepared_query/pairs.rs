@@ -17,9 +17,34 @@ struct Page {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Data {
-    pairs: Vec<crate::search::exact_pairs::PairEdge>,
+    pairs: Vec<Pair>,
     coverage: Coverage,
     next_cursor: Option<String>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Pair {
+    left_id: crate::model::MemoryId,
+    right_id: crate::model::MemoryId,
+    similarity_bits: String,
+}
+
+pub(super) fn encode(page: &ExactScanPage) -> Result<Value, crate::mcp::bridge::BridgeError> {
+    let mut value = serde_json::to_value(page).map_err(|_| {
+        crate::mcp::bridge::BridgeError::Internal("exact page serialization failed".into())
+    })?;
+    // Obtain every bit from the original PairEdge before any decimal parse.
+    for (value, pair) in value["data"]["pairs"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .zip(&page.data.pairs)
+    {
+        value.as_object_mut().unwrap().remove("similarity");
+        value["similarityBits"] =
+            Value::String(crate::serialization::scan::scalar_bits(pair.similarity));
+    }
+    Ok(value)
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -110,8 +135,23 @@ pub(super) fn decode(
     {
         return Err(ExactScanError::Unavailable);
     }
+    // The strict private roundtrip above contains bit strings, never f64 scores.
+    let pairs = page
+        .data
+        .pairs
+        .into_iter()
+        .map(|p| {
+            let similarity = crate::serialization::scan::scalar_from_bits(&p.similarity_bits)
+                .ok_or(ExactScanError::Unavailable)?;
+            Ok(crate::search::exact_pairs::PairEdge {
+                left_id: p.left_id,
+                right_id: p.right_id,
+                similarity,
+            })
+        })
+        .collect::<Result<Vec<_>, ExactScanError>>()?;
     let mut previous = None;
-    for p in &page.data.pairs {
+    for p in &pairs {
         let pair = (p.left_id, p.right_id);
         if p.left_id.as_bytes() == &[0; 16]
             || p.left_id >= p.right_id
@@ -169,7 +209,7 @@ pub(super) fn decode(
         warnings: page.warnings,
         diagnostics: None,
         data: ExactScanData {
-            pairs: page.data.pairs,
+            pairs,
             next_cursor: page.data.next_cursor,
             coverage: ExactCoverage {
                 algorithm: ExactPairAlgorithm::ExactPairs,

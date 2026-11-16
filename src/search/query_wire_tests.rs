@@ -9,11 +9,15 @@ async fn prepared_remote_exact_threshold_bits_and_continuation() {
         Arc::new(crate::embedding::PassthroughProvider::new(4)),
         f.f.storage.clone(),f.f.graph.clone(),chrono_tz::UTC));
     let daemon=crate::daemon::server::prepared_query_tests::PreparedDaemon::start(adapter.clone()).await;
-    daemon.client.ping().await.unwrap();
-    let remote=crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
     let before=bytes(&f.f);
     let base=crate::serialization::scan::ExactScanRequest::from_http(
         &serde_json::json!({"pairBudget":2,"threshold":0.}),"default").unwrap();
+    assert!(daemon.client.call(crate::daemon::prepared_query::PAIRS,serde_json::json!({
+        "arguments":base.rpc_arguments().unwrap(),"responseLimit":crate::daemon::prepared_query::response_limit()})).await.is_err(),
+        "unnegotiated pair alias must refuse before capture");
+    assert_eq!(bytes(&f.f),before);
+    daemon.client.ping().await.unwrap();
+    let remote=crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
     let initial=adapter.scan_duplicate_pairs(base.clone()).await.unwrap();
     let edge=&initial.data.pairs[0];
     let score=edge.similarity;
@@ -23,13 +27,13 @@ async fn prepared_remote_exact_threshold_bits_and_continuation() {
         let input=crate::serialization::scan::ExactScanRequest{threshold,..base.clone()};
         let local=adapter.scan_duplicate_pairs(input.clone()).await.unwrap();
         let arguments=input.rpc_arguments().unwrap();
-        let argument_bits=arguments["threshold"].as_f64().unwrap().to_bits();
+        let argument_bits=u64::from_str_radix(arguments["thresholdBits"].as_str().unwrap(),16).unwrap();
         let local_score_bits:Vec<_>=local.data.pairs.iter().map(|p|p.similarity.to_bits()).collect();
         let typed=crate::daemon::prepared_query::Reply{wire_version:1,http_status:200,reply:&local};
         let typed_bytes=serde_json::to_vec(&typed).unwrap();
-        let compact=crate::daemon::prepared_query::compact_value(&typed).unwrap();
+        let compact=crate::daemon::prepared_query::pair_reply(&local).unwrap();
         let score_bits=|v:&serde_json::Value| v["reply"]["data"]["pairs"].as_array().unwrap().iter()
-            .map(|p|p["similarity"].as_f64().unwrap().to_bits()).collect::<Vec<_>>();
+            .map(|p|u64::from_str_radix(p["similarityBits"].as_str().unwrap(),16).unwrap()).collect::<Vec<_>>();
         let compact_score_bits=score_bits(&compact);
         let response_bytes=serde_json::to_vec(&crate::daemon::DaemonResponse::success(u64::MAX,compact)).unwrap();
         let response_value:serde_json::Value=serde_json::from_slice(&response_bytes).unwrap();
@@ -45,7 +49,7 @@ async fn prepared_remote_exact_threshold_bits_and_continuation() {
             jsonrpc:"2.0".into(),id:u64::MAX,method:crate::daemon::prepared_query::PAIRS.into(),params,
         }).unwrap();
         let parsed:crate::daemon::protocol::DaemonRequest=serde_json::from_slice(&request_bytes).unwrap();
-        let parsed_bits=parsed.params["arguments"]["threshold"].as_f64().unwrap().to_bits();
+        let parsed_bits=u64::from_str_radix(parsed.params["arguments"]["thresholdBits"].as_str().unwrap(),16).unwrap();
         if server_bits!=parsed_bits {failures.push(format!("{case}: server cursor differs from emitter model"));}
         let received=remote.scan_duplicate_pairs(input.clone()).await;
         let returned_pairs=|page:&crate::search::exact_scan::ExactScanPage| page.data.pairs.iter()
@@ -53,7 +57,8 @@ async fn prepared_remote_exact_threshold_bits_and_continuation() {
         let remote_pairs=received.as_ref().ok().map(&returned_pairs);
         if server_bits!=threshold.to_bits() {failures.push(format!("{case}: request threshold bits changed"));}
         match &received {
-            Ok(page) if serde_json::to_value(page).unwrap()==serde_json::to_value(&local).unwrap()=>{},
+            Ok(page) if serde_json::to_value(page).unwrap()==serde_json::to_value(&local).unwrap()
+                && returned_pairs(page)==returned_pairs(&local)=>{},
             other=>failures.push(format!("{case}: first page differs: {other:?}")),
         }
         let next=crate::serialization::scan::ExactScanRequest{cursor:local.data.next_cursor.clone(),..input.clone()};
@@ -66,12 +71,13 @@ async fn prepared_remote_exact_threshold_bits_and_continuation() {
         let remote_next=remote.scan_duplicate_pairs(crate::serialization::scan::ExactScanRequest{cursor,..input}).await;
         let remote_next_pairs=remote_next.as_ref().ok().map(&returned_pairs);
         match &remote_next {
-            Ok(page) if serde_json::to_value(page).unwrap()==serde_json::to_value(&local_next).unwrap()=>{},
+            Ok(page) if serde_json::to_value(page).unwrap()==serde_json::to_value(&local_next).unwrap()
+                && returned_pairs(page)==returned_pairs(&local_next)=>{},
             other=>failures.push(format!("{case}: continuation differs: {other:?}")),
         }
         evidence.push(serde_json::json!({"case":case,"thresholdBits":threshold.to_bits(),
             "argumentThresholdBits":argument_bits,"localScoreBits":local_score_bits,
-            "compactScoreBits":compact_score_bits,"frameScoreBits":frame_score_bits,
+            "privateEncodedScoreBits":compact_score_bits,"frameScoreBits":frame_score_bits,
             "actualDiagnosticScoreBits":score_bits(&raw),
             "modeledTypedReplyJson":String::from_utf8(typed_bytes).unwrap(),
             "modeledResponseJson":String::from_utf8(response_bytes).unwrap(),
@@ -87,6 +93,31 @@ async fn prepared_remote_exact_threshold_bits_and_continuation() {
         let path=std::path::Path::new(&root).parent().unwrap().join("pair-threshold-evidence.json");
         std::fs::write(path,serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     }
+    // Actual same-connection peer frames, not direct decoder-only goldens.
+    let valid=crate::daemon::prepared_query::pair_reply(&initial).unwrap();
+    let peer=crate::daemon::server::prepared_query_tests::peer_pairs(base.clone(),valid.clone()).await.unwrap();
+    assert_eq!(peer.data.pairs,initial.data.pairs);
+    for bad in [serde_json::Value::Null,serde_json::json!(1),serde_json::json!("0"),
+        serde_json::json!("3FF0000000000000"),serde_json::json!("7ff0000000000000"),
+        serde_json::json!("7ff8000000000000"),serde_json::json!("bff0000000000001"),
+        serde_json::json!("3ff0000000000001"),serde_json::json!("gggggggggggggggg")] {
+        let mut value=valid.clone();value["reply"]["data"]["pairs"][0]["similarityBits"]=bad;
+        assert!(crate::daemon::server::prepared_query_tests::peer_pairs(base.clone(),value).await.is_err());
+    }
+    for field in ["missing","similarity","extra"] {
+        let mut value=valid.clone();let pair=value["reply"]["data"]["pairs"][0].as_object_mut().unwrap();
+        if field=="missing" {pair.remove("similarityBits");} else {pair.insert(field.into(),serde_json::json!(0.));}
+        assert!(crate::daemon::server::prepared_query_tests::peer_pairs(base.clone(),value).await.is_err());
+    }
+    let valid_args=base.rpc_arguments().unwrap();
+    for bad in [serde_json::Value::Null,serde_json::json!(0),serde_json::json!("7ff0000000000000"),
+        serde_json::json!("8000000000000000"),serde_json::json!("3ff0000000000001")] {
+        let mut arguments=valid_args.clone();arguments["thresholdBits"]=bad;
+        assert!(daemon.client.call(crate::daemon::prepared_query::PAIRS,serde_json::json!({
+            "arguments":arguments,"responseLimit":crate::daemon::prepared_query::response_limit()})).await.is_err());
+    }
+    assert!(daemon.client.call("exact_pairs_v1",serde_json::json!({"arguments":valid_args,
+        "responseLimit":crate::daemon::prepared_query::response_limit()})).await.is_err());
     assert_eq!(bytes(&f.f),before,"all diagnostic/Remote calls are false reads");
     drop(remote);
     daemon.finish().await;
