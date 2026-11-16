@@ -1462,7 +1462,7 @@ async fn native_api1_purge_single_target_high_peer_and_max_history_full_frame() 
 async fn native_api1_purge_admission_survives_blocked_writers_and_competing_one_row_chunks() {
     use crate::storage::native_graph::{NativeEdgeInput, NativeGraphInput};
     let (fx, namespace, publisher, path) = setup();
-    let (ids, kept, intent, peer_generation) = {
+    let (ids, kept, intent, policy_intent, peer_generation) = {
         let mut engine = fx.storage.write().unwrap();
         let mut ids: Vec<_> = engine
             .meta_store()
@@ -1515,6 +1515,14 @@ async fn native_api1_purge_admission_survives_blocked_writers_and_competing_one_
                 auto_created: false,
             }],
         };
+        let mut policy_input = crate::storage::catalog::NamespacePolicy::from(
+            &engine.get_namespace_by_name("doomed").unwrap().unwrap(),
+        );
+        policy_input.initial_stability += 1.0;
+        let policy_intent = engine
+            .meta_store()
+            .capture_native_policy(scope.clone(), &policy_input, &policy, None)
+            .unwrap();
         let intent = engine
             .meta_store()
             .capture_native_graph(scope, &other, &policy, None)
@@ -1527,7 +1535,7 @@ async fn native_api1_purge_admission_survives_blocked_writers_and_competing_one_
             .unwrap()
             .lifecycle
             .record_generation;
-        (ids, kept, intent, peer_generation)
+        (ids, kept, intent, policy_intent, peer_generation)
     };
     publisher.rebuild_all().await.unwrap();
     let (started, resume) = pause(&fx);
@@ -1581,6 +1589,25 @@ async fn native_api1_purge_admission_survives_blocked_writers_and_competing_one_
                 &NoClock,
                 None
             ),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        assert!(matches!(
+            engine.apply_native_policy(&ctx, &policy_intent, &NativePolicyInputs::default(), None),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        assert!(matches!(
+            engine.meta_store().reserve_batch(
+                &catalog,
+                crate::storage::batch::BatchKind::Forget,
+                &[crate::storage::batch::BatchItemPlan::Forget {
+                    request_hash: [7; 32],
+                    id: ids[0]
+                }],
+            ),
+            Err(StorageError::RecoveryRequired(_))
+        ));
+        assert!(matches!(
+            engine.compact_text_log(),
             Err(StorageError::RecoveryRequired(_))
         ));
         assert!(
