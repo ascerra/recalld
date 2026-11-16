@@ -10,7 +10,7 @@ use crate::storage::schema_migration::{
     MigrationOptions, ProfileAttestationInput, inspect_schema, migrate_schema,
 };
 use crate::storage::vector_certification::{ReembedVectors, reembed_fresh};
-use crate::storage::{StorageEngine as _, TextRef};
+use crate::storage::TextRef;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -30,7 +30,7 @@ impl EmbeddingProvider for Provider {
     fn model_name(&self) -> &str {
         &self.descriptor.model_id
     }
-    async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
+    async fn embed(&self, text: &str) -> std::result::Result<Vec<f32>, EmbeddingError> {
         self.inputs.lock().unwrap().push(text.into());
         let mut result = vec![0.; self.dimensions()];
         result[1] = 1.;
