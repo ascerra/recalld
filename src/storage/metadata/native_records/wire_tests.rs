@@ -147,7 +147,12 @@ fn public_adapters_with_query(
             .with_clock(clock.clone())
             .with_native_lifecycle_policy(policy),
         ),
-        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+        Arc::new(NamespaceRegistryAdapter::new(
+            f.storage.clone(),
+            std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                crate::test_support::DIM,
+            )),
+        )),
         Arc::new(NoopMetricsCollector),
     );
     (bridge, state)

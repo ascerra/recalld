@@ -20,9 +20,14 @@ async fn owned_namespace_clock_samples_once_for_response_canonical_row_and_recei
     let f = Fixture::new();
     let clock = Arc::new(CountingClock(AtomicI64::new(1_767_225_660_000)));
     let mcp = f.namespace_adapter().with_clock(clock.clone());
-    let rest = crate::api::adapters::NamespaceRegistryAdapter::new(f.storage.clone())
-        .with_completion(f.completion())
-        .with_clock(clock.clone());
+    let rest = crate::api::adapters::NamespaceRegistryAdapter::new(
+        f.storage.clone(),
+        std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+            crate::test_support::DIM,
+        )),
+    )
+    .with_completion(f.completion())
+    .with_clock(clock.clone());
     let response = mcp
         .create_namespace(CreateNamespaceInput {
             name: "clock-mcp".into(),
