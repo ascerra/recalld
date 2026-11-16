@@ -143,6 +143,9 @@ pub(crate) fn select(
         StorageError::InvalidControl("native graph namespace schema missing".into())
     })?;
     let query = if matches!(selection, NativeLinkSelection::Semantic { .. }) {
+        engine
+            .meta_store()
+            .with_generation_read_at(generation, |view| view.check_native_vector_namespace(&ns))?;
         if !matches!(
             schema.embedding_binding,
             crate::model::schema::EmbeddingBinding::Bound { .. }
