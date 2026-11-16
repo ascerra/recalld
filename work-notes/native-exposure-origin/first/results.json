@@ -1,0 +1,64 @@
+[
+  {
+    "name": "mount",
+    "command": [
+      "python3",
+      ".test-scratch/seal.py",
+      "verify",
+      ".test-scratch/first"
+    ],
+    "exit": 0,
+    "start": 1794694625.2202964,
+    "end": 1794694625.2622821
+  },
+  {
+    "name": "format",
+    "command": [
+      "cargo",
+      "fmt",
+      "--all"
+    ],
+    "exit": 0,
+    "start": 1794694625.262594,
+    "end": 1794694626.072212
+  },
+  {
+    "name": "source",
+    "command": [
+      "python3",
+      ".test-scratch/seal.py",
+      "seal",
+      ".test-scratch/first"
+    ],
+    "exit": 0,
+    "start": 1794694626.0726142,
+    "end": 1794694626.6299918
+  },
+  {
+    "name": "clean",
+    "command": [
+      "cargo",
+      "clean",
+      "-p",
+      "recalld"
+    ],
+    "exit": 0,
+    "start": 1794694626.6302657,
+    "end": 1794694627.0942366
+  },
+  {
+    "name": "focused",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "exposure_origin",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "start": 1794694627.0946763,
+    "end": 1794694714.9807546
+  }
+]

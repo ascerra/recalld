@@ -55,7 +55,8 @@ impl DaemonServer {
                 std::sync::Arc::new(system.config().clone()),
                 tz,
             )
-            .with_clock(system.clock().clone()),
+            .with_clock(system.clock().clone())
+            .with_query_engine(system.query_engine().clone()),
         );
         let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(
             McpNamespaceAdapter::new(
@@ -198,7 +199,23 @@ async fn handle_connection(
 
     loop {
         tokio::select! {
-            msg = read_framed_message(&mut reader, MAX_MESSAGE_SIZE) => {
+            msg = read_frame(&mut reader, MAX_MESSAGE_SIZE) => {
+                // EOF is connection termination, not another sampled request.
+                if let Err(e @ FrameError::Closed) = &msg {
+                    tracing::warn!(%e, "client read error, closing connection");
+                    break;
+                }
+                let operation = if msg.is_ok() { "daemon.rpc" } else { "daemon.frame_error" };
+                let outcome = crate::performance::measure_transport(operation, async {
+                let mut timeline = crate::performance::Timeline::new();
+                let msg = msg.and_then(|buf| {
+                    crate::performance::event!(kind = "transport_input", transport = "daemon", source_bytes = buf.len(), framing_bytes = 4);
+                    let decode = crate::performance::Timer::new("daemon.decode");
+                    let result = serde_json::from_slice::<DaemonRequest>(&buf).map_err(|e| FrameError::Malformed(e.to_string()));
+                    decode.outcome(result.is_ok());
+                    result
+                });
+                timeline.mark("transport.decode");
                 match msg {
                     Ok(request) => {
                         frame_error_strikes = 0;
@@ -208,11 +225,16 @@ async fn handle_connection(
                             peer_limit = peer_frame_limit(&request.params);
                         }
 
-                        let response = dispatch(
+                        crate::performance::event!(kind = "transport_operation", operation = if method == "store_memory" { "store_memory" } else { "other" });
+                        let response = if matches!(method.as_str(),"feedback_api1_v1"|"forget_api1_v1") && peer_limit<MAX_MESSAGE_SIZE {
+                            Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
+                        } else { dispatch(
                             &*search, &*storage, &*namespaces, &*health,
                             &request.method, request.params,
-                        ).await;
+                        ).await };
 
+                        timeline.mark("transport.dispatch");
+                        crate::performance::event!(kind = "transport_rpc_result", success = response.is_ok());
                         let resp = match response {
                             Ok(result) => DaemonResponse::success(request.id, result),
                             Err(e) => DaemonResponse::error(request.id, DaemonRpcError::from(&e)),
@@ -224,6 +246,7 @@ async fn handle_connection(
                             // would desynchronize the client's stream, so send an
                             // error that does fit instead.
                             Err(FrameError::TooLarge { size, limit }) => {
+                                crate::performance::event!(kind = "transport_response_fallback", reason = "too_large");
                                 tracing::warn!(
                                     method = %method, size, limit,
                                     "response exceeds the peer frame limit, replying with an error"
@@ -243,12 +266,12 @@ async fn handle_connection(
                                     .await
                                     .is_err()
                                 {
-                                    break;
+                                    return Err(());
                                 }
                             }
                             Err(e) => {
                                 tracing::warn!(%e, "client write error, closing connection");
-                                break;
+                                return Err(());
                             }
                         }
 
@@ -258,7 +281,7 @@ async fn handle_connection(
 
                         if method == "shutdown" {
                             let _ = shutdown_tx.send(true);
-                            break;
+                            return Ok(false);
                         }
                     }
                     Err(e) => match action_for_frame_error(&e) {
@@ -274,7 +297,7 @@ async fn handle_connection(
                             );
                             let resp = DaemonResponse::error(UNATTRIBUTED_ID, err);
                             if write_framed_message(&mut writer, &resp, peer_limit).await.is_err() {
-                                break;
+                                return Err(());
                             }
                             // Answered, then hung up: a peer that only ever
                             // sends garbage is not worth a connection slot.
@@ -284,15 +307,19 @@ async fn handle_connection(
                                     "client sent {MAX_CONSECUTIVE_FRAME_ERRORS} consecutive \
                                      unusable frames, closing connection"
                                 );
-                                break;
+                                return Err(());
                             }
                         }
                         ConnectionAction::Close => {
                             tracing::warn!(%e, "client read error, closing connection");
-                            break;
+                            return Err(());
                         }
                     },
                 }
+                timeline.mark("transport.serialize_write_flush");
+                Ok::<_, ()>(true)
+                }).await;
+                if !matches!(outcome, Ok(true)) { break; }
             }
             _ = shutdown_rx.changed() => break,
         }
@@ -438,7 +465,30 @@ async fn dispatch(
         "ping" => Ok(serde_json::json!({
             "protocolVersion": PROTOCOL_VERSION,
             "maxMessageSize": MAX_MESSAGE_SIZE,
+            "api1LifecycleV1": storage.supports_api1_lifecycle(),
         })),
+
+        "feedback_api1_v1" | "forget_api1_v1" => {
+            use crate::serialization::{
+                lifecycle_api1,
+                native_lifecycle::{self, Operation},
+            };
+            if !storage.supports_api1_lifecycle() {
+                return Err(BridgeError::InvalidInput(
+                    "API1 lifecycle capability unavailable".into(),
+                ));
+            }
+            let operation = if method == "feedback_api1_v1" {
+                Operation::Feedback
+            } else {
+                Operation::Forget
+            };
+            let reply = match lifecycle_api1::parse(&params, operation) {
+                Ok(request) => storage.api1_lifecycle(request, operation).await,
+                Err(error) => lifecycle_api1::Reply::failure(native_lifecycle::Reply::input(error)),
+            };
+            serde_json::to_value(reply).map_err(|e| BridgeError::Internal(e.to_string()))
+        }
 
         "shutdown" => Ok(serde_json::json!({})),
 
@@ -507,6 +557,29 @@ async fn dispatch(
             serde_json::to_value(result).map_err(|e| {
                 BridgeError::PartiallyApplied(format!("batch result serialization failed: {e}"))
             })
+        }
+        "forget_lifecycle_v1" | "feedback_lifecycle_v1" => {
+            let operation = if method == "forget_lifecycle_v1" {
+                crate::serialization::native_lifecycle::Operation::Forget
+            } else {
+                crate::serialization::native_lifecycle::Operation::Feedback
+            };
+            let reply = crate::mcp::native_lifecycle_adapter::dispatch_lifecycle_private(
+                storage, operation, params,
+            )
+            .await;
+            serde_json::to_value(reply).map_err(|e| BridgeError::PartiallyApplied(e.to_string()))
+        }
+        "forget_native_v1" | "feedback_native_v1" => {
+            let operation = if method == "forget_native_v1" {
+                crate::serialization::native_lifecycle::Operation::Forget
+            } else {
+                crate::serialization::native_lifecycle::Operation::Feedback
+            };
+            let reply =
+                crate::mcp::native_lifecycle_adapter::dispatch_private(storage, operation, params)
+                    .await;
+            serde_json::to_value(reply).map_err(|e| BridgeError::PartiallyApplied(e.to_string()))
         }
         "store_memory" => {
             let input: StoreInput = serde_json::from_value(params)
@@ -640,7 +713,7 @@ mod tests {
 
     /// Stub subsystems for the dispatch tests. Only the unknown-method path
     /// is exercised, which never reaches any of these.
-    struct Unused;
+    pub(super) struct Unused;
 
     #[tokio::test]
     async fn actual_batch_socket_roundtrip_preserves_partial_outcome_and_rejects_foreign_resume() {
@@ -1336,3 +1409,76 @@ mod batch_label_tests;
 #[cfg(test)]
 #[path = "coverage_tests.rs"]
 mod coverage_tests;
+
+#[cfg(test)]
+#[path = "producer_tests.rs"]
+mod producer_tests;
+
+#[cfg(test)]
+pub(crate) async fn native_lifecycle_test_remote(
+    storage: Arc<dyn BridgeStorageEngine>,
+    path: &Path,
+) -> (
+    crate::daemon::bridge_adapters::RemoteStorageAdapter,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let task = tokio::spawn(async move {
+        let (server, _) = listener.accept().await.unwrap();
+        let (tx, rx) = watch::channel(false);
+        handle_connection(
+            Arc::new(tests::Unused),
+            storage,
+            Arc::new(tests::Unused),
+            Arc::new(tests::Unused),
+            server,
+            Arc::new(AtomicU32::new(1)),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            tx,
+        )
+        .await;
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(path).await.unwrap());
+    (
+        crate::daemon::bridge_adapters::RemoteStorageAdapter::new(client),
+        task,
+    )
+}
+
+/// Isolated actual framed namespace connection for catalog completion regressions.
+#[cfg(test)]
+pub(crate) async fn catalog_test_remote(
+    namespaces: Arc<dyn NamespaceRegistry>,
+    path: &std::path::Path,
+) -> (
+    Arc<crate::daemon::bridge_adapters::RemoteNamespaceAdapter>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let stub = Arc::new(crate::test_support::StubBridge::default());
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        handle_connection(
+            stub.clone(),
+            stub.clone(),
+            namespaces,
+            stub,
+            stream,
+            Arc::new(AtomicU32::new(1)),
+            Arc::new(AtomicI64::new(0)),
+            rx,
+            tx,
+        )
+        .await;
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(path).await.unwrap());
+    client.ping().await.unwrap();
+    (
+        Arc::new(crate::daemon::bridge_adapters::RemoteNamespaceAdapter::new(
+            client,
+        )),
+        task,
+    )
+}

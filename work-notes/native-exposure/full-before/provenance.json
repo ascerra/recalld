@@ -1,0 +1,11 @@
+{
+  "runtime": "3955c9ccc7dd2a2efb265ccc58e16c1a83fc50cd",
+  "source_sha256": "39ccdd3bab69cdd837000341e13da1ffbb3423a8b7006b865a08367baeb598f7",
+  "exe_sha256": "1ceed9db8c5710370c89252092e91ba42cfee5da36495f23b2c583fa7ab577fa",
+  "mtime_ns": 1794686093119402381,
+  "size": 404976008,
+  "passed": 989,
+  "failed": 27,
+  "cli": "not reached",
+  "clippy": "not reached"
+}

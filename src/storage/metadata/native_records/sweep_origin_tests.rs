@@ -95,7 +95,7 @@ async fn manual_origin_native_api_one_and_autonomous_two_are_real_producers() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_origin_native_requires_configured_policy_and_rejects_unknown_before_clock() {
-    let (f, _d, id, c) = setup();
+    let (f, _d, id, c) = setup_with_multiplier(0.);
     completion(&f).rebuild_all().await.unwrap();
     c.set(10_000 * DAY);
     let before = row(&f, id).encode().unwrap();
@@ -121,7 +121,7 @@ async fn manual_origin_native_requires_configured_policy_and_rejects_unknown_bef
     assert!(manual.trigger_sweep_with_origin(None, 3).await.is_err());
     assert_eq!(c.calls.load(Ordering::SeqCst), calls);
     assert_eq!(row(&f, id).encode().unwrap(), before);
-    // Configured native multiplier0 overrides the unrelated adapter legacy1.
+    // Explicitly adopted native multiplier0 overrides the unrelated adapter legacy1.
     let manual = manual.with_native_lifecycle_policy(NativePolicyInputs {
         multiplier: 0.,
         ..Default::default()

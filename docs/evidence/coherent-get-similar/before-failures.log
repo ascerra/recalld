@@ -1,0 +1,80 @@
+failures:
+
+---- api::handlers::validation_tests::scope_assertions_preserve_record_scope_despite_wrong_session_default stdout ----
+
+thread 'api::handlers::validation_tests::scope_assertions_preserve_record_scope_despite_wrong_session_default' (64) panicked at src/api/validation_tests.rs:578:13:
+assertion `left != right` failed: get_memory: ToolCallResult { content: [Text { text: "Failed to get memory: Unavailable: storage recovery required: canonical and derived generations are not coherent" }], is_error: Some(true) }
+  left: Some(true)
+ right: Some(true)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- api::handlers::validation_tests::scope_assertions_reject_wrong_namespace_before_access_search_or_mutation stdout ----
+
+thread 'api::handlers::validation_tests::scope_assertions_reject_wrong_namespace_before_access_search_or_mutation' (70) panicked at src/api/validation_tests.rs:493:13:
+assertion failed: serde_json::to_string(&result).unwrap().contains("NAMESPACE_MISMATCH")
+
+---- daemon::server::read_only_tests::actual_transports_propagate_observation_failure_without_success_payload stdout ----
+
+thread 'daemon::server::read_only_tests::actual_transports_propagate_observation_failure_without_success_payload' (265) panicked at src/daemon/read_only_tests.rs:934:5:
+assertion failed: serialized.contains("notCommitted")
+
+---- daemon::server::read_only_tests::observed_join_tests::public_postcommit_admission_faults_retain_receipts_and_exactly_once_history stdout ----
+postcommit wire transport=http operation=get fault=1: {"error":"OBSERVATION_FAILED","observation":{"commitState":"committed","message":"INDEX_NOT_READY: ServiceUnavailable { message: \"storage recovery required: store handle unavailable; reopen for recovery\" }","ready":false,"receipts":[{"committedGeneration":"6","operationId":"42032bc2-2dd5-4d80-ad4a-f1fa253a739f","outcome":{"accesses":[{"accessedAt":86400000,"kind":"direct_retrieval","memoryId":"01a1db7c-7510-7892-873d-0fd09de0fb3c"}],"kind":"exposuresRecorded"},"receiptVersion":1,"replayed":false,"storeId":"beb1f9c4-915c-48ef-a933-ef939346a59c"}],"unknownOperationId":null}}
+postcommit fault=1 transport=http operation=get receipt=42032bc2-2dd5-4d80-ad4a-f1fa253a739f generation=6
+postcommit wire transport=http operation=search fault=1: {"error":"OBSERVATION_FAILED","observation":{"commitState":"committed","message":"INDEX_NOT_READY: ServiceUnavailable { message: \"storage recovery required: store handle unavailable; reopen for recovery\" }","ready":false,"receipts":[{"committedGeneration":"6","operationId":"1fd12ac1-cf09-4852-97eb-f39cc6223dac","outcome":{"accesses":[{"accessedAt":86400000,"kind":"direct_retrieval","memoryId":"01a1db7c-771e-70d2-ad59-18ab6aabab01"}],"kind":"exposuresRecorded"},"receiptVersion":1,"replayed":false,"storeId":"d0226a8e-30ba-4c17-9bf5-93069fee1dea"}],"unknownOperationId":null}}
+postcommit fault=1 transport=http operation=search receipt=1fd12ac1-cf09-4852-97eb-f39cc6223dac generation=6
+postcommit wire transport=http operation=similar fault=1: {"error":"OBSERVATION_FAILED","observation":{"commitState":"committed","message":"INDEX_NOT_READY: ServiceUnavailable { message: \"storage recovery required: store handle unavailable; reopen for recovery\" }","ready":false,"receipts":[{"committedGeneration":"6","operationId":"ec6275f7-8d43-4795-9d5b-304035f2aaba","outcome":{"accesses":[{"accessedAt":86400000,"kind":"associative_retrieval","memoryId":"01a1db7c-7961-7450-9f30-e50129538d61"}],"kind":"exposuresRecorded"},"receiptVersion":1,"replayed":false,"storeId":"0156e853-8c06-4e26-9d5b-45f28d43d6df"}],"unknownOperationId":null}}
+postcommit fault=1 transport=http operation=similar receipt=ec6275f7-8d43-4795-9d5b-304035f2aaba generation=6
+
+thread 'daemon::server::read_only_tests::observed_join_tests::public_postcommit_admission_faults_retain_receipts_and_exactly_once_history' (296) panicked at src/daemon/observed_join_tests.rs:168:17:
+mcp/get: "Failed to get memory: Unavailable: storage recovery required: canonical and derived generations are not coherent"
+
+---- daemon::server::read_only_tests::read_only_daemon_aliases_force_false_and_legacy_methods_keep_defaults stdout ----
+
+thread 'daemon::server::read_only_tests::read_only_daemon_aliases_force_false_and_legacy_methods_keep_defaults' (304) panicked at src/daemon/read_only_tests.rs:560:14:
+called `Result::unwrap()` on an `Err` value: Unavailable("storage recovery required: canonical and derived generations are not coherent")
+
+---- daemon::server::read_only_tests::read_only_mcp_tools_and_legacy_get_contract stdout ----
+
+thread 'daemon::server::read_only_tests::read_only_mcp_tools_and_legacy_get_contract' (318) panicked at src/daemon/read_only_tests.rs:387:9:
+assertion `left != right` failed: ToolCallResult { content: [Text { text: "Failed to get memory: Unavailable: storage recovery required: canonical and derived generations are not coherent" }], is_error: Some(true) }
+  left: Some(true)
+ right: Some(true)
+
+---- daemon::server::read_only_tests::scoped_read_only_controls_survive_http_mcp_and_framed_daemon stdout ----
+
+thread 'daemon::server::read_only_tests::scoped_read_only_controls_survive_http_mcp_and_framed_daemon' (330) panicked at src/daemon/read_only_tests.rs:980:13:
+assertion `left == right` failed: ToolCallResult { content: [Text { text: "Failed to get memory: Unavailable: storage recovery required: canonical and derived generations are not coherent" }], is_error: Some(true) }
+  left: true
+ right: false
+
+---- daemon::server::scope_tests::scope_assertions_remote_round_trip_and_old_daemon_fail_closed stdout ----
+
+thread 'daemon::server::scope_tests::scope_assertions_remote_round_trip_and_old_daemon_fail_closed' (347) panicked at src/daemon/scope_tests.rs:67:17:
+Unavailable: storage recovery required: canonical and derived generations are not coherent
+
+thread 'tokio-rt-worker' (349) panicked at src/daemon/scope_tests.rs:26:22:
+called `Result::unwrap()` on an `Err` value: Closed
+
+---- mcp::tools::tests::a4_mcp_get_false_is_unchanged_and_default_observes_once stdout ----
+
+thread 'mcp::tools::tests::a4_mcp_get_false_is_unchanged_and_default_observes_once' (854) panicked at src/mcp/tools.rs:2921:13:
+assertion `left != right` failed
+  left: Some(true)
+ right: Some(true)
+
+
+failures:
+    api::handlers::validation_tests::scope_assertions_preserve_record_scope_despite_wrong_session_default
+    api::handlers::validation_tests::scope_assertions_reject_wrong_namespace_before_access_search_or_mutation
+    daemon::server::read_only_tests::actual_transports_propagate_observation_failure_without_success_payload
+    daemon::server::read_only_tests::observed_join_tests::public_postcommit_admission_faults_retain_receipts_and_exactly_once_history
+    daemon::server::read_only_tests::read_only_daemon_aliases_force_false_and_legacy_methods_keep_defaults
+    daemon::server::read_only_tests::read_only_mcp_tools_and_legacy_get_contract
+    daemon::server::read_only_tests::scoped_read_only_controls_survive_http_mcp_and_framed_daemon
+    daemon::server::scope_tests::scope_assertions_remote_round_trip_and_old_daemon_fail_closed
+    mcp::tools::tests::a4_mcp_get_false_is_unchanged_and_default_observes_once
+
+test result: FAILED. 997 passed; 9 failed; 0 ignored; 0 measured; 0 filtered out; finished in 434.19s
+
+error: test failed, to rerun pass `--lib`

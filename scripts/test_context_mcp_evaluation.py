@@ -92,7 +92,7 @@ class ContextPreflight(unittest.TestCase):
 
     def validate(self):
         h['save'](self.root/'manifest.json',self.m)
-        with mock.patch('subprocess.check_output',return_value=json.dumps(self.identity).encode()):return h['validate'](self.root/'manifest.json',self.old.binary,self.old.scorer,self.root,ASSETS.assets)
+        with mock.patch('subprocess.check_output',return_value=json.dumps(self.identity).encode()):return h['validate'](self.root/'manifest.json',self.old.binary,self.old.scorer,self.root,context_assets=ASSETS.assets)
 
     def test_exact_policy_asset_identity_and_old_boundary(self):
         self.validate();original=copy.deepcopy(self.m)

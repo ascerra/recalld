@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/output/module_roster_probe.py", line 11, in <module>
+    elif not p.is_relative_to('/usr/lib') and not p.is_relative_to('/usr/local/lib') and not p.is_relative_to('/output'):raise RuntimeError('unexpected module path '+str(p))
+                                                                                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: unexpected module path /etc/python3.11/sitecustomize.py

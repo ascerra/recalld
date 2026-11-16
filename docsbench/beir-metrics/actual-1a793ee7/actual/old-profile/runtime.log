@@ -1,0 +1,34 @@
+[2m2026-11-15T22:30:26.582891Z[0m [32m INFO[0m [2mrecalld[0m[2m:[0m Recalld MCP server starting (stdio) [3mdefault_namespace[0m[2m=[0mdefault
+[2m2026-11-15T22:30:26.582966Z[0m [33m WARN[0m [2mrecalld[0m[2m:[0m daemon unavailable, falling back to direct mode [3me[0m[2m=[0mFile exists (os error 17)
+[2m2026-11-15T22:30:26.642519Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m EdgeStore opened at /tmp/a6-public-runtime-ip9_xqs9/data/edges.db
+[2m2026-11-15T22:30:26.643593Z[0m [32m INFO[0m [2mrecalld::storage::engine[0m[2m:[0m Running storage startup validation...
+[2m2026-11-15T22:30:26.643638Z[0m [32m INFO[0m [2mrecalld::storage::engine[0m[2m:[0m Storage startup validation complete
+[2m2026-11-15T22:30:26.643676Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m starting Recalld with owned storage
+[2m2026-11-15T22:30:26.643695Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.643710Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m relationship graph loaded [3mnodes[0m[2m=[0m0 [3medges[0m[2m=[0m0 [3mloaded_edges[0m[2m=[0m0 [3mavg_degree[0m[2m=[0m0.0
+[2m2026-11-15T22:30:26.643763Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m cache manager initialized
+[2m2026-11-15T22:30:26.643868Z[0m [32m INFO[0m [2mrecalld::embedding::provider[0m[2m:[0m Built OpenAI embedding provider [3mprovider[0m[2m=[0m"openai" [3mmodel[0m[2m=[0ma6-public-synthetic-v1 [3mdimensions[0m[2m=[0m4
+[2m2026-11-15T22:30:26.643880Z[0m [32m INFO[0m [2mrecalld::embedding::provider[0m[2m:[0m Wrapping embedding provider with contextual prefix layer [3mdocument_prefix[0m[2m=[0m"a6-document:" [3mquery_prefix[0m[2m=[0m"a6-query:"
+[2m2026-11-15T22:30:26.643890Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m embedding provider ready [3mprovider[0m[2m=[0mOpenAI [3mmodel[0m[2m=[0ma6-public-synthetic-v1 [3mdimensions[0m[2m=[0m4 [3mdocument_prefix[0m[2m=[0ma6-document: [3mquery_prefix[0m[2m=[0ma6-query:
+[2m2026-11-15T22:30:26.643901Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m RIF engine initialized [3menabled[0m[2m=[0mfalse
+[2m2026-11-15T22:30:26.643912Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m flat vector index created and loaded from storage [3mdimensions[0m[2m=[0m4 [3mloaded[0m[2m=[0m0 [3mskipped[0m[2m=[0m0 [3mskipped_tombstoned[0m[2m=[0m0 [3mskipped_missing_slot[0m[2m=[0m0 [3mskipped_unreadable[0m[2m=[0m0 [3mskipped_dimension_mismatch[0m[2m=[0m0 [3melapsed_ms[0m[2m=[0m0
+[2m2026-11-15T22:30:26.644359Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m FTS5 index ready
+[2m2026-11-15T22:30:26.644370Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m entity index built [3mmemories[0m[2m=[0m0
+[2m2026-11-15T22:30:26.644385Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m query engine initialized
+[2m2026-11-15T22:30:26.644801Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m created default namespace [3mid[0m[2m=[0m1 [3mdimensions[0m[2m=[0m4
+[2m2026-11-15T22:30:26.645155Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.645358Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m decay sweep disabled by config
+[2m2026-11-15T22:30:26.645367Z[0m [32m INFO[0m [2mrecalld::system[0m[2m:[0m Recalld initialized
+[2m2026-11-15T22:30:26.645383Z[0m [32m INFO[0m [2mrecalld::mcp::transport[0m[2m:[0m MCP stdio transport started
+[2m2026-11-15T22:30:26.645467Z[0m [32m INFO[0m [2mrecalld::mcp::server[0m[2m:[0m MCP client initializing (legacy era) [3mclient[0m[2m=[0mserialized-mcp-synthetic-diagnostic-v1 [3mversion[0m[2m=[0m1 [3mprotocol[0m[2m=[0m2025-06-18
+[2m2026-11-15T22:30:26.645902Z[0m [32m INFO[0m [2mrecalld::mcp::server[0m[2m:[0m Client confirmed initialization
+[2m2026-11-15T22:30:26.654760Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.656405Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.657954Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.659070Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.660629Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.661773Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.663221Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.664799Z[0m [32m INFO[0m [2mrecalld::storage::edges[0m[2m:[0m Loaded all edges from edges.db [3mcount[0m[2m=[0m0
+[2m2026-11-15T22:30:26.775549Z[0m [32m INFO[0m [2mrecalld::mcp::transport[0m[2m:[0m MCP stdio transport closed (stdin EOF)
+[2m2026-11-15T22:30:26.775574Z[0m [32m INFO[0m [2mrecalld[0m[2m:[0m MCP server exited cleanly

@@ -310,11 +310,23 @@ fn native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_w
     let intent = s.capture_decay(id, d.ns).unwrap();
     s.policy.multiplier = 2.;
     assert!(matches!(
-        s.apply_decay(&ctx(&s, &d, "policy"), &intent).unwrap(),
-        NativeDecayResult::Skipped(NativeDecaySkip::Stale)
+        s.apply_decay(&ctx(&s, &d, "policy"), &intent),
+        Err(StorageError::InvalidMutation(message)) if message.contains("differs from canonical adoption")
     ));
     assert_eq!(s.metadata().control_state().unwrap(), state);
-    s.policy.multiplier = 0.;
+    assert_eq!(record(&s, id).encode().unwrap(), before);
+    drop(s);
+    crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 0., 3000 + DAY * 9 / 2);
+    let mut s = NativeLifecycleSession::open(
+        &d.path,
+        NativePolicyInputs {
+            multiplier: 0.,
+            ..Default::default()
+        },
+        c.clone(),
+    )
+    .unwrap();
+    let state = s.metadata().control_state().unwrap();
     assert!(matches!(
         s.maintain(&ctx(&s, &d, "exempt"), id).unwrap(),
         NativeDecayResult::Skipped(NativeDecaySkip::Exempt)
@@ -570,6 +582,7 @@ fn native_maintenance_missing_summary_permastore_and_unknown_phase_marker_are_pr
     )
     .unwrap();
     d.path = destination;
+    crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 10_000 * DAY);
     let c = Arc::new(Clock::new(500 * DAY));
     let mut s = session(&d, c.clone());
     let before = record(&s, missing).encode().unwrap();
@@ -686,7 +699,7 @@ async fn native_harddelete_foreign_peer_requires_actual_policy_history() {
         &LifecycleMigrationOptions {
             expected_source: inspect_schema(&d.path).unwrap().control.generation_ref(),
             namespace_id: d.ns,
-            expected_policy_revision: Generation::default().next().unwrap(),
+            expected_policy_revision: policy_revision(&d),
             target: LifecycleVersion::LegacyAccessV1,
             idempotency_key: "rollback".into(),
         },
@@ -1067,7 +1080,7 @@ fn native_maintenance_actual_policy_migration_invalidates_plan_but_replays_old_r
         &LifecycleMigrationOptions {
             expected_source: inspect_schema(&d.path).unwrap().control.generation_ref(),
             namespace_id: d.ns,
-            expected_policy_revision: "1".to_string().try_into().unwrap(),
+            expected_policy_revision: policy_revision(&d),
             target: LifecycleVersion::LegacyAccessV1,
             idempotency_key: "rollback".into(),
         },
@@ -1221,6 +1234,7 @@ fn native_harddelete_zero_weight_pending_edge_rejects_signed_zero_change_without
     )
     .unwrap();
     d.path = destination;
+    crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 2000);
     let c = Arc::new(Clock::new(10_000 * DAY));
     let mut s = session(&d, c.clone());
     committed(s.maintain(&ctx(&s, &d, "summary"), id).unwrap());

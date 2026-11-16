@@ -1,0 +1,25 @@
+{
+  "parent": "3fa91d4e542ec8ed5519fe4c3b87e9e665043a40",
+  "before_test_source": "71721faaf231b784ff73d65320103fc6bb6bdcf2",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "rust_toolchain": "1.94.1",
+  "before_library_sha256": "4aa631432c8837a25638f866b72ea444f5df7e0144d40261a56d11f4218475e4",
+  "first_focused_library_sha256": "7921740773860d51b7fbebfe39f363a8ffbd29fab249e91eff00af81c1030b52",
+  "runtime_source": "b3a21e6b40805309886385bb92b019880b2e4798",
+  "shipping_source": "f19655b5e886e364a1f0d471412ff82202bec554",
+  "first_full_library_sha256": "cbc9c0126ce47e6aa8fe67a8e0df562591ca0b3594b2efae44ef458f81d83dd0",
+  "shipping_library_sha256": "278d6e484d7f6d30937721d20969730d09a968797d039736c7b141928d82a321",
+  "shipping_source_files": 257,
+  "shipping_exit": 0,
+  "shipping_validation": {
+    "focused_negative": 1,
+    "focused_record": 5,
+    "library": 1098,
+    "cli": 2,
+    "ignored_doctests": 4,
+    "fmt": "pass",
+    "clippy": "pass with warnings",
+    "library_seconds": 881.06,
+    "clippy_seconds": 36.23
+  }
+}

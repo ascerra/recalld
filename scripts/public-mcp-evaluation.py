@@ -17,6 +17,8 @@ import time
 import uuid
 
 CONTEXT = runpy.run_path(str(Path(__file__).with_name("context-mcp-evaluation.py")))
+BEIR = runpy.run_path(str(Path(__file__).with_name("beir-mcp-evaluation.py")))
+GROUPED = runpy.run_path(str(Path(__file__).with_name("grouped-mcp-evaluation.py")))
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
 MODEL = "a6-public-synthetic-v1"
 CONFORMANCE = runpy.run_path(str(Path(__file__).with_name("public-mcp-conformance.py")))
@@ -32,7 +34,8 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
                     canonicalSchemaAttested=False)
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
-EXTRA = ("scripts/test_trace_accounting.py", "scripts/check_trace_accounting.py", "scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+EXTRA = ('src/mcp/fixtures/legacy-lifecycle-old-api1.json', 'src/mcp/fixtures/legacy-lifecycle-old-api1.zip', 'src/storage/metadata/native_records/fixtures/original-api-old2.zip', 'src/storage/metadata/native_records/fixtures/request-context-api2.zip',
+         "scripts/beir-mcp-evaluation.py", "scripts/beir-reference-lock.json", "scripts/test_beir_mcp_evaluation.py", "scripts/check_beir_mcp_evaluation.py", "scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py", "scripts/test_trace_accounting.py", "scripts/check_trace_accounting.py", "scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py", "scripts/native-sweep-mcp-supervisor.py", "scripts/test_native_sweep_episode.py", "src/storage/engine/fixtures/text-compaction-before.zip",
          *["docsbench/native-sweep-consumer/full-e1d4cea9/inputs/"+name for name in ("manifest.json","actor-inputs.json","evaluator-labels.json","evaluator-cache.json","evaluator-schedule.json")])
 EXTRA += ("scripts/context-mcp-evaluation.py", "scripts/context_tokenizer.py", "scripts/context-tokenizer-lock.json", "scripts/context-encoding.json", "scripts/TIKTOKEN-LICENSE.txt", "scripts/prepare-context-assets.py", "scripts/test_context_mcp_evaluation.py", "scripts/check_context_mcp_evaluation.py",)
@@ -217,7 +220,7 @@ def reconcile_accounting(trace_rows, provider_rows):
 def track_profile(track):
     if track == NATIVE_SWEEP["TRACK"]:
         versions, capabilities = track_profile(NATIVE["TRACK"])
-        return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1, physicalCompactionContractVersion=1, nativePrefixFixtureVersion=2), dict(capabilities,
+        return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1, physicalCompactionContractVersion=1, nativePrefixFixtureVersion=3, inheritedPolicyAdoptionVersion=1), dict(capabilities,
             nativeSweep=True, nativePhysicalCompaction=True, sweepDecayRateMultiplier=1.0, namespaceDecayMultipliers={"foreign":0.0})
     if track == NATIVE["TRACK"]:
         versions, capabilities = track_profile(RESET["TRACK"])
@@ -238,6 +241,8 @@ def track_profile(track):
 
 
 def fixtures(track=TRACK):
+    if track == BEIR["TRACK"]:
+        return BEIR["fixtures"](globals())
     if track == NATIVE_SWEEP["TRACK"]:
         return NATIVE_SWEEP["fixtures"](fixtures, NATIVE)
     if track == NATIVE["TRACK"]:
@@ -270,21 +275,15 @@ def fixtures(track=TRACK):
     return actor, labels, cache, schedule
 
 
-def validate(manifest_path, binary, scorer, source_root, context_assets=None):
-    # Complete input validation before creating episode output, provider, or store.
-    raw = manifest_path.read_bytes()
-    m = json.loads(raw)
-    context = m.get("track") == CONTEXT["TRACK"]
-    accounted = m.get("track") == ACCOUNTING_TRACK
-    exact_keys(m, (*(("accountingPolicy",) if accounted else ()), "manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
-                   "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
-                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset", *(("contextPolicy", "contextFixture") if context else ())))
+COMMON_FIELDS = ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+                 "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "activeEmbedding", "scoringProfile")
+
+
+def validate_build(m, binary, scorer, source_root):
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
-    if accounted and encoded(m["accountingPolicy"]) != encoded(ACCOUNTING_POLICY):
-        raise ValueError("unsupported accounting/token/context/cost policy")
     versions, capabilities = track_profile(m["track"])
-    if m["track"] not in (TRACK, CONTEXT["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
+    if m["track"] not in (TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -305,16 +304,30 @@ def validate(manifest_path, binary, scorer, source_root, context_assets=None):
         expected_executables["nativePrefixFixture"] = digest(binary.with_name("native_prefix_fixture").read_bytes())
     if m["executables"] != expected_executables:
         raise ValueError("executable hash mismatch")
+    profile = json.loads(subprocess.check_output([str(scorer), "--profile"], env={"PATH": "/usr/bin:/bin"}))
+    if (profile["sourceCommit"] != m["sourceCommit"] or profile["containerImageId"] != m["containerImageId"] or
+            profile["sourceTreeSha256"] != digest(encoded(m["sourceFilesSha256"]))):
+        raise ValueError("compiled provenance mismatch")
+    if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
+        raise ValueError("configuration profile mismatch")
+
+
+def validate_artifacts(root, m, expected=None, prefix=""):
     artifacts = []
     for key, name in (("actorInputs", "actor-inputs.json"), ("evaluatorLabels", "evaluator-labels.json"), ("replayCache", "evaluator-cache.json"), ("evaluatorSchedule", "evaluator-schedule.json")):
         exact_keys(m[key], ("file", "sha256"))
-        p = manifest_path.parent / name
-        if m[key]["file"] != name or not p.is_file() or p.is_symlink() or digest(p.read_bytes()) != m[key]["sha256"]:
+        name = prefix + name
+        p = root / name
+        if m[key]["file"] != name or not p.is_file() or p.is_symlink() or not p.resolve().is_relative_to(root.resolve()) or digest(p.read_bytes()) != m[key]["sha256"]:
             raise ValueError("artifact hash/reference mismatch")
         artifacts.append(json.loads(p.read_text()))
     actor, labels, cache, schedule = artifacts
-    if context:
+    if expected is not None:
+        expected_actor, _, expected_cache, expected_schedule = expected
+    elif m["track"] == CONTEXT["TRACK"]:
         expected_actor, _, expected_cache, expected_schedule = CONTEXT["fixtures"](globals(), m["contextFixture"])
+    elif m["track"] == BEIR["TRACK"]:
+        expected_actor, _, expected_cache, expected_schedule = BEIR["fixtures"](globals(), schedule.get("futureVariant") == "changed")
     elif m["track"] == NATIVE_SWEEP["TRACK"]:
         expected_actor, _, expected_cache, expected_schedule = NATIVE_SWEEP["fixtures"](fixtures, NATIVE, schedule.get("futureVariant") == "changed")
     elif m["track"] == NATIVE["TRACK"]:
@@ -323,7 +336,7 @@ def validate(manifest_path, binary, scorer, source_root, context_assets=None):
         expected_actor, _, expected_cache, expected_schedule = fixtures(m["track"])
     if encoded(actor) != encoded(expected_actor) or encoded(cache) != encoded(expected_cache) or encoded(schedule) != encoded(expected_schedule):
         raise ValueError("unsupported synthetic actor/cache fixture")
-    exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary"))
+    exact_keys(labels, ("adapterVersion", "annotationUnit", "relevant", "labelCanary", *(("metricQrels",) if m["track"] == BEIR["TRACK"] else ())))
     if type(labels["adapterVersion"]) is not int or labels["adapterVersion"] != 1 or labels["annotationUnit"] != "synthetic-unit" or not isinstance(labels["labelCanary"], str) or not labels["labelCanary"]:
         raise ValueError("unsupported annotations")
     if not isinstance(labels["relevant"], dict) or not set(labels["relevant"]) <= {q["queryId"] for q in schedule["queries"]}:
@@ -334,20 +347,45 @@ def validate(manifest_path, binary, scorer, source_root, context_assets=None):
     if m["dataset"] != dict(kind="generated-synthetic", upstreamRevision=None, upstreamUrl=None, thirdPartyLicense=None,
                             actorArtifactSha256=m["actorInputs"]["sha256"], intendedUse="contract-diagnostic-only"):
         raise ValueError("unsupported dataset claim")
-    profile = json.loads(subprocess.check_output([str(scorer), "--profile"], env={"PATH": "/usr/bin:/bin"}))
-    if (profile["sourceCommit"] != m["sourceCommit"] or profile["containerImageId"] != m["containerImageId"] or
-            profile["sourceTreeSha256"] != digest(encoded(m["sourceFilesSha256"]))):
-        raise ValueError("compiled provenance mismatch")
-    if encoded(m["activeEmbedding"]) != encoded(profile["activeEmbedding"]):
-        raise ValueError("configuration profile mismatch")
-    if context: CONTEXT["preflight"](m,schedule,context_assets)
-    return m, actor, labels, cache, schedule, digest(raw)
+    return actor, labels, cache, schedule
+
+
+def validate(manifest_path, binary, scorer, source_root, beir_reference=None, *, context_assets=None):
+    # Complete input validation before creating episode output, provider, or store.
+    raw = manifest_path.read_bytes()
+    m = json.loads(raw)
+    accounted = m.get("track") == ACCOUNTING_TRACK
+    context = m.get("track") == CONTEXT["TRACK"]
+    exact_keys(m, (*(("accountingPolicy",) if accounted else ()), *(("metricPolicy", "referenceBundleSha256") if m.get("track") == BEIR["TRACK"] else ()), "manifestVersion", "sourceMappingVersion", "traceSchemaVersion", "track", "versions", "capabilities",
+                   "sourceCommit", "sourceFilesSha256", "containerImageId", "limits", "executables", "actorInputs",
+                   "evaluatorLabels", "evaluatorSchedule", "replayCache", "activeEmbedding", "scoringProfile", "dataset", *(("contextPolicy", "contextFixture") if context else ())))
+    if accounted and encoded(m["accountingPolicy"]) != encoded(ACCOUNTING_POLICY):
+        raise ValueError("unsupported accounting/token/context/cost policy")
+    validate_build(m, binary, scorer, source_root)
+    artifacts = validate_artifacts(manifest_path.parent, m)
+    if m["track"] == BEIR["TRACK"]:
+        actor, labels, cache, schedule = artifacts
+        BEIR["preflight"](m, labels, actor, schedule, beir_reference)
+    if context:
+        CONTEXT["preflight"](m, artifacts[3], context_assets)
+    return m, *artifacts, digest(raw)
+
+
+def build_manifest(args, build):
+    return dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=TRACK, versions=VERSIONS,
+        capabilities=CAPABILITIES, sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
+        containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
+        executables=dict(recalld=digest(args.binary.read_bytes()), scorer=digest(args.scorer.read_bytes())),
+        activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
 
 
 def prepare(args):
-    context = getattr(args,"track",TRACK)==CONTEXT["TRACK"]
+    if getattr(args, "track", TRACK) == GROUPED["TRACK"]:
+        return GROUPED["prepare"](args, globals())
+    reference_sha = BEIR["verify_reference"](getattr(args, "beir_reference", None)) if args.track == BEIR["TRACK"] else None
+    context = getattr(args, "track", TRACK) == CONTEXT["TRACK"]
     if context:
-        profile,kind=CONTEXT["PROFILES"][args.context_profile]
+        profile, kind = CONTEXT["PROFILES"][args.context_profile]
         CONTEXT["TOKEN"]["load"](args.context_assets)
     args.out.mkdir()
     build = json.loads(args.build.read_text())
@@ -358,6 +396,8 @@ def prepare(args):
              executables={"ownedEvaluator" if args.track in (OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
              activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
     if context: m.update(track=CONTEXT["TRACK"],contextPolicy=CONTEXT["TOKEN"]["policy"](profile),contextFixture=kind)
+    if args.track == BEIR["TRACK"]:
+        m.update(metricPolicy=BEIR["POLICY"], referenceBundleSha256=reference_sha)
     if getattr(args, "track", TRACK) == ACCOUNTING_TRACK:
         m.update(track=ACCOUNTING_TRACK, accountingPolicy=ACCOUNTING_POLICY)
     if args.track in (NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]):
@@ -389,7 +429,7 @@ class Replay(http.server.BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             status, body = 400, dict(error=dict(message="offline replay miss; no fallback"))
         with self.server.log.open("a") as log:
-            log.write(json.dumps(dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])], **({"responseVectors": vectors if status == 200 else None} if self.server.owned else {}))) + "\n")
+            log.write(json.dumps(dict(requestBody=raw.decode(), status=status, environmentHash=self.server.environment, deliveryOrdinal=self.server.delivery, cacheKeys=[self.server.key(t) for t in json.loads(raw).get("input", [])], **({"responseVectors": vectors if status == 200 else None} if self.server.owned or getattr(self.server, "grouped", False) else {}))) + "\n")
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -428,17 +468,20 @@ class Replay(http.server.BaseHTTPRequestHandler):
                 log.flush()
 
 
-def run_episode(args):
-    if json.loads(args.manifest.read_text()).get("track") == NATIVE_SWEEP["TRACK"]:
+def run_episode(args, prepared=None):
+    if prepared is None and json.loads(args.manifest.read_text()).get("track") == GROUPED["TRACK"]:
+        return GROUPED["run"](args, globals())
+    if prepared is None and json.loads(args.manifest.read_text()).get("track") == NATIVE_SWEEP["TRACK"]:
         return NATIVE["run"](args, globals(), NATIVE_SWEEP)
-    if json.loads(args.manifest.read_text()).get("track") == NATIVE["TRACK"]:
+    if prepared is None and json.loads(args.manifest.read_text()).get("track") == NATIVE["TRACK"]:
         return NATIVE["run"](args, globals())
-    if json.loads(args.manifest.read_text()).get("track") in (RESET["TRACK"], SWEEP["TRACK"]):
+    if prepared is None and json.loads(args.manifest.read_text()).get("track") in (RESET["TRACK"], SWEEP["TRACK"]):
         return RESET["run"](args, globals())
-    m, actor, labels, cache, schedule, environment = validate(args.manifest, args.binary, args.scorer, args.source_root, getattr(args,"context_assets",None))
+    m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root, beir_reference=getattr(args, "beir_reference", None), context_assets=getattr(args, "context_assets", None))
     owned = m["track"] == OWNED["TRACK"]
-    scripted = owned or m["track"] == CONFORMANCE["TRACK"]
-    conformance = scripted and not owned
+    beir = m["track"] == BEIR["TRACK"]
+    scripted = owned or beir or m["track"] == CONFORMANCE["TRACK"]
+    conformance = scripted and not owned and not beir
     adapter = OWNED if owned else CONFORMANCE
     args.out.mkdir()
     evaluator = args.out / "evaluator"
@@ -452,6 +495,7 @@ def run_episode(args):
     trace = TraceRecorder(args.out / "trace.jsonl", environment, args.out.name, m["activeEmbedding"]) if accounted else None
     stub.accounted = accounted
     stub.owned = owned
+    stub.grouped = "groupContext" in m
     stub.log, stub.environment, stub.delivery = args.out / "actor-provider.jsonl", environment, 0
     stub.key = lambda text: digest(encoded(dict(environmentHash=environment, model=MODEL, dimension=4, prefixedInput=text)))
     stub.entries = {stub.key(text): vector for text, vector in cache["entries"].items() if text.startswith("a6-document:") and (not conformance or text.removeprefix("a6-document:") in {CONFORMANCE["document_text"](s) for s in actor["sources"][:3]} or text == "a6-document:health check")}
@@ -633,10 +677,12 @@ warm_file_enabled = false
         event_text = "".join(json.dumps(e) + "\n" for e in events)
         (evaluator / "source-events.jsonl").write_text(event_text)
         save(args.out / "source-mappings.json", dict(sourceMappingVersion=1, actorArtifactSha256=m["actorInputs"]["sha256"], mappings=mappings, sources=actor["sources"]))
+        if "groupContext" in m:
+            save(evaluator / "group-context.json", m["groupContext"])
         if not accounted:
             with (args.out / "trace.jsonl").open("w") as legacy_trace:
                 for row in outcomes:
-                    legacy_trace.write(json.dumps(dict(traceSchemaVersion=1, runId=environment, episodeId=args.out.name, groupId="synthetic-regression",
+                    legacy_trace.write(json.dumps(dict(traceSchemaVersion=1, runId=environment, episodeId=args.out.name, groupId=m.get("groupContext", {}).get("groupId", "synthetic-regression"),
                         stepId=row["stepId"], environmentHash=environment, action=row["request"], outcome=row["response"],
                         readGeneration=None, readiness=(dict(available=True, scope="post-delivery-barrier-not-response-readview", receiptFile="evaluator/readiness-receipts.json", deliveryOrdinal=row["deliveryOrdinal"]) if owned else dict(available=False)), simulatedTimeMs=None, snapshot=None, reward=None)) + "\n")
         if runtime_failure:
@@ -644,6 +690,8 @@ warm_file_enabled = false
             raise RuntimeError(runtime_failure)
         score_input = dict(profile=m["scoringProfile"], environmentHash=environment, sourceIds=[s["sourceId"] for s in actor["sources"]], mappings=mappings,
                            relevant=labels["relevant"], queries=queries, sourceEvents=event_text, sourceEventsSha256=digest(event_text.encode()))
+        if beir:
+            BEIR["consume"](args, globals(), m, actor, labels, schedule, wire, score_input)
         save(evaluator / "score-input.json", score_input)
         subprocess.run([str(args.scorer), "--input", str(evaluator / "score-input.json"), "--out", str(evaluator / "scores.json")], check=True)
         if "contextPolicy" in m: CONTEXT["consume"](args,globals(),m,schedule,wire,score_input)
@@ -766,13 +814,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
-    p.add_argument("--track", choices=(TRACK, CONTEXT["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
+    p.add_argument("--track", choices=(TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
-    p.add_argument("--context-profile",choices=tuple(CONTEXT["PROFILES"]),default="default")
-    p.add_argument("--context-assets",type=Path)
+    p.add_argument("--beir-reference", type=Path)
+    p.add_argument("--context-profile", choices=tuple(CONTEXT["PROFILES"]), default="default")
+    p.add_argument("--context-assets", type=Path)
     p = sub.add_parser("run")
     for flag in ("binary", "scorer", "source-root", "manifest", "out"): p.add_argument("--" + flag, type=Path, required=True)
-    p.add_argument("--context-assets",type=Path)
+    p.add_argument("--beir-reference", type=Path)
+    p.add_argument("--context-assets", type=Path)
     p = sub.add_parser("host")
     p.add_argument("--track", choices=(TRACK, CONFORMANCE["TRACK"]), default=TRACK)
     p.add_argument("--cache", type=Path, required=True); p.add_argument("--build-cache", type=Path, required=True); p.add_argument("--library-evidence", type=Path)
