@@ -37,7 +37,12 @@ impl Write for Count {
 }
 impl Count {
     fn add(&mut self, value: &impl serde::Serialize) -> Result<(), StorageError> {
-        serde_json::to_writer(&mut *self, value).map_err(|_| too_large())
+        // Match project()'s json!(receipt) representation, including f32 ->
+        // Value's f64 widening. Each component was bounded before decoding;
+        // never construct a Value containing the entire witness union.
+        let value =
+            serde_json::to_value(value).map_err(|e| StorageError::Serialize(e.to_string()))?;
+        serde_json::to_writer(&mut *self, &value).map_err(|_| too_large())
     }
     fn element(&mut self, value: &impl serde::Serialize) -> Result<(), StorageError> {
         self.add(value)?;
@@ -46,12 +51,49 @@ impl Count {
     }
 }
 
-struct Scan {
+pub(super) struct Scan {
     items: usize,
     bytes: usize,
     value_limit: usize,
 }
 impl Scan {
+    pub(super) fn new(value_limit: usize) -> Self {
+        Self {
+            items: 0,
+            bytes: 0,
+            value_limit,
+        }
+    }
+
+    pub(super) fn resolve_name(
+        &mut self,
+        tx: &redb::WriteTransaction,
+        name: &str,
+    ) -> Result<Option<NamespaceId>, StorageError> {
+        let mut exact = None;
+        let mut folded = None;
+        for row in tx.open_table(NAMESPACE_TABLE)?.iter()? {
+            let (id, bytes) = row?;
+            self.examine(bytes.value().len())?;
+            // Same decoder/error as the existing list-based name resolver.
+            let config: NamespaceConfig = serde_json::from_slice(bytes.value())
+                .map_err(|e| StorageError::Deserialize(e.to_string()))?;
+            if config.id.get() != id.value() {
+                return Err(StorageError::InvalidControl(
+                    "purge namespace key mismatch".into(),
+                ));
+            }
+            if exact.is_none() && config.name == name {
+                exact = Some(config.id);
+            }
+            if folded.is_none() && config.name.eq_ignore_ascii_case(name) {
+                folded = Some(config.id);
+            }
+            // No early positive: later malformed/oversized rows must still
+            // reject, and a later exact match takes precedence over a fold.
+        }
+        Ok(exact.or(folded))
+    }
     fn examine(&mut self, bytes: usize) -> Result<(), StorageError> {
         self.items = self.items.checked_add(1).ok_or_else(too_large)?;
         self.bytes = self.bytes.checked_add(bytes).ok_or_else(too_large)?;
@@ -108,13 +150,11 @@ impl Scan {
 pub(super) fn check_namespace_size(
     tx: &redb::WriteTransaction,
     namespace: NamespaceId,
-    limit: usize,
+    scan: &mut Scan,
 ) -> Result<(), StorageError> {
     let table = tx.open_table(NAMESPACE_TABLE)?;
     if let Some(bytes) = table.get(namespace.get())? {
-        if bytes.value().len() > limit.min(MAX_VALUE_BYTES) {
-            return Err(too_large());
-        }
+        scan.examine(bytes.value().len())?;
     }
     Ok(())
 }
@@ -137,9 +177,10 @@ pub(super) fn admit(
     namespace: NamespaceId,
     start: &MutationOutcome,
     edges: &EdgeStore,
-    limit: usize,
+    scan: &mut Scan,
     force: bool,
 ) -> Result<(), StorageError> {
+    let limit = scan.value_limit;
     let mut start_count = Count { bytes: 0, limit };
     start_count.add(&sizing_receipt(start.clone()))?;
     // Count the union of every possible child, not just one predicted partition.
@@ -178,11 +219,6 @@ pub(super) fn admit(
             },
         ))?;
     }
-    let mut scan = Scan {
-        items: 0,
-        bytes: 0,
-        value_limit: limit,
-    };
     for row in tx.open_table(META_TABLE)?.iter()? {
         let (key, bytes) = row?;
         scan.examine(bytes.value().len())?;
@@ -251,4 +287,109 @@ pub(super) fn admit(
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_api1_purge_count_matches_projected_value_at_exact_limit() {
+        #[derive(serde::Serialize)]
+        struct Component<'a> {
+            stability: f32,
+            name: &'a str,
+        }
+        for stability in [3.7145_f32, f32::MIN_POSITIVE, 0.3, 1.] {
+            let component = Component {
+                stability,
+                name: "escaped \" \\ \0 界",
+            };
+            let projected = serde_json::to_vec(&serde_json::to_value(&component).unwrap()).unwrap();
+            if stability == 3.7145 {
+                assert!(serde_json::to_vec(&component).unwrap().len() < projected.len());
+            }
+            let mut exact = Count {
+                bytes: 0,
+                limit: projected.len(),
+            };
+            exact.add(&component).unwrap();
+            assert_eq!(exact.bytes, projected.len());
+            assert!(matches!(
+                Count {
+                    bytes: 0,
+                    limit: projected.len() - 1
+                }
+                .add(&component),
+                Err(StorageError::PurgeResponseTooLarge)
+            ));
+        }
+        assert!(
+            Count {
+                bytes: usize::MAX,
+                limit: usize::MAX
+            }
+            .write_all(b"x")
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn native_api1_purge_raw_name_scan_preserves_precedence_and_rejects_late_caps() {
+        let root = tempfile::tempdir().unwrap();
+        let db = redb::Database::create(root.path().join("names.db")).unwrap();
+        let tx = db.begin_write().unwrap();
+        {
+            let mut table = tx.open_table(NAMESPACE_TABLE).unwrap();
+            for (id, name) in [(1, "fold"), (2, "Fold"), (3, "other")] {
+                let mut config = NamespaceConfig::default_namespace(100);
+                config.id = NamespaceId::new(id);
+                config.name = name.into();
+                table
+                    .insert(id, serde_json::to_vec(&config).unwrap().as_slice())
+                    .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+        let tx = db.begin_write().unwrap();
+        for (name, expected) in [("Fold", Some(2)), ("FOLD", Some(1)), ("missing", None)] {
+            let mut scan = Scan::new(4096);
+            assert_eq!(
+                scan.resolve_name(&tx, name).unwrap().map(|id| id.get()),
+                expected
+            );
+            assert_eq!(scan.items, 3);
+        }
+        let mut scan = Scan::new(4096);
+        scan.items = MAX_EXAMINATIONS - 2;
+        assert!(matches!(
+            scan.resolve_name(&tx, "fold"),
+            Err(StorageError::PurgeResponseTooLarge)
+        ));
+        // The original exact match occurs first. An oversized malformed later
+        // value must be refused before decoding, never hidden by that match.
+        tx.open_table(NAMESPACE_TABLE)
+            .unwrap()
+            .insert(3, vec![b'x'; 8192].as_slice())
+            .unwrap();
+        assert!(matches!(
+            Scan::new(4096).resolve_name(&tx, "fold"),
+            Err(StorageError::PurgeResponseTooLarge)
+        ));
+        tx.open_table(NAMESPACE_TABLE)
+            .unwrap()
+            .insert(3, b"{".as_slice())
+            .unwrap();
+        assert!(matches!(
+            Scan::new(4096).resolve_name(&tx, "fold"),
+            Err(StorageError::Deserialize(_))
+        ));
+        let mut scan = Scan::new(4096);
+        scan.bytes = MAX_SOURCE_BYTES;
+        assert!(matches!(
+            scan.examine(1),
+            Err(StorageError::PurgeResponseTooLarge)
+        ));
+        tx.abort().unwrap();
+    }
 }

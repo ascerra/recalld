@@ -1,7 +1,11 @@
 # Implemented purge admission inequality: source review candidate
 
-This describes unvalidated implementation following the approved c6b5755d plan.
-Candidate006 remains immutable. No full-suite or readiness claim.
+This describes the corrected, still-unvalidated implementation following the
+approved c6b5755d plan. Candidate006 and the 71802899/candidate007 green run remain
+immutable. Huygens found two source proof/resource gaps in 71802899: typed f32
+counting did not match projected Value serialization, and initial name resolution
+decoded the whole catalog before caps. These corrections require his source ACK
+before new execution. No full-suite or readiness claim.
 
 ## Wire bound
 
@@ -25,9 +29,13 @@ serializer inequality tests and actual complete frames remain required.
 
 ## Canonical receipt bound
 
-`metadata/purge_budget.rs` uses serde_json::to_writer and a checked counting sink,
-not a Vec containing a whole hypothetical receipt. The exact start outcome is
-counted inside a WriteReceipt sizing envelope with maximum-width receipt IDs/G.
+`metadata/purge_budget.rs` uses the same serde_json::to_value representation as
+project()'s json!(receipt), then serde_json::to_writer and a checked counting sink.
+In particular f32 values widen identically. A Value is constructed only for one
+source-bounded component, never a Vec/Value containing the whole witness union.
+The source bound applies before decoding; temporary Value string/object storage
+is additional bounded per-component memory, not claimed to be zero allocation.
+The exact start outcome is counted inside a WriteReceipt sizing envelope with maximum-width receipt IDs/G.
 The deleting-child scaffold is counted with empty arrays, u64 maximum sequence,
 u63 maximum previous/committed G and a full UUID parent. Cleanup and Complete
 chunk=None scaffolds are separately serialized. These sizing objects are never
@@ -43,8 +51,10 @@ chunk, each actual witness has a counted counterpart and no additional source ca
 appear while the target purge is active. Reducing counts/removing rows cannot
 increase this sum. Repeated sources are counted without allocating a global set.
 
-Only peer edge_count and record_generation may change between start and any child.
-Both before and after sizing states use u16::MAX and Generation::MAX respectively,
+Permitted continuation can change a surviving peer's edge_count and
+record_generation. A target that was such a peer can later be deleted with those
+changed fields. All sizing states, including eventual deletion states and both
+peer states, use u16::MAX and Generation::MAX respectively,
 covering every representable decimal width. Other record content/lifecycle/history,
 profile IDs, edge payloads and vector references remain unchanged. The content
 capture uses a 32-byte all-255 sizing text hash, whose decimal digits upper-bound
@@ -64,8 +74,12 @@ historical-route negatives are still required; source review alone is not proof.
 
 Fresh native bounded calls only: at most 100,000 examinations (record, namespace,
 edge and repeated endpoint lookups all count), 256 MiB cumulative encoded source
-bytes, and each decoded value <= min(receipt_limit, 8 MiB). Root namespace size is
-checked before decode. Overflow/cap/serialization failure refuses before any start
+bytes, and each decoded value <= min(receipt_limit, 8 MiB). The bounded public Name route resolves raw namespace rows inside the SAME guarded
+start write transaction, with these checks before each decode. It scans every row
+and retains only first-exact/first-folded IDs, preserving exact-match preference
+and later decode/cap errors. The same Scan continues into root reload and all proof
+components, so resolution cannot reset or bypass cumulative limits. No initial
+list_namespaces Vec is used. Unbounded direct and legacy routes remain separate. Overflow/cap/serialization failure refuses before any start
 write or owned ID draw; a partial scan never authorizes mutation. Existing fresh
 native record/force checks move into the bounded scan instead of running an
 unbounded pre-scan. The unbounded existing route retains its prior checks.
@@ -78,8 +92,9 @@ memory is not claimed to be bounded by this added counter. Repeated endpoint loo
 work counts toward the cap. This conservatively refuses some valid large unrelated
 stores and high-degree namespaces; it is not a new disk/export/schema restriction.
 
-Original request replay remains before fresh admission. Name-only public API1 has
-no key and cannot enter the private Context replay branch. Active namespace reads
+Original request replay remains before fresh admission. The bounded name method creates an unkeyed API1 context only after same-TX
+resolution and cannot enter the private Context replay branch. The common TX body
+retains original replay-before-fresh-admission ordering for Context callers. Active namespace reads
 are unavailable; completed absent names are NotFound; recreated names resolve to
 new IDs, never old receipts. No retained oversized receipt is rewritten/substituted.
 The new refusal says operation too large with no retry/get_memory advice. A known

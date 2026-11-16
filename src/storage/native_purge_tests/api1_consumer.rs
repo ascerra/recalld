@@ -1053,8 +1053,12 @@ async fn native_api1_purge_max_chunk_refuses_legacy_before_work_and_preserves_ne
         .clone();
     let receipt_bytes = serde_json::to_vec(&first).unwrap().len();
     eprintln!(
-        "ACTUAL_MAX_CHUNK_FRAME rows={} canonical={:?} full_receipt_bytes={} response={response:?}",
-        p.removed, p.stage, receipt_bytes
+        "ACTUAL_MAX_CHUNK_FRAME rows={} canonical={:?} full_receipt_bytes={} response_bytes={} response_code={:?}",
+        p.removed,
+        p.stage,
+        receipt_bytes,
+        serde_json::to_vec(&response).unwrap().len(),
+        response.error.as_ref().map(|e| e.code)
     );
     assert_eq!(p.stage, PurgeStage::Complete);
     assert_eq!(

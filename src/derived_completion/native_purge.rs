@@ -178,6 +178,16 @@ impl DerivedCompletion {
                 let ctx = match selector {
                     PurgeSelector::Context(ctx) => ctx,
                     PurgeSelector::Name(name) => {
+                        if let Some(limit) = receipt_limit {
+                            return storage
+                                .begin_native_purge_named_admitted(
+                                    &name,
+                                    force,
+                                    Some(&child),
+                                    limit,
+                                )?
+                                .ok_or(PurgeApi1Failure::NamespaceNotFound(name));
+                        }
                         let namespace = storage
                             .get_namespace_by_name(&name)?
                             .ok_or(PurgeApi1Failure::NamespaceNotFound(name))?;
@@ -186,7 +196,7 @@ impl DerivedCompletion {
                     }
                 };
                 storage
-                    .begin_namespace_purge_admitted(&ctx, force, Some(&child), receipt_limit)
+                    .begin_namespace_purge_with_work(&ctx, force, Some(&child))
                     .map_err(PurgeApi1Failure::from)
             })();
             storage.meta_store().finish_work(child);
