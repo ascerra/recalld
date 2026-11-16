@@ -131,6 +131,16 @@ fn receipt_snapshot(path: &std::path::Path) -> Vec<(Vec<u8>, Vec<u8>)> {
     receipts(&db.begin_read().unwrap())
 }
 
+fn control_snapshot(path: &std::path::Path) -> control::ControlState {
+    // Active purge intentionally rejects the ordinary admitted control reader.
+    // Inspect a disposable metadata copy; never bypass/change the source guard.
+    let (_copy, db) =
+        crate::storage::validation::inspect_database_copy(&path.join("meta.db"), true).unwrap();
+    control::validate_existing(&db.begin_read().unwrap())
+        .unwrap()
+        .unwrap()
+}
+
 async fn request(app: &Router, body: &str) -> (StatusCode, Value) {
     request_with_limit(app, body, crate::daemon::protocol::MAX_MESSAGE_SIZE).await
 }
@@ -621,34 +631,38 @@ async fn http_sweep_completion_worker_loss_preserves_unknown_and_prior_receipt()
     }
 }
 
+async fn create_purge_namespace(f: &Fixture) {
+    f.storage
+        .write()
+        .unwrap()
+        .create_native_namespace(
+            &MutationContext {
+                scope: control::MutationScope::Catalog,
+                ..MutationContext::unkeyed(NamespaceId::new(1))
+            },
+            &crate::storage::native_catalog::NativeNamespaceInput {
+                name: "purge-race".into(),
+                embedding_dim: Some(4),
+                embedding_profile_id: None,
+                initial_stability: None,
+                desired_retention: None,
+                decay_rate_multiplier: None,
+            },
+            &crate::embedding::runtime::tests::profile(),
+            &NativePolicyInputs::default(),
+            &crate::time::ManualClock::new(1000),
+            None,
+        )
+        .unwrap();
+    f.completion().rebuild_all().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn http_sweep_peer_effect_and_purge_race_refuse_without_foreign_ack() {
     for purge in [false, true] {
         let (f, ids, clock) = fixture().await;
         if purge {
-            f.storage
-                .write()
-                .unwrap()
-                .create_native_namespace(
-                    &MutationContext {
-                        scope: control::MutationScope::Catalog,
-                        ..MutationContext::unkeyed(NamespaceId::new(1))
-                    },
-                    &crate::storage::native_catalog::NativeNamespaceInput {
-                        name: "purge-race".into(),
-                        embedding_dim: Some(4),
-                        embedding_profile_id: None,
-                        initial_stability: None,
-                        desired_retention: None,
-                        decay_rate_multiplier: None,
-                    },
-                    &crate::embedding::runtime::tests::profile(),
-                    &NativePolicyInputs::default(),
-                    &crate::time::ManualClock::new(1000),
-                    None,
-                )
-                .unwrap();
-            f.completion().rebuild_all().await.unwrap();
+            create_purge_namespace(&f).await;
         }
         let before = f.storage.read().unwrap().control_state().unwrap();
         let (entered, waiting) = tokio::sync::oneshot::channel();
@@ -717,7 +731,7 @@ async fn http_sweep_peer_effect_and_purge_race_refuse_without_foreign_ack() {
                 foreign,
                 serde_json::to_vec(&pending).unwrap(),
                 progress,
-                engine.control_state().unwrap(),
+                control_snapshot(engine.db_path()),
             )
         };
         assert_eq!(
@@ -738,7 +752,7 @@ async fn http_sweep_peer_effect_and_purge_race_refuse_without_foreign_ack() {
         assert!(!known.contains(&foreign));
         let engine = f.storage.read().unwrap();
         assert_eq!(
-            engine.control_state().unwrap().generation_ref(),
+            control_snapshot(engine.db_path()).generation_ref(),
             after_peer.generation_ref()
         );
         assert_eq!(
@@ -1115,5 +1129,85 @@ async fn http_sweep_later_known_publication_failure_retains_ordered_full_receipt
             rows.iter()
                 .any(|(_, b)| control::validate_receipt(b).unwrap().receipt == receipt)
         );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_preexisting_pending_or_purge_has_no_receipt_authority() {
+    for purge in [false, true] {
+        let (f, ids, clock) = fixture().await;
+        if purge {
+            create_purge_namespace(&f).await;
+        }
+        let path = f.storage.read().unwrap().db_path().to_owned();
+        let progress = {
+            let mut engine = f.storage.write().unwrap();
+            if purge {
+                engine
+                    .begin_native_purge_named_admitted(
+                        "purge-race",
+                        true,
+                        None,
+                        crate::daemon::protocol::MAX_MESSAGE_SIZE,
+                    )
+                    .unwrap()
+            } else {
+                let policy = NativePolicyInputs::default();
+                let intent = engine
+                    .meta_store()
+                    .capture_native_decay(ids[0], NamespaceId::new(1), &policy, NOW)
+                    .unwrap();
+                assert!(matches!(
+                    engine
+                        .apply_native_decay(
+                            &MutationContext::unkeyed(NamespaceId::new(1)),
+                            &intent,
+                            &policy,
+                            None
+                        )
+                        .unwrap(),
+                    crate::storage::native_maintenance::NativeDecayResult::Committed(_)
+                ));
+                None
+            }
+        };
+        let before = control_snapshot(&path).generation_ref();
+        let pending = serde_json::to_vec(
+            &f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .pending_effects()
+                .unwrap(),
+        )
+        .unwrap();
+        let receipts = receipt_snapshot(&path);
+        let router = app(&f, clock.clone());
+        let (status, body) = request(&router, "{}").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["commitState"], "notCommitted");
+        assert_eq!(body["receipts"], json!([]));
+        assert!(body["operationId"].is_null());
+        assert_eq!(body["ready"], false);
+        assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+        assert_eq!(receipt_snapshot(&path), receipts);
+        let engine = f.storage.read().unwrap();
+        assert_eq!(control_snapshot(&path).generation_ref(), before);
+        assert_eq!(
+            serde_json::to_vec(&engine.meta_store().pending_effects().unwrap()).unwrap(),
+            pending
+        );
+        if let Some(p) = progress {
+            assert_eq!(
+                engine
+                    .lookup_namespace_purge(
+                        p.store_id,
+                        p.namespace_id,
+                        p.start_receipt.operation_id
+                    )
+                    .unwrap(),
+                Some(p)
+            );
+        }
     }
 }
