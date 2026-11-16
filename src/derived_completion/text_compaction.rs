@@ -122,6 +122,91 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bounded_compaction_entry_refuses_peer_after_completion_before_worker() {
+        let f = crate::test_support::Fixture::new();
+        let id = f.insert_memory().await;
+        let c = f.completion();
+        c.complete().await.unwrap();
+        let admission = crate::storage::maintenance::ReceiptAdmission::new(8192).unwrap();
+        let observed = admission.clone();
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        let task = tokio::spawn(async move {
+            let work = c.accept_work(None).unwrap();
+            let result = c
+                .compact_text_accepted_bounded(&work, Some(&admission), Some((entered, resume)))
+                .await;
+            if let Err(error) = &result {
+                admission.fail(error);
+            }
+            c.finish_known_work(work);
+            result
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        let (foreign, at, selection, pending) = {
+            let engine = f.storage.write().unwrap();
+            let record = engine.get_record(id).unwrap().unwrap();
+            let ns = engine
+                .get_namespace(crate::model::NamespaceId::new(record.namespace_id))
+                .unwrap()
+                .unwrap();
+            let result = engine
+                .apply_legacy_decay_with_receipt(
+                    &crate::storage::control::MutationContext::unkeyed(ns.id),
+                    id,
+                    &record,
+                    &ns,
+                    record.phase,
+                    0.5,
+                    0.5,
+                )
+                .unwrap();
+            let crate::storage::maintenance::DecayMutationResult::Committed(receipt) = result
+            else {
+                panic!("real peer commit");
+            };
+            (
+                receipt,
+                engine.control_state().unwrap().generation_ref(),
+                engine.meta_store().text_selection().unwrap(),
+                serde_json::to_vec(&engine.meta_store().pending_effects().unwrap()).unwrap(),
+            )
+        };
+        release.send(()).unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            result,
+            Err(StorageError::MaintenanceDependencyUnavailable)
+        ));
+        let (_, known, _) = observed.snapshot().unwrap();
+        assert!(known.is_empty());
+        let engine = f.storage.read().unwrap();
+        assert_eq!(engine.control_state().unwrap().generation_ref(), at);
+        assert_eq!(engine.meta_store().text_selection().unwrap(), selection);
+        assert_eq!(
+            serde_json::to_vec(&engine.meta_store().pending_effects().unwrap()).unwrap(),
+            pending
+        );
+        assert_eq!(
+            engine.meta_store().pending_effects().unwrap()[0].receipt,
+            foreign
+        );
+        assert!(
+            !engine
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compaction_cancelled_waiter_cannot_release_worker_publication_lease() {
         let f = crate::test_support::Fixture::new();
         f.insert_memory().await;

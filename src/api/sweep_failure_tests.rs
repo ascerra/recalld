@@ -19,7 +19,7 @@ impl crate::time::Clock for SweepClock {
     }
 }
 
-async fn fixture() -> (Fixture, Vec<MemoryId>, Arc<SweepClock>) {
+async fn legacy_fixture() -> (Fixture, Vec<MemoryId>, Arc<SweepClock>) {
     let f = Fixture::new();
     let mut ids = Vec::new();
     for n in 0..2 {
@@ -48,6 +48,11 @@ async fn fixture() -> (Fixture, Vec<MemoryId>, Arc<SweepClock>) {
         ids.push(crate::storage::insertion::inserted_id(&receipt).unwrap());
     }
     f.completion().rebuild_all().await.unwrap();
+    (f, ids, Arc::new(SweepClock(AtomicUsize::new(0))))
+}
+
+async fn fixture() -> (Fixture, Vec<MemoryId>, Arc<SweepClock>) {
+    let (f, ids, clock) = legacy_fixture().await;
     let legacy = f.close();
     let root = tempfile::tempdir().unwrap();
     let destination = root.path().join("schema");
@@ -74,7 +79,6 @@ async fn fixture() -> (Fixture, Vec<MemoryId>, Arc<SweepClock>) {
         1.,
         1000,
     );
-    let clock = Arc::new(SweepClock(AtomicUsize::new(0)));
     let session =
         NativeLifecycleSession::open(&destination, NativePolicyInputs::default(), clock.clone())
             .unwrap();
@@ -621,6 +625,31 @@ async fn http_sweep_completion_worker_loss_preserves_unknown_and_prior_receipt()
 async fn http_sweep_peer_effect_and_purge_race_refuse_without_foreign_ack() {
     for purge in [false, true] {
         let (f, ids, clock) = fixture().await;
+        if purge {
+            f.storage
+                .write()
+                .unwrap()
+                .create_native_namespace(
+                    &MutationContext {
+                        scope: control::MutationScope::Catalog,
+                        ..MutationContext::unkeyed(NamespaceId::new(1))
+                    },
+                    &crate::storage::native_catalog::NativeNamespaceInput {
+                        name: "purge-race".into(),
+                        embedding_dim: Some(4),
+                        embedding_profile_id: None,
+                        initial_stability: None,
+                        desired_retention: None,
+                        decay_rate_multiplier: None,
+                    },
+                    &crate::embedding::runtime::tests::profile(),
+                    &NativePolicyInputs::default(),
+                    &crate::time::ManualClock::new(1000),
+                    None,
+                )
+                .unwrap();
+            f.completion().rebuild_all().await.unwrap();
+        }
         let before = f.storage.read().unwrap().control_state().unwrap();
         let (entered, waiting) = tokio::sync::oneshot::channel();
         let (release, resume) = tokio::sync::oneshot::channel();
@@ -645,7 +674,7 @@ async fn http_sweep_peer_effect_and_purge_race_refuse_without_foreign_ack() {
             let (foreign, progress) = if purge {
                 let p = engine
                     .begin_native_purge_named_admitted(
-                        "default",
+                        "purge-race",
                         true,
                         None,
                         crate::daemon::protocol::MAX_MESSAGE_SIZE,
@@ -741,4 +770,289 @@ async fn http_sweep_peer_effect_and_purge_race_refuse_without_foreign_ack() {
         }
         assert_eq!(clock.0.load(Ordering::SeqCst), 1);
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_both_formats_phase_and_delete_budget_abort_then_strict_reopen() {
+    for native in [false, true] {
+        let (f, ids, clock) = if native {
+            fixture().await
+        } else {
+            legacy_fixture().await
+        };
+        let path = f.storage.read().unwrap().db_path().to_owned();
+        let original_receipts = receipt_snapshot(&path);
+        for next in [Some(DecayPhase::Summary), Some(DecayPhase::Ghost), None] {
+            let before = canonical(&f);
+            // A nonzero candidate allowance reaches the final transaction's
+            // encoder, then rejects the complete real proof before commit.
+            let bounded = app_with_limit(&f, clock.clone(), 2200);
+            let (status, failure) = request_with_limit(&bounded, "{}", 2200).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(failure["error"], "SWEEP_RESPONSE_LIMIT");
+            assert_eq!(failure["commitState"], "notCommitted");
+            assert_eq!(failure["receipts"], json!([]));
+            assert_eq!(canonical(&f), before);
+            drop(bounded);
+
+            let router = app(&f, clock.clone());
+            let (status, _) = request(&router, "{}").await;
+            assert_eq!(status, StatusCode::OK);
+            for id in &ids {
+                assert_eq!(f.record(*id).map(|r| r.phase), next);
+            }
+            assert!(
+                f.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .publication_state()
+                    .unwrap()
+                    .matches_canonical()
+            );
+            drop(router);
+        }
+        assert_eq!(clock.0.load(Ordering::SeqCst), 6);
+        let rows = receipt_snapshot(&path);
+        assert!(original_receipts.iter().all(|r| rows.contains(r)));
+        let new: Vec<_> = rows
+            .iter()
+            .filter(|r| !original_receipts.contains(r))
+            .map(|(_, b)| control::validate_receipt(b).unwrap())
+            .collect();
+        assert!(new.iter().all(|r| r.request_hash_version == 1));
+        assert!(new.iter().any(|r| matches!(
+            r.receipt.outcome,
+            MutationOutcome::TextGenerationSelected { .. }
+                | MutationOutcome::NativeTextGenerationSelected { .. }
+        )));
+        if native {
+            assert_eq!(
+                new.iter()
+                    .filter(|r| matches!(
+                        r.receipt.outcome,
+                        MutationOutcome::NativeMemoryHardDeleted { .. }
+                    ))
+                    .count(),
+                2
+            );
+        }
+        let before = f
+            .storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref();
+        let _root = f.close();
+        let reopened = if native {
+            NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock)
+                .unwrap()
+                .engine
+        } else {
+            crate::storage::RedbStorageEngine::open(&path).unwrap()
+        };
+        assert_eq!(reopened.control_state().unwrap().generation_ref(), before);
+        assert!(
+            ids.iter()
+                .all(|id| reopened.get_record(*id).unwrap().is_none())
+        );
+        assert_eq!(receipt_snapshot(&path), rows);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounded_compaction_both_formats_rejects_final_receipt_without_selection() {
+    for native in [false, true] {
+        let (f, _ids, clock) = if native {
+            fixture().await
+        } else {
+            legacy_fixture().await
+        };
+        let path = f.storage.read().unwrap().db_path().to_owned();
+        let before = canonical(&f);
+        let admission = crate::storage::maintenance::ReceiptAdmission::new(2200).unwrap();
+        let error = f
+            .completion()
+            .compact_text_with_work_bounded(None, Some(&admission))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::storage::StorageError::ReceiptBudgetExceeded
+        ));
+        assert_eq!(canonical(&f), before);
+        let (_, known, _) = admission.snapshot().unwrap();
+        assert!(known.is_empty());
+        let rows = receipt_snapshot(&path);
+        let selection = f
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .text_selection()
+            .unwrap();
+        let _root = f.close();
+        let reopened = if native {
+            NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock)
+                .unwrap()
+                .engine
+        } else {
+            crate::storage::RedbStorageEngine::open(&path).unwrap()
+        };
+        assert_eq!(reopened.meta_store().text_selection().unwrap(), selection);
+        assert_eq!(receipt_snapshot(&path), rows);
+        // Prepared unselected files/IDs may exist; no claim of zero allocation.
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_sweep_compaction_completion_loss_retains_physical_receipt_and_reopens() {
+    let (f, _, clock) = fixture().await;
+    let path = f.storage.read().unwrap().db_path().to_owned();
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let old = receipt_snapshot(&path);
+    // Initial completion, two phase publications, pre-compaction completion,
+    // then worker loss in post-selection completion. Not a lost selection ACK.
+    f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .bounded_completion_failure_nth
+        .store(5, Ordering::SeqCst);
+    let router = app(&f, clock.clone());
+    let (status, body) = request(&router, "{}").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["commitState"], "unknown");
+    assert!(body["operationId"].is_null());
+    assert!(body.get("receipt").is_none());
+    let known: Vec<WriteReceipt> = serde_json::from_value(body["receipts"].clone()).unwrap();
+    assert_eq!(known.len(), 3);
+    assert!(matches!(
+        known[2].outcome,
+        MutationOutcome::NativeTextGenerationSelected { .. }
+    ));
+    assert!(
+        known
+            .windows(2)
+            .all(|w| w[0].committed_generation < w[1].committed_generation)
+    );
+    drop(router);
+    let _root = f.close();
+    let reopened =
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock).unwrap();
+    assert_eq!(
+        reopened
+            .engine
+            .control_state()
+            .unwrap()
+            .committed_generation
+            .get(),
+        before.committed_generation.get() + 3
+    );
+    let rows = receipt_snapshot(&path);
+    assert_eq!(rows.len(), old.len() + 3);
+    assert!(old.iter().all(|r| rows.contains(r)));
+    for receipt in known {
+        assert!(
+            rows.iter()
+                .any(|(_, b)| control::validate_receipt(b).unwrap().receipt == receipt)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bounded_legacy_strength_and_bridged_delete_abort_all_staged_effects() {
+    let (f, ids, _) = legacy_fixture().await;
+    let third = f.insert_memory().await;
+    let edge = |source, target| crate::storage::PersistedEdge {
+        source,
+        target,
+        edge_type: crate::model::EdgeType::Associative,
+        weight: 0.5,
+        auto_created: true,
+        created_at: 1000,
+    };
+    f.storage
+        .read()
+        .unwrap()
+        .put_edges_with_effects(&[edge(ids[0], ids[1]), edge(ids[0], third)])
+        .unwrap()
+        .unwrap();
+    f.completion().rebuild_all().await.unwrap();
+    let path = f.storage.read().unwrap().db_path().to_owned();
+    for deletion in [false, true] {
+        let before = canonical(&f);
+        let denied = crate::storage::maintenance::ReceiptAdmission::new(2200).unwrap();
+        let apply = |admission: &crate::storage::maintenance::ReceiptAdmission| {
+            let mut engine = f.storage.write().unwrap();
+            if deletion {
+                engine
+                    .delete_memory_with_edges_with_origin_work_bounded(
+                        ids[0],
+                        &[edge(ids[1], third)],
+                        None,
+                        1,
+                        Some(admission),
+                    )
+                    .map(|result| result.unwrap().receipt)
+            } else {
+                let record = engine.get_record(ids[0]).unwrap().unwrap();
+                let ns = engine
+                    .get_namespace(NamespaceId::new(record.namespace_id))
+                    .unwrap()
+                    .unwrap();
+                engine
+                    .apply_legacy_decay_with_work_bounded(
+                        &MutationContext::unkeyed(ns.id),
+                        ids[0],
+                        &record,
+                        &ns,
+                        record.phase,
+                        0.5,
+                        0.5,
+                        None,
+                        Some(admission),
+                    )
+                    .map(|result| {
+                        let crate::storage::maintenance::DecayMutationResult::Committed(receipt) =
+                            result
+                        else {
+                            panic!("actual patch required");
+                        };
+                        receipt
+                    })
+            }
+        };
+        assert!(matches!(
+            apply(&denied),
+            Err(crate::storage::StorageError::ReceiptBudgetExceeded)
+        ));
+        assert_eq!(canonical(&f), before);
+        let allowed = crate::storage::maintenance::ReceiptAdmission::new(
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .unwrap();
+        let receipt = apply(&allowed).unwrap();
+        allowed.record(&receipt).unwrap();
+        f.completion()
+            .complete_with_admission(None, Some(&allowed))
+            .await
+            .unwrap();
+        assert!(
+            receipt_snapshot(&path)
+                .iter()
+                .any(|(_, b)| control::validate_receipt(b).unwrap().receipt == receipt)
+        );
+    }
+    assert!(f.record(ids[0]).is_none());
+    assert_eq!(
+        f.storage.read().unwrap().load_all_edges().unwrap(),
+        vec![edge(ids[1], third)]
+    );
+    let before = canonical(&f);
+    let _root = f.close();
+    let engine = crate::storage::RedbStorageEngine::open(&path).unwrap();
+    let reopened = Fixture::from_open_engine(_root, engine);
+    assert_eq!(canonical(&reopened), before);
 }

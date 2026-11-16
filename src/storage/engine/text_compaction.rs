@@ -188,6 +188,85 @@ mod tests {
 
     include!("text_compaction_native_tests.rs");
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bounded_compaction_selected_and_published_failures_preserve_full_receipt() {
+        for native in [false, true] {
+            for stage in [Stage::Selected, Stage::Published] {
+                let root = tempfile::tempdir().unwrap();
+                let (engine, kept) = if native {
+                    native_compaction_fixture(root.path())
+                } else {
+                    generation_fixture(root.path())
+                };
+                let path = engine.db_path().to_owned();
+                let f = crate::test_support::Fixture::from_open_engine(root, engine);
+                f.completion().rebuild_all().await.unwrap();
+                let admission = crate::storage::maintenance::ReceiptAdmission::new(
+                    crate::daemon::protocol::MAX_MESSAGE_SIZE,
+                )
+                .unwrap();
+                let before = f.storage.read().unwrap().control_state().unwrap();
+                let error = f
+                    .storage
+                    .write()
+                    .unwrap()
+                    .compact_text_at_with_work_bounded(
+                        |at| {
+                            if at == stage {
+                                Err(std::io::Error::other(
+                                    "injected post-selection publication failure",
+                                )
+                                .into())
+                            } else {
+                                Ok(())
+                            }
+                        },
+                        None,
+                        Some(&admission),
+                    )
+                    .unwrap_err();
+                admission.fail(&error);
+                let StorageError::CommittedMutation { receipt, .. } = error else {
+                    panic!("missing full selection receipt");
+                };
+                let (_, known, failed) = admission.snapshot().unwrap();
+                assert_eq!(known, vec![*receipt.clone()]);
+                assert_eq!(failed.as_ref(), Some(receipt.as_ref()));
+                let body = crate::decay::sweep::SweepFailure::from_admission(&admission)
+                    .unwrap()
+                    .unwrap();
+                let encoded = serde_json::to_vec(&body).unwrap();
+                assert!(
+                    encoded.len()
+                        <= 2048 + 2 * (serde_json::to_vec(receipt.as_ref()).unwrap().len() + 1)
+                );
+                let _root = f.close();
+                let reopened = RedbStorageEngine::open_with_ids(
+                    &path,
+                    native,
+                    Box::new(crate::storage::ids::SystemIds),
+                )
+                .unwrap();
+                assert_eq!(
+                    reopened.control_state().unwrap().committed_generation,
+                    before.committed_generation.next().unwrap()
+                );
+                assert_texts(&reopened, &kept);
+                assert_eq!(
+                    reopened
+                        .lookup_operation(
+                            receipt.store_id,
+                            MutationScope::Catalog,
+                            receipt.operation_id
+                        )
+                        .unwrap()
+                        .as_ref(),
+                    Some(receipt.as_ref())
+                );
+            }
+        }
+    }
+
     fn generation_fixture(path: &Path) -> (RedbStorageEngine, Vec<(MemoryId, String)>) {
         let mut engine = RedbStorageEngine::open(path).unwrap();
         let mut config = NamespaceConfig::default_namespace(0);
