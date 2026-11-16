@@ -256,6 +256,69 @@ zero-match filters and actual RED/GREEN separately.
 
 ## Coordination and resources
 
+### Independent RED-only stage (source review before build release)
+
+This stage is deliberately independent of the unapproved production solution.
+Its sole code base is `33865ca0d19599a13ba999d31a1ec736c89db233`; the plan commit
+is `970e7310104d2d05d52d141af42cfe00b025e275`. No PR184 parent is required.
+Pascal owns these exact test-only hunks; Halley retains queue/full/merge ownership:
+
+- `src/storage/metadata.rs`: cfg(test) instance `record_commit_failure_nth`
+  AtomicUsize field and zero initialization only.
+- `src/storage/metadata/effects.rs`: decrement that counter only inside the
+  existing successful `committed.and_then` closure; Nth1 returns the same synthetic
+  lost-ACK error class as the existing probes. Old thread-local/batch hooks remain.
+- `src/api/validation_tests.rs`: register the new test module only.
+- `src/api/sweep_failure_tests.rs`: local real migration/adoption fixture, real
+  router POST `{}`, first/later record lost-ACK probes, existing known derived
+  publication-failure positive control, and supplied-asOf rejection control.
+
+The hook is armed after fixture insertion, migration, explicit policy adoption
+and initial completion. A wrong-width vector view supplies the existing known
+failure control; it must not be relabeled as an unknown commit. The request uses
+the configured counting clock, not public asOf. Full response bytes are logged.
+Before assertions on the missing HTTP fields, the unknown tests require the
+unavailable owner and unresolved accepted work, actual failed readiness, exact
+G increments, durable scoped receipt/hash/original1, unchanged historical receipt
+bytes, pending outbox and full-text ledger mask, retained Summary content/anchor,
+and strict native reopen without another canonical commit. The later test gets
+the earlier full receipt from actual durable history for comparison only; the
+production handler does not gain a readback/reconstruction path. No unreturned
+current receipt is passed off as known to the caller.
+
+Expected RED is only the final structured HTTP evidence assertion, after durable
+proof succeeds. Compilation/setup failures are not defect evidence. All source,
+binary and logs are retained separately from a later corrected run. No production
+mapper, error schema, receipt collector, completion or transaction budget changes
+belong to this stage. Curie released the hook boundary; exact diff source ACKs
+from Curie/Feynman/Huygens and Halley's literal RED build release are still required.
+
+### Unresolved production design review
+
+The earlier production outline is **not approved for implementation**. Two
+concrete requirements remain before its byte-bound/readiness claims are valid:
+
+1. Measure exactly the representation emitted by HTTP. In particular, encoding
+   a typed f32 receipt and later passing it through `serde_json::Value` may change
+   number spellings and length. Either emit the measured typed representation or
+   cache/count the actual Value representation. Exact serialized identity must
+   retain replay flags and numeric spelling, including negative zero.
+2. Enforce completion admission under its existing publication/graph/storage
+   locks, before purge resume or rebuild. A read-only preflight before awaiting
+   those locks does not exclude concurrent foreign pending work. Native-decay
+   and compaction errors can nest a distinct preexisting receipt/unknown leaf;
+   the unconditional final completion can also start additional canonical purge
+   work. Merely bounding the candidate receipt does not bound those outcomes.
+
+The proposed narrow direction is a bounded mode of the existing completion path
+which only completes already-admitted pass effects, refuses foreign pending work
+and active purges under the same final locks, and never runs generic completion
+after a budget/unknown stop. It must not report a historical foreign operation as
+this sweep's commit, omit a distinct in-hand nested receipt, invent an unknown ID,
+or silently discard a known receipt to fit the cap. Exact API, race checks and
+encoding choice remain subject to owner review; RED-only tests do not validate
+this design or release those production hunks.
+
 No edits to frozen PR172/181 or queue worktrees. Runtime child will use this exact
 main base, plus this plan, after literal owner release; no PR184 ancestry. Reuse
 one Pascal-owned bounded cache/target, no cloning or shared concurrent target.

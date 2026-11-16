@@ -1077,12 +1077,18 @@ impl MetadataStore {
         // not assume failure means its staged bytes can be reclaimed.
         #[cfg(test)]
         let committed = committed.and_then(|()| {
+            let nth = self.record_commit_failure_nth.fetch_update(
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+                |n| n.checked_sub(1),
+            );
             if FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.replace(false))
                 || child.is_some()
                     && self
                         .fail_batch_commit
                         .compare_exchange(3, 0, Ordering::SeqCst, Ordering::SeqCst)
                         .is_ok()
+                || nth == Ok(1)
             {
                 Err(redb::CommitError::Storage(redb::StorageError::Io(
                     std::io::Error::other("injected unknown record commit"),
