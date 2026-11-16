@@ -27,53 +27,79 @@ impl RedbStorageEngine {
             // stamps; ranking/projection callers retain their own pinned views.
             self.meta_store.effects_stamp()?;
 
-            if let Some(namespace) = asserted_namespace {
-                validate_namespace_name(namespace).map_err(|e| {
-                    StorageError::InvalidNamespaceName {
-                        name: namespace.to_owned(),
-                        reason: e.to_string(),
-                    }
-                })?;
-            }
-            let Some(record) = view.disk_record(id)? else {
-                return if asserted_namespace.is_some() {
-                    Err(StorageError::NotFound(id.into_inner()))
-                } else {
-                    Ok(None)
-                };
-            };
-            let namespace = view
-                .namespaces()?
-                .into_iter()
-                .find(|namespace| namespace.id.get() == record.namespace_id)
-                .ok_or(StorageError::NamespaceNotFound(record.namespace_id))?;
-            if let Some(asserted) = asserted_namespace {
-                if !namespace.name.eq_ignore_ascii_case(asserted) {
-                    return Err(StorageError::NamespaceMismatch {
-                        id: id.into_inner(),
-                        namespace: asserted.to_owned(),
-                    });
-                }
-            }
-            let full_text = if matches!(record.phase, DecayPhase::Full | DecayPhase::Summary)
-                && record.text_length != 0
-            {
-                Some(self.text_store.read(TextRef {
-                    file_offset: record.text_offset,
-                    length: record.text_length,
-                })?)
-            } else {
-                None
-            };
-            Ok(Some((
-                namespace,
-                HydratedRecord {
-                    record,
-                    full_text,
-                    embedding: None,
-                },
-            )))
+            self.hydrate_point_from_view(view, id, asserted_namespace)
         })
+    }
+
+    /// Prepared point capture: row/text and any native exposure intent are
+    /// copied from the same borrowed transaction. Caller owns engine.read.
+    pub(crate) fn with_point_get<T>(
+        &self,
+        id: MemoryId,
+        asserted_namespace: Option<&str>,
+        copy: impl for<'a> FnOnce(
+            crate::storage::metadata::PointRead<'a>,
+            Option<(NamespaceConfig, HydratedRecord)>,
+        ) -> Result<T, StorageError>,
+    ) -> Result<T, StorageError> {
+        self.meta_store.with_point_read(|point| {
+            let payload = self.hydrate_point_from_view(point.view(), id, asserted_namespace)?;
+            copy(point, payload)
+        })
+    }
+
+    fn hydrate_point_from_view(
+        &self,
+        view: &crate::storage::metadata::CanonicalReadView,
+        id: MemoryId,
+        asserted_namespace: Option<&str>,
+    ) -> Result<Option<(NamespaceConfig, HydratedRecord)>, StorageError> {
+        if let Some(namespace) = asserted_namespace {
+            validate_namespace_name(namespace).map_err(|e| {
+                StorageError::InvalidNamespaceName {
+                    name: namespace.to_owned(),
+                    reason: e.to_string(),
+                }
+            })?;
+        }
+        let Some(record) = view.disk_record(id)? else {
+            return if asserted_namespace.is_some() {
+                Err(StorageError::NotFound(id.into_inner()))
+            } else {
+                Ok(None)
+            };
+        };
+        let namespace = view
+            .namespaces()?
+            .into_iter()
+            .find(|namespace| namespace.id.get() == record.namespace_id)
+            .ok_or(StorageError::NamespaceNotFound(record.namespace_id))?;
+        if let Some(asserted) = asserted_namespace {
+            if !namespace.name.eq_ignore_ascii_case(asserted) {
+                return Err(StorageError::NamespaceMismatch {
+                    id: id.into_inner(),
+                    namespace: asserted.to_owned(),
+                });
+            }
+        }
+        let full_text = if matches!(record.phase, DecayPhase::Full | DecayPhase::Summary)
+            && record.text_length != 0
+        {
+            Some(self.text_store.read(TextRef {
+                file_offset: record.text_offset,
+                length: record.text_length,
+            })?)
+        } else {
+            None
+        };
+        Ok(Some((
+            namespace,
+            HydratedRecord {
+                record,
+                full_text,
+                embedding: None,
+            },
+        )))
     }
 
     /// No awaits or escaped references. Generation mismatch rejects the entire

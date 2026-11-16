@@ -281,6 +281,21 @@ pub trait AccessRecorder: Send + Sync {
         false
     }
 
+    /// Prepared point observations retain their captured native witness. A
+    /// recorder must opt in; this default never silently performs a fresh capture.
+    async fn record_point_for_publication(
+        &self,
+        _id: MemoryId,
+        _scope: &crate::storage::control::ExposureScope,
+        _intent: Option<crate::storage::native_lifecycle::ExposureIntent>,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+        _policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        _original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        Err(SearchError::Unavailable("captured point observer unavailable".into()))
+    }
+
     async fn record_similarity_for_publication(
         &self,
         _accesses: &[(MemoryId, AccessKind)],
