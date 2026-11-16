@@ -412,6 +412,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `StorageEngine` trait.
 pub struct StorageEngineAdapter {
+    catalog_profile: Option<crate::serialization::session::ActiveEmbedding>,
     native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -429,6 +430,14 @@ pub struct StorageEngineAdapter {
 }
 
 impl StorageEngineAdapter {
+    /// Capture actual configuration identity once; this is not provider
+    /// availability, namespace attestation, or a readiness guarantee.
+    pub fn with_catalog_profile_context(mut self, provider: &dyn EmbeddingProvider) -> Self {
+        self.catalog_profile =
+            crate::serialization::session::ActiveEmbedding::from_provider(provider).ok();
+        self
+    }
+
     pub(crate) fn with_native_lifecycle_policy(
         mut self,
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
@@ -449,6 +458,7 @@ impl StorageEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            catalog_profile: None,
             native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
@@ -468,6 +478,24 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        self.catalog_profile.clone()
+    }
+
+    async fn list_catalog_page(
+        &self,
+        request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        crate::catalog_page::read(self.storage.clone(), request).await
+    }
+
+    async fn list_canonical_page(
+        &self,
+        request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        crate::canonical_list::list_page(self.storage.clone(), request).await
+    }
+
     async fn forget_api1(
         &self,
         id: MemoryId,

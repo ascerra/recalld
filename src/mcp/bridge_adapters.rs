@@ -1122,6 +1122,7 @@ impl bridge::SearchPipeline for McpSearchAdapter {
 
 /// Adapts `RedbStorageEngine` + subsystems to the MCP `StorageEngine` trait.
 pub struct McpStorageAdapter {
+    catalog_profile: Option<crate::serialization::session::ActiveEmbedding>,
     /// Test-only, per-instance fault after completed children and known root
     /// finish: 1 invalidates FTS publication; 2 withdraws the canonical handle.
     #[cfg(test)]
@@ -1141,6 +1142,14 @@ pub struct McpStorageAdapter {
 }
 
 impl McpStorageAdapter {
+    /// Capture actual configuration identity once; this is not provider
+    /// availability, namespace attestation, or a readiness guarantee.
+    pub fn with_catalog_profile_context(mut self, provider: &dyn EmbeddingProvider) -> Self {
+        self.catalog_profile =
+            crate::serialization::session::ActiveEmbedding::from_provider(provider).ok();
+        self
+    }
+
     pub(crate) fn with_native_lifecycle_policy(
         mut self,
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
@@ -1174,6 +1183,7 @@ impl McpStorageAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            catalog_profile: None,
             native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             #[cfg(test)]
@@ -1776,6 +1786,24 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        self.catalog_profile.clone()
+    }
+
+    async fn list_catalog_page(
+        &self,
+        request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        crate::catalog_page::read(self.storage.clone(), request).await
+    }
+
+    async fn list_canonical_page(
+        &self,
+        request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        crate::canonical_list::list_page(self.storage.clone(), request).await
+    }
+
     fn supports_api1_store(&self) -> bool {
         true
     }
@@ -4777,6 +4805,7 @@ pub fn direct_bridge(
             tz,
         )
         .with_clock(system.clock().clone())
+        .with_catalog_profile_context(system.embedding().as_ref())
         .with_query_engine(system.query_engine().clone()),
     );
     let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> = Arc::new(

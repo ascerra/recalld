@@ -1,0 +1,330 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794817022.5778227
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_conformance.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794817022.6706173
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_offline_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794817022.7529452
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794817022.9009154
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "store_api1",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817112.2957728
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "canonical_list",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817117.130792
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "catalog_page",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817121.7193284
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "canonical_vector_snapshot",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817123.9112513
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "catalog_completion",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817125.9208913
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "native_lifecycle",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817260.9703124
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "native_single_and_batch_rpc_require_full_frame_before_any_work",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817264.079881
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "daemon::server::tests::",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82"
+    },
+    "finished": 1794817265.4406385
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--all-targets"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld_text_migrate-30300e92b7b70a3c": "e7ebfd356c3def7fd778812317308e30880c1269ca4c58764327d79f9cb5a9fe",
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "62052dd0739c7994b7f8fd5d7eb7fcd937039ce80f5cdc521462c91f73fc6c38",
+      "debug/deps/lifecycle_cli-804868469b715f2b": "ad19f769d224c19d0b8534bf1b849f05022fe1c84dd2e7c548a2f3174d9acc2d",
+      "debug/deps/recalld_cli-af23d66ef4eb6fd9": "a15f28d7483a736af20f6dc9e131034efb67986a659b881eb533aa2bf8fb469e",
+      "debug/deps/recalld-e3511e97d96c1bb5": "5649e67e38cf8ddb92332e903ae78d5a19a4f56620416396000e59b721edd65c",
+      "debug/deps/vector_certification_cli-9b2ce2a99762f26a": "26bb3c0b011edc93ad38d6415b98b0e0206e5747cc0d8cd7f3729493f84a7ce6",
+      "debug/deps/recalld_cli-e55940b1d38701e3": "836428353f9cd740882ce44360a0d574d7e1a376e68e6fde269e4fcb5b04905e",
+      "debug/deps/inherited_policy_cli-4560ea4fe142dcf8": "cb3898a5f17d5021aaf6ebad2abbe0d5987199a62fa5bf9589abcf4b206a2b37",
+      "debug/deps/recalld_schema-df67e3e2e7ae031a": "b5f7e2d9be91aaaedbdc953772d930b77ef9dba48d1412a104d44802315dafe6",
+      "debug/deps/recalld-6b2c0f17da487309": "9710dcbeb1b3a1d7ef42c7168f57d64c510429362d5960d32ee60ca3a4faf41c",
+      "debug/deps/recalld_schema-57916d9b4d6c3308": "9e37d605a67226d4ba03575647191dabe2c0c5cf18ccb67c14ff21dd7d2d3a1f",
+      "debug/deps/recalld-8b31964f64b2cfc4": "13bdcb23f8ee1fdf2a00464cfac3e6e8d58393607e5b6f455beda2f3b4a56b82",
+      "debug/deps/text_migration_cli-3c82895165fac14b": "015786ef6f676f9e33a9c17d8399dd68cce70a54d55e9c5d0257e514db1ca712",
+      "debug/deps/recalld_text_migrate-89ef39f5299d9e87": "6efabe98ca2f5c7789e2488923b414373825d3f09c4eb4cab7dcd8de36089090",
+      "debug/examples/native_prefix_fixture-d5e400b9a5e43be0": "7373ab4316ab71adf80b132879ccb25c02ed8efe4566809e671ebff34164964d",
+      "debug/examples/offline_eval-a4d9b061895d675e": "8d092eca7fdc0eea3955e1b7884040eb8677efaf1507538702cef8563e9137b9",
+      "debug/examples/owned_evaluator-962f1919193c8893": "d7b81aeb012c113f9f412195a57bf0f8156ccd3385032f46b38d990c384139ff",
+      "debug/examples/performance_probe-1ba5be5867dfd2ed": "1a5a3389d36b2612a12aeff82faacd327dccc5629067b281844add93b1d47ad2",
+      "debug/examples/score_mcp_episode-cf46f9fa17b90ad6": "64b04aa74e8b3bf12f4382e8435449c13d24c54fea745491f4ac780695a64221"
+    },
+    "finished": 1794818340.066015
+  },
+  {
+    "command": [
+      "cargo",
+      "clippy",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--all-targets"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794818377.0159352
+  },
+  {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--bin",
+      "recalld"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794818416.820004
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-conformance.py",
+      "--inside",
+      "--fixture-version",
+      "3"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "../recalld": "fe68e66c35f1b1e41191c52809ac81eaefb531b8f079e38a1e121e9d8e54c597"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794818506.4504075
+  },
+  {
+    "command": [
+      "python3",
+      "/work/output/check-public.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "../recalld": "fe68e66c35f1b1e41191c52809ac81eaefb531b8f079e38a1e121e9d8e54c597"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794818506.9276388
+  }
+]
