@@ -52,7 +52,7 @@ async fn prepared_evidence_rejects_operator_rif_before_work_on_actual_transports
             );
             let before = bytes(&f);
             for query_mode in ["metadata_only", "embedding_only"] {
-                let mut args = serde_json::json!({"contractVersion":2,"queryMode":query_mode,"recordAccess":access,"explain":true});
+                let mut args = serde_json::json!({"contractVersion":2,"queryMode":query_mode,"tags":["allow"],"recordAccess":access,"explain":true});
                 if query_mode == "embedding_only" {
                     args["query"] = serde_json::json!("fixture");
                 }
