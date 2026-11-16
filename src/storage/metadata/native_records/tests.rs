@@ -866,5 +866,7 @@ mod store_producers;
 #[path = "namespace_binding_tests.rs"]
 mod namespace_binding;
 
+#[path = "compaction_tests.rs"]
+mod compaction;
 #[path = "request_context_tests.rs"]
 mod request_context;

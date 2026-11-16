@@ -6,7 +6,7 @@ use crate::storage::native_maintenance::NativeDecayResult;
 use crate::storage::native_store::{FrozenInsertLinks, NativeStoreInput, NativeStoreSettings};
 use crate::storage::{logical_export, validation};
 
-fn linked(s: &mut NativeLifecycleSession, d: &Data, key: &str) -> MemoryId {
+pub(super) fn linked(s: &mut NativeLifecycleSession, d: &Data, key: &str) -> MemoryId {
     let mut original = input(d);
     original.memory.initial_stability = Some(1.);
     let original = NativeStoreInput {
@@ -38,7 +38,7 @@ fn linked(s: &mut NativeLifecycleSession, d: &Data, key: &str) -> MemoryId {
         _ => panic!("wrong creation proof"),
     }
 }
-fn graph(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId) {
+pub(super) fn graph(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId) {
     let input = NativeGraphInput {
         edges: vec![NativeEdgeInput {
             source: id,
@@ -75,7 +75,7 @@ fn graph(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId) {
     assert_eq!(replay.committed_generation, receipt.committed_generation);
     assert_eq!(s.engine.control_state().unwrap(), before);
 }
-fn phases(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId, count: usize) {
+pub(super) fn phases(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId, count: usize) {
     let policy = NativePolicyInputs::default();
     let original = s.engine.get_record(id).unwrap().unwrap();
     for n in 0..count {
@@ -105,7 +105,7 @@ fn phases(s: &mut NativeLifecycleSession, d: &Data, id: MemoryId, count: usize) 
         }
     }
 }
-fn purge(s: &mut NativeLifecycleSession, d: &Data) {
+pub(super) fn purge(s: &mut NativeLifecycleSession, d: &Data) {
     let mut p = s
         .engine
         .begin_namespace_purge(&ctx(s, d, "purge"), true)
@@ -158,7 +158,7 @@ fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
     visit(path, &mut result);
     result
 }
-fn receipts(path: &Path) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
+pub(super) fn receipts(path: &Path) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
     use redb::ReadableTable;
     let (_copy, db) = validation::inspect_database(&path.join("meta.db")).unwrap();
     let read = db.begin_read().unwrap();
@@ -172,7 +172,7 @@ fn receipts(path: &Path) -> std::collections::BTreeMap<Vec<u8>, Vec<u8>> {
         })
         .collect()
 }
-fn payloads(stream: &Path) -> Vec<serde_json::Value> {
+pub(super) fn payloads(stream: &Path) -> Vec<serde_json::Value> {
     std::fs::read_to_string(stream)
         .unwrap()
         .lines()
@@ -231,7 +231,7 @@ fn kept(s: &mut NativeLifecycleSession, d: &Data) -> MemoryId {
         .unwrap();
     inserted(&r)
 }
-async fn export_import_fork(root: &Path, d: &Data) -> PathBuf {
+pub(super) async fn export_import_fork(root: &Path, d: &Data) -> PathBuf {
     let original = receipts(&d.path);
     let stream = root.join("mixed.jsonl");
     let imported = root.join("imported");

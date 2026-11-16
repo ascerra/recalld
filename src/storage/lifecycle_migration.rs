@@ -189,6 +189,7 @@ pub(crate) fn validate_policy_history(
                 ));
                 Some(t.before_namespace.namespace_id)
             }
+            MutationOutcome::NativeTextGenerationSelected { .. } => None,
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 native_history.push((
                     receipt.clone(),
@@ -840,6 +841,9 @@ pub(crate) fn validate_policy_history(
                         .ok_or_else(|| invalid("cutover reverse prior state absent"))?;
                 }
                 *namespace = t.before_namespace.namespace()?;
+            }
+            MutationOutcome::NativeTextGenerationSelected { transition } => {
+                transition.validate_records(records.values().flat_map(|rows| rows.iter()))?;
             }
             MutationOutcome::NativeNamespacePurgeStarted { transition: t } => {
                 let ns = configs

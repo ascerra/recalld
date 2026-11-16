@@ -387,6 +387,9 @@ pub enum MutationOutcome {
         #[serde(rename = "attestedNamespaces")]
         attested_namespaces: u64,
     },
+    NativeTextGenerationSelected {
+        transition: super::native_text::NativeTextRelocation,
+    },
     TextGenerationSelected {
         #[serde(rename = "generationId")]
         generation_id: Uuid,
@@ -489,6 +492,7 @@ pub(crate) fn validate_existing(
             .value(),
     )?;
     let ancestry = super::lineage::read_lineage(tx, &state)?;
+    super::lineage::validate_text_anchor(tx, &state, ancestry.as_ref())?;
     super::canonical_schema::read_state(tx, &state)?;
     for entry in receipts.iter()? {
         let (key, value) = entry?;
@@ -507,7 +511,11 @@ pub(crate) fn validate_existing(
             MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::BatchReserved { .. }
             | MutationOutcome::BatchItemRejected { .. }
-            | MutationOutcome::NativeNamespaceCreated { .. } => scope == MutationScope::Catalog,
+            | MutationOutcome::NativeNamespaceCreated { .. }
+            | MutationOutcome::TextGenerationSelected { .. }
+            | MutationOutcome::NativeTextGenerationSelected { .. } => {
+                scope == MutationScope::Catalog
+            }
             MutationOutcome::InheritedDecayAdopted { transition } => {
                 scope == MutationScope::Namespace(transition.preview.namespace_id)
             }
@@ -550,6 +558,7 @@ pub(crate) fn validate_existing(
             stored.receipt.outcome,
             MutationOutcome::NativeNamespacePurgeStarted { .. }
                 | MutationOutcome::VectorsReembedded { .. }
+                | MutationOutcome::NativeTextGenerationSelected { .. }
                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                 | MutationOutcome::LifecyclePolicyMigrated { .. }
                 | MutationOutcome::NativeNamespaceCreated { .. }
@@ -782,6 +791,34 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
+        MutationOutcome::NativeTextGenerationSelected { transition } => {
+            transition.validate_stored(&stored)?;
+        }
+        MutationOutcome::TextGenerationSelected {
+            generation_id,
+            format_version,
+            ..
+        } => {
+            let previous = Generation(stored.receipt.committed_generation.get() - 1);
+            let ctx = super::native_text::request_context(GenerationRef {
+                store_id: stored.receipt.store_id,
+                generation: previous,
+            });
+            let operation = match format_version {
+                1 => "registerLegacyText",
+                2 => "compactText",
+                _ => {
+                    return Err(StorageError::InvalidControl(
+                        "invalid legacy text selection format".into(),
+                    ));
+                }
+            };
+            if generation_id.is_nil() || stored.request_hash != request_hash(&ctx, operation, &[]) {
+                return Err(StorageError::InvalidControl(
+                    "legacy text selection request hash mismatch".into(),
+                ));
+            }
+        }
         MutationOutcome::NativeNamespacePurgeStarted { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -834,7 +871,6 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::LifecyclePolicyMigrated { .. }
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
-        | MutationOutcome::TextGenerationSelected { .. }
         | MutationOutcome::AccessRecorded { .. }
         | MutationOutcome::NamespaceCreated { .. }
         | MutationOutcome::NamespacePolicyUpdated { .. }
@@ -975,6 +1011,7 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         | MutationOutcome::GraphChanged { .. }
         | MutationOutcome::SchemaMigrated { .. }
         | MutationOutcome::TextGenerationSelected { .. }
+        | MutationOutcome::NativeTextGenerationSelected { .. }
         | MutationOutcome::LifecyclePolicyMigrated { .. } => {}
         MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::BatchReserved { .. }
