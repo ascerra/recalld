@@ -238,7 +238,7 @@ fn native_preflight_recovers_actual_nonbatch_process_exits_and_retries_once() {
     for point in ["before_metadata_commit", "after_metadata_commit"] {
         eprintln!("native recovery crash point: {point}");
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let id = MemoryId::new();
         let initial = inspect_schema(&d.path).unwrap().control;
         let output = child(&d, id, "crash", Some(point));
@@ -316,7 +316,7 @@ fn native_preflight_rejects_malformed_repaired_copies_without_original_writes() 
     // No restore journal is pending: journal recovery is a separate owned path.
     for kind in ["schema", "effects", "text", "vector", "edges"] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let output = child(&d, MemoryId::new(), kind, None);
         assert_eq!(
             output.status.code(),

@@ -1,0 +1,181 @@
+--- a/src/storage/metadata/native_records/exposure_consumer_tests.rs
++++ b/src/storage/metadata/native_records/exposure_consumer_tests.rs
+@@ -446,6 +446,28 @@
+         current = dest;
+     }
+     d.path = current;
++    // Remigration created a fresh unknown binding. Adopt only the namespace
++    // intended to commit first; the terminal namespace must stay unknown.
++    let before = inspect_schema(&d.path).unwrap();
++    assert!(
++        before
++            .namespaces
++            .iter()
++            .all(|n| n.schema.as_ref().unwrap().inherited_decay.is_none())
++    );
++    crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 4000);
++    assert!(
++        inspect_schema(&d.path)
++            .unwrap()
++            .namespaces
++            .into_iter()
++            .find(|n| n.id == second)
++            .unwrap()
++            .schema
++            .unwrap()
++            .inherited_decay
++            .is_none()
++    );
+     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+     let mut session = open(&d, clock.clone());
+     let policy = NativePolicyInputs::default();
+--- a/src/storage/metadata/native_records/public_api1_tests.rs
++++ b/src/storage/metadata/native_records/public_api1_tests.rs
+@@ -432,7 +432,20 @@
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+ async fn api1_public_native_feedback_uses_configured_policy_and_original1_hash() {
+     use redb::ReadableTable as _;
+-    let (f, d, clock, mut bridge, state) = setup().await;
++    let (f, d, clock, bridge, state) = setup().await;
++    // This positive multiplier2 assertion now requires its real offline adoption.
++    // Close every adapter/owner first; never rewrite a binding or receipt in place.
++    drop((bridge, state));
++    let root = f.close();
++    crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 2., 2000);
++    let policy = NativePolicyInputs {
++        multiplier: 2.,
++        ..Default::default()
++    };
++    let session = NativeLifecycleSession::open(&d.path, policy.clone(), clock.clone()).unwrap();
++    let f = Fixture::from_open_engine(root, session.engine);
++    completion(&f).rebuild_all().await.unwrap();
++    let (mut bridge, state) = configured_public_adapters(&f, clock.clone(), policy);
+     bridge.storage = Arc::new(
+         f.storage_adapter()
+             .with_clock(clock.clone())
+--- a/src/storage/metadata/native_records/request_context_tests.rs
++++ b/src/storage/metadata/native_records/request_context_tests.rs
+@@ -299,8 +299,8 @@
+     std::fs::write(output.join("manifest.json"),serde_json::to_vec(&serde_json::json!({"namespace":d.ns.get(),"parent":d.parent,"profile":d.profile,"insert":insertion,"forget":forget,"insertExpected":insert_key.expected_generation,"forgetExpected":forget_key.expected_generation,"rows":rows})).unwrap()).unwrap();
+ }
+ 
+-#[test]
+-fn native_record_context_replays_genuine_before_api2_bytes() {
++#[tokio::test]
++async fn native_record_context_replays_genuine_before_api2_bytes() {
+     let root = tempfile::tempdir().unwrap();
+     let source = match std::env::var("RECALLD_READ_RECORD_CONTEXT_BEFORE") {
+         Ok(source) => PathBuf::from(source),
+@@ -343,9 +343,26 @@
+     let state = s.metadata().control_state().unwrap();
+     let mut insert_key = ctx(&s, &d, "old2-insert");
+     insert_key.expected_generation = serde_json::from_value(m["insertExpected"].clone()).unwrap();
+-    let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();
++    // Genuine old history remains unadopted. Replay uses the actual accepted
++    // consumer before any fresh-policy capture or provider call.
++    assert!(
++        s.engine
++            .get_namespace(d.ns)
++            .unwrap()
++            .unwrap()
++            .schema
++            .unwrap()
++            .inherited_decay
++            .is_none()
++    );
++    let provider = Provider {
++        profile: d.profile.clone(),
++        calls: AtomicUsize::new(0),
++        fail_if_called: true,
++    };
+     assert_eq!(
+-        s.insert_prepared(&insert_key, &intent, &generated())
++        s.insert_generated(&insert_key, scope(&d), &input(&d), &provider)
++            .await
+             .unwrap(),
+         replay(&insertion)
+     );
+@@ -359,7 +376,8 @@
+     insert_key.contract_version = 1;
+     forget_key.contract_version = 1;
+     assert!(matches!(
+-        s.insert_prepared(&insert_key, &intent, &generated()),
++        s.insert_generated(&insert_key, scope(&d), &input(&d), &provider)
++            .await,
+         Err(StorageError::IdempotencyConflict)
+     ));
+     assert!(matches!(
+@@ -370,4 +388,15 @@
+     assert_eq!(s.metadata().control_state().unwrap(), state);
+     assert_eq!(files(&d.path), before);
+     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
+-}
++    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
++    assert!(
++        s.engine
++            .get_namespace(d.ns)
++            .unwrap()
++            .unwrap()
++            .schema
++            .unwrap()
++            .inherited_decay
++            .is_none()
++    );
++}
+--- a/src/storage/metadata/native_records/wire_tests.rs
++++ b/src/storage/metadata/native_records/wire_tests.rs
+@@ -32,13 +32,27 @@
+         // The real schema migration destination retains the legacy lifecycle.
+         // No raw policy edits or fabricated proof receipts.
+         d.path = root.path().join("schema");
++        // This intended-positive public fixture selects a different real migration
++        // destination. Adopt there explicitly; unknown-history cases opt out.
++        crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 2000);
+     }
+     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+     let session = open(&d, clock.clone());
+     let f = Fixture::from_open_engine(root, session.engine);
+     completion(&f).rebuild_all().await.unwrap();
+-    let (_, mut bridge, engine) = readers(&f, clock.clone());
+-    let policy = NativePolicyInputs::default();
++    let (bridge, state) =
++        configured_public_adapters(&f, clock.clone(), NativePolicyInputs::default());
++    (f, d, clock, bridge, state)
++}
++fn configured_public_adapters(
++    f: &Fixture,
++    clock: Arc<FixedClock>,
++    policy: NativePolicyInputs,
++) -> (McpBridge, crate::api::AppState) {
++    let (_, mut bridge, engine) = readers(f, clock.clone());
++    let mut config = crate::config::RecalldConfig::default();
++    config.decay.decay_rate_multiplier = policy.multiplier;
++    let config = Arc::new(config);
+     bridge.storage = Arc::new(
+         McpStorageAdapter::new(
+             f.storage.clone(),
+@@ -48,14 +62,13 @@
+             f.fts_index.clone(),
+             f.entity_index.clone(),
+             f.graph.clone(),
+-            Arc::new(Default::default()),
++            config.clone(),
+             chrono_tz::UTC,
+         )
+         .with_clock(clock.clone())
+         .with_native_lifecycle_policy(policy.clone()),
+     );
+     bridge.default_namespace = "deliberately-wrong".into();
+-    let config = Arc::new(crate::config::RecalldConfig::default());
+     let state = crate::api::AppState::new(
+         Arc::new(SearchPipelineAdapter::new(
+             engine,
+@@ -104,7 +117,7 @@
+         Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+         Arc::new(NoopMetricsCollector),
+     );
+-    (f, d, clock, bridge, state)
++    (bridge, state)
+ }
+ fn request(f: &Fixture, d: &Data, key: &str) -> Value {
+     let control = f.storage.read().unwrap().control_state().unwrap();

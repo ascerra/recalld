@@ -18,7 +18,7 @@ use crate::model::{
     AccessKind, CachedRecord, DecayPhase, DiskRecord, MemoryId, NamespaceConfig, NamespaceId, Tag,
     structured_metadata,
 };
-use crate::search::{EntityIndex, FlatVectorIndex, FtsIndex};
+use crate::search::{EntityIndex, FtsIndex, VectorIndexOwner};
 use crate::storage::RedbStorageEngine;
 // Import the StorageEngine trait so its methods are in scope.
 use super::state;
@@ -60,7 +60,7 @@ impl From<crate::graph::LinkError> for super::errors::AppError {
 pub struct SearchPipelineAdapter {
     query_engine: Arc<crate::search::QueryEngine>,
     embedding: Arc<dyn EmbeddingProvider>,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
 }
@@ -70,7 +70,7 @@ impl SearchPipelineAdapter {
     pub fn new(
         query_engine: Arc<crate::search::QueryEngine>,
         embedding: Arc<dyn EmbeddingProvider>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     ) -> Self {
@@ -86,11 +86,17 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
-    fn active_embedding(
+    async fn similar_contract(
         &self,
-    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
-    {
-        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+        request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.similar_contract(request).await
+    }
+    async fn query_contract(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine.query_contract(request).await
     }
     fn accept_work(
         &self,
@@ -202,6 +208,12 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+    }
     async fn embed_text(
         &self,
         text: &str,
@@ -273,8 +285,15 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     ) -> Result<Vec<(MemoryId, f32)>, super::errors::AppError> {
         let stamp = self.query_engine.effects_stamp().await?;
         let index = self.vector_index.read().await;
-        let result =
-            crate::search::find_near_duplicates(&index, embedding, namespace_id, threshold, limit);
+        let result = crate::search::find_near_duplicates(
+            index
+                .uniform_index()
+                .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?,
+            embedding,
+            namespace_id,
+            threshold,
+            limit,
+        );
         drop(index);
         if self.query_engine.effects_stamp().await? != stamp {
             return Err(crate::storage::StorageError::RecoveryRequired(
@@ -286,7 +305,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     }
 
     async fn index_memory(&self, id: MemoryId, embedding: &[f32], namespace_id: NamespaceId) {
-        use crate::search::{VectorIndex, VectorMetadata};
+        use crate::search::VectorMetadata;
         let mut index = self.vector_index.write().await;
         let metadata = VectorMetadata {
             namespace_id,
@@ -297,13 +316,11 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     }
 
     async fn remove_from_index(&self, id: MemoryId) {
-        use crate::search::VectorIndex;
         let mut index = self.vector_index.write().await;
         let _ = index.remove(id);
     }
 
     fn get_embedding(&self, id: MemoryId) -> Option<Vec<f32>> {
-        use crate::search::VectorIndex;
         let index = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.vector_index.read())
         });
@@ -314,7 +331,6 @@ impl state::SearchPipeline for SearchPipelineAdapter {
         &self,
         ids: &[MemoryId],
     ) -> std::collections::HashMap<MemoryId, Vec<f32>> {
-        use crate::search::VectorIndex;
         // Acquire the lock once for the entire batch instead of
         // once per ID, amortizing the block_in_place overhead.
         let index = tokio::task::block_in_place(|| {
@@ -330,7 +346,6 @@ impl state::SearchPipeline for SearchPipelineAdapter {
     }
 
     fn indexed_count(&self) -> usize {
-        use crate::search::VectorIndex;
         let index = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.vector_index.read())
         });
@@ -404,7 +419,7 @@ pub struct StorageEngineAdapter {
     /// Held so `delete_memory` can clean the indexes storage cannot
     /// reach. Without them this adapter could tombstone a record and
     /// leave it indexed everywhere else.
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     /// See [`vector_index`](Self::vector_index).
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
     /// See [`vector_index`](Self::vector_index).
@@ -427,7 +442,7 @@ impl StorageEngineAdapter {
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         graph: crate::graph::SharedGraph,
@@ -1081,11 +1096,16 @@ impl state::RecordCache for RecordCacheAdapter {
 /// Adapts `SharedGraph` to the API `RelationshipGraph` trait.
 pub struct RelationshipGraphAdapter {
     graph: SharedGraph,
-    vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+    vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     config: Arc<RecalldConfig>,
+    native: Option<(
+        crate::derived_completion::DerivedCompletion,
+        Arc<dyn crate::time::Clock>,
+        crate::storage::native_lifecycle::NativePolicyInputs,
+    )>,
 }
 
 impl RelationshipGraphAdapter {
@@ -1093,7 +1113,7 @@ impl RelationshipGraphAdapter {
     /// subsystems needed for post-creation linking.
     pub fn new(
         graph: SharedGraph,
-        vector_index: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         entity_index: Arc<tokio::sync::RwLock<EntityIndex>>,
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
         cache: Arc<CacheManager>,
@@ -1106,12 +1126,80 @@ impl RelationshipGraphAdapter {
             storage,
             cache,
             config,
+            native: None,
         }
+    }
+    /// Supply the actual owner's remaining view, clock and lifecycle inputs.
+    /// This shares existing handles and their registry; it creates no new owner.
+    pub fn with_native_completion(
+        mut self,
+        fts: Arc<tokio::sync::Mutex<FtsIndex>>,
+        clock: Arc<dyn crate::time::Clock>,
+        policy: crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Self {
+        self.native = Some((
+            crate::derived_completion::DerivedCompletion {
+                storage: self.storage.clone(),
+                cache: self.cache.clone(),
+                graph: self.graph.clone(),
+                vectors: self.vector_index.clone(),
+                fts,
+                entities: self.entity_index.clone(),
+            },
+            clock,
+            policy,
+        ));
+        self
     }
 }
 
 #[async_trait]
 impl state::RelationshipGraph for RelationshipGraphAdapter {
+    async fn put_native_edges(
+        &self,
+        ctx: crate::storage::control::MutationContext,
+        input: crate::storage::native_graph::NativeGraphInput,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, crate::storage::StorageError> {
+        let (owner, clock, policy) = self.native.as_ref().ok_or_else(|| {
+            crate::storage::StorageError::RecoveryRequired(
+                "native graph requires FTS, clock and policy from its actual owner".into(),
+            )
+        })?;
+        owner
+            .native_graph(
+                ctx,
+                crate::derived_completion::native_graph::GraphRequest::Explicit(input),
+                policy.clone(),
+                clock.clone(),
+                parent,
+            )
+            .await
+            .map(|result| result.map(|effect| effect.receipt))
+    }
+    async fn select_native_links(
+        &self,
+        ctx: crate::storage::control::MutationContext,
+        selection: crate::graph::native_producer::NativeLinkSelection,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::control::WriteReceipt>, crate::storage::StorageError> {
+        let (owner, clock, policy) = self.native.as_ref().ok_or_else(|| {
+            crate::storage::StorageError::RecoveryRequired(
+                "native graph requires FTS, clock and policy from its actual owner".into(),
+            )
+        })?;
+        owner
+            .native_graph(
+                ctx,
+                crate::derived_completion::native_graph::GraphRequest::Automatic(selection),
+                policy.clone(),
+                clock.clone(),
+                parent,
+            )
+            .await
+            .map(|result| result.map(|effect| effect.receipt))
+    }
+
     async fn check_link_target(
         &self,
         field: &'static str,
@@ -1154,6 +1242,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         id: MemoryId,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), crate::graph::GraphError> {
+        crate::graph::autolink::require_legacy_owner(&self.storage)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let work = crate::storage::work::accept_work(&self.storage, parent)
             .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let result = async {
@@ -1174,6 +1264,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         strength: f32,
         vector_slot: u32,
     ) -> Result<(), crate::graph::GraphError> {
+        crate::graph::autolink::require_legacy_owner(&self.storage)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let work = crate::storage::work::accept_work(&self.storage, None)
             .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         let result = async {
@@ -1221,6 +1313,8 @@ impl state::RelationshipGraph for RelationshipGraphAdapter {
         created_at: i64,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<(), crate::graph::GraphError> {
+        crate::graph::autolink::require_legacy_owner(&self.storage)
+            .map_err(|e| crate::graph::GraphError::Unavailable(e.to_string()))?;
         if !self.config.graph.autolink_enabled {
             return Ok(());
         }
@@ -1449,7 +1543,7 @@ impl FsrsEngineAdapter {
     /// Attach the live derived views so manual sweeps complete committed effects.
     pub fn with_indexes(
         mut self,
-        vectors: Arc<tokio::sync::RwLock<FlatVectorIndex>>,
+        vectors: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts: Arc<tokio::sync::Mutex<FtsIndex>>,
         entities: Arc<tokio::sync::RwLock<EntityIndex>>,
     ) -> Self {
@@ -1786,7 +1880,7 @@ impl state::MetricsCollector for NoopMetricsCollector {
 mod tests {
     use super::*;
     use crate::api::state::StorageEngine as _;
-    use crate::search::{VectorIndex as _, VectorMetadata};
+    use crate::search::VectorMetadata;
     use crate::test_support::{DIM, Fixture, MemorySpec};
 
     #[tokio::test]
@@ -1845,7 +1939,7 @@ mod tests {
     async fn actual_http_insertion_adapter_reports_durable_receipt_if_publication_fails() {
         use axum::response::IntoResponse;
         let fx = Fixture::new();
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM + 1);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM + 1);
         let error = match adapter(&fx)
             .insert_memory(
                 NamespaceId::new(1),
@@ -1890,7 +1984,7 @@ mod tests {
                 .effects_stamp()
                 .is_err()
         );
-        *fx.vector_index.write().await = FlatVectorIndex::new(DIM);
+        *fx.vector_index.write().await = VectorIndexOwner::uniform(DIM);
         adapter(&fx).complete_insertion(&receipt).await.unwrap();
         assert!(fx.vector_index.read().await.get_vector(id).is_some());
         assert!(

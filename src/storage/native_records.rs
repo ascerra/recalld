@@ -418,6 +418,12 @@ impl From<&super::edges::PersistedEdge> for NativeEdgeProof {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeRecordWrite {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub vector_execution: Option<super::vector_certification::VectorExecution>,
     pub namespace_id: crate::model::NamespaceId,
     pub memory_id: MemoryId,
     pub lifecycle_version: LifecycleVersion,
@@ -505,6 +511,12 @@ impl NativeRecordWrite {
         receipt: &WriteReceipt,
         insertion: bool,
     ) -> Result<(), StorageError> {
+        if let Some(execution) = &self.vector_execution {
+            if !insertion {
+                return Err(invalid("non-vector mutation has vector execution evidence"));
+            }
+            execution.validate(&self.primary()?.after, receipt)?;
+        }
         if self.namespace_id.is_unset()
             || self.memory_id == MemoryId::nil()
             || self.capture_generation.store_id != receipt.store_id
@@ -639,6 +651,8 @@ impl NativeRecordWrite {
 pub(crate) struct CreationCommitment {
     pub namespace_id: crate::model::NamespaceId,
     pub primary: NativeRecordChange,
+    /// Validated typed replacement, not a rewrite of the original receipt.
+    pub reembedded_vector: Option<VectorReference>,
 }
 impl CreationCommitment {
     pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
@@ -653,6 +667,7 @@ pub(crate) fn creation_proofs(
 ) -> Result<HashMap<MemoryId, CreationCommitment>, StorageError> {
     use redb::ReadableTable;
     let mut result = HashMap::new();
+    let mut replacements = HashMap::new();
     for row in read.open_table(super::control::RECEIPTS)?.iter()? {
         let (_, value) = row?;
         let receipt = super::control::validate_receipt(value.value())?.receipt;
@@ -662,6 +677,7 @@ pub(crate) fn creation_proofs(
                 CreationCommitment {
                     namespace_id: transition.namespace_id,
                     primary: transition.primary()?.clone(),
+                    reembedded_vector: None,
                 },
             )),
             MutationOutcome::NativeMemoryInsertedWithLinks { transition } => Some((
@@ -669,14 +685,42 @@ pub(crate) fn creation_proofs(
                 CreationCommitment {
                     namespace_id: transition.namespace_id,
                     primary: transition.primary()?.clone(),
+                    reembedded_vector: None,
                 },
             )),
+            MutationOutcome::VectorsReembedded { transition } => {
+                for replacement in &transition.records {
+                    if replacements
+                        .insert(replacement.record.memory_id, replacement.record.clone())
+                        .is_some()
+                    {
+                        return Err(invalid("ambiguous vector replacement history"));
+                    }
+                }
+                None
+            }
             _ => None,
         };
         if let Some((id, proof)) = creation {
             if result.insert(id, proof).is_some() {
                 return Err(invalid("duplicate native creation identity"));
             }
+        }
+    }
+    for (id, replacement) in replacements {
+        if let Some(creation) = result.get_mut(&id) {
+            let before = replacement
+                .before
+                .as_ref()
+                .ok_or_else(|| invalid("replacement source missing"))?;
+            if before.content.vector != creation.primary.after.content.vector
+                || before.content.profile_id != creation.primary.after.content.profile_id
+            {
+                return Err(invalid(
+                    "replacement differs from original creation vector/profile",
+                ));
+            }
+            creation.reembedded_vector = replacement.after.content.vector;
         }
     }
     Ok(result)
@@ -723,7 +767,12 @@ pub(crate) fn validate_retained_creation(
             && (current.tags_sha256 != expected.tags_sha256
                 || current.labels_sha256 != expected.labels_sha256))
         || (mask & FULL_TEXT == 0 && (record.text_length != 0) != original.lifecycle.has_text)
-        || (mask & EMBEDDING == 0 && current.vector != expected.vector)
+        || (mask & EMBEDDING == 0
+            && current.vector.as_ref()
+                != creation
+                    .reembedded_vector
+                    .as_ref()
+                    .or(expected.vector.as_ref()))
     {
         return Err(invalid(
             "retained native record disagrees with its creation commitment",
@@ -823,10 +872,7 @@ impl super::native_lifecycle::NativeLifecycleSession {
         }
         let intent = self.capture_insert(scope, input)?;
         let generated = if input.memory.embedding.is_some() {
-            crate::embedding::runtime::GeneratedEmbedding {
-                values: vec![],
-                profile: None,
-            }
+            crate::embedding::runtime::GeneratedEmbedding::unverified(vec![], None)
         } else {
             crate::embedding::runtime::generate_native(
                 provider,

@@ -6,18 +6,28 @@ use crate::embedding::runtime::GeneratedEmbedding;
 use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
 use crate::search::{canonicalize_entity, dot_product_simd};
 use crate::storage::control::{Generation, GenerationRef};
-use crate::storage::native_records::NativeInsertIntent;
 use crate::storage::native_store::{FrozenInsertLinks, NativeStoreIntent, NativeStoreSettings};
 use crate::storage::{RedbStorageEngine, StorageEngine, StorageError};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+
+// Selection-only counters: actual consumer tests run on their own current-thread
+// runtime. Completion/reopen vector reads are deliberately outside this count.
+#[cfg(test)]
+thread_local! {
+    static READS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+#[cfg(test)]
+pub(crate) fn take_reads() -> (usize, usize) {
+    READS.with(|reads| reads.replace((0, 0)))
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct NativeCandidate {
     pub id: MemoryId,
     pub record_generation: Generation,
     pub created_at: i64,
-    pub similarity: f32,
+    pub similarity: Option<f32>,
     pub shared_tags: bool,
     pub shared_entities: usize,
     pub entity_union: usize,
@@ -28,7 +38,32 @@ pub(crate) struct NativeCandidates {
     pub namespace_id: NamespaceId,
     pub profile_id: String,
     pub candidates: Vec<NativeCandidate>,
+    demand: SelectionDemand,
 }
+/// Ephemeral demand from retained intent; never a new request/hash field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SelectionDemand {
+    scores: bool,
+    entities: bool,
+    temporal: bool,
+}
+impl SelectionDemand {
+    fn from_intent(intent: &NativeStoreIntent) -> Self {
+        let settings = intent.settings();
+        Self {
+            scores: intent.check_duplicates
+                || (settings.autolink_enabled && settings.max_auto_links > 0),
+            entities: settings.autolink_enabled && settings.max_entity_links > 0,
+            temporal: settings.autolink_enabled
+                && settings.temporal_window_ms > 0
+                && settings.max_temporal_links > 0,
+        }
+    }
+    fn scans(self) -> bool {
+        self.scores || self.entities || self.temporal
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SelectedNativeLink {
     pub target: MemoryId,
@@ -50,9 +85,11 @@ fn conflict(message: &str) -> StorageError {
 /// same-generation canonical/derived view, never an unversioned cache shortcut.
 pub(crate) fn capture(
     engine: &RedbStorageEngine,
-    intent: &NativeInsertIntent,
+    store: &NativeStoreIntent,
     generated: &GeneratedEmbedding,
 ) -> Result<NativeCandidates, StorageError> {
+    let intent = store.insert_intent();
+    let demand = SelectionDemand::from_intent(store);
     engine.ensure_available()?;
     let generation = engine.control_state()?.generation_ref();
     if generation != intent.capture_generation() {
@@ -87,9 +124,23 @@ pub(crate) fn capture(
         input.memory.embedding.is_some(),
     )?;
     let namespace_id = intent.scope.namespace_id;
-    let new_entities = keys(&input.entities);
+    let new_entities = if demand.entities {
+        keys(&input.entities)
+    } else {
+        BTreeSet::new()
+    };
     let mut candidates = Vec::new();
-    for record in engine.meta_store().records_in_namespace(namespace_id)? {
+    let records = if demand.scans() {
+        #[cfg(test)]
+        READS.with(|reads| {
+            let (scan, vectors) = reads.get();
+            reads.set((scan + 1, vectors));
+        });
+        engine.meta_store().records_in_namespace(namespace_id)?
+    } else {
+        vec![]
+    };
+    for record in records {
         if !matches!(record.phase, DecayPhase::Full | DecayPhase::Summary) {
             continue;
         }
@@ -100,41 +151,55 @@ pub(crate) fn capture(
         let schema = record.schema.as_ref().ok_or_else(|| {
             StorageError::InvalidControl("native candidate schema missing".into())
         })?;
-        let reference = schema.vector.as_ref().ok_or_else(|| {
-            StorageError::OwnershipMismatch("native candidate vector missing".into())
-        })?;
-        if reference.slot != record.vector_slot {
-            return Err(StorageError::OwnershipMismatch(
-                "native candidate vector slot mismatch".into(),
-            ));
-        }
-        let vector = engine
-            .get_vector(namespace_id, record.vector_slot)?
-            .ok_or_else(|| {
-                StorageError::OwnershipMismatch("native candidate vector unavailable".into())
+        let similarity = if demand.scores {
+            let reference = schema.vector.as_ref().ok_or_else(|| {
+                StorageError::OwnershipMismatch("native candidate vector missing".into())
             })?;
-        if vector.len() != query.len() {
-            return Err(StorageError::OwnershipMismatch(
-                "native candidate vector dimension mismatch".into(),
-            ));
-        }
-        crate::storage::canonical_schema::validate_bound_vector(&vector)?;
-        let mut hash = Sha256::new();
-        for value in &vector {
-            hash.update(value.to_le_bytes());
-        }
-        if <[u8; 32]>::from(hash.finalize()) != reference.sha256 {
-            return Err(StorageError::OwnershipMismatch(
-                "native candidate vector hash mismatch".into(),
-            ));
-        }
-        let candidate_entities = keys(&schema.labels.entities);
+            if reference.slot != record.vector_slot {
+                return Err(StorageError::OwnershipMismatch(
+                    "native candidate vector slot mismatch".into(),
+                ));
+            }
+            #[cfg(test)]
+            READS.with(|reads| {
+                let (scan, vectors) = reads.get();
+                reads.set((scan, vectors + 1));
+            });
+            let vector = engine
+                .get_vector(namespace_id, record.vector_slot)?
+                .ok_or_else(|| {
+                    StorageError::OwnershipMismatch("native candidate vector unavailable".into())
+                })?;
+            if vector.len() != query.len() {
+                return Err(StorageError::OwnershipMismatch(
+                    "native candidate vector dimension mismatch".into(),
+                ));
+            }
+            crate::storage::canonical_schema::validate_bound_vector(&vector)?;
+            let mut hash = Sha256::new();
+            for value in &vector {
+                hash.update(value.to_le_bytes());
+            }
+            if <[u8; 32]>::from(hash.finalize()) != reference.sha256 {
+                return Err(StorageError::OwnershipMismatch(
+                    "native candidate vector hash mismatch".into(),
+                ));
+            }
+            Some(dot_product_simd(&query, &vector).clamp(-1., 1.))
+        } else {
+            None
+        };
+        let candidate_entities = if demand.entities {
+            keys(&schema.labels.entities)
+        } else {
+            BTreeSet::new()
+        };
         candidates.push(NativeCandidate {
             id,
             record_generation: schema.lifecycle.record_generation,
             created_at: record.created_at,
             // Bound vectors can round a dot product just outside the cosine range.
-            similarity: dot_product_simd(&query, &vector).clamp(-1., 1.),
+            similarity,
             shared_tags: input
                 .memory
                 .tags
@@ -154,6 +219,7 @@ pub(crate) fn capture(
         namespace_id,
         profile_id,
         candidates,
+        demand,
     })
 }
 
@@ -187,7 +253,8 @@ impl NativeCandidates {
         intent: &NativeStoreIntent,
     ) -> Result<FrozenInsertLinks, StorageError> {
         let insert = intent.insert_intent();
-        if self.generation != insert.capture_generation()
+        if self.demand != SelectionDemand::from_intent(intent)
+            || self.generation != insert.capture_generation()
             || self.namespace_id != insert.scope.namespace_id
             || Some(self.profile_id.as_str())
                 != crate::storage::native_records::profile_id(&insert.namespace).as_deref()
@@ -225,7 +292,7 @@ impl NativeCandidates {
             } else {
                 vec![]
             },
-            advisory: self.advisory(intent.check_duplicates),
+            advisory: self.advisory(intent.check_duplicates)?,
         })
     }
 
@@ -247,26 +314,27 @@ impl NativeCandidates {
         }
         let floor = super::autolink::THRESHOLD_HARD_FLOOR;
         let threshold = (settings.auto_link_threshold as f32).max(floor);
-        let mut semantic: Vec<_> = self
-            .candidates
-            .iter()
-            .filter(|c| {
-                c.similarity
-                    >= if c.shared_tags {
-                        (threshold - super::autolink::TAG_THRESHOLD_ADJUSTMENT).max(floor)
-                    } else {
-                        threshold
-                    }
-            })
-            .collect();
-        semantic.sort_by(|a, b| b.similarity.total_cmp(&a.similarity).then(a.id.cmp(&b.id)));
+        let mut semantic = if settings.max_auto_links > 0 {
+            self.scored_candidates()?
+        } else {
+            vec![]
+        };
+        semantic.retain(|(c, score)| {
+            *score
+                >= if c.shared_tags {
+                    (threshold - super::autolink::TAG_THRESHOLD_ADJUSTMENT).max(floor)
+                } else {
+                    threshold
+                }
+        });
+        semantic.sort_by(|(a, sa), (b, sb)| sb.total_cmp(sa).then(a.id.cmp(&b.id)));
         let mut links: Vec<_> = semantic
             .into_iter()
             .take(settings.max_auto_links)
-            .map(|c| SelectedNativeLink {
+            .map(|(c, score)| SelectedNativeLink {
                 target: c.id,
                 edge_type: EdgeType::Associative,
-                weight: c.similarity,
+                weight: score,
             })
             .collect();
         let mut entity: Vec<_> = self
@@ -320,20 +388,37 @@ impl NativeCandidates {
 
     /// Numeric/ID-only selection; hydration of current visible summaries belongs
     /// to the response path. Disabled and checked-empty remain distinguishable.
-    pub(crate) fn advisory(&self, requested: bool) -> Option<Vec<(MemoryId, f32)>> {
+    pub(crate) fn advisory(
+        &self,
+        requested: bool,
+    ) -> Result<Option<Vec<(MemoryId, f32)>>, StorageError> {
         if !requested {
-            return None;
+            return Ok(None);
         }
         let mut matches: Vec<_> = self
-            .candidates
-            .iter()
-            .filter(|c| {
-                c.similarity >= crate::model::constants::DUPLICATE_SIMILARITY_THRESHOLD as f32
+            .scored_candidates()?
+            .into_iter()
+            .filter(|(_, score)| {
+                *score >= crate::model::constants::DUPLICATE_SIMILARITY_THRESHOLD as f32
             })
-            .map(|c| (c.id, c.similarity))
+            .map(|(c, score)| (c.id, score))
             .collect();
         matches.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         matches.truncate(crate::model::constants::MAX_NEAR_DUPLICATE_MATCHES);
-        Some(matches)
+        Ok(Some(matches))
+    }
+
+    fn scored_candidates(&self) -> Result<Vec<(&NativeCandidate, f32)>, StorageError> {
+        if !self.demand.scores {
+            return Err(conflict("native selection did not request similarity"));
+        }
+        self.candidates
+            .iter()
+            .map(|c| {
+                c.similarity
+                    .map(|score| (c, score))
+                    .ok_or_else(|| conflict("native selection similarity was not computed"))
+            })
+            .collect()
     }
 }

@@ -194,6 +194,12 @@ impl BatchFailure {
     }
     pub(crate) fn from_storage(error: StorageError) -> Self {
         match error {
+            error @ StorageError::VectorCertificationRequired { .. } => Self::new(
+                ErrorCategory::Unavailable,
+                "UNAVAILABLE",
+                Some("/namespace".into()),
+                error.to_string(),
+            ),
             StorageError::BatchResponseTooLarge {
                 reservation_receipt,
             } => {
@@ -213,7 +219,17 @@ impl BatchFailure {
                 out.error.code = "INDEX_NOT_READY".into();
                 out.error.commit_state = CommitState::Committed;
                 out.error.operation_id = Some(receipt.operation_id);
-                out.receipt = Some(*receipt);
+                if matches!(
+                    receipt.outcome,
+                    crate::storage::control::MutationOutcome::BatchReserved { .. }
+                ) {
+                    // Evidence of the reservation only, never an atomic batch or
+                    // successful child. Remote API1 still verifies the caller hash.
+                    out.reservation_receipt = Some(*receipt);
+                    out.warnings.push("READINESS_UNKNOWN".into());
+                } else {
+                    out.receipt = Some(*receipt);
+                }
                 out
             }
             StorageError::CommitOutcomeUnknown { operation_id, .. } => {
@@ -402,8 +418,8 @@ pub struct BatchEnvelope {
     pub envelope: Envelope<BatchData>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_operation_id: Option<Uuid>,
-    /// Only historical oversize failures: reservation evidence, not an atomic
-    /// batch receipt, item outcome list, or readiness assertion.
+    /// Reservation evidence on oversize or reservation publication failure,
+    /// not an atomic batch receipt, item outcome list, or readiness assertion.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reservation_receipt: Option<WriteReceipt>,
 }

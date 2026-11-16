@@ -10,6 +10,7 @@ mod config;
 mod import;
 mod output;
 mod policy;
+mod vector_certification;
 
 pub use client::RecalldClient;
 pub use commands::Cli;
@@ -69,6 +70,7 @@ pub type Result<T> = std::result::Result<T, CliError>;
 /// dispatches to the appropriate command handler.
 pub async fn run(cli: Cli, config: CliConfig) -> Result<()> {
     let command = match cli.command {
+        Command::ReembedVectors(args) => return vector_certification::run(args).await,
         Command::Policy(args) => return policy::run(args),
         other => other,
     };
@@ -80,6 +82,9 @@ pub async fn run(cli: Cli, config: CliConfig) -> Result<()> {
     };
 
     match command {
+        Command::ReembedVectors(_) => {
+            unreachable!("offline re-embedding dispatched before client construction")
+        }
         Command::Policy(_) => unreachable!("offline policy dispatched before client construction"),
         Command::Store(args) => cmd_store(&client, &*formatter, args).await,
         Command::Recall(args) => cmd_recall(&client, &*formatter, args).await,

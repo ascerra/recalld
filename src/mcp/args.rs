@@ -803,7 +803,7 @@ pub fn parse_store_item(
 // ═══════════════════════════════════════════════════════════════════════
 
 /// The maximum `limit` a search tool will accept, matching the schema.
-const MAX_SEARCH_LIMIT: usize = 100;
+pub(crate) const MAX_SEARCH_LIMIT: usize = 100;
 /// The `limit` a search uses when the caller names none.
 const DEFAULT_SEARCH_LIMIT: usize = 10;
 /// The maximum graph `depth` a recall will traverse, matching the schema.

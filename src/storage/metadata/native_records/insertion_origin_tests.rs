@@ -6,7 +6,7 @@ async fn native_origin_single_actual_1_and_2_keep_identity_and_replay_before_pro
     for contract_version in [1, 2] {
         for generated in [true, false] {
             let root = tempfile::tempdir().unwrap();
-            let d = fixture(root.path());
+            let d = certified_fixture(root.path());
             let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
             let s = open(&d, clock.clone());
             let f = Fixture::from_open_engine(root, s.engine);
@@ -91,7 +91,7 @@ async fn native_origin_batch_actual_runner_replay_and_cross_contract_conflict() 
     for version in [2, 3] {
         for contract in [1, 2] {
             let root = tempfile::tempdir().unwrap();
-            let d = fixture(root.path());
+            let d = certified_fixture(root.path());
             let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
             let s = open(&d, clock.clone());
             let f = Fixture::from_open_engine(root, s.engine);

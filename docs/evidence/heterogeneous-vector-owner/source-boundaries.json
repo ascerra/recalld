@@ -1,0 +1,76 @@
+{
+  "base": "3361ddb2309593493326ace621d4fdcc9ba89d8c",
+  "runtime": "3ec4ff51289e23bf217afbd1efa40a067d74e4fd",
+  "checks": [
+    {
+      "path": "src/search/index.rs",
+      "sha256": "2ead14cbde959190df7c1dd0ce3b6bf5cead6b7e7ac083650ef3c8d7b09609d0",
+      "unchanged": true
+    },
+    {
+      "path": "src/search/duplicates.rs",
+      "sha256": "9b84026e7bb1e50eac4449e8da9c3f2d5347603f4ca5249270373a3c995850e6",
+      "unchanged": true
+    },
+    {
+      "path": "src/storage/vectors.rs",
+      "sha256": "e6efd2e93e422d199ed60cf927dce2b608cb85e834f6b0972a372ef426808d23",
+      "unchanged": true
+    },
+    {
+      "path": "src/serialization/contract.rs",
+      "sha256": "4bd2548ee341a897c6cb22765923b041850d3c67521f23de806f54d5781ddd2f",
+      "unchanged": true
+    },
+    {
+      "path": "src/bench/native_prefix.rs",
+      "sha256": "77ab96d210150bed7f3095d428945f875ec5f134596bf00194417ebc543830a8",
+      "unchanged": true
+    },
+    {
+      "path": "src/system.rs native_profile loop",
+      "sha256": "aac02f058e098505a1c4e816bffd90c6ab213263b8003973e62643ec0c6fdd75",
+      "unchanged": true
+    }
+  ],
+  "changed_paths": [
+    "src/api/adapters.rs",
+    "src/api/handlers.rs",
+    "src/daemon/server.rs",
+    "src/derived_completion.rs",
+    "src/derived_readiness.rs",
+    "src/graph/autolink.rs",
+    "src/index_cleanup.rs",
+    "src/mcp/batch_adapters.rs",
+    "src/mcp/bridge_adapters.rs",
+    "src/mcp/legacy_lifecycle_tests.rs",
+    "src/producer_work_tests.rs",
+    "src/search/adapters.rs",
+    "src/search/mod.rs",
+    "src/search/pipeline.rs",
+    "src/search/strength_tests.rs",
+    "src/search/vector_owner.rs",
+    "src/storage/maintenance_tests.rs",
+    "src/storage/metadata/native_records/batch_tests.rs",
+    "src/storage/metadata/native_records/batch_wire_tests.rs",
+    "src/storage/metadata/native_records/compaction_tests.rs",
+    "src/storage/metadata/native_records/exposure_consumer_tests.rs",
+    "src/storage/metadata/native_records/feedback_consumer_tests.rs",
+    "src/storage/metadata/native_records/forget_consumer_tests.rs",
+    "src/storage/metadata/native_records/forget_origin_tests.rs",
+    "src/storage/metadata/native_records/graph_producer_tests.rs",
+    "src/storage/metadata/native_records/owned_ids_producer_tests.rs",
+    "src/storage/metadata/native_records/public_api1_tests.rs",
+    "src/storage/metadata/native_records/reader_tests.rs",
+    "src/storage/metadata/native_records/store_producer_tests.rs",
+    "src/storage/metadata/native_records/sweep_tests.rs",
+    "src/storage/metadata/native_records/wire_tests.rs",
+    "src/storage/native_purge_tests.rs",
+    "src/storage/purge_tests.rs",
+    "src/storage/tombstone_tests.rs",
+    "src/storage/vector_certification/tests.rs",
+    "src/system.rs",
+    "src/system_heterogeneous_tests.rs",
+    "src/test_support.rs"
+  ]
+}
