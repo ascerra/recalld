@@ -1,0 +1,10 @@
+{
+  "currentQuestion": {
+    "queryId": "replay-miss",
+    "text": "unrecorded-query"
+  },
+  "deliveryOrdinal": 5,
+  "expectedMiss": true,
+  "phase": "query",
+  "startId": 14
+}

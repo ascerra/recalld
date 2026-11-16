@@ -1,0 +1,9 @@
+[
+  {
+    "actorCodeEqual": true,
+    "actorInputsEqual": true,
+    "episodeId": "episode-0",
+    "onlyDeclaredRequestLimitDiffers": false,
+    "providerInputsVectorsEqual": true
+  }
+]

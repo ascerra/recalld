@@ -17,6 +17,7 @@ import time
 import uuid
 
 CONTEXT = runpy.run_path(str(Path(__file__).with_name("context-mcp-evaluation.py")))
+PAIRED = runpy.run_path(str(Path(__file__).with_name("paired-mcp-evaluation.py")))
 BEIR = runpy.run_path(str(Path(__file__).with_name("beir-mcp-evaluation.py")))
 GROUPED = runpy.run_path(str(Path(__file__).with_name("grouped-mcp-evaluation.py")))
 TRACK = "serialized-mcp-synthetic-diagnostic-v1"
@@ -35,7 +36,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = ('src/mcp/fixtures/legacy-lifecycle-old-api1.json', 'src/mcp/fixtures/legacy-lifecycle-old-api1.zip', 'src/storage/metadata/native_records/fixtures/original-api-old2.zip', 'src/storage/metadata/native_records/fixtures/request-context-api2.zip',
-         "scripts/beir-mcp-evaluation.py", "scripts/beir-reference-lock.json", "scripts/test_beir_mcp_evaluation.py", "scripts/check_beir_mcp_evaluation.py", "scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py", "scripts/test_trace_accounting.py", "scripts/check_trace_accounting.py", "scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
+         "scripts/beir-mcp-evaluation.py", "scripts/beir-reference-lock.json", "scripts/test_beir_mcp_evaluation.py", "scripts/check_beir_mcp_evaluation.py", "scripts/paired-mcp-evaluation.py", "scripts/test_paired_mcp_evaluation.py", "scripts/check_paired_mcp_evaluation.py", "scripts/grouped-mcp-evaluation.py", "scripts/test_grouped_mcp_evaluation.py", "scripts/check_grouped_mcp_evaluation.py", "scripts/test_trace_accounting.py", "scripts/check_trace_accounting.py", "scripts/public-mcp-conformance.py", "scripts/public-mcp-evaluation.py", "scripts/public-mcp-actor.py", "scripts/test_public_mcp_evaluation.py",
          "src/storage/metadata/native_records/fixtures/phase-clock-legacy.jsonl", "scripts/owned-mcp-supervisor.py", "scripts/test_owned_mcp_episode.py", "scripts/reset-mcp-supervisor.py", "scripts/test_reset_mcp_episode.py", "scripts/sweep-mcp-supervisor.py", "scripts/test_sweep_mcp_episode.py", "scripts/native-prefix-mcp-supervisor.py", "scripts/test_native_prefix_episode.py", "scripts/native-sweep-mcp-supervisor.py", "scripts/test_native_sweep_episode.py", "src/storage/engine/fixtures/text-compaction-before.zip",
          *["docsbench/native-sweep-consumer/full-e1d4cea9/inputs/"+name for name in ("manifest.json","actor-inputs.json","evaluator-labels.json","evaluator-cache.json","evaluator-schedule.json")])
 EXTRA += ("scripts/context-mcp-evaluation.py", "scripts/context_tokenizer.py", "scripts/context-tokenizer-lock.json", "scripts/context-encoding.json", "scripts/TIKTOKEN-LICENSE.txt", "scripts/prepare-context-assets.py", "scripts/test_context_mcp_evaluation.py", "scripts/check_context_mcp_evaluation.py",)
@@ -283,7 +284,7 @@ def validate_build(m, binary, scorer, source_root):
     if any(type(m[k]) is not int or m[k] != 1 for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
     versions, capabilities = track_profile(m["track"])
-    if m["track"] not in (TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
+    if m["track"] not in (TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], PAIRED["ARM_TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -380,6 +381,8 @@ def build_manifest(args, build):
 
 
 def prepare(args):
+    if getattr(args, "track", TRACK) == PAIRED["TRACK"]:
+        return PAIRED["prepare"](args, globals())
     if getattr(args, "track", TRACK) == GROUPED["TRACK"]:
         return GROUPED["prepare"](args, globals())
     reference_sha = BEIR["verify_reference"](getattr(args, "beir_reference", None)) if args.track == BEIR["TRACK"] else None
@@ -469,7 +472,9 @@ class Replay(http.server.BaseHTTPRequestHandler):
 
 
 def run_episode(args, prepared=None):
-    if prepared is None and json.loads(args.manifest.read_text()).get("track") == GROUPED["TRACK"]:
+    if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == PAIRED["TRACK"]:
+        return PAIRED["run"](args, globals())
+    if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == GROUPED["TRACK"]:
         return GROUPED["run"](args, globals())
     if prepared is None and json.loads(args.manifest.read_text()).get("track") == NATIVE_SWEEP["TRACK"]:
         return NATIVE["run"](args, globals(), NATIVE_SWEEP)
@@ -617,11 +622,11 @@ warm_file_enabled = false
                     if "contextPolicy" in m and ordinal>0: projection["contextPolicy"]=m["contextPolicy"]
                     save(args.out / "actor-inputs" / f"step-{ordinal}.json", projection)
                     if accounted:
-                        child = run_accounted_actor([sys.executable, str(actor_path), "--accounting", "--write-fd", str(process.stdin.fileno()),
+                        child = run_accounted_actor([sys.executable, str(actor_path), *(["--retrieval-limit", str(m["pairedArm"]["retrievalLimit"])] if "pairedArm" in m else []), "--accounting", "--write-fd", str(process.stdin.fileno()),
                             "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read)], projection, wire, actor_log, root,
                             dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC"), (process.stdin.fileno(), process.stdout.fileno()), trace)
                     else:
-                        child = subprocess.run([sys.executable, str(actor_path), *(["--context-bundle",str(args.context_assets)] if "contextPolicy" in m else []), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read), *[arg for fd in control_fds for arg in ("--deny-control-fd", str(fd))]],
+                        child = subprocess.run([sys.executable, str(actor_path), *(["--context-bundle", str(args.context_assets)] if "contextPolicy" in m else []), *(["--retrieval-limit", str(m["pairedArm"]["retrievalLimit"])] if "pairedArm" in m else []), "--write-fd", str(process.stdin.fileno()), "--read-fd", str(process.stdout.fileno()), "--deny-fd", str(guard_read), *[arg for fd in control_fds for arg in ("--deny-control-fd", str(fd))]],
                             input=encoded(projection), stdout=wire, stderr=actor_log, cwd=root,
                             env=dict(PATH="/usr/bin:/bin", HOME=str(root / "home"), TZ="UTC", PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1"),
                             pass_fds=(process.stdin.fileno(), process.stdout.fileno()), timeout=90)
@@ -814,7 +819,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
-    p.add_argument("--track", choices=(TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
+    p.add_argument("--track", choices=(TRACK, CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p.add_argument("--beir-reference", type=Path)
     p.add_argument("--context-profile", choices=tuple(CONTEXT["PROFILES"]), default="default")

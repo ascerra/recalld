@@ -176,7 +176,7 @@ def run(args):
     else:
         query = projection["currentQuestion"]
         assert set(query) == {"queryId", "text"}
-        result=call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=3 if tokenizer else 1),
+        result=call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=3 if tokenizer else args.retrieval_limit),
              "replay-miss" if projection["expectedMiss"] else "query:" + query["queryId"], error=projection["expectedMiss"])
         if tokenizer and not projection["expectedMiss"]:
             context=tokenizer.assemble(encoder,query["text"],result["memories"],projection["contextPolicy"])
@@ -185,6 +185,7 @@ def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context-bundle")
+    parser.add_argument("--retrieval-limit", type=int, choices=(1,2), default=1)
     parser.add_argument("--accounting", action="store_true")
     for flag in ("read-fd", "write-fd", "deny-fd"):
         parser.add_argument("--" + flag, type=int, required=True)
