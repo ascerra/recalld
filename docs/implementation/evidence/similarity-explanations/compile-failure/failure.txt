@@ -1,0 +1,95 @@
+error[E0433]: failed to resolve: use of undeclared type `EdgeType`
+   --> src/search/similar_selection_tests.rs:168:45
+    |
+168 |                 .add_edge(terminal, origin, EdgeType::Supersedes, 1.0, false, 100)
+    |                                             ^^^^^^^^ use of undeclared type `EdgeType`
+    |
+help: consider importing this enum through its public re-export
+   --> src/search/read_view.rs:696:5
+    |
+696 +     use crate::EdgeType;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `EdgeType`
+    --> src/search/similar_selection_tests.rs:1150:48
+     |
+1150 |                 .add_edge(padding, f.terminal, EdgeType::Associative, 0.1, false)
+     |                                                ^^^^^^^^ use of undeclared type `EdgeType`
+     |
+help: consider importing this enum through its public re-export
+    -->  src/search/read_view.rs:696:5
+     |
+ 696 +     use crate::EdgeType;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `EdgeType`
+    --> src/search/similar_selection_tests.rs:1210:50
+     |
+1210 |                         .add_edge(f.live, f.old, EdgeType::Supersedes, 1.0, false)
+     |                                                  ^^^^^^^^ use of undeclared type `EdgeType`
+     |
+help: consider importing this enum through its public re-export
+    -->  src/search/read_view.rs:696:5
+     |
+ 696 +     use crate::EdgeType;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `EdgeType`
+    --> src/search/similar_selection_tests.rs:1215:50
+     |
+1215 |                         .add_edge(f.old, f.live, EdgeType::Supersedes, 1.0, false)
+     |                                                  ^^^^^^^^ use of undeclared type `EdgeType`
+     |
+help: consider importing this enum through its public re-export
+    -->  src/search/read_view.rs:696:5
+     |
+ 696 +     use crate::EdgeType;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `EdgeType`
+    --> src/search/similar_selection_tests.rs:1218:55
+     |
+1218 |                         .add_edge(f.live, f.terminal, EdgeType::Supersedes, 1.0, false)
+     |                                                       ^^^^^^^^ use of undeclared type `EdgeType`
+     |
+help: consider importing this enum through its public re-export
+    -->  src/search/read_view.rs:696:5
+     |
+ 696 +     use crate::EdgeType;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `EdgeType`
+    --> src/search/similar_selection_tests.rs:1223:58
+     |
+1223 |                         .add_edge(f.foreign, f.terminal, EdgeType::Supersedes, 1.0, false)
+     |                                                          ^^^^^^^^ use of undeclared type `EdgeType`
+     |
+help: consider importing this enum through its public re-export
+    -->  src/search/read_view.rs:696:5
+     |
+ 696 +     use crate::EdgeType;
+     |
+
+error[E0433]: failed to resolve: use of undeclared type `EdgeType`
+    --> src/search/similar_selection_tests.rs:1237:63
+     |
+1237 |                         .add_edge(fixed_id(9999), f.terminal, EdgeType::Supersedes, 1.0, false)
+     |                                                               ^^^^^^^^ use of undeclared type `EdgeType`
+     |
+help: consider importing this enum through its public re-export
+    -->  src/search/read_view.rs:696:5
+     |
+ 696 +     use crate::EdgeType;
+     |
+
+warning: unused import: `StorageEngine`
+ --> src/search/origin_tests.rs:5:5
+  |
+5 |     StorageEngine as _,
+  |     ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0433`.
+warning: `recalld` (lib test) generated 1 warning
+error: could not compile `recalld` (lib test) due to 7 previous errors; 1 warning emitted

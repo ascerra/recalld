@@ -1,0 +1,78 @@
+{
+  "source_commit": "83dda1285e3b0c4c355714623caa31f0ca6a71ed",
+  "source_files": 233,
+  "manifest_sha256": "9aa1391cfb15914b07d888238e3515f870c5e7fbf0cd1db26c16e026aaa089cb",
+  "inside_precompile_postrun_match": true,
+  "host_snapshot_worktree_committed_match": true,
+  "binaries_sha256": {
+    "lifecycle_cli-4843a41927cafc6b": "8fc84b38c798aa839b446a76c1b301df6adb6cc0c27b4f948d2fbf9994b62fd3",
+    "recalld-7667794dd2328ce1": "5b28136d6594c81630d0a36c55db3283bed7a2a623eea4832b060eda5c1ea92e",
+    "recalld-c8392f2a5ef64898": "bd64d1823fabd862afd7eab9a328870877ed172d1e6ee0a7d7a4549a9cccd468",
+    "recalld-e423ca3d07310388": "b420bc1dc67a2cadedfb85914aa0cfce5b62616f97887511051d12a7d0c52b70",
+    "text_migration_cli-92bf02c892a58814": "270f773c3dcd7d325f9d07ff9b334a809898b553f56c823a434b595b1c54270c"
+  },
+  "log_sha256": "ff4c6c874f9208795c562ea0f9aaadae6d1e9b6d43cfc6a487685f75e36ccf3f",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-15T02:32:34.764702914Z",
+    "FinishedAt": "2026-11-15T02:41:21.703057769Z"
+  },
+  "network": "none",
+  "memory_bytes": 4294967296,
+  "nano_cpus": 2000000000,
+  "mounts": [
+    {
+      "Source": "/tmp/recalld-implementation/coherent-v2-similar/.validation/cargo",
+      "Destination": "/cargo",
+      "RW": true
+    },
+    {
+      "Source": "/tmp/recalld-implementation/canonical-eligibility-coverage/.validation/canonical-eligibility-green/source.sha256",
+      "Destination": "/source.sha256",
+      "RW": false
+    },
+    {
+      "Source": "/tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity",
+      "Destination": "/target",
+      "RW": true
+    },
+    {
+      "Source": "/tmp/recalld-implementation/canonical-eligibility-coverage/.validation/canonical-eligibility-green/validate.sh",
+      "Destination": "/validate.sh",
+      "RW": false
+    },
+    {
+      "Source": "/tmp/recalld-implementation/canonical-eligibility-coverage/.validation/canonical-eligibility-green/source",
+      "Destination": "/work",
+      "RW": false
+    }
+  ],
+  "results": [
+    "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1047 filtered out; finished in 0.26s",
+    "test result: ok. 1054 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 421.57s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.53s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s"
+  ],
+  "warning_summaries": [
+    "warning: `recalld` (lib test) generated 9 warnings",
+    "warning: `recalld` (lib test) generated 9 warnings",
+    "warning: `recalld` (lib) generated 29 warnings (4 duplicates)",
+    "warning: `recalld` (lib) generated 708 warnings (run `cargo clippy --fix --lib -p recalld` to apply 85 suggestions)",
+    "warning: `recalld` (bin \"recalld\") generated 1 warning",
+    "warning: `recalld` (bin \"recalld\" test) generated 1 warning (1 duplicate)",
+    "warning: `recalld` (lib test) generated 777 warnings (685 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 7 suggestions)"
+  ],
+  "fmt_and_clippy_exit": 0
+}

@@ -152,6 +152,13 @@ impl QueryEngine {
 
     /// Immutable inputs cloned into each operation; production uses the same
     /// instance clock and global multiplier as A3. Does not activate schema v2.
+    pub fn native_policy_inputs(&self) -> crate::storage::native_lifecycle::NativePolicyInputs {
+        crate::storage::native_lifecycle::NativePolicyInputs {
+            global: self.decay_policy.clone(),
+            multiplier: self.decay_multiplier,
+        }
+    }
+
     pub fn with_lifecycle_inputs(
         mut self,
         clock: Arc<dyn crate::time::Clock>,

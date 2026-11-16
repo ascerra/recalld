@@ -156,4 +156,9 @@ mod vector_query_tests;
 #[cfg(test)]
 mod legacy_label_tests;
 
+#[cfg(test)]
+pub(crate) use handlers::create_namespace_v2;
+
+#[cfg(test)]
+pub(crate) use handlers::update_namespace_policy_v2;
 pub(crate) mod native_lifecycle;
