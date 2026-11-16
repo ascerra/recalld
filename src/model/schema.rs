@@ -325,6 +325,13 @@ pub struct NamespaceSchemaV2 {
     pub lifecycle_version: LifecycleVersion,
     pub policy_revision: Generation,
     pub embedding_binding: EmbeddingBinding,
+    /// Absent old history is unknown; opening a store never adopts current inputs.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::storage::request_context::deserialize_present"
+    )]
+    pub inherited_decay: Option<crate::storage::inherited_policy::InheritedDecayBinding>,
     pub required_features: Vec<String>,
     pub extensions: BTreeMap<String, serde_json::Value>,
 }
@@ -335,6 +342,7 @@ impl NamespaceSchemaV2 {
             lifecycle_version: LifecycleVersion::LegacyAccessV1,
             policy_revision: Generation::default(),
             embedding_binding: EmbeddingBinding::UnknownLegacy,
+            inherited_decay: None,
             required_features: vec![],
             extensions: BTreeMap::new(),
         }
@@ -344,6 +352,9 @@ impl NamespaceSchemaV2 {
             || !self.required_features.is_empty()
         {
             return Err("unsupported namespace schema/features".into());
+        }
+        if let Some(binding) = &self.inherited_decay {
+            binding.validate().map_err(|e| e.to_string())?;
         }
         let floats = [
             namespace.initial_stability,

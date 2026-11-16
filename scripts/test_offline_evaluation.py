@@ -5,6 +5,8 @@ import runpy
 import subprocess
 import tempfile
 import unittest
+import sys
+from types import SimpleNamespace
 
 runner = runpy.run_path(str(Path(__file__).with_name("offline-evaluation.py")))
 
@@ -121,6 +123,77 @@ class SourceSnapshotTests(unittest.TestCase):
         (self.output / "run-2/control-after.json").write_text('{}\n')
         with self.assertRaisesRegex(RuntimeError, "false query changed control"):
             runner["verify_replays"](self.output, 3)
+
+
+class ManifestInputTests(unittest.TestCase):
+    def test_synthetic_actor_evaluator_separation_and_nonrecursive_hashes(self):
+        args = SimpleNamespace(records=100, dimensions=16, k=5, warmup=1, samples=3, seed=7)
+        # Metadata values here are not executed; full validation is through the compiled consumer.
+        diagnostic = dict.fromkeys(("sourceCommit", "dirtyPatchSha256", "sourceFilesSha256",
+                                    "lockfileSha256", "containerImageId", "limits"))
+        manifest, actor, evaluator = runner["evaluation_inputs"](args, diagnostic)
+        labels = json.loads(evaluator)
+        self.assertNotIn(labels["labelCanary"].encode(), actor)
+        self.assertEqual(manifest["actorInputs"]["sha256"], runner["hashlib"].sha256(actor).hexdigest())
+        self.assertEqual(manifest["evaluatorLabels"]["sha256"], runner["hashlib"].sha256(evaluator).hexdigest())
+        self.assertEqual(manifest["dataset"]["datasetRevision"], manifest["actorInputs"]["sha256"])
+        self.assertEqual(len(json.loads(actor)["sources"]), 100)
+        self.assertEqual(manifest["track"], "manifest-internal-diagnostic-v2")
+        self.assertEqual(manifest["manifestVersion"], 1)
+        self.assertEqual(manifest["scoring"]["profile"], "synthetic-unique-source-v1")
+        self.assertEqual(labels["relevant"]["query10"], [])
+        self.assertNotIn("query20", labels["relevant"])
+        self.assertEqual(labels["relevant"]["query30"], ["unit-000030", "unit-000099"])
+        self.assertNotIn("manifestSha256", manifest)
+        self.assertFalse(manifest["capabilities"]["reset"])
+        self.assertIsNone(manifest["versions"]["canonicalSchemaVersion"])
+        self.assertEqual(manifest["versions"]["canonicalRepresentation"], "legacy-schema-none")
+        self.assertIsNone(manifest["dataset"]["thirdPartyLicense"])
+
+    def test_old_supervisor_invocation_cannot_silently_select_new_track(self):
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("offline-evaluation.py")),
+                                 "--cache", "/does-not-exist"], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--track", result.stderr)
+        self.assertNotIn("Artifacts:", result.stdout)
+
+    def test_scoring_verifier_separates_index_oracle_and_checks_all_engine_events(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "evaluator").mkdir()
+            def rows(name, values):
+                (root / name).write_text("\n".join(map(json.dumps, values)) + "\n")
+            rows("source-mappings.jsonl", [{"memoryId": "memory", "sourceIds": ["source"]}])
+            rows("trace.jsonl", [
+                {"stepId": "index", "action": {"kind": "exact-index-query"}, "outcome": {"status": "ok"}},
+                {"stepId": "engine", "action": {"kind": "internal-query", "request": {"text": "query"}},
+                 "outcome": {"status": "ok", "warmup": False, "results": [{"memoryId": "memory"}]}}])
+            oracle = {"stepId": "index", "oracleRecallAtK": 1.0}
+            metrics = {"stepId": "engine", "queryId": "query", "retrievedSourceIds": ["source"],
+                       "metrics": {"annotationStatus": "unknown", "scored": False}}
+            rows("evaluator/trace.jsonl", [oracle, metrics])
+            runner["save"](root / "evaluator/scoring-summary.json", {"queryEvents": "1", "scored": "0",
+                "zeroLabelUnscored": "0", "unknownAnnotations": "1", "means": {"retrievalRecallAt5": None}})
+            self.assertEqual(runner["verify_scoring_outputs"](root, {"relevant": {}}),
+                             {"scored": 0, "zero_label": 0, "unknown": 1})
+            rows("evaluator/trace.jsonl", [oracle])
+            with self.assertRaises(AssertionError):
+                runner["verify_scoring_outputs"](root, {"relevant": {}})
+            rows("evaluator/trace.jsonl", [oracle, metrics, metrics])
+            with self.assertRaises(AssertionError):
+                runner["verify_scoring_outputs"](root, {"relevant": {}})
+
+    def test_old_explicit_track_is_rejected_before_scratch(self):
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("offline-evaluation.py")),
+                                 "--track", "manifest-internal-diagnostic-v1", "--cache", "/does-not-exist"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Artifacts:", result.stdout)
+
+    def test_bad_plan_rejected_before_any_runner_side_effect(self):
+        args = SimpleNamespace(records=99, dimensions=16, k=5, warmup=1, samples=3, seed=7)
+        with self.assertRaises(ValueError):
+            runner["evaluation_inputs"](args, {})
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+{
+  "utc": "2026-11-16T03:23:26.654173+00:00",
+  "cgroup": {
+    "cpu.stat": "usage_usec 1645813335\nuser_usec 1557364243\nsystem_usec 88449091\nnice_usec 0\nnr_periods 10633\nnr_throttled 80\nthrottled_usec 251430\nnr_bursts 0\nburst_usec 0\n",
+    "memory.peak": "4294967296\n",
+    "memory.events": "low 0\nhigh 0\nmax 11496\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory.current": "1491103744\n"
+  }
+}

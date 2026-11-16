@@ -1,0 +1,13 @@
+{
+  "executablesSha256": {
+    "target/debug/deps/recalld-27bbb81e23f12ff5": "613d5896e230b65d20512188b12dd3b0a9928b1ca95d1e00ef46f7fbd5418a26",
+    "target/debug/deps/recalld-7025a4141187b374": "3b39100ec120f52c2a096a6dd3ef455c89c9639da3e07d9ba7e6746186404aaf",
+    "target/debug/deps/recalld-db4c01372257a80b": "1a28b011e9bd29f8607ea790736b900af412125fc4aa09fbcf0bfc264ef1ba88",
+    "target/debug/deps/recalld-eb419297c7400d31": "650a8435a6729e2fc224c27384ab7150dfbe6bdcd79fce6cd9e65e2fabf63ea4",
+    "target/debug/examples/owned_evaluator": "44ec62dc1d64c27b2499accb5fd5089df4f420ec402563d74d0718bf8f326c57",
+    "target/debug/recalld": "1a28b011e9bd29f8607ea790736b900af412125fc4aa09fbcf0bfc264ef1ba88"
+  },
+  "packageCleanLogSha256": "5e9afeb035c40f0ae163a5425b7904a404f1e2484ee21a70a275f18d573d1a5a",
+  "sourceCommit": "6ba411ecc0d0333177127f81fc83d76cfe816d4a",
+  "sourceTree": "30be4727e8ab1ac69a673c73f602a0483c733a6a"
+}

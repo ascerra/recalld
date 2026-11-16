@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/target/debug/examples/owned_evaluator",
+    "--config",
+    "/output/episode/runtime/config.toml",
+    "--data-root",
+    "/output/episode/runtime/negative-wrong-source",
+    "--control-read-fd",
+    "4",
+    "--control-write-fd",
+    "7",
+    "--restore-checkpoint",
+    "/output/episode/runtime/recalld-frozen-canonical-8fdrhO/negative-source.json",
+    "--checkpoint-sha256",
+    "961d38e2a75bd014fdcf51a95d1e18dbaa28bd386900c5cfa4dc3ece81fa4653"
+  ],
+  "exitCode": 1,
+  "forced": false,
+  "negativeConstructorProbe": true,
+  "pid": 1327,
+  "priorJoined": null,
+  "status": "joined"
+}

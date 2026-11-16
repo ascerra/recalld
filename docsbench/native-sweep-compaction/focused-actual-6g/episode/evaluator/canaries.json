@@ -1,0 +1,14 @@
+[
+  {
+    "actorBehaviorVerified": true,
+    "environmentHash": "180b937570af1903f21078df7c36e60526edb6d831af339bdc23d49e2f383f59",
+    "logicalHash": "e4e8933357d378aa632d042bcd55df35dc5a7ef3ae0cec01f7f6130fc8a8c836",
+    "variant": "labels"
+  },
+  {
+    "actorBehaviorVerified": true,
+    "environmentHash": "e3555643a9f1e37e095ec8dc7f6ea07b76c3b5b279675c7daab1fc94084b20f4",
+    "logicalHash": "e4e8933357d378aa632d042bcd55df35dc5a7ef3ae0cec01f7f6130fc8a8c836",
+    "variant": "future"
+  }
+]

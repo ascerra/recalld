@@ -1,0 +1,111 @@
+{
+  "observed": "2026-11-15",
+  "scope": "Read-only upstream/source assessment; no correction built or tested",
+  "pinned": {
+    "tracing": "0.1.44",
+    "tracing_core": "0.1.36",
+    "tracing_subscriber": "0.3.23"
+  },
+  "issue": {
+    "url": "https://github.com/tokio-rs/tracing/issues/3611",
+    "state": "open",
+    "updated": "2026-10-20T19:49:47Z"
+  },
+  "pulls": [
+    {
+      "url": "https://github.com/tokio-rs/tracing/pull/3614",
+      "state": "open",
+      "merged": false,
+      "head": "642be12d1bfcfa19693a166b2fb5e57a4658c7de",
+      "base": "d9d4c542de10f5d3a711b7a45ffe450fd0666437",
+      "base_ref": "main",
+      "updated": "2026-10-23T04:36:09Z"
+    },
+    {
+      "url": "https://github.com/tokio-rs/tracing/pull/3615",
+      "state": "open",
+      "merged": false,
+      "head": "40d32e12160568f367c04571164a343bd61ec74f",
+      "base": "d9d4c542de10f5d3a711b7a45ffe450fd0666437",
+      "base_ref": "main",
+      "updated": "2026-09-18T02:50:27Z"
+    }
+  ],
+  "release": {
+    "url": "https://github.com/tokio-rs/tracing/releases/tag/tracing-core-0.1.36",
+    "tag": "tracing-core-0.1.36"
+  },
+  "registry": {
+    "url": "https://github.com/rust-lang/crates.io-index/blob/master/tr/ac/tracing-core",
+    "last_entries": [
+      {
+        "vers": "0.1.33",
+        "yanked": false,
+        "cksum": "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c",
+        "rust_version": "1.63.0",
+        "pubtime": "2024-11-25T22:10:20Z"
+      },
+      {
+        "vers": "0.1.34",
+        "yanked": false,
+        "cksum": "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678",
+        "rust_version": "1.65.0",
+        "pubtime": "2025-06-06T10:08:58Z"
+      },
+      {
+        "vers": "0.1.35",
+        "yanked": false,
+        "cksum": "7a04e24fab5c89c6a36eb8558c9656f30d81de51dfa4d3b45f26b21d61fa0a6c",
+        "rust_version": "1.65.0",
+        "pubtime": "2025-11-26T11:03:31Z"
+      },
+      {
+        "vers": "0.1.36",
+        "yanked": false,
+        "cksum": "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
+        "rust_version": "1.65.0",
+        "pubtime": "2025-12-18T14:13:04Z"
+      }
+    ]
+  },
+  "full_git_pin_vs_release": {
+    "ahead_commits": 19,
+    "core_files": [
+      {
+        "path": "tracing-core/Cargo.toml",
+        "additions": 4,
+        "deletions": 2
+      },
+      {
+        "path": "tracing-core/src/callsite.rs",
+        "additions": 61,
+        "deletions": 17
+      },
+      {
+        "path": "tracing-core/src/lazy.rs",
+        "additions": 0,
+        "deletions": 76
+      },
+      {
+        "path": "tracing-core/src/lib.rs",
+        "additions": 0,
+        "deletions": 2
+      },
+      {
+        "path": "tracing-core/src/sync.rs",
+        "additions": 5,
+        "deletions": 5
+      }
+    ]
+  },
+  "patch_check": {
+    "original": "fails at hunk 527: release retains Lazy<RwLock<...>>",
+    "adaptation": "Only hunk context restored to released Lazy declaration; final patch-format trailing blank removed; git apply --check --recount all 9 hunks pass. No production source applied.",
+    "compile_or_runtime_compatibility": "unvalidated"
+  },
+  "halley": {
+    "daemon_draft": "16885f96",
+    "patch": "/tmp/recalld-implementation/merge-queue/.queue/daemon-cold-trace.patch",
+    "historical_failure": "c65d8136 original cause unknown; 90e passing diagnostic produced no failure rows"
+  }
+}

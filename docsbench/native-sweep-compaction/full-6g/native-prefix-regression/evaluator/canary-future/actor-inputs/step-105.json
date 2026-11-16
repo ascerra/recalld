@@ -1,0 +1,17 @@
+{
+  "currentAction": {
+    "arguments": {
+      "compact": false,
+      "depth": 0,
+      "limit": 3,
+      "namespace": "default",
+      "query": "beta FUTURE_NATIVE_QUERY CHANGED_FUTURE_ONLY",
+      "recordAccess": false
+    },
+    "tag": "query:q3",
+    "tool": "recall_memories"
+  },
+  "deliveryOrdinal": 105,
+  "phase": "action",
+  "startId": 105
+}

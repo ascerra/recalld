@@ -1,5 +1,6 @@
 //! Commit metadata first, then deterministically materialize the separate edge DB.
 use super::*;
+use crate::storage::control::MutationOutcome;
 use crate::storage::metadata::effects::{EffectResult, crash_point};
 use std::sync::atomic::Ordering;
 
@@ -10,7 +11,15 @@ impl RedbStorageEngine {
         &self,
         puts: &[PersistedEdge],
     ) -> Result<Option<EffectResult>, StorageError> {
-        let guard = self.meta_store.mutation_guard()?;
+        self.put_edges_with_effects_with_work(puts, None)
+    }
+
+    pub(crate) fn put_edges_with_effects_with_work(
+        &self,
+        puts: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<EffectResult>, StorageError> {
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let Some(first) = puts.first() else {
             return Ok(None);
         };
@@ -27,7 +36,7 @@ impl RedbStorageEngine {
             false,
             false,
         )?;
-        apply_pending(&self.meta_store, &self.edge_store, None).map_err(|source| {
+        apply_pending(&self.meta_store, &guard, &self.edge_store, None).map_err(|source| {
             StorageError::CommittedEffectsPending {
                 operation_id: result.receipt.operation_id,
                 source: Box::new(source),
@@ -43,11 +52,35 @@ impl RedbStorageEngine {
         id: MemoryId,
         bridges: &[PersistedEdge],
     ) -> Result<Option<EffectResult>, StorageError> {
-        let guard = self.meta_store.mutation_guard()?;
+        self.delete_memory_with_edges_with_work(id, bridges, None)
+    }
+
+    pub(crate) fn delete_memory_with_edges_with_work(
+        &mut self,
+        id: MemoryId,
+        bridges: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<EffectResult>, StorageError> {
+        self.delete_memory_with_edges_with_origin_work(id, bridges, parent, 1)
+    }
+
+    pub(crate) fn delete_memory_with_edges_with_origin_work(
+        &mut self,
+        id: MemoryId,
+        bridges: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Option<EffectResult>, StorageError> {
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(StorageError::InvalidMutationContext(
+                "unsupported original application contract".into(),
+            ));
+        }
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let Some(record) = self.meta_store.get(id)? else {
             return Ok(None);
         };
-        let result = self.meta_store.commit_graph_effects(
+        let result = self.meta_store.commit_graph_effects_with_origin(
             &guard,
             NamespaceId::new(record.namespace_id),
             &self.edge_store.load_all_edges()?,
@@ -55,9 +88,11 @@ impl RedbStorageEngine {
             &[id],
             true,
             true,
+            original_contract_version,
         )?;
         apply_pending(
             &self.meta_store,
+            &guard,
             &self.edge_store,
             Some(&mut self.vector_manager),
         )
@@ -71,8 +106,10 @@ impl RedbStorageEngine {
     pub(crate) fn recover_pending_effects(&mut self) -> Result<(), StorageError> {
         // Constructor only: no handle has escaped, and normal admission is
         // blocked for pending canonical effects. Replay precedes orphan cleanup.
+        let guard = self.meta_store.canonical_effects_guard(None)?;
         apply_pending(
             &self.meta_store,
+            &guard,
             &self.edge_store,
             Some(&mut self.vector_manager),
         )
@@ -82,8 +119,16 @@ impl RedbStorageEngine {
         &self,
         operation_id: uuid::Uuid,
     ) -> Result<(), StorageError> {
+        self.acknowledge_graph_effects_with_work(operation_id, None)
+    }
+
+    pub(crate) fn acknowledge_graph_effects_with_work(
+        &self,
+        operation_id: uuid::Uuid,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), StorageError> {
         self.meta_store
-            .acknowledge_derived_effects(operation_id)
+            .acknowledge_derived_effects_with_work(operation_id, parent)
             .map_err(|source| StorageError::CommittedEffectsPending {
                 operation_id,
                 source: Box::new(source),
@@ -93,10 +138,12 @@ impl RedbStorageEngine {
 
 pub(super) fn apply_pending(
     meta: &MetadataStore,
+    guard: &crate::storage::metadata::MutationGuard<'_>,
     edges: &EdgeStore,
     mut vectors: Option<&mut VectorManager>,
 ) -> Result<(), StorageError> {
     let result = (|| {
+        guard.check(meta)?;
         #[cfg(test)]
         if meta.fail_effect_application.swap(false, Ordering::SeqCst) {
             return Err(StorageError::RecoveryRequired(
@@ -108,8 +155,14 @@ pub(super) fn apply_pending(
             let records = meta.scan_all_for_recovery()?;
             // Refuse corrupt recovery instructions before changing any files.
             crate::storage::metadata::effects::validate_plan(effect, &records)?;
-            edges.apply_effects(&effect.puts, &effect.deletes)?;
-            crash_point("after_edge_commit");
+            // A validated no-change receipt has no physical edge transaction.
+            if !matches!(
+                effect.receipt.outcome,
+                MutationOutcome::NativeGraphUnchanged { .. }
+            ) {
+                edges.apply_effects(&effect.puts, &effect.deletes)?;
+                crash_point("after_edge_commit");
+            }
             for release in &effect.releases {
                 let manager = vectors.as_mut().ok_or_else(|| {
                     StorageError::RecoveryRequired(
@@ -123,7 +176,7 @@ pub(super) fn apply_pending(
                 store.sync()?;
             }
             crash_point("after_vector_sync");
-            meta.acknowledge_canonical_effects(effect)?;
+            meta.acknowledge_canonical_effects(guard, effect)?;
             crash_point("after_canonical_ack");
         }
         meta.canonical_pending.store(false, Ordering::SeqCst);

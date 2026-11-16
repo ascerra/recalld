@@ -8,6 +8,13 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error("LIFECYCLE_CONFLICT: {0}")]
+    LifecycleConflict(String),
+    #[error("CONTENT_UNAVAILABLE")]
+    LifecycleContentUnavailable,
+    #[error(transparent)]
+    Work(#[from] crate::storage::work::WorkError),
+
     /// Canonical mutation exists; retry publication, never retry as a new write.
     #[error("INDEX_NOT_READY commitState=committed ready=false receipt={} cause={source}", serde_json::to_string(receipt).unwrap_or_default())]
     CommittedMutation {
@@ -45,6 +52,11 @@ pub enum StorageError {
         #[source]
         source: redb::CommitError,
     },
+
+    /// A worker was lost without returning its canonical outcome. No operation
+    /// ID or receipt can be invented; recover and reconcile the original intent.
+    #[error("worker outcome unknown: {0}")]
+    WorkerOutcomeUnknown(String),
 
     /// Canonical metadata is durable; materialization must resume after reopen.
     #[error("operation {operation_id} committed; canonical effects unavailable: {source}")]

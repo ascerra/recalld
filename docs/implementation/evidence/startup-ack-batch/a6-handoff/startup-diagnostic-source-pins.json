@@ -1,0 +1,14 @@
+{
+  "examples/support/empirical_retrieval.rs": {
+    "before": "23680b8669734828977697891ebea9795b207d3c01d72ab8cdec9006552037cc",
+    "after": "0bf7fb2ee9439e589fa567de62ffb341a2b1e2b8a2194d647114f4397316c31c"
+  },
+  "examples/support/empirical_retrieval_version.rs": {
+    "before": "aa8b6283019d5092a1bca083c29cbf4c18572e5169008ef8a5f6e3d8acb6bd40",
+    "after": "aea7282e2df26e17454019d01e84b2cc08c1723bcb67d08df61648994308ad7a"
+  },
+  "src/storage/metadata/effects.rs": {
+    "before": "ba160177b71c0fd789138e30bde25f6c23b7328cb887a7d33e6cfa1d94034bdd",
+    "after": "171c75b69d858307444ade71ee722b61243a2f2c2147fedc6dbdfe3b34dc28a4"
+  }
+}

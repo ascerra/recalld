@@ -1,0 +1,6 @@
+{
+  "sha256": {
+    "target/debug/deps/recalld-212d4a4f320696fe": "b55eccf47e361bbbfe152d25812ba03dbad6e369843209aeabfaea31860ea049"
+  },
+  "sourceCommit": "73dd4c0410a1147fb40124783dd50f80e92df829"
+}

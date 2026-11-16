@@ -101,6 +101,12 @@ impl Fixture {
             engine.create_namespace(&config).expect("create namespace");
         }
 
+        Self::from_open_engine(dir, engine)
+    }
+
+    /// The caller supplies the actual owned engine, including its explicit native
+    /// entry mode. This constructs empty views, never publishes or acknowledges.
+    pub(crate) fn from_open_engine(dir: tempfile::TempDir, engine: RedbStorageEngine) -> Self {
         let fts_index = crate::search::FtsIndex::new(dir.path()).expect("open fts index");
 
         Self {
@@ -277,6 +283,7 @@ impl Fixture {
             .expect("tombstone memory");
     }
 
+    /// Real read/search adapter over the isolated fixture, with no external provider.
     pub(crate) fn search_adapter(&self) -> crate::mcp::bridge_adapters::McpSearchAdapter {
         use crate::search::adapters::*;
         let embedding = Arc::new(crate::embedding::PassthroughProvider::new(DIM));
@@ -305,6 +312,17 @@ impl Fixture {
             self.graph.clone(),
             chrono_tz::UTC,
         )
+    }
+
+    pub(crate) fn completion(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
     }
 
     /// The MCP namespace adapter over this fixture's storage.
@@ -536,4 +554,48 @@ fn clone_bridge_error(e: &crate::mcp::bridge::BridgeError) -> crate::mcp::bridge
         E::TooLarge(m) => E::TooLarge(m.clone()),
         E::PartiallyApplied(m) => E::PartiallyApplied(m.clone()),
     }
+}
+
+/// Explicit present-day adoption for a test that exercises dependent native work.
+/// This calls the real read-only preview and canonical writer; migration itself
+/// still leaves unknown inputs absent. No raw schema or provenance mutation.
+pub(crate) fn explicitly_adopt_inherited_policy(
+    path: &Path,
+    namespace: NamespaceId,
+    multiplier: f64,
+    sampled_at: i64,
+) -> crate::storage::control::WriteReceipt {
+    use crate::storage::control::{MutationContext, MutationScope};
+    use crate::storage::inherited_policy::{
+        AdoptInheritedDecay, adopt_inherited_decay, preview_inherited_decay,
+    };
+    let source = crate::storage::schema_migration::inspect_schema(path)
+        .unwrap()
+        .control
+        .generation_ref();
+    let preview = preview_inherited_decay(
+        path,
+        namespace,
+        multiplier,
+        source,
+        &crate::time::ManualClock::new(sampled_at),
+    )
+    .unwrap();
+    adopt_inherited_decay(
+        path,
+        &AdoptInheritedDecay {
+            context: MutationContext {
+                store_id: Some(source.store_id),
+                scope: MutationScope::Namespace(namespace),
+                idempotency_key: Some(format!(
+                    "explicit-fixture-adoption-{}",
+                    source.generation.get()
+                )),
+                expected_generation: Some(source.generation),
+                contract_version: 1,
+            },
+            preview,
+        },
+    )
+    .unwrap()
 }

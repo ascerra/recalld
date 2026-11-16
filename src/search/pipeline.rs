@@ -19,6 +19,9 @@ use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConf
 
 #[path = "diagnostics.rs"]
 mod diagnostics;
+#[path = "read_view.rs"]
+mod read_view;
+pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse};
 #[path = "strength.rs"]
 mod strength;
 use strength::StrengthContext;
@@ -51,6 +54,17 @@ pub use semantics::{
 pub trait NamespaceResolver: Send + Sync {
     /// Look up a namespace by name, returning its configuration.
     async fn resolve(&self, name: &str) -> Result<NamespaceConfig>;
+    /// Only an actual owned native canonical view can grant this admission.
+    fn check_native_query_profile(
+        &self,
+        _namespace: &NamespaceConfig,
+        _profile: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<()> {
+        Err(SearchError::Unavailable(
+            "native query owner admission unavailable".into(),
+        ))
+    }
+
     /// Resolve canonical by-ID scope without guessing a session default.
     async fn resolve_id(&self, id: NamespaceId) -> Result<NamespaceConfig> {
         Err(SearchError::NamespaceNotFound(format!("id {}", id.get())))
@@ -60,6 +74,12 @@ pub trait NamespaceResolver: Send + Sync {
 /// Per-namespace embedding provider registry.
 #[async_trait::async_trait]
 pub trait EmbeddingProviderRegistry: Send + Sync {
+    fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+        None
+    }
+    fn dimensions(&self) -> Option<usize> {
+        None
+    }
     /// Embed document text using the provider configured for a namespace.
     async fn embed(&self, namespace: &str, text: &str) -> Result<Vec<f32>>;
 
@@ -132,6 +152,25 @@ pub trait RecordCache: Send + Sync {
 /// On-disk metadata storage fallback.
 #[async_trait::async_trait]
 pub trait MetadataStore: Send + Sync {
+    /// Immutable/offline adapters have no owned mutable core. A parent cannot
+    /// cross silently into such an adapter or another owner.
+    fn accept_work(
+        &self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::work::WorkTicket>> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "metadata adapter cannot inherit owned work".into(),
+            ));
+        }
+        Ok(None)
+    }
+    fn finish_work(&self, work: crate::storage::work::WorkTicket) {
+        // An adapter returning Some must implement known completion. Default
+        // drop retains unresolved work rather than manufacturing readiness.
+        drop(work);
+    }
+
     /// Internal effects admission stamp, not a canonical generation/read view.
     async fn effects_stamp(&self) -> Result<u64> {
         Ok(0)
@@ -173,6 +212,68 @@ pub struct RifSuppression {
 /// Records access events on memories.
 #[async_trait::async_trait]
 pub trait AccessRecorder: Send + Sync {
+    /// Only a configured, owned native writer may admit observing v2 reads.
+    fn supports_native_exposure(&self) -> bool {
+        false
+    }
+
+    /// Receives the query owner's configured policy and already sampled clock.
+    /// Legacy recorders keep their existing behavior through this default.
+    async fn record_access_batch_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        _policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        if original_contract_version != 1 {
+            return Err(SearchError::Unavailable(
+                "access recorder cannot preserve original application contract".into(),
+            ));
+        }
+        let receipts = match sampled_at {
+            Some(at) => {
+                self.record_access_batch_at_with_work(accesses, scope, at, parent)
+                    .await?
+            }
+            None => {
+                self.record_access_batch_with_work(accesses, scope, parent)
+                    .await?
+            }
+        };
+        Ok(crate::decay::observation::AccessObservation::from_receipts(
+            receipts,
+        ))
+    }
+
+    async fn record_access_batch_at_with_work(
+        &self,
+        _accesses: &[(MemoryId, AccessKind)],
+        _scope: Option<&crate::storage::control::ExposureScope>,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        Err(SearchError::Unavailable(
+            "access recorder cannot preserve sampled query clock".into(),
+        ))
+    }
+
+    async fn record_access_batch_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "access recorder cannot inherit owned work".into(),
+            ));
+        }
+        self.record_access_batch(accesses, scope).await
+    }
+
     /// Record that a memory was accessed.
     async fn record_access(
         &self,
@@ -383,6 +484,11 @@ const FTS_ONLY_RATE: f32 = 0.3;
 /// Holds `Arc` references to all subsystems. Cheap to clone, safe to
 /// share across request handlers.
 pub struct QueryEngine {
+    native_query_admission: bool,
+    coherent_owner: Option<(
+        crate::derived_completion::DerivedCompletion,
+        Arc<crate::rif::RifEngine>,
+    )>,
     clock: Arc<dyn crate::time::Clock>,
     decay_policy: crate::decay::DecayConfig,
     decay_multiplier: f64,
@@ -409,6 +515,54 @@ pub struct QueryEngine {
 }
 
 impl QueryEngine {
+    pub(crate) fn with_native_query_admission(mut self) -> Self {
+        self.native_query_admission = true;
+        self
+    }
+
+    pub(crate) fn accept_work(
+        &self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::storage::work::WorkTicket>> {
+        self.meta_store.accept_work(parent)
+    }
+    pub(crate) fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
+        if let Some(work) = work {
+            self.meta_store.finish_work(work);
+        }
+    }
+
+    pub(crate) async fn prepare_search_with_work(
+        &self,
+        query: SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<SearchResponse> {
+        Ok(self
+            .search_checked_with_work(query, RetrievalSemantics::V1, true, parent)
+            .await?
+            .response)
+    }
+    pub(crate) async fn search_with_work(
+        &self,
+        query: SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<SearchResponse> {
+        Ok(self
+            .search_checked_with_work(query, RetrievalSemantics::V1, false, parent)
+            .await?
+            .response)
+    }
+    pub(crate) async fn prepare_similar_filtered_with_work(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<SearchResult>> {
+        self.similar_with_access_checked_with_work(id, k, min_score, requested_access, true, parent)
+            .await
+    }
     /// Create a new QueryEngine with all subsystem dependencies.
     pub fn new(
         namespace_resolver: Arc<dyn NamespaceResolver>,
@@ -423,6 +577,8 @@ impl QueryEngine {
         access_recorder: Arc<dyn AccessRecorder>,
     ) -> Self {
         Self {
+            native_query_admission: false,
+            coherent_owner: None,
             clock: Arc::new(crate::time::SystemClock),
             decay_policy: crate::decay::DecayConfig::default(),
             decay_multiplier: 1.0,
@@ -481,7 +637,8 @@ impl QueryEngine {
             .response)
     }
 
-    /// Rust-only harness entry point. No transport selects semantics2 until A1/A4 readiness.
+    /// Rust compatibility entry uses application1, including semantics2.
+    /// No transport selects semantics2 until A1/A4 readiness.
     pub async fn search_with_semantics(
         &self,
         query: SearchQuery,
@@ -503,14 +660,47 @@ impl QueryEngine {
         semantics: RetrievalSemantics,
         defer_recording: bool,
     ) -> Result<SemanticsResponse> {
-        crate::performance::measure("engine.search", query.record_access, async {
+        self.search_checked_with_work(query, semantics, defer_recording, None)
+            .await
+    }
+
+    pub(crate) async fn search_checked_with_work(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<SemanticsResponse> {
+        self.search_checked_with_origin_work(query, semantics, defer_recording, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn search_checked_with_origin_work(
+        &self,
+        query: SearchQuery,
+        semantics: RetrievalSemantics,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<SemanticsResponse> {
+        let work = self.accept_work(parent)?;
+        let result = crate::performance::measure("engine.search", query.record_access, async {
             let stamp = self.meta_store.effects_stamp().await?;
             let observed = self
-                .search_admitted(query, semantics, defer_recording)
+                .search_admitted(
+                    query,
+                    semantics,
+                    defer_recording,
+                    work.as_ref(),
+                    original_contract_version,
+                )
                 .await?;
             observed.finish(self.check_effects_stamp(stamp).await)
         })
-        .await
+        .await;
+        self.finish_work(work);
+        result
     }
 
     async fn check_effects_stamp(&self, stamp: u64) -> Result<()> {
@@ -531,6 +721,8 @@ impl QueryEngine {
         mut query: SearchQuery,
         semantics: RetrievalSemantics,
         defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Observed<SemanticsResponse>> {
         let mut diagnostics = SemanticsDiagnostics::new(semantics);
         let pipeline_start = Instant::now();
@@ -544,6 +736,12 @@ impl QueryEngine {
         }
         query.validate()?;
         let ns_config = self.namespace_resolver.resolve(&query.namespace).await?;
+        query
+            .filter
+            .labels
+            .validate(ns_config.schema.is_some())
+            .map_err(SearchError::InvalidFilter)?;
+        query.filter.compiled_labels = Some(query.filter.labels.compile());
         let mut strength_context = StrengthContext::pin(self, &ns_config, query.record_access)?;
         diagnostics.strength = Some(strength_context.diagnostics);
         if let Some(embedding) = query.query_embedding.as_mut() {
@@ -559,10 +757,32 @@ impl QueryEngine {
             _ if query.query_embedding.is_some() => query.query_embedding.take(),
             _ => {
                 let text = query.text.as_ref().ok_or(SearchError::EmptyQuery)?;
-                let embedding = self
+                let profile = self.embedding_providers.profile();
+                if self.native_query_admission {
+                    self.namespace_resolver
+                        .check_native_query_profile(&ns_config, profile.as_ref())?;
+                } else {
+                    crate::embedding::runtime::check_namespace(&ns_config, profile.as_ref())
+                        .map_err(|e| SearchError::Unavailable(e.to_string()))?;
+                }
+                if self
+                    .embedding_providers
+                    .dimensions()
+                    .is_some_and(|dim| dim != ns_config.embedding_dim as usize)
+                {
+                    return Err(SearchError::Unavailable(
+                        "provider dimension differs from namespace".into(),
+                    ));
+                }
+                let mut embedding = self
                     .embedding_providers
                     .embed_query(&query.namespace, text)
                     .await?;
+                crate::embedding::validation::normalize_vector(
+                    &mut embedding,
+                    ns_config.embedding_dim as usize,
+                )
+                .map_err(SearchError::EmbeddingFailed)?;
                 Some(embedding)
             }
         };
@@ -592,8 +812,12 @@ impl QueryEngine {
             .map(|record| (record.id, record))
             .collect();
         let eligible_ids: HashSet<MemoryId> = eligible_records.keys().copied().collect();
-        tracing::trace!(target: "recalld::performance", kind = "eligibility",
-            examined, eligible = eligible_ids.len(), rejected = examined - eligible_ids.len());
+        crate::performance::event!(
+            kind = "eligibility",
+            examined,
+            eligible = eligible_ids.len(),
+            rejected = examined - eligible_ids.len()
+        );
         timings.eligibility_us = stage_start.elapsed().as_micros() as u64;
         performance.mark("hard_filter");
         if semantics != RetrievalSemantics::V1 {
@@ -850,12 +1074,15 @@ impl QueryEngine {
 
         performance.mark("graph_filter_rank_supersession");
         if semantics != RetrievalSemantics::V1 {
-            tracing::trace!(target: "recalld::performance", kind = "graph_work", known = true,
+            crate::performance::event!(
+                kind = "graph_work",
+                known = true,
                 expanded_states = diagnostics.graph.expanded_states,
                 examined_edges = diagnostics.graph.examined_edges,
-                supersession_edges = diagnostics.supersession_edges_examined);
+                supersession_edges = diagnostics.supersession_edges_examined
+            );
         } else {
-            tracing::trace!(target: "recalld::performance", kind = "graph_work", known = false);
+            crate::performance::event!(kind = "graph_work", known = false);
         }
         // -- Stage 8d: Truncate -------------------------------------------
         diagnostics.result_limit_applied = candidates.len() > query.limit;
@@ -878,6 +1105,9 @@ impl QueryEngine {
                     namespace: ns_config.name.clone(),
                     source: None,
                 },
+                strength_context.diagnostics.evaluated_at,
+                parent,
+                original_contract_version,
             )
             .await?
         } else {
@@ -885,10 +1115,16 @@ impl QueryEngine {
         };
 
         performance.mark("exposure");
-        tracing::trace!(target: "recalld::performance", kind = "selection",
-            vector_admitted = vector_ids.len(), fts_admitted = fts_ids.len(),
-            entity_admitted = entity_only_ids.len(), union_candidates = all_candidate_ids.len(),
-            pre_limit = total_matches, returned = results.len(), receipt_count = receipts.len());
+        crate::performance::event!(
+            kind = "selection",
+            vector_admitted = vector_ids.len(),
+            fts_admitted = fts_ids.len(),
+            entity_admitted = entity_only_ids.len(),
+            union_candidates = all_candidate_ids.len(),
+            pre_limit = total_matches,
+            returned = results.len(),
+            receipt_count = receipts.len()
+        );
         let response = SearchResponse {
             results,
             total_matches,
@@ -1278,17 +1514,83 @@ impl QueryEngine {
         id: MemoryId,
         record_access: bool,
     ) -> Result<Option<MemoryResponse>> {
-        let stamp = self.meta_store.effects_stamp().await?;
-        let observed = self
-            .get_memory_with_access_admitted(id, record_access)
-            .await?;
-        observed.finish(self.check_effects_stamp(stamp).await)
+        self.get_memory_with_work(id, record_access, None).await
+    }
+
+    pub(crate) async fn get_memory_with_work(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<MemoryResponse>> {
+        self.get_memory_with_origin_work(id, record_access, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn get_memory_with_origin_work(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Option<MemoryResponse>> {
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let stamp = self.meta_store.effects_stamp().await?;
+            if let Some(prepared) = self
+                .prepare_coherent_get(id, None, record_access, work.as_ref())
+                .await?
+            {
+                let receipts = if record_access
+                    && prepared
+                        .response
+                        .as_ref()
+                        .is_some_and(|r| r.phase != DecayPhase::Tombstone)
+                {
+                    self.record_exposures_at_with_origin_work(
+                        &[(id, AccessKind::DirectRetrieval)],
+                        crate::storage::control::ExposureScope {
+                            namespace: prepared.response.as_ref().unwrap().namespace.clone(),
+                            source: Some(id),
+                        },
+                        prepared.evaluated_at,
+                        work.as_ref(),
+                        original_contract_version,
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+                return Observed {
+                    value: prepared.response,
+                    receipts,
+                }
+                .finish(self.check_effects_stamp(stamp).await);
+            }
+            let observed = self
+                .get_memory_with_access_admitted(
+                    id,
+                    record_access,
+                    false,
+                    work.as_ref(),
+                    original_contract_version,
+                )
+                .await?;
+            observed.finish(self.check_effects_stamp(stamp).await)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 
     async fn get_memory_with_access_admitted(
         &self,
         id: MemoryId,
         record_access: bool,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Observed<Option<MemoryResponse>>> {
         let Some(mut record) = self.meta_store.get(&id).await? else {
             return Ok(Observed::unobserved(None));
@@ -1307,13 +1609,17 @@ impl QueryEngine {
             .await?;
         context.apply(&mut record)?;
 
-        let receipts = if record_access && record.phase != DecayPhase::Tombstone {
-            self.record_exposures(
+        let receipts = if record_access && !defer_recording && record.phase != DecayPhase::Tombstone
+        {
+            self.record_query_exposures(
                 &[(id, AccessKind::DirectRetrieval)],
                 crate::storage::control::ExposureScope {
                     namespace: namespace.name.clone(),
                     source: Some(id),
                 },
+                context.diagnostics.evaluated_at,
+                parent,
+                original_contract_version,
             )
             .await?
         } else {
@@ -1322,6 +1628,7 @@ impl QueryEngine {
         Ok(Observed {
             receipts,
             value: Some(MemoryResponse {
+                labels: record.labels.clone(),
                 id: record.id,
                 namespace: namespace.name,
                 created_at: record.created_at,
@@ -1395,11 +1702,109 @@ impl QueryEngine {
         requested_access: bool,
         defer_recording: bool,
     ) -> Result<Vec<SearchResult>> {
-        let stamp = self.meta_store.effects_stamp().await?;
-        let observed = self
-            .similar_with_access_admitted(id, k, min_score, requested_access, defer_recording)
-            .await?;
-        observed.finish(self.check_effects_stamp(stamp).await)
+        self.similar_with_access_checked_with_work(
+            id,
+            k,
+            min_score,
+            requested_access,
+            defer_recording,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn similar_with_access_checked_with_work(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<SearchResult>> {
+        self.similar_with_access_checked_with_origin_work(
+            id,
+            k,
+            min_score,
+            requested_access,
+            defer_recording,
+            parent,
+            1,
+        )
+        .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn similar_with_access_checked_with_origin_work(
+        &self,
+        id: MemoryId,
+        k: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<SearchResult>> {
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let stamp = self.meta_store.effects_stamp().await?;
+            if let Some(prepared) = self
+                .prepare_coherent_similar(
+                    id,
+                    None,
+                    k,
+                    min_score,
+                    requested_access,
+                    false,
+                    work.as_ref(),
+                )
+                .await?
+            {
+                let mut results = prepared.results;
+                for (result, row) in results.iter_mut().zip(prepared.payload.rows) {
+                    result.full_text = row.full_text;
+                }
+                let receipts = if requested_access && !defer_recording {
+                    let accesses: Vec<_> = results
+                        .iter()
+                        .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
+                        .collect();
+                    self.record_exposures_at_with_origin_work(
+                        &accesses,
+                        crate::storage::control::ExposureScope {
+                            namespace: prepared.payload.namespace.name,
+                            source: Some(id),
+                        },
+                        prepared.evaluated_at,
+                        work.as_ref(),
+                        original_contract_version,
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+                return Observed {
+                    value: results,
+                    receipts,
+                }
+                .finish(self.check_effects_stamp(stamp).await);
+            }
+            let observed = self
+                .similar_with_access_admitted(
+                    id,
+                    k,
+                    min_score,
+                    requested_access,
+                    defer_recording,
+                    work.as_ref(),
+                    original_contract_version,
+                )
+                .await?;
+            observed.finish(self.check_effects_stamp(stamp).await)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 
     async fn similar_with_access_admitted(
@@ -1409,6 +1814,8 @@ impl QueryEngine {
         min_score: Option<f32>,
         record_access: bool,
         defer_recording: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Observed<Vec<SearchResult>>> {
         let k = k.min(SearchQuery::MAX_USER_LIMIT);
         let mut record = self
@@ -1475,6 +1882,7 @@ impl QueryEngine {
                 }
                 let score = Some(scored.score);
                 Some(SearchResult {
+                    labels: rec.labels.clone(),
                     memory_id: rec.id,
                     created_at: rec.created_at,
                     last_accessed_at: rec.last_accessed_at,
@@ -1502,14 +1910,31 @@ impl QueryEngine {
             .collect();
 
         let receipts = if context.requested_record_access && !defer_recording {
-            self.record_similar_accesses(
-                &results.iter().map(|r| r.memory_id).collect::<Vec<_>>(),
-                crate::storage::control::ExposureScope {
-                    namespace: namespace.name.clone(),
-                    source: Some(id),
-                },
-            )
-            .await?
+            let scope = crate::storage::control::ExposureScope {
+                namespace: namespace.name.clone(),
+                source: Some(id),
+            };
+            if self.access_recorder.supports_native_exposure() {
+                self.record_exposures_at_with_origin_work(
+                    &results
+                        .iter()
+                        .map(|r| (r.memory_id, AccessKind::AssociativeRetrieval))
+                        .collect::<Vec<_>>(),
+                    scope,
+                    context.diagnostics.evaluated_at,
+                    parent,
+                    original_contract_version,
+                )
+                .await?
+            } else {
+                self.record_similar_accesses_with_origin_work(
+                    &results.iter().map(|r| r.memory_id).collect::<Vec<_>>(),
+                    scope,
+                    parent,
+                    original_contract_version,
+                )
+                .await?
+            }
         } else {
             Vec::new()
         };
@@ -1526,27 +1951,63 @@ impl QueryEngine {
         ids: &[MemoryId],
         scope: crate::storage::control::ExposureScope,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
-        let mut seen = std::collections::HashSet::new();
-        // Consumer preflight only: a schema-aware observation writer must also
-        // enforce this under its publication guard on the later A3 join.
-        let records = self.meta_store.get_batch(ids).await?;
-        if records.iter().any(|r| {
-            r.lifecycle.as_ref().is_some_and(|fields| {
-                fields.lifecycle_version
-                    == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
-            })
-        }) {
-            return Err(SearchError::Unavailable(
-                "explicit-feedback exposure writer unavailable".into(),
-            ));
+        self.record_similar_accesses_with_work(ids, scope, None)
+            .await
+    }
+
+    pub(crate) async fn record_similar_accesses_with_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_similar_accesses_with_origin_work(ids, scope, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn record_similar_accesses_with_origin_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let mut seen = std::collections::HashSet::new();
+            // Consumer preflight only: a schema-aware observation writer must also
+            // enforce this under its publication guard on the later A3 join.
+            let records = self.meta_store.get_batch(ids).await?;
+            if !self.access_recorder.supports_native_exposure()
+                && records.iter().any(|r| {
+                    r.lifecycle.as_ref().is_some_and(|fields| {
+                        fields.lifecycle_version
+                            == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+                    })
+                })
+            {
+                return Err(SearchError::Unavailable(
+                    "explicit-feedback exposure writer unavailable".into(),
+                ));
+            }
+            let accesses: Vec<_> = ids
+                .iter()
+                .copied()
+                .filter(|id| seen.insert(*id))
+                .map(|id| (id, AccessKind::AssociativeRetrieval))
+                .collect();
+            self.record_exposures_with_origin_work(
+                &accesses,
+                scope,
+                work.as_ref(),
+                original_contract_version,
+            )
+            .await
         }
-        let accesses: Vec<_> = ids
-            .iter()
-            .copied()
-            .filter(|id| seen.insert(*id))
-            .map(|id| (id, AccessKind::AssociativeRetrieval))
-            .collect();
-        self.record_exposures(&accesses, scope).await
+        .await;
+        self.finish_work(work);
+        result
     }
 
     // =====================================================================
@@ -1601,6 +2062,19 @@ impl QueryEngine {
 
         // Permastore filter
         if filter.permastore_only && !record.is_permastore {
+            return false;
+        }
+
+        // Admitted queries reuse a compiled predicate. Direct internal callers
+        // still apply the full filter if they have not gone through admission.
+        let labels_match = match &filter.compiled_labels {
+            Some(labels) => labels.matches(&record.tags, record.labels.as_ref()),
+            None => filter
+                .labels
+                .compile()
+                .matches(&record.tags, record.labels.as_ref()),
+        };
+        if !labels_match {
             return false;
         }
 
@@ -1715,6 +2189,7 @@ impl QueryEngine {
             .map(|c| {
                 let record = &c.record;
                 SearchResult {
+                    labels: record.labels.clone(),
                     memory_id: record.id,
                     created_at: record.created_at,
                     last_accessed_at: record.last_accessed_at,
@@ -1745,6 +2220,9 @@ impl QueryEngine {
         &self,
         candidates: &[Candidate],
         scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         let accesses: Vec<(MemoryId, AccessKind)> = candidates
             .iter()
@@ -1758,7 +2236,14 @@ impl QueryEngine {
             })
             .collect();
 
-        self.record_exposures(&accesses, scope).await
+        self.record_query_exposures(
+            &accesses,
+            scope,
+            sampled_at,
+            parent,
+            original_contract_version,
+        )
+        .await
     }
 
     /// Record the final caller-visible set after any outer hydration/filtering.
@@ -1768,12 +2253,131 @@ impl QueryEngine {
         accesses: &[(MemoryId, AccessKind)],
         scope: crate::storage::control::ExposureScope,
     ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_with_work(accesses, scope, None).await
+    }
+
+    pub(crate) async fn record_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_with_origin_work(accesses, scope, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn record_exposures_with_origin_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(accesses, scope, None, parent, original_contract_version)
+            .await
+    }
+    pub(crate) async fn record_exposures_at_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_at_with_origin_work(accesses, scope, sampled_at, parent, 1)
+            .await
+    }
+
+    /// Explicit original application contract; compatibility entry above means API1.
+    pub(crate) async fn record_exposures_at_with_origin_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        self.record_exposures_sampled(
+            accesses,
+            scope,
+            Some(sampled_at),
+            parent,
+            original_contract_version,
+        )
+        .await
+    }
+    /// Native queries reuse their sampled projection time. Legacy direct callers
+    /// retain their existing recorder method and clock fallback. Explicit `_at`
+    /// APIs always preserve the supplied time regardless of recorder capability.
+    async fn record_query_exposures(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+        let sampled_at = self
+            .access_recorder
+            .supports_native_exposure()
+            .then_some(sampled_at);
+        self.record_exposures_sampled(
+            accesses,
+            scope,
+            sampled_at,
+            parent,
+            original_contract_version,
+        )
+        .await
+    }
+
+    async fn record_exposures_sampled(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
         if accesses.is_empty() {
             return Ok(Vec::new());
         }
-        self.access_recorder
-            .record_access_batch(accesses, Some(&scope))
-            .await
+        if self.access_recorder.supports_native_exposure() && self.coherent_owner.is_none() {
+            return Err(SearchError::Unavailable(
+                "native exposure requires the query publication owner".into(),
+            ));
+        }
+        let work = self.accept_work(parent)?;
+        let result = async {
+            let policy = crate::storage::native_lifecycle::NativePolicyInputs {
+                global: self.decay_policy.clone(),
+                multiplier: self.decay_multiplier,
+            };
+            let observation = self
+                .access_recorder
+                .record_access_batch_for_publication(
+                    accesses,
+                    Some(&scope),
+                    sampled_at,
+                    work.as_ref(),
+                    Some(&policy),
+                    original_contract_version,
+                )
+                .await?;
+            let observed = Observed {
+                value: (),
+                receipts: observation.receipts,
+            }
+            .publish_derived(
+                self.coherent_owner.as_ref().map(|(owner, _)| owner),
+                work.as_ref(),
+            )
+            .await?;
+            Ok(observed.receipts)
+        }
+        .await;
+        self.finish_work(work);
+        result
     }
 }
 
@@ -1799,7 +2403,7 @@ mod tests {
 
     /// Supersedes chains, pre-resolved to their terminal memory.
     #[derive(Default)]
-    struct StubGraph {
+    pub(super) struct StubGraph {
         terminal: HashMap<MemoryId, MemoryId>,
     }
 
@@ -1825,7 +2429,7 @@ mod tests {
     /// Backing store for replacement records, with a switch for making the
     /// batch load fail.
     #[derive(Default)]
-    struct StubMetaStore {
+    pub(super) struct StubMetaStore {
         records: HashMap<MemoryId, CachedRecord>,
         fail: bool,
     }
@@ -1955,6 +2559,7 @@ mod tests {
     /// A Full-phase, strong, untagged record in namespace 1.
     pub(super) fn rec(id: MemoryId) -> CachedRecord {
         CachedRecord {
+            labels: None,
             lifecycle: None,
             id,
             namespace_id: ns(),
@@ -1987,7 +2592,7 @@ mod tests {
         serde_json::from_value(value).expect("valid query")
     }
 
-    fn engine(graph: StubGraph, meta: StubMetaStore) -> QueryEngine {
+    pub(super) fn engine(graph: StubGraph, meta: StubMetaStore) -> QueryEngine {
         QueryEngine::new(
             Arc::new(Unused),
             Arc::new(Unused),
@@ -2000,6 +2605,274 @@ mod tests {
             Arc::new(Unused),
             Arc::new(Unused),
         )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn access_policy_forwarding_keeps_query_inputs_and_legacy_receipts() {
+        use crate::decay::observation::AccessObservation;
+        use crate::search::adapters::{StorageAccessRecorder, StorageMetadataAdapter};
+        use crate::storage::control::ExposureScope;
+        use crate::storage::native_lifecycle::NativePolicyInputs;
+        use crate::storage::work::WorkTicket;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Clock(AtomicUsize);
+        impl crate::time::Clock for Clock {
+            fn now_millis(&self) -> i64 {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                1_800_000_000_007
+            }
+        }
+        struct Recording {
+            inner: StorageAccessRecorder,
+            seen: std::sync::Mutex<Vec<(Option<i64>, f32, f64, bool)>>,
+        }
+        #[async_trait::async_trait]
+        impl AccessRecorder for Recording {
+            async fn record_access_batch_for_publication(
+                &self,
+                accesses: &[(MemoryId, AccessKind)],
+                scope: Option<&ExposureScope>,
+                sampled_at: Option<i64>,
+                parent: Option<&WorkTicket>,
+                policy: Option<&NativePolicyInputs>,
+                original_contract_version: u32,
+            ) -> Result<AccessObservation> {
+                let policy = policy.expect("actual configured policy");
+                assert_eq!(scope.unwrap().namespace, "default");
+                assert_eq!(scope.unwrap().source, Some(accesses[0].0));
+                self.seen.lock().unwrap().push((
+                    sampled_at,
+                    policy.global.initial_stability,
+                    policy.multiplier,
+                    parent.is_some(),
+                ));
+                // The production legacy adapter uses the new trait default,
+                // which must preserve its old clock/receipt/publication path.
+                self.inner
+                    .record_access_batch_for_publication(
+                        accesses,
+                        scope,
+                        sampled_at,
+                        parent,
+                        Some(policy),
+                        original_contract_version,
+                    )
+                    .await
+            }
+            async fn record_access(
+                &self,
+                _: MemoryId,
+                _: AccessKind,
+            ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+                unreachable!()
+            }
+            async fn record_access_batch(
+                &self,
+                _: &[(MemoryId, AccessKind)],
+                _: Option<&ExposureScope>,
+            ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+                unreachable!()
+            }
+        }
+        let fx = crate::test_support::Fixture::new();
+        let id = fx.insert_memory().await;
+        let clock = Arc::new(Clock(AtomicUsize::new(0)));
+        let recorder = Arc::new(Recording {
+            inner: StorageAccessRecorder::new(fx.storage.clone(), fx.cache.clone())
+                .with_clock(clock.clone()),
+            seen: Default::default(),
+        });
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: fx.storage.clone(),
+            cache: fx.cache.clone(),
+            graph: fx.graph.clone(),
+            vectors: fx.vector_index.clone(),
+            fts: fx.fts_index.clone(),
+            entities: fx.entity_index.clone(),
+        };
+        owner.complete().await.unwrap();
+        let mut query_engine = engine(StubGraph::default(), StubMetaStore::default())
+            .with_lifecycle_inputs(
+                clock.clone(),
+                crate::decay::DecayConfig {
+                    initial_stability: 17.25,
+                    ..Default::default()
+                },
+                2.75,
+            )
+            .with_coherent_owner(
+                owner,
+                Arc::new(crate::rif::RifEngine::new(Default::default())),
+            );
+        query_engine.meta_store = Arc::new(StorageMetadataAdapter::new(fx.storage.clone()));
+        query_engine.access_recorder = recorder.clone();
+        let scope = || ExposureScope {
+            namespace: "default".into(),
+            source: Some(id),
+        };
+        let accesses = [(id, AccessKind::DirectRetrieval)];
+        let first = query_engine
+            .record_exposures_at_with_work(&accesses, scope(), 1_800_000_000_003, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            clock.0.load(Ordering::SeqCst),
+            0,
+            "pinned clock must not be sampled again"
+        );
+        assert_eq!(fx.record(id).unwrap().last_accessed_at, 1_800_000_000_003);
+        let second = query_engine
+            .record_exposures(&accesses, scope())
+            .await
+            .unwrap();
+        assert_eq!(
+            clock.0.load(Ordering::SeqCst),
+            1,
+            "legacy non-pinned path samples its recorder once"
+        );
+        assert_eq!(fx.record(id).unwrap().last_accessed_at, 1_800_000_000_007);
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_ne!(first[0].operation_id, second[0].operation_id);
+        assert_eq!(
+            *recorder.seen.lock().unwrap(),
+            vec![
+                (Some(1_800_000_000_003), 17.25, 2.75, true),
+                (None, 17.25, 2.75, true)
+            ]
+        );
+        assert!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+        let before = fx.record(id).unwrap().to_bytes();
+        assert!(
+            query_engine
+                .record_exposures(&[], scope())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(before, fx.record(id).unwrap().to_bytes());
+        assert_eq!(recorder.seen.lock().unwrap().len(), 2);
+        assert_eq!(
+            fx.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .status()
+                .pending,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn native_profile_query_rejects_wrong_binding_and_bad_vectors_before_indexes() {
+        use crate::embedding::runtime::tests::{bound, profile};
+        use crate::embedding::{EmbeddingError, EmbeddingProvider};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Namespace(NamespaceConfig);
+        #[async_trait::async_trait]
+        impl NamespaceResolver for Namespace {
+            async fn resolve(&self, _: &str) -> Result<NamespaceConfig> {
+                Ok(self.0.clone())
+            }
+        }
+        struct Provider {
+            calls: Arc<AtomicUsize>,
+            profile: Option<crate::model::schema::EmbeddingProfile>,
+            vector: Vec<f32>,
+        }
+        #[async_trait::async_trait]
+        impl EmbeddingProvider for Provider {
+            async fn embed(&self, _: &str) -> std::result::Result<Vec<f32>, EmbeddingError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(self.vector.clone())
+            }
+            fn dimensions(&self) -> usize {
+                4
+            }
+            fn model_name(&self) -> &str {
+                "model"
+            }
+            fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+                self.profile.clone()
+            }
+        }
+        let mut wrong = profile();
+        wrong.model_id = "same-width-different-model".into();
+        for (ns, descriptor, vector, expected_calls, message) in [
+            (
+                bound(),
+                Some(wrong),
+                vec![1., 0., 0., 0.],
+                0,
+                "profile differs",
+            ),
+            (
+                bound(),
+                Some(profile()),
+                vec![1., 0., 0., 0.],
+                0,
+                "serving remains disabled",
+            ),
+            (
+                bound(),
+                None,
+                vec![1., 0., 0., 0.],
+                0,
+                "provenance is unknown",
+            ),
+            (
+                {
+                    let mut ns = bound();
+                    ns.schema = None;
+                    ns
+                },
+                Some(profile()),
+                vec![0.; 4],
+                1,
+                "positive norm",
+            ),
+            (
+                {
+                    let mut ns = bound();
+                    ns.schema = None;
+                    ns
+                },
+                None,
+                vec![1.; 3],
+                1,
+                "dimension",
+            ),
+        ] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let mut pipeline = engine(StubGraph::default(), StubMetaStore::default());
+            pipeline.namespace_resolver = Arc::new(Namespace(ns));
+            pipeline.embedding_providers = Arc::new(
+                crate::search::adapters::SingleEmbeddingRegistry::new(Arc::new(Provider {
+                    calls: calls.clone(),
+                    profile: descriptor,
+                    vector,
+                })),
+            );
+            // All indexes/access callbacks are Unused: reaching one panics.
+            let error = pipeline
+                .search(query(
+                    serde_json::json!({"namespace":"default", "text":"probe"}),
+                ))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+            assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
+        }
     }
 
     #[tokio::test]
@@ -2408,7 +3281,9 @@ mod tests {
     #[async_trait::async_trait]
     impl NamespaceResolver for SearchFixture {
         async fn resolve(&self, _name: &str) -> Result<NamespaceConfig> {
-            Ok(NamespaceConfig::default_namespace(1_700_000_000_000))
+            let mut config = NamespaceConfig::default_namespace(1_700_000_000_000);
+            config.embedding_dim = 2; // Actual fixture provider width.
+            Ok(config)
         }
     }
 
@@ -2493,7 +3368,7 @@ mod tests {
         }
         let mut entities = EntityIndex::new();
         for record in &records {
-            entities.add(record.id, &record.entities);
+            entities.add(record.namespace_id, record.id, &record.entities);
         }
         let fixture = Arc::new(SearchFixture(records));
         QueryEngine::new(
@@ -2870,3 +3745,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "origin_tests.rs"]
+mod origin_tests;

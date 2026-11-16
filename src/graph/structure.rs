@@ -156,6 +156,10 @@ pub struct TraversalResult {
 /// Errors returned by graph mutation operations.
 #[derive(Debug, thiserror::Error)]
 pub enum GraphError {
+    /// The owned core cannot accept a new graph producer.
+    #[error("graph unavailable: {0}")]
+    Unavailable(String),
+
     /// A memory was not found in the graph.
     #[error("memory {0:?} not found in graph")]
     MemoryNotFound(MemoryId),

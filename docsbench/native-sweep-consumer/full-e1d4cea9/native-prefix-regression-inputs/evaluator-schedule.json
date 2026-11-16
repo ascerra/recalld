@@ -1,0 +1,174 @@
+{
+  "futureQueryCanary": "FUTURE_NATIVE_QUERY",
+  "futureVariant": "baseline",
+  "queries": [
+    {
+      "queryId": "q0",
+      "text": "alpha beta"
+    },
+    {
+      "queryId": "q1",
+      "text": "beta"
+    },
+    {
+      "queryId": "q2",
+      "text": "alpha beta"
+    },
+    {
+      "queryId": "q3",
+      "text": "beta FUTURE_NATIVE_QUERY"
+    }
+  ],
+  "scheduleVersion": 1,
+  "steps": [
+    {
+      "arguments": {
+        "id": "$turn-0",
+        "namespace": "default",
+        "recordAccess": false
+      },
+      "tag": "get",
+      "tool": "get_memory"
+    },
+    {
+      "arguments": {
+        "id": "$turn-0",
+        "namespace": "foreign",
+        "recordAccess": false
+      },
+      "tag": "foreign-assertion",
+      "tool": "get_memory"
+    },
+    {
+      "arguments": {
+        "compact": false,
+        "depth": 0,
+        "limit": 3,
+        "namespace": "default",
+        "query": "alpha beta",
+        "recordAccess": false
+      },
+      "tag": "query:q0",
+      "tool": "recall_memories"
+    },
+    {
+      "arguments": {
+        "compact": false,
+        "depth": 0,
+        "limit": 3,
+        "namespace": "default",
+        "query": "beta",
+        "recordAccess": false
+      },
+      "tag": "query:q1",
+      "tool": "recall_memories"
+    },
+    {
+      "arguments": {
+        "compact": false,
+        "depth": 0,
+        "limit": 3,
+        "namespace": "default",
+        "query": "alpha beta",
+        "recordAccess": false
+      },
+      "tag": "query:q2",
+      "tool": "recall_memories"
+    },
+    {
+      "arguments": {
+        "compact": false,
+        "depth": 0,
+        "limit": 3,
+        "namespace": "default",
+        "query": "beta FUTURE_NATIVE_QUERY",
+        "recordAccess": false
+      },
+      "tag": "query:q3",
+      "tool": "recall_memories"
+    },
+    {
+      "arguments": {
+        "compact": false,
+        "depth": 0,
+        "limit": 3,
+        "namespace": "foreign",
+        "query": "beta",
+        "recordAccess": false
+      },
+      "tag": "foreign-query",
+      "tool": "recall_memories"
+    },
+    {
+      "arguments": {
+        "id": "$turn-0",
+        "namespace": "default"
+      },
+      "tag": "omitted-access",
+      "tool": "get_memory"
+    },
+    {
+      "arguments": {
+        "id": "$turn-0",
+        "namespace": "default",
+        "recordAccess": true
+      },
+      "tag": "true-access",
+      "tool": "get_memory"
+    },
+    {
+      "arguments": {
+        "namespace": "default",
+        "query": "beta"
+      },
+      "tag": "omitted-search-access",
+      "tool": "recall_memories"
+    },
+    {
+      "arguments": {
+        "namespace": "default",
+        "query": "beta",
+        "recordAccess": true
+      },
+      "tag": "true-search-access",
+      "tool": "recall_memories"
+    },
+    {
+      "arguments": {
+        "namespace": "default",
+        "summary": "unrecorded-write"
+      },
+      "tag": "blocked-store",
+      "tool": "store_memory"
+    },
+    {
+      "arguments": {
+        "id": "$turn-0",
+        "namespace": "default",
+        "quality": 3
+      },
+      "tag": "blocked-feedback",
+      "tool": "reinforce_memory"
+    },
+    {
+      "arguments": {
+        "id": "$turn-0",
+        "namespace": "default"
+      },
+      "tag": "blocked-forget",
+      "tool": "forget_memory"
+    },
+    {
+      "arguments": {
+        "compact": false,
+        "depth": 0,
+        "limit": 1,
+        "namespace": "default",
+        "query": "unrecorded-native-query",
+        "recordAccess": false
+      },
+      "tag": "replay-miss",
+      "tool": "recall_memories"
+    }
+  ]
+}

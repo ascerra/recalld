@@ -1,0 +1,173 @@
+--- /dev/null
++++ b/src/storage/metadata/native_records/public_api1_tests.rs
+@@ -0,0 +1,71 @@
++//! Public API1 handlers, not prepared/private-only dispatch.
++use super::*;
++use tower::ServiceExt;
++
++async fn public_action(operation: Operation, mcp: bool) {
++    let (f, d, _clock, bridge, state) = setup().await;
++    let id = d.parent;
++    if mcp {
++        let name = if operation == Operation::Feedback {
++            "reinforce_memory"
++        } else {
++            "forget_memory"
++        };
++        let result = crate::mcp::tools::dispatch_tool(&bridge, name, json!({"id":id})).await;
++        assert_ne!(
++            result.is_error,
++            Some(true),
++            "public native API1 {name}: {result:?}"
++        );
++    } else {
++        let router = crate::api::router(state, &Default::default());
++        let (method, uri, body) = if operation == Operation::Feedback {
++            ("POST", format!("/memories/{id}/reinforce"), "{}")
++        } else {
++            ("DELETE", format!("/memories/{id}"), "")
++        };
++        let response = router
++            .oneshot(
++                Request::builder()
++                    .method(method)
++                    .uri(uri)
++                    .header("content-type", "application/json")
++                    .body(Body::from(body))
++                    .unwrap(),
++            )
++            .await
++            .unwrap();
++        let status = response.status();
++        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
++            .await
++            .unwrap();
++        assert_eq!(
++            status.as_u16(),
++            200,
++            "public native API1: {}",
++            String::from_utf8_lossy(&body)
++        );
++    }
++    let record = f.record(id).unwrap();
++    if operation == Operation::Forget {
++        assert_eq!(record.phase, DecayPhase::Tombstone);
++    } else {
++        assert!(record.schema.unwrap().lifecycle.reinforced_at.is_some());
++    }
++}
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn api1_public_native_mcp_feedback() {
++    public_action(Operation::Feedback, true).await;
++}
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn api1_public_native_mcp_forget() {
++    public_action(Operation::Forget, true).await;
++}
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn api1_public_native_http_feedback() {
++    public_action(Operation::Feedback, false).await;
++}
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn api1_public_native_http_forget() {
++    public_action(Operation::Forget, false).await;
++}
+--- a/src/mcp/legacy_lifecycle_tests.rs
++++ b/src/mcp/legacy_lifecycle_tests.rs
+@@ -1156,3 +1156,87 @@
+     task.await.unwrap();
+     assert_eq!(snapshot(&f, id), before);
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn api1_public_legacy_success_shapes() {
++    use tower::ServiceExt;
++    let f = Fixture::new();
++    let id = f.insert_memory().await;
++    let clock = Arc::new(CountingClock::default());
++    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
++    bridge.storage = Arc::new(
++        f.storage_adapter()
++            .with_clock(clock.clone())
++            .with_native_lifecycle_policy(Default::default()),
++    );
++    let (state, _query) = state(&f, clock);
++    for name in ["reinforce_memory", "forget_memory"] {
++        let result = crate::mcp::tools::dispatch_tool(&bridge, name, json!({"id":id})).await;
++        assert_ne!(result.is_error, Some(true), "{result:?}");
++        let result = serde_json::to_value(result).unwrap();
++        let data: Value =
++            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
++        let expected = if name == "reinforce_memory" {
++            vec!["id", "isPermastore", "phase", "stability", "strength"]
++        } else {
++            vec!["deleted", "id"]
++        };
++        assert_eq!(
++            data.as_object()
++                .unwrap()
++                .keys()
++                .map(String::as_str)
++                .collect::<Vec<_>>(),
++            expected
++        );
++        println!("legacy MCP {name}: {data}");
++    }
++    let id = f.insert_memory().await;
++    for (method, uri, body) in [
++        ("POST", format!("/memories/{id}/reinforce"), "{}"),
++        ("DELETE", format!("/memories/{id}"), ""),
++    ] {
++        let response = crate::api::router(state.clone(), &Default::default())
++            .oneshot(
++                axum::http::Request::builder()
++                    .method(method)
++                    .uri(uri)
++                    .header("content-type", "application/json")
++                    .body(axum::body::Body::from(body))
++                    .unwrap(),
++            )
++            .await
++            .unwrap();
++        assert_eq!(response.status().as_u16(), 200);
++        let value: Value = serde_json::from_slice(
++            &axum::body::to_bytes(response.into_body(), usize::MAX)
++                .await
++                .unwrap(),
++        )
++        .unwrap();
++        assert_eq!(
++            value
++                .as_object()
++                .unwrap()
++                .keys()
++                .map(String::as_str)
++                .collect::<Vec<_>>(),
++            vec!["data", "tookUs"]
++        );
++        let expected = if method == "POST" {
++            vec!["id", "isPermastore", "phase", "stability", "strength"]
++        } else {
++            vec!["deleted", "id"]
++        };
++        assert_eq!(
++            value["data"]
++                .as_object()
++                .unwrap()
++                .keys()
++                .map(String::as_str)
++                .collect::<Vec<_>>(),
++            expected
++        );
++        println!("legacy HTTP {method}: {value}");
++    }
++}
+--- a/src/storage/metadata/native_records/wire_tests.rs
++++ b/src/storage/metadata/native_records/wire_tests.rs
+@@ -710,3 +710,6 @@
+     assert_eq!(bytes(&f, d.parent), before);
+     assert_eq!(clock.0.load(Ordering::SeqCst), calls);
+ }
++
++#[path = "public_api1_tests.rs"]
++mod public_api1;

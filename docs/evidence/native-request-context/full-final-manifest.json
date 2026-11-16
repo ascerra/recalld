@@ -1,0 +1,45 @@
+{
+  "source": "a9053ef1287b0b2a1a266c7c72268ad61f84291b",
+  "tree": "fa4fed7d18d206304edcc15984cad0713289a09a",
+  "exit": 0,
+  "log_sha256": "e011a4a1056625824f640031c760f8df7dac404b73167b59c889f71834c3bc38",
+  "binary": [
+    {
+      "path": "debug/deps/lifecycle_cli-c369125dcd35855a",
+      "sha256": "c738d4ffd6030f99cc3ddcab19e0a21ee795df3f80add57bb1615c0aa78b7852"
+    },
+    {
+      "path": "debug/deps/recalld-a60730f3f93b30b7",
+      "sha256": "f0e375306e5963e0f25d18253cb3371d265d4cae84a7e10adf5d4ed73e6930ba"
+    },
+    {
+      "path": "debug/deps/text_migration_cli-c3debcbf7a93ee01",
+      "sha256": "87efb77cd460632edc14b3a30db0b400ca3444e4631cd06f56ce4d6d4c597679"
+    },
+    {
+      "path": "debug/deps/recalld-b2844bb1c4a63074",
+      "sha256": "06d68a6608425bfaa628df7ce55724a7e52e52d6d5e7c685d5996713d726df6a"
+    },
+    {
+      "path": "debug/deps/recalld_cli-8f457ab03bd2b416",
+      "sha256": "b8ff5ec9db2c4db3ee5f49f4b3296b74d80c1629a12ee35d6e5392a59786aac2"
+    },
+    {
+      "path": "debug/deps/recalld_text_migrate-e2e689a390b4efcc",
+      "sha256": "0663467c03121eda54a35a92e213ebb28d3d5bc755002f86572d54b8788ef77a"
+    }
+  ],
+  "results": [
+    "warning: `recalld` (lib test) generated 7 warnings",
+    "warning: `recalld` (lib) generated 35 warnings (4 duplicates) (run `cargo fix --lib -p recalld` to apply 2 suggestions)",
+    "test result: ok. 1103 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 715.68s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.59s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.13s",
+    "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "warning: `recalld` (lib) generated 869 warnings (run `cargo clippy --fix --lib -p recalld` to apply 93 suggestions)",
+    "warning: `recalld` (lib test) generated 929 warnings (840 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 7 suggestions)"
+  ]
+}

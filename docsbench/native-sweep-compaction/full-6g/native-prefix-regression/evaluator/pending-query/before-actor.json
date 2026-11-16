@@ -1,0 +1,90 @@
+{
+  "readiness": {
+    "committedGeneration": "8",
+    "derived": [
+      {
+        "appliedGeneration": "8",
+        "name": "graph",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "8",
+        "name": "vectors",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "8",
+        "name": "fts",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "8",
+        "name": "entities",
+        "ready": true
+      }
+    ],
+    "pendingWork": 0,
+    "ready": true,
+    "storeId": "c2f72928-8b6a-48b9-bdc4-c3ab98250022"
+  },
+  "snapshot": {
+    "committed": {
+      "generation": "8",
+      "storeId": "c2f72928-8b6a-48b9-bdc4-c3ab98250022"
+    },
+    "logicalHash": "b7bf78e9f9cda444be4324c23d80709a8026e2b370894cec4859121d23097781",
+    "manifest": "/output/native-prefix-regression/runtime/recalld-frozen-canonical-fO0gJ8/manifest.json",
+    "sha256": "9c199266505658311891ab1a7b20e227563cd96e605c61c45005680d669a9849",
+    "track": "isolated-native-prefix-checkpoint-v1"
+  },
+  "state": {
+    "committed": {
+      "generation": "8",
+      "storeId": "c2f72928-8b6a-48b9-bdc4-c3ab98250022"
+    },
+    "logicalHash": null,
+    "runtimeState": {
+      "allocation": {
+        "counter": 0,
+        "lastMemoryMillis": null,
+        "seed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "version": 1
+      },
+      "nowMillis": 1767225600000
+    },
+    "snapshot": false
+  }
+}

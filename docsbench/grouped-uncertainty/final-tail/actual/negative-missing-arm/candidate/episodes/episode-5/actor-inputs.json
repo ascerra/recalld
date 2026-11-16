@@ -1,0 +1,53 @@
+{
+  "adapterVersion": 1,
+  "sources": [
+    {
+      "contentSha256": "23279ec58bde7b1b96bcfdb1a8d3f6e6591bb7ff137a8fa041a6635fa00e6738",
+      "conversationId": "conversation-5",
+      "namespace": "default",
+      "ordinal": 0,
+      "role": "user",
+      "sessionId": "session-5",
+      "sourceId": "turn-0",
+      "sourceTimestamp": 1767225600000,
+      "summary": "amber ash",
+      "turnId": "turn-0"
+    },
+    {
+      "contentSha256": "ed6a3c0a08ecabab972d75e0dc820dcd0413ae112aaf5fdcc8ca9b69ad4368f1",
+      "conversationId": "conversation-5",
+      "namespace": "default",
+      "ordinal": 1,
+      "role": "user",
+      "sessionId": "session-5",
+      "sourceId": "turn-1",
+      "sourceTimestamp": 1767225600000,
+      "summary": "birch ash",
+      "turnId": "turn-1"
+    },
+    {
+      "contentSha256": "06e401fb529f4cfb32ebce713ee14db32d1f115b4c3bcbffa50d8a2a978470db",
+      "conversationId": "conversation-5",
+      "namespace": "default",
+      "ordinal": 2,
+      "role": "user",
+      "sessionId": "session-5",
+      "sourceId": "turn-2",
+      "sourceTimestamp": 1767225600000,
+      "summary": "olive ash",
+      "turnId": "turn-2"
+    },
+    {
+      "contentSha256": "c5caab499a6ac84b281578dc7febef6a5e8b6e21032308dde725b34478e472ec",
+      "conversationId": "conversation-5",
+      "namespace": "foreign",
+      "ordinal": 3,
+      "role": "user",
+      "sessionId": "session-5",
+      "sourceId": "turn-3",
+      "sourceTimestamp": 1767225600000,
+      "summary": "foreign ash",
+      "turnId": "turn-3"
+    }
+  ]
+}

@@ -113,6 +113,9 @@ pub struct ScanDuplicatesParams {
     pub threshold: f32,
     /// Maximum number of memories to sample.
     pub max_memories: usize,
+    /// Opt into a report object; omission preserves the legacy cluster array.
+    #[serde(default)]
+    pub include_coverage: bool,
 }
 
 /// Parameters for the `namespace_stats` RPC method.
@@ -463,7 +466,7 @@ async fn read_payload<R: AsyncRead + Unpin>(
 /// declares a frame and then goes quiet costs one [`PAYLOAD_CHUNK`] and at
 /// most one timeout, not a pinned connection task holding
 /// [`MAX_MESSAGE_SIZE`].
-async fn read_frame<R: AsyncRead + Unpin>(
+pub(crate) async fn read_frame<R: AsyncRead + Unpin>(
     reader: &mut R,
     limit: usize,
 ) -> Result<Vec<u8>, FrameError> {
@@ -530,8 +533,34 @@ pub async fn write_framed_message<W: AsyncWrite + Unpin>(
     response: &DaemonResponse,
     limit: usize,
 ) -> Result<(), FrameError> {
-    let payload = encode_frame(response, limit)?;
-    write_frame(writer, &payload).await
+    let encode = crate::performance::Timer::new("daemon.serialize");
+    let result = encode_frame(response, limit);
+    encode.outcome(result.is_ok());
+    let payload = result?;
+    crate::performance::event!(
+        kind = "transport_output",
+        transport = "daemon",
+        phase = "attempt",
+        source_bytes = payload.len(),
+        framing_bytes = 4
+    );
+    let delivery = crate::performance::Timer::new("daemon.write_flush");
+    let result = write_frame(writer, &payload).await;
+    crate::performance::event!(
+        kind = "transport_delivery",
+        transport = "daemon",
+        success = result.is_ok()
+    );
+    delivery.outcome(result.is_ok());
+    result?;
+    crate::performance::event!(
+        kind = "transport_output",
+        transport = "daemon",
+        phase = "complete",
+        source_bytes = payload.len(),
+        framing_bytes = 4
+    );
+    Ok(())
 }
 
 /// Writes a length-prefixed JSON-RPC request to the stream.

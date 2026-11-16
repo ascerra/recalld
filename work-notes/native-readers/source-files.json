@@ -1,0 +1,10 @@
+{
+  "docs/implementation/native-record-readers.md": "db36d95de7a6c9cdbe605afa993149427543c9969858da055e1e2c6aeca6d68e",
+  "src/derived_completion.rs": "cfc96e83232e2a82c5073895b947ebd49e43ca2b18a14a3030c6dd72ae7283b6",
+  "src/mcp/bridge_adapters.rs": "95cf78474b06f5b942a60d968ad082cdb72356d7eeccd1ef89e39dba64471db3",
+  "src/storage/metadata/effects.rs": "3453775cafac87c0f2e0cbbd311d2abda3af59fe3ce0576d8859cb17f6124340",
+  "src/storage/metadata/native_records/reader_tests.rs": "65ec2c9ed9adb59bb0b296c2587f5c1185c62eaced42ba90aad49efcf958dbb6",
+  "src/storage/metadata/native_records/tests.rs": "61027b42c9f9ab695ca71c1a1de7b2540eb68da77cff41f6b3936b2c611668ac",
+  "src/storage/metadata/observation_tests.rs": "1197780a4c1d2dd8c28b6acc09e85d4aa4b5c23403e57e30f1ce6ed5fd0b2faf",
+  "src/test_support.rs": "b2222ac298e61a76c6675307929055a96d0e2186bebeded96dea8b484dd60e7b"
+}

@@ -1,0 +1,6 @@
+docker run --rm --network none --cpus 2 --memory 4g
+ENV RUSTUP_TOOLCHAIN=1.94.1 CARGO_BUILD_JOBS=2 CARGO_HOME=/cargo CARGO_TARGET_DIR=/target
+Only mounts: assigned native-sweep-readiness worktree:/work, its private .test-scratch/cargo:/cargo and .test-scratch/target:/target. Workdir /work, image recalld-ci:1.94.
+Own-package clean after original cache/worktree switch: baseline/package-clean.log.
+Corrected join: cargo fmt --all --check && cargo test --offline --lib storage::metadata::native_records::tests::sweep -- --nocapture && cargo test --offline && cargo clippy --offline --all-targets
+Actual96+98 baseline retained independently; final corrections change runtime inputs and require the recorded second full validation.

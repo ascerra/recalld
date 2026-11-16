@@ -7,17 +7,34 @@
 //!
 //! See CS-07 for the full specification.
 
+pub(crate) mod batch;
+mod canonical_vector_snapshot;
 mod catalog;
+#[cfg(test)]
+mod catalog_completion_tests;
 pub(crate) mod effects;
+mod inherited_policy;
 mod insertion;
+mod legacy_lifecycle;
 mod lifecycle_updates;
 pub(crate) mod namespace_state;
+mod native_catalog;
+pub(crate) mod native_graph;
+mod native_lifecycle;
+mod native_maintenance;
+mod native_namespace_binding;
+mod native_policy;
+pub(crate) mod native_records;
+mod native_store;
 mod observation;
+mod publication;
+pub(crate) use publication::CanonicalReadView;
 pub(crate) mod purge;
 pub(crate) mod removal_ledger;
 pub(crate) mod restoration;
 pub(crate) mod text_generation;
 mod tombstone;
+mod work;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -36,6 +53,9 @@ use crate::storage::control::{
 };
 use crate::storage::error::StorageError;
 use crate::storage::indexes::PhaseIndex;
+use crate::storage::work::{WorkTicket, WorkTracker};
+pub use work::MetadataFreeze;
+pub(crate) use work::MutationGuard;
 
 // ═══════════════════════════════════════════════════════════════════════
 // redb Table Definitions
@@ -79,18 +99,36 @@ const NAMESPACE_INDEX: MultimapTableDefinition<u32, &[u8]> =
 /// concurrent read transactions and exclusive write transactions.
 pub struct MetadataStore {
     db: Database,
+    ids: Box<dyn super::ids::IdSource>,
+    native_lifecycle_only: bool,
+    work_tracker: WorkTracker,
+    view_publication: std::sync::Arc<super::publication::PublicationRegistry>,
     unavailable: std::sync::atomic::AtomicBool,
     purge_pending: std::sync::atomic::AtomicBool,
     pub(crate) canonical_pending: std::sync::atomic::AtomicBool,
     derived_dirty: std::sync::atomic::AtomicBool,
     effects_epoch: std::sync::atomic::AtomicU64,
     #[cfg(test)]
+    pub(crate) ack_work_probe:
+        std::sync::Mutex<Option<std::sync::mpsc::Sender<effects::ack_tests::AckWork>>>,
+    #[cfg(test)]
+    pub(crate) ack_test_hook: std::sync::Mutex<Option<effects::ack_tests::AckHook>>,
+    #[cfg(test)]
+    pub(crate) ack_test_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
+    pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
     #[cfg(test)]
+    pub(crate) catalog_test_fault: std::sync::atomic::AtomicU8,
+    #[cfg(test)]
     pub(crate) fail_purge_child_commit: std::sync::atomic::AtomicBool,
+    /// Store-local lost-ack probes: 1 reservation, 2 rejection, 3 child.
+    #[cfg(test)]
+    pub(crate) fail_batch_commit: std::sync::atomic::AtomicU8,
     // Lock order: engine gate -> publication -> redb -> phase_index.
     // Hold across commit and bitmap publication, including direct callers.
     publication: std::sync::RwLock<()>,
@@ -102,20 +140,77 @@ pub struct MetadataStore {
 // ── Constructor ─────────────────────────────────────────────────────
 
 impl MetadataStore {
+    pub(crate) fn id_source(&self) -> &dyn super::ids::IdSource {
+        self.ids.as_ref()
+    }
+
+    fn record_receipt(
+        &self,
+        tx: &redb::WriteTransaction,
+        ctx: &MutationContext,
+        hash: [u8; 32],
+        outcome: control::MutationOutcome,
+    ) -> Result<WriteReceipt, StorageError> {
+        control::record_receipt_with_ids(tx, ctx, hash, outcome, self.ids.as_ref())
+    }
+
     /// Open or create meta.db at the given path.
     ///
     /// - Sets a 16 MB read cache (covers top B+tree levels).
     /// - Creates all tables on first open.
     /// - Loads or rebuilds the phase index from persisted bitmaps.
     pub(crate) fn open(path: &Path) -> Result<Self, StorageError> {
+        Self::open_with_ids(path, false, Box::new(super::ids::SystemIds))
+    }
+
+    // Caller must already own the store and validate its complete inventory.
+    pub(crate) fn open_native_lifecycle(path: &Path) -> Result<Self, StorageError> {
+        Self::open_with_ids(path, true, Box::new(super::ids::SystemIds))
+    }
+
+    pub(crate) fn open_with_ids(
+        path: &Path,
+        native_lifecycle_only: bool,
+        ids: Box<dyn super::ids::IdSource>,
+    ) -> Result<Self, StorageError> {
+        if native_lifecycle_only && (!path.is_file() || path.metadata()?.len() == 0) {
+            return Err(StorageError::InvalidPath);
+        }
+        if let Some(parent) = path.parent() {
+            if std::fs::symlink_metadata(parent.join(".recalld-importing")).is_ok() {
+                return Err(StorageError::RecoveryRequired(
+                    "incomplete logical import; resume using its original export".into(),
+                ));
+            }
+        }
         // redb's writable open can change bookkeeping. Reject historical mode
         // on a disposable copy even for callers bypassing the engine.
         if path.try_exists()? && path.metadata()?.len() > 0 {
             let (_copy, db) = super::validation::inspect_database_copy(path, true)?;
             let read = db.begin_read()?;
-            if let Some(control) = control::validate_existing(&read)? {
+            let control = control::validate_existing(&read)?;
+            super::canonical_schema::validate_metadata_format(&read, control.as_ref())?;
+            if native_lifecycle_only {
+                restoration::validate_inventory(&read)?;
+            }
+            if native_lifecycle_only && text_generation::read_selection(&read)?.is_none() {
+                return Err(StorageError::InvalidControl(
+                    "native lifecycle entry requires the selected-text old-reader fence".into(),
+                ));
+            }
+            if native_lifecycle_only && control.is_none() {
+                return Err(StorageError::InvalidMutation(
+                    "native lifecycle entry requires canonical schema 2".into(),
+                ));
+            }
+            if let Some(control) = control {
                 super::lineage::ensure_serving(&read, &control)?;
-                if control.control_schema_version == 2 {
+                if native_lifecycle_only && control.control_schema_version != 2 {
+                    return Err(StorageError::InvalidMutation(
+                        "native lifecycle entry requires canonical schema 2".into(),
+                    ));
+                }
+                if control.control_schema_version == 2 && !native_lifecycle_only {
                     return Err(StorageError::RecoveryRequired("canonical schema v2 is offline until participating writers are enabled; use schema inspect/export".into()));
                 }
             }
@@ -135,7 +230,7 @@ impl MetadataStore {
             let control = control::validate_existing(&read)?;
             removal_ledger::read_export(&read, control.as_ref())?;
             if let Some(state) = control {
-                if state.control_schema_version == 2 {
+                if state.control_schema_version == 2 && !native_lifecycle_only {
                     return Err(StorageError::RecoveryRequired("canonical schema v2 is offline until participating writers are enabled; use schema inspect/export".into()));
                 }
                 // An adopted store must retain its canonical tables. Do not
@@ -147,10 +242,20 @@ impl MetadataStore {
             effects::validate_existing(&read)?;
         }
 
-        // Force-create all tables by opening them in a write transaction.
-        {
+        // Native entry never initializes tables or rewrites checkpoints.
+        let store_id = if native_lifecycle_only {
+            let read = db.begin_read()?;
+            let table = read.open_table(control::CONTROL)?;
+            ControlState::decode(
+                table
+                    .get("state")?
+                    .ok_or_else(|| StorageError::InvalidControl("missing native control".into()))?
+                    .value(),
+            )?
+            .store_id
+        } else {
             let write_txn = db.begin_write()?;
-            control::initialize(&write_txn)?;
+            control::initialize_with_ids(&write_txn, ids.as_ref())?;
             effects::initialize(&write_txn)?;
             let _ = write_txn.open_table(META_TABLE)?;
             let _ = write_txn.open_table(NAMESPACE_TABLE)?;
@@ -159,13 +264,26 @@ impl MetadataStore {
             let _ = write_txn.open_multimap_table(TAG_INDEX)?;
             let _ = write_txn.open_multimap_table(NAMESPACE_INDEX)?;
             removal_ledger::initialize(&write_txn, pristine)?;
+            let store_id = control::read_control(&write_txn)?.store_id;
             write_txn.commit()?;
-        }
-
+            store_id
+        };
         // Legacy checkpoints have no generation watermark. Always rebuild
         // from canonical records, even for direct MetadataStore callers.
         let store = Self {
+            #[cfg(test)]
+            ack_work_probe: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            ack_test_hook: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            ack_test_fault: std::sync::atomic::AtomicU8::new(0),
             db,
+            ids,
+            native_lifecycle_only,
+            work_tracker: WorkTracker::new(store_id),
+            view_publication: std::sync::Arc::new(
+                super::publication::PublicationRegistry::default(),
+            ),
             unavailable: std::sync::atomic::AtomicBool::new(false),
             purge_pending: std::sync::atomic::AtomicBool::new(false),
             canonical_pending: std::sync::atomic::AtomicBool::new(false),
@@ -173,11 +291,17 @@ impl MetadataStore {
             effects_epoch: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             observation_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            tombstone_publication_fault: std::sync::atomic::AtomicBool::new(false),
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
+            catalog_test_fault: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
             fail_purge_child_commit: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_batch_commit: std::sync::atomic::AtomicU8::new(0),
             publication: std::sync::RwLock::new(()),
             phase_index: std::sync::RwLock::new(PhaseIndex::new()),
         };
@@ -220,6 +344,11 @@ impl MetadataStore {
         self.require_no_active_purge()
     }
 
+    /// The mode was established by strict owned-open validation, not a caller flag.
+    pub(crate) fn uses_native_lifecycle(&self) -> bool {
+        self.native_lifecycle_only
+    }
+
     pub(crate) fn ensure_handle_available(&self) -> Result<(), StorageError> {
         if self.unavailable.load(std::sync::atomic::Ordering::Acquire)
             || self
@@ -234,26 +363,22 @@ impl MetadataStore {
     }
 
     fn commit(&self, tx: redb::WriteTransaction) -> Result<(), StorageError> {
+        self.ensure_legacy_operation()?;
         tx.commit().map_err(|e| {
             self.mark_unavailable();
             StorageError::RedbCommit(e)
-        })
+        })?;
+        self.view_publication.canonical_committed();
+        Ok(())
     }
 
-    pub(crate) fn mutation_guard(
-        &self,
-    ) -> Result<std::sync::RwLockWriteGuard<'_, ()>, StorageError> {
-        let guard = self.publication.write().unwrap_or_else(|e| e.into_inner());
-        // Recheck after waiting: the preceding writer may have failed.
-        self.ensure_available()?;
-        let read = self.db.begin_read()?;
-        let table = read.open_table(control::CONTROL)?;
-        let value = table
-            .get("state")?
-            .ok_or_else(|| StorageError::InvalidControl("missing control".into()))?;
-        let control = ControlState::decode(value.value())?;
-        crate::storage::lineage::ensure_serving(&read, &control)?;
-        Ok(guard)
+    fn ensure_legacy_operation(&self) -> Result<(), StorageError> {
+        if self.native_lifecycle_only {
+            return Err(StorageError::RecoveryRequired(
+                "operation does not participate in native lifecycle proof".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -301,7 +426,7 @@ impl MetadataStore {
             state.generation_ref(),
             &before,
             &record,
-            uuid::Uuid::new_v4(),
+            self.ids.uuid(super::ids::IdKind::Operation)?,
         )?;
         self.commit(write_txn)?;
 
@@ -557,12 +682,13 @@ impl MetadataStore {
     // transaction at the last pre-commit boundary, without a fake backend.
     fn prepare_access(
         &self,
-        _publication: &std::sync::RwLockWriteGuard<'_, ()>,
+        _publication: &MutationGuard<'_>,
         ctx: &MutationContext,
         id: MemoryId,
         timestamp: i64,
         kind: AccessKind,
     ) -> Result<(redb::WriteTransaction, WriteReceipt), StorageError> {
+        _publication.check(self)?;
         let kind_bytes = control::encode(&kind)?;
         let hash = control::request_hash(ctx, "record_access", &[id.as_bytes(), &kind_bytes]);
         let tx = self.db.begin_write()?;
@@ -591,7 +717,7 @@ impl MetadataStore {
             record.access_history.push(AccessEvent { timestamp, kind });
             table.insert(id.as_bytes().as_slice(), record.encode()?.as_slice())?;
         }
-        let receipt = control::record_receipt(
+        let receipt = self.record_receipt(
             &tx,
             ctx,
             hash,
@@ -649,7 +775,7 @@ impl MetadataStore {
             id,
             Some(removal_ledger::TerminalKind::HardDelete),
             removal_ledger::ALL,
-            uuid::Uuid::new_v4(),
+            self.ids.uuid(super::ids::IdKind::Operation)?,
         )?;
         self.commit(write_txn)?;
 
@@ -731,7 +857,7 @@ impl MetadataStore {
             id,
             Some(removal_ledger::TerminalKind::Tombstone),
             removal_ledger::ALL,
-            uuid::Uuid::new_v4(),
+            self.ids.uuid(super::ids::IdKind::Operation)?,
         )?;
         self.commit(write_txn)?;
 
@@ -982,6 +1108,7 @@ impl MetadataStore {
         &self,
         namespace_id: NamespaceId,
     ) -> Result<Vec<DiskRecord>, StorageError> {
+        self.ensure_available()?;
         let timer = crate::performance::Timer::new("canonical.namespace_read");
         let instrumented = crate::performance::enabled();
         let mut encoded_bytes = 0usize;
@@ -1009,8 +1136,12 @@ impl MetadataStore {
                 result.push(record);
             }
         }
-        tracing::trace!(target: "recalld::performance", kind = "canonical_read",
-            examined, records = result.len(), encoded_record_bytes = encoded_bytes);
+        crate::performance::event!(
+            kind = "canonical_read",
+            examined,
+            records = result.len(),
+            encoded_record_bytes = encoded_bytes
+        );
         timer.complete();
         Ok(result)
     }
@@ -1077,6 +1208,28 @@ impl MetadataStore {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<(MemoryId, DiskRecord)>, u64), StorageError> {
+        self.list_memories_filtered_by(
+            namespace_id,
+            require_tags,
+            time_range_start,
+            time_range_end,
+            offset,
+            limit,
+            |_| true,
+        )
+    }
+
+    /// Apply additional canonical predicates before totals, offset and limit.
+    pub(crate) fn list_memories_filtered_by(
+        &self,
+        namespace_id: NamespaceId,
+        require_tags: &[crate::model::Tag],
+        time_range_start: Option<i64>,
+        time_range_end: Option<i64>,
+        offset: usize,
+        limit: usize,
+        eligible: impl Fn(&DiskRecord) -> bool,
+    ) -> Result<(Vec<(MemoryId, DiskRecord)>, u64), StorageError> {
         self.ensure_available()?;
         // Step 1: Get all memory IDs in this namespace from the index.
         let read_txn = self.db.begin_read()?;
@@ -1101,7 +1254,10 @@ impl MetadataStore {
             let record = DiskRecord::from_bytes(record_value.value())?;
 
             // Skip tombstoned records.
-            if record.phase == DecayPhase::Tombstone {
+            if record.namespace_id != namespace_id.get()
+                || record.phase == DecayPhase::Tombstone
+                || !eligible(&record)
+            {
                 continue;
             }
 
@@ -1198,7 +1354,7 @@ impl MetadataStore {
         let write_txn = self.db.begin_write()?;
         let mut transitions = Vec::new();
         let state = control::advance_generation(&write_txn)?;
-        let operation_id = uuid::Uuid::new_v4();
+        let operation_id = self.ids.uuid(super::ids::IdKind::Operation)?;
         {
             let mut table = write_txn.open_table(META_TABLE)?;
             let mut tags = write_txn.open_multimap_table(TAG_INDEX)?;
@@ -1258,8 +1414,15 @@ impl MetadataStore {
     /// Persist the current in-memory phase bitmaps to INDEX_TABLE.
     /// Called periodically (end of decay sweep, graceful shutdown).
     pub fn persist_phase_index(&self) -> Result<(), StorageError> {
+        self.persist_phase_index_with_work(None)
+    }
+
+    pub(crate) fn persist_phase_index_with_work(
+        &self,
+        parent: Option<&WorkTicket>,
+    ) -> Result<(), StorageError> {
         self.ensure_available()?;
-        let _publication = self.mutation_guard()?;
+        let _publication = self.mutation_guard_with_work(parent)?;
         let bytes = {
             let pi = self.phase_index.read().unwrap_or_else(|e| e.into_inner());
             pi.to_bytes()
@@ -1613,7 +1776,7 @@ impl MetadataStore {
             }
         }
         let state = control::advance_generation(&write_txn)?;
-        let operation_id = uuid::Uuid::new_v4();
+        let operation_id = self.ids.uuid(super::ids::IdKind::Operation)?;
         for (id, record) in chunk {
             removal_ledger::record_removal(
                 &write_txn,
@@ -1754,7 +1917,7 @@ impl MetadataStore {
             }
         }
         let state = control::advance_generation(&write_txn)?;
-        let operation_id = uuid::Uuid::new_v4();
+        let operation_id = self.ids.uuid(super::ids::IdKind::Operation)?;
         for outcome in &outcomes {
             if let TombstoneOutcome::Tombstoned(record) = outcome {
                 removal_ledger::record_removal(
@@ -2031,6 +2194,85 @@ mod tests {
     }
 
     #[test]
+    fn canonical_label_list_predicate_precedes_total_offset_and_limit() {
+        use crate::model::schema::{
+            LabelProvenance, RecordSchemaV2, StructuredLabels, VectorReference,
+        };
+        use crate::model::tag::StructuredLabelFilter;
+        let (_dir, store) = open_store();
+        let mut matching = Vec::new();
+        // Codec-level synthetic canonical payloads inside the already-open test
+        // store exercise the list reader only; no ordinary v2 writer is enabled.
+        for index in 0..5 {
+            let id = insert(&store, 1, index, &["entity/caleb"]);
+            let mut record = store.get(id).unwrap().unwrap();
+            record.created_at = index as i64;
+            record.last_accessed_at = record.created_at;
+            let mut schema = RecordSchemaV2::from_legacy(
+                &record,
+                10,
+                Some(VectorReference {
+                    slot: index,
+                    allocation_epoch: control::Generation::default(),
+                    sha256: [1; 32],
+                }),
+            );
+            schema.labels = StructuredLabels {
+                entities: if index == 1 || index == 3 {
+                    vec!["José".into()]
+                } else {
+                    vec![]
+                },
+                topics: vec![],
+                emotions: vec![],
+                provenance: LabelProvenance::LegacyRetainedOnly,
+            };
+            if index == 1 || index == 3 {
+                matching.push(id);
+            }
+            record.version = 2;
+            record.schema = Some(schema);
+            let tx = store.db.begin_write().unwrap();
+            tx.open_table(META_TABLE)
+                .unwrap()
+                .insert(
+                    id.as_bytes().as_slice(),
+                    record.encode().unwrap().as_slice(),
+                )
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        let filter = StructuredLabelFilter {
+            entities: vec!["josé".into()],
+            ..Default::default()
+        }
+        .compile();
+        let (page, total) = store
+            .list_memories_filtered_by(NamespaceId::new(1), &[], None, None, 1, 1, |record| {
+                filter.matches(&record.tags, record.schema.as_ref().map(|s| &s.labels))
+            })
+            .unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].0, matching[0]);
+        let legacy = StructuredLabelFilter {
+            entities: vec!["caleb".into()],
+            ..Default::default()
+        }
+        .compile();
+        let (page, total) = store
+            .list_memories_filtered_by(NamespaceId::new(1), &[], None, None, 0, 10, |record| {
+                legacy.matches(&record.tags, record.schema.as_ref().map(|s| &s.labels))
+            })
+            .unwrap();
+        assert_eq!(total, 0);
+        assert!(
+            page.is_empty(),
+            "canonical empty labels must not match retained tags"
+        );
+    }
+
+    #[test]
     fn integration_access_receipt_cannot_be_overwritten_by_a_paused_sweep() {
         use std::sync::{Arc, mpsc};
         use std::time::Duration;
@@ -2275,7 +2517,7 @@ mod tests {
             .len()
             .unwrap();
         // All three writes have been staged in the real redb transaction.
-        let publication = store.publication.write().unwrap();
+        let publication = store.mutation_guard().unwrap();
         let (tx, abandoned) = store
             .prepare_access(&publication, &ctx, id, 123, AccessKind::DirectRetrieval)
             .unwrap();

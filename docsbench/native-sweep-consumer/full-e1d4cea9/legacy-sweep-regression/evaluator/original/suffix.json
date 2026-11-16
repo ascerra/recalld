@@ -1,0 +1,542 @@
+{
+  "logicalHash": "598f61f37c1e1a1f26946d45284d7aef124e8cc6a04954be9031cb6c342716f7",
+  "malformedControlsRejected": 7,
+  "mappings": {
+    "turn-0": "019b76da-a800-7cbf-aa23-03b88d1bbdca"
+  },
+  "outputs": [
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "{\n  \"id\": \"019b76da-a800-7cbf-aa23-03b88d1bbdca\",\n  \"namespace\": \"default\",\n  \"summary\": \"chronological-sweep\",\n  \"fullText\": \"one retained payload\",\n  \"tags\": [\n    \"sweep-payload-canary\"\n  ],\n  \"phase\": \"Full\",\n  \"strength\": 1.0,\n  \"stability\": 3.7145,\n  \"createdAt\": \"2026-01-01 00:00:00 UTC\",\n  \"lastAccessedAt\": \"2026-01-01 00:00:00 UTC\",\n  \"isPermastore\": false,\n  \"edgeCount\": 0\n}",
+            "type": "text"
+          }
+        ],
+        "resultType": "complete"
+      },
+      "tag": "get:full"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "{\n  \"count\": 1,\n  \"memories\": [\n    {\n      \"createdAt\": \"2026-01-01 00:00:00 UTC\",\n      \"fullText\": \"one retained payload\",\n      \"id\": \"019b76da-a800-7cbf-aa23-03b88d1bbdca\",\n      \"lastAccessedAt\": \"2026-01-01 00:00:00 UTC\",\n      \"namespace\": \"default\",\n      \"phase\": \"Full\",\n      \"score\": 1.0,\n      \"strength\": 1.0,\n      \"summary\": \"chronological-sweep\",\n      \"tags\": [\n        \"sweep-payload-canary\"\n      ]\n    }\n  ]\n}",
+            "type": "text"
+          }
+        ],
+        "resultType": "complete"
+      },
+      "tag": "query:full"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "{\n  \"id\": \"019b76da-a800-7cbf-aa23-03b88d1bbdca\",\n  \"namespace\": \"default\",\n  \"summary\": \"chronological-sweep\",\n  \"fullText\": null,\n  \"tags\": [\n    \"sweep-payload-canary\"\n  ],\n  \"phase\": \"Summary\",\n  \"strength\": 0.020824533,\n  \"stability\": 3.7145,\n  \"createdAt\": \"2026-01-01 00:00:00 UTC\",\n  \"lastAccessedAt\": \"2026-01-01 00:00:00 UTC\",\n  \"isPermastore\": false,\n  \"edgeCount\": 0\n}",
+            "type": "text"
+          }
+        ],
+        "resultType": "complete"
+      },
+      "tag": "get:summary"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "{\n  \"count\": 1,\n  \"memories\": [\n    {\n      \"createdAt\": \"2026-01-01 00:00:00 UTC\",\n      \"id\": \"019b76da-a800-7cbf-aa23-03b88d1bbdca\",\n      \"lastAccessedAt\": \"2026-01-01 00:00:00 UTC\",\n      \"namespace\": \"default\",\n      \"phase\": \"Summary\",\n      \"score\": 1.0,\n      \"strength\": 0.020824532955884933,\n      \"summary\": \"chronological-sweep\",\n      \"tags\": [\n        \"sweep-payload-canary\"\n      ]\n    }\n  ]\n}",
+            "type": "text"
+          }
+        ],
+        "resultType": "complete"
+      },
+      "tag": "query:summary"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "{\n  \"id\": \"019b76da-a800-7cbf-aa23-03b88d1bbdca\",\n  \"namespace\": \"default\",\n  \"summary\": \"\",\n  \"fullText\": null,\n  \"tags\": [\n    \"sweep-payload-canary\"\n  ],\n  \"phase\": \"Ghost\",\n  \"strength\": 0.020824533,\n  \"stability\": 3.7145,\n  \"createdAt\": \"2026-01-01 00:00:00 UTC\",\n  \"lastAccessedAt\": \"2026-01-01 00:00:00 UTC\",\n  \"isPermastore\": false,\n  \"edgeCount\": 0\n}",
+            "type": "text"
+          }
+        ],
+        "resultType": "complete"
+      },
+      "tag": "get:ghost"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "{\n  \"count\": 0,\n  \"memories\": []\n}",
+            "type": "text"
+          }
+        ],
+        "resultType": "complete"
+      },
+      "tag": "query:ghost"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "Failed to get memory: Not found: memory not found: 019b76da-a800-7cbf-aa23-03b88d1bbdca",
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tag": "get:deleted"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "{\n  \"count\": 0,\n  \"memories\": []\n}",
+            "type": "text"
+          }
+        ],
+        "resultType": "complete"
+      },
+      "tag": "query:deleted"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "Parameter 'quality' must be between 1 and 4 (got 0)",
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tag": "invalid-quality"
+    },
+    {
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "recalld",
+            "version": "1.0.0"
+          }
+        },
+        "content": [
+          {
+            "text": "Search failed: Search error: embedding provider error: request failed: bad request",
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tag": "replay-miss"
+    }
+  ],
+  "provider": [
+    {
+      "request": {
+        "dimensions": 4,
+        "encoding_format": "float",
+        "input": [
+          "a6-query:chronological-sweep"
+        ],
+        "model": "a6-public-synthetic-v1"
+      },
+      "status": 200,
+      "vectors": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "request": {
+        "dimensions": 4,
+        "encoding_format": "float",
+        "input": [
+          "a6-query:chronological-sweep"
+        ],
+        "model": "a6-public-synthetic-v1"
+      },
+      "status": 200,
+      "vectors": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "request": {
+        "dimensions": 4,
+        "encoding_format": "float",
+        "input": [
+          "a6-query:chronological-sweep"
+        ],
+        "model": "a6-public-synthetic-v1"
+      },
+      "status": 200,
+      "vectors": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "request": {
+        "dimensions": 4,
+        "encoding_format": "float",
+        "input": [
+          "a6-query:chronological-sweep FUTURE_SWEEP_QUERY"
+        ],
+        "model": "a6-public-synthetic-v1"
+      },
+      "status": 200,
+      "vectors": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "request": {
+        "dimensions": 4,
+        "encoding_format": "float",
+        "input": [
+          "a6-query:unrecorded-query"
+        ],
+        "model": "a6-public-synthetic-v1"
+      },
+      "status": 400,
+      "vectors": null
+    }
+  ],
+  "readiness": {
+    "committedGeneration": "9",
+    "derived": [
+      {
+        "appliedGeneration": "9",
+        "name": "graph",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "9",
+        "name": "vectors",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "9",
+        "name": "fts",
+        "ready": true
+      },
+      {
+        "appliedGeneration": "9",
+        "name": "entities",
+        "ready": true
+      }
+    ],
+    "pendingWork": 0,
+    "ready": true,
+    "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+  },
+  "state": {
+    "committed": {
+      "generation": "9",
+      "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+    },
+    "logicalHash": null,
+    "runtimeState": {
+      "allocation": {
+        "counter": 14,
+        "lastMemoryMillis": 1767225600000,
+        "seed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "version": 1
+      },
+      "nowMillis": 4920825600000
+    },
+    "snapshot": false
+  },
+  "sweepReports": [
+    {
+      "controlRequestId": 1023,
+      "executionCompleted": true,
+      "phase": "completed",
+      "readiness": {
+        "committedGeneration": "6",
+        "derived": [
+          {
+            "appliedGeneration": "6",
+            "name": "graph",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "6",
+            "name": "vectors",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "6",
+            "name": "fts",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "6",
+            "name": "entities",
+            "ready": true
+          }
+        ],
+        "pendingWork": 0,
+        "ready": true,
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "result": {
+        "compactionTriggered": true,
+        "decayDisabledSkipped": 0,
+        "deletions": 0,
+        "errors": [],
+        "exemptSkipped": 0,
+        "fullToSummary": 1,
+        "knownCommitError": null,
+        "knownCommittedReceipt": null,
+        "memoriesScanned": 1,
+        "permastoreSkipped": 0,
+        "publicationError": null,
+        "savedByConnectionBonus": 0,
+        "staleSkipped": 0,
+        "summaryToGhost": 0,
+        "transitions": [
+          {
+            "fromPhase": "full",
+            "id": "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+            "retrievability": 0.020824532955884933,
+            "toPhase": "summary"
+          }
+        ],
+        "uncertainOperation": null,
+        "unchangedSkipped": 0
+      },
+      "sampledAtMillis": 4920825600000
+    },
+    {
+      "controlRequestId": 1035,
+      "executionCompleted": true,
+      "phase": "completed",
+      "readiness": {
+        "committedGeneration": "7",
+        "derived": [
+          {
+            "appliedGeneration": "7",
+            "name": "graph",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "7",
+            "name": "vectors",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "7",
+            "name": "fts",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "7",
+            "name": "entities",
+            "ready": true
+          }
+        ],
+        "pendingWork": 0,
+        "ready": true,
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "result": {
+        "compactionTriggered": false,
+        "decayDisabledSkipped": 0,
+        "deletions": 0,
+        "errors": [],
+        "exemptSkipped": 0,
+        "fullToSummary": 0,
+        "knownCommitError": null,
+        "knownCommittedReceipt": null,
+        "memoriesScanned": 1,
+        "permastoreSkipped": 0,
+        "publicationError": null,
+        "savedByConnectionBonus": 0,
+        "staleSkipped": 0,
+        "summaryToGhost": 1,
+        "transitions": [
+          {
+            "fromPhase": "summary",
+            "id": "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+            "retrievability": 0.020824532955884933,
+            "toPhase": "ghost"
+          }
+        ],
+        "uncertainOperation": null,
+        "unchangedSkipped": 0
+      },
+      "sampledAtMillis": 4920825600000
+    },
+    {
+      "controlRequestId": 1047,
+      "executionCompleted": true,
+      "phase": "completed",
+      "readiness": {
+        "committedGeneration": "9",
+        "derived": [
+          {
+            "appliedGeneration": "9",
+            "name": "graph",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "9",
+            "name": "vectors",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "9",
+            "name": "fts",
+            "ready": true
+          },
+          {
+            "appliedGeneration": "9",
+            "name": "entities",
+            "ready": true
+          }
+        ],
+        "pendingWork": 0,
+        "ready": true,
+        "storeId": "4507de41-5344-46b2-b5cb-43df21f436de"
+      },
+      "result": {
+        "compactionTriggered": true,
+        "decayDisabledSkipped": 0,
+        "deletions": 1,
+        "errors": [],
+        "exemptSkipped": 0,
+        "fullToSummary": 0,
+        "knownCommitError": null,
+        "knownCommittedReceipt": null,
+        "memoriesScanned": 1,
+        "permastoreSkipped": 0,
+        "publicationError": null,
+        "savedByConnectionBonus": 0,
+        "staleSkipped": 0,
+        "summaryToGhost": 0,
+        "transitions": [
+          {
+            "fromPhase": "ghost",
+            "id": "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+            "retrievability": 0.020824532955884933,
+            "toPhase": "deleted"
+          }
+        ],
+        "uncertainOperation": null,
+        "unchangedSkipped": 0
+      },
+      "sampledAtMillis": 4920825600000
+    }
+  ]
+}

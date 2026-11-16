@@ -3,22 +3,30 @@ use super::adapters::*;
 use crate::model::{AccessKind, MemoryId, NamespaceId};
 use crate::search::adapters::*;
 use crate::search::{AccessRecorder, QueryEngine, SearchQuery, VectorIndex as _, VectorMetadata};
+use crate::storage::StorageEngine as _;
 use crate::test_support::{DIM, Fixture, MemorySpec};
 use serde_json::{Value, json};
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::Duration;
 
 #[derive(Default)]
 struct FixedEmbedding {
     calls: AtomicUsize,
+    hold: AtomicBool,
+    entered: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
 }
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for FixedEmbedding {
     async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.hold.load(Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.resume.notified().await;
+        }
         Ok(vec![0.0, 1.0, 0.0, 0.0])
     }
     fn dimensions(&self) -> usize {
@@ -35,6 +43,35 @@ struct ObservedAccess {
 }
 #[async_trait::async_trait]
 impl AccessRecorder for ObservedAccess {
+    async fn record_access_batch_at_with_work(
+        &self,
+        values: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        let receipts = self
+            .inner
+            .record_access_batch_at_with_work(values, scope, sampled_at, parent)
+            .await?;
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        self.notify.notify_one();
+        Ok(receipts)
+    }
+    async fn record_access_batch_with_work(
+        &self,
+        values: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, crate::search::SearchError> {
+        let receipts = self
+            .inner
+            .record_access_batch_with_work(values, scope, parent)
+            .await?;
+        self.completed.fetch_add(1, Ordering::SeqCst);
+        self.notify.notify_one();
+        Ok(receipts)
+    }
     async fn record_access(
         &self,
         id: MemoryId,
@@ -119,7 +156,10 @@ impl Harness {
                 .await
                 .add(NamespaceId::new(1), id, summary, None, &[])
                 .unwrap();
-            f.entity_index.write().await.add(id, &["fixture".into()]);
+            f.entity_index
+                .write()
+                .await
+                .add(NamespaceId::new(1), id, &["fixture".into()]);
             ids.push(id);
         }
         Self {
@@ -382,3 +422,521 @@ async fn vector_query_invalid_vectors_reject_before_access_work() {
     h.assert_quiet(&before).await;
     assert_eq!(h.embedding.calls.load(Ordering::SeqCst), 0);
 }
+
+// These are actual serialized HTTP/router and MCP tool consumers. The provider
+// latch controls scheduling only; real storage, pipeline, hydration and exposure
+// transactions run unchanged. No timing sleep is used to establish admission.
+async fn accepted_query(h: &Harness, mcp: bool) {
+    if mcp {
+        let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+        bridge.search = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            h.engine.clone(),
+            h.embedding.clone(),
+            h.f.storage.clone(),
+            h.f.graph.clone(),
+            chrono_tz::UTC,
+        ));
+        let result = crate::mcp::tools::dispatch_tool(
+            &bridge,
+            "recall_memories",
+            json!({
+                "query":"rarekeyword", "namespace":"default", "limit":1,
+                "depth":0, "recordAccess":true, "includeNeighbors":false,
+            }),
+        )
+        .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+    } else {
+        let (status, body) = request(
+            h,
+            "/search",
+            json!({
+                "query":"rarekeyword", "namespace":"default", "limit":1,
+                "depth":0, "recordAccess":true,
+            })
+            .to_string(),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(body["hits"].as_array().unwrap().len(), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_query_roots_allow_http_and_mcp_exposure_after_close() {
+    for mcp in [false, true] {
+        let h = Arc::new(Harness::new().await);
+        h.embedding.hold.store(true, Ordering::SeqCst);
+        let tracker =
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .clone();
+        let before =
+            h.f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation;
+        let running = {
+            let h = h.clone();
+            tokio::spawn(async move { accepted_query(&h, mcp).await })
+        };
+        tokio::time::timeout(Duration::from_secs(5), h.embedding.entered.notified())
+            .await
+            .unwrap();
+        assert!(
+            tracker.status().pending >= 2,
+            "outer transport and pipeline roots must both be accepted"
+        );
+        let close = {
+            let tracker = tracker.clone();
+            tokio::task::spawn_blocking(move || {
+                tracker.close_and_drain(std::time::Instant::now() + Duration::from_secs(5))
+            })
+        };
+        let waiting = tracker.clone();
+        tokio::task::spawn_blocking(move || waiting.wait_until_closed())
+            .await
+            .unwrap();
+        assert!(!close.is_finished());
+        assert!(tracker.begin().is_err());
+        h.embedding.resume.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), running)
+            .await
+            .unwrap()
+            .unwrap();
+        let frozen = close.await.unwrap().unwrap();
+        assert_eq!(tracker.status().pending, 0);
+        assert_eq!(tracker.status().unresolved, 0);
+        assert!(!tracker.status().admission_open);
+        assert_eq!(h.access.completed.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            h.ids
+                .iter()
+                .map(|id| h.f.record(*id).unwrap().access_history.len())
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(
+            h.f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get(),
+            before.get() + 1
+        );
+        drop(frozen);
+        assert!(tracker.status().admission_open);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_query_cancel_keeps_http_and_mcp_roots_unresolved() {
+    for mcp in [false, true] {
+        let h = Arc::new(Harness::new().await);
+        h.embedding.hold.store(true, Ordering::SeqCst);
+        let tracker =
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .clone();
+        let before = h.snapshot();
+        let running = {
+            let h = h.clone();
+            tokio::spawn(async move { accepted_query(&h, mcp).await })
+        };
+        tokio::time::timeout(Duration::from_secs(5), h.embedding.entered.notified())
+            .await
+            .unwrap();
+        running.abort();
+        assert!(running.await.unwrap_err().is_cancelled());
+        assert_eq!(h.snapshot(), before);
+        assert_eq!(h.access.completed.load(Ordering::SeqCst), 0);
+        assert!(tracker.status().unresolved >= 2);
+        assert!(matches!(tracker.close_and_drain(std::time::Instant::now()),
+            Err(crate::storage::work::WorkError::Deadline{unresolved,..}) if unresolved>=2));
+        assert!(tracker.status().admission_open);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_http_create_carries_provider_root_through_links_and_publication() {
+    let h = Arc::new(Harness::new().await);
+    h.embedding.hold.store(true, Ordering::SeqCst);
+    let tracker =
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .work_tracker()
+            .clone();
+    let running = {
+        let h = h.clone();
+        tokio::spawn(async move {
+            request(
+                &h,
+                "/memories",
+                json!({
+                    "summary":"accepted after close", "namespace":"default",
+                    "fullText":"retained synthetic text", "entities":["fixture"],
+                    "checkDuplicates":false,
+                })
+                .to_string(),
+            )
+            .await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(5), h.embedding.entered.notified())
+        .await
+        .unwrap();
+    assert!(tracker.status().pending > 0);
+    let close = {
+        let tracker = tracker.clone();
+        tokio::task::spawn_blocking(move || {
+            tracker.close_and_drain(std::time::Instant::now() + Duration::from_secs(10))
+        })
+    };
+    let waiting = tracker.clone();
+    tokio::task::spawn_blocking(move || waiting.wait_until_closed())
+        .await
+        .unwrap();
+    assert!(!close.is_finished());
+    h.embedding.resume.notify_one();
+    let (status, body) = tokio::time::timeout(Duration::from_secs(10), running)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, axum::http::StatusCode::CREATED, "{body}");
+    let id: MemoryId = serde_json::from_value(body["data"]["id"].clone()).unwrap();
+    let frozen = close.await.unwrap().unwrap();
+    assert_eq!(tracker.status().pending, 0);
+    assert_eq!(tracker.status().unresolved, 0);
+    assert_eq!(h.f.record(id).unwrap().summary, "accepted after close");
+    assert!(
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+    assert!(
+        h.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+    // Linking can change the record after insertion. The bound cache is allowed
+    // to reject the pre-link value; it must never serve stale graph metadata.
+    if let Some(cached) = h.f.cache.get(id).await {
+        assert_eq!(cached.edge_count, h.f.record(id).unwrap().edge_count);
+    }
+    drop(frozen);
+    assert!(tracker.status().admission_open);
+}
+
+fn coherent_owner(h: &Harness) -> crate::derived_completion::DerivedCompletion {
+    crate::derived_completion::DerivedCompletion {
+        storage: h.f.storage.clone(),
+        cache: h.f.cache.clone(),
+        graph: h.f.graph.clone(),
+        vectors: h.f.vector_index.clone(),
+        fts: h.f.fts_index.clone(),
+        entities: h.f.entity_index.clone(),
+    }
+}
+async fn coherent_harness() -> Harness {
+    let mut h = Harness::new().await;
+    let owner = coherent_owner(&h);
+    let inserted = owner
+        .insert(
+            crate::storage::control::MutationContext::unkeyed(NamespaceId::new(1)),
+            crate::storage::insertion::InsertMemory {
+                id: None,
+                summary: "coherent payload".into(),
+                full_text: Some("owned résumé 日本語".into()),
+                tags: vec![],
+                initial_stability: None,
+                created_at: None,
+                embedding: Some(vec![0., 1., 0., 0.]),
+                parent_id: None,
+                supersedes: None,
+            },
+            Vec::new().into(),
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
+        .unwrap();
+    let id = crate::storage::insertion::inserted_id(&inserted.receipt).unwrap();
+    h.ids.push(id);
+    let mut disk = h.f.record(id).unwrap();
+    disk.difficulty = 7.25;
+    disk.strength = 0.42;
+    disk.decay_strength = 0.67;
+    h.f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .batch_update_records(&[(id, disk)])
+        .unwrap();
+    owner.complete().await.unwrap();
+    h.engine = Arc::new(Arc::try_unwrap(h.engine).ok().unwrap().with_coherent_owner(
+        owner,
+        Arc::new(crate::rif::RifEngine::new(Default::default())),
+    ));
+    h
+}
+
+async fn coherent_call(h: &Harness, mcp: bool, access: bool) -> (bool, String) {
+    if mcp {
+        let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+        bridge.search = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            h.engine.clone(),
+            h.embedding.clone(),
+            h.f.storage.clone(),
+            h.f.graph.clone(),
+            chrono_tz::UTC,
+        ));
+        let result = crate::mcp::tools::dispatch_tool(&bridge, "recall_memories",
+            json!({"query":"payload","depth":0,"limit":10,"recordAccess":access,"includeNeighbors":true})).await;
+        {
+            let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
+            (result.is_error != Some(true), text.clone())
+        }
+    } else {
+        let (status, body) = request(
+            h,
+            "/search",
+            json!({"query":"payload","depth":0,"limit":10,
+            "recordAccess":access})
+            .to_string(),
+        )
+        .await;
+        (status.is_success(), body.to_string())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_http_preserves_metadata_bytes_and_returned_only_exposure() {
+    let h = coherent_harness().await;
+    let before = h.snapshot();
+    let input = json!({"embedding":[0.,1.,0.,0.],"limit":10,"depth":0,
+        "includeEmbeddings":true,"recordAccess":false});
+    let (status, body) = request(&h, "/search", input.to_string()).await;
+    assert!(status.is_success(), "{body}");
+    let rows = body["hits"].as_array().unwrap();
+    let id = h.ids.last().unwrap().to_string();
+    let row = rows.iter().find(|r| r["memory"]["id"] == id).unwrap();
+    assert_eq!(row["memory"]["fullText"], "owned résumé 日本語");
+    assert_eq!(row["memory"]["difficulty"], 7.25);
+    assert!((row["memory"]["strength"].as_f64().unwrap() - 0.42).abs() < 1e-6);
+    assert!((row["memory"]["decayStrength"].as_f64().unwrap() - 0.67).abs() < 1e-6);
+    assert_eq!(row["memory"]["embedding"], json!([0., 1., 0., 0.]));
+    h.assert_quiet(&before).await;
+    let mut input = input;
+    input["recordAccess"] = json!(true);
+    input["limit"] = json!(1);
+    let (status, body) = request(&h, "/search", input.to_string()).await;
+    assert!(status.is_success(), "{body}");
+    let returned = body["hits"][0]["memory"]["id"].as_str().unwrap();
+    for id in &h.ids {
+        assert_eq!(
+            h.f.record(*id).unwrap().access_history.len(),
+            usize::from(id.to_string() == returned)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_transports_reject_concurrent_forget_and_compaction_before_exposure() {
+    for mcp in [false, true] {
+        for compact in [false, true] {
+            for access in [false, true] {
+                let h = Arc::new(coherent_harness().await);
+                let owner = coherent_owner(&h);
+                let at =
+                    h.f.storage
+                        .read()
+                        .unwrap()
+                        .meta_store()
+                        .publication_state()
+                        .unwrap()
+                        .canonical;
+                h.embedding.hold.store(true, Ordering::SeqCst);
+                let child = h.clone();
+                let query = tokio::spawn(async move { coherent_call(&child, mcp, access).await });
+                tokio::time::timeout(Duration::from_secs(10), h.embedding.entered.notified())
+                    .await
+                    .unwrap();
+                let id = *h.ids.last().unwrap();
+                let writer = tokio::spawn(async move {
+                    if compact {
+                        let storage = owner.storage.clone();
+                        tokio::task::spawn_blocking(move || {
+                            storage.write().unwrap().compact_text_log()
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    } else {
+                        assert!(owner.forget(id, Some("default")).await.unwrap());
+                    }
+                });
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        if h.f
+                            .storage
+                            .read()
+                            .unwrap()
+                            .meta_store()
+                            .publication_state()
+                            .unwrap()
+                            .canonical
+                            != at
+                        {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                h.embedding.resume.notify_one();
+                let (status, body) = tokio::time::timeout(Duration::from_secs(10), query)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    !status,
+                    "mcp={mcp} compact={compact} access={access}: {body}"
+                );
+                assert!(!body.to_string().contains("owned résumé"));
+                assert_eq!(h.access.completed.load(Ordering::SeqCst), 0);
+                tokio::time::timeout(Duration::from_secs(10), writer)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let state =
+                    h.f.storage
+                        .read()
+                        .unwrap()
+                        .meta_store()
+                        .work_tracker()
+                        .status();
+                assert_eq!(state.pending, 0);
+                assert_eq!(state.unresolved, 0);
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_postcommit_faults_retain_receipts() {
+    for mcp in [false, true] {
+        for fault in [1, 2] {
+            let h = coherent_harness().await;
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .observation_fault
+                .store(fault, Ordering::SeqCst);
+            let before = h.snapshot();
+            let (ok, body) = coherent_call(&h, mcp, false).await;
+            assert!(ok, "{mcp}/{fault}: {body}");
+            assert!(body.contains("owned résumé"));
+            h.assert_quiet(&before).await;
+            let (ok, body) = coherent_call(&h, mcp, true).await;
+            assert!(!ok, "{mcp}/{fault}: {body}");
+            assert!(!body.contains("owned résumé"));
+            let error: Value = if mcp {
+                let start = body.find("{\"commitState\"").expect(&body);
+                serde_json::Deserializer::from_str(&body[start..])
+                    .into_iter()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+            } else {
+                serde_json::from_str::<Value>(&body).unwrap()["observation"].clone()
+            };
+            assert_eq!(error["commitState"], "committed", "{body}");
+            let receipts: Vec<crate::storage::control::WriteReceipt> =
+                serde_json::from_value(error["receipts"].clone()).unwrap();
+            assert_eq!(receipts.len(), 1);
+            let crate::storage::control::MutationOutcome::ExposuresRecorded { accesses } =
+                &receipts[0].outcome
+            else {
+                panic!("{body}");
+            };
+            assert!(!accesses.is_empty());
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn coherent_payload_query_and_exposure_share_one_clock_sample_after_provider_wait() {
+    for mcp in [false, true] {
+        let mut h = coherent_harness().await;
+        let sampled = 2_000_000_000_000;
+        let clock = Arc::new(crate::time::ManualClock::new(sampled));
+        h.engine = Arc::new(
+            Arc::try_unwrap(h.engine)
+                .ok()
+                .unwrap()
+                .with_lifecycle_inputs(clock.clone(), Default::default(), 0.0),
+        );
+        h.embedding.hold.store(true, Ordering::SeqCst);
+        let h = Arc::new(h);
+        let child = h.clone();
+        let query = tokio::spawn(async move { coherent_call(&child, mcp, true).await });
+        tokio::time::timeout(Duration::from_secs(10), h.embedding.entered.notified())
+            .await
+            .unwrap();
+        clock.advance_to(sampled + 86_400_000).unwrap();
+        h.embedding.resume.notify_one();
+        let (ok, body) = tokio::time::timeout(Duration::from_secs(10), query)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(ok, "{body}");
+        let mut exposed = 0;
+        for id in &h.ids {
+            let record = h.f.record(*id).unwrap();
+            for event in &record.access_history {
+                assert_eq!(event.timestamp, sampled);
+                exposed += 1;
+            }
+        }
+        assert!(exposed > 0);
+        assert!(
+            h.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+        // A later false query observes the published state without needing a write-side repair.
+        h.embedding.hold.store(false, Ordering::SeqCst);
+        let before = h.snapshot();
+        let (ok, body) = coherent_call(&h, mcp, false).await;
+        assert!(ok, "{body}");
+        assert_eq!(h.snapshot(), before);
+    }
+}
+
+#[path = "coherent_by_id_tests.rs"]
+mod coherent_by_id_tests;

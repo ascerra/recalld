@@ -314,8 +314,12 @@ impl FlatVectorIndex {
             })
             .collect();
 
-        tracing::trace!(target: "recalld::performance", kind = "vector_scan",
-            examined = self.entries.len(), dot_products = dots, admitted = results.len());
+        crate::performance::event!(
+            kind = "vector_scan",
+            examined = self.entries.len(),
+            dot_products = dots,
+            admitted = results.len()
+        );
         Ok(results)
     }
 }

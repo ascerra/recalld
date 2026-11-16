@@ -1,0 +1,62 @@
+[
+  {
+    "path": "/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2",
+    "sha256": "02e19a7555a987eae35d9d70195de81d204c6e2d1420d5ab24249974d2953601",
+    "size": 14040352,
+    "mtime_ns": 1794709937847577708
+  },
+  {
+    "path": "/target/debug/deps/recalld-562f5ca8fdb44e42",
+    "sha256": "e16edddc6d5eceea02fe26858b4fa19575450691d7ac9cfdcc593c032308d13d",
+    "size": 1058728,
+    "mtime_ns": 1794709935885172576
+  },
+  {
+    "path": "/target/debug/deps/recalld-b5f6af44d2a89497",
+    "sha256": "2390b5bfe705b99996a1a702778e451de51fbd2112992e4430c180a049d2aa31",
+    "size": 109536584,
+    "mtime_ns": 1794709950426786946
+  },
+  {
+    "path": "/target/debug/deps/recalld_cli-c8bdd12cfba39b69",
+    "sha256": "e0ec5b8b46a903a8e3d0081ee16a881c4ff2a892d6ad5d5093acbb2201397b08",
+    "size": 1057368,
+    "mtime_ns": 1794709948351054459
+  },
+  {
+    "path": "/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0",
+    "sha256": "975e2bec45b53f5533be1bd391917cba3ff37f74a1f0c306911d02d79f802163",
+    "size": 1057384,
+    "mtime_ns": 1794709943529375733
+  },
+  {
+    "path": "/target/debug/deps/text_migration_cli-2f292c1c7574ca84",
+    "sha256": "21bd052d948dba0635d50f425491340a640fa7a632fc628b9458f0e635c0859a",
+    "size": 13675400,
+    "mtime_ns": 1794709935373125817
+  },
+  {
+    "path": "/target/debug/examples/owned_evaluator",
+    "sha256": "34d53c796741782fb16b0b731af7bb38e1bb87f6fae534ec9a807a69e37a8040",
+    "size": 69965720,
+    "mtime_ns": 1794709941478913908
+  },
+  {
+    "path": "/target/debug/recalld",
+    "sha256": "a97347ccb17a72a9279536bf7920dfb1416e5b431489faa4d588dced338b364a",
+    "size": 89357520,
+    "mtime_ns": 1794709948076938829
+  },
+  {
+    "path": "/target/debug/recalld-cli",
+    "sha256": "d3c52dd2b012efa5a02f40b316f24a252af78d5d5df31ba0869401a917a0e97c",
+    "size": 20220192,
+    "mtime_ns": 1794709950292255872
+  },
+  {
+    "path": "/target/debug/recalld-text-migrate",
+    "sha256": "55b824c81d8564e2463527dcc79e0b5efeb435cdbec28d4a78441c3731e925d0",
+    "size": 13968264,
+    "mtime_ns": 1794709943324748987
+  }
+]

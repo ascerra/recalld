@@ -1,0 +1,30 @@
+{
+  "left": "/tmp/recalld-reset-supervisor-3ff4e313-g7e6wsm8/output/episode-0/runtime/recalld-frozen-canonical-SqEUvO/manifest.json",
+  "right": "/tmp/recalld-reset-supervisor-3ff4e313-g7e6wsm8/output/canaries/changed-label-episode/runtime/recalld-frozen-canonical-FXI3d3/manifest.json",
+  "leftSha256": "c854233f11814197675decf18f5d9b67c47d0d69f7c25fbfc7a1e9d20ceea280",
+  "rightSha256": "78a966d3cfe149a51ea995fdff3cf63288f96d07f1b16e7e080defb417471dcf",
+  "exactEqual": false,
+  "differences": [
+    {
+      "path": "/config/embedding/base_url",
+      "before": "http://127.0.0.1:45009",
+      "after": "http://127.0.0.1:39907"
+    },
+    {
+      "path": "/filesSha256/meta.db",
+      "before": "4b1f128a738254c7614ad3f5e2b782ac60ead2e4bc6a7cb2d1b101438f54031a",
+      "after": "5873b03d2896f379081c60c3dcbd7ed388eb98089e375ed45f68da2204c3a57d"
+    },
+    {
+      "path": "/logicalSha256",
+      "before": "6b0d8dad3a265787af45b55ad74b1ad11c4cf73e626fa892cea2d0f652d2cb7b",
+      "after": "5ad97378fe0847265cd669c06180920d8857232f5880c2fc575b04fe0a8747d5"
+    },
+    {
+      "path": "/sourceRoot",
+      "before": "/work/output/episode-0/runtime/original",
+      "after": "/work/output/canaries/changed-label-episode/runtime/original"
+    }
+  ],
+  "comparison": "Diagnostic only; original raw values and failing equality remain unchanged."
+}

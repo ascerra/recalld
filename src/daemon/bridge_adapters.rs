@@ -80,11 +80,39 @@ impl SearchPipeline for RemoteSearchAdapter {
             namespace: namespace.to_string(),
             threshold,
             max_memories,
+            include_coverage: false,
         })
         .map_err(|e| BridgeError::Internal(e.to_string()))?;
         let result = self.client.call("scan_duplicates", params).await?;
         serde_json::from_value(result)
             .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
+    }
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<bridge::DuplicateScanReport, BridgeError> {
+        let params = serde_json::to_value(protocol::ScanDuplicatesParams {
+            namespace: namespace.to_string(),
+            threshold,
+            max_memories,
+            include_coverage: true,
+        })
+        .map_err(|e| BridgeError::Internal(e.to_string()))?;
+        let result = self.client.call("scan_duplicates", params).await?;
+        // Old daemons ignore the new flag and still return just clusters.
+        if result.is_array() {
+            let clusters = serde_json::from_value(result)
+                .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))?;
+            Ok(bridge::DuplicateScanReport {
+                clusters,
+                coverage: None,
+            })
+        } else {
+            serde_json::from_value(result)
+                .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
+        }
     }
 }
 
@@ -98,6 +126,11 @@ pub struct RemoteStorageAdapter {
 }
 
 impl RemoteStorageAdapter {
+    #[cfg(test)]
+    pub(crate) fn test_client(&self) -> Arc<DaemonClient> {
+        self.client.clone()
+    }
+
     /// Creates a new adapter backed by the given daemon client.
     pub fn new(client: Arc<DaemonClient>) -> Self {
         Self { client }
@@ -106,6 +139,153 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn api1_lifecycle(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+        operation: crate::serialization::native_lifecycle::Operation,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{self, Reply, Value},
+            native_lifecycle::{self, Operation},
+        };
+        if let Err(error) = lifecycle_api1::parse(&request.wire(operation), operation) {
+            return Reply::failure(native_lifecycle::Reply::input(error));
+        }
+        let (new_method, old_method) = match operation {
+            Operation::Feedback => ("feedback_api1_v1", "reinforce_memory"),
+            Operation::Forget => ("forget_api1_v1", "delete_memory"),
+        };
+        let mut old_params = serde_json::json!({"id":request.id});
+        if operation == Operation::Feedback {
+            old_params["quality"] = serde_json::json!(request.quality);
+        }
+        let old_method = if let Some(namespace) = request.namespace.as_ref() {
+            old_params["namespace"] = serde_json::json!(namespace);
+            format!("{old_method}_scoped")
+        } else {
+            old_method.into()
+        };
+        match self
+            .client
+            .call_api1_lifecycle(new_method, request.wire(operation), &old_method, old_params)
+            .await
+        {
+            Ok((true, value)) => Reply::decode(value, &request, operation),
+            Ok((false, value)) => {
+                let parsed = match operation {
+                    Operation::Feedback => {
+                        serde_json::from_value(value).map(|result| Value::Feedback { result })
+                    }
+                    Operation::Forget => {
+                        serde_json::from_value(value).map(|deleted| Value::Forget { deleted })
+                    }
+                };
+                match parsed {
+                    Ok(value) => Reply::compatibility(value),
+                    Err(error) => Reply::failure(native_lifecycle::Reply::storage(
+                        crate::storage::StorageError::WorkerOutcomeUnknown(format!(
+                            "old API1 response decode: {error}"
+                        )),
+                    )),
+                }
+            }
+            Err(error) => Reply::bridge_error(error),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        use crate::serialization::{
+            contract::CommitState,
+            native_lifecycle::{Operation, Reply},
+        };
+        match self
+            .client
+            .call(
+                request.rpc_method(Operation::Forget),
+                request.wire(Operation::Forget),
+            )
+            .await
+        {
+            Ok(value) => Reply::decode_response(value, &request, Operation::Forget),
+            Err(error) => {
+                let mut reply = Reply::unavailable(&error.to_string());
+                // Only the server's typed rejection proves that the method was
+                // rejected. Transport/decode failures never imply rollback.
+                if !matches!(error, BridgeError::InvalidInput(_)) {
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                }
+                reply
+            }
+        }
+    }
+
+    async fn feedback_native(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        use crate::serialization::{
+            contract::CommitState,
+            native_lifecycle::{Operation, Reply},
+        };
+        match self
+            .client
+            .call(
+                request.rpc_method(Operation::Feedback),
+                request.wire(Operation::Feedback),
+            )
+            .await
+        {
+            Ok(value) => Reply::decode_response(value, &request, Operation::Feedback),
+            Err(error) => {
+                let mut reply = Reply::unavailable(&error.to_string());
+                // Only the server's typed rejection proves that the method was
+                // rejected. Transport/decode failures never imply rollback.
+                if !matches!(error, BridgeError::InvalidInput(_)) {
+                    reply.error.as_mut().unwrap().commit_state = CommitState::Unknown;
+                }
+                reply
+            }
+        }
+    }
+
+    fn supports_durable_batches(&self) -> bool {
+        true
+    }
+
+    async fn mutate_batch(
+        &self,
+        input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {
+        let params =
+            serde_json::to_value(input).map_err(|e| BridgeError::Internal(e.to_string()))?;
+        // This new method is mutating and never enters the client's read-only
+        // retry allowlist. An old daemon rejects it before doing any work.
+        let result = self.client.call("mutate_batch", params).await?;
+        serde_json::from_value(result).map_err(|e| {
+            BridgeError::PartiallyApplied(format!(
+                "batch response decode failed; reconcile the same request and key: {e}"
+            ))
+        })
+    }
+
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        // Dedicated RPC: an old daemon cannot silently ignore new context fields.
+        let value = self
+            .client
+            .call("session_context_v1", serde_json::json!({}))
+            .await?;
+        let context: crate::serialization::session::BackendContext = serde_json::from_value(value)
+            .map_err(|_| BridgeError::Unavailable("invalid backend context response".into()))?;
+        context
+            .validate()
+            .map_err(|e| BridgeError::Unavailable(e.into()))?;
+        Ok(context)
+    }
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError> {
         let params =
             serde_json::to_value(&input).map_err(|e| BridgeError::Internal(e.to_string()))?;

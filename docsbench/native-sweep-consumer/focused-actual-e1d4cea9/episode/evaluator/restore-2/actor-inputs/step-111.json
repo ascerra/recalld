@@ -1,0 +1,14 @@
+{
+  "currentAction": {
+    "arguments": {
+      "id": "01a1dcb1-37a8-7203-b925-8fd73d4eeb9f",
+      "namespace": "default",
+      "recordAccess": false
+    },
+    "tag": "get:deleted",
+    "tool": "get_memory"
+  },
+  "deliveryOrdinal": 111,
+  "phase": "action",
+  "startId": 107
+}

@@ -63,6 +63,61 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Sink {
         self.clone()
     }
 }
+// These counters and caller latencies are never sampled. A failed request is
+// recorded before propagating its error; interrupted processes remain invalid.
+#[derive(Default, serde::Serialize)]
+struct PhaseCounts {
+    attempted: u64,
+    completed: u64,
+    engine_errors: u64,
+    sink_errors: u64,
+    latency_observations: u64,
+    latency_total_ns: u64,
+}
+struct RequestCounts {
+    phases: [PhaseCounts; 3],
+    path: PathBuf,
+    sample_every: u64,
+}
+impl RequestCounts {
+    fn snapshot(&self) -> serde_json::Value {
+        serde_json::json!({"sampling_denominator": self.sample_every,
+            "counters_sampled": false, "warmup":self.phases[0],
+            "measured":self.phases[1], "throughput":self.phases[2]})
+    }
+    fn save(&self) -> std::io::Result<()> {
+        fs::write(&self.path, serde_json::to_vec_pretty(&self.snapshot())?)
+    }
+}
+impl Drop for RequestCounts {
+    fn drop(&mut self) {
+        if let Err(error) = self.save() {
+            eprintln!("request counter persistence failed: {error}");
+        }
+    }
+}
+async fn measured_query(
+    engine: &QueryEngine,
+    query: SearchQuery,
+    sink: &Sink,
+    counts: &mut PhaseCounts,
+) -> Result<(SearchResponse, u64)> {
+    counts.attempted += 1;
+    let start = Instant::now();
+    let response = engine.search(query).await;
+    let flush = sink.0.lock().unwrap().flush();
+    let sink_ok = flush.is_ok() && sink.1.load(std::sync::atomic::Ordering::Relaxed) == 0;
+    let elapsed = start.elapsed().as_nanos() as u64;
+    counts.latency_observations += 1;
+    counts.latency_total_ns += elapsed;
+    counts.engine_errors += u64::from(response.is_err());
+    counts.sink_errors += u64::from(!sink_ok);
+    counts.completed += u64::from(response.is_ok() && sink_ok);
+    let response = response?;
+    flush?;
+    ensure!(sink_ok, "trace sink lost events");
+    Ok((response, elapsed))
+}
 struct NoCache;
 impl RecordCache for NoCache {
     fn get(&self, _: &MemoryId) -> Option<CachedRecord> {
@@ -152,6 +207,11 @@ async fn main() -> Result<()> {
         args.records >= 200 && args.records % 10 == 0,
         "invalid corpus"
     );
+    let sample_every = match std::env::var("RECALLD_PERFORMANCE_SAMPLE_EVERY") {
+        Ok(value) => value.parse::<std::num::NonZeroU64>()?.get(),
+        Err(std::env::VarError::NotPresent) => 1,
+        Err(error) => return Err(error.into()),
+    };
     let fixture = vectors(args.seed, args.records);
     if args.initialize {
         ensure!(!args.store.exists(), "fresh initialization required");
@@ -251,18 +311,23 @@ async fn main() -> Result<()> {
     let queries:Vec<SearchQuery>=(0..100.min(args.records / 10)).map(|i| serde_json::from_value(serde_json::json!({
         "namespace":"n0","text":"needle","queryEmbedding":fixture[i*10],"limit":20,"recordAccess":false,"graphDepth":0
     })).unwrap()).collect();
+    let mut counts = RequestCounts {
+        phases: Default::default(),
+        path: args.out.join("request-counts.json"),
+        sample_every,
+    };
     let mut samples = BufWriter::new(fs::File::create(args.out.join("samples.jsonl"))?);
     let mut result_hash = Sha256::new();
     let mut times = vec![];
     for i in 0..args.warmup + args.samples {
-        let start = Instant::now();
-        let response = engine.search(queries[i % queries.len()].clone()).await?;
-        sink.0.lock().unwrap().flush()?;
-        ensure!(
-            sink.1.load(std::sync::atomic::Ordering::Relaxed) == 0,
-            "trace sink lost events"
-        ); // sink service included in request latency
-        let elapsed = start.elapsed().as_nanos() as u64;
+        let phase = usize::from(i >= args.warmup);
+        let (response, elapsed) = measured_query(
+            &engine,
+            queries[i % queries.len()].clone(),
+            &sink,
+            &mut counts.phases[phase],
+        )
+        .await?;
         ensure!(response.results.len() == 20, "result count");
         if i >= args.warmup {
             for r in &response.results {
@@ -282,14 +347,13 @@ async fn main() -> Result<()> {
     while start.elapsed() < Duration::from_secs(args.throughput_seconds)
         || completed < args.throughput_minimum_requests
     {
-        engine
-            .search(queries[completed % queries.len()].clone())
-            .await?;
-        sink.0.lock().unwrap().flush()?;
-        ensure!(
-            sink.1.load(std::sync::atomic::Ordering::Relaxed) == 0,
-            "trace sink lost events"
-        );
+        measured_query(
+            &engine,
+            queries[completed % queries.len()].clone(),
+            &sink,
+            &mut counts.phases[2],
+        )
+        .await?;
         completed += 1;
     }
     let seconds = start.elapsed().as_secs_f64();
@@ -302,11 +366,13 @@ async fn main() -> Result<()> {
         canonical_before == canonical_state(&storage.read().unwrap())?,
         "canonical state changed"
     );
+    counts.save()?;
     times.sort();
     let p95 = times[(times.len() * 95).div_ceil(100) - 1];
     fs::write(
         args.out.join("summary.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
+            "request_counts":counts.snapshot(),"warmup":args.warmup,
             "track":"canonical-writer-internal-probe-v2", "fixture_source":source,
             "historicalMeasurementComparable":false,
             "seed":args.seed,"records":args.records,"trace":args.trace,"samples":args.samples,"p95_ns":p95,

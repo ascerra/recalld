@@ -33,12 +33,128 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
+    /// Same owned core as the production pipeline, before provider/selection work.
+    /// Immutable test adapters do not register work; they may not inherit a ticket.
+    fn accept_work(&self) -> Result<Option<crate::storage::work::WorkTicket>, SearchError> {
+        Ok(None)
+    }
+    fn finish_work(&self, work: Option<crate::storage::work::WorkTicket>) {
+        drop(work);
+    }
+
+    /// Owned production engines return a generation-checked payload page.
+    /// Immutable/mock adapters keep their explicit legacy path.
+    async fn record_coherent_exposures_with_work(
+        &self,
+        _accesses: &[(MemoryId, AccessKind)],
+        _scope: crate::storage::control::ExposureScope,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {
+        Err(SearchError::Unavailable(
+            "coherent exposure unavailable".into(),
+        ))
+    }
+
+    async fn prepare_coherent_search_with_work(
+        &self,
+        _query: SearchQuery,
+        _include_embeddings: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSearchResponse>, SearchError> {
+        Ok(None)
+    }
+
+    async fn prepare_coherent_get_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _requested_access: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentGetResponse>, SearchError> {
+        Ok(None)
+    }
+    async fn prepare_coherent_similar_with_work(
+        &self,
+        _id: MemoryId,
+        _namespace: Option<&str>,
+        _limit: usize,
+        _min_score: Option<f32>,
+        _requested_access: bool,
+        _include_embeddings: bool,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Option<crate::search::CoherentSimilarResponse>, SearchError> {
+        Ok(None)
+    }
+
+    async fn prepare_search_with_work(
+        &self,
+        query: SearchQuery,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<ResolvedSearchResult>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.prepare_search(query).await
+    }
+    async fn prepare_similar_with_work(
+        &self,
+        id: MemoryId,
+        limit: usize,
+        min_score: Option<f32>,
+        requested_access: bool,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::search::PipelineSearchResult>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.prepare_similar_filtered(id, limit, min_score, requested_access)
+            .await
+    }
+    async fn record_similar_with_work(
+        &self,
+        ids: &[MemoryId],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.record_similar_accesses(ids, scope).await
+    }
+    async fn record_exposures_with_work(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: crate::storage::control::ExposureScope,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<Vec<crate::storage::control::WriteReceipt>, SearchError> {
+        if parent.is_some() {
+            return Err(SearchError::Unavailable(
+                "search adapter cannot inherit work".into(),
+            ));
+        }
+        self.record_exposures(accesses, scope).await
+    }
+
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, EmbeddingError> {
+        Err(EmbeddingError::Unavailable(
+            "active embedding identity unavailable".into(),
+        ))
+    }
     /// Generate an embedding for the given text within a namespace.
     async fn embed_text(
         &self,
         text: &str,
-        namespace_id: NamespaceId,
-    ) -> Result<Vec<f32>, EmbeddingError>;
+        namespace: &NamespaceConfig,
+    ) -> Result<crate::embedding::runtime::GeneratedEmbedding, EmbeddingError>;
 
     /// Execute a search query, returning scored results.
     async fn search(&self, query: SearchQuery) -> Result<Vec<ResolvedSearchResult>, SearchError>;
@@ -140,15 +256,100 @@ pub trait SearchPipeline: Send + Sync {
     async fn fts_remove(&self, memory_id: MemoryId);
 
     /// Add a memory to the entity index for entity-based linking.
-    async fn entity_index_add(&self, memory_id: MemoryId, entities: &[String]);
+    async fn entity_index_add(
+        &self,
+        namespace_id: NamespaceId,
+        memory_id: MemoryId,
+        entities: &[String],
+    );
 
     /// Remove a memory from the entity index.
-    async fn entity_index_remove(&self, memory_id: MemoryId, entities: &[String]);
+    async fn entity_index_remove(&self, namespace_id: NamespaceId, memory_id: MemoryId);
 }
 
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    async fn forget_api1(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{Reply, Value},
+            native_lifecycle,
+        };
+        match self.delete_memory(id, namespace).await {
+            Ok(deleted) => Reply::compatibility(Value::Forget { deleted }),
+            Err(e) => Reply::failure(native_lifecycle::Reply::storage(e)),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    async fn insert_memory_with_work(
+        &self,
+        namespace_id: NamespaceId,
+        input: crate::storage::insertion::InsertMemory,
+        embedding: crate::embedding::runtime::GeneratedEmbedding,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<crate::storage::insertion::InsertResult, StorageError> {
+        if parent.is_some() {
+            return Err(StorageError::RecoveryRequired(
+                "storage adapter cannot inherit work".into(),
+            ));
+        }
+        self.insert_memory(namespace_id, input, embedding).await
+    }
+    async fn complete_insertion_with_work(
+        &self,
+        receipt: &crate::storage::control::WriteReceipt,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), StorageError> {
+        if parent.is_some() {
+            return Err(StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(StorageError::RecoveryRequired(
+                    "storage adapter cannot inherit work".into(),
+                )),
+            });
+        }
+        self.complete_insertion(receipt).await
+    }
+    async fn delete_memory_with_work(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<bool, StorageError> {
+        if parent.is_some() {
+            return Err(StorageError::RecoveryRequired(
+                "storage adapter cannot inherit work".into(),
+            ));
+        }
+        self.delete_memory(id, namespace).await
+    }
+    async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
+        Err(StorageError::RecoveryRequired(
+            "store identity unavailable".into(),
+        ))
+    }
+    /// Concrete canonical/vector capture; no legacy backend fallback.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Drain in-flight create/index publication before online derived repair.
     async fn publication_lease(
         &self,
@@ -164,7 +365,7 @@ pub trait StorageEngine: Send + Sync {
         &self,
         namespace_id: NamespaceId,
         input: crate::storage::insertion::InsertMemory,
-        generated_embedding: Vec<f32>,
+        generated_embedding: crate::embedding::runtime::GeneratedEmbedding,
     ) -> Result<crate::storage::insertion::InsertResult, StorageError>;
 
     async fn complete_insertion(
@@ -286,6 +487,45 @@ pub trait RecordCache: Send + Sync {
 /// Relationship graph for edge traversal.
 #[async_trait::async_trait]
 pub trait RelationshipGraph: Send + Sync {
+    async fn tombstone_node_with_work(
+        &self,
+        id: MemoryId,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), GraphError> {
+        if parent.is_some() {
+            return Err(GraphError::Unavailable(
+                "graph adapter cannot inherit work".into(),
+            ));
+        }
+        self.tombstone_node(id).await
+    }
+    async fn post_creation_links_with_work(
+        &self,
+        memory_id: MemoryId,
+        namespace_id: NamespaceId,
+        embedding: &[f32],
+        tags: &[String],
+        entities: &[String],
+        created_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<(), GraphError> {
+        if parent.is_some() {
+            return Err(GraphError::Unavailable(
+                "graph adapter cannot inherit work".into(),
+            ));
+        }
+        self.perform_post_creation_links(
+            memory_id,
+            namespace_id,
+            embedding,
+            tags,
+            entities,
+            created_at,
+        )
+        .await;
+        Ok(())
+    }
+
     /// Validate a caller-specified link target (`supersedes`, `parentId`)
     /// before the new memory is written.
     ///
@@ -355,6 +595,42 @@ pub trait RelationshipGraph: Send + Sync {
 /// FSRS decay engine for reinforcement and strength recalculation.
 #[async_trait::async_trait]
 pub trait FsrsEngine: Send + Sync {
+    async fn feedback_api1(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        crate::serialization::lifecycle_api1::Reply::legacy_feedback(
+            self.reinforce(id, quality, namespace).await,
+            id,
+        )
+    }
+
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    async fn reinforce_with_work(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<ReinforceResult, Box<dyn std::error::Error + Send + Sync>> {
+        if parent.is_some() {
+            return Err(Box::new(StorageError::RecoveryRequired(
+                "feedback adapter cannot inherit work".into(),
+            )));
+        }
+        self.reinforce(id, quality, namespace).await
+    }
+
     /// Record an access event for decay tracking.
     async fn record_access(
         &self,
