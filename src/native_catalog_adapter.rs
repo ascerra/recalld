@@ -69,11 +69,13 @@ impl NativeCatalogAdapter {
         let result = tokio::task::spawn_blocking(move || {
             let _lease = lease;
             #[cfg(test)]
-            let _fault = tests::Fault::enter(this.failure);
+            let _fault = tests::Fault::enter_api1(this.failure);
             let mut storage = this
                 .storage
                 .write()
                 .map_err(|_| CatalogError::WorkerUnknown)?;
+            #[cfg(test)]
+            tests::api1_before_result(this.failure);
             let ctx = crate::serialization::contract::WriteOptions::default()
                 .context(MutationScope::Catalog, ContractVersion::V1);
             let result = storage.create_native_namespace_with_provider_bounded(
@@ -86,6 +88,8 @@ impl NativeCatalogAdapter {
                 Some(&worker_admission),
                 |receipt| surface.check_candidate(receipt),
             );
+            #[cfg(test)]
+            tests::api1_after_result(this.failure, &result);
             storage.meta_store().finish_work(child);
             result.map_err(CatalogError::Storage)
         })

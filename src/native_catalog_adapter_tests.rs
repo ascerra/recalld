@@ -58,6 +58,39 @@ impl Fault {
     pub(super) fn enter(point: Option<&'static str>) -> Self {
         Self(crate::storage::catalog::FAILURE.with(|f| f.replace(point)))
     }
+
+    pub(super) fn enter_api1(point: Option<&'static str>) -> Self {
+        Self::enter(match point {
+            Some("api1_after_known_error") => Some("before_handle_publish"),
+            Some("api1_after_unknown_error") => Some("commit_unknown"),
+            point => point,
+        })
+    }
+}
+
+pub(super) fn api1_before_result(point: Option<&str>) {
+    if point == Some("api1_before_result") { panic!("injected API1 worker loss before producer result"); }
+}
+
+pub(super) fn api1_after_result(point: Option<&str>, result: &Result<WriteReceipt, StorageError>) {
+    match point {
+        Some("api1_after_result") => {
+            let receipt = result.as_ref().expect("actual successful producer result");
+            eprintln!("API1 actual returned receipt before lost worker: {}", serde_json::to_string(receipt).unwrap());
+            panic!("injected API1 worker loss after successful producer result");
+        }
+        Some("api1_after_known_error") => {
+            let Err(StorageError::CommittedMutation { receipt, .. }) = result else { panic!("expected actual committed error, got {result:?}"); };
+            eprintln!("API1 actual error receipt before lost worker: {}", serde_json::to_string(receipt).unwrap());
+            panic!("injected API1 worker loss after committed producer error");
+        }
+        Some("api1_after_unknown_error") => {
+            let Err(StorageError::CommitOutcomeUnknown { operation_id, .. }) = result else { panic!("expected actual allocated unknown, got {result:?}"); };
+            eprintln!("API1 actual allocated unknown ID before lost worker: {operation_id}");
+            panic!("injected API1 worker loss after actual unknown producer result");
+        }
+        _ => {},
+    }
 }
 impl Drop for Fault {
     fn drop(&mut self) {
@@ -1038,6 +1071,59 @@ async fn native_catalog_api1_cancel_keeps_worker_publication_lease() {
     );
     drop(reopened);
     drop(dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_post_result_join_loss_preserves_actual_collected_evidence() {
+    use crate::serialization::catalog_api1::{self, CatalogReplyAdmission};
+    use crate::storage::ids::{IdKind, IdSource, SeededIds};
+    let mut lost = Vec::new();
+    for point in ["api1_before_result", "api1_after_result", "api1_after_known_error", "api1_after_unknown_error"] {
+        let (f, path, provider) = api1_seeded_fixture();
+        let (before, tracker, expected_id) = {
+            let engine = f.storage.read().unwrap();
+            let oracle = SeededIds::from_state(engine.meta_store().id_source().checkpoint().unwrap().unwrap()).unwrap();
+            (engine.control_state().unwrap(), engine.meta_store().work_tracker(), oracle.uuid(IdKind::Operation).unwrap())
+        };
+        let mut adapter = NativeCatalogAdapter::new(f.completion(), provider, Default::default(), Arc::new(FixedClock));
+        adapter.failure = Some(point);
+        let error = adapter.create_api1_bounded(crate::storage::native_catalog::NativeNamespaceInput {
+            name: "lost_worker".into(), embedding_dim: None, embedding_profile_id: None,
+            initial_stability: Some(3.7145), desired_retention: None, decay_rate_multiplier: None,
+        }, CatalogReplyAdmission::http()).await.unwrap_err();
+        assert!(catalog_api1::outcome_unknown(&error));
+        let (_, value) = catalog_api1::failure(&error);
+        assert_eq!(value["commitState"], "unknown", "{point}: {value}");
+        assert!(value.get("ready").is_none());
+        let expected_pending = if point == "api1_after_known_error" || point == "api1_after_unknown_error" { 3 } else { 2 };
+        assert_eq!(tracker.status().pending, expected_pending);
+        assert_eq!(tracker.status().unresolved, expected_pending);
+        drop(adapter);
+        let dir = f.close();
+        let reopened = NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(FixedClock)).unwrap();
+        if point == "api1_before_result" {
+            assert_eq!(reopened.engine.control_state().unwrap(), before);
+            assert!(value.get("receipt").is_none());
+            assert_eq!(value["operationId"], Value::Null);
+        } else {
+            let canonical = reopened.engine.meta_store().lookup_operation(before.store_id, MutationScope::Catalog, expected_id).unwrap().unwrap();
+            assert_eq!(canonical.committed_generation, before.committed_generation.next().unwrap());
+            if point == "api1_after_unknown_error" {
+                assert!(value.get("receipt").is_none(), "unknown result never returned a receipt");
+                if value["operationId"] != json!(expected_id) { lost.push((point, value.clone())); }
+            } else {
+                assert_eq!(value["operationId"], Value::Null, "receipt ID is not an invented unknown-operation ID");
+                if value.get("receipt").is_none() { lost.push((point, value.clone())); }
+                else {
+                    let retained: WriteReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
+                    assert_eq!(crate::storage::control::encode(&retained).unwrap(), crate::storage::control::encode(&canonical).unwrap());
+                }
+            }
+        }
+        eprintln!("post-result case {point}: {value}");
+        drop(reopened); drop(dir);
+    }
+    assert!(lost.is_empty(), "actual returned worker evidence lost: {lost:?}");
 }
 fn rest_adapter(
     f: &Fixture,
