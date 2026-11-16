@@ -12,9 +12,9 @@ mod canonical_list;
 mod canonical_scope;
 mod canonical_vector_snapshot;
 mod catalog;
-mod catalog_page;
 #[cfg(test)]
 mod catalog_completion_tests;
+mod catalog_page;
 pub(crate) mod effects;
 mod inherited_policy;
 mod insertion;
