@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 
 #[cfg(test)]
+pub(crate) mod ack_tests;
+
+#[cfg(test)]
 thread_local! {
     pub(crate) static FAIL_BEFORE_RECORD_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     pub(crate) static FAIL_AFTER_RECORD_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -98,6 +101,8 @@ pub(crate) fn initialize(tx: &redb::WriteTransaction) -> Result<(), StorageError
 pub(crate) fn validate_existing(
     tx: &redb::ReadTransaction,
 ) -> Result<Vec<PendingEffects>, StorageError> {
+    #[cfg(test)]
+    ack_tests::count(|work| work.validation_calls += 1);
     use redb::{MultimapTableHandle, TableHandle};
     let reserved = [SCHEMA.name(), EFFECTS.name()];
     if tx
@@ -161,6 +166,8 @@ pub(crate) fn validate_existing(
     let table = tx.open_table(EFFECTS)?;
     let mut effects = Vec::new();
     for entry in table.iter()? {
+        #[cfg(test)]
+        ack_tests::count(|work| work.effect_rows += 1);
         let (key, value) = entry?;
         let effect: PendingEffects = control::decode(value.value())?;
         if effect.version != 1
@@ -336,6 +343,8 @@ impl MetadataStore {
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<(), StorageError> {
+        #[cfg(test)]
+        let _probe = ack_tests::Probe::start(self);
         let work = self.work_tracker.admit(parent)?;
         let result = (|| {
             let ids: Vec<_> = self
@@ -1078,10 +1087,14 @@ impl MetadataStore {
             }
             effects.remove(operation_id.as_bytes().as_slice())?;
         }
+        #[cfg(test)]
+        ack_tests::count(|work| work.commit_attempts += 1);
         tx.commit().map_err(|error| {
             self.mark_unavailable();
             StorageError::RedbCommit(error)
         })?;
+        #[cfg(test)]
+        ack_tests::count(|work| work.commit_successes += 1);
         self.derived_dirty
             .store(!self.pending_effects()?.is_empty(), Ordering::SeqCst);
         Ok(())

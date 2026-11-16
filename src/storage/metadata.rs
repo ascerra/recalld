@@ -107,6 +107,9 @@ pub struct MetadataStore {
     derived_dirty: std::sync::atomic::AtomicBool,
     effects_epoch: std::sync::atomic::AtomicU64,
     #[cfg(test)]
+    pub(crate) ack_work_probe:
+        std::sync::Mutex<Option<std::sync::mpsc::Sender<effects::ack_tests::AckWork>>>,
+    #[cfg(test)]
     pub(crate) observation_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
     pub(crate) tombstone_publication_fault: std::sync::atomic::AtomicBool,
@@ -260,6 +263,8 @@ impl MetadataStore {
         // Legacy checkpoints have no generation watermark. Always rebuild
         // from canonical records, even for direct MetadataStore callers.
         let store = Self {
+            #[cfg(test)]
+            ack_work_probe: std::sync::Mutex::new(None),
             db,
             ids,
             native_lifecycle_only,
