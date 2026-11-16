@@ -1587,6 +1587,10 @@ mod producer_tests;
 pub(crate) mod prepared_query_tests;
 
 #[cfg(test)]
+#[path = "prepared_pages_tests.rs"]
+mod prepared_pages_tests;
+
+#[cfg(test)]
 pub(crate) async fn native_lifecycle_test_remote(
     storage: Arc<dyn BridgeStorageEngine>,
     path: &Path,
