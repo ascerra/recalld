@@ -103,7 +103,13 @@ async fn native_graph_producer_publication_failure_preserves_exact_receipt_then_
         ..Default::default()
     };
     let replay = publisher
-        .native_graph(context, crate::derived_completion::native_graph::GraphRequest::Explicit(input.clone()), policy, Arc::new(NeverClock), None)
+        .native_graph(
+            context,
+            crate::derived_completion::native_graph::GraphRequest::Explicit(input.clone()),
+            policy,
+            Arc::new(NeverClock),
+            None,
+        )
         .await
         .unwrap()
         .unwrap();
@@ -155,7 +161,13 @@ async fn native_graph_producer_root_precedes_graph_wait_and_completes_descendant
     let graph = f.graph.clone().write_owned().await;
     let job = tokio::spawn(async move {
         publisher
-            .native_graph(context, crate::derived_completion::native_graph::GraphRequest::Explicit(input), NativePolicyInputs::default(), clock, None)
+            .native_graph(
+                context,
+                crate::derived_completion::native_graph::GraphRequest::Explicit(input),
+                NativePolicyInputs::default(),
+                clock,
+                None,
+            )
             .await
     });
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -215,7 +227,13 @@ async fn native_graph_producer_cancelled_before_graph_ownership_stays_unresolved
     let graph = f.graph.clone().write_owned().await;
     let job = tokio::spawn(async move {
         publisher
-            .native_graph(context, crate::derived_completion::native_graph::GraphRequest::Explicit(input), NativePolicyInputs::default(), clock, None)
+            .native_graph(
+                context,
+                crate::derived_completion::native_graph::GraphRequest::Explicit(input),
+                NativePolicyInputs::default(),
+                clock,
+                None,
+            )
             .await
     });
     tokio::time::timeout(Duration::from_secs(5), async {

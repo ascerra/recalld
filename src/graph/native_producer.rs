@@ -83,6 +83,8 @@ fn vector(
             "native graph vector slot mismatch".into(),
         ));
     }
+    #[cfg(test)]
+    vector_probe::read(MemoryId::from_bytes(row.id));
     let values = engine
         .get_vector(ns, reference.slot)?
         .ok_or_else(|| StorageError::OwnershipMismatch("native graph vector missing".into()))?;
@@ -248,4 +250,45 @@ pub(crate) fn select(
         },
         generation,
     ))
+}
+
+#[cfg(test)]
+pub(crate) mod vector_probe {
+    use crate::model::MemoryId;
+    use std::collections::BTreeMap;
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+    static COUNTERS: Mutex<BTreeMap<MemoryId, Arc<AtomicUsize>>> = Mutex::new(BTreeMap::new());
+    pub(crate) struct Probe {
+        ids: Vec<MemoryId>,
+        count: Arc<AtomicUsize>,
+    }
+    impl Probe {
+        pub(crate) fn new(ids: Vec<MemoryId>) -> Self {
+            let count = Arc::new(AtomicUsize::new(0));
+            let mut map = COUNTERS.lock().unwrap();
+            for id in &ids {
+                assert!(map.insert(*id, count.clone()).is_none());
+            }
+            Self { ids, count }
+        }
+        pub(crate) fn reads(&self) -> usize {
+            self.count.load(Ordering::SeqCst)
+        }
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let mut map = COUNTERS.lock().unwrap();
+            for id in &self.ids {
+                map.remove(id);
+            }
+        }
+    }
+    pub(super) fn read(id: MemoryId) {
+        if let Some(count) = COUNTERS.lock().unwrap().get(&id) {
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 }

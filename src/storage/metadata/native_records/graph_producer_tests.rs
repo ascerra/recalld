@@ -3,7 +3,7 @@ use crate::storage::native_graph::{NativeEdgeInput, NativeGraphInput};
 
 fn setup() -> (Fixture, Data, Arc<FixedClock>, MemoryId) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock.clone());
     let mut original = input(&d);
@@ -66,7 +66,7 @@ async fn native_graph_producer_legacy_adapter_rejects_native_owner() {
 #[test]
 fn native_graph_producer_original_api1_core_guard() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut s = open(&d, clock);
     let mut original = input(&d);
@@ -237,7 +237,7 @@ async fn native_graph_producer_automatic_families_use_canonical_payloads_and_rej
     use crate::graph::native_producer::NativeLinkSelection as S;
     for api in [1, 2] {
         let root = tempfile::tempdir().unwrap();
-        let d = fixture(root.path());
+        let d = certified_fixture(root.path());
         let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
         let mut session = open(&d, clock.clone());
         let mut original = input(&d);
@@ -412,7 +412,7 @@ async fn native_graph_producer_missing_owner_scope_and_unsupported_contract_do_n
 fn native_graph_producer_final_selection_generation_rejects_phantom_candidate() {
     use crate::graph::native_producer::{NativeLinkSelection, select};
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock);
     let mut original = input(&d);
@@ -808,7 +808,7 @@ async fn native_graph_producer_filters_namespace_and_terminal_candidates_before_
     use crate::graph::native_producer::NativeLinkSelection as S;
     let root = tempfile::tempdir().unwrap();
     let mut foreign = MemoryId::nil();
-    let d = fixture_with_seed(root.path(), |engine| {
+    let d = certified_fixture_with_seed(root.path(), |engine| {
         let mut ns = NamespaceConfig::default_namespace(0);
         ns.name = "foreign".into();
         ns.embedding_dim = 4;
@@ -892,7 +892,7 @@ async fn native_graph_producer_entity_ties_use_shared_count_then_uuid_not_weight
     use crate::api::RelationshipGraph as _;
     use crate::graph::native_producer::NativeLinkSelection;
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let d = certified_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let id = |value| MemoryId::from_uuid(uuid::Uuid::from_u128(value));
@@ -935,3 +935,6 @@ async fn native_graph_producer_entity_ties_use_shared_count_then_uuid_not_weight
     assert_eq!(transition.edges[0].after.target, id(1));
     assert_eq!(transition.edges[0].after.weight_bits, 0.5f32.to_bits());
 }
+
+#[path = "graph_certification_tests.rs"]
+mod certification;
