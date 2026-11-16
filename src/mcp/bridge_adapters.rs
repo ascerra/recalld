@@ -134,6 +134,41 @@ async fn effects_stamp(
 // McpSearchAdapter
 // ═══════════════════════════════════════════════════════════════════════
 
+/// Catalog failures retain evidence through the existing framed error message.
+/// Only this create path emits/decodes the structured payload; no string matching
+/// is used to infer whether a storage operation committed.
+fn map_catalog_create_error(
+    error: crate::derived_completion::catalog::CatalogCreateError,
+) -> bridge::BridgeError {
+    use crate::derived_completion::catalog::CatalogCreateError;
+    use crate::storage::StorageError;
+    let evidence = match error {
+        CatalogCreateError::Storage(StorageError::CommittedMutation { receipt, source }) => {
+            serde_json::json!({
+                "error": "INDEX_NOT_READY", "commitState": "committed", "ready": false,
+                "receipt": receipt, "message": source.to_string(),
+            })
+        }
+        CatalogCreateError::Storage(StorageError::CommitOutcomeUnknown {
+            operation_id, ..
+        }) => serde_json::json!({
+            "error": "COMMIT_OUTCOME_UNKNOWN", "commitState": "unknown", "operationId": operation_id,
+            "message": "namespace commit acknowledgement unavailable; reconcile before retry",
+        }),
+        CatalogCreateError::WorkerUnknown => serde_json::json!({
+            "error": "COMMIT_OUTCOME_UNKNOWN", "commitState": "unknown", "operationId": null,
+            "message": "namespace worker outcome unavailable; reconcile before retry",
+        }),
+        CatalogCreateError::Storage(error @ StorageError::RecoveryRequired(_)) => {
+            return bridge::BridgeError::Unavailable(error.to_string());
+        }
+        CatalogCreateError::Storage(error) => return map_mutation_error(error),
+    };
+    bridge::BridgeError::PartiallyApplied(
+        serde_json::to_string(&evidence).expect("catalog evidence JSON"),
+    )
+}
+
 /// Adapts `QueryEngine` + subsystems to the MCP `SearchPipeline` trait.
 pub struct McpSearchAdapter {
     query_engine: Arc<QueryEngine>,
@@ -2590,78 +2625,41 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         crate::model::validation::validate_namespace_name(&input.name)
             .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
 
-        let work =
-            crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
-        let worker = work.child().map_err(|e| map_mutation_error(e.into()))?;
-        let now = self.clock.now_millis();
-        let storage = self.storage.clone();
-        let tz = self.timezone;
-        let input_name = input.name.clone();
-        let embedding_dim = input.embedding_dim;
-        let initial_stability = input.initial_stability;
-        let desired_retention = input.desired_retention;
-        let decay_rate_multiplier = input.decay_rate_multiplier;
-
-        let result = tokio::task::spawn_blocking(move || {
-            let result = (|| {
-                let dim = embedding_dim.map(|d| d as u32).unwrap_or_else(|| {
-                    storage
-                        .read()
-                        .ok()
-                        .and_then(|s| {
-                            s.get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)
-                                .ok()
-                                .flatten()
-                        })
-                        .map(|ns| ns.embedding_dim)
-                        .unwrap_or(1536)
-                });
-
-                let ns_config = NamespaceConfig {
-                    schema: None,
-                    id: NamespaceId::UNSET,
-                    name: input_name.clone(),
-                    embedding_dim: dim,
-                    initial_stability: initial_stability.unwrap_or(3.7145),
-                    default_difficulty: 5.0,
-                    phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
-                    permastore_threshold: 1500.0,
-                    created_at: now,
-                    desired_retention: desired_retention.unwrap_or(0.9),
-                    decay_rate_multiplier,
-                };
-
-                crate::decay::lifecycle::resolve_policy(
-                    &ns_config,
-                    &crate::decay::DecayConfig::default(),
-                    1.0,
-                )
-                .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
-
-                let mut storage_w = storage.write().map_err(|e| {
-                    bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
-                })?;
-                let assigned_id = storage_w
-                    .create_namespace_with_work(&ns_config, Some(&worker))
-                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-
-                Ok(bridge::NamespaceInfo {
-                    id: assigned_id.get(),
-                    name: input_name,
-                    embedding_dim: dim as u16,
-                    // Not a placeholder: a namespace created one line ago is
-                    // empty.
-                    memory_count: 0,
-                    created_at: format_timestamp(now, tz),
-                })
-            })();
-            crate::storage::work::finish_work(&storage, worker);
-            result
-        })
+        let config = NamespaceConfig {
+            schema: None,
+            id: NamespaceId::UNSET,
+            name: input.name,
+            embedding_dim: 1536,
+            initial_stability: input.initial_stability.unwrap_or(3.7145),
+            default_difficulty: 5.0,
+            phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
+            permastore_threshold: 1500.0,
+            created_at: 0,
+            desired_retention: input.desired_retention.unwrap_or(0.9),
+            decay_rate_multiplier: input.decay_rate_multiplier,
+        };
+        let config = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .create_legacy_namespace(
+            config,
+            input.embedding_dim.map(u32::from),
+            self.clock.clone(),
+        )
         .await
-        .map_err(|e| bridge::BridgeError::Internal(format!("blocking task join error: {e}")))?;
-        crate::storage::work::finish_work(&self.storage, work);
-        result
+        .map_err(map_catalog_create_error)?;
+        Ok(bridge::NamespaceInfo {
+            id: config.id.get(),
+            name: config.name,
+            embedding_dim: config.embedding_dim as u16,
+            memory_count: 0,
+            created_at: format_timestamp(config.created_at, self.timezone),
+        })
     }
 
     async fn namespace_stats(
