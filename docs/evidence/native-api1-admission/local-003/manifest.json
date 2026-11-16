@@ -1,0 +1,74 @@
+{
+  "command.json": {
+    "sha256": "7c145ec0d8faba2ff3632d0f2175660564f613f7071defe09536776952783725",
+    "bytes": 1210
+  },
+  "source.json": {
+    "sha256": "e36f3b5d2335a110efb2ce872080c367500ac1e207bf62094e734278997464c8",
+    "bytes": 200
+  },
+  "source.sha256": {
+    "sha256": "cf55300ccff54ba53d6d2184e44afe1a9e60e152b0dce5f572d658aa8e4bce09",
+    "bytes": 50847
+  },
+  "rustc.txt": {
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+    "bytes": 197
+  },
+  "started.txt": {
+    "sha256": "0f054cec8e4bc1ece84981ba37f025426c28fbda169f5b1ab62df4187dd174cb",
+    "bytes": 21
+  },
+  "finished.txt": {
+    "sha256": "90b5a2a5d72fc66be07b9e213bfaefa8c83287d6373079a97edd0c7e12d13cf0",
+    "bytes": 21
+  },
+  "fmt.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "compile.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "tests.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "container.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  "test-command.json": {
+    "sha256": "78a4f8f55f35a8f547c59b4c244d6a64236495e0a01b634d04427108882d7748",
+    "bytes": 162
+  },
+  "tests.log": {
+    "sha256": "55329897db50dd9b54726f7c6c132bed03f7b7e11a443c45193ba2f176891a78",
+    "bytes": 9180
+  },
+  "executable.sha256": {
+    "sha256": "e6a67d25c3752b82679061b50934bf231a5b2e0f491d7e0e0c6ae73ab66e41f6",
+    "bytes": 115
+  },
+  "memory-events.txt": {
+    "sha256": "dbc165b465b3a98d7511d919c1929564e701d5206b1920ad5abd7cc9db24f9f0",
+    "bytes": 73
+  },
+  "memory-peak.txt": {
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+    "bytes": 11
+  },
+  "source-after.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "format-command.json": {
+    "sha256": "b7f6a572a0470afa3c6b0f3c2063c213aba7ca5399200f43e23af331a5fcf5bd",
+    "bytes": 769
+  },
+  "format.exit": {
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  }
+}

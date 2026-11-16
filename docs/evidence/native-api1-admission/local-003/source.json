@@ -1,0 +1,7 @@
+{
+  "commit": "25ac7749d01678e89f09c9e37938aea30786b09a",
+  "files": 448,
+  "bytes": 17038514,
+  "scope": "Cargo + src/tests/examples; default lib focused; no features",
+  "RUST_MIN_STACK": "unset"
+}

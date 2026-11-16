@@ -1,0 +1,1 @@
+["timeout", "--signal=TERM", "--kill-after=10s", "900s", "/work/target/debug/deps/recalld-e3b6b0e7e1d61821", "native_catalog", "--nocapture", "--test-threads=1"]
