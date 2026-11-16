@@ -1,11 +1,19 @@
 # Implemented purge admission inequality: source review candidate
 
-This describes the corrected, still-unvalidated implementation following the
-approved c6b5755d plan. Candidate006 and the 71802899/candidate007 green run remain
-immutable. Huygens found two source proof/resource gaps in 71802899: typed f32
-counting did not match projected Value serialization, and initial name resolution
-decoded the whole catalog before caps. These corrections require his source ACK
-before new execution. No full-suite or readiness claim.
+This describes runtime `369d8e9219441a031b5502edd3d1ea435334c576`, source-reviewed
+by Huygens and the coordinating agent. Candidate006 and the 71802899/candidate007
+green run remain immutable. Two real proof/resource gaps in718 were corrected:
+typed f32 counting differed from projected Value serialization, and initial name
+resolution decoded the whole catalog before caps. Candidate00815PASS and
+candidate01022PASS validate the corrected runtime with different test sources.
+Candidate00920PASS/1FAIL is retained: a new test read a work tracker through the
+intentionally poisoned storage lock after injected worker loss; the test now
+captures that same tracker before injection, preserving all unknown/reopen checks.
+Final source90938aa5 adds only policy/batch/compaction exclusion assertions;
+its focused validation passes22/22 (40.70s). Frozen default-all-targets full passes
+1378library/3CLI/12examples with1historical generator ignored; fmt and all-feature/
+all-target Clippy pass separately with warnings. No all-feature execution claim. No publication
+or activation claim. See the [acceptance report](../evidence/native-api1-purge-projection/REPORT.md).
 
 ## Wire bound
 
