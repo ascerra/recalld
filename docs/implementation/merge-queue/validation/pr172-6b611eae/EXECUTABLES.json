@@ -1,0 +1,63 @@
+{
+  "testExecutables": {
+    "debug/deps/recalld-8b31964f64b2cfc4": "f385b32fab8dcc61b9d12d5cc07c4bf798aaeeeb5a5b615e596f813790bf133a",
+    "debug/deps/inherited_policy_cli-55f09460c02dd6ae": "e51e6c87d428e27e7edaf6aded9b17143773b09576fc53b82636c3a9cfbd673a",
+    "debug/deps/lifecycle_cli-5bae1aa288409852": "d6a4873a18641cf52a16f82f55f522f19f5187e213eddb4756dd573a78417e11",
+    "debug/deps/profile_attestation_cli-e203f21f7c00a546": "b9058fa07d1c2bc000b064df2603c5d9a6e95d334dfbeaad3689c243b85275aa",
+    "debug/deps/text_migration_cli-9d4a9dc03f7ddb52": "72becf06ce8664630dc381facc1eaa86111b35359965950d869b42608d538f20",
+    "debug/deps/vector_certification_cli-1e106a1b26764bb3": "1710086f75470008fe7abcc3246c5ffbf6ae8e6ce9e0a0969a890ad0caaceb6e"
+  },
+  "publicBinarySha256": "c073e462eeae8c775561624375c9d1ff1c81b73bb4bb2a9f12225dc3ebaae27e",
+  "testResults": [
+    {
+      "step": 4,
+      "passed": 4,
+      "ignored": 0
+    },
+    {
+      "step": 5,
+      "passed": 10,
+      "ignored": 0
+    },
+    {
+      "step": 6,
+      "passed": 14,
+      "ignored": 0
+    },
+    {
+      "step": 7,
+      "passed": 18,
+      "ignored": 0
+    },
+    {
+      "step": 8,
+      "passed": 4,
+      "ignored": 0
+    },
+    {
+      "step": 9,
+      "passed": 11,
+      "ignored": 0
+    },
+    {
+      "step": 10,
+      "passed": 10,
+      "ignored": 0
+    },
+    {
+      "step": 11,
+      "passed": 3,
+      "ignored": 0
+    },
+    {
+      "step": 12,
+      "passed": 2,
+      "ignored": 0
+    },
+    {
+      "step": 13,
+      "passed": 10,
+      "ignored": 0
+    }
+  ]
+}

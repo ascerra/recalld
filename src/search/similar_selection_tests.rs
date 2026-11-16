@@ -337,8 +337,39 @@ async fn similar_fixture_options(
         },
     )
     .unwrap();
-    for ns in [NamespaceId::new(1), other] {
-        crate::test_support::explicitly_adopt_inherited_policy(native.path(), ns, 1., 2000);
+    // These two namespaces are intended positive query/exposure participants.
+    // Migration preserves unknown inheritance; only real adoption enables them.
+    let before_adoption = inspect_schema(native.path()).unwrap();
+    for id in [NamespaceId::new(1), other] {
+        let ns = before_adoption
+            .namespaces
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap();
+        assert!(ns.schema.as_ref().unwrap().inherited_decay.is_none());
+        assert!(matches!(
+            crate::storage::inherited_policy::resolve_bound(ns, &Default::default(), 1.),
+            Err(crate::storage::StorageError::InvalidMutation(_))
+        ));
+        crate::test_support::explicitly_adopt_inherited_policy(native.path(), id, 1., 2000);
+    }
+    let after_adoption = inspect_schema(native.path()).unwrap();
+    for id in [mismatch, unknown] {
+        let before = before_adoption
+            .namespaces
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap();
+        let after = after_adoption
+            .namespaces
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap();
+        assert_eq!(
+            crate::storage::control::encode(before).unwrap(),
+            crate::storage::control::encode(after).unwrap()
+        );
+        assert!(after.schema.as_ref().unwrap().inherited_decay.is_none());
     }
     native = certify_similar_namespace(native.path(), NamespaceId::new(1), extra).await;
     if certify_donor {

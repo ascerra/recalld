@@ -73,7 +73,16 @@ fn configured_public_adapters(
     clock: Arc<dyn Clock>,
     policy: NativePolicyInputs,
 ) -> (McpBridge, crate::api::AppState) {
-    let (_, mut bridge, engine) = readers(f, clock.clone());
+    public_adapters_with_query(f, clock, policy, false)
+}
+fn public_adapters_with_query(
+    f: &Fixture,
+    clock: Arc<dyn Clock>,
+    policy: NativePolicyInputs,
+    native_exposure: bool,
+) -> (McpBridge, crate::api::AppState) {
+    let (_, mut bridge, engine) =
+        readers_with_policy(f, clock.clone(), native_exposure, policy.clone());
     let mut config = crate::config::RecalldConfig::default();
     config.decay.decay_rate_multiplier = policy.multiplier;
     let config = Arc::new(config);
@@ -772,3 +781,6 @@ mod public_matrix;
 
 #[path = "adopted_public_tests.rs"]
 mod adopted_public;
+
+#[path = "query_feedback_chronology_tests.rs"]
+mod query_feedback_chronology;
