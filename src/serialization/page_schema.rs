@@ -1,7 +1,7 @@
 //! Output shapes of the actual prepared page consumers, not live v2 advertising.
 //! Canonical selection and cross-field/count/cursor authority stay in the backend
 //! and the strict Remote decoder. Schema string lengths count characters, not UTF-8 bytes.
-use super::catalog_page::CatalogKind;
+use super::{catalog_page::CatalogKind, contract::ErrorCategory};
 use serde_json::{Value, json};
 
 fn object(properties: Value, required: &[&str]) -> Value {
@@ -103,7 +103,7 @@ pub(crate) fn output_schema(kind: Option<CatalogKind>) -> Value {
         }
     };
     let error = object(
-        json!({"category":{"enum":["invalidInput","notFound","conflict","unavailable"]},"code":{"type":"string"},"message":{"type":"string"},"field":{"type":"string"},"retryable":{"type":"boolean"},"commitState":{"const":"notCommitted"}}),
+        json!({"category":{"enum":[ErrorCategory::InvalidInput,ErrorCategory::NotFound,ErrorCategory::Conflict,ErrorCategory::Unavailable]},"code":{"type":"string"},"message":{"type":"string"},"field":{"type":"string"},"retryable":{"type":"boolean"},"commitState":{"const":"notCommitted"}}),
         &["category", "code", "message", "retryable", "commitState"],
     );
     let mut schema = object(
