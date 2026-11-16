@@ -2556,6 +2556,7 @@ fn build_list_tags_response(
 pub struct McpNamespaceAdapter {
     native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    embedding: Arc<dyn EmbeddingProvider>,
     cache: Arc<CacheManager>,
     vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -2599,6 +2600,7 @@ impl McpNamespaceAdapter {
     /// the indexes a namespace deletion has to clean.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+        embedding: Arc<dyn EmbeddingProvider>,
         cache: Arc<CacheManager>,
         vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -2610,6 +2612,7 @@ impl McpNamespaceAdapter {
         Self {
             native_catalog: None,
             storage,
+            embedding,
             cache,
             vector_index,
             fts_index,
@@ -2796,11 +2799,21 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         crate::model::validation::validate_namespace_name(&input.name)
             .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
 
+        let dim = crate::embedding::runtime::creation_dimension(
+            self.embedding.as_ref(),
+            input.embedding_dim.map(u32::from),
+        )
+        .map_err(|error| match error {
+            crate::embedding::runtime::NamespaceProfileError::Unavailable(_) => {
+                bridge::BridgeError::Unavailable(error.to_string())
+            }
+            _ => bridge::BridgeError::InvalidInput(error.to_string()),
+        })?;
         let config = NamespaceConfig {
             schema: None,
             id: NamespaceId::UNSET,
             name: input.name,
-            embedding_dim: 1536,
+            embedding_dim: dim,
             initial_stability: input.initial_stability.unwrap_or(3.7145),
             default_difficulty: 5.0,
             phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
@@ -2817,11 +2830,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .create_legacy_namespace(
-            config,
-            input.embedding_dim.map(u32::from),
-            self.clock.clone(),
-        )
+        .create_legacy_namespace(config, Some(dim), self.clock.clone())
         .await
         .map_err(map_catalog_create_error)?;
         Ok(bridge::NamespaceInfo {
@@ -4820,6 +4829,7 @@ pub fn direct_bridge(
     let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> = Arc::new(
         McpNamespaceAdapter::new(
             system.storage().clone(),
+            system.embedding().clone(),
             system.cache().clone(),
             system.vector_index().clone(),
             system.fts_index().clone(),

@@ -139,7 +139,12 @@ fn readers_with_policy(
                 )
                 .with_clock(clock.clone()),
             ),
-            Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+            Arc::new(NamespaceRegistryAdapter::new(
+                f.storage.clone(),
+                std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                    crate::test_support::DIM,
+                )),
+            )),
             Arc::new(NoopMetricsCollector),
         ),
         &crate::api::ApiConfig::default(),
