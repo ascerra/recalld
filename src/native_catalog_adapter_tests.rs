@@ -537,7 +537,7 @@ fn api1_bridge(f: &Fixture, provider: Arc<Provider>, fault: Option<&'static str>
     bridge
 }
 
-fn api1_seeded_fixture() -> (Fixture, std::path::PathBuf, Arc<Provider>) {
+pub(crate) fn api1_seeded_fixture() -> (Fixture, std::path::PathBuf, Arc<Provider>) {
     let (f, path, provider) = fixture();
     let dir = f.close();
     let engine = RedbStorageEngine::open_with_ids(&path, true,
@@ -584,7 +584,7 @@ async fn native_catalog_api1_real_dispatcher_eras_original_context_and_alias_gua
         assert_eq!(found.len(), 1);
         let input = crate::storage::native_catalog::NativeNamespaceInput {
             name: "local".into(), embedding_dim: None, embedding_profile_id: None,
-            initial_stability: None, desired_retention: None, decay_rate_multiplier: None,
+            initial_stability: Some(3.7145), desired_retention: None, decay_rate_multiplier: None,
         };
         let options = crate::serialization::contract::WriteOptions::default();
         assert_eq!(found[0].request_hash, input.hash(&options.context(MutationScope::Catalog, ContractVersion::V1)).unwrap());
@@ -760,10 +760,16 @@ async fn native_catalog_api1_cancel_keeps_worker_publication_lease() {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while Arc::strong_count(&f.storage) != owner_count { tokio::task::yield_now().await; }
     }).await.unwrap();
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    assert_eq!(tracker.status().pending, 1);
+    assert_eq!(tracker.status().unresolved, 1);
+    assert!(matches!(tracker.close_and_drain(std::time::Instant::now() + std::time::Duration::from_millis(10)),
+        Err(crate::storage::work::WorkError::Deadline { pending: 1, unresolved: 1 })));
     let dir = f.close();
     let reopened = NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(FixedClock)).unwrap();
     assert!(reopened.engine.get_namespace_by_name("cancelled").unwrap().is_some());
     assert_eq!(reopened.engine.control_state().unwrap().committed_generation, before.committed_generation.next().unwrap());
+    assert_eq!(reopened.engine.meta_store().work_tracker().status().pending, 0);
     drop(reopened); drop(dir);
 }
 fn rest_adapter(

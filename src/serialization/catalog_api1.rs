@@ -249,6 +249,54 @@ mod tests {
     use super::*;
     use crate::native_catalog_adapter::{NativeCatalogAdapter, tests::{fixture, FixedClock}};
 
+    struct CountClock(std::sync::atomic::AtomicUsize);
+    impl crate::time::Clock for CountClock {
+        fn now_millis(&self) -> i64 { self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst); 2000 }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_catalog_api1_real_candidate_budget_rolls_back_before_namespace_stage() {
+        use crate::storage::{StorageEngine, ids::{IdKind, IdSource, SeededIds}};
+        let (f, path, provider) = crate::native_catalog_adapter::tests::api1_seeded_fixture();
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let ids = f.storage.read().unwrap().meta_store().id_source().checkpoint().unwrap().unwrap();
+        let oracle = SeededIds::from_state(ids).unwrap();
+        let rejected_id = oracle.uuid(IdKind::Operation).unwrap();
+        let clock = std::sync::Arc::new(CountClock(std::sync::atomic::AtomicUsize::new(0)));
+        let adapter = NativeCatalogAdapter::new(f.completion(), provider, Default::default(), clock.clone());
+        let mut admission = CatalogReplyAdmission::mcp(JsonRpcId::String("x".repeat(100_000)), Era::Modern);
+        // Find the exact minimum envelope allowance. Its collector has ample
+        // space for a creation receipt, but the final outer-ID frame does not.
+        let (mut low, mut high) = (0, LOCAL_LIMIT);
+        while low < high {
+            let middle = low + (high - low) / 2;
+            admission.limit = middle;
+            if admission.admit_native().is_ok() { high = middle; } else { low = middle + 1; }
+        }
+        admission.limit = low;
+        admission.admit_native().unwrap();
+        let input = input(crate::mcp::bridge::CreateNamespaceInput {
+            name: "candidate".into(), embedding_dim: None, initial_stability: Some(3.7145),
+            desired_retention: None, decay_rate_multiplier: None,
+        });
+        let error = adapter.create_api1_bounded(input.clone(), admission).await.unwrap_err();
+        assert!(matches!(error, CatalogError::Storage(StorageError::ReceiptBudgetExceeded)));
+        assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        {
+            let engine = f.storage.read().unwrap();
+            assert_eq!(engine.control_state().unwrap(), before);
+            assert!(engine.get_namespace_by_name("candidate").unwrap().is_none());
+            assert!(engine.meta_store().lookup_operation(before.store_id, crate::storage::control::MutationScope::Catalog, rejected_id).unwrap().is_none());
+            assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), oracle.checkpoint().unwrap());
+        }
+        assert!(!path.join("candidate").exists());
+        assert!(std::fs::read_dir(&path).unwrap().all(|entry| !entry.unwrap().file_name().to_string_lossy().starts_with(".recalld-catalog-")));
+        let receipt = adapter.create_api1_bounded(input, CatalogReplyAdmission::http()).await.unwrap();
+        assert_eq!(receipt.operation_id, oracle.uuid(IdKind::Operation).unwrap());
+        assert_eq!(receipt.committed_generation, before.committed_generation.next().unwrap());
+        assert_eq!(namespace(&receipt).unwrap().id.get(), 2);
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_catalog_api1_full_encoding_limits_and_unknown_over_known() {
         let (f, _, provider) = fixture();

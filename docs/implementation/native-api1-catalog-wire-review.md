@@ -360,8 +360,12 @@ HTTP bodies, exact serialized-byte boundaries and unknown plus known receipt.
 A test tail adds a deterministic worker-clock cancellation pause and a real
 supplied native insert left awaiting derived acknowledgment before catalog
 admission. The latter retains the foreign receipt and uses a seeded owner to
-check that refusal consumes no operation ID. Custom candidate refusal still
-needs its final consumer regression. No compile, fmt, runtime GREEN,
+check that refusal consumes no operation ID. A custom candidate test finds the
+minimum actual outer-ID envelope allowance, then proves the later receipt
+candidate is refused before namespace staging with exactly one clock/operation
+draw and no retained receipt/G/counter change. Cancellation also checks the
+actual unresolved root/drain rejection and clean volatile tracker after reopen.
+All these regressions remain unexecuted. No compile, fmt, runtime GREEN,
 full suite or activation is claimed for this source draft.
 
 Proposed validation resource plan after literal patch review: one existing
