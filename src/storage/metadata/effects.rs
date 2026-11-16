@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 
 #[cfg(test)]
+pub(crate) mod ack_tests;
+
+#[cfg(test)]
 thread_local! {
     pub(crate) static FAIL_BEFORE_RECORD_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     pub(crate) static FAIL_AFTER_RECORD_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -98,6 +101,8 @@ pub(crate) fn initialize(tx: &redb::WriteTransaction) -> Result<(), StorageError
 pub(crate) fn validate_existing(
     tx: &redb::ReadTransaction,
 ) -> Result<Vec<PendingEffects>, StorageError> {
+    #[cfg(test)]
+    ack_tests::count(|work| work.validation_calls += 1);
     use redb::{MultimapTableHandle, TableHandle};
     let reserved = [SCHEMA.name(), EFFECTS.name()];
     if tx
@@ -161,6 +166,8 @@ pub(crate) fn validate_existing(
     let table = tx.open_table(EFFECTS)?;
     let mut effects = Vec::new();
     for entry in table.iter()? {
+        #[cfg(test)]
+        ack_tests::count(|work| work.effect_rows += 1);
         let (key, value) = entry?;
         let effect: PendingEffects = control::decode(value.value())?;
         if effect.version != 1
@@ -326,16 +333,21 @@ impl MetadataStore {
         self.derived_dirty.load(Ordering::SeqCst)
     }
 
-    /// Called after every derived index is rebuilt, either during startup or
-    /// under the online coordinator's publication/index/storage guards.
+    /// Fixture-only low-level retirement; this does not certify derived views.
+    #[cfg(test)]
     pub(crate) fn acknowledge_rebuilt_effects(&self) -> Result<(), StorageError> {
         self.acknowledge_rebuilt_effects_with_work(None)
     }
 
+    /// Retain the old fixture seam for tests that intentionally manipulate effects
+    /// without constructing a query owner. Production must supply rebuilt G.
+    #[cfg(test)]
     pub(crate) fn acknowledge_rebuilt_effects_with_work(
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<(), StorageError> {
+        #[cfg(test)]
+        let _probe = ack_tests::Probe::start(self);
         let work = self.work_tracker.admit(parent)?;
         let result = (|| {
             let ids: Vec<_> = self
@@ -350,6 +362,116 @@ impl MetadataStore {
         })();
         self.finish_work(work);
         result
+    }
+
+    /// Retire only the complete outbox whose actual current views were rebuilt.
+    /// The same metadata guard excludes canonical and effects-only writers from
+    /// validation through commit and dirty publication. No view is stamped here.
+    pub(crate) fn acknowledge_rebuilt_effects_at(
+        &self,
+        rebuilt: control::GenerationRef,
+        parent: Option<&WorkTicket>,
+    ) -> Result<(), StorageError> {
+        #[cfg(test)]
+        let _probe = ack_tests::Probe::start(self);
+        let guard = if self.native_lifecycle_only {
+            self.native_guard_with_work(parent)?
+        } else {
+            self.mutation_guard_with_work(parent)?
+        };
+        guard.check(self)?;
+        let read = self.db.begin_read()?;
+        let actual = {
+            let table = read.open_table(control::CONTROL)?;
+            let value = table
+                .get("state")?
+                .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
+            ControlState::decode(value.value())?.generation_ref()
+        };
+        if actual != rebuilt || !self.view_publication.state(actual).matches_canonical() {
+            return Err(StorageError::RecoveryRequired(
+                "effects acknowledgement requires current rebuilt views".into(),
+            ));
+        }
+        let pending = validate_existing(&read)?;
+        if pending.iter().any(|effect| !effect.canonical_applied) {
+            return Err(StorageError::RecoveryRequired(
+                "canonical effects pending".into(),
+            ));
+        }
+        #[cfg(test)]
+        if let Some(hook) = self.ack_test_hook.lock().unwrap().take() {
+            hook(self);
+        }
+        if pending.is_empty() {
+            self.derived_dirty.store(false, Ordering::SeqCst);
+            return Ok(());
+        }
+        let tx = self.db.begin_write()?;
+        {
+            let table = tx.open_table(control::CONTROL)?;
+            let value = table
+                .get("state")?
+                .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
+            if ControlState::decode(value.value())?.generation_ref() != rebuilt {
+                return Err(StorageError::RecoveryRequired(
+                    "canonical generation changed during effects acknowledgement".into(),
+                ));
+            }
+        }
+        {
+            let validated = read.open_table(EFFECTS)?;
+            let mut effects = tx.open_table(EFFECTS)?;
+            for effect in &pending {
+                let key = effect.receipt.operation_id.as_bytes().as_slice();
+                // Also reject same-G effects-only changes, rather than treating
+                // unchanged canonical generation as proof of identical rows.
+                let old = validated.get(key)?.ok_or_else(|| {
+                    StorageError::InvalidControl("validated effect missing".into())
+                })?;
+                if effects
+                    .get(key)?
+                    .is_none_or(|value| value.value() != old.value())
+                {
+                    return Err(StorageError::RecoveryRequired(
+                        "validated effect changed during acknowledgement".into(),
+                    ));
+                }
+                effects.remove(key)?;
+            }
+            if !effects.is_empty()? {
+                return Err(StorageError::RecoveryRequired(
+                    "unvalidated effects remain during acknowledgement".into(),
+                ));
+            }
+        }
+        crash_point("before_rebuilt_effects_ack_commit");
+        #[cfg(test)]
+        if self.ack_test_fault.load(Ordering::SeqCst) == 1 {
+            return Err(StorageError::RecoveryRequired("injected ACK abort".into()));
+        }
+        #[cfg(test)]
+        ack_tests::count(|work| work.commit_attempts += 1);
+        let committed = tx.commit();
+        #[cfg(test)]
+        let committed = committed.and_then(|()| {
+            if self.ack_test_fault.load(Ordering::SeqCst) == 2 {
+                Err(redb::CommitError::from(redb::StorageError::Io(
+                    std::io::Error::other("injected lost ACK commit result"),
+                )))
+            } else {
+                Ok(())
+            }
+        });
+        committed.map_err(|error| {
+            self.mark_unavailable();
+            StorageError::RedbCommit(error)
+        })?;
+        #[cfg(test)]
+        ack_tests::count(|work| work.commit_successes += 1);
+        crash_point("after_rebuilt_effects_ack_commit");
+        self.derived_dirty.store(false, Ordering::SeqCst);
+        Ok(())
     }
 
     pub(crate) fn pending_effects(&self) -> Result<Vec<PendingEffects>, StorageError> {
@@ -1078,10 +1200,14 @@ impl MetadataStore {
             }
             effects.remove(operation_id.as_bytes().as_slice())?;
         }
+        #[cfg(test)]
+        ack_tests::count(|work| work.commit_attempts += 1);
         tx.commit().map_err(|error| {
             self.mark_unavailable();
             StorageError::RedbCommit(error)
         })?;
+        #[cfg(test)]
+        ack_tests::count(|work| work.commit_successes += 1);
         self.derived_dirty
             .store(!self.pending_effects()?.is_empty(), Ordering::SeqCst);
         Ok(())
