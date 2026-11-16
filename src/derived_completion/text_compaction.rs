@@ -6,21 +6,53 @@ impl DerivedCompletion {
         &self,
         parent: Option<&WorkTicket>,
     ) -> Result<crate::storage::CompactionResult, StorageError> {
+        self.compact_text_with_work_bounded(parent, None).await
+    }
+
+    pub(crate) async fn compact_text_with_work_bounded(
+        &self,
+        parent: Option<&WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<crate::storage::CompactionResult, StorageError> {
         let work = self.accept_work(parent)?;
         let result = self
-            .compact_text_accepted(
+            .compact_text_accepted_bounded(
                 &work,
+                admission,
                 #[cfg(test)]
                 None,
             )
             .await;
-        self.finish_known_work(work);
+        if let (Some(admission), Err(error)) = (admission, &result) {
+            admission.fail(error);
+        }
+        if !admission.is_some_and(crate::storage::maintenance::ReceiptAdmission::unknown) {
+            self.finish_known_work(work);
+        }
         result
     }
 
     async fn compact_text_accepted(
         &self,
         work: &WorkTicket,
+        #[cfg(test)] worker_pause: Option<(
+            tokio::sync::oneshot::Sender<()>,
+            std::sync::mpsc::Receiver<()>,
+        )>,
+    ) -> Result<crate::storage::CompactionResult, StorageError> {
+        self.compact_text_accepted_bounded(
+            work,
+            None,
+            #[cfg(test)]
+            worker_pause,
+        )
+        .await
+    }
+
+    async fn compact_text_accepted_bounded(
+        &self,
+        work: &WorkTicket,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
         #[cfg(test)] worker_pause: Option<(
             tokio::sync::oneshot::Sender<()>,
             std::sync::mpsc::Receiver<()>,
@@ -35,11 +67,12 @@ impl DerivedCompletion {
             let storage = self.storage.read().map_err(|e| failed(e.to_string()))?;
             storage.ensure_available()?;
         }
-        self.complete_with_work(Some(work)).await?;
+        self.complete_with_admission(Some(work), admission).await?;
         let lease = publication_gate(&self.storage).await?.read_owned().await;
         let graph = self.graph.clone().read_owned().await;
         let storage = self.storage.clone();
         let child = work.child()?;
+        let worker_admission = admission.cloned();
         let result = tokio::task::spawn_blocking(move || {
             // Cancellation of the async waiter cannot release a queued worker's
             // publication lease. Lock order remains graph -> storage.
@@ -53,13 +86,28 @@ impl DerivedCompletion {
                     .unwrap();
             }
             let mut storage = storage.write().map_err(|e| failed(e.to_string()))?;
-            let result = storage.compact_text_log_with_work(Some(&child));
+            let result =
+                storage.compact_text_log_with_work_bounded(Some(&child), worker_admission.as_ref());
             storage.meta_store().finish_work(child);
             result
         })
         .await
-        .map_err(|e| failed(format!("text compaction worker outcome unknown: {e}")))??;
-        self.complete_with_work(Some(work))
+        .map_err(|e| {
+            if admission.is_some() {
+                StorageError::WorkerOutcomeUnknown(e.to_string())
+            } else {
+                failed(format!("text compaction worker outcome unknown: {e}"))
+            }
+        })??;
+        if let Some(admission) = admission {
+            admission.record(&result.receipt).map_err(|source| {
+                StorageError::CommittedMutation {
+                    receipt: Box::new(result.receipt.clone()),
+                    source: Box::new(source),
+                }
+            })?;
+        }
+        self.complete_with_admission(Some(work), admission)
             .await
             .map_err(|source| StorageError::CommittedMutation {
                 receipt: Box::new(result.receipt.clone()),

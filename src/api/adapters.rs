@@ -1437,6 +1437,16 @@ impl FsrsEngineAdapter {
         as_of_millis: Option<i64>,
         original_contract_version: u32,
     ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
+        self.trigger_sweep_with_origin_bounded(as_of_millis, original_contract_version, None)
+            .await
+    }
+
+    pub(crate) async fn trigger_sweep_with_origin_bounded(
+        &self,
+        as_of_millis: Option<i64>,
+        original_contract_version: u32,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
         use crate::decay::sweep::{DecaySweepRunner, SweepConfig};
         use crate::graph::ActivationConfig;
 
@@ -1469,7 +1479,7 @@ impl FsrsEngineAdapter {
         let sweep_config = SweepConfig::default();
         let activation_config = ActivationConfig::default();
 
-        let result = DecaySweepRunner::execute_sweep_with_origin_work(
+        let result = DecaySweepRunner::execute_sweep_with_origin_work_bounded(
             &sweep_config,
             &policy.global,
             &activation_config,
@@ -1481,9 +1491,20 @@ impl FsrsEngineAdapter {
             None,
             self.completion.as_ref(),
             original_contract_version,
+            admission,
         )
         .await;
 
+        if let Some(admission) = admission {
+            if !admission.stopped() && result.publication_error.is_some() {
+                admission.fail(&crate::storage::StorageError::MaintenanceDependencyUnavailable);
+            }
+            if let Some(failure) =
+                crate::decay::sweep::evidence::SweepFailure::from_admission(admission)
+            {
+                return Err(Box::new(failure));
+            }
+        }
         // Do not let a subsequent unavailable-handle error hide the original
         // canonical receipt or uncertain operation identity.
         if let Some((receipt, message)) = &result.failed_commit {
@@ -1695,7 +1716,11 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         &self,
         as_of_millis: Option<i64>,
     ) -> Result<crate::decay::SweepResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.trigger_sweep_with_origin(as_of_millis, 1).await
+        let admission = crate::storage::maintenance::ReceiptAdmission::new(
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )?;
+        self.trigger_sweep_with_origin_bounded(as_of_millis, 1, Some(&admission))
+            .await
     }
 }
 

@@ -313,6 +313,49 @@ pub(crate) fn validate_existing(
 }
 
 impl MetadataStore {
+    /// Caller owns the engine/publication guard. Never scan lifetime history on
+    /// this healthy-handle path, or adopt foreign pending work into a sweep.
+    pub(crate) fn check_receipt_admission(
+        &self,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<(), StorageError> {
+        if admission.is_none() {
+            return Ok(());
+        }
+        self.pending_effects_admitted(&self.db.begin_read()?, admission)
+            .map(|_| ())
+    }
+
+    fn pending_effects_admitted(
+        &self,
+        read: &redb::ReadTransaction,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<Vec<PendingEffects>, StorageError> {
+        let Some(admission) = admission else {
+            return validate_existing(read);
+        };
+        self.ensure_handle_available()?;
+        if self.purge_pending.load(Ordering::SeqCst) {
+            return Err(StorageError::MaintenanceDependencyUnavailable);
+        }
+        // Reject foreign IDs before decoding/allocating their outbox payload.
+        // Strict open already established this owner's initialized schema.
+        for row in read.open_table(EFFECTS)?.iter()? {
+            let (key, _) = row?;
+            if !admission.permits_operation(key.value()) {
+                return Err(StorageError::MaintenanceDependencyUnavailable);
+            }
+        }
+        let pending = validate_existing(read)?;
+        for effect in &pending {
+            if !effect.canonical_applied {
+                return Err(StorageError::MaintenanceDependencyUnavailable);
+            }
+            admission.check_receipt(&effect.receipt)?;
+        }
+        Ok(pending)
+    }
+
     pub(crate) fn effects_stamp(&self) -> Result<u64, StorageError> {
         let before = self.effects_epoch.load(Ordering::SeqCst);
         self.ensure_available()?;
@@ -372,6 +415,15 @@ impl MetadataStore {
         rebuilt: control::GenerationRef,
         parent: Option<&WorkTicket>,
     ) -> Result<(), StorageError> {
+        self.acknowledge_rebuilt_effects_at_bounded(rebuilt, parent, None)
+    }
+
+    pub(crate) fn acknowledge_rebuilt_effects_at_bounded(
+        &self,
+        rebuilt: control::GenerationRef,
+        parent: Option<&WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<(), StorageError> {
         #[cfg(test)]
         let _probe = ack_tests::Probe::start(self);
         let guard = if self.native_lifecycle_only {
@@ -393,7 +445,7 @@ impl MetadataStore {
                 "effects acknowledgement requires current rebuilt views".into(),
             ));
         }
-        let pending = validate_existing(&read)?;
+        let pending = self.pending_effects_admitted(&read, admission)?;
         if pending.iter().any(|effect| !effect.canonical_applied) {
             return Err(StorageError::RecoveryRequired(
                 "canonical effects pending".into(),
@@ -403,7 +455,7 @@ impl MetadataStore {
         if let Some(hook) = self.ack_test_hook.lock().unwrap().take() {
             hook(self);
         }
-        if pending.is_empty() {
+        if pending.is_empty() && admission.is_none() {
             self.derived_dirty.store(false, Ordering::SeqCst);
             return Ok(());
         }
@@ -413,7 +465,10 @@ impl MetadataStore {
             let value = table
                 .get("state")?
                 .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?;
-            if ControlState::decode(value.value())?.generation_ref() != rebuilt {
+            if ControlState::decode(value.value())?.generation_ref() != rebuilt
+                || (admission.is_some()
+                    && !self.view_publication.state(rebuilt).matches_canonical())
+            {
                 return Err(StorageError::RecoveryRequired(
                     "canonical generation changed during effects acknowledgement".into(),
                 ));
@@ -444,6 +499,13 @@ impl MetadataStore {
                     "unvalidated effects remain during acknowledgement".into(),
                 ));
             }
+        }
+        if pending.is_empty() {
+            // Bounded empty ACK also checked the fresh transaction for same-G
+            // additions after the read snapshot. No empty write is committed.
+            drop(tx);
+            self.derived_dirty.store(false, Ordering::SeqCst);
+            return Ok(());
         }
         crash_point("before_rebuilt_effects_ack_commit");
         #[cfg(test)]
@@ -512,7 +574,33 @@ impl MetadataStore {
         release_vectors: bool,
         original_contract_version: u32,
     ) -> Result<EffectResult, StorageError> {
+        self.commit_graph_effects_with_origin_bounded(
+            _guard,
+            namespace,
+            existing_edges,
+            puts,
+            incident_ids,
+            delete_records,
+            release_vectors,
+            original_contract_version,
+            None,
+        )
+    }
+
+    pub(crate) fn commit_graph_effects_with_origin_bounded(
+        &self,
+        _guard: &MutationGuard<'_>,
+        namespace: NamespaceId,
+        existing_edges: &[PersistedEdge],
+        puts: &[PersistedEdge],
+        incident_ids: &[MemoryId],
+        delete_records: bool,
+        release_vectors: bool,
+        original_contract_version: u32,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<EffectResult, StorageError> {
         _guard.check(self)?;
+        self.check_receipt_admission(admission)?;
         self.ensure_available()?;
         let mut ctx = MutationContext::unkeyed(namespace);
         ctx.contract_version = original_contract_version;
@@ -520,7 +608,7 @@ impl MetadataStore {
         let tx = self.db.begin_write()?;
         let request = control::encode(&(puts, incident_ids, delete_records, release_vectors))?;
         let hash = control::request_hash(&ctx, "graph_effects", &[&request]);
-        self.finish_record_effects(
+        self.finish_record_effects_bounded(
             _guard,
             tx,
             &ctx,
@@ -532,6 +620,9 @@ impl MetadataStore {
             release_vectors,
             RecordMutation::GraphOnly,
             None,
+            admission
+                .map(crate::storage::maintenance::ReceiptAdmission::limit)
+                .transpose()?,
         )
     }
 
@@ -550,6 +641,37 @@ impl MetadataStore {
         release_vectors: bool,
         mut mutation: RecordMutation<'_>,
         child: Option<&crate::storage::batch::BatchChild>,
+    ) -> Result<EffectResult, StorageError> {
+        self.finish_record_effects_bounded(
+            _guard,
+            tx,
+            ctx,
+            hash,
+            existing_edges,
+            puts,
+            incident_ids,
+            delete_records,
+            release_vectors,
+            mutation,
+            child,
+            None,
+        )
+    }
+
+    pub(super) fn finish_record_effects_bounded(
+        &self,
+        _guard: &MutationGuard<'_>,
+        tx: redb::WriteTransaction,
+        ctx: &MutationContext,
+        hash: [u8; 32],
+        existing_edges: &[PersistedEdge],
+        puts: &[PersistedEdge],
+        incident_ids: &[MemoryId],
+        delete_records: bool,
+        release_vectors: bool,
+        mut mutation: RecordMutation<'_>,
+        child: Option<&crate::storage::batch::BatchChild>,
+        limit: Option<crate::storage::maintenance::ReceiptSizeLimit>,
     ) -> Result<EffectResult, StorageError> {
         _guard.check(self)?;
         let MutationScope::Namespace(namespace) = ctx.scope else {
@@ -1044,6 +1166,9 @@ impl MetadataStore {
             return Err(StorageError::InvalidMutation(
                 "injected precommit abandonment".into(),
             ));
+        }
+        if let Some(limit) = limit {
+            limit.check(&receipt)?;
         }
         let certification = self.prepare_vector_validation_commit(&tx, &receipt)?;
         crash_point("before_metadata_commit");

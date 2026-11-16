@@ -311,7 +311,15 @@ async fn probe(nth: usize, known: bool) {
         assert_eq!(reply["error"], "INDEX_NOT_READY");
         assert_eq!(reply["commitState"], "committed");
         assert_eq!(reply["ready"], false);
-        assert_eq!(reply["receipt"], serde_json::to_value(&new[0]).unwrap());
+        // Intentional failure-wire change: typed f32 JSON, not the old
+        // json!(receipt) Value promotion. Historical bytes remain untouched.
+        let expected: Value =
+            serde_json::from_slice(&serde_json::to_vec(&new[0]).unwrap()).unwrap();
+        assert_eq!(reply["receipt"], expected);
+        assert_eq!(
+            serde_json::from_value::<WriteReceipt>(reply["receipt"].clone()).unwrap(),
+            new[0]
+        );
     } else {
         assert_eq!(
             reply["commitState"], "unknown",
@@ -321,7 +329,7 @@ async fn probe(nth: usize, known: bool) {
         assert_eq!(reply["ready"], false);
         assert_eq!(
             reply["receipts"],
-            serde_json::to_value(&new[..nth - 1]).unwrap(),
+            serde_json::from_slice::<Value>(&serde_json::to_vec(&new[..nth - 1]).unwrap()).unwrap(),
             "only prior known receipts; never synthesize current receipt"
         );
         assert!(reply.get("receipt").is_none_or(Value::is_null));

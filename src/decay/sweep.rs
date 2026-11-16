@@ -35,9 +35,10 @@ use crate::cache::CacheManager;
 use crate::graph::SharedGraph;
 use crate::graph::activation::{ActivationConfig, connection_bonus};
 use crate::model::{DecayPhase, MemoryId};
-use crate::storage::maintenance::{DecayMutationResult, DecaySkip};
+use crate::storage::maintenance::{DecayMutationResult, DecaySkip, ReceiptAdmission};
 use crate::storage::{RedbStorageEngine, StorageEngine as _};
 
+pub(crate) mod evidence;
 mod native;
 
 // ── Decay Metadata ──────────────────────────────────────────────────
@@ -749,6 +750,37 @@ impl DecaySweepRunner {
         completion: Option<&crate::derived_completion::DerivedCompletion>,
         original_contract_version: u32,
     ) -> SweepResult {
+        Self::execute_sweep_with_origin_work_bounded(
+            config,
+            decay_config,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            global_decay_multiplier,
+            as_of_millis,
+            parent,
+            completion,
+            original_contract_version,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_sweep_with_origin_work_bounded(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        parent: Option<&WorkTicket>,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+        original_contract_version: u32,
+        admission: Option<&ReceiptAdmission>,
+    ) -> SweepResult {
         if !matches!(original_contract_version, 1 | 2) {
             return SweepResult {
                 publication_error: Some("unsupported original application contract".into()),
@@ -764,6 +796,25 @@ impl DecaySweepRunner {
                 };
             }
         };
+        if let Some(admission) = admission {
+            let initial = match completion {
+                Some(completion) => {
+                    completion
+                        .complete_with_admission(Some(&work), Some(admission))
+                        .await
+                }
+                None => Err(crate::storage::StorageError::MaintenanceDependencyUnavailable),
+            };
+            if let Err(error) = initial {
+                admission.fail(&error);
+                let mut result = SweepResult::default();
+                result.retain_publication_failure(&error);
+                if !admission.unknown() {
+                    finish_work(storage, work);
+                }
+                return result;
+            }
+        }
         let native = storage
             .read()
             .map(|s| s.meta_store().uses_native_lifecycle())
@@ -779,11 +830,12 @@ impl DecaySweepRunner {
                     &work,
                     completion,
                     original_contract_version,
+                    admission,
                 )
                 .await
             }
             Ok(false) => {
-                Self::execute_sweep_accepted(
+                Self::execute_sweep_accepted_bounded(
                     config,
                     decay_config,
                     activation_config,
@@ -795,6 +847,7 @@ impl DecaySweepRunner {
                     &work,
                     completion,
                     original_contract_version,
+                    admission,
                 )
                 .await
             }
@@ -805,8 +858,17 @@ impl DecaySweepRunner {
         };
         // Keep the original canonical failure identity; completion may only add
         // publication evidence, never replace a failed receipt or unknown ID.
-        if let Some(completion) = completion {
-            if let Err(error) = completion.complete_with_work(Some(&work)).await {
+        if admission.is_some_and(ReceiptAdmission::stopped) {
+            // No additional completion, canonical purge work or fresh mutation
+            // after an unknown/budget/dependency/publication stop.
+        } else if let Some(completion) = completion {
+            if let Err(error) = completion
+                .complete_with_admission(Some(&work), admission)
+                .await
+            {
+                if let Some(admission) = admission {
+                    admission.fail(&error);
+                }
                 result.retain_publication_failure(&error);
             }
         } else if storage
@@ -820,7 +882,8 @@ impl DecaySweepRunner {
         // block capture and can be retried by completion on this owner. Do not
         // strand an abandoned ticket for recoverable outbox work. Unknown
         // commits and unavailable handles retain unresolved work instead.
-        if result.uncertain_operation.is_none() {
+        if result.uncertain_operation.is_none() && !admission.is_some_and(ReceiptAdmission::unknown)
+        {
             finish_work(storage, work);
         }
         result
@@ -839,6 +902,37 @@ impl DecaySweepRunner {
         completion: Option<&crate::derived_completion::DerivedCompletion>,
         original_contract_version: u32,
     ) -> SweepResult {
+        Self::execute_sweep_accepted_bounded(
+            config,
+            decay_config,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            global_decay_multiplier,
+            as_of_millis,
+            work,
+            completion,
+            original_contract_version,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_sweep_accepted_bounded(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        work: &WorkTicket,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+        original_contract_version: u32,
+        admission: Option<&ReceiptAdmission>,
+    ) -> SweepResult {
         let start = Instant::now();
         let now_millis = as_of_millis
             .unwrap_or_else(|| crate::time::Clock::now_millis(&crate::time::SystemClock));
@@ -846,7 +940,7 @@ impl DecaySweepRunner {
         let mut result = SweepResult::default();
 
         // -- Phase 3: Ghost -> Deletable --------------------------
-        Self::sweep_phase(
+        Self::sweep_phase_bounded(
             DecayPhase::Ghost,
             config,
             &engine,
@@ -859,11 +953,12 @@ impl DecaySweepRunner {
             &mut result,
             work,
             original_contract_version,
+            admission,
         )
         .await;
 
         // -- Phase 2: Summary -> Ghost ----------------------------
-        Self::sweep_phase(
+        Self::sweep_phase_bounded(
             DecayPhase::Summary,
             config,
             &engine,
@@ -876,11 +971,12 @@ impl DecaySweepRunner {
             &mut result,
             work,
             original_contract_version,
+            admission,
         )
         .await;
 
         // -- Phase 1: Full -> Summary -----------------------------
-        Self::sweep_phase(
+        Self::sweep_phase_bounded(
             DecayPhase::Full,
             config,
             &engine,
@@ -893,6 +989,7 @@ impl DecaySweepRunner {
             &mut result,
             work,
             original_contract_version,
+            admission,
         )
         .await;
 
@@ -903,9 +1000,13 @@ impl DecaySweepRunner {
         //   - Ghost -> Deleted transitions (all text removed)
         // If neither occurred, there is no new fragmentation to compact
         // and we skip the expensive write-lock + I/O entirely.
-        if result.deletions > 0 || result.full_to_summary > 0 {
+        if !admission.is_some_and(ReceiptAdmission::stopped)
+            && (result.deletions > 0 || result.full_to_summary > 0)
+        {
             let compaction_result = if let Some(completion) = completion {
-                completion.compact_text_with_work(Some(work)).await
+                completion
+                    .compact_text_with_work_bounded(Some(work), admission)
+                    .await
             } else {
                 let storage_clone = Arc::clone(storage);
                 let worker = work.child().expect("live sweep ticket");
@@ -931,6 +1032,9 @@ impl DecaySweepRunner {
                     result.compaction_cleanup_pending = result_compaction.cleanup_pending;
                 }
                 Err(e) => {
+                    if let Some(admission) = admission {
+                        admission.fail(&e);
+                    }
                     result.retain_publication_failure(&e);
                     error!(error = %e, "fulltext.dat compaction failed");
                 }
@@ -938,7 +1042,7 @@ impl DecaySweepRunner {
         }
 
         // -- Persist updated phase bitmaps ------------------------
-        {
+        if !admission.is_some_and(ReceiptAdmission::stopped) {
             let storage_clone = Arc::clone(storage);
             let worker = work.child().expect("live sweep ticket");
             let persist_result = tokio::task::spawn_blocking(move || {
@@ -957,10 +1061,18 @@ impl DecaySweepRunner {
             .await;
             match persist_result {
                 Ok(Err(e)) => {
+                    if let Some(admission) = admission {
+                        admission.fail(&e);
+                    }
                     result.retain_publication_failure(&e);
                     error!(error = %e, "failed to persist phase bitmap index");
                 }
                 Err(e) => {
+                    if let Some(admission) = admission {
+                        admission.fail(&crate::storage::StorageError::WorkerOutcomeUnknown(
+                            e.to_string(),
+                        ));
+                    }
                     result.publication_error = Some(e.to_string());
                     error!(error = %e, "phase index persist task panicked");
                 }
@@ -998,6 +1110,42 @@ impl DecaySweepRunner {
         work: &WorkTicket,
         original_contract_version: u32,
     ) {
+        Self::sweep_phase_bounded(
+            phase,
+            config,
+            engine,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            now_millis,
+            global_decay_multiplier,
+            result,
+            work,
+            original_contract_version,
+            None,
+        )
+        .await
+    }
+
+    async fn sweep_phase_bounded(
+        phase: DecayPhase,
+        config: &SweepConfig,
+        engine: &FsrsEngine<'_>,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        now_millis: i64,
+        global_decay_multiplier: f64,
+        result: &mut SweepResult,
+        work: &WorkTicket,
+        original_contract_version: u32,
+        admission: Option<&ReceiptAdmission>,
+    ) {
+        if admission.is_some_and(ReceiptAdmission::stopped) {
+            return;
+        }
         // Get all memory IDs in this phase from the PhaseIndex.
         let memory_ids = Self::load_phase_ids(phase, storage).await;
         let memory_ids = match memory_ids {
@@ -1041,6 +1189,9 @@ impl DecaySweepRunner {
             }
 
             for (i, memory_id) in chunk.iter().enumerate() {
+                if admission.is_some_and(ReceiptAdmission::stopped) {
+                    return;
+                }
                 // Cooperative yielding: give query tasks a chance to run.
                 // Track total count across chunks for yield cadence.
                 let global_idx = result.memories_scanned as usize;
@@ -1083,7 +1234,7 @@ impl DecaySweepRunner {
                     .last()
                     .is_some_and(|t| t.memory_id == *memory_id);
                 if let Some(evaluation) = retrievability.filter(|_| !has_transition) {
-                    Self::update_record_state_with_work(
+                    Self::update_record_state_with_work_bounded(
                         *memory_id,
                         phase,
                         &evaluation,
@@ -1093,13 +1244,14 @@ impl DecaySweepRunner {
                         result,
                         Some(work),
                         original_contract_version,
+                        admission,
                     )
                     .await;
                 }
 
                 // Flush write batch if full.
                 if pending_transitions.len() >= config.write_batch_size {
-                    Self::flush_transitions(
+                    Self::flush_transitions_bounded(
                         &pending_transitions,
                         storage,
                         graph,
@@ -1107,6 +1259,7 @@ impl DecaySweepRunner {
                         result,
                         work,
                         original_contract_version,
+                        admission,
                     )
                     .await;
                     pending_transitions.clear();
@@ -1118,7 +1271,7 @@ impl DecaySweepRunner {
 
         // Flush remaining transitions.
         if !pending_transitions.is_empty() {
-            Self::flush_transitions(
+            Self::flush_transitions_bounded(
                 &pending_transitions,
                 storage,
                 graph,
@@ -1126,6 +1279,7 @@ impl DecaySweepRunner {
                 result,
                 work,
                 original_contract_version,
+                admission,
             )
             .await;
         }
@@ -1405,6 +1559,33 @@ impl DecaySweepRunner {
         parent: Option<&WorkTicket>,
         original_contract_version: u32,
     ) {
+        Self::update_record_state_with_work_bounded(
+            memory_id,
+            phase,
+            evaluation,
+            meta,
+            storage,
+            graph,
+            result,
+            parent,
+            original_contract_version,
+            None,
+        )
+        .await
+    }
+
+    async fn update_record_state_with_work_bounded(
+        memory_id: MemoryId,
+        phase: DecayPhase,
+        evaluation: &SweepEvaluation,
+        meta: &DecayMetadata,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        result: &mut SweepResult,
+        parent: Option<&WorkTicket>,
+        original_contract_version: u32,
+        admission: Option<&ReceiptAdmission>,
+    ) {
         let work = match accept_work(storage, parent) {
             Ok(work) => work,
             Err(error) => {
@@ -1420,6 +1601,7 @@ impl DecaySweepRunner {
         let evaluation = evaluation.clone();
         // Always graph -> storage: never await a graph lock holding a storage lock.
         let mut graph = Arc::clone(graph).write_owned().await;
+        let worker_admission = admission.cloned();
         let outcome = tokio::task::spawn_blocking(move || {
             let outcome = (|| {
                 let storage = storage
@@ -1441,7 +1623,7 @@ impl DecaySweepRunner {
                 let raw_r = projection.strength;
                 let effective_r = projection.decay_strength;
                 let outcome = storage
-                    .apply_legacy_decay_with_work(
+                    .apply_legacy_decay_with_work_bounded(
                         &crate::storage::control::MutationContext {
                             contract_version: original_contract_version,
                             ..crate::storage::control::MutationContext::unkeyed(
@@ -1455,8 +1637,19 @@ impl DecaySweepRunner {
                         raw_r,
                         effective_r,
                         Some(&worker),
+                        worker_admission.as_ref(),
                     )
                     .map_err(SweepError::Mutation)?;
+                if let (Some(admission), DecayMutationResult::Committed(receipt)) =
+                    (worker_admission.as_ref(), &outcome)
+                {
+                    admission.record(receipt).map_err(|source| {
+                        SweepError::Mutation(crate::storage::StorageError::CommittedMutation {
+                            receipt: Box::new(receipt.clone()),
+                            source: Box::new(source),
+                        })
+                    })?;
+                }
                 if matches!(
                     outcome,
                     DecayMutationResult::Skipped(DecaySkip::Stale | DecaySkip::Exempt)
@@ -1481,10 +1674,20 @@ impl DecaySweepRunner {
                 None
             }
             Ok(Err(e)) => {
+                if let (Some(admission), SweepError::Mutation(error)) = (admission, &e) {
+                    admission.fail(error);
+                }
                 result.retain_mutation_failure(&e);
                 Some(e.to_string())
             }
-            Err(e) => Some(e.to_string()),
+            Err(e) => {
+                if let Some(admission) = admission {
+                    admission.fail(&crate::storage::StorageError::WorkerOutcomeUnknown(
+                        e.to_string(),
+                    ));
+                }
+                Some(e.to_string())
+            }
         };
         if let Some(error) = error {
             result.errors.push(SweepRecordError {
@@ -1493,7 +1696,9 @@ impl DecaySweepRunner {
                 error,
             });
         }
-        finish_work(&root_storage, work);
+        if !admission.is_some_and(ReceiptAdmission::unknown) {
+            finish_work(&root_storage, work);
+        }
     }
 
     /// Calculate the connection bonus for a memory based on spreading
@@ -1526,13 +1731,40 @@ impl DecaySweepRunner {
         work: &WorkTicket,
         original_contract_version: u32,
     ) {
+        Self::flush_transitions_bounded(
+            transitions,
+            storage,
+            graph,
+            cache,
+            result,
+            work,
+            original_contract_version,
+            None,
+        )
+        .await
+    }
+
+    async fn flush_transitions_bounded(
+        transitions: &[PendingTransition],
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        result: &mut SweepResult,
+        work: &WorkTicket,
+        original_contract_version: u32,
+        admission: Option<&ReceiptAdmission>,
+    ) {
         for t in transitions {
-            let outcome = Self::apply_transition_with_work(
+            if admission.is_some_and(ReceiptAdmission::stopped) {
+                break;
+            }
+            let outcome = Self::apply_transition_with_work_bounded(
                 t.clone(),
                 storage,
                 graph,
                 Some(work),
                 original_contract_version,
+                admission,
             )
             .await;
             // Even a partial storage failure may have changed the canonical phase.
@@ -1554,6 +1786,9 @@ impl DecaySweepRunner {
                     result.transitions.push(transition);
                 }
                 Err(e) => {
+                    if let (Some(admission), SweepError::Mutation(error)) = (admission, &e) {
+                        admission.fail(error);
+                    }
                     result.retain_mutation_failure(&e);
                     result.errors.push(SweepRecordError {
                         memory_id: t.memory_id,
@@ -1584,6 +1819,25 @@ impl DecaySweepRunner {
         parent: Option<&WorkTicket>,
         original_contract_version: u32,
     ) -> Result<Option<PhaseTransition>, SweepError> {
+        Self::apply_transition_with_work_bounded(
+            t,
+            storage,
+            graph,
+            parent,
+            original_contract_version,
+            None,
+        )
+        .await
+    }
+
+    async fn apply_transition_with_work_bounded(
+        t: PendingTransition,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        parent: Option<&WorkTicket>,
+        original_contract_version: u32,
+        admission: Option<&ReceiptAdmission>,
+    ) -> Result<Option<PhaseTransition>, SweepError> {
         let work = accept_work(storage, parent).map_err(SweepError::Mutation)?;
         let worker = work
             .child()
@@ -1592,6 +1846,7 @@ impl DecaySweepRunner {
 
         let storage = Arc::clone(storage);
         let mut graph = Arc::clone(graph).write_owned().await;
+        let worker_admission = admission.cloned();
         let outcome = tokio::task::spawn_blocking(move || {
             let outcome = (|| {
                 let mut storage = storage
@@ -1665,17 +1920,28 @@ impl DecaySweepRunner {
                                 })
                             })
                             .collect::<Result<Vec<_>, SweepError>>()?;
-                        let Some(_) = storage
-                            .delete_memory_with_edges_with_origin_work(
+                        let Some(effect) = storage
+                            .delete_memory_with_edges_with_origin_work_bounded(
                                 t.memory_id,
                                 &bridges,
                                 Some(&worker),
                                 original_contract_version,
+                                worker_admission.as_ref(),
                             )
                             .map_err(map_error)?
                         else {
                             return Ok(None);
                         };
+                        if let Some(admission) = worker_admission.as_ref() {
+                            admission.record(&effect.receipt).map_err(|source| {
+                                SweepError::Mutation(
+                                    crate::storage::StorageError::CommittedMutation {
+                                        receipt: Box::new(effect.receipt.clone()),
+                                        source: Box::new(source),
+                                    },
+                                )
+                            })?;
+                        }
                         *graph = planned;
                         // Derived invalidations remain pending until complete publication.
                         return Ok(Some(PhaseTransition::Deleted {
@@ -1692,7 +1958,7 @@ impl DecaySweepRunner {
                     ));
                 }
                 let outcome = storage
-                    .apply_legacy_decay_with_work(
+                    .apply_legacy_decay_with_work_bounded(
                         &crate::storage::control::MutationContext {
                             contract_version: original_contract_version,
                             ..crate::storage::control::MutationContext::unkeyed(
@@ -1706,10 +1972,19 @@ impl DecaySweepRunner {
                         projection.strength,
                         projection.decay_strength,
                         Some(&worker),
+                        worker_admission.as_ref(),
                     )
                     .map_err(map_error)?;
-                if !matches!(outcome, DecayMutationResult::Committed(_)) {
+                let DecayMutationResult::Committed(receipt) = outcome else {
                     return Ok(None);
+                };
+                if let Some(admission) = worker_admission.as_ref() {
+                    admission.record(&receipt).map_err(|source| {
+                        SweepError::Mutation(crate::storage::StorageError::CommittedMutation {
+                            receipt: Box::new(receipt.clone()),
+                            source: Box::new(source),
+                        })
+                    })?;
                 }
                 // Publish only after the atomic metadata phase/content commit.
                 let _ = graph.update_node_state(t.memory_id, new_phase, projection.decay_strength);
@@ -1734,7 +2009,15 @@ impl DecaySweepRunner {
             outcome
         })
         .await
-        .map_err(|e| SweepError::Storage(format!("transition task panicked: {e}")))?;
+        .map_err(|e| {
+            if admission.is_some() {
+                SweepError::Mutation(crate::storage::StorageError::WorkerOutcomeUnknown(
+                    e.to_string(),
+                ))
+            } else {
+                SweepError::Storage(format!("transition task panicked: {e}"))
+            }
+        })?;
         finish_work(&root_storage, work);
         outcome
     }

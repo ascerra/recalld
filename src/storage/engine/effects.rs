@@ -71,16 +71,34 @@ impl RedbStorageEngine {
         parent: Option<&crate::storage::work::WorkTicket>,
         original_contract_version: u32,
     ) -> Result<Option<EffectResult>, StorageError> {
+        self.delete_memory_with_edges_with_origin_work_bounded(
+            id,
+            bridges,
+            parent,
+            original_contract_version,
+            None,
+        )
+    }
+
+    pub(crate) fn delete_memory_with_edges_with_origin_work_bounded(
+        &mut self,
+        id: MemoryId,
+        bridges: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<Option<EffectResult>, StorageError> {
         if !matches!(original_contract_version, 1 | 2) {
             return Err(StorageError::InvalidMutationContext(
                 "unsupported original application contract".into(),
             ));
         }
+        self.meta_store.check_receipt_admission(admission)?;
         let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let Some(record) = self.meta_store.get(id)? else {
             return Ok(None);
         };
-        let result = self.meta_store.commit_graph_effects_with_origin(
+        let result = self.meta_store.commit_graph_effects_with_origin_bounded(
             &guard,
             NamespaceId::new(record.namespace_id),
             &self.edge_store.load_all_edges()?,
@@ -89,6 +107,7 @@ impl RedbStorageEngine {
             true,
             true,
             original_contract_version,
+            admission,
         )?;
         apply_pending(
             &self.meta_store,

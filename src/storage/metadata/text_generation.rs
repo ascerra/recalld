@@ -218,8 +218,30 @@ impl MetadataStore {
         proof: Option<&crate::storage::native_text::NativeTextRelocation>,
         text_hashes: &std::collections::BTreeMap<MemoryId, [u8; 32]>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.select_text_generation_proved_guarded_bounded(
+            guard,
+            expected,
+            descriptor,
+            refs,
+            proof,
+            text_hashes,
+            None,
+        )
+    }
+
+    pub(crate) fn select_text_generation_proved_guarded_bounded(
+        &self,
+        guard: &MutationGuard<'_>,
+        expected: Generation,
+        descriptor: &TextGeneration,
+        refs: &RefMapping,
+        proof: Option<&crate::storage::native_text::NativeTextRelocation>,
+        text_hashes: &std::collections::BTreeMap<MemoryId, [u8; 32]>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<WriteReceipt, StorageError> {
         use crate::storage::native_text;
         guard.check(self)?;
+        self.check_receipt_admission(admission)?;
         let tx = self.db.begin_write()?;
         let state = control::read_control(&tx)?;
         if (state.control_schema_version == 2) != self.native_lifecycle_only
@@ -407,6 +429,9 @@ impl MetadataStore {
             proof.validate(&receipt)?;
         }
 
+        if let Some(admission) = admission {
+            admission.limit()?.check(&receipt)?;
+        }
         let certification = self.prepare_vector_validation_commit(&tx, &receipt)?;
         let committed = tx.commit();
         // Model an I/O error whose commit actually became durable. Tests must

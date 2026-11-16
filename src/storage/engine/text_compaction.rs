@@ -23,21 +23,31 @@ impl RedbStorageEngine {
         &mut self,
         mut boundary: impl FnMut(Stage) -> Result<(), StorageError>,
     ) -> Result<CompactionResult, StorageError> {
-        self.compact_text_at_with_work(&mut boundary, None)
+        self.compact_text_at_with_work(&mut boundary, None, None)
     }
 
     pub(crate) fn compact_text_log_with_work(
         &mut self,
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<CompactionResult, StorageError> {
-        self.compact_text_at_with_work(|_| Ok(()), parent)
+        self.compact_text_log_with_work_bounded(parent, None)
+    }
+
+    pub(crate) fn compact_text_log_with_work_bounded(
+        &mut self,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<CompactionResult, StorageError> {
+        self.compact_text_at_with_work(|_| Ok(()), parent, admission)
     }
 
     fn compact_text_at_with_work(
         &mut self,
         mut boundary: impl FnMut(Stage) -> Result<(), StorageError>,
         parent: Option<&crate::storage::work::WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
     ) -> Result<CompactionResult, StorageError> {
+        self.meta_store.check_receipt_admission(admission)?;
         self.ensure_available()?;
         // Admission precedes prepared file creation and stays live through the
         // selected handle and cleanup publication, including unknown failures.
@@ -113,14 +123,17 @@ impl RedbStorageEngine {
         } else {
             None
         };
-        let receipt = self.meta_store.select_text_generation_proved_guarded(
-            &guard,
-            state.committed_generation,
-            &descriptor,
-            &new_refs,
-            proof.as_ref(),
-            &text_hashes,
-        )?;
+        let receipt = self
+            .meta_store
+            .select_text_generation_proved_guarded_bounded(
+                &guard,
+                state.committed_generation,
+                &descriptor,
+                &new_refs,
+                proof.as_ref(),
+                &text_hashes,
+                admission,
+            )?;
         boundary(Stage::Selected).map_err(|source| {
             self.mark_unavailable();
             StorageError::CommittedMutation {

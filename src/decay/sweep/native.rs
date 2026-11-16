@@ -15,6 +15,7 @@ impl DecaySweepRunner {
         work: &WorkTicket,
         completion: Option<&crate::derived_completion::DerivedCompletion>,
         original_contract_version: u32,
+        admission: Option<&ReceiptAdmission>,
     ) -> SweepResult {
         let start = Instant::now();
         let mut result = SweepResult::default();
@@ -57,15 +58,24 @@ impl DecaySweepRunner {
         let intents = match captured {
             Ok(Ok(intents)) => intents,
             Ok(Err(error)) => {
+                if let Some(admission) = admission {
+                    admission.fail(&error);
+                }
                 result.retain_publication_failure(&error);
                 return result;
             }
             Err(error) => {
+                if let Some(admission) = admission {
+                    admission.fail(&StorageError::WorkerOutcomeUnknown(error.to_string()));
+                }
                 result.publication_error = Some(error.to_string());
                 return result;
             }
         };
         for (index, intent) in intents.into_iter().enumerate() {
+            if admission.is_some_and(ReceiptAdmission::stopped) {
+                break;
+            }
             result.memories_scanned += 1;
             let id = intent.memory_id;
             let phase = intent.captured_phase;
@@ -80,7 +90,7 @@ impl DecaySweepRunner {
                 contract_version: original_contract_version,
             };
             match completion
-                .apply_native_decay_accepted(ctx, intent, policy.clone(), work)
+                .apply_native_decay_accepted_bounded(ctx, intent, policy.clone(), work, admission)
                 .await
             {
                 Ok(NativeDecayResult::Committed(receipt)) => result.native_commit(&receipt),
@@ -91,6 +101,9 @@ impl DecaySweepRunner {
                     NativeDecaySkip::MissingSummary => result.missing_summary_skipped += 1,
                 },
                 Err(error) => {
+                    if let Some(admission) = admission {
+                        admission.fail(&error);
+                    }
                     if let StorageError::CommittedMutation { receipt, .. } = &error {
                         result.native_commit(receipt);
                     }
@@ -116,13 +129,21 @@ impl DecaySweepRunner {
             && result.publication_error.is_none()
             && (result.deletions > 0 || result.full_to_summary > 0)
         {
-            match completion.compact_text_with_work(Some(work)).await {
+            match completion
+                .compact_text_with_work_bounded(Some(work), admission)
+                .await
+            {
                 Ok(compaction) => {
                     result.compaction_triggered = true;
                     result.compaction_receipt = Some(compaction.receipt);
                     result.compaction_cleanup_pending = compaction.cleanup_pending;
                 }
-                Err(error) => result.retain_publication_failure(&error),
+                Err(error) => {
+                    if let Some(admission) = admission {
+                        admission.fail(&error);
+                    }
+                    result.retain_publication_failure(&error);
+                }
             }
         }
         // Phase-index publication is owned by the canonical writer/completion;
