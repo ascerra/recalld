@@ -590,7 +590,7 @@ async fn strict_query_actual_whole_response_budget_before_false_and_true_observa
     f.storage.write().unwrap().sync().unwrap();
     let before = bytes(&f);
     for record_access in [false, true] {
-        let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"recordAccess":record_access,"limit":4}),"default").unwrap();
+        let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"recordAccess":record_access,"limit":4,"explain":true}),"default").unwrap();
         let reply = engine.query_contract(request).await;
         assert_eq!(reply.http_status, 400, "{reply:?}");
         assert!(reply.envelope.data.is_none());
@@ -603,7 +603,7 @@ async fn strict_query_actual_whole_response_budget_before_false_and_true_observa
         );
         assert_eq!(bytes(&f), before);
     }
-    let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"limit":3}),"default").unwrap();
+    let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"limit":3,"explain":true}),"default").unwrap();
     let reply = engine.query_contract(request).await;
     assert_eq!(reply.http_status, 200, "{reply:?}");
     assert_eq!(reply.observation_receipts.len(), 1);
@@ -822,11 +822,11 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
         serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
         value
     );
-    // Similarity has cosine/current-max evidence, not ranked-query §9 evidence.
-    // Even the default mutating selector must fail before any exposure.
+    // The optional explanation selector is strict: null still fails before
+    // exposure in both modes. Actual true cosine evidence is tested separately.
     for access in [false, true] {
         let mut unsupported = args.clone();
-        unsupported["explain"] = serde_json::json!(true);
+        unsupported["explain"] = serde_json::Value::Null;
         unsupported["recordAccess"] = serde_json::json!(access);
         let result = crate::mcp::tools::prepared_similar(&mcp, &unsupported).await;
         assert_eq!(result.is_error, Some(true));
@@ -840,7 +840,7 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
             true,
             &rejected,
         );
-        assert_eq!(rejected["error"]["code"], "UNSUPPORTED_FEATURE");
+        assert_eq!(rejected["error"]["code"], "INVALID_TYPE");
         assert_eq!(rejected["error"]["field"], "/explain");
         assert!(rejected.get("receipt").is_none());
         unsupported
@@ -886,7 +886,7 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_query_actual_similar_original2_true_preserves_all_namespace_receipts() {
     let f = similar_fixture().await;
-    let request=crate::serialization::query::SimilarRequest::from_mcp(&serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"namespaceScope":"allCompatible","tags":["allow"]})).unwrap();
+    let request=crate::serialization::query::SimilarRequest::from_mcp(&serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"namespaceScope":"allCompatible","tags":["allow"],"explain":true})).unwrap();
     let reply = f.engine.similar_contract(request).await;
     assert_eq!(reply.http_status, 200, "{reply:?}");
     crate::serialization::query_schema::record_fixture(

@@ -36,6 +36,14 @@ rows/passed/first-rejection diagnostics. Preserve unknown nulls, nonadditive
 channels, current/history semantics, final supplemental graph/chain counters and
 returned-only identities. These are source-operation measurements, not physical
 storage scan counts, unique aggregate coverage, full recall or performance proof.
+`coverage.canonicalEligibility` is null if not measured; otherwise its
+`examinedUnit` is `canonicalRecords`, with numeric `examined`/`passed` loop-row
+counts and a sparse `firstRejections` map of the first short-circuit reason.
+Each channel has nullable `examinedUnit`: `vectorEntries`, `entityPostings`,
+`ftsRows`, `scoredVectors`, or `canonicalRecords`. Not-requested channels retain
+null measurements. Metadata participation measures only metadata-only queries;
+shared canonical filtering is reported separately and must not be summed with
+channel counts. Generation identities keep the existing strict decimal strings.
 
 Update strict input/output schemas with the actual fields and selector behavior.
 Full projected output (including explanations, coverage, MCP text + structured
