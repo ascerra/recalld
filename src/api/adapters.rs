@@ -86,6 +86,13 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
+    async fn get_contract(
+        &self,
+        request: crate::serialization::get::GetRequest,
+        response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        self.query_engine.get_contract(request, response_limit).await
+    }
     async fn similar_contract(
         &self,
         request: crate::serialization::query::SimilarRequest,

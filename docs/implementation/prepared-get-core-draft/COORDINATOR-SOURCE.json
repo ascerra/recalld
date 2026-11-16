@@ -1,0 +1,82 @@
+{
+  "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
+  "status": "source only; no execution",
+  "files": [
+    {
+      "path": "src/api/adapters.rs",
+      "sha256": "2672b75e63680233966b3e674c0d8bdc91cb4898bfb63a12a6115319f9b2e5e3"
+    },
+    {
+      "path": "src/api/handlers.rs",
+      "sha256": "29592a0ff571c6471fe206ff7bfea1a95ad511c636ec271a8da2daaf0aa84797"
+    },
+    {
+      "path": "src/api/mod.rs",
+      "sha256": "e939d9c01276d62801ae0fb57d6cc2b95249939132dc29ef783476e2b25f8854"
+    },
+    {
+      "path": "src/api/state.rs",
+      "sha256": "643364ead7cfafdccbfc24940cd42175af807412964462c2684f273775e873a2"
+    },
+    {
+      "path": "src/derived_completion/native_exposure.rs",
+      "sha256": "90088b1e14891f1c174ef7799bc0f80370ecd14bfbd4959cdaf9e03463127257"
+    },
+    {
+      "path": "src/mcp/bridge.rs",
+      "sha256": "da89bb5a06d71994564ab51d4a045c50cd6d23ca43145c007e0ebcf6e7e4d859"
+    },
+    {
+      "path": "src/mcp/bridge_adapters.rs",
+      "sha256": "8d5ae4de467eeb594599381b92882b345eaa0fc25eb8a466f9383a937f9f3730"
+    },
+    {
+      "path": "src/mcp/tools.rs",
+      "sha256": "7dee5910da401923ecc96b051e4a138c9728f248dee04504539901da58060f6d"
+    },
+    {
+      "path": "src/search/adapters.rs",
+      "sha256": "13868be5e93d13a029e6aa21371c4502b3231f0ab4054d4906ddaa26089afcd3"
+    },
+    {
+      "path": "src/search/get_wire.rs",
+      "sha256": "904b288b8db70be013bf815240b2c318708195ae1dd71c697d14ecc2ea00924d"
+    },
+    {
+      "path": "src/search/get_wire_tests.rs",
+      "sha256": "1e8b1a6b11d8f65d3ed4d8f97958010d90c86c184e54f966bcad5ccd7687054e"
+    },
+    {
+      "path": "src/search/pipeline.rs",
+      "sha256": "63a7adfb58452878e27d128623fd0df943b3c74f3526c9453598562d8ecc77d0"
+    },
+    {
+      "path": "src/search/read_view.rs",
+      "sha256": "1987817b0dd550750a92428a56f7bbfb32a18e7425c38292821185abda232530"
+    },
+    {
+      "path": "src/search/strength.rs",
+      "sha256": "2532d8931756715f1f39772e47fc304e868361416b131b417515b23aa20f77d5"
+    },
+    {
+      "path": "src/serialization/get.rs",
+      "sha256": "f08d4c7abf7a34c3526f84b1ad173bb3088fb306f9f6e360dc49cd65a3b7b3ed"
+    },
+    {
+      "path": "src/serialization/mod.rs",
+      "sha256": "08ac8f709eb68d3c483190fd5ecb078bd3d5ca8712d0a23bd601fa2f418f41cf"
+    },
+    {
+      "path": "src/storage/engine/read_payload.rs",
+      "sha256": "fc089afd1d9fc750fb45f2dde37f2b8fd2f857af4ae6d5e6847873a2e69624f9"
+    },
+    {
+      "path": "src/storage/metadata.rs",
+      "sha256": "ef907697248d467c2c27d8c22944e028efb81a157ad93ebd9a15ca936ce5882c"
+    },
+    {
+      "path": "src/storage/metadata/publication.rs",
+      "sha256": "f850843cef2804ea067bf545e2e78e0fe18d4a035918edb51c923abd1a41895f"
+    }
+  ]
+}

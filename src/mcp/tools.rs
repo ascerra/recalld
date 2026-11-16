@@ -808,7 +808,7 @@ fn get_memory_def() -> ToolInfo {
     ToolInfo {
         name: "get_memory".to_string(),
         title: Some("Get Memory".to_string()),
-        description: "Retrieve a specific memory by its ID. This MCP fetch does not record access."
+        description: "Retrieve a specific memory by its ID. Access is recorded by default; set recordAccess to false for a read-only fetch."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -1985,6 +1985,9 @@ pub(crate) async fn dispatch_v2(
         )
         .await;
     }
+    if name == "get_memory" {
+        return prepared_get(bridge.search.as_ref(), &arguments).await;
+    }
     if name == "find_similar_memories"
         && arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
     {
@@ -2053,6 +2056,17 @@ pub(crate) async fn prepared_similar(
     let reply = match crate::serialization::query::SimilarRequest::from_mcp(arguments) {
         Ok(request) => search.similar_contract(request).await,
         Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    reply.mcp()
+}
+
+pub(crate) async fn prepared_get(
+    search: &dyn crate::mcp::bridge::SearchPipeline,
+    arguments: &serde_json::Value,
+) -> ToolCallResult {
+    let reply = match crate::serialization::get::GetRequest::from_mcp(arguments) {
+        Ok(request) => search.get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE).await,
+        Err(error) => crate::serialization::get::GetReply::input(error),
     };
     reply.mcp()
 }

@@ -35,6 +35,8 @@ pub use explanation::{
 mod payload_selection;
 #[path = "query_wire.rs"]
 mod query_wire;
+#[path = "get_wire.rs"]
+mod get_wire;
 #[path = "similar_selection.rs"]
 mod similar_selection;
 pub(crate) use similar_selection::{

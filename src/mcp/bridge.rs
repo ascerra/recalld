@@ -24,6 +24,15 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    async fn get_contract(
+        &self,
+        _request: crate::serialization::get::GetRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        crate::serialization::get::GetReply::failure(crate::search::SearchError::Unavailable(
+            "prepared get requires the actual coherent owner".into(),
+        ))
+    }
     async fn similar_contract(
         &self,
         _request: crate::serialization::query::SimilarRequest,

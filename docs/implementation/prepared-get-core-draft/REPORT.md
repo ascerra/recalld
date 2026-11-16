@@ -1,4 +1,10 @@
-# Prepared get: literal core draft for A1/A3 review
+# Prepared get: source draft, not ready for publication
+
+**Current update:** [COORDINATOR.md](COORDINATOR.md) records the actual coordinator,
+direct consumers and first focused validation plan. The helper-only description
+below is historical at7939d6d; no execution claim is superseded by source work.
+
+## Historical literal helper review
 
 **Uncompiled, untested, not a shipping helper-only PR.** Exact base:
 `19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1`. Worktree
