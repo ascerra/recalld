@@ -20,7 +20,7 @@ fn retained(certified: bool) -> (Fixture, Data, Arc<FixedClock>, Vec<MemoryId>) 
                 id: None,
                 summary: format!("shared graph peer {i}"),
                 full_text: None,
-                tags: vec!["entity/shared".into()],
+                tags: vec![crate::model::Tag::new("entity/shared").unwrap()],
                 initial_stability: None,
                 created_at: Some(2000 + i),
                 embedding: Some(vec![1., 0., 0., 0.]),

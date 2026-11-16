@@ -74,7 +74,7 @@ async fn native_graph_producer_publication_failure_preserves_exact_receipt_then_
     let error = publisher
         .native_graph(
             context.clone(),
-            input.clone(),
+            crate::derived_completion::native_graph::GraphRequest::Explicit(input.clone()),
             NativePolicyInputs::default(),
             clock.clone(),
             None,
