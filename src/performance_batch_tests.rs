@@ -92,6 +92,7 @@ use crate::mcp::bridge::StorageEngine as _;
 use crate::storage::batch::{BatchInput, BatchItemState, BatchKind};
 fn typed_request(fx: &Fixture, items: Vec<serde_json::Value>) -> BatchInput {
     BatchInput {
+        mutation_version: 1,
         result_version: 1,
         kind: BatchKind::Insert,
         items,

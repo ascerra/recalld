@@ -205,6 +205,7 @@ async fn legacy_batch_actual_daemon_socket_frames_include_complete_delivery() {
         id: 1,
         method: "mutate_batch".into(),
         params: serde_json::to_value(crate::storage::batch::BatchInput {
+            mutation_version: 1,
             result_version: 1, kind: crate::storage::batch::BatchKind::Insert,
             default_namespace: "default".into(),
             store_id: Some(fx.storage.read().unwrap().control_state().unwrap().store_id),
