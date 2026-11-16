@@ -60,8 +60,11 @@ impl McpStorageAdapter {
             result
         };
         async move {
+            // Keep the large batch future in one place; only a pinned borrow
+            // crosses the conditional diagnostic wrapper.
+            let mut run = std::pin::pin!(run);
             if legacy_trace {
-                performance::measure("mcp.batch", true, run).await
+                performance::measure("mcp.batch", true, run.as_mut()).await
             } else {
                 run.await
             }
