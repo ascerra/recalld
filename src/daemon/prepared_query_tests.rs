@@ -527,6 +527,83 @@ async fn prepared_remote_whole_budget_and_unnegotiated_alias_precede_exposure() 
     daemon.finish().await;
 }
 
+#[tokio::test]
+async fn prepared_remote_capability_refusal_and_lost_reply_never_fallback_or_replay() {
+    use crate::daemon::protocol::{
+        LEGACY_MAX_MESSAGE_SIZE, read_framed_message, write_framed_message,
+    };
+    use crate::serialization::contract::CommitState;
+    for (capable, limit) in [(false, MAX_MESSAGE_SIZE), (true, LEGACY_MAX_MESSAGE_SIZE)] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("old.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            for _ in 0..2 {
+                let ping = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    ping.method, "ping",
+                    "unsupported peer must receive no query or legacy fallback"
+                );
+                write_framed_message(&mut stream,&DaemonResponse::success(ping.id,
+                    json!({"protocolVersion":2,"maxMessageSize":limit,"preparedQueriesV1":capable})),MAX_MESSAGE_SIZE).await.unwrap();
+            }
+        });
+        let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+        let remote = RemoteSearchAdapter::new(client.clone());
+        let reply = remote.query_contract(query_input(true, "default")).await;
+        assert_eq!(reply.http_status, 503);
+        assert_eq!(
+            reply.envelope.error.unwrap().commit_state,
+            CommitState::NotCommitted
+        );
+        assert!(reply.received_evidence.is_none() && reply.observation_receipts.is_empty());
+        client.ping().await.unwrap();
+        task.await.unwrap();
+    }
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("lost.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let ping = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(ping.method, "ping");
+        write_framed_message(&mut stream,&DaemonResponse::success(ping.id,
+            json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"preparedQueriesV1":true})),MAX_MESSAGE_SIZE).await.unwrap();
+        let sent = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(sent.method, crate::daemon::prepared_query::QUERY);
+        drop(stream);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                .await
+                .is_err(),
+            "no reconnect/replay after query send"
+        );
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+    let reply = RemoteSearchAdapter::new(client.clone())
+        .query_contract(query_input(true, "default"))
+        .await;
+    assert_eq!(reply.http_status, 503);
+    assert_eq!(
+        reply.envelope.error.unwrap().commit_state,
+        CommitState::Unknown
+    );
+    assert!(
+        reply.envelope.receipt.is_none()
+            && reply.received_evidence.is_none()
+            && reply.observation_receipts.is_empty()
+    );
+    assert!(!client.is_connected());
+    task.await.unwrap();
+}
+
 fn search(f: &Fixture) -> Arc<McpSearchAdapter> {
     let provider = Arc::new(crate::embedding::PassthroughProvider::new(4));
     let rif = Arc::new(crate::rif::RifEngine::new(crate::rif::RifConfig {

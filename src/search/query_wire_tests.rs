@@ -11,6 +11,42 @@ async fn prepared_remote_native_query_similar_exact_and_known_publication_failur
     let daemon=PreparedDaemon::start(adapter.clone()).await;
     let remote=crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
     let before=bytes(&f.f);
+    let assert_wire = |name: &str, local: &crate::serialization::query_response::QueryReply,
+                       received: &crate::serialization::query_response::QueryReply| {
+        // Reproduce the actual private emitter exactly once: typed Reply ->
+        // compact Value -> DaemonResponse bytes -> the client's Value parse.
+        // Direct to_value(local) takes a different f32/f64 representation path.
+        let result=crate::daemon::prepared_query::compact_value(&crate::daemon::prepared_query::Reply {
+            wire_version:1,http_status:local.http_status,reply:local,
+        }).unwrap();
+        let frame=serde_json::to_vec(&crate::daemon::DaemonResponse::success(u64::MAX,result)).unwrap();
+        assert!(crate::daemon::prepared_query::admitted_frame(&frame));
+        let expected:serde_json::Value=serde_json::from_slice(&frame).unwrap();
+        if let Some(root)=std::env::var_os("RECALLD_QUERY_SCHEMA_FIXTURES") {
+            let root=std::path::Path::new(&root).parent().unwrap().join("remote-wire");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join(format!("{name}-local-typed.json")),serde_json::to_vec(local).unwrap()).unwrap();
+            std::fs::write(root.join(format!("{name}-expected-private-frame.json")),frame).unwrap();
+            std::fs::write(root.join(format!("{name}-received-projected.json")),serde_json::to_vec(received).unwrap()).unwrap();
+        }
+        assert_eq!(received.http_status,local.http_status,"{name}");
+        assert_eq!(serde_json::to_value(received).unwrap(),expected["result"]["reply"],"{name}");
+        // Independent canonical f32 bits, not a numeric tolerance. The response
+        // already owns all payload fields; this check performs no write.
+        let rows=received.envelope.data.as_ref().unwrap()["results"].as_array().unwrap();
+        let source=f.f.storage.read().unwrap();
+        for row in rows {
+            let id:MemoryId=serde_json::from_value(row["memoryId"].clone()).unwrap();
+            let record=source.get_record(id).unwrap().unwrap();
+            assert_eq!((row["stability"].as_f64().unwrap() as f32).to_bits(),record.stability.to_bits());
+            if let Some(vector)=row.get("embedding") {
+                let stored=source.get_vector(NamespaceId::new(record.namespace_id),record.vector_slot).unwrap().unwrap();
+                let actual:Vec<_>=vector.as_array().unwrap().iter().map(|v|(v.as_f64().unwrap() as f32).to_bits()).collect();
+                assert_eq!(actual,stored.iter().map(|v|v.to_bits()).collect::<Vec<_>>());
+            }
+        }
+
+    };
     for mode in ["metadata_only","fts_only","embedding_only"] {
         let mut args=serde_json::json!({"contractVersion":2,"namespace":"DeFaUlT","queryMode":mode,
             "tags":["allow"],"recordAccess":false,"explain":true,"compact":false,"includeEmbeddings":true});
@@ -24,7 +60,7 @@ async fn prepared_remote_native_query_similar_exact_and_known_publication_failur
         let local=adapter.query_contract(input()).await;
         assert_eq!(local.http_status,200,"{mode}: {local:?}");
         let received=remote.query_contract(input()).await;
-        assert_eq!(serde_json::to_value(&received).unwrap(),serde_json::to_value(&local).unwrap(),"{mode}: {received:?}");
+        assert_wire(mode,&local,&received);
     }
     for scope in ["sameNamespace","allCompatible"] {
         for version in ["current","history"] {
@@ -34,7 +70,7 @@ async fn prepared_remote_native_query_similar_exact_and_known_publication_failur
             let local=adapter.similar_contract(input()).await;
             assert_eq!(local.http_status,200,"{local:?}");
             let received=remote.similar_contract(input()).await;
-            assert_eq!(serde_json::to_value(&received).unwrap(),serde_json::to_value(&local).unwrap(),"{received:?}");
+            assert_wire(&format!("similar-{scope}-{version}"),&local,&received);
         }
     }
     let mut input=crate::serialization::scan::ExactScanRequest::from_http(&serde_json::json!({"pairBudget":2,"threshold":0.}),"DeFaUlT").unwrap();
