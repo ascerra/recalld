@@ -5,9 +5,20 @@ use crate::serialization::query::QueryRequest;
 use crate::serialization::query_response::{QueryReply, project};
 
 impl QueryEngine {
+    pub(crate) fn supports_prepared_queries(&self) -> bool {
+        self.coherent_owner.is_some()
+    }
     pub(crate) async fn similar_contract(
         &self,
         request: crate::serialization::query::SimilarRequest,
+    ) -> QueryReply {
+        self.similar_contract_bounded(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+            .await
+    }
+    pub(crate) async fn similar_contract_bounded(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+        response_limit: usize,
     ) -> QueryReply {
         let accepted = match self.accept_work(None) {
             Ok(work) => work,
@@ -31,7 +42,10 @@ impl QueryEngine {
                 request.explain,
             )?;
             captured = Some((reply.envelope.scope.clone(), selected.read_generation));
-            if !reply.fits_before_observation(if access { selected.rows.len() } else { 0 }) {
+            if !reply.fits_before_observation_with_limit(
+                if access { selected.rows.len() } else { 0 },
+                response_limit,
+            ) {
                 return Ok(reply.oversize());
             }
             let receipts = self
@@ -61,6 +75,14 @@ impl QueryEngine {
         .await
     }
     pub(crate) async fn query_contract(&self, request: QueryRequest) -> QueryReply {
+        self.query_contract_bounded(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+            .await
+    }
+    pub(crate) async fn query_contract_bounded(
+        &self,
+        request: QueryRequest,
+        response_limit: usize,
+    ) -> QueryReply {
         if self.rif_mode != RifMode::Off {
             return QueryReply::failure(SearchError::Unavailable(
                 "operator RIF modes are not available through prepared queries".into(),
@@ -116,11 +138,14 @@ impl QueryEngine {
             let mut reply = project(&prepared, request.explain)?;
             captured = Some((reply.envelope.scope.clone(), prepared.read_generation));
             let exposures = prepared.exposures(request.include_neighbors)?;
-            if !reply.fits_before_observation(if request.query.record_access {
-                exposures.len()
-            } else {
-                0
-            }) {
+            if !reply.fits_before_observation_with_limit(
+                if request.query.record_access {
+                    exposures.len()
+                } else {
+                    0
+                },
+                response_limit,
+            ) {
                 return Ok(reply.oversize());
             }
             if request.query.record_access {

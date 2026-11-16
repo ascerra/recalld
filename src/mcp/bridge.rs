@@ -24,6 +24,25 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    /// Private transport support requires the actual pre-observation bound.
+    /// An implementation of the unbounded methods alone cannot advertise it.
+    fn supports_prepared_queries(&self) -> bool {
+        false
+    }
+    async fn query_contract_bounded(
+        &self,
+        _request: crate::serialization::query::QueryRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn similar_contract_bounded(
+        &self,
+        _request: crate::serialization::query::SimilarRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
     async fn similar_contract(
         &self,
         _request: crate::serialization::query::SimilarRequest,
