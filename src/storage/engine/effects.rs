@@ -61,11 +61,26 @@ impl RedbStorageEngine {
         bridges: &[PersistedEdge],
         parent: Option<&crate::storage::work::WorkTicket>,
     ) -> Result<Option<EffectResult>, StorageError> {
+        self.delete_memory_with_edges_with_origin_work(id, bridges, parent, 1)
+    }
+
+    pub(crate) fn delete_memory_with_edges_with_origin_work(
+        &mut self,
+        id: MemoryId,
+        bridges: &[PersistedEdge],
+        parent: Option<&crate::storage::work::WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Option<EffectResult>, StorageError> {
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(StorageError::InvalidMutationContext(
+                "unsupported original application contract".into(),
+            ));
+        }
         let guard = self.meta_store.mutation_guard_with_work(parent)?;
         let Some(record) = self.meta_store.get(id)? else {
             return Ok(None);
         };
-        let result = self.meta_store.commit_graph_effects(
+        let result = self.meta_store.commit_graph_effects_with_origin(
             &guard,
             NamespaceId::new(record.namespace_id),
             &self.edge_store.load_all_edges()?,
@@ -73,6 +88,7 @@ impl RedbStorageEngine {
             &[id],
             true,
             true,
+            original_contract_version,
         )?;
         apply_pending(
             &self.meta_store,

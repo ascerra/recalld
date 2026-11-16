@@ -1,0 +1,10 @@
+{
+  "validated": true,
+  "sweepValidated": true,
+  "sweepParent": "5deb840a21ad5f1f80006e0d05a6372919292acf",
+  "sweepRuntime": "42d39a4e80996706fdd1c74a24b2cb8df7b17382",
+  "sourceCommit": "31955c3dde7f0219f2ebcebb36f57a35476038af",
+  "additionalFtsParent": "bf7c2484018297b7f9af30e98d3214581f33f351",
+  "ownerEvidence": "benchmarks/owned-legacy-sweep/REPORT.md",
+  "composition": "actual127+128 only; owner-reviewed controls dispatch/method union"
+}

@@ -1,0 +1,68 @@
+{
+  "actorArtifactSha256": "11d87f4d40a84fd185fe6eb891e8fc94499e66dd96a09de7a9de35576416cd2c",
+  "mappings": {
+    "01a1e107-e8a1-7b13-acd4-f4669100de3e": [
+      "turn-0"
+    ],
+    "01a1e107-e8a4-79d3-b69b-af1e7544d2db": [
+      "turn-1"
+    ],
+    "01a1e107-e8a8-7903-900d-8fa06a97f204": [
+      "turn-2"
+    ],
+    "01a1e107-e8ab-7251-a0f2-daa0ad4b09f2": [
+      "turn-3"
+    ]
+  },
+  "sourceMappingVersion": 1,
+  "sources": [
+    {
+      "contentSha256": "76a788c7eeaa978674b635f0716657ea3ccc0bb4518d6cee659424aaf8c91733",
+      "conversationId": "conversation-3",
+      "namespace": "default",
+      "ordinal": 0,
+      "role": "user",
+      "sessionId": "session-3",
+      "sourceId": "turn-0",
+      "sourceTimestamp": 1767225600000,
+      "summary": "amber cedar",
+      "turnId": "turn-0"
+    },
+    {
+      "contentSha256": "83a726a7cb94b16791e8d1c04f1e1eb82b18fcea3c3ff52bfad63984b0d4df90",
+      "conversationId": "conversation-3",
+      "namespace": "default",
+      "ordinal": 1,
+      "role": "user",
+      "sessionId": "session-3",
+      "sourceId": "turn-1",
+      "sourceTimestamp": 1767225600000,
+      "summary": "birch cedar",
+      "turnId": "turn-1"
+    },
+    {
+      "contentSha256": "3b61d231e138771ecb5705e49090278b489348a3047ecb2eb3524f4bff94a803",
+      "conversationId": "conversation-3",
+      "namespace": "default",
+      "ordinal": 2,
+      "role": "user",
+      "sessionId": "session-3",
+      "sourceId": "turn-2",
+      "sourceTimestamp": 1767225600000,
+      "summary": "olive cedar",
+      "turnId": "turn-2"
+    },
+    {
+      "contentSha256": "6d52a16142c88fdb7b2bc2d31083ef270a7e1dc23a49c1126633aedc5dae07ef",
+      "conversationId": "conversation-3",
+      "namespace": "foreign",
+      "ordinal": 3,
+      "role": "user",
+      "sessionId": "session-3",
+      "sourceId": "turn-3",
+      "sourceTimestamp": 1767225600000,
+      "summary": "foreign cedar",
+      "turnId": "turn-3"
+    }
+  ]
+}

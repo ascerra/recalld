@@ -1,0 +1,642 @@
+//! Internal production-engine diagnostic; NOT the A6 public-action harness.
+#[path = "support/evaluation_manifest.rs"]
+mod evaluation_manifest;
+#[path = "support/source_scoring.rs"]
+mod source_scoring;
+mod support;
+use source_scoring::{evidence_metrics, scoring_summary, turn_coverage};
+
+use std::{
+    collections::BTreeMap,
+    fs::{self, File},
+    io::BufReader,
+    io::Write,
+    path::PathBuf,
+    sync::Arc,
+    time::Instant,
+};
+
+use anyhow::{Context, Result, ensure};
+use clap::Parser;
+use recalld::{
+    model::{DecayPhase, MemoryId, NamespaceConfig, NamespaceId},
+    rif::{RifConfig, RifEngine},
+    search::{adapters::*, *},
+    storage::{RedbStorageEngine, StorageEngine},
+};
+use serde_json::{Value, json};
+
+const TIME: i64 = 1_767_225_600_000;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(long)]
+    out: PathBuf,
+    /// Required frozen inputs; old invocation flags intentionally fail closed.
+    #[arg(long)]
+    manifest: PathBuf,
+}
+
+// SplitMix64, with explicitly defined integer -> f32 conversion. No RNG-version drift.
+fn vectors(seed: u64, count: usize, dim: usize) -> Vec<Vec<f32>> {
+    let mut state = seed;
+    (0..count)
+        .map(|_| {
+            let mut v: Vec<f32> = (0..dim)
+                .map(|_| {
+                    state = state.wrapping_add(0x9e3779b97f4a7c15);
+                    let mut z = state;
+                    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+                    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+                    ((z ^ (z >> 31)) >> 40) as f32 / 8_388_608.0 - 1.0
+                })
+                .collect();
+            normalize_l2(&mut v);
+            v
+        })
+        .collect()
+}
+
+fn id(i: usize) -> MemoryId {
+    // Stable fixture identity, not a production-generated UUID.
+    MemoryId::from_uuid(uuid::Uuid::from_u128((i + 1) as u128))
+}
+
+fn namespace(i: usize) -> NamespaceId {
+    NamespaceId::new(if i.is_multiple_of(10) { 1 } else { 2 })
+}
+
+// Independent scalar f64 oracle; never used to generate the engine's results.
+fn oracle(vectors: &[Vec<f32>], query: usize, filtered: bool, k: usize) -> Vec<(MemoryId, f64)> {
+    let mut scores: Vec<_> = vectors
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !filtered || namespace(*i).get() == 1)
+        .map(|(i, v)| {
+            (
+                id(i),
+                v.iter()
+                    .zip(&vectors[query])
+                    .map(|(a, b)| *a as f64 * *b as f64)
+                    .sum::<f64>(),
+            )
+        })
+        .collect();
+    scores.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    scores.truncate(k);
+    scores
+}
+
+fn percentiles(values: &[f64]) -> Value {
+    if values.is_empty() {
+        return Value::Null;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let at = |p: f64| sorted[((p * sorted.len() as f64).ceil() as usize).saturating_sub(1)];
+    json!({"count": sorted.len(), "p50": at(0.50), "p95": at(0.95), "p99": at(0.99)})
+}
+
+struct ReplayEmbeddings {
+    context: evaluation_manifest::ReplayContext,
+    entries: BTreeMap<String, Vec<f32>>,
+}
+#[async_trait::async_trait]
+impl EmbeddingProviderRegistry for ReplayEmbeddings {
+    async fn embed(&self, namespace: &str, text: &str) -> Result<Vec<f32>, SearchError> {
+        if namespace != "fixture" {
+            return Err(SearchError::NamespaceNotFound(namespace.into()));
+        }
+        self.entries
+            .get(&self.context.key(namespace, text))
+            .cloned()
+            .ok_or_else(|| SearchError::EmbeddingFailed("offline replay miss".into()))
+    }
+}
+
+fn write_json(path: impl AsRef<std::path::Path>, value: &Value) -> Result<()> {
+    fs::write(path, serde_json::to_vec_pretty(value)?)?;
+    Ok(())
+}
+
+fn record_state(storage: &RedbStorageEngine) -> Result<Value> {
+    // DiskRecord has a canonical byte encoder, deliberately no Serialize impl.
+    let records: BTreeMap<_, _> = storage
+        .scan_all()?
+        .into_iter()
+        .map(|(id, record)| (id, record.to_bytes()))
+        .collect();
+    Ok(serde_json::to_value(records)?)
+}
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+async fn main() -> Result<()> {
+    let cli = Args::parse();
+    let contract = Arc::new(evaluation_manifest::Validated::load(&cli.manifest)?);
+    let args = contract.manifest.execution.clone();
+    let out = cli.out;
+    let episode = out
+        .file_name()
+        .context("missing episode directory")?
+        .to_string_lossy()
+        .into_owned();
+    fs::create_dir(&out).context("output must be a fresh directory")?;
+    fs::create_dir(out.join("evaluator"))?;
+    // Historical diagnostics contain oracle metrics and stay evaluator-only.
+    let mut trace = File::create(out.join("evaluator/diagnostic-trace.jsonl"))?;
+    let mut actor_trace = File::create(out.join("trace.jsonl"))?;
+    let mut evaluator_trace = File::create(out.join("evaluator/trace.jsonl"))?;
+    let mut source_events = File::create(out.join("evaluator/source-events.jsonl"))?;
+    let fixture = vectors(args.seed, args.records, args.dimensions);
+    write_json(
+        out.join("fixture.json"),
+        &json!({"generator": "splitmix64-f32-l2-v1", "seed": args.seed,
+        "time": TIME, "vectors": fixture, "sourceMappingVersion": 1,
+        "sources": (0..args.records).map(|i| json!({"sourceId": i, "memoryId": id(i),
+            "ordinal": i, "namespace": namespace(i).get(), "transformation": "raw_synthetic_unit",
+            "ingestPlan": "store_raw_unit"})).collect::<Vec<_>>()}),
+    )?;
+
+    let mut mappings = File::create(out.join("source-mappings.jsonl"))?;
+    let mut source_lookup = BTreeMap::new();
+    write_json(
+        out.join("actor-inputs.json"),
+        &json!({"sources":contract.sources}),
+    )?;
+
+    let mut index = FlatVectorIndex::new(args.dimensions);
+    for (i, v) in fixture.iter().enumerate() {
+        index.add(
+            id(i),
+            v,
+            VectorMetadata {
+                namespace_id: namespace(i),
+                decay_phase: 1,
+                tags: vec![],
+            },
+        )?;
+    }
+    let mut summaries = Vec::new();
+    let mut replay = Vec::new();
+    for filtered in [false, true] {
+        let cell = if filtered {
+            "exact-index-10pct"
+        } else {
+            "exact-index-100pct"
+        };
+        let filter = SearchFilter {
+            namespace_id: filtered.then(|| NamespaceId::new(1)),
+            ..Default::default()
+        };
+        let mut times = Vec::new();
+        for step in 0..args.warmup + args.samples {
+            let q = (step % (args.records / 10)) * 10;
+            let start = Instant::now();
+            let result = index.search(&fixture[q], args.k, &filter)?;
+            let elapsed = start.elapsed().as_secs_f64() * 1e6;
+            let expected = oracle(&fixture, q, filtered, args.k);
+            ensure!(
+                result.len() == expected.len(),
+                "exact result count mismatch"
+            );
+            // Random continuous fixtures avoid designed ties; near ties are tolerated
+            // only in score, never by silently substituting a different UUID.
+            for (actual, expected) in result.iter().zip(&expected) {
+                ensure!(
+                    actual.id == expected.0 && (actual.score as f64 - expected.1).abs() <= 2e-6,
+                    "scalar exact oracle mismatch in {cell}"
+                );
+            }
+            writeln!(actor_trace, "{}", contract.trace(&episode, &format!("{cell}:{step}"),
+                json!({"kind":"exact-index-query","queryId":format!("query{q}"),"k":args.k,
+                    "warmup":step < args.warmup}),
+                json!({"status":"ok","resultIds":result.iter().map(|r|r.id).collect::<Vec<_>>(),"latencyUs":elapsed})))?;
+            if step >= args.warmup {
+                times.push(elapsed);
+                let ids: Vec<_> = result.iter().map(|r| r.id).collect();
+                writeln!(
+                    trace,
+                    "{}",
+                    json!({"diagnosticTraceVersion": 1, "cell": cell, "step": step - args.warmup,
+                    "querySource": q, "latencyUs": elapsed, "resultIds": ids, "oracleRecallAtK": 1.0})
+                )?;
+                writeln!(
+                    evaluator_trace,
+                    "{}",
+                    json!({"traceSchemaVersion":1,"episodeId":episode,
+                    "stepId":format!("{cell}:{step}"),"oracleRecallAtK":1.0})
+                )?;
+                replay.push(json!({"cell": cell, "query": q, "ids": ids}));
+            }
+        }
+        summaries.push(
+            json!({"cell": cell, "attempted": args.samples, "completed": times.len(), "failed": 0,
+            "latencyUs": percentiles(&times), "eligibleOracleRecallAtK": 1.0}),
+        );
+    }
+
+    // Canonical internal insertion with receipts; not public transport ingestion.
+    let store_dir = tempfile::tempdir()?;
+    let build_start = Instant::now();
+    let mut storage = RedbStorageEngine::open(store_dir.path())?;
+    for (name, expected_id) in [("fixture", 1), ("distractors", 2)] {
+        let mut ns = NamespaceConfig::default_namespace(TIME);
+        ns.name = name.into();
+        ns.embedding_dim = args.dimensions as u32;
+        ns.decay_rate_multiplier = Some(0.0);
+        ensure!(
+            storage.create_namespace(&ns)?.get() == expected_id,
+            "unexpected namespace identity"
+        );
+    }
+    let mut ledger = File::create(out.join("turn-ledger.jsonl"))?;
+    for (i, v) in fixture.iter().enumerate() {
+        for status in ["seen", "attempted"] {
+            writeln!(
+                source_events,
+                "{}",
+                json!({"sourceMappingVersion":1,"sourceId":contract.sources[i].source_id,
+                "status":status,"reason":"raw_synthetic_unit","ordinal":i.to_string()})
+            )?;
+        }
+        writeln!(
+            ledger,
+            "{}",
+            json!({"sourceId": i, "memoryId": id(i), "status": "attempted"})
+        )?;
+        let receipt_result = support::insert(
+            &mut storage,
+            id(i),
+            namespace(i),
+            contract.sources[i].summary.clone(),
+            v,
+            TIME,
+        );
+        let receipt = match receipt_result {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                writeln!(
+                    source_events,
+                    "{}",
+                    json!({"sourceMappingVersion":1,"sourceId":contract.sources[i].source_id,
+                    "status":"rejected","reason":error.to_string(),"ordinal":i.to_string()})
+                )?;
+                writeln!(actor_trace,"{}",contract.trace(&episode,&format!("insert:{i}"),
+                    json!({"kind":"canonical-internal-insert","summary":contract.sources[i].summary}),
+                    json!({"status":"error","error":error.to_string()})))?;
+                write_json(
+                    out.join("evaluator/turn-coverage.json"),
+                    &turn_coverage(
+                        BufReader::new(File::open(out.join("evaluator/source-events.jsonl"))?),
+                        args.records,
+                    )?,
+                )?;
+                return Err(error);
+            }
+        };
+        writeln!(mappings, "{}", contract.mapping(i, id(i)))?;
+        source_lookup.insert(id(i), i);
+        writeln!(
+            source_events,
+            "{}",
+            json!({"sourceMappingVersion":1,"sourceId":contract.sources[i].source_id,
+            "status":"accepted","reason":"canonical_commit","memoryId":id(i),"ordinal":i.to_string()})
+        )?;
+        writeln!(
+            actor_trace,
+            "{}",
+            contract.trace(
+                &episode,
+                &format!("insert:{i}"),
+                json!({"kind":"canonical-internal-insert","summary":contract.sources[i].summary}),
+                json!({"status":"committed","receipt":receipt})
+            )
+        )?;
+        writeln!(
+            ledger,
+            "{}",
+            json!({"sourceId": i, "memoryId": id(i), "status": "accepted", "receipt": receipt,
+                "publication": "canonical committed; startup rebuild follows"})
+        )?;
+    }
+    let coverage = turn_coverage(
+        BufReader::new(File::open(out.join("evaluator/source-events.jsonl"))?),
+        args.records,
+    )?;
+    write_json(out.join("evaluator/turn-coverage.json"), &coverage)?;
+    storage.sync()?;
+    drop(storage);
+    let system = support::open_ready(store_dir.path(), args.dimensions, TIME).await?;
+    let build_us = build_start.elapsed().as_secs_f64() * 1e6;
+    let storage = system.storage().clone();
+    let graph = system.graph().clone();
+    let before = record_state(&storage.read().unwrap())?;
+    let control_before = storage.read().unwrap().control_state()?;
+    ensure!(
+        control_before.control_schema_version == 1,
+        "manifest control representation mismatch"
+    );
+    ensure!(
+        storage
+            .read()
+            .unwrap()
+            .scan_all()?
+            .iter()
+            .all(|(_, r)| r.version == 1 && r.schema.is_none()),
+        "manifest legacy schema-absence/record representation mismatch"
+    );
+    write_json(out.join("state-before.json"), &before)?;
+    write_json(
+        out.join("control-before.json"),
+        &serde_json::to_value(&control_before)?,
+    )?;
+    let context = contract.replay_context();
+    let entries: BTreeMap<_, _> = (0..args.records)
+        .step_by(10)
+        .map(|i| {
+            (
+                context.key("fixture", &format!("query{i}")),
+                fixture[i].clone(),
+            )
+        })
+        .collect();
+    write_json(
+        out.join("actor-replay-cache.json"),
+        &json!({"cacheVersion":1,"role":"actor-query",
+        "environmentHash":contract.environment_hash,"profile":contract.manifest.embedding,"entries":entries}),
+    )?;
+    let embeddings = Arc::new(ReplayEmbeddings {
+        context: context.clone(),
+        entries,
+    });
+    let engine = QueryEngine::new(
+        Arc::new(StorageNamespaceResolver::new(storage.clone())),
+        embeddings,
+        Arc::new(SharedVectorIndexRegistry::new(
+            system.vector_index().clone(),
+        )),
+        Arc::new(SharedFtsIndexRegistry::new(system.fts_index().clone())),
+        Arc::new(SharedEntityIndexReader::new(system.entity_index().clone())),
+        Arc::new(CacheManagerAdapter::new(system.cache().clone())),
+        Arc::new(StorageMetadataAdapter::new(storage.clone())),
+        Arc::new(SharedGraphReader::new(graph.clone())),
+        Arc::new(RifProcessorAdapter::new(
+            Arc::new(RifEngine::new(RifConfig {
+                enabled: false,
+                ..Default::default()
+            })),
+            graph,
+        )),
+        Arc::new(
+            StorageAccessRecorder::new(storage.clone(), system.cache().clone())
+                .with_clock(system.clock().clone()),
+        ),
+    )
+    .with_lifecycle_inputs(system.clock().clone(), Default::default(), 1.0);
+
+    // This must traverse the real QueryEngine/provider adapter, never a generated fallback.
+    let missing: SearchQuery =
+        serde_json::from_value(json!({"text":"unrecorded input","namespace":"fixture",
+        "recordAccess":false,"graphDepth":0,"limit":args.k}))?;
+    let miss_action = json!({"kind":"internal-query","request":serde_json::to_value(&missing)?,
+        "replayCacheKey":context.key("fixture","unrecorded input")});
+    let miss = engine.search(missing).await;
+    let miss_error = match miss {
+        Err(error) => error.to_string(),
+        Ok(_) => anyhow::bail!("actual QueryEngine accepted an offline replay miss"),
+    };
+    ensure!(
+        miss_error.contains("offline replay miss"),
+        "unexpected replay-miss error: {miss_error}"
+    );
+    writeln!(
+        actor_trace,
+        "{}",
+        contract.trace(
+            &episode,
+            "replay-miss",
+            miss_action,
+            json!({"status":"expected_error","error":miss_error})
+        )
+    )?;
+    write_json(
+        out.join("replay-miss.json"),
+        &json!({"actualQueryEngine":true,"expectedFailure":true,
+        "error":miss_error,"fallback":false}),
+    )?;
+
+    let retained: Vec<_> = source_lookup.values().copied().collect();
+    let mut scored_events = Vec::new();
+    for hybrid in [false, true] {
+        let cell = if hybrid {
+            "internal-engine-hybrid"
+        } else {
+            "internal-engine-vector"
+        };
+        let mut stages: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        for step in 0..args.warmup + args.samples {
+            let q = (step % (args.records / 10)) * 10;
+            let query: SearchQuery = serde_json::from_value(json!({"text": format!("query{q}"),
+                "ftsQuery": if hybrid { format!("token{q}") } else { "unmatchedfixtureterm".into() },
+                "namespace": "fixture", "limit": args.k, "graphDepth": 0, "recordAccess": false}))?;
+            let start = Instant::now();
+            let action = json!({"kind":"internal-query","request":serde_json::to_value(&query)?,"cell":cell,
+                "replayCacheKey":context.key("fixture",&format!("query{q}"))});
+            let response = match engine.search(query).await {
+                Ok(response) => response,
+                Err(error) => {
+                    writeln!(
+                        actor_trace,
+                        "{}",
+                        contract.trace(
+                            &episode,
+                            &format!("{cell}:{step}"),
+                            action,
+                            json!({"status":"error","error":error.to_string()})
+                        )
+                    )?;
+                    return Err(error.into());
+                }
+            };
+            let call_us = start.elapsed().as_secs_f64() * 1e6;
+            ensure!(!response.results.is_empty(), "empty fixture response");
+            let encode_start = Instant::now();
+            let encoded = serde_json::to_vec(&response)?;
+            let encode_us = encode_start.elapsed().as_secs_f64() * 1e6;
+            ensure!(
+                response.results[0].memory_id == id(q),
+                "self-retrieval baseline failed"
+            );
+            if hybrid {
+                ensure!(
+                    response.results[0]
+                        .fts_score
+                        .is_some_and(|score| score > 0.0),
+                    "hybrid fixture did not exercise FTS"
+                );
+            } else {
+                ensure!(
+                    response.results.iter().all(|r| r.fts_score.is_none()),
+                    "vector control unexpectedly matched FTS"
+                );
+            }
+            ensure!(
+                response.results.iter().all(|r| r.namespace == "fixture"
+                    && r.phase == DecayPhase::Full
+                    && (r.memory_id.into_inner().as_u128() - 1) % 10 == 0),
+                "eligibility violation"
+            );
+            if !hybrid {
+                let expected: Vec<_> = oracle(&fixture, q, true, args.k)
+                    .into_iter()
+                    .filter(|s| s.1 >= 0.0)
+                    .map(|s| s.0)
+                    .collect();
+                ensure!(
+                    response
+                        .results
+                        .iter()
+                        .map(|r| r.memory_id)
+                        .collect::<Vec<_>>()
+                        == expected,
+                    "vector engine versus eligible scalar oracle mismatch"
+                );
+            }
+            writeln!(
+                actor_trace,
+                "{}",
+                contract.trace(
+                    &episode,
+                    &format!("{cell}:{step}"),
+                    action,
+                    json!({"status":"ok","results":response.results,"latencyUs":call_us,
+                    "warmup":step < args.warmup,"responseBytes":encoded.len().to_string()})
+                )
+            )?;
+            if step >= args.warmup {
+                let ids: Vec<_> = response.results.iter().map(|r| r.memory_id).collect();
+                let sources: Vec<_> = ids
+                    .iter()
+                    .map(|id| {
+                        source_lookup
+                            .get(id)
+                            .copied()
+                            .context("unmapped returned memory")
+                    })
+                    .collect::<Result<_>>()?;
+                let metrics = evidence_metrics(
+                    contract.relevant_ordinals(&format!("query{q}")).as_deref(),
+                    &retained,
+                    &sources,
+                );
+                scored_events.push(metrics.clone());
+                let mut timing = serde_json::to_value(
+                    response.timings.as_ref().context("missing stage timings")?,
+                )?;
+                timing["engineCallUs"] = json!(call_us);
+                timing["jsonSerializationUs"] = json!(encode_us);
+                for (name, value) in timing.as_object().unwrap() {
+                    stages
+                        .entry(name.clone())
+                        .or_default()
+                        .push(value.as_f64().unwrap());
+                }
+                writeln!(
+                    trace,
+                    "{}",
+                    json!({"diagnosticTraceVersion": 1, "cell": cell, "step": step - args.warmup,
+                    "querySource": q, "resultIds": ids, "stageUs": timing, "responseBytes": encoded.len(),
+                    "totalMatchesCandidateCount": response.total_matches,
+                    "metrics": metrics})
+                )?;
+                writeln!(
+                    evaluator_trace,
+                    "{}",
+                    json!({"traceSchemaVersion":1,"episodeId":episode,
+                    "stepId":format!("{cell}:{step}"),"queryId":format!("query{q}"),
+                    "retrievedSourceIds":sources.iter().map(|i| &contract.sources[*i].source_id).collect::<Vec<_>>(),
+                    "metrics":metrics})
+                )?;
+                replay.push(json!({"cell": cell, "query": q, "results": response.results}));
+            }
+        }
+        summaries.push(json!({"cell": cell, "attempted": args.samples, "completed": args.samples, "failed": 0,
+            "stageUs": stages.iter().map(|(k,v)| (k.clone(), percentiles(v))).collect::<BTreeMap<_,_>>() }));
+    }
+    write_json(
+        out.join("evaluator/scoring-summary.json"),
+        &scoring_summary(&scored_events),
+    )?;
+    let after = record_state(&storage.read().unwrap())?;
+    ensure!(before == after, "diagnostic queries mutated stored records");
+    write_json(out.join("state-after.json"), &after)?;
+    let control_after = storage.read().unwrap().control_state()?;
+    ensure!(
+        control_before == control_after,
+        "false queries changed canonical control"
+    );
+    write_json(
+        out.join("control-after.json"),
+        &serde_json::to_value(control_after)?,
+    )?;
+    write_json(out.join("replay.json"), &json!(replay))?;
+    write_json(
+        out.join("summary.json"),
+        &json!({"diagnosticManifestVersion": 1,
+        "track": evaluation_manifest::TRACK,"manifestVersion":1,"sourceMappingVersion":1,"traceSchemaVersion":1,
+        "environmentHash":contract.environment_hash,"expectedReplayMisses":1, "publicApiConformance": false,
+        "syntheticSemanticQualityClaim": false, "records": args.records, "dimensions": args.dimensions,
+        "k": args.k, "seed": args.seed, "warmupPerCell": args.warmup, "samplesPerCell": args.samples,
+        "fixtureIngestUs": build_us, "canonicalRecordsUnchanged": true, "canonicalControlUnchanged": true,
+        "ingestion": "InsertMemory receipts; production startup/completion", "recordAccess": false,
+        "clock": "ManualClock for lifecycle only; operation/store UUIDs remain random",
+        "identity": "explicit caller-supplied canonical memory IDs; not whole-store deterministic replay",
+        "extraction": {"track": "raw-synthetic-unit", "sourceUnits": args.records,
+            "turnCoverage":coverage, "propositionPreservation": "not measured"},
+        "cells": summaries, "unmeasured": ["transport", "liveEmbedding", "lockWaitHold", "scanCounters",
+            "receiptsLedgerReadiness", "answerQuality", "groupedConfidenceIntervals", "sustainableThroughput"]}),
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn scorer_and_percentile_goldens() {
+        assert_eq!(percentiles(&[]), Value::Null);
+        assert_eq!(
+            percentiles(&(1..=100).map(f64::from).collect::<Vec<_>>())["p95"],
+            95.0
+        );
+        assert_eq!(evidence_metrics(Some(&[]), &[], &[])["scored"], false);
+        assert_eq!(
+            evidence_metrics(Some(&[1]), &[1], &[])["retrievalRecallAt5"],
+            0.0
+        );
+        let partial = evidence_metrics(Some(&[1, 2]), &[1], &[1, 1, 3]);
+        assert_eq!(partial["extractionEvidenceRetention"], 0.5);
+        assert_eq!(partial["retrievalRecallAt5"], 0.5);
+        assert_eq!(partial["allRequiredEvidence"], false);
+        let perfect = evidence_metrics(Some(&[1, 2]), &[1, 2], &[1, 1, 2]);
+        assert_eq!(perfect["binarySourceNdcgAt10"], 1.0);
+        assert_eq!(perfect["allRequiredEvidence"], true);
+    }
+    #[test]
+    fn fixture_is_seeded_normalized_and_oracle_filters() {
+        let a = vectors(7, 100, 16);
+        assert_eq!(a, vectors(7, 100, 16));
+        assert_ne!(a, vectors(19, 100, 16));
+        assert!(
+            a.iter()
+                .all(|v| (v.iter().map(|x| x * x).sum::<f32>() - 1.0).abs() < 1e-6)
+        );
+        let ranks = oracle(&a, 0, true, 5);
+        assert_eq!(ranks[0].0, id(0));
+        assert!(
+            ranks
+                .iter()
+                .all(|r| (r.0.into_inner().as_u128() - 1) % 10 == 0)
+        );
+    }
+}

@@ -1,0 +1,77 @@
+[
+  {
+    "case": "v1-with-policy",
+    "command": [
+      "/target/debug/examples/native_prefix_fixture",
+      "--input",
+      "/output/fixture-negative-v1-with-policy.json",
+      "--root",
+      "/output/fixture-destination-v1-with-policy",
+      "--report",
+      "/output/fixture-report-v1-with-policy.json"
+    ],
+    "exitCode": 1,
+    "destinationExists": false,
+    "reportExists": false
+  },
+  {
+    "case": "v1-with-null-policy",
+    "command": [
+      "/target/debug/examples/native_prefix_fixture",
+      "--input",
+      "/output/fixture-negative-v1-with-null-policy.json",
+      "--root",
+      "/output/fixture-destination-v1-with-null-policy",
+      "--report",
+      "/output/fixture-report-v1-with-null-policy.json"
+    ],
+    "exitCode": 1,
+    "destinationExists": false,
+    "reportExists": false
+  },
+  {
+    "case": "v2-wrong-policy",
+    "command": [
+      "/target/debug/examples/native_prefix_fixture",
+      "--input",
+      "/output/fixture-negative-v2-wrong-policy.json",
+      "--root",
+      "/output/fixture-destination-v2-wrong-policy",
+      "--report",
+      "/output/fixture-report-v2-wrong-policy.json"
+    ],
+    "exitCode": 1,
+    "destinationExists": false,
+    "reportExists": false
+  },
+  {
+    "case": "v2-without-policy",
+    "command": [
+      "/target/debug/examples/native_prefix_fixture",
+      "--input",
+      "/output/fixture-negative-v2-without-policy.json",
+      "--root",
+      "/output/fixture-destination-v2-without-policy",
+      "--report",
+      "/output/fixture-report-v2-without-policy.json"
+    ],
+    "exitCode": 1,
+    "destinationExists": false,
+    "reportExists": false
+  },
+  {
+    "case": "unknown-version",
+    "command": [
+      "/target/debug/examples/native_prefix_fixture",
+      "--input",
+      "/output/fixture-negative-unknown-version.json",
+      "--root",
+      "/output/fixture-destination-unknown-version",
+      "--report",
+      "/output/fixture-report-unknown-version.json"
+    ],
+    "exitCode": 1,
+    "destinationExists": false,
+    "reportExists": false
+  }
+]

@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/work/source/scripts/public-mcp-evaluation.py", line 548, in <module>
+    main()
+  File "/work/source/scripts/public-mcp-evaluation.py", line 544, in main
+    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
+  File "/work/source/scripts/public-mcp-evaluation.py", line 229, in run_episode
+    return NATIVE["run"](args, globals(), NATIVE_SWEEP)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/native-prefix-mcp-supervisor.py", line 63, in run
+    manifest, actor, labels, cache, schedule, environment = h["validate"](args.manifest, args.binary, args.scorer, args.source_root)
+                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/source/scripts/public-mcp-evaluation.py", line 123, in validate
+    raise ValueError("unsupported independent harness version")
+ValueError: unsupported independent harness version

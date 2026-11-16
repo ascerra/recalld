@@ -3,9 +3,9 @@
 use super::*;
 use std::sync::atomic::AtomicI64;
 
-struct RegressedClock {
-    time: AtomicI64,
-    calls: AtomicUsize,
+pub(super) struct RegressedClock {
+    pub(super) time: AtomicI64,
+    pub(super) calls: AtomicUsize,
 }
 impl Clock for RegressedClock {
     fn now_millis(&self) -> i64 {
@@ -148,6 +148,17 @@ async fn actual_original_phase_receipt_survives_reopen_export_and_fork_restore()
     });
     let mut session =
         NativeLifecycleSession::open(&path, NativePolicyInputs::default(), clock.clone()).unwrap();
+    // Genuine BEFORE bytes: no adoption, current-input blessing or proof rewrite
+    // is needed to inspect/export or replay an already committed old operation.
+    assert!(
+        session.engine.list_namespaces().unwrap().iter().all(|n| n
+            .schema
+            .as_ref()
+            .unwrap()
+            .inherited_decay
+            .is_none())
+    );
+    let untouched_generation = session.engine.control_state().unwrap().generation_ref();
     let all = receipts(&session);
     let (receipt_key, raw) = all
         .iter()
@@ -203,6 +214,18 @@ async fn actual_original_phase_receipt_survives_reopen_export_and_fork_restore()
     assert_eq!(replay.outcome, receipt.outcome);
     assert_eq!(replay.operation_id, receipt.operation_id);
     assert_eq!(clock.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        session.engine.control_state().unwrap().generation_ref(),
+        untouched_generation
+    );
+    assert!(
+        session.engine.list_namespaces().unwrap().iter().all(|n| n
+            .schema
+            .as_ref()
+            .unwrap()
+            .inherited_decay
+            .is_none())
+    );
     assert_eq!(receipts(&session), all);
     drop(session);
 

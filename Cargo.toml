@@ -20,6 +20,10 @@ path = "src/bin/recalld_cli.rs"
 name = "recalld-text-migrate"
 path = "src/bin/recalld_text_migrate.rs"
 
+[[bin]]
+name = "recalld-schema"
+path = "src/bin/recalld_schema.rs"
+
 [lib]
 name = "recalld"
 path = "src/lib.rs"
@@ -120,6 +124,7 @@ hostname    = "0.4"
 zip         = { version = "2", features = ["deflate-zlib"] }
 
 [dev-dependencies]
+rand_chacha = "=0.3.1"
 tokio-test  = "0.4"
 assert_matches = "1"
 serde_json  = "1.0"
@@ -132,3 +137,8 @@ strip = "symbols"
 [profile.bench]
 inherits = "release"
 debug = true
+
+[[example]]
+name = "owned_evaluator"
+path = "examples/owned_evaluator.rs"
+required-features = ["bench"]

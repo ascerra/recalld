@@ -1,0 +1,47 @@
+benchmarks/accepted-work/runtime.patch:11: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:15: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:398: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:402: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:579: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:613: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:749: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:818: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:828: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:841: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:880: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:945: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:982: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:1094: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:1120: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:1564: trailing whitespace.
++ 
+benchmarks/accepted-work/runtime.patch:1566: trailing whitespace.
++ 
+benchmarks/coherent-payload/driver.py:66: trailing whitespace.
++    script = 'cargo fmt --all > /work/output/format.log 2>&1' 
+benchmarks/coherent-publication/driver.py:70: trailing whitespace.
++    script = 'cargo fmt --all > /work/output/format.log 2>&1' 
+benchmarks/owned-evaluator/driver.py:62: trailing whitespace.
++    script = 'cargo fmt --all > /work/output/format.log 2>&1' 
+work-notes/native-phase-clock/implementation.patch:495: trailing whitespace.
++ 
+work-notes/native-phase-clock/phase-clock-after.log:33: new blank line at EOF.
+work-notes/native-preflight-recovery/preflight-after.log:30: new blank line at EOF.
+work-notes/native-preflight-recovery/preflight-focused-final.log:37: new blank line at EOF.
+work-notes/native-preflight-recovery/source.patch:416: trailing whitespace.
++ 

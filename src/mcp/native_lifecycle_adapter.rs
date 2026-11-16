@@ -18,6 +18,17 @@ pub(crate) async fn execute(
     policy: &NativePolicyInputs,
     clock: Arc<dyn Clock>,
 ) -> Reply {
+    execute_with_projection(owner, request, operation, policy, clock, None).await
+}
+
+pub(crate) async fn execute_with_projection(
+    owner: &DerivedCompletion,
+    mut request: Request,
+    operation: Operation,
+    policy: &NativePolicyInputs,
+    clock: Arc<dyn Clock>,
+    legacy_projection: Option<&mut Option<crate::decay::lifecycle::FeedbackPlan>>,
+) -> Reply {
     let work = match owner.accept_work(None) {
         Ok(work) => work,
         Err(e) => return Reply::storage(e),
@@ -33,6 +44,7 @@ pub(crate) async fn execute(
         }
     };
     let requested = request.clone();
+    let normalize_api1_assertion = legacy_projection.is_some();
     let resolved = tokio::task::spawn_blocking(move || {
         let storage = storage
             .read()
@@ -44,7 +56,7 @@ pub(crate) async fn execute(
                     "native-only lifecycle entry requires native storage".into(),
                 ));
             }
-            let _guard = meta.lifecycle_guard_with_work(Some(&child))?;
+            let guard = meta.lifecycle_guard_with_work(Some(&child))?;
             let record = storage.get_record(requested.id)?;
             let canonical = if let Some(record) = record {
                 Some(crate::model::NamespaceId::new(record.namespace_id))
@@ -82,13 +94,32 @@ pub(crate) async fn execute(
             let namespace = canonical
                 .or(requested.namespace_id)
                 .ok_or(StorageError::NotFound(requested.id.into_inner()))?;
-            Ok((namespace, meta.uses_native_lifecycle()))
+            let assertion = if normalize_api1_assertion {
+                match requested.namespace {
+                    Some(asserted) => {
+                        // API1's existing lookup is case-insensitive, while the
+                        // stable stored spelling and all private keyed hashes
+                        // remain unchanged. Resolve inside this accepted guard.
+                        let canonical = meta
+                            .lifecycle_namespace_name(&guard, namespace)?
+                            .ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
+                        if !canonical.eq_ignore_ascii_case(&asserted) {
+                            return Err(StorageError::MutationNamespaceMismatch);
+                        }
+                        Some(canonical)
+                    }
+                    None => None,
+                }
+            } else {
+                requested.namespace
+            };
+            Ok((namespace, meta.uses_native_lifecycle(), assertion))
         })();
         meta.finish_work(child);
         result
     })
     .await;
-    let (scope, native) = match resolved {
+    let (scope, native, assertion) = match resolved {
         Ok(Ok(scope)) => scope,
         other => {
             owner.finish_known_work(work);
@@ -99,6 +130,7 @@ pub(crate) async fn execute(
             });
         }
     };
+    request.namespace = assertion;
     let context = MutationContext {
         store_id: request.options.store_id,
         scope: MutationScope::Namespace(scope),
@@ -108,7 +140,7 @@ pub(crate) async fn execute(
     };
     let result = if !native {
         owner
-            .legacy_lifecycle_with_work(
+            .legacy_lifecycle_projected_with_work(
                 context,
                 request.id,
                 (operation == Operation::Feedback).then_some(request.quality),
@@ -116,39 +148,43 @@ pub(crate) async fn execute(
                 policy.clone(),
                 clock,
                 Some(&work),
+                legacy_projection.is_some(),
             )
             .await
     } else {
         match operation {
-            Operation::Forget => {
-                owner
-                    .forget_native_with_work(
-                        context,
-                        request.id,
-                        request.namespace,
-                        policy.clone(),
-                        clock,
-                        Some(&work),
-                    )
-                    .await
-            }
-            Operation::Feedback => {
-                owner
-                    .feedback_native_with_work(
-                        context,
-                        request.id,
-                        request.quality,
-                        request.namespace,
-                        policy.clone(),
-                        clock,
-                        Some(&work),
-                    )
-                    .await
-            }
+            Operation::Forget => owner
+                .forget_native_with_work(
+                    context,
+                    request.id,
+                    request.namespace,
+                    policy.clone(),
+                    clock,
+                    Some(&work),
+                )
+                .await
+                .map(|receipt| (receipt, None)),
+            Operation::Feedback => owner
+                .feedback_native_with_work(
+                    context,
+                    request.id,
+                    request.quality,
+                    request.namespace,
+                    policy.clone(),
+                    clock,
+                    Some(&work),
+                )
+                .await
+                .map(|receipt| (receipt, None)),
         }
     };
     let receipt = match result {
-        Ok(receipt) => receipt,
+        Ok((receipt, view)) => {
+            if let Some(output) = legacy_projection {
+                *output = view;
+            }
+            receipt
+        }
         Err(e) => {
             owner.finish_known_work(work);
             return Reply::storage(e);

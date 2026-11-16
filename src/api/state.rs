@@ -270,6 +270,10 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Physical control format, never inferred from API version or a namespace.
+    async fn native_store_format(&self) -> Result<bool, StorageError> {
+        Ok(false)
+    }
     async fn store_identity(&self) -> Result<uuid::Uuid, StorageError> {
         Err(StorageError::RecoveryRequired(
             "store identity unavailable".into(),
@@ -283,6 +287,21 @@ pub trait StorageEngine: Send + Sync {
     {
         Err(crate::search::exact_scan::ExactScanError::Unavailable)
     }
+    async fn forget_api1(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{Reply, Value},
+            native_lifecycle,
+        };
+        match self.delete_memory(id, namespace).await {
+            Ok(deleted) => Reply::compatibility(Value::Forget { deleted }),
+            Err(e) => Reply::failure(native_lifecycle::Reply::storage(e)),
+        }
+    }
+
     async fn forget_native(
         &self,
         _request: crate::serialization::native_lifecycle::Request,
@@ -580,6 +599,18 @@ pub trait RelationshipGraph: Send + Sync {
 /// FSRS decay engine for reinforcement and strength recalculation.
 #[async_trait::async_trait]
 pub trait FsrsEngine: Send + Sync {
+    async fn feedback_api1(
+        &self,
+        id: MemoryId,
+        quality: u8,
+        namespace: Option<&str>,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        crate::serialization::lifecycle_api1::Reply::legacy_feedback(
+            self.reinforce(id, quality, namespace).await,
+            id,
+        )
+    }
+
     async fn feedback_native(
         &self,
         _request: crate::serialization::native_lifecycle::Request,

@@ -1,0 +1,10 @@
+{
+  "currentQuestion": {
+    "queryId": "q1",
+    "text": "amber elm"
+  },
+  "deliveryOrdinal": 2,
+  "expectedMiss": false,
+  "phase": "query",
+  "startId": 11
+}

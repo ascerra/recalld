@@ -120,6 +120,11 @@ pub enum StorageError {
     #[error("invalid storage mutation: {0}")]
     InvalidMutation(String),
 
+    #[error(
+        "operation too large for this response transport or its bounded admission scan; no new purge was started"
+    )]
+    PurgeResponseTooLarge,
+
     #[error("storage recovery required: {0}")]
     RecoveryRequired(String),
 

@@ -1,0 +1,12 @@
+ACTUAL_HIGH_PEER_FRAME target_rows=1 peers=400 history=32 bytes=1302161
+thread 'tokio-rt-worker' (379) panicked at src/derived_completion/native_purge.rs:173:17:
+injected native purge begin worker loss
+
+thread 'tokio-rt-worker' (379) panicked at src/derived_completion.rs:379:21:
+injected native purge completion worker loss
+
+thread 'storage::native_purge_tests::api1_consumer::native_api1_purge_unknown_outcomes_survive_actual_bounded_frames' (376) panicked at src/storage/native_purge_tests/api1_consumer.rs:1752:18:
+called `Result::unwrap()` on an `Err` value: PoisonError { .. }
+test storage::native_purge_tests::api1_consumer::native_api1_purge_unknown_outcomes_survive_actual_bounded_frames ... FAILED
+ACTUAL_MAX_CHUNK_FRAME rows=1000 canonical=Complete full_receipt_bytes=1464530 response_bytes=1572891 response_code=Some(-32006)
+test result: FAILED. 20 passed; 1 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 40.35s

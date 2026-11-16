@@ -121,7 +121,12 @@ async fn linked_producer_completed_replay_skips_settings_provider_and_rediscover
         ),
         "public version3 remains gated"
     );
-    let out = a.run_batch(r.clone()).await.unwrap();
+    let (out, trace) = {
+        let mut pending = std::pin::pin!(a.run_batch(r.clone()));
+        crate::performance::tests::capture_full(pending.as_mut()).await
+    };
+    let out = out.unwrap();
+    crate::performance::tests::assert_no_legacy_batch_events(&trace);
     assert!(out.all_ready(), "{out:?}");
     assert_eq!(p.calls.load(Ordering::SeqCst), 1);
     let receipt = out.items[0].receipt.as_ref().unwrap().clone();
@@ -1819,3 +1824,6 @@ async fn native_single_wire_actual_unknown_commit_keeps_original_operation_on_re
     assert_eq!(p.calls.load(Ordering::SeqCst), 0);
     assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
 }
+
+#[path = "owned_ids_producer_tests.rs"]
+mod owned_ids;

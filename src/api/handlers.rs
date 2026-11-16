@@ -180,8 +180,8 @@ pub async fn single_store_versioned(
         return single_reply_response(Reply::invalid(error));
     }
     if version == ContractVersion::V1 {
-        return match Json::<CreateMemoryApiRequest>::from_request(request, &state).await {
-            Ok(body) => create_memory(State(state), body).await.into_response(),
+        return match Json::<super::store_api1::Request>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::create(state, body).await,
             Err(error) => error.into_response(),
         };
     }
@@ -605,67 +605,23 @@ pub async fn delete_memory(
     Path(id): Path<String>,
     Query(scope): Query<MemoryScopeQuery>,
 ) -> Result<Json<ApiResponse<DeleteResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-        if let Some(namespace) = scope.namespace.as_deref() {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-
-        // Read record first for entity index cleanup (Issue 14)
-        let existing_record = state.storage.get_record(memory_id).await;
-
-        let existed = state
-            .storage
-            .delete_memory_with_work(memory_id, scope.namespace.as_deref(), work.as_ref())
-            .await?;
-        if existed {
-            state.cache.remove(memory_id).await;
-            state.search.remove_from_index(memory_id).await;
-
-            // Issue 14: Clean up FTS5 index
-            state.search.fts_remove(memory_id).await;
-
-            // Issue 14: Clean up entity index
-            if let Some(ref record) = existing_record {
-                state
-                    .search
-                    .entity_index_remove(NamespaceId::new(record.namespace_id), memory_id)
-                    .await;
-            }
-
-            // Issue 13: Tombstone the graph node instead of removing it
-            if let Err(e) = state
-                .graph
-                .tombstone_node_with_work(memory_id, work.as_ref())
-                .await
-            {
-                tracing::warn!(
-                    memory_id = %memory_id,
-                    %e,
-                    "graph tombstone failed (non-fatal)"
-                );
-            }
-        }
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: DeleteResponse {
-                id: memory_id,
-                deleted: existed,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let mut reply = state
+        .storage
+        .forget_api1(memory_id, scope.namespace.as_deref())
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Forget { deleted }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: DeleteResponse {
+            id: memory_id,
+            deleted,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// POST /memories/:id/reinforce -- manual reinforcement.
@@ -681,44 +637,28 @@ pub async fn reinforce_memory(
     Path(id): Path<String>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<ApiResponse<ReinforceResponse>>, AppError> {
-    let work = state.search.accept_work()?;
-    let result = async {
-        let start = Instant::now();
-
-        let memory_id = parse_memory_id(&id)?;
-
-        let namespace =
-            crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
-        if let Some(namespace) = namespace {
-            state
-                .storage
-                .assert_memory_namespace(memory_id, namespace)
-                .await?;
-        }
-        let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
-
-        let updated = state
-            .decay
-            .reinforce_with_work(memory_id, quality, namespace, work.as_ref())
-            .await
-            .map_err(|e| feedback_error(e, &id))?;
-
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: ReinforceResponse {
-                id: memory_id,
-                strength: updated.strength,
-                stability: updated.stability,
-                phase: format!("{:?}", updated.phase),
-                is_permastore: updated.is_permastore,
-            },
-            took_us: Some(took),
-        }))
-    }
-    .await;
-    state.search.finish_work(work);
-    result
+    let start = Instant::now();
+    let memory_id = parse_memory_id(&id)?;
+    let namespace = crate::mcp::args::parse_namespace_assertion(&req).map_err(argument_error)?;
+    let quality = crate::mcp::args::parse_quality(&req).map_err(argument_error)?;
+    let mut reply = state
+        .decay
+        .feedback_api1(memory_id, quality, namespace)
+        .await;
+    let Some(crate::serialization::lifecycle_api1::Value::Feedback { result }) = reply.value.take()
+    else {
+        return Err(reply.http_error(&id));
+    };
+    Ok(Json(ApiResponse {
+        data: ReinforceResponse {
+            id: memory_id,
+            strength: result.strength,
+            stability: result.stability,
+            phase: result.phase,
+            is_permastore: result.is_permastore,
+        },
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
 }
 
 /// Preserve typed lifecycle outcomes instead of classifying display strings.
@@ -990,12 +930,12 @@ pub async fn search_memories(
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
     let work = state.search.accept_work()?;
-    let result = async {
+    let result = crate::performance::measure("rest.search", req.record_access, async {
         let stamp = state.storage.effects_stamp().await?;
         let observed =
             search_memories_admitted(State(state.clone()), Json(req), stamp, work.as_ref()).await;
         observed?.finish(check_read_admission(&state, stamp).await)
-    }
+    })
     .await;
     state.search.finish_work(work);
     result
@@ -1087,8 +1027,10 @@ async fn search_memories_admitted(
         .search
         .prepare_coherent_search_with_work(search_query.clone(), req.include_embeddings, parent)
         .await?;
+    let hydration = crate::performance::Timer::new("rest.hydration");
     let (hits, exposures, evaluated_at) =
         if let Some(prepared) = coherent {
+            let hydration = crate::performance::Timer::new("rest.hydration");
             let payload = prepared
                 .payload
                 .ok_or_else(|| AppError::ServiceUnavailable {
@@ -1141,6 +1083,7 @@ async fn search_memories_admitted(
                     score: selected.score.unwrap_or(0.0),
                 });
             }
+            hydration.complete();
             (hits, exposures, Some(prepared.evaluated_at))
         } else {
             let results = state
@@ -1148,6 +1091,7 @@ async fn search_memories_admitted(
                 .prepare_search_with_work(search_query, parent)
                 .await?;
 
+            let hydration = crate::performance::Timer::new("rest.hydration");
             // Batch-load embeddings with a single lock acquisition if requested.
             let embeddings = if req.include_embeddings {
                 let ids: Vec<MemoryId> = results.iter().map(|r| r.memory.id).collect();
@@ -1195,6 +1139,7 @@ async fn search_memories_admitted(
                 });
             }
 
+            hydration.complete();
             (hits, exposures, None)
         };
 
@@ -1540,7 +1485,22 @@ pub async fn create_namespace(
 
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {
     use crate::decay::lifecycle::LifecycleError;
+    use crate::derived_completion::catalog::CatalogCreateError;
     use crate::storage::StorageError;
+    let error: Box<dyn std::error::Error + Send + Sync> = match error
+        .downcast::<CatalogCreateError>()
+    {
+        Ok(error) => match *error {
+            CatalogCreateError::Storage(error) => Box::new(error),
+            CatalogCreateError::WorkerUnknown => {
+                return AppError::MutationUnknown {
+                    operation_id: None,
+                    message: "namespace worker outcome unavailable; reconcile before retry".into(),
+                };
+            }
+        },
+        Err(error) => error,
+    };
     if matches!(
         error.downcast_ref::<LifecycleError>(),
         Some(LifecycleError::InvalidInput(_))
@@ -1559,8 +1519,10 @@ fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> Ap
                 message,
                 field: None,
             },
-            error @ StorageError::CommitOutcomeUnknown { .. } => AppError::ServiceUnavailable {
-                message: error.to_string(),
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => AppError::MutationUnknown {
+                operation_id: Some(operation_id),
+                message: "namespace commit acknowledgement unavailable; reconcile before retry"
+                    .into(),
             },
             error => error.into(),
         },
@@ -2129,8 +2091,8 @@ pub async fn batch_store_versioned(
         .into_response();
     }
     if version == ContractVersion::V1 {
-        return match Json::<BatchStoreRequest>::from_request(request, &state).await {
-            Ok(body) => batch_store(State(state), body).await.into_response(),
+        return match Json::<super::store_api1::BatchRequest>::from_request(request, &state).await {
+            Ok(Json(body)) => super::store_api1::batch(state, body).await,
             Err(e) => e.into_response(),
         };
     }
@@ -2408,24 +2370,29 @@ pub async fn metrics(
 
 /// POST /decay/sweep -- trigger an immediate decay sweep.
 ///
-/// Accepts an optional `as_of` field (milliseconds since epoch) to run
-/// the sweep as if the current time were the given timestamp. This is
-/// used by the replay driver to simulate time-appropriate decay during
-/// historical seeding.
+/// Uses the configured clock. Caller-supplied time overrides are rejected
+/// before accepting work; isolated replay controls its existing owned clock.
 pub async fn trigger_decay_sweep(
     State(state): State<AppState>,
     Json(req): Json<TriggerSweepRequest>,
 ) -> Result<Json<ApiResponse<TriggerSweepResponse>>, AppError> {
-    let result = state
-        .decay
-        .trigger_sweep(req.as_of)
-        .await
-        .map_err(
-            |error| match error.downcast::<crate::storage::StorageError>() {
-                Ok(storage) => AppError::from(*storage),
-                Err(source) => AppError::Internal { source },
-            },
-        )?;
+    if req.fields.contains_key("asOf") || req.fields.contains_key("as_of") {
+        return Err(AppError::BadRequest {
+            message: "Public sweeps use the configured clock; remove asOf/as_of".into(),
+            field: Some("asOf".into()),
+        });
+    }
+    let result =
+        state
+            .decay
+            .trigger_sweep(None)
+            .await
+            .map_err(
+                |error| match error.downcast::<crate::storage::StorageError>() {
+                    Ok(storage) => AppError::from(*storage),
+                    Err(source) => AppError::Internal { source },
+                },
+            )?;
 
     Ok(Json(ApiResponse {
         data: TriggerSweepResponse {

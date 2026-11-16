@@ -1,0 +1,101 @@
+[
+  {
+    "path": "/validation/target/debug/recalld-text-migrate",
+    "target": "recalld-text-migrate",
+    "kind": [
+      "bin"
+    ],
+    "test": false,
+    "sha256": "43a8825f39a820626a6243567fed932fc58ad9fe41b6ba29014429cb0c7dc706",
+    "size": 13319808,
+    "mtime_ns": 1794706712049926372
+  },
+  {
+    "path": "/validation/target/debug/deps/text_migration_cli-2f292c1c7574ca84",
+    "target": "text_migration_cli",
+    "kind": [
+      "test"
+    ],
+    "test": true,
+    "sha256": "4096aac8586c62a5e8658b1f2243b39711da8693157f1217fdef1cfa44f88360",
+    "size": 13026328,
+    "mtime_ns": 1794706713852855705
+  },
+  {
+    "path": "/validation/target/debug/recalld-cli",
+    "target": "recalld-cli",
+    "kind": [
+      "bin"
+    ],
+    "test": false,
+    "sha256": "8038096e937b580b1c0076b6c3e336868a76ec0765c66a0d92f98e9682da8252",
+    "size": 20285024,
+    "mtime_ns": 1794706715936147414
+  },
+  {
+    "path": "/validation/target/debug/recalld",
+    "target": "recalld",
+    "kind": [
+      "bin"
+    ],
+    "test": false,
+    "sha256": "ec7bed9afc188e65bdceb4b20b8226bce81af54bcb7326acbcf12f306111c907",
+    "size": 90927984,
+    "mtime_ns": 1794706721593234559
+  },
+  {
+    "path": "/validation/target/debug/deps/recalld_cli-c8bdd12cfba39b69",
+    "target": "recalld-cli",
+    "kind": [
+      "bin"
+    ],
+    "test": true,
+    "sha256": "e0ec5b8b46a903a8e3d0081ee16a881c4ff2a892d6ad5d5093acbb2201397b08",
+    "size": 1057368,
+    "mtime_ns": 1794706721848028192
+  },
+  {
+    "path": "/validation/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2",
+    "target": "lifecycle_cli",
+    "kind": [
+      "test"
+    ],
+    "test": true,
+    "sha256": "3729df20f4f0d619d59d0ce6688596d05943846e6bd75d564c5b58cda4d782f4",
+    "size": 13404592,
+    "mtime_ns": 1794706723725672581
+  },
+  {
+    "path": "/validation/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0",
+    "target": "recalld-text-migrate",
+    "kind": [
+      "bin"
+    ],
+    "test": true,
+    "sha256": "975e2bec45b53f5533be1bd391917cba3ff37f74a1f0c306911d02d79f802163",
+    "size": 1057384,
+    "mtime_ns": 1794706723939591869
+  },
+  {
+    "path": "/validation/target/debug/deps/recalld-562f5ca8fdb44e42",
+    "target": "recalld",
+    "kind": [
+      "bin"
+    ],
+    "test": true,
+    "sha256": "e16edddc6d5eceea02fe26858b4fa19575450691d7ac9cfdcc593c032308d13d",
+    "size": 1058728,
+    "mtime_ns": 1794706724418512552
+  },
+  {
+    "path": "/validation/target/debug/deps/recalld-b5f6af44d2a89497",
+    "target": "recalld",
+    "kind": [
+      "lib"
+    ],
+    "test": true,
+    "sha256": "396716b83dbb7007d1aa1e2c3f77584c8b1e3112435a17a07f5bd571cb46458e",
+    "size": 111249344,
+    "mtime_ns": 1794706729636674537
+  }
+]

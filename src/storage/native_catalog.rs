@@ -130,7 +130,7 @@ pub struct NamespacePolicyState {
     thresholds: [FiniteF32; 3],
     permastore_threshold: FiniteF32,
     desired_retention: FiniteF32,
-    decay_rate_multiplier: Option<FiniteF32>,
+    pub(crate) decay_rate_multiplier: Option<FiniteF32>,
 }
 impl NamespacePolicyState {
     pub(crate) fn capture(ns: &NamespaceConfig) -> Result<Self, StorageError> {
@@ -174,6 +174,12 @@ pub struct NativeNamespaceCreated {
     pub created_at: i64,
     pub profile: EmbeddingProfile,
     pub policy: NamespacePolicyState,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub inherited_decay: Option<super::inherited_policy::InheritedDecayBinding>,
 }
 impl NativeNamespaceCreated {
     pub(crate) fn namespace(&self) -> Result<NamespaceConfig, StorageError> {
@@ -188,6 +194,7 @@ impl NativeNamespaceCreated {
         let mut ns = input.prepare(&self.profile, self.created_at)?;
         ns.id = self.namespace_id;
         self.policy.apply(&mut ns);
+        ns.schema.as_mut().unwrap().inherited_decay = self.inherited_decay.clone();
         super::catalog::NamespacePolicy::from(&ns).validate()?;
         ns.schema
             .as_ref()
@@ -204,6 +211,14 @@ impl NativeNamespaceCreated {
             return Err(invalid("invalid native namespace creation boundary"));
         }
         self.namespace()?;
+        if let Some(binding) = &self.inherited_decay {
+            binding.validate()?;
+            if !binding.matches_receipt(receipt) || self.policy.decay_rate_multiplier.is_some() {
+                return Err(invalid(
+                    "native creation inherited binding differs from receipt",
+                ));
+            }
+        }
         Ok(())
     }
     pub(crate) fn matches_namespace(&self, ns: &NamespaceConfig) -> Result<bool, StorageError> {

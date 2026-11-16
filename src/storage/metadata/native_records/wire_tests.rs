@@ -15,14 +15,46 @@ async fn setup() -> (
     McpBridge,
     crate::api::AppState,
 ) {
+    setup_policy(LifecycleVersion::ExplicitFeedbackV2).await
+}
+async fn setup_policy(
+    version: LifecycleVersion,
+) -> (
+    Fixture,
+    Data,
+    Arc<FixedClock>,
+    McpBridge,
+    crate::api::AppState,
+) {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture(root.path());
+    let mut d = fixture(root.path());
+    if version == LifecycleVersion::LegacyAccessV1 {
+        // The real schema migration destination retains the legacy lifecycle.
+        // No raw policy edits or fabricated proof receipts.
+        d.path = root.path().join("schema");
+        // This intended-positive public fixture selects a different real migration
+        // destination. Adopt there explicitly; unknown-history cases opt out.
+        crate::test_support::explicitly_adopt_inherited_policy(&d.path, d.ns, 1., 2000);
+    }
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let session = open(&d, clock.clone());
     let f = Fixture::from_open_engine(root, session.engine);
     completion(&f).rebuild_all().await.unwrap();
-    let (_, mut bridge, engine) = readers(&f, clock.clone());
-    let policy = NativePolicyInputs::default();
+    let (bridge, state) = public_adapters(&f, clock.clone());
+    (f, d, clock, bridge, state)
+}
+fn public_adapters(f: &Fixture, clock: Arc<dyn Clock>) -> (McpBridge, crate::api::AppState) {
+    configured_public_adapters(f, clock, NativePolicyInputs::default())
+}
+fn configured_public_adapters(
+    f: &Fixture,
+    clock: Arc<dyn Clock>,
+    policy: NativePolicyInputs,
+) -> (McpBridge, crate::api::AppState) {
+    let (_, mut bridge, engine) = readers(f, clock.clone());
+    let mut config = crate::config::RecalldConfig::default();
+    config.decay.decay_rate_multiplier = policy.multiplier;
+    let config = Arc::new(config);
     bridge.storage = Arc::new(
         McpStorageAdapter::new(
             f.storage.clone(),
@@ -32,14 +64,13 @@ async fn setup() -> (
             f.fts_index.clone(),
             f.entity_index.clone(),
             f.graph.clone(),
-            Arc::new(Default::default()),
+            config.clone(),
             chrono_tz::UTC,
         )
         .with_clock(clock.clone())
         .with_native_lifecycle_policy(policy.clone()),
     );
     bridge.default_namespace = "deliberately-wrong".into();
-    let config = Arc::new(crate::config::RecalldConfig::default());
     let state = crate::api::AppState::new(
         Arc::new(SearchPipelineAdapter::new(
             engine,
@@ -88,7 +119,7 @@ async fn setup() -> (
         Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
         Arc::new(NoopMetricsCollector),
     );
-    (f, d, clock, bridge, state)
+    (bridge, state)
 }
 fn request(f: &Fixture, d: &Data, key: &str) -> Value {
     let control = f.storage.read().unwrap().control_state().unwrap();
@@ -710,3 +741,12 @@ async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocate
     assert_eq!(bytes(&f, d.parent), before);
     assert_eq!(clock.0.load(Ordering::SeqCst), calls);
 }
+
+#[path = "public_api1_tests.rs"]
+mod public_api1;
+
+#[path = "public_matrix_tests.rs"]
+mod public_matrix;
+
+#[path = "adopted_public_tests.rs"]
+mod adopted_public;

@@ -1,0 +1,21 @@
+{
+  "production": "9c90f8201d476918077d3d08920fdb989269c205",
+  "driver_base": "d7fc2865c0761107cfc95576bf00b6dfa454da74",
+  "kind": "genuine prior private native3 Some(original1) createdAt rejection; not public API1 acceptance",
+  "source_manifest_sha256": "2dcf06ef1e39dd51eb492c9b6a01ffec63a72ad655ae68cb49c37b13c4d8e069",
+  "executables": {
+    "/target/debug/deps/recalld-7025a4141187b374": {
+      "sha256": "41e0bdea8068ad396d09156d60150be6a4a8edc54835e9b6be2105c313d6d3a4",
+      "bytes": 484682104
+    }
+  },
+  "store_files_sha256": {
+    "edges.db": "c640e7546d6ce1310d23dcc2163dc6afdc06796e3e2820f9eb64df11411af329",
+    "fulltext.8a6ce6f2-f016-47a7-b9f4-cda53ef5b71b.dat": "43beb87de3310f9c319128b3398e45b8e4117ccf3fc5eca57946e4797da9e1a5",
+    "fulltext.dat": "a27d395749d0587a7e39386c8cc3bc4d68156759f1ef1d99bddf32c50791658f",
+    "meta.db": "e0695e6715783315f7913e9c69049bb64f884c4bed3e1fa6e168e5a8f3353907",
+    "native/vectors.dat": "600a18c6c726cd3c96ef44cdcb388483e957f67a202b0f45248d8a12b5961f0d",
+    "recalld.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "archive_sha256": "c202cd5eb0ef80c50492d5d1857ed5a882b8f81f4c7606168c56f7a352c352cb"
+}

@@ -1,0 +1,10 @@
+{
+  "adapterVersion": 1,
+  "annotationUnit": "synthetic-unit",
+  "labelCanary": "CHANGED_CONTEXT_LABEL_CANARY",
+  "relevant": {
+    "q0": [
+      "turn-3"
+    ]
+  }
+}

@@ -1,0 +1,316 @@
+[
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "prepare",
+      "--track",
+      "serialized-mcp-paired-grouped-synthetic-diagnostic-v1",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--build",
+      "/output/build.json",
+      "--out",
+      "/output/actual/inputs"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "prepare",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/inputs/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/paired"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "actual-pair",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/missing-arm.json",
+      "--out",
+      "/output/actual/missing-arm-scores.json"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "score-missing-arm",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/duplicate-arm.json",
+      "--out",
+      "/output/actual/duplicate-arm-scores.json"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "score-duplicate-arm",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/failed-arm.json",
+      "--out",
+      "/output/actual/failed-arm-scores.json"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "score-failed-arm",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/missing-member.json",
+      "--out",
+      "/output/actual/missing-member-scores.json"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "score-missing-member",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/duplicate-member.json",
+      "--out",
+      "/output/actual/duplicate-member-scores.json"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "score-duplicate-member",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/missing-query.json",
+      "--out",
+      "/output/actual/missing-query-scores.json"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "score-missing-query",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/changed-label.json",
+      "--out",
+      "/output/actual/changed-label-scores.json"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "score-changed-label",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/target/debug/examples/score_mcp_episode",
+      "--paired-input",
+      "/output/actual/permuted.json",
+      "--out",
+      "/output/actual/permuted-scores.json"
+    ],
+    "exitCode": 0,
+    "expectedSuccess": true,
+    "name": "score-permuted",
+    "outputAbsent": null
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-last-cache/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-last-cache"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-last-cache",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-labels/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-labels"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-labels",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-seed/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-seed"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-seed",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-stream/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-stream"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-stream",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-version/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-version"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-version",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-missing-arm/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-missing-arm"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-missing-arm",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-duplicate-arm/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-duplicate-arm"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-duplicate-arm",
+    "outputAbsent": true
+  },
+  {
+    "command": [
+      "/usr/bin/python3",
+      "/work/source/scripts/public-mcp-evaluation.py",
+      "run",
+      "--manifest",
+      "/output/actual/negative-reset/manifest.json",
+      "--binary",
+      "/target/debug/recalld",
+      "--scorer",
+      "/target/debug/examples/score_mcp_episode",
+      "--source-root",
+      "/work/source",
+      "--out",
+      "/output/actual/rejected-reset"
+    ],
+    "exitCode": 1,
+    "expectedSuccess": false,
+    "name": "reject-reset",
+    "outputAbsent": true
+  }
+]

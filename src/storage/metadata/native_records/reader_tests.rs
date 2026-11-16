@@ -13,6 +13,8 @@ mod exposure_consumer;
 mod feedback_consumer;
 #[path = "forget_consumer_tests.rs"]
 mod forget_consumer;
+#[path = "native_query_admission_tests.rs"]
+mod native_query_admission;
 #[path = "replay_consumer_tests.rs"]
 mod replay_consumer;
 
@@ -44,13 +46,13 @@ pub(super) fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompl
 }
 pub(super) fn readers(
     f: &Fixture,
-    clock: Arc<FixedClock>,
+    clock: Arc<dyn Clock>,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
     readers_with_exposure(f, clock, false)
 }
 fn readers_with_exposure(
     f: &Fixture,
-    clock: Arc<FixedClock>,
+    clock: Arc<dyn Clock>,
     native_exposure: bool,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
     let provider = Arc::new(NoProvider);
