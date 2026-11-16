@@ -13,7 +13,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 root = Path(sys.argv[1])
 count = 0
 kinds = set()
-errors_seen = 0
+errors_seen = set()
+successes_seen = set()
 for path in sorted(root.glob("*.json")):
     case = json.loads(path.read_text())
     schema, value = case["schema"], case["value"]
@@ -21,7 +22,8 @@ for path in sorted(root.glob("*.json")):
     validator = Draft202012Validator(schema, format_checker=FormatChecker())
     validator.validate(value)
     count += 1
-    kinds.add(path.name.split("-", 1)[0])
+    kind = path.name.split("-", 1)[0]
+    kinds.add(kind)
 
     def rejects(change):
         bad = copy.deepcopy(value)
@@ -32,10 +34,11 @@ for path in sorted(root.glob("*.json")):
     rejects(lambda v: v.update(receipt={}))
     rejects(lambda v: v.update(readiness={"ready": True}))
     if value["status"] == "error":
-        errors_seen += 1
+        errors_seen.add(kind)
         rejects(lambda v: v["error"].update(commitState="committed"))
         rejects(lambda v: v.update(data={}))
         continue
+    successes_seen.add(kind)
     for invalid in [1, "01", "-1", "9223372036854775808", "1\n", "1\r", "1\u2028", "1\u2029"]:
         rejects(lambda v, x=invalid: v["readGeneration"].update(generation=x))
     rejects(lambda v: v["data"].update(undeclared=True))
@@ -57,5 +60,6 @@ for path in sorted(root.glob("*.json")):
                 rejects(lambda v, key=bucket: v["data"][key]["items"][0]["sources"].update(rawTags=1))
 
 assert kinds == {"list", "namespaces", "tags"}, kinds
-assert errors_seen, "missing actual whole-operation error envelope"
+assert errors_seen == kinds, ("missing actual per-kind error envelopes", errors_seen)
+assert successes_seen == kinds, ("missing actual per-kind successes", successes_seen)
 print(f"PASS {count} actual page envelopes plus strict shape/counter mutation negatives")

@@ -550,6 +550,49 @@ async fn prepared_pages_whole_size_error_smaller_retry_actual_transport_frames()
 }
 
 #[tokio::test]
+async fn prepared_pages_actual_mcp_http_catalog_errors_have_kind_schemas() {
+    let f = Fixture::new();
+    let before = canonical(&f);
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = adapter(&f);
+    let rest = crate::api::adapters::StorageEngineAdapter::new(
+        f.storage.clone(),
+        f.cache.clone(),
+        f.vector_index.clone(),
+        f.fts_index.clone(),
+        f.entity_index.clone(),
+        f.graph.clone(),
+    );
+    for (kind, tool) in [
+        (CatalogKind::Namespaces, "list_namespaces"),
+        (CatalogKind::Tags, "list_tags"),
+    ] {
+        let mcp =
+            crate::mcp::tools::dispatch_v2(&bridge, tool, json!({"contractVersion":2,"limit":0}))
+                .await;
+        assert_eq!(mcp.is_error, Some(true));
+        let value = serde_json::to_value(mcp).unwrap();
+        let mcp: serde_json::Value =
+            serde_json::from_str(value["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(value["structuredContent"], mcp);
+        let response =
+            crate::api::catalog_v2(&rest, "default", &[("limit".into(), "0".into())], kind).await;
+        assert_eq!(response.status(), 400);
+        let http: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 8192)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(http, mcp);
+        assert_eq!(http["error"]["commitState"], "notCommitted");
+        assert!(http.get("data").is_none());
+        assert!(http.get("receipt").is_none());
+    }
+    assert_eq!(canonical(&f), before);
+}
+
+#[tokio::test]
 async fn prepared_pages_remote_list_matches_actual_owner_before() {
     let f = Fixture::new();
     f.insert_memory_with(MemorySpec {
