@@ -208,6 +208,27 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    fn supports_prepared_queries(&self) -> bool {
+        self.query_engine.supports_prepared_queries()
+    }
+    async fn query_contract_bounded(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+        response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine
+            .query_contract_bounded(request, response_limit)
+            .await
+    }
+    async fn similar_contract_bounded(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+        response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine
+            .similar_contract_bounded(request, response_limit)
+            .await
+    }
     async fn similar_contract(
         &self,
         request: crate::serialization::query::SimilarRequest,

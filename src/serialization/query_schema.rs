@@ -54,7 +54,7 @@ pub(crate) fn output_schema(similar: bool) -> Value {
     let phase = json!({"enum":["full","summary","ghost","tombstone"]});
     let version = json!({"enum":["legacy_access_v1","explicit_feedback_v2"]});
     let access = json!({"enum":["direct_retrieval","associative_retrieval"]});
-    let reason = json!({"enum":["branch","cycle","hopLimit","workLimit","ineligible"]});
+    let reason = json!({"enum":["missingRecord","missingStructure","foreignNamespace","branch","cycle","hopLimit","workLimit","ineligible"]});
     let mut defs = serde_json::Map::new();
     defs.insert("generation".into(), generation.clone());
     defs.insert(
@@ -67,7 +67,7 @@ pub(crate) fn output_schema(similar: bool) -> Value {
     );
     defs.insert("scope".into(), json!({"oneOf":[reference("namespace"),all(json!({"namespaceIds":array(namespace.clone())}))]}));
     defs.insert("version".into(), json!({"oneOf":[all(json!({"status":{"enum":["current","historical"]}})),all(json!({"status":{"const":"unresolved"},"reason":reason}))]}));
-    defs.insert("unresolved".into(), object(json!({"branch":count,"cycle":count,"hopLimit":count,"workLimit":count,"ineligible":count}), &[]));
+    defs.insert("unresolved".into(), object(json!({"missingRecord":count,"missingStructure":count,"foreignNamespace":count,"branch":count,"cycle":count,"hopLimit":count,"workLimit":count,"ineligible":count}), &[]));
     defs.insert("labels".into(), all(json!({"entities":array(string.clone()),"topics":array(string.clone()),"emotions":array(string.clone()),"provenance":{"enum":["native_v2","legacy_retained_only"]}})));
     defs.insert("direct".into(), all(json!({"vector":nullable(number.clone()),"fts":nullable(number.clone()),"fused":nullable(number.clone()),"minScore":number,"disposition":{"enum":["passed","rejected","auxiliary"]}})));
     defs.insert("own".into(), all(json!({"formula":{"enum":["direct","graph","entityRecall","metadata"]},"direct":reference("direct"),"entityOverlap":number,"entityRecall":number,"ftsSignal":number,"rawRetrievability":number,"effectiveRetrievability":number,"activation":nullable(number.clone()),"activationDepth":nullable(count.clone()),"baseScore":number,"temporalFactor":number,"rifMultiplier":{"const":1.0},"score":number})));
@@ -114,17 +114,34 @@ pub(crate) fn output_schema(similar: bool) -> Value {
     defs.insert("change".into(), all(json!({"memoryId":uuid,"kind":access,"before":reference("state"),"after":reference("state"),"historyBefore":hash,"historyAfter":hash,"evictedEvent":nullable(event)})));
     defs.insert("transition".into(), all(json!({"namespaceId":namespace,"lifecycleVersion":version,"policyRevision":generation,"previousGeneration":generation,"captureGeneration":reference("generationRef"),"sampledAt":time,"records":array(reference("change")),"feedback":{"type":"null"}})));
     defs.insert("receipt".into(), all(json!({"storeId":uuid,"operationId":uuid,"committedGeneration":generation,"receiptVersion":{"const":1},"replayed":boolean,"outcome":{"oneOf":[all(json!({"kind":{"const":"exposuresRecorded"},"accesses":array(all(json!({"memoryId":uuid,"kind":access,"accessedAt":time})))})),all(json!({"kind":{"const":"lifecycleExposureRecorded"},"transition":reference("transition")}))]}})));
+    // Unverified remote evidence is not this query's receipt. This schema
+    // validates only the exact header and an opaque outcome object; the Rust
+    // decoder additionally requires the complete WriteReceipt codec and exact
+    // canonical roundtrip. Neither check proves canonical storage/authenticity.
+    defs.insert("receivedUnverifiedReceipt".into(), all(json!({
+        "storeId":uuid,"operationId":uuid,"committedGeneration":generation,
+        "receiptVersion":{"const":1},"replayed":boolean,
+        "outcome":{"type":"object","properties":{"kind":{"type":"string"}},
+            "required":["kind"],"additionalProperties":true,
+            "description":"Opaque unverified variant payload, preserved completely. This schema does not validate the outcome variant or prove current-write commitment. Runtime requires full Rust WriteReceipt decoding and exact canonical roundtrip."}
+    })));
     defs.insert("readiness".into(), all(json!({"storeId":uuid,"committedGeneration":generation,"ready":boolean,"pendingWork":count,"derived":array(all(json!({"name":string,"appliedGeneration":generation,"ready":boolean})))})));
     defs.insert("error".into(), object(json!({"category":{"enum":["invalid_input","not_found","conflict","unavailable","partial","internal"]},"code":string,"message":string,"field":string,"retryable":boolean,"commitState":{"enum":["notCommitted","committed","unknown"]},"operationId":uuid}), &["category","code","message","retryable","commitState"]));
     let mut schema = object(
-        json!({"contractVersion":{"const":2},"status":{"enum":["ok","error"]},"scope":reference("scope"),"data":reference("data"),"receipt":reference("receipt"),"observationReceipts":array(reference("receipt")),"readGeneration":reference("generationRef"),"error":reference("error"),"readiness":reference("readiness"),"warnings":array(string)}),
+        json!({"contractVersion":{"const":2},"status":{"enum":["ok","error"]},"scope":reference("scope"),"data":reference("data"),"receipt":reference("receipt"),"observationReceipts":array(reference("receipt")),"readGeneration":reference("generationRef"),"error":reference("error"),"readiness":reference("readiness"),"warnings":array(string),
+            "receivedEvidence":all(json!({"receipts":{"type":"array","minItems":1,"items":reference("receivedUnverifiedReceipt")}}))}),
         &["contractVersion", "status", "warnings"],
     );
     schema["$schema"] = json!("https://json-schema.org/draft/2020-12/schema");
     schema["$defs"] = Value::Object(defs);
     schema["allOf"] = json!([
         {"if":{"properties":{"status":{"const":"ok"}}},"then":{"required":["scope","data","readGeneration"],"not":{"required":["error"]}},"else":{"required":["error"],"not":{"required":["data"]}}},
-        {"if":{"required":["receipt"]},"then":{"required":["observationReceipts"]}}
+        {"if":{"required":["receipt"]},"then":{"required":["observationReceipts"]}},
+        {"if":{"required":["receivedEvidence"]},"then":{
+            "properties":{"status":{"const":"error"},"warnings":{"contains":{"const":"UNVERIFIED_RECEIVED_EVIDENCE"}},
+                "error":{"properties":{"commitState":{"enum":["notCommitted","unknown"]}},"not":{"required":["operationId"]}}},
+            "not":{"anyOf":[{"required":["data"]},{"required":["receipt"]},{"required":["observationReceipts"]},{"required":["readiness"]},{"required":["readGeneration"]},{"required":["scope"]}]}
+        }}
     ]);
     schema
 }
