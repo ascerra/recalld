@@ -42,7 +42,23 @@ REST201557bytes; modern MCP456169/daemon456062; legacy MCP254591/daemon254484.
 These are actual fixture measurements including complete wrappers with maximum
 numeric IDs, not an all-history maximum, RSS limit or arbitrary-string-ID bound.
 
-No full suite, Clippy, final schema GREEN or READY claim is made by these runs.
+No full suite, Clippy, final schema GREEN or READY claim is made by003/004.
 The schema-only correction needs affected emitted fixtures and formal validation
 before the planned single frozen full run. Original001 and002 failures stay
 separately attributed to their exact sources and executables.
+
+## Run005 corrected schema
+
+Source `7eec6f48e512f91f2bcd08357eba85089ffffb53`: four affected actual fixture
+tests and formatting passed. The formal runner passed12 emitted envelopes,
+including success and error for each of list, namespaces and tags, plus strict
+shape/counter mutation negatives. All468 source inputs and13 formal inputs
+(12 fixtures and the runner) matched their pre-run hashes.
+
+Library executable SHA256
+`2c81ca5846e98f0af8337286e0396685a6721590e2751b8a6a35b6a4d693f917`.
+Cgroup peak4294967296bytes,max26368,oom0,oom_kill0: reclaim pressure, not OOM.
+The focused Rust and formal containers are retired. These are four distinct
+affected tests, not a rerun of the preceding23. The single planned full suite
+uses the same frozen source root and target without a source switch; its result
+will be reported separately. No final full/Clippy/READY result is asserted here.
