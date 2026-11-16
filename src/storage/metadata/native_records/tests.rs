@@ -65,12 +65,30 @@ fn fixture_with_policy(
     multiplier: Option<f32>,
     adopt: bool,
 ) -> Data {
+    let mut config = NamespaceConfig::default_namespace(0);
+    config.decay_rate_multiplier = multiplier;
+    fixture_with_config(root, ghost, config, seed, adopt)
+}
+fn fixture_configured(
+    root: &Path,
+    ghost: bool,
+    config: NamespaceConfig,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+) -> Data {
+    // This matrix already supplies an explicit namespace multiplier.
+    fixture_with_config(root, ghost, config, seed, false)
+}
+fn fixture_with_config(
+    root: &Path,
+    ghost: bool,
+    mut config: NamespaceConfig,
+    seed: impl FnOnce(&mut RedbStorageEngine),
+    adopt: bool,
+) -> Data {
     let source = root.join("legacy");
     let mut engine = RedbStorageEngine::open(&source).unwrap();
-    let mut config = NamespaceConfig::default_namespace(0);
     config.name = "native".into();
     config.embedding_dim = 4;
-    config.decay_rate_multiplier = multiplier;
     let ns = engine.create_namespace(&config).unwrap();
     let input = crate::storage::insertion::InsertMemory {
         id: None,
