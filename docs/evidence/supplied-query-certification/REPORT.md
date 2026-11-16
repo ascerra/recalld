@@ -1,4 +1,4 @@
-# Supplied-query certification: validation in progress
+# Supplied-query certification consumer
 
 This is a bounded consumer of PR175 + PR151 and the unchanged Feynman helper/accessor
 3f76d77e / 794506f6. It does not activate ordinary public API2 or native startup.
@@ -49,12 +49,12 @@ owned reusable pair, with package cleanup on source changes. No personal data,
 credentials, host home or sockets are mounted. Memory max events represent
 reclaim pressure, not OOM when oom/oom_kill are zero.
 
-## Remaining validation
+## Review boundaries
 
-Focused corrected tests, inherited compatibility controls, frozen full suite and
-lints must complete before this report becomes a publication handoff. Hume has
-provided bounded source ACK for production diff85ea70fc; that is not independent
-execution evidence. No completion, CI, public readiness or whole-A4 claim yet.
+Hume and Feynman provided bounded source ACKs for production diff
+`85ea70fc606d2c9bf0493bebe54b35157c926b702f3da0b83f5668033a1e2187`.
+Those are source reviews, separate from the owner execution below. Exact-head
+GitHub CI remains pending at handoff. No public readiness or whole-A4 claim.
 
 ### Focused005 and internal-entry compatibility
 
@@ -77,8 +77,8 @@ Exact runtime `9bd4e8820bf063902e9e2f4d205d4b1d6f550617`, immutable final-006:
 - Full `cargo test --offline --locked --all-features`:1460 library passed,
   0 failed,2 ignored,1258.96s; five CLI passed; four doctests ignored.
 - `cargo fmt --all -- --check` and all-feature/all-target Clippy exited0,
-  with existing warnings. No broad warning cleanup.
--404 source files verified pre/post and against the worktree before the tail;
+  with warnings. No broad warning cleanup.
+- 404 source files verified pre/post and against the worktree before the tail;
   nine executed binaries hashed before target cleanup;21 evidence files copied
   and verified under final-006/COPY.json.
 - Source manifest SHA256:
@@ -90,3 +90,47 @@ Exact runtime `9bd4e8820bf063902e9e2f4d205d4b1d6f550617`, immutable final-006:
 This is exact runtime proof before the separately approved PR175 test-only tail.
 No production change is planned after this source. The full run is not attributed
 to the future final docs/test-tail head; exact-head GitHub CI remains required.
+
+
+## Exact test-only tail
+
+After sealing006, normally merged exact published175 follow-up
+`a54cdc7dc89221f66049147ee8543d84bbb49977`. Merge head
+`9ab0e69c8077793fe5c6b3cc5207412c5bc9d486` changes only
+`tests/vector_certification_cli.rs`: `connection.set_nonblocking(false).unwrap()`
+before the existing timeout/read. It addresses the owner-reviewed macOS fixture
+behavior. No runtime/Cargo/example delta, no stack rewrite or unrelated parent.
+
+Immutable tail-007 on that exact head: actual vector-certification CLI2 passed
+(2.18s), fmt exited0. No broad full rerun, as explicitly approved.404 source
+inputs verified pre/post/worktree;2 executed binaries and16 evidence files verified.
+Source manifest SHA256
+`7fb821416b81b99a48f3fdee72c06d8849b3831a561f96847610b52b614e2f69`;
+executed-binary manifest SHA256
+`cb39b4ca75191dac652a7dfa7ced679f4a320b3bc2d4478077f2fa5f459c05fe`.
+Memory peak3735539712 bytes, max0/oom0/oom_kill0. Same offline image/resources,
+private package-cleaned target and source-specific executable attribution.
+This Linux tail run does not claim independent macOS validation; final-head CI
+must establish that. The subsequent seal is docs/evidence only.
+
+## Dependency and scope handoff
+
+PR base175 exacta54; actual additional prerequisite151 exact2b256051. Feynman's
+3f76/794 helper/accessor commits are consumed unchanged in this actual consumer,
+with no helper-only PR. Prepared-query join uses the existing175 Readiness
+conversion; no new readiness semantics. Core runtime changes are confined to
+NamespaceResolver authority/delegation, the supplied-vector pipeline guard and
+source/donor similarity guards. Tests and fixture changes are described above.
+
+This closes the supplied-query certification bypass, not all A4 acceptance.
+Ordinary publicAPI2 remains closed. Native startup, vector-owner partitioning,
+publicAPI1 native catalog/purge adapter closure and final public contract activation
+remain coordinated work. Feynman owns A1/startup/purge; Huygens owns the wire
+projection/activation side. No new registry, global namespace gate, profile
+inference, metadata/FTS provider requirement or ranking/default change is added.
+No performance or A5 gate claim. No personal daemon/data, deployment or merge.
+
+All owned validation containers are removed. The single owned Cargo cache/target
+remains protected. Seven completed raw run roots may be released centrally only
+after the resulting PR and compact results are recorded; source/worktree/.git and
+tracked evidence remain. No raw HOME archive.

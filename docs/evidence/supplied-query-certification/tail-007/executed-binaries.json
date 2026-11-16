@@ -1,0 +1,10 @@
+{
+  "/target/debug/deps/vector_certification_cli-2f72c905f2c41567": {
+    "sha256": "c959e247a8e52fdf391d835b8e98856c0e889d51a0d5e1ca6bf97a3ed6ec8bab",
+    "bytes": 16022008
+  },
+  "/target/debug/recalld": {
+    "sha256": "2b152e5d00c00b1e1cf0e8dba4c584b2993153053d9fbe4078e31d2e7e28f6c1",
+    "bytes": 97841096
+  }
+}
