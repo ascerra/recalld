@@ -1,0 +1,287 @@
+[
+    {
+        "Id": "d65ae58ad4d38f60fbcc706670b20b8070019d28590fd16708d12326a9318601",
+        "Created": "2026-11-16T18:12:41.364694595Z",
+        "Path": "python3",
+        "Args": [
+            "/work/output/execute.py"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-16T18:12:41.460997454Z",
+            "FinishedAt": "2026-11-16T18:49:10.895714183Z"
+        },
+        "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+        "ResolvConfPath": "/var/lib/docker/containers/d65ae58ad4d38f60fbcc706670b20b8070019d28590fd16708d12326a9318601/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/d65ae58ad4d38f60fbcc706670b20b8070019d28590fd16708d12326a9318601/hostname",
+        "HostsPath": "/var/lib/docker/containers/d65ae58ad4d38f60fbcc706670b20b8070019d28590fd16708d12326a9318601/hosts",
+        "LogPath": "/var/lib/docker/containers/d65ae58ad4d38f60fbcc706670b20b8070019d28590fd16708d12326a9318601/d65ae58ad4d38f60fbcc706670b20b8070019d28590fd16708d12326a9318601-json.log",
+        "Name": "/recalld-merge-queue-pr184",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": null,
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {
+                    "max-file": "5",
+                    "max-size": "20m"
+                }
+            },
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": [
+                "ALL"
+            ],
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": true,
+            "SecurityOpt": [
+                "no-new-privileges"
+            ],
+            "Tmpfs": {
+                "/tmp": "rw,nosuid,nodev,exec,size=1g"
+            },
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 8407482368,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 6442450944,
+            "NanoCpus": 2000000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 6442450944,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": 512,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "Mounts": [
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr184-c9ccaabe/source",
+                    "Target": "/work/source",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/cargo",
+                    "Target": "/cargo"
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/target",
+                    "Target": "/work/target"
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr184-c9ccaabe/output",
+                    "Target": "/work/output"
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-huygens-active-validation/schema-wheels",
+                    "Target": "/work/schema-wheels",
+                    "ReadOnly": true
+                }
+            ],
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/cargo",
+                "Destination": "/cargo",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr184-c9ccaabe/output",
+                "Destination": "/work/output",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-huygens-active-validation/schema-wheels",
+                "Destination": "/work/schema-wheels",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr184-c9ccaabe/source",
+                "Destination": "/work/source",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/target",
+                "Destination": "/work/target",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "d65ae58ad4d3",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "CARGO_NET_OFFLINE=true",
+                "CARGO_BUILD_JOBS=2",
+                "RECALLD_A6_SOURCE_COMMIT=c9ccaabe13cc45c300b2c4e686412a8db6590e22",
+                "CARGO_HOME=/cargo",
+                "HOME=/tmp",
+                "RUSTUP_TOOLCHAIN=1.94.1",
+                "RECALLD_A6_SOURCE_TREE_SHA256=5eacf3f29aba3a3a43ad248fd9c706d97b38a1007f6b20db226909918ac375a7",
+                "RECALLD_A6_IMAGE_ID=sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+                "CARGO_TARGET_DIR=/work/target",
+                "RECALLD_QUERY_SCHEMA_FIXTURES=/work/output/schema-fixtures",
+                "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "RUSTUP_HOME=/usr/local/rustup",
+                "RUST_VERSION=1.94.1"
+            ],
+            "Cmd": [
+                "python3",
+                "/work/output/execute.py"
+            ],
+            "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+            "Volumes": null,
+            "WorkingDir": "/work/source",
+            "Entrypoint": null,
+            "Labels": {
+                "org.opencontainers.image.source": "https://github.com/rust-lang/docker-rust"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "none": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "9f8d771a69aae6568ca4386f95a53838dae6a2faa7f0494668ca6d561de2ff98",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:3065526a10807e4b0672a1c23f6a167f6b42ba75efdae5deaf7afdbd4d554544",
+            "size": 1448,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]
