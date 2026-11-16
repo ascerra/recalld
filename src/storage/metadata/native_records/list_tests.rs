@@ -17,7 +17,7 @@ fn request(cursor: Option<String>) -> ListPageRequest {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn canonical_list_native_unicode_authority_transport_reopen_and_stale() {
     let mut root = tempfile::tempdir().unwrap();
-    let d = fixture_with_ghost(root.path(), true);
+    let d = certified_positive_fixture::certified_ghost_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     let mut expected = vec![];
@@ -158,7 +158,7 @@ async fn canonical_list_native_unicode_authority_transport_reopen_and_stale() {
     assert_eq!(actual, expected);
     assert!(cursor.is_none());
     let f = Fixture::from_open_engine(root, engine.take().unwrap());
-    // All-mode has legacy retained ghost and canonical empty native labels.
+    // All-mode retains migrated provenance after real native Ghost phase loss.
     let all = list_page(
         f.storage.clone(),
         ListPageRequest::from_mcp(&json!({"contractVersion":2,"namespace":"native"})).unwrap(),

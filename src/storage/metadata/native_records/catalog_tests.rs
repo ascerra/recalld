@@ -59,7 +59,7 @@ async fn mcp(bridge: &crate::mcp::bridge::McpBridge, tool: &str, args: Value) ->
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn catalog_page_native_unicode_empty_provenance_actual_transports_and_reopen() {
     let root = tempfile::tempdir().unwrap();
-    let d = fixture_with_ghost(root.path(), true);
+    let d = certified_positive_fixture::certified_ghost_fixture(root.path());
     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
     let mut session = open(&d, clock.clone());
     for i in 0..4 {
