@@ -70,7 +70,7 @@ async fn native_graph_producer_publication_failure_preserves_exact_receipt_then_
         .control_state()
         .unwrap()
         .committed_generation;
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(5);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(5);
     let error = publisher
         .native_graph(
             context.clone(),
@@ -97,7 +97,7 @@ async fn native_graph_producer_publication_failure_preserves_exact_receipt_then_
         *receipt
     );
     let calls = clock.0.load(Ordering::SeqCst);
-    *f.vector_index.write().await = crate::search::FlatVectorIndex::new(4);
+    *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let policy = NativePolicyInputs {
         multiplier: f64::NAN,
         ..Default::default()

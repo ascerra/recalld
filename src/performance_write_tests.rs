@@ -487,7 +487,7 @@ async fn online_producer_actual_committed_publication_failure_and_keyed_replay_k
         idempotency_key: Some("private-key-canary".into()),
         ..MutationContext::unkeyed(NamespaceId::new(1))
     };
-    *fx.vector_index.write().await = FlatVectorIndex::new(5);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(5);
     let capture = Capture::default();
     let error = completion
         .insert(ctx.clone(), input.clone(), vec![].into(), 123)
@@ -524,7 +524,7 @@ async fn online_producer_actual_committed_publication_failure_and_keyed_replay_k
             .iter()
             .any(|e| e["stage"] == "insert.complete" && e["outcome"] == "error")
     );
-    *fx.vector_index.write().await = FlatVectorIndex::new(4);
+    *fx.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
     let replay_capture = Capture::default();
     let replay = completion
         .insert(ctx, input, vec![f32::NAN].into(), i64::MAX)
