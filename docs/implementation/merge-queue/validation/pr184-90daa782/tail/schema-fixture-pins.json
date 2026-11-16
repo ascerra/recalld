@@ -1,0 +1,16 @@
+{
+  "recall-legacy-observed.json": "ce81cc579ad0952dc17b483d32294bb07b66b0fa6ac4f134aa899362e93bbc64",
+  "similar-false-rejected.json": "553c443ef1bacd6f0f03b686743eaf4dd68dc998b8e6bb1dacfd659c5f40331e",
+  "similar-true-rejected.json": "553c443ef1bacd6f0f03b686743eaf4dd68dc998b8e6bb1dacfd659c5f40331e",
+  "input-cases.json": "09b2b705265f4c1dd4363ba017c1d0c2aeab1339c5a65dd21c5e086342862b4d",
+  "similar-plain.json": "87dff42d2e14e59b935b107bf0f182f5fe7f3a3eaba864a6c744852769c5cc88",
+  "recall-plain.json": "b4b7c115c94037fd5aacea9dfdf7005d1a738cc952a093655a4ec3744c5a3170",
+  "recall-explained.json": "8900e827be833a07a2d9842d997a0028ccf58546bd78763cf3d1e7318ce70503",
+  "similar-native-observed.json": "bcdca082b8eece45e491376a992db3653d879d25638bdabf557fe2b70ca8c5d6",
+  "maximal-valid-receipts.json": "47ad6f0446735f02bbe77586d498a3b51cc060da719fc32cc3f4124a6cb134c0",
+  "recall-canonical-evidence.json": "7635c9d37493ad0cddcb0b68891164314fc8d2f773c2ea6a7c1931e7faceb1e9",
+  "similar-evidence.json": "e88ddd12c6ceb10ecc291c392fedaab3e168128d3e659e82a6d0f1419feb3d39",
+  "similar-evidence-dense.json": "c0113f5eaf24e1620b8a56b816ccee90665f8ac8438606b3aaac2869d83de38a",
+  "recall-supplemental.json": "440591f3a7aa12bb4b9ccb402e7f7b8fcf266f6ae587a1f60a618effd2ffa369",
+  "recall-known-failure.json": "32d163b06ea174a53e8247ab1d9554d6639be55b1954dc40d3470dc9e5179f36"
+}

@@ -12,7 +12,18 @@ fn own(e: &OwnScoreExplanation) -> Value {
     json!({"formula":match e.formula{ScoreFormula::Direct=>"direct",ScoreFormula::Graph=>"graph",ScoreFormula::EntityRecall=>"entityRecall",ScoreFormula::Metadata=>"metadata"},
         "direct":direct(&e.direct),"entityOverlap":e.entity_overlap,"entityRecall":e.entity_recall,"ftsSignal":e.fts_signal,
         "rawRetrievability":e.raw_retrievability,"effectiveRetrievability":e.effective_retrievability,"activation":e.activation,"activationDepth":e.activation_depth,
-        "baseScore":e.base_score,"temporalFactor":e.temporal_factor,"score":e.score})
+        "baseScore":e.base_score,"temporalFactor":e.temporal_factor,"rifMultiplier":e.rif_multiplier,"score":e.score})
+}
+
+pub(crate) fn similarity(e: &crate::search::SimilarityExplanation) -> Value {
+    use crate::search::{SimilarityAlgorithm, SimilarityOwnAdmission};
+    json!({"algorithm":match e.algorithm {SimilarityAlgorithm::CosineMax=>"cosineMax"},
+        "ownCosine":e.own_cosine,"ownAdmission":match e.own_admission {
+            SimilarityOwnAdmission::Missing=>"missing",SimilarityOwnAdmission::RejectedByMinScore=>"rejectedByMinScore",
+            SimilarityOwnAdmission::NotAdmitted=>"notAdmitted",SimilarityOwnAdmission::Admitted=>"admitted"},
+        "minScore":e.min_score,"admittedOwn":e.admitted_own,"inheritedFloor":e.inherited_floor,
+        "origins":e.origins.iter().map(|o|json!({"originId":o.origin_id,"cosine":o.cosine})).collect::<Vec<_>>(),
+        "omittedOrigins":e.omitted_origins,"finalSimilarity":e.final_similarity,"version":e.version.map(super::query_response::version)})
 }
 pub(crate) fn project(e: &ScoreExplanation) -> Value {
     json!({"rankingProfile":e.ranking_profile,"retrievalSemanticsVersion":e.retrieval_semantics_version,
