@@ -21,8 +21,11 @@ ranked-query `baseline-v1` evidence; omission/false leaves explanations absent.
 This parent supports RIF Off only. Similarity retains its cosine/current-max
 semantics, including the own-vector versus inherited-floor distinction; it does
 not acquire a baseline-v1 label or ranked-query decomposition. Similarity
-`explain:true` is explicitly unsupported before selection or observation, and
-its prepared schema allows only false until a cosine-specific producer lands.
+`explain:true` was unsupported in the original PR151 parent. The dependent
+prepared-query-evidence consumer now uses PR155's cosine-specific producer,
+with actual own admission, inherited floor, up to64 eligible origins and an
+exact omitted count. This is a separate explanation shape, not baseline-v1.
+It is projected and counted before observation; omission/false still omits it.
 
 The public version selector and capabilities remain contract1 only. Private
 prepared consumers and real owned fixtures are useful before ordinary native
@@ -56,8 +59,11 @@ parser/schema cases, and mutation negatives. It is not native publication proof.
 
 Still outside this prepared child: live version2 activation and tool outputSchema
 advertising, remote query/exact-scan RPC conformance, generated native text-query
-admission from its actual owner, keyed query exposure, experimental RIF evidence,
-cosine-specific similarity explanations, and A5 overhead/page measurements.
+admission from its actual owner, keyed query exposure, experimental public RIF,
+and A5 overhead/page measurements. The dependent evidence consumer rejects
+configured non-Off ranked queries before accepted work; direct operator
+coherent RIF remains available. Its own/origin evidence projection preserves
+the producer's actual multiplier. Prepared Off schemas require1 throughout.
 Ordinary native startup and API1 writer compatibility remain independent
 prerequisites; the next store projection consumes the frozen PR148 producer.
 

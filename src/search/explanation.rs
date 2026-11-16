@@ -54,6 +54,8 @@ pub struct OwnScoreExplanation {
     pub fts_signal: f32,
     pub raw_retrievability: f32,
     pub effective_retrievability: f32,
+    /// Applied to this origin's effective R; 1 for Off and returned Shadow scores.
+    pub rif_multiplier: f32,
     pub activation: Option<f32>,
     pub activation_depth: Option<u8>,
     pub base_score: f32,
@@ -82,8 +84,8 @@ pub struct ScoreExplanation {
     /// No intermediate chain nodes or rejected/foreign records are included.
     pub inherited_sources: Vec<InheritedScoreExplanation>,
     pub inherited_sources_omitted: usize,
-    /// This parent supports V2 Off only. Experimental composition must supply
-    /// its actual query-local multiplier when the RIF sibling is integrated.
+    /// Applied to the returned record's effective R. Inherited origins carry
+    /// their own multipliers; this is not a multiplier on the final score.
     pub rif_multiplier: f32,
     pub final_score: f32,
 }
@@ -135,7 +137,7 @@ impl Candidate {
             inherited_floor: self.provenance.inherited_floor,
             inherited_sources: sources,
             inherited_sources_omitted: omitted,
-            rif_multiplier: 1.0,
+            rif_multiplier: self.applied_rif_multiplier,
             final_score: self.composite_score,
         }
     }

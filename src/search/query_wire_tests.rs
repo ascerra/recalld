@@ -1,5 +1,309 @@
 // Real owned fixture consumers; included in read_view::tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_evidence_rejects_operator_rif_before_work_on_actual_transports() {
+    struct NoProviderOrObservation;
+    #[async_trait::async_trait]
+    impl EmbeddingProviderRegistry for NoProviderOrObservation {
+        async fn embed(&self, _: &str, _: &str) -> Result<Vec<f32>> {
+            panic!("prepared non-Off query must reject before provider");
+        }
+    }
+    #[async_trait::async_trait]
+    impl AccessRecorder for NoProviderOrObservation {
+        async fn record_access(
+            &self,
+            _: MemoryId,
+            _: AccessKind,
+        ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+            panic!("prepared non-Off query must reject before observation");
+        }
+        async fn record_access_batch(
+            &self,
+            _: &[(MemoryId, AccessKind)],
+            _: Option<&crate::storage::control::ExposureScope>,
+        ) -> Result<Vec<crate::storage::control::WriteReceipt>> {
+            panic!("prepared non-Off query must reject before batch observation");
+        }
+    }
+    for mode in [RifMode::Shadow, RifMode::Experimental] {
+        for access in [false, true] {
+            let f = Fixture::new();
+            let owner = owner(&f);
+            payload_record(&owner, 9201, [1., 0., 0., 0.], None, None, true).await;
+            let mut engine = payload_engine(&f, &owner);
+            engine.rif_mode = mode;
+            engine.embedding_providers = Arc::new(NoProviderOrObservation);
+            engine.access_recorder = Arc::new(NoProviderOrObservation);
+            let engine = Arc::new(engine);
+            let provider = Arc::new(crate::embedding::PassthroughProvider::new(4));
+            let mcp = crate::mcp::bridge_adapters::McpSearchAdapter::new(
+                engine.clone(),
+                provider.clone(),
+                f.storage.clone(),
+                f.graph.clone(),
+                chrono_tz::UTC,
+            );
+            let http = crate::api::adapters::SearchPipelineAdapter::new(
+                engine,
+                provider,
+                f.vector_index.clone(),
+                f.fts_index.clone(),
+                f.entity_index.clone(),
+            );
+            let before = bytes(&f);
+            for query_mode in ["metadata_only", "embedding_only"] {
+                let mut args = serde_json::json!({"contractVersion":2,"queryMode":query_mode,"tags":["allow"],"recordAccess":access,"explain":true});
+                if query_mode == "embedding_only" {
+                    args["query"] = serde_json::json!("fixture");
+                }
+                let reply = crate::mcp::tools::prepared_query(&mcp, "default", &args).await;
+                assert_eq!(
+                    reply.is_error,
+                    Some(true),
+                    "configured {mode:?} must not reach prepared query: {reply:?}"
+                );
+                let value = serde_json::Value::Object(reply.structured_content.unwrap());
+                assert_eq!(value["error"]["commitState"], "notCommitted");
+                assert!(value.get("receipt").is_none());
+                args.as_object_mut().unwrap().remove("contractVersion");
+                let response = crate::api::search_v2(&http, "default", &args).await;
+                assert_eq!(
+                    response.status(),
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE
+                );
+                let raw = axum::body::to_bytes(
+                    response.into_body(),
+                    crate::daemon::protocol::MAX_MESSAGE_SIZE,
+                )
+                .await
+                .unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
+                    value
+                );
+                assert_eq!(bytes(&f), before);
+                let status = f
+                    .storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .work_tracker()
+                    .status();
+                assert_eq!(status.pending, 0);
+                assert_eq!(status.unresolved, 0);
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_evidence_similar_actual_mcp_rest_cosine_and_bounded_origins() {
+    for dense in [false, true] {
+        let f = if dense {
+            similar_fixture_with_origins(0, Some((false, 0.0))).await
+        } else {
+            similar_fixture().await
+        };
+        let before = bytes(&f.f);
+        let provider = Arc::new(crate::embedding::PassthroughProvider::new(4));
+        let engine = Arc::new(f.engine);
+        let mcp = crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            engine.clone(),
+            provider.clone(),
+            f.f.storage.clone(),
+            f.f.graph.clone(),
+            chrono_tz::UTC,
+        );
+        let http = crate::api::adapters::SearchPipelineAdapter::new(
+            engine,
+            provider,
+            f.f.vector_index.clone(),
+            f.f.fts_index.clone(),
+            f.f.entity_index.clone(),
+        );
+        let mut args = serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"recordAccess":false,"limit":1,"minScore":0.5});
+        if dense {
+            args["tags"] = serde_json::json!(["explain"]);
+        }
+        let plain = crate::mcp::tools::prepared_similar(&mcp, &args).await;
+        assert_eq!(plain.is_error, Some(false), "{plain:?}");
+        let plain = serde_json::Value::Object(plain.structured_content.unwrap());
+        args["explain"] = serde_json::json!(true);
+        let reply = crate::mcp::tools::prepared_similar(&mcp, &args).await;
+        assert_eq!(
+            reply.is_error,
+            Some(false),
+            "actual cosine evidence must be consumed: {reply:?}"
+        );
+        let value = serde_json::Value::Object(reply.structured_content.clone().unwrap());
+        let crate::mcp::protocol::ContentBlock::Text { text } = &reply.content[0];
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(text).unwrap(),
+            value
+        );
+        let row = &value["data"]["results"][0];
+        assert_eq!(row["memoryId"], f.terminal.to_string());
+        let e = &row["explanation"];
+        assert_eq!(e["algorithm"], "cosineMax");
+        assert!(e.get("rankingProfile").is_none());
+        assert_eq!(e["ownCosine"], 0.0);
+        assert_eq!(e["ownAdmission"], "rejectedByMinScore");
+        assert!(e["admittedOwn"].is_null());
+        assert_eq!(e["finalSimilarity"], row["compositeScore"]);
+        assert_eq!(e["inheritedFloor"], e["finalSimilarity"]);
+        assert_eq!(
+            e["origins"].as_array().unwrap().len(),
+            if dense { 64 } else { 1 }
+        );
+        assert_eq!(e["omittedOrigins"], if dense { 6 } else { 0 });
+        if !dense {
+            assert_eq!(e["origins"][0]["originId"], f.old.to_string());
+        }
+        let mut stripped = value.clone();
+        stripped["data"]["results"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("explanation");
+        assert_eq!(
+            stripped, plain,
+            "evidence must not alter selection or scores"
+        );
+        args.as_object_mut().unwrap().remove("contractVersion");
+        args.as_object_mut().unwrap().remove("id");
+        let response = crate::api::similar_v2(&http, f.source, &args).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let raw = axum::body::to_bytes(
+            response.into_body(),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
+            value
+        );
+        assert_eq!(bytes(&f.f), before);
+        crate::serialization::query_schema::record_fixture(
+            if dense {
+                "similar-evidence-dense"
+            } else {
+                "similar-evidence"
+            },
+            true,
+            &value,
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_evidence_actual_metadata_counts_units_and_first_rejection() {
+    let f = Fixture::new();
+    let owner = owner(&f);
+    payload_record(&owner, 9101, [1., 0., 0., 0.], None, None, true).await;
+    payload_record(&owner, 9102, [1., 0., 0., 0.], None, None, false).await;
+    let engine = Arc::new(payload_engine(&f, &owner));
+    let provider = Arc::new(crate::embedding::PassthroughProvider::new(4));
+    let mcp = crate::mcp::bridge_adapters::McpSearchAdapter::new(
+        engine.clone(),
+        provider.clone(),
+        f.storage.clone(),
+        f.graph.clone(),
+        chrono_tz::UTC,
+    );
+    let http = crate::api::adapters::SearchPipelineAdapter::new(
+        engine,
+        provider,
+        f.vector_index.clone(),
+        f.fts_index.clone(),
+        f.entity_index.clone(),
+    );
+    let before = bytes(&f);
+    let mut args = serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"recordAccess":false});
+    let reply = crate::mcp::tools::prepared_query(&mcp, "default", &args).await;
+    assert_eq!(reply.is_error, Some(false), "{reply:?}");
+    let value = serde_json::Value::Object(reply.structured_content.unwrap());
+    let c = &value["data"]["coverage"];
+    assert_eq!(
+        c["canonicalEligibility"]["examinedUnit"],
+        "canonicalRecords"
+    );
+    assert_eq!(c["canonicalEligibility"]["examined"], 2);
+    assert_eq!(c["canonicalEligibility"]["passed"], 1);
+    assert_eq!(
+        c["canonicalEligibility"]["firstRejections"]["requiredTag"],
+        1
+    );
+    assert_eq!(
+        c["channels"]["metadata"]["examinedUnit"],
+        "canonicalRecords"
+    );
+    assert_eq!(c["channels"]["metadata"]["examined"], 2);
+    assert_eq!(c["channels"]["metadata"]["eligible"], 1);
+    assert!(c["channels"]["vector"]["examinedUnit"].is_null());
+    assert!(c["channels"]["vector"]["examined"].is_null());
+    args.as_object_mut().unwrap().remove("contractVersion");
+    let response = crate::api::search_v2(&http, "default", &args).await;
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let raw = axum::body::to_bytes(
+        response.into_body(),
+        crate::daemon::protocol::MAX_MESSAGE_SIZE,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
+        value
+    );
+    assert_eq!(bytes(&f), before);
+    crate::serialization::query_schema::record_fixture("recall-canonical-evidence", false, &value);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_evidence_actual_operator_origin_rif_projection() {
+    let f = Fixture::new();
+    let owner = owner(&f);
+    let old = payload_record(&owner, 1, [1., 0., 0., 0.], None, None, true).await;
+    let terminal = payload_record(&owner, 2, [1., 0., 0., 0.], None, Some(old), true).await;
+    payload_record(&owner, 3, [1., 0., 0., 0.], Some(old), None, true).await;
+    let mut engine = payload_engine(&f, &owner);
+    engine.rif_mode = RifMode::Experimental;
+    let before = bytes(&f);
+    let query: SearchQuery = serde_json::from_value(serde_json::json!({"queryMode":"metadata_only","filter":{"minStrength":0.0},"limit":3,"graphDepth":0,"recordAccess":false})).unwrap();
+    let prepared = engine
+        .prepare_coherent_payload_with_semantics(
+            query,
+            RetrievalSemantics::V2(VersionMode::Current),
+            false,
+            false,
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let typed = prepared.response.diagnostics.provenance.as_ref().unwrap()[&terminal]
+        .explanation
+        .as_ref()
+        .unwrap();
+    assert_eq!(typed.rif_multiplier, 1.0);
+    assert!(typed.inherited_sources[0].own.rif_multiplier < 1.0);
+    let projected = crate::serialization::query_response::project(&prepared, true).unwrap();
+    let row = projected.envelope.data.as_ref().unwrap()["results"].as_array().unwrap()
+        .iter().find(|r| r["memoryId"] == terminal.to_string()).unwrap();
+    let value = &row["explanation"];
+    assert_eq!(value["inheritedSources"][0]["source"], old.to_string());
+    assert_eq!(
+        value["inheritedSources"][0]["own"]["rifMultiplier"],
+        serde_json::json!(typed.inherited_sources[0].own.rif_multiplier)
+    );
+    assert_eq!(
+        value["own"]["rifMultiplier"],
+        serde_json::json!(typed.own.as_ref().unwrap().rif_multiplier)
+    );
+    assert_eq!(bytes(&f), before);
+    // This uses the actual operator producer directly, not an experimental REST selector.
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_query_actual_supplemental_coverage_after_filter_and_cap() {
     let f = Fixture::new();
     let owner = owner(&f);
@@ -286,7 +590,7 @@ async fn strict_query_actual_whole_response_budget_before_false_and_true_observa
     f.storage.write().unwrap().sync().unwrap();
     let before = bytes(&f);
     for record_access in [false, true] {
-        let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"recordAccess":record_access,"limit":4}),"default").unwrap();
+        let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"recordAccess":record_access,"limit":4,"explain":true}),"default").unwrap();
         let reply = engine.query_contract(request).await;
         assert_eq!(reply.http_status, 400, "{reply:?}");
         assert!(reply.envelope.data.is_none());
@@ -299,7 +603,7 @@ async fn strict_query_actual_whole_response_budget_before_false_and_true_observa
         );
         assert_eq!(bytes(&f), before);
     }
-    let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"limit":3}),"default").unwrap();
+    let request=crate::serialization::query::QueryRequest::from_mcp(&serde_json::json!({"contractVersion":2,"queryMode":"metadata_only","tags":["allow"],"limit":3,"explain":true}),"default").unwrap();
     let reply = engine.query_contract(request).await;
     assert_eq!(reply.http_status, 200, "{reply:?}");
     assert_eq!(reply.observation_receipts.len(), 1);
@@ -518,11 +822,11 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
         serde_json::from_slice::<serde_json::Value>(&raw).unwrap(),
         value
     );
-    // Similarity has cosine/current-max evidence, not ranked-query §9 evidence.
-    // Even the default mutating selector must fail before any exposure.
+    // The optional explanation selector is strict: null still fails before
+    // exposure in both modes. Actual true cosine evidence is tested separately.
     for access in [false, true] {
         let mut unsupported = args.clone();
-        unsupported["explain"] = serde_json::json!(true);
+        unsupported["explain"] = serde_json::Value::Null;
         unsupported["recordAccess"] = serde_json::json!(access);
         let result = crate::mcp::tools::prepared_similar(&mcp, &unsupported).await;
         assert_eq!(result.is_error, Some(true));
@@ -536,7 +840,7 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
             true,
             &rejected,
         );
-        assert_eq!(rejected["error"]["code"], "UNSUPPORTED_FEATURE");
+        assert_eq!(rejected["error"]["code"], "INVALID_TYPE");
         assert_eq!(rejected["error"]["field"], "/explain");
         assert!(rejected.get("receipt").is_none());
         unsupported
@@ -582,7 +886,7 @@ async fn strict_query_actual_similar_scope_current_history_empty_identity_and_pa
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_query_actual_similar_original2_true_preserves_all_namespace_receipts() {
     let f = similar_fixture().await;
-    let request=crate::serialization::query::SimilarRequest::from_mcp(&serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"namespaceScope":"allCompatible","tags":["allow"]})).unwrap();
+    let request=crate::serialization::query::SimilarRequest::from_mcp(&serde_json::json!({"contractVersion":2,"id":f.source.to_string(),"namespaceScope":"allCompatible","tags":["allow"],"explain":true})).unwrap();
     let reply = f.engine.similar_contract(request).await;
     assert_eq!(reply.http_status, 200, "{reply:?}");
     crate::serialization::query_schema::record_fixture(

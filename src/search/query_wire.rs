@@ -25,8 +25,11 @@ impl QueryEngine {
                     accepted.as_ref(),
                 )
                 .await?;
-            let mut reply =
-                crate::serialization::query_response::project_similarity(&selected, all)?;
+            let mut reply = crate::serialization::query_response::project_similarity(
+                &selected,
+                all,
+                request.explain,
+            )?;
             captured = Some((reply.envelope.scope.clone(), selected.read_generation));
             if !reply.fits_before_observation(if access { selected.rows.len() } else { 0 }) {
                 return Ok(reply.oversize());
@@ -58,6 +61,11 @@ impl QueryEngine {
         .await
     }
     pub(crate) async fn query_contract(&self, request: QueryRequest) -> QueryReply {
+        if self.rif_mode != RifMode::Off {
+            return QueryReply::failure(SearchError::Unavailable(
+                "operator RIF modes are not available through prepared queries".into(),
+            ));
+        }
         let accepted = match self.accept_work(None) {
             Ok(work) => work,
             Err(error) => return QueryReply::failure(error),

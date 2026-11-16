@@ -1,0 +1,441 @@
+{
+  "runtime": "8e0a5521315a35a2fd4931686b0a55e2833e6675",
+  "runs": {
+    "001-red": {
+      "source": "42d30b304c734332a769461316947c885b3f9e2c",
+      "source_files_verified": 259,
+      "root": "/tmp/recalld-huygens-active-validation/prepared-evidence-001-red",
+      "files": {
+        "clean.log": {
+          "sha256": "789a57f2d346664861471ea4d79810466a92d5528342ae928e65971e03b37671",
+          "bytes": 39
+        },
+        "exit-code": {
+          "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+          "bytes": 4
+        },
+        "focused.log": {
+          "sha256": "49653c0432ac32713e5b0cd7f7a338fec82581e186afa88535e47922de07d190",
+          "bytes": 2639
+        },
+        "memory.events": {
+          "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+          "bytes": 70
+        },
+        "memory.peak": {
+          "sha256": "7c61e8e402b07f959ca197cc1d2a4a6b17eb336c791748a971b4bc2fdf4e5a5e",
+          "bytes": 11
+        },
+        "prior-executable-verified.txt": {
+          "sha256": "753589b2102a46334d75e088703ec057fe1ec0de070dd7ccc47d52c9f0835777",
+          "bytes": 164
+        },
+        "run.sh": {
+          "sha256": "2ded06e476aeda373f8f019006d2ccae62f583bf4a792d92fc1015048f224005",
+          "bytes": 423
+        },
+        "source-post-verified.txt": {
+          "sha256": "13c624cca00179dc5e6cee36595178272f9550500455246d8d2f778035fdd775",
+          "bytes": 95
+        },
+        "source.json": {
+          "sha256": "c3f41b80c200a56e7adaf137959ba31ae820fef7a16e09a0b355717de431221d",
+          "bytes": 26472
+        },
+        "status.txt": {
+          "sha256": "1d6cc7e1c1d0a35a4110bbd443aa3f341fae30cc539e7bd8db7235d810c35f75",
+          "bytes": 12
+        }
+      },
+      "test_results": [],
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.peak": 2288406528
+    },
+    "002-red": {
+      "source": "4c9c8ca1194a18b5f3207476c80572d8453d6620",
+      "source_files_verified": 259,
+      "root": "/tmp/recalld-huygens-active-validation/prepared-evidence-002-red",
+      "files": {
+        "clean.log": {
+          "sha256": "d497246d8491921531fbc260e69f6998eab5126e0383270acdeae17e956b4c27",
+          "bytes": 36
+        },
+        "exit-code": {
+          "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+          "bytes": 4
+        },
+        "focused.log": {
+          "sha256": "c094a9750b298359aa3caec090fd4ec6b23e5f20c0583a14f8091cd8de6f5205",
+          "bytes": 7022
+        },
+        "memory.events": {
+          "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+          "bytes": 70
+        },
+        "memory.peak": {
+          "sha256": "df6f089bb2a5eee1cfa942287b1b658f74b4da71bb44ea842e8138d2475f6a6d",
+          "bytes": 11
+        },
+        "run.sh": {
+          "sha256": "2ded06e476aeda373f8f019006d2ccae62f583bf4a792d92fc1015048f224005",
+          "bytes": 423
+        },
+        "source-executables-final.json": {
+          "sha256": "9958c9ab87be6fd5c62e60da552c5404358ea5bdd726185da4c76c8eda08d5e9",
+          "bytes": 164
+        },
+        "source-post-verified.txt": {
+          "sha256": "ea02529feb3485a93055042d74704c574bd19726a7308af1f951e0dda05da670",
+          "bytes": 95
+        },
+        "source.json": {
+          "sha256": "bf80a0dd8d5d5b84be1c66608a3237e2cb6feead42af903fee171658e6ca157c",
+          "bytes": 26472
+        },
+        "status.txt": {
+          "sha256": "1d6cc7e1c1d0a35a4110bbd443aa3f341fae30cc539e7bd8db7235d810c35f75",
+          "bytes": 12
+        }
+      },
+      "test_results": [
+        {
+          "log": "focused.log",
+          "result": "test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 1133 filtered out; finished in 1.46s"
+        }
+      ],
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.peak": 3576827904,
+      "executables": {
+        "/target/debug/deps/recalld-b5f6af44d2a89497": {
+          "sha256": "c479d4dfc55f87d848855bc1f8e26cd4954d8d33ffddbd59657b3874b9e6cbc5",
+          "bytes": 105463448
+        }
+      }
+    },
+    "003-red": {
+      "source": "d7879564d14114c54c791aa4e3a58f4bbc4a2125",
+      "source_files_verified": 259,
+      "root": "/tmp/recalld-huygens-active-validation/prepared-evidence-003-red",
+      "files": {
+        "clean.log": {
+          "sha256": "c25fd3a2c26fa8cbdfc2f8f23f6ba137262bd5f950e797f07db368c60182687d",
+          "bytes": 37
+        },
+        "exit-code": {
+          "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+          "bytes": 4
+        },
+        "focused.log": {
+          "sha256": "8b9f7cab16e41e6a0ef71ae317931662357b5f1db069c80882a6dc46892271e6",
+          "bytes": 12663
+        },
+        "memory.events": {
+          "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+          "bytes": 70
+        },
+        "memory.peak": {
+          "sha256": "79563094fd9c4bf9f94bab4a90b9b1fbf8c0c297a3990cbe375ee51b1400aa01",
+          "bytes": 11
+        },
+        "run.sh": {
+          "sha256": "7606d5eaa335c790525f71d221986e92babaf51488d2252bd5d10a6eebbd7269",
+          "bytes": 444
+        },
+        "source-executables-final.json": {
+          "sha256": "7ac0496e2da0476c06c52e7567e12bafa373015eccd8683087f165741d20fc4d",
+          "bytes": 164
+        },
+        "source-post-verified.txt": {
+          "sha256": "b8c2298bf891f687c49ea8c5ccdacda52b54a9a123bebbbeccf335b52768a5f6",
+          "bytes": 95
+        },
+        "source.json": {
+          "sha256": "fdbb360aabf53c20bed420ca33bc872a9e9b9c8cb6cfc008c5c0706e2b1c7946",
+          "bytes": 26472
+        },
+        "status.txt": {
+          "sha256": "1d6cc7e1c1d0a35a4110bbd443aa3f341fae30cc539e7bd8db7235d810c35f75",
+          "bytes": 12
+        }
+      },
+      "test_results": [
+        {
+          "log": "focused.log",
+          "result": "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1136 filtered out; finished in 0.12s"
+        }
+      ],
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.peak": 3126079488,
+      "executables": {
+        "/target/debug/deps/recalld-b5f6af44d2a89497": {
+          "sha256": "0bf3cc2bacb34939a4303493807adf9f9827acee82888e74f60b5039db161841",
+          "bytes": 105457016
+        }
+      }
+    },
+    "004-green": {
+      "source": "8e0a5521315a35a2fd4931686b0a55e2833e6675",
+      "source_files_verified": 259,
+      "root": "/tmp/recalld-huygens-active-validation/prepared-evidence-004-green",
+      "files": {
+        "clean.log": {
+          "sha256": "c25fd3a2c26fa8cbdfc2f8f23f6ba137262bd5f950e797f07db368c60182687d",
+          "bytes": 37
+        },
+        "clippy.log": {
+          "sha256": "e899d5106b6a95044820b9651c375ad2a38605fb2b19e572ec31589f0c391388",
+          "bytes": 699145
+        },
+        "exit-code": {
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "bytes": 2
+        },
+        "fmt.log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "focus-coherent_rif_explanations.log": {
+          "sha256": "e4a50b581fb542d7e0ad6055c5c798444defa44a08d8dd106f0e815a10be977d",
+          "bytes": 4273
+        },
+        "focus-prepared_evidence_.log": {
+          "sha256": "e9fa912c1ad51404c50a2448b6e8760442fcd090a7fd5bcecea4bea676c3e19e",
+          "bytes": 4648
+        },
+        "focus-similar_explanation_.log": {
+          "sha256": "9efea9f9395a9ad260eb4588271b60320ae48757a20897def7692c8e4a829741",
+          "bytes": 4890
+        },
+        "focus-strict_query_.log": {
+          "sha256": "fd81e912615fdafd65efd6d806aa752d7c03466e095aeb3a2a8cae296afc5e1b",
+          "bytes": 5772
+        },
+        "focused-source-verified.txt": {
+          "sha256": "4ae9e59336ffc3d9eedbc9a4cc49b7c3fe36315bc3467d297b39610201981a5b",
+          "bytes": 57
+        },
+        "full-exit-code": {
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "bytes": 2
+        },
+        "full-memory.events": {
+          "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+          "bytes": 70
+        },
+        "full-memory.peak": {
+          "sha256": "fce91d46824b63788a4bc623e50d6676627e5afa95dfd6a08e34adecf0de3298",
+          "bytes": 11
+        },
+        "full.log": {
+          "sha256": "aa68b022579f3dd52e2bf18cc5d5feeac446455eedb65b0968a2a183e6adcb64",
+          "bytes": 130054
+        },
+        "full.sh": {
+          "sha256": "c85b54e6d240f5e3bc893bf2fdf0520cbcd9431fa574dbe3320a27b31d468eac",
+          "bytes": 778
+        },
+        "memory.events": {
+          "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+          "bytes": 70
+        },
+        "memory.peak": {
+          "sha256": "05c7b7de4dad8927931107976887623b3a14ba27203b6f46f7a4c62936a13edf",
+          "bytes": 11
+        },
+        "run.sh": {
+          "sha256": "0f10db0ce83a2fefdb2fc976d3ec858ec164ab1abc4e9cafd8aa71e2faa7f8ad",
+          "bytes": 844
+        },
+        "schema.log": {
+          "sha256": "840fda7b99e9ed5130634d922ab5ddff3c4c10e739475b31ae278cc4897f0652",
+          "bytes": 65
+        },
+        "source-executables-final.json": {
+          "sha256": "cf22ac79adc41ade44e802c766f705ef99ce2f8a197f56cd1623812504693fd8",
+          "bytes": 1426
+        },
+        "source-post-verified.txt": {
+          "sha256": "1447cc839aed0545fb457552b7bd09829d887d3c28946a0c829189dd58b88b6a",
+          "bytes": 95
+        },
+        "source.json": {
+          "sha256": "70f933ac8a0f6223ff344693d42e67536d7b06a2aa8f0829a63ea17e1831f9a0",
+          "bytes": 26472
+        },
+        "status.txt": {
+          "sha256": "8326dd8ff8a9f6859d2f2d9bd892841f7f4324af8d7b866473374b74c3bd4b3f",
+          "bytes": 119
+        }
+      },
+      "test_results": [
+        {
+          "log": "focus-coherent_rif_explanations.log",
+          "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1136 filtered out; finished in 0.23s"
+        },
+        {
+          "log": "focus-prepared_evidence_.log",
+          "result": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1133 filtered out; finished in 4.75s"
+        },
+        {
+          "log": "focus-similar_explanation_.log",
+          "result": "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1131 filtered out; finished in 14.98s"
+        },
+        {
+          "log": "focus-strict_query_.log",
+          "result": "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 1123 filtered out; finished in 3.60s"
+        },
+        {
+          "log": "full.log",
+          "result": "test result: ok. 1137 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 369.31s"
+        },
+        {
+          "log": "full.log",
+          "result": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        },
+        {
+          "log": "full.log",
+          "result": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        },
+        {
+          "log": "full.log",
+          "result": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        },
+        {
+          "log": "full.log",
+          "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.87s"
+        },
+        {
+          "log": "full.log",
+          "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s"
+        },
+        {
+          "log": "full.log",
+          "result": "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        },
+        {
+          "log": "schema.log",
+          "result": "PASS 61 actual output/input cases plus output mutation negatives"
+        }
+      ],
+      "full-memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "full-memory.peak": 2698870784,
+      "memory.events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "memory.peak": 3576360960,
+      "executables": {
+        "/target/debug/deps/lifecycle_cli-47f6a1ac133afcc2": {
+          "sha256": "ab59c5d02fdc4a36f678ff013a85a9943b3a4b325fc98b6b23a714fa1e7602f2",
+          "bytes": 11260368
+        },
+        "/target/debug/deps/recalld-562f5ca8fdb44e42": {
+          "sha256": "e16edddc6d5eceea02fe26858b4fa19575450691d7ac9cfdcc593c032308d13d",
+          "bytes": 1058728
+        },
+        "/target/debug/deps/recalld-b5f6af44d2a89497": {
+          "sha256": "d07dfe450c7a40a0032db23200a3ad8cffebbed9ae33581e3baf1b9151ce4aa7",
+          "bytes": 105544696
+        },
+        "/target/debug/deps/recalld_cli-c8bdd12cfba39b69": {
+          "sha256": "e0ec5b8b46a903a8e3d0081ee16a881c4ff2a892d6ad5d5093acbb2201397b08",
+          "bytes": 1057368
+        },
+        "/target/debug/deps/recalld_text_migrate-9a013ecf6293c9c0": {
+          "sha256": "975e2bec45b53f5533be1bd391917cba3ff37f74a1f0c306911d02d79f802163",
+          "bytes": 1057384
+        },
+        "/target/debug/deps/text_migration_cli-2f292c1c7574ca84": {
+          "sha256": "f9600a255459752b41dead31b45c75af622ce5b27853f4c5e05f2104295ff406",
+          "bytes": 10865272
+        },
+        "/target/debug/recalld": {
+          "sha256": "2662824c9dafbf867a819bc2053075387f587d4eb5ef9b7e2d8662c46bbf05f0",
+          "bytes": 89251840
+        },
+        "/target/debug/recalld-cli": {
+          "sha256": "8b06e21a938df9b4fb21daf2c7adf2336d815fcd7baaf64ba214081df1aaaf70",
+          "bytes": 20220168
+        },
+        "/target/debug/recalld-text-migrate": {
+          "sha256": "d0110d77b15ddd47d782b29891131a026838616decac0427ce3ed69bf6a82b60",
+          "bytes": 11251056
+        }
+      },
+      "container": {
+        "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+        "State": {
+          "Status": "exited",
+          "Running": false,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 0,
+          "ExitCode": 0,
+          "Error": "",
+          "StartedAt": "2026-11-16T08:48:19.519682341Z",
+          "FinishedAt": "2026-11-16T08:55:24.603110664Z"
+        },
+        "binds": [
+          "/tmp/recalld-huygens-active-validation/prepared-evidence-004-green/source:/work:ro",
+          "/tmp/recalld-huygens-active-validation/prepared-evidence-004-green:/evidence",
+          "/tmp/recalld-implementation/compaction-review-7281918/cargo:/cargo",
+          "/tmp/recalld-huygens-active-validation/target:/target"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "toolchain": "1.94.1",
+    "network": "none",
+    "cpus": 2,
+    "memory_bytes": 4294967296,
+    "cargo_build_jobs": 1,
+    "source_mount": "read-only",
+    "cache_clones": 0
+  },
+  "cleanup": {
+    "owned_containers_retired": true,
+    "raw_deleted_bytes": 0,
+    "raw_roots_protected": true
+  }
+}

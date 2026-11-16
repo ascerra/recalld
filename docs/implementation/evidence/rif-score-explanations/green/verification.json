@@ -1,0 +1,82 @@
+{
+  "source_commit": "2e32a81b5f8fdc2c76864791dff6af75c5bb237a",
+  "manifest_sha256": "6b068520dc34ab44f32b33bc93f197a079222f795eda779a3d0b9836497b82d8",
+  "source_files": 237,
+  "inside_precompile_postrun_match": true,
+  "host_snapshot_worktree_committed_match": true,
+  "binaries_sha256": {
+    "lifecycle_cli-4843a41927cafc6b": "d06b9cd6b9e9ff14c9d2d39e80ab20650978dc4ab03b1728a198fb31740e36c4",
+    "recalld-7667794dd2328ce1": "f8c020a2633145149722011f446a844b4755ec4b85dd12900269cbd36297ab80",
+    "recalld-c8392f2a5ef64898": "bd64d1823fabd862afd7eab9a328870877ed172d1e6ee0a7d7a4549a9cccd468",
+    "recalld-e423ca3d07310388": "0f4b6c43192a0923296b65a6d2a50efac779c18e52fe59d0b79f00efe6400fa2",
+    "text_migration_cli-92bf02c892a58814": "277bf6308a461844c0e3e1983ef155e6f61c01dbdbbc2507ce91f1bb094d9461"
+  },
+  "log_sha256": "8ec5e860b84de567c9075fbaa39f7b81b645b5ed7de24f721f3fef06c2b86f84",
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-15T01:15:28.109797829Z",
+    "FinishedAt": "2026-11-15T01:23:54.249505456Z"
+  },
+  "network": "none",
+  "memory_bytes": 4294967296,
+  "nano_cpus": 2000000000,
+  "mounts": [
+    {
+      "Source": "/tmp/recalld-implementation/coherent-v2-similar/.validation/cargo",
+      "Destination": "/cargo",
+      "RW": true
+    },
+    {
+      "Source": "/tmp/recalld-implementation/rif-score-explanations/.validation/rif-explain-green/source.sha256",
+      "Destination": "/source.sha256",
+      "RW": false
+    },
+    {
+      "Source": "/tmp/recalld-implementation/a2-conformance-inventory/.validation/target-entity",
+      "Destination": "/target",
+      "RW": true
+    },
+    {
+      "Source": "/tmp/recalld-implementation/rif-score-explanations/.validation/rif-explain-green/validate.sh",
+      "Destination": "/validate.sh",
+      "RW": false
+    },
+    {
+      "Source": "/tmp/recalld-implementation/rif-score-explanations/.validation/rif-explain-green/source",
+      "Destination": "/work",
+      "RW": false
+    }
+  ],
+  "results": [
+    "test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 1047 filtered out; finished in 1.52s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1063 filtered out; finished in 0.28s",
+    "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1061 filtered out; finished in 0.01s",
+    "test result: ok. 1064 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 416.36s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.38s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.33s"
+  ],
+  "warning_summaries": [
+    "warning: `recalld` (lib test) generated 9 warnings",
+    "warning: `recalld` (lib test) generated 9 warnings",
+    "warning: `recalld` (lib test) generated 9 warnings",
+    "warning: `recalld` (lib test) generated 9 warnings",
+    "warning: `recalld` (lib) generated 28 warnings (4 duplicates)",
+    "warning: `recalld` (lib) generated 707 warnings (run `cargo clippy --fix --lib -p recalld` to apply 85 suggestions)",
+    "warning: `recalld` (bin \"recalld\" test) generated 1 warning",
+    "warning: `recalld` (bin \"recalld\") generated 1 warning (1 duplicate)",
+    "warning: `recalld` (lib test) generated 777 warnings (685 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 6 suggestions)"
+  ],
+  "fmt_and_clippy_exit": 0
+}

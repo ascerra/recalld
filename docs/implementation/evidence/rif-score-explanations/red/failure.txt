@@ -1,0 +1,17 @@
+running 1 test
+
+thread 'search::pipeline::rif_experiment_tests::rif_explanations_follow_applied_own_and_inherited_scores' (300) panicked at src/search/rif_experiment_tests.rs:121:9:
+assertion `left == right` failed: returned record applied multiplier
+  left: 1.0
+ right: 0.85012245
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test search::pipeline::rif_experiment_tests::rif_explanations_follow_applied_own_and_inherited_scores ... FAILED
+
+failures:
+
+failures:
+    search::pipeline::rif_experiment_tests::rif_explanations_follow_applied_own_and_inherited_scores
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1062 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`
