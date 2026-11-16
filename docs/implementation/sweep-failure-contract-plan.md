@@ -1,5 +1,10 @@
 # E1: bounded HTTP sweep failure evidence
 
+The concrete completion/encoding amendment is now in
+[sweep-failure-implementation-plan.md](sweep-failure-implementation-plan.md).
+It supersedes the provisional choices below; runtime implementation still needs
+the coordinator's literal release after exact owner review.
+
 Plan-only child of actual main `33865ca0d19599a13ba999d31a1ec736c89db233`.
 Proposed sole implementation owner: Pascal. Halley owns queue integration.
 Huygens reviews HTTP schema/size; Feynman reviews receipt/producer proof;
