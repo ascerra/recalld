@@ -285,7 +285,12 @@ async fn vector_certification_genuine_pending_keeps_parent_child_then_real_remed
     );
     assert!(reply.readiness.is_none());
     assert_eq!(reply.error.code, "INDEX_NOT_READY");
-    assert!(reply.warnings.iter().any(|warning| warning == "READINESS_UNKNOWN"));
+    assert!(
+        reply
+            .warnings
+            .iter()
+            .any(|warning| warning == "READINESS_UNKNOWN")
+    );
     assert!(matches!(
         retained.items[0].state,
         BatchItemState::NotAttempted {}
