@@ -47,7 +47,8 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
         crate::storage::StorageError::NamespaceMismatch { .. } => {
             bridge::BridgeError::NamespaceMismatch(error.to_string())
         }
-        crate::storage::StorageError::InvalidMutation(_)
+        crate::storage::StorageError::CallerVectorInvalid(_)
+        | crate::storage::StorageError::InvalidMutation(_)
         | crate::storage::StorageError::EdgeConflict(_)
         | crate::storage::StorageError::MutationNamespaceMismatch => {
             bridge::BridgeError::InvalidInput(error.to_string())
@@ -1061,6 +1062,10 @@ impl bridge::SearchPipeline for McpSearchAdapter {
 /// Adapts `RedbStorageEngine` + subsystems to the MCP `StorageEngine` trait.
 pub struct McpStorageAdapter {
     catalog_profile: Option<crate::serialization::session::ActiveEmbedding>,
+    /// Test-only, per-instance fault after completed children and known root
+    /// finish: 1 invalidates FTS publication; 2 withdraws the canonical handle.
+    #[cfg(test)]
+    pub(crate) fail_native_batch_after_children: std::sync::atomic::AtomicU8,
     native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -1120,6 +1125,8 @@ impl McpStorageAdapter {
             catalog_profile: None,
             native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
+            #[cfg(test)]
+            fail_native_batch_after_children: std::sync::atomic::AtomicU8::new(0),
             query_engine: None,
             storage,
             cache,
@@ -1725,6 +1732,133 @@ impl bridge::StorageEngine for McpStorageAdapter {
         crate::canonical_list::list_page(self.storage.clone(), request).await
     }
 
+    fn supports_api1_store(&self) -> bool {
+        true
+    }
+    async fn store_native_wire(
+        &self,
+        request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        self.run_native_single_wire(request).await
+    }
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::{contract::ContractVersion, native_single, store_api1::Reply};
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))
+            .and_then(|s| s.control_state())
+            .map(|c| c.control_schema_version == 2);
+        match native {
+            Err(e) => Reply::Owned(native_single::Reply::failure(e)),
+            Ok(true) => match request.prepare_native() {
+                Err(e) => Reply::Owned(native_single::Reply::invalid(e)),
+                Ok(parsed) => Reply::Owned(
+                    self.run_native_single_parsed(parsed, ContractVersion::V1)
+                        .await,
+                ),
+            },
+            Ok(false) => {
+                if let Err(e) = request.validate_legacy() {
+                    return Reply::Legacy(Err(e.to_string()));
+                }
+                match self.store_memory_reserved(request.input, None).await {
+                    Ok((data, _)) => Reply::Legacy(Ok(data)),
+                    Err(StoreWriteError::Canonical(e)) => {
+                        Reply::Owned(native_single::Reply::failure(e))
+                    }
+                    Err(StoreWriteError::Bridge(e)) => Reply::Legacy(Err(e.to_string())),
+                }
+            }
+        }
+    }
+    fn supports_api1_store_batch(&self) -> bool {
+        true
+    }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::{
+            batch_api1::{Reply, Surface},
+            native_batch::BatchFailure,
+        };
+        if let Err(e) = request.validate() {
+            return Reply::invalid(e);
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))
+            .and_then(|s| s.control_state())
+            .map(|c| c.control_schema_version == 2);
+        match native {
+            Err(e) => Reply::Owned(Err(BatchFailure::from_storage(e))),
+            Ok(false) => {
+                if let Err(e) = request.legacy() {
+                    return Reply::invalid(e);
+                }
+                Reply::Legacy(
+                    self.run_batch(request.input)
+                        .await
+                        .map_err(|e| e.to_string()),
+                )
+            }
+            Ok(true) => {
+                if request.surface == Surface::Mcp
+                    && request.input.items.iter().any(|v| {
+                        ["createdAt", "observedAt", "embeddingProfile"]
+                            .iter()
+                            .any(|k| v.get(k).is_some())
+                    })
+                {
+                    return Reply::invalid(bridge::BridgeError::InvalidInput("REST-only timestamp/private profile controls are not MCP API1 batch fields".into()));
+                }
+                let mut input = request.input;
+                input.mutation_version = 3;
+                input.request_context =
+                    crate::storage::request_context::RetainedRequestContext::from_contract(1)
+                        .expect("supported origin");
+                let budget = crate::mcp::batch_budget::BatchBudget::api1(input.items.len());
+                let result = self
+                    .run_batch_with_surface(input, Some(budget), Some(request.surface))
+                    .await
+                    .map_err(|e| match e {
+                        StoreWriteError::Canonical(e) => BatchFailure::from_storage(e),
+                        StoreWriteError::Bridge(e) => BatchFailure::from_bridge(e),
+                    });
+                Reply::owned(self.native_batch_readiness(result).await)
+            }
+        }
+    }
+    async fn mutate_native_batch(
+        &self,
+        input: crate::storage::batch::BatchInput,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        use crate::serialization::native_batch::BatchFailure;
+        if input.mutation_version != 3
+            || input.result_version != 1
+            || input.kind != crate::storage::batch::BatchKind::Insert
+        {
+            return Err(BatchFailure::from_bridge(
+                bridge::BridgeError::InvalidInput("native insertion batch version mismatch".into()),
+            ));
+        }
+        let result = self
+            .run_batch_budgeted(input, Some(crate::mcp::batch_budget::BatchBudget::STANDARD))
+            .await
+            .map_err(|e| match e {
+                StoreWriteError::Canonical(e) => BatchFailure::from_storage(e),
+                StoreWriteError::Bridge(e) => BatchFailure::from_bridge(e),
+            });
+        self.native_batch_readiness(result).await
+    }
     fn supports_api1_lifecycle(&self) -> bool {
         true
     }
@@ -1809,7 +1943,6 @@ impl bridge::StorageEngine for McpStorageAdapter {
         .await
         .map_err(|_| bridge::BridgeError::Unavailable("store context unavailable".into()))?
     }
-
     fn supports_durable_batches(&self) -> bool {
         true
     }
@@ -1818,7 +1951,20 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: crate::storage::batch::BatchInput,
     ) -> Result<crate::storage::batch::BatchOutcome, bridge::BridgeError> {
-        if input.mutation_version == 3 {
+        if input.mutation_version == 1
+            && input.kind == crate::storage::batch::BatchKind::Insert
+            && self
+                .storage
+                .read()
+                .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?
+                .control_state()
+                .map_err(bridge::BridgeError::from)?
+                .control_schema_version
+                == 2
+        {
+            return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreBatchV1/store_batch_api1_v1 before inserting a batch".into()));
+        }
+        if input.mutation_version == 3 || input.expected_generation.is_some() {
             return Err(bridge::BridgeError::Unavailable(
                 "linked native batch consumer remains gated pending transport validation".into(),
             ));
@@ -1830,6 +1976,19 @@ impl bridge::StorageEngine for McpStorageAdapter {
         &self,
         input: bridge::StoreInput,
     ) -> Result<bridge::StoredMemory, bridge::BridgeError> {
+        // Historical RPCs cannot preserve full native receipts. Reject before
+        // provider work or owned reservation; current API1 uses store_api1.
+        if self
+            .storage
+            .read()
+            .map_err(|e| bridge::BridgeError::Unavailable(e.to_string()))?
+            .control_state()
+            .map_err(bridge::BridgeError::from)?
+            .control_schema_version
+            == 2
+        {
+            return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreV1/store_api1_v1; upgrade the client capability before storing".into()));
+        }
         self.store_memory_reserved(input, None)
             .await
             .map(|(record, _)| record)
@@ -1986,6 +2145,8 @@ impl bridge::StorageEngine for McpStorageAdapter {
         }
         let outcome = self
             .run_batch(crate::storage::batch::BatchInput {
+                request_context: None,
+                expected_generation: None,
                 mutation_version: 1,
                 result_version: 1,
                 kind: crate::storage::batch::BatchKind::Forget,
@@ -4469,10 +4630,10 @@ mod tests {
     async fn namespace_deletion_rebuild_preserves_canonical_foreign_postings() {
         let fx = Fixture::new();
         let scratch = fx.create_namespace("scratch");
-        // The completion rebuild must retain the actual foreign record, not
-        // preserve a phantom posting whose UUID has no canonical row.
-        let orphan = fx.insert_memory_in(default_ns(), &["entity/alice"]).await;
-        let names = vec!["Alice".into()];
+        // Only the scratch posting is orphaned. Canonical rebuild must retain
+        // the real foreign owner; noncanonical foreign postings are not retained.
+        let orphan = fx.insert_memory_in(default_ns(), &["entity/shared"]).await;
+        let names = vec!["Shared".into()];
         {
             let mut index = fx.entity_index.write().await;
             index.add(scratch, orphan, &names);

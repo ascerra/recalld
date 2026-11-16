@@ -86,6 +86,12 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
+    fn active_embedding(
+        &self,
+    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
+    {
+        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
+    }
     fn accept_work(
         &self,
     ) -> Result<Option<crate::storage::work::WorkTicket>, crate::search::SearchError> {
@@ -196,12 +202,6 @@ impl state::SearchPipeline for SearchPipelineAdapter {
             .await
     }
 
-    fn active_embedding(
-        &self,
-    ) -> Result<crate::serialization::session::ActiveEmbedding, crate::embedding::EmbeddingError>
-    {
-        crate::serialization::session::ActiveEmbedding::from_provider(self.embedding.as_ref())
-    }
     async fn embed_text(
         &self,
         text: &str,
@@ -575,6 +575,14 @@ impl state::StorageEngine for StorageEngineAdapter {
         })
         .await
         .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+    }
+
+    async fn native_store_format(&self) -> Result<bool, crate::storage::StorageError> {
+        self.storage
+            .read()
+            .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+            .control_state()
+            .map(|c| c.control_schema_version == 2)
     }
 
     async fn insert_memory(

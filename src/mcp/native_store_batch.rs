@@ -17,9 +17,16 @@ impl McpStorageAdapter {
         child: &BatchChild,
         work: &WorkTicket,
     ) -> Result<(WriteReceipt, serde_json::Value), StoreWriteError> {
-        let BatchItemPlan::NativeStore { input, .. } = &item.plan else {
+        let BatchItemPlan::NativeStore {
+            input,
+            supplied_profile_id,
+            ..
+        } = &item.plan
+        else {
             return Err(StorageError::InvalidMutation("wrong linked batch plan".into()).into());
         };
+        let resolved = child.resolve_store_profile(input, supplied_profile_id.as_deref())?;
+        let input = &resolved;
         let replay = self
             .storage
             .read()
@@ -58,12 +65,7 @@ impl McpStorageAdapter {
                 crate::embedding::runtime::generate_native(
                     self.embedding.as_ref(),
                     &intent.insert_intent().namespace,
-                    input
-                        .insert
-                        .memory
-                        .full_text
-                        .as_deref()
-                        .unwrap_or(&input.insert.memory.summary),
+                    &input.insert.document_v1(),
                 )
                 .await
                 .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?

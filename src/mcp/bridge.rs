@@ -99,6 +99,62 @@ pub trait StorageEngine: Send + Sync {
         Err(crate::canonical_list::ListError::Unavailable)
     }
 
+    fn supports_api1_store(&self) -> bool {
+        false
+    }
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::store_api1::Reply;
+        if request.require_native {
+            return Reply::unavailable();
+        }
+        if let Err(error) = request.validate_legacy() {
+            return Reply::Legacy(Err(error.to_string()));
+        }
+        Reply::Legacy(
+            self.store_memory(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+    async fn store_native_wire(
+        &self,
+        _request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        crate::serialization::native_single::Reply::failure(
+            crate::storage::StorageError::RecoveryRequired(
+                "native single consumer unavailable".into(),
+            ),
+        )
+    }
+    fn supports_api1_store_batch(&self) -> bool {
+        false
+    }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::batch_api1::Reply;
+        if let Err(e) = request.legacy() {
+            return Reply::invalid(e);
+        }
+        Reply::Legacy(
+            self.mutate_batch(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+    async fn mutate_native_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        Err(crate::serialization::native_batch::BatchFailure::unavailable())
+    }
     fn supports_api1_lifecycle(&self) -> bool {
         false
     }

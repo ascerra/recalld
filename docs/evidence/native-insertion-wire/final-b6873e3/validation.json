@@ -1,0 +1,129 @@
+{
+  "fullSource": "4a6d04f2c66bc6760eae4e584142fb68b655dacf",
+  "finalRuntimeSource": "b6873e357c87bf2bfefbd47605ecd3083a5491e4",
+  "full": {
+    "libraryPassed": 1213,
+    "libraryIgnored": 1,
+    "cliPassed": 2,
+    "doctestsIgnored": 4,
+    "seconds": 828.04,
+    "fmtExit": 0,
+    "clippyExit": 0,
+    "clippyWarnings": true
+  },
+  "focusedOnFullSource": {
+    "singlePassed": 21,
+    "singleIgnored": 1,
+    "genuineHistoricalPassed": 1
+  },
+  "finalTargeted": {
+    "source": "b6873e357c87bf2bfefbd47605ecd3083a5491e4",
+    "singlePassed": 22,
+    "singleIgnored": 1,
+    "genuineHistoricalPassed": 1,
+    "batchWirePassed": 5,
+    "daemonProtocolPassed": 81,
+    "fmtExit": 0,
+    "clippyExit": 0,
+    "clippyWarnings": true,
+    "fullSuiteOnFinalSource": null
+  },
+  "sourceFiles": 308,
+  "fullExecutables": {
+    "/target/debug/deps/lifecycle_cli-ef7aa35bda05dfab": {
+      "sha256": "d6a8ff6420946552f012d92c7365dbef93f25070d5e6100d4f4ddade483ce446",
+      "bytes": 285294880
+    },
+    "/target/debug/deps/recalld-27bbb81e23f12ff5": {
+      "sha256": "99df1ad472c6e79a00db245a7a1972cdc4ba2ae5044629f787275098108397b3",
+      "bytes": 6908664
+    },
+    "/target/debug/deps/recalld-7025a4141187b374": {
+      "sha256": "d32c3f19341ae88c1f8592145e1e79b6ee4b9cdec8e9f6ae830734ba3462daa2",
+      "bytes": 456173712
+    },
+    "/target/debug/deps/recalld_cli-16a6b9f5f1a3f682": {
+      "sha256": "cd54291dbc43bf0933db0f91e2778f6d761f59b19001aaa1e7f370636c833176",
+      "bytes": 6357936
+    },
+    "/target/debug/deps/recalld_text_migrate-b3ddbfaa472dba30": {
+      "sha256": "cc3a30679a3bccdf954e467e46ad603341622e14941d3d6a5fc329fad62061ac",
+      "bytes": 6358016
+    },
+    "/target/debug/deps/text_migration_cli-c242142a48e76014": {
+      "sha256": "ef1f37f8bca7a1d301dcea766c844b4f69d6ac41ba314dd9b7eaca75c70fd599",
+      "bytes": 284877136
+    },
+    "/target/debug/recalld": {
+      "sha256": "ef5859d514c360cdbc1486764796b3d0d5525a5444777a2b658acab99504d479",
+      "bytes": 386087752
+    },
+    "/target/debug/recalld-cli": {
+      "sha256": "fc1793141c15e51aa13c1e25fcf46af5f8f71c82d8a46abe217fb0fe09b2bfdb",
+      "bytes": 292346368
+    },
+    "/target/debug/recalld-text-migrate": {
+      "sha256": "b52dca7dd178af13f8ab86b452e89605958a87bb116fe8d0e7e4aa46a62709cb",
+      "bytes": 283447088
+    }
+  },
+  "fullArtifacts": {
+    "run.sh": "8372fd0c365d0c07dd6f349c5defc04df4ea2e3e7b6f40d0b43cc66e27cbab10",
+    "command.json": "a2a706ff0c15482823acc339f9194be32e98b31c232a3aecd40d8423be547ba9",
+    "source-hashes.json": "d29739be074e9017e8fd62783dbf654c98fc3c50d4e6b62cd9de14db866fde50",
+    "source-before.log": "78b88390ffc09d30ee0933105bbe59034b307c61da80b0bc6d751da48f4d9f5f",
+    "source-after.log": "78b88390ffc09d30ee0933105bbe59034b307c61da80b0bc6d751da48f4d9f5f",
+    "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "single.log": "ef169a94941c43b2f9b4949c780f747d3fcdc8acc744c50b32952ca96a4262d4",
+    "genuine-before.log": "85856e7c44ea50210245039625d435524ec61e667d77876ac99a4b97745bb78e",
+    "full.log": "7bbd51d922a7e12cd42c4fa927283fd0b11c47d868df26413dc41791efc31cf5",
+    "clippy.log": "68ea1a69418f0d31f3b1309823cd75d23b957a8f9b6435c36c683c3b79968c19"
+  },
+  "wholeRustDeltaFromFull": " src/daemon/server.rs                               |  67 ++++++++-----\n .../metadata/native_records/batch_wire_tests.rs    | 107 +++++++++++++++++++++\n 2 files changed, 152 insertions(+), 22 deletions(-)\n",
+  "cleanup": "Raw artifacts disposable after completed PR and recorded results. No new HOME archive requirement.",
+  "finalExecutables": {
+    "/target/debug/deps/recalld-7025a4141187b374": {
+      "sha256": "4ce8b5d593ff856a31d2c448ae78327d429ea3f3f6eef379d2f3fd08021c41fe",
+      "bytes": 456738176
+    }
+  },
+  "finalSourceFiles": 308,
+  "finalArtifacts": {
+    "run.sh": "be64ebd32ff0b60c119feef5c10d29977466bed710bd1ea91f0a7b13cf1dc63f",
+    "command.json": "de47aff266121f4fca0fe2440992e9898da5c7f935642bb14497417e6a862b53",
+    "source-hashes.json": "de203de0a29cca8844cfa15257f54af063041c6bef7b0038819dc7ecc1ab07dc",
+    "source-before.log": "78b88390ffc09d30ee0933105bbe59034b307c61da80b0bc6d751da48f4d9f5f",
+    "source-after.log": "78b88390ffc09d30ee0933105bbe59034b307c61da80b0bc6d751da48f4d9f5f",
+    "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "single.log": "1a9eee0af8e5e2aaac7f72d3e78cb107babb1a31127765282a16dda86d6ed8ad",
+    "genuine-before.log": "6c9d8fb621012cc1c4ea10f8e728f925d03255a609ed36d71d64a43079369610",
+    "native-batch-wire.log": "68d7f2406529c191c3e275e56f9a173a1f69f3dbe09a8b7f517dcd60ac7c422c",
+    "daemon.log": "0b316cf525bc68380aa3715270e5ec994e6c01a76540951fdbc52bd91a945b76",
+    "clippy.log": "b396c6987fd911c42d67d5e2f81400a4ccdae9fb3416fbec937de730f2056816"
+  },
+  "sourceChecks": {
+    "full": {
+      "beforeAllOk": true,
+      "afterAllOk": true
+    },
+    "final": {
+      "beforeAllOk": true,
+      "afterAllOk": true
+    }
+  },
+  "failures": {
+    "run-d12a9a3": {
+      "logSha256": "e7568d4b279214bb588dfc267d234e5a1c3e716cc7e67b69ba8ffe39ccc3a63b",
+      "source": "d12a9a373e7dea2ceebae5893f5cad2581b04c07"
+    },
+    "run-cb81448": {
+      "logSha256": "59de29d3d60791c5f160442e267dce9c74ea5ee9777b1a116ff8f68609885920",
+      "source": "cb8144871b541f2b58f62a38bc88c2ad7b2ce883"
+    }
+  },
+  "readinessObserver": {
+    "runtime": "f8765b28fdc899988c26ce5c64e82cbfed60f7d9",
+    "evidence": "cc865c296247a55cadb09081e349c059c8724619",
+    "consumedBy": "this single/batch failure envelope; PR96 is only parent"
+  }
+}

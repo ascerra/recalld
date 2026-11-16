@@ -489,6 +489,8 @@ async fn run_serve(
         }
     };
 
+    let mcp_bridge = create_direct_mcp_bridge(&system, default_namespace);
+
     let app_state = {
         use recalld::api::adapters::*;
 
@@ -543,11 +545,13 @@ async fn run_serve(
         let metrics: Arc<dyn recalld::api::MetricsCollector> = Arc::new(NoopMetricsCollector);
 
         recalld::api::AppState::new(search, storage, cache, graph, decay, namespaces, metrics)
-            .with_default_namespace(default_namespace.clone())
+            .with_native_batches(
+                mcp_bridge.storage.clone(),
+                mcp_bridge.default_namespace().into(),
+            )
     };
 
     // Build MCP bridge and router for the /mcp endpoint.
-    let mcp_bridge = create_direct_mcp_bridge(&system, default_namespace);
     let mcp_handler: Arc<dyn recalld::mcp::McpHandler> = Arc::new(mcp_bridge);
     let mcp_router = recalld::mcp::mcp_router(mcp_handler, mcp_http_config);
 

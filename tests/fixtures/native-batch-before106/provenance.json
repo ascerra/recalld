@@ -1,0 +1,38 @@
+{
+  "base": "fe99020926eb81a6994c7e9214ad4623180eeed1",
+  "testOnlyChanges": [
+    "src/storage/metadata/native_records/batch_tests.rs",
+    "src/storage/metadata/native_records/store_batch_tests.rs"
+  ],
+  "runtimeIdentical": true,
+  "immutableFiles": 607,
+  "sourceVerified": true,
+  "results": [
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1045 filtered out; finished in 4.44s"
+  ],
+  "binaries": {
+    "/target/debug/deps/recalld-7025a4141187b374": "489a1840f20b77c2778ebd748b65a3a135b9f2633a778a8b1ccb04336e098a5b"
+  },
+  "artifactsSha256": {
+    "v1-manifest.json": "d70bb8f6c0c7f054df52be747b9a7ea139bf1c7ad3640ffe8fa0a03d381f09c5",
+    "v1-request.json": "c6b9ec1c40d074c87b7acbc162778c2ad88d940ede0e20106c3cb4f6347de80a",
+    "v1-reservation.json": "1ea4f3a3554e3fae3fc9fb913e126158078fa845d9f463222226ee5d5412a672",
+    "v1-store.zip": "4f54a5d4386b7f695b4ab90fa0c046c10b40f2a2def3cb16f9922f49146a5c3c",
+    "v2-manifest.json": "c35b6ed7839fd1cc71daf236ce27fd6e95669bc99e46af788399210d253539f8",
+    "v2-request.json": "8575c43eaad6d734613bea8dad1f116f0ca150e891a590e5f2928acf4e42042e",
+    "v2-reservation.json": "ececc92499263aad698fcd079d69528d369a793f815bbe2e07a5ce1e2419c842",
+    "v2.jsonl": "ba7adf7f4267a495ad587d195d642809b74e027a09b8b24ec10dcfd183d9e98c",
+    "v3-manifest.json": "67ebd28d15f426de8cbca3c8fb9ad2cdc6e1276aca332de4b44ac2a934288766",
+    "v3-request.json": "bd862d74ae20e232c8b12ffd48c10c8896456ba94c47f20c02f07be9915fbc72",
+    "v3-reservation.json": "19c2b841fe7f9e65329b76175e14cf5d31cce4c00a442eac196b5bd1aa74fd56",
+    "v3.jsonl": "00eb32d389d0f1eb9bca17429907cd2972e6fa6ad33e60f282e1425c6eabf239"
+  },
+  "rawLegacyFilesSha256": {
+    "edges.db": "5a50f921527ec4bfddbfce6043d625c38ce4ba1b2612c16bef25a234dab1f052",
+    "fulltext.9874181d-68f7-40e7-a25f-3f44a591db2a.dat": "f9cb859d5d4ae57bc94eb670744d17cc0703714cb21d78c23e8c68ab09c2e825",
+    "fulltext.dat": "f9cb859d5d4ae57bc94eb670744d17cc0703714cb21d78c23e8c68ab09c2e825",
+    "meta.db": "e1689343e5b7594a2625b9999125d989ecb360fbaa99fd7d0ce3ce3f659af30a",
+    "native/vectors.dat": "600a18c6c726cd3c96ef44cdcb388483e957f67a202b0f45248d8a12b5961f0d",
+    "recalld.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
