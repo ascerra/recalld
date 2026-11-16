@@ -56,6 +56,7 @@ impl DaemonServer {
                 tz,
             )
             .with_clock(system.clock().clone())
+            .with_catalog_profile_context(system.embedding().as_ref())
             .with_query_engine(system.query_engine().clone()),
         );
         let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(

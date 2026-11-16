@@ -6,6 +6,7 @@
 pub mod catalog;
 pub mod contract;
 mod json;
+pub mod list;
 pub mod native_batch;
 pub mod native_single;
 pub(crate) mod pair_cursor;
@@ -23,6 +24,7 @@ pub use json::{
     NamespaceResponse, SearchHit, SearchRequest, SearchResponse,
 };
 
+pub mod catalog_page;
 pub(crate) mod native_lifecycle;
 
 pub(crate) mod lifecycle_api1;
