@@ -1,6 +1,9 @@
 //! Public-route regressions and separately labeled private-history evidence.
 use super::*;
 
+#[path = "batch_postcommit_tests.rs"]
+mod postcommit;
+
 async fn batch_http(api: &axum::Router, body: Value) -> (u16, Value) {
     use tower::ServiceExt;
     let response = api
