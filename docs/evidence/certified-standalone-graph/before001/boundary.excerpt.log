@@ -1,0 +1,34 @@
+
+error[E0277]: the trait bound `tag::Tag: From<&str>` is not satisfied
+  --> src/storage/metadata/native_records/graph_certification_tests.rs:23:44
+   |
+23 |                 tags: vec!["entity/shared".into()],
+   |                                            ^^^^ unsatisfied trait bound
+   |
+help: the trait `From<&str>` is not implemented for `tag::Tag`
+  --> src/model/tag.rs:22:1
+   |
+22 | pub struct Tag(String);
+   | ^^^^^^^^^^^^^^
+   = note: required for `&str` to implement `Into<tag::Tag>`
+
+error[E0308]: mismatched types
+  --> src/storage/metadata/native_records/graph_publication_tests.rs:77:13
+
+error[E0308]: mismatched types
+  --> src/storage/metadata/native_records/graph_publication_tests.rs:77:13
+   |
+75 |         .native_graph(
+   |          ------------ arguments to this method are incorrect
+76 |             context.clone(),
+77 |             input.clone(),
+   |             ^^^^^^^^^^^^^ expected `GraphRequest`, found `NativeGraphInput`
+   |
+note: method defined here
+  --> src/derived_completion/native_graph.rs:15:25
+   |
+15 |     pub(crate) async fn native_graph(
+   |                         ^^^^^^^^^^^^
+...
+warning: `recalld` (lib test) generated 9 warnings
+error: could not compile `recalld` (lib test) due to 2 previous errors; 9 warnings emitted

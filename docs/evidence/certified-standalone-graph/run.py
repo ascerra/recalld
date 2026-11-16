@@ -8,7 +8,7 @@ import sys
 
 source = pathlib.Path(__file__).resolve().parents[3]
 mode, label = sys.argv[1:]
-assert mode in ("focused", "full", "before") and label.isalnum()
+assert mode in ("focused", "full", "before", "tail") and label.isalnum()
 out = source / ".validation" / label
 out.mkdir(parents=True, exist_ok=False)
 cache = pathlib.Path("/tmp/recalld-curie-active-build")
@@ -39,6 +39,12 @@ if mode in ("focused", "before"):
     ):
         steps.append((label_filter, "cargo test --locked --offline --all-features --lib "
                       + pattern + " -- --nocapture"))
+elif mode == "tail":
+    steps.extend([
+        ("cli", "cargo test --locked --offline --all-features --test vector_certification_cli"),
+        ("fmt", "cargo fmt --all -- --check"),
+        ("clippy", "cargo clippy --locked --offline --all-features --all-targets"),
+    ])
 else:
     steps.extend([
         ("fmt", "cargo fmt --all -- --check"),
