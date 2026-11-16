@@ -1,0 +1,36 @@
+{
+  "utc": "2026-11-16T18:56:23.713965+00:00",
+  "source": "90daa782e9482ff265b03969fcfae393aaf75660",
+  "priorMeasuredSource": "c9ccaabe13cc45c300b2c4e686412a8db6590e22",
+  "actualMain": "b374f07efb2da994d3a82e85d4814e642d2864b2",
+  "changedRustFilesExactlyMainBlobs": {
+    "src/api/adapters.rs": "fd66e8b71c33a70a8bba1129674b6158ee8f17c4",
+    "src/api/contract_wire_tests.rs": "db013344d1db660266987970c815e5192808fecf",
+    "src/api/handlers.rs": "cb6ddbafc498fb8ef9495a38915955f35b9348e1",
+    "src/api/mod.rs": "ae04d724a88642989581449ee9dd437b6d55405c",
+    "src/api/routes.rs": "d5e75f1931db79608d127b83c2bab161802b271f",
+    "src/api/state.rs": "2b67803787657fab6e6ebb0e81e20fd7dc704b47",
+    "src/daemon/server.rs": "922a3dbf643822ee00817215723ff8e3547140cf",
+    "src/lib.rs": "8da4083922fcbd8ad8642ef9d733388f75d972a3",
+    "src/main.rs": "090da19218aaf63f90dd71427aac333a4f08b629",
+    "src/mcp/bridge.rs": "d66dd582e16425d38b2f4d1dbc71c209b6b73b52",
+    "src/mcp/bridge_adapters.rs": "dd85457f7c2a49c95c2ba18e6c5064ba1d6be25c",
+    "src/mcp/tools.rs": "e9d794e7a657895274e3fbd57ccb42a74a704b7d",
+    "src/native_catalog_adapter.rs": "7205776f013ee3b12b5f928e191be6c919ffb369",
+    "src/native_catalog_adapter_tests.rs": "2441ef59e68f63c672bdd4c072dee84febb9a015",
+    "src/search/strength.rs": "e6e59b653df738f6197a5c3ed84a2928807480a6",
+    "src/serialization/catalog.rs": "f2e6fb76aea6a7a4f7f70c246b15ae39a4a78b46",
+    "src/serialization/mod.rs": "401927140930e3d12f1302899005791adc9f9cbf",
+    "src/serialization/policy.rs": "664c835861f249ebf80efc244012a93daaf2f0f1",
+    "src/storage/engine/native_catalog.rs": "540e77f4019cfbcf5f48662dc7b596fbda52cf65",
+    "src/storage/error.rs": "b9b0912bd68ddbc6abca4bb8a90803f366922cc2",
+    "src/storage/metadata/native_catalog.rs": "a557e2a2f0a3161846f257bb4518a1f77ff25bc6",
+    "src/storage/native_catalog.rs": "e464c02b026a4d3f9b2d0e9a213303c516e26378"
+  },
+  "sourceACKs": {
+    "Hume": "Exact measuredowner/pipeline/readview/RIF/querywire/schema unchangedc9; native_policy_inputs getter clones config/multiplier. No metricsrewrite.",
+    "Huygens": "Exact parentdelta and actual owner factories/contract dispatch/version gates retained; no new composition blocker.",
+    "Feynman": "Exact certification prepare/TXcommit/publish/invalidation/fullreceipt path and actual canonicalGeneration/allstamps checks, worker lease/root ownership unchanged. No merge-specific blocker."
+  },
+  "limits": "Source-only ACK, not new full/runtime proof. N1/E1 foreign/nested completion remains separately owned; no activation."
+}

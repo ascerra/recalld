@@ -17,6 +17,12 @@ use super::response::{MemoryResponse, SearchResponse, SearchResult, StageTimings
 use super::{EligibleFtsResults, FtsCoverage};
 use crate::model::{AccessKind, CachedRecord, DecayPhase, MemoryId, NamespaceConfig, NamespaceId};
 
+#[path = "rif_experiment.rs"]
+mod rif_experiment;
+pub use rif_experiment::{
+    MAX_RIF_EXAMINED_EDGES, MAX_RIF_PAIRS, MAX_RIF_TARGETS_PER_ANCHOR, RifDiagnostics, RifMode,
+};
+
 #[path = "diagnostics.rs"]
 mod diagnostics;
 #[path = "explanation.rs"]
@@ -32,7 +38,8 @@ mod query_wire;
 #[path = "similar_selection.rs"]
 mod similar_selection;
 pub(crate) use similar_selection::{
-    SelectedSimilarity, SimilarityExclusion, SimilarityScope, SimilaritySelection,
+    SelectedSimilarity, SimilarityAlgorithm, SimilarityExclusion, SimilarityExplanation,
+    SimilarityOrigin, SimilarityOwnAdmission, SimilarityScope, SimilaritySelection,
 };
 
 #[path = "read_view.rs"]
@@ -58,11 +65,15 @@ mod semantics;
 #[path = "strength_tests.rs"]
 mod strength_tests;
 pub use diagnostics::{
-    ChannelDiagnostics, ChannelParticipation, ResultProvenance, RetrievalChannel,
+    CanonicalEligibilityDiagnostics, ChannelDiagnostics, ChannelParticipation, ExaminationUnit,
+    HardFilterRejection, ResultProvenance, RetrievalChannel, SourceCoverage, SourceResults,
 };
 #[cfg(test)]
 #[path = "explanation_tests.rs"]
 mod explanation_tests;
+#[cfg(test)]
+#[path = "rif_experiment_tests.rs"]
+mod rif_experiment_tests;
 #[cfg(test)]
 #[path = "semantics_tests.rs"]
 mod semantics_tests;
@@ -139,6 +150,20 @@ pub trait VectorIndexRegistry: Send + Sync {
         k: usize,
         eligible_ids: Option<&HashSet<MemoryId>>,
     ) -> Result<Vec<ScoredResult>>;
+
+    /// Optional source measurements; result-only adapters retain honest unknowns.
+    fn search_measured(
+        &self,
+        namespace_id: NamespaceId,
+        query_vec: &[f32],
+        k: usize,
+        eligible_ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<SourceResults<ScoredResult>> {
+        Ok(SourceResults {
+            results: self.search(namespace_id, query_vec, k, eligible_ids)?,
+            coverage: None,
+        })
+    }
 
     /// Retrieve the raw embedding vector for a given memory ID, if present.
     fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>>;
@@ -392,6 +417,20 @@ pub trait GraphReader: Send + Sync {
             "semantics2 graph expansion unavailable".into(),
         ))
     }
+    /// Whole one-hop typed adjacency within the remaining examination allowance.
+    /// A refused neighborhood returns explicit unexamined work and no prefix.
+    /// Unsupported/corrupt reads fail; absence is not silently successful.
+    fn rif_edges(
+        &self,
+        _anchor: MemoryId,
+        _namespace: NamespaceId,
+        _allowance: usize,
+    ) -> Result<crate::graph::query::RifAdjacency> {
+        Err(SearchError::Unavailable(
+            "RIF graph reads unavailable".into(),
+        ))
+    }
+
     /// Get the neighbor IDs for a given memory.
     /// Used by RIF computation (line 601) to find competitors.
     fn neighbors(&self, id: &MemoryId) -> Vec<MemoryId>;
@@ -439,6 +478,21 @@ pub trait EntityIndexReader: Send + Sync {
         k: usize,
         eligible_ids: &HashSet<MemoryId>,
     ) -> Result<Vec<EntityRecallResult>>;
+
+    /// Optional actual posting-scan measurements, never inferred from a full cap.
+    fn find_by_entities_measured(
+        &self,
+        namespace_id: NamespaceId,
+        entities: &[String],
+        exclude_id: MemoryId,
+        k: usize,
+        eligible_ids: &HashSet<MemoryId>,
+    ) -> Result<SourceResults<EntityRecallResult>> {
+        Ok(SourceResults {
+            results: self.find_by_entities(namespace_id, entities, exclude_id, k, eligible_ids)?,
+            coverage: None,
+        })
+    }
 }
 
 /// A single result from entity index recall.
@@ -491,6 +545,7 @@ struct Candidate {
     /// Diagnostic evidence only; never read by ranking or source selection.
     provenance: ResultProvenance,
     score_explanation: Option<OwnScoreExplanation>,
+    applied_rif_multiplier: f32,
     rejected_direct: Option<DirectScoreEvidence>,
     // Deduplicate actual admitted origins across version-resolution passes.
     // The response projection bounds details; this map is not a 64-entry cap.
@@ -514,6 +569,7 @@ impl Candidate {
             seed_score: 0.0,
             provenance: ResultProvenance::default(),
             score_explanation: None,
+            applied_rif_multiplier: 1.0,
             rejected_direct: None,
             inherited_score_sources: Default::default(),
         }
@@ -550,6 +606,7 @@ pub struct QueryEngine {
         crate::derived_completion::DerivedCompletion,
         Arc<crate::rif::RifEngine>,
     )>,
+    rif_mode: RifMode,
     clock: Arc<dyn crate::time::Clock>,
     decay_policy: crate::decay::DecayConfig,
     decay_multiplier: f64,
@@ -640,6 +697,7 @@ impl QueryEngine {
         Self {
             native_query_admission: false,
             coherent_owner: None,
+            rif_mode: RifMode::Off,
             clock: Arc::new(crate::time::SystemClock),
             decay_policy: crate::decay::DecayConfig::default(),
             decay_multiplier: 1.0,
@@ -814,6 +872,11 @@ impl QueryEngine {
         let stage_start = Instant::now();
         if semantics != RetrievalSemantics::V1 {
             semantics::validate_query(&query)?;
+            if self.rif_mode != RifMode::Off && query.record_access {
+                return Err(SearchError::InvalidFilter(
+                    "operator RIF experiments require explicit recordAccess=false".into(),
+                ));
+            }
         }
         query.validate()?;
         let ns_config = self.namespace_resolver.resolve(&query.namespace).await?;
@@ -892,12 +955,26 @@ impl QueryEngine {
         performance.mark("canonical_read");
         let examined = namespace_records.len();
         strength_context.project_namespace(&mut namespace_records, self.graph.as_ref())?;
+        let mut eligibility =
+            (semantics != RetrievalSemantics::V1).then(CanonicalEligibilityDiagnostics::default);
         performance.mark("strength_projection");
         let eligible_records: HashMap<MemoryId, CachedRecord> = namespace_records
             .into_iter()
-            .filter(|record| Self::passes_hard_filters(record, &query, ns_config.id))
+            .filter(|record| {
+                let rejection = Self::hard_filter_rejection(record, &query, ns_config.id);
+                if let Some(facts) = &mut eligibility {
+                    facts.examined += 1;
+                    if let Some(reason) = rejection {
+                        *facts.first_rejections.entry(reason).or_default() += 1;
+                    } else {
+                        facts.passed += 1;
+                    }
+                }
+                rejection.is_none()
+            })
             .map(|record| (record.id, record))
             .collect();
+        diagnostics.canonical_eligibility = eligibility;
         let eligible_ids: HashSet<MemoryId> = eligible_records.keys().copied().collect();
         crate::performance::event!(
             kind = "eligibility",
@@ -919,9 +996,11 @@ impl QueryEngine {
             _ => (query.limit * 8).max(100).min(SearchQuery::MAX_FETCH_K),
         };
 
-        let (scored_candidates, vector_search_us) =
+        let (vector_source, vector_search_us) =
             self.run_vector_search(&query_embedding, ns_config.id, fetch_k, &eligible_ids)?;
         timings.vector_search_us = vector_search_us;
+        let vector_coverage = vector_source.coverage;
+        let scored_candidates = vector_source.results;
         performance.mark("vector");
 
         let (fts_results, fts_search_us) = self.run_fts_search(
@@ -965,6 +1044,7 @@ impl QueryEngine {
         let mut entity_only_ids: Vec<(MemoryId, f32)> = Vec::new();
         let mut entity_hit_ids = HashSet::new();
         let mut entity_offered = None;
+        let mut entity_coverage = None;
 
         // Union vector and FTS results into the candidate pool.
         let mut all_candidate_ids: Vec<MemoryId> = vector_ids.clone();
@@ -984,7 +1064,7 @@ impl QueryEngine {
             } else {
                 entity_recall_cap
             };
-            let entity_results = self.entity_index.find_by_entities(
+            let entity_source = self.entity_index.find_by_entities_measured(
                 ns_config.id,
                 &query_entities,
                 MemoryId::nil(),
@@ -992,9 +1072,11 @@ impl QueryEngine {
                 &eligible_ids,
             )?;
 
+            entity_coverage = entity_source.coverage;
+            let entity_results = entity_source.results;
             if diagnostics.channels.is_some() {
                 // Retain admitted channel overlap before union/deduplication.
-                // Unmeasured scan counts/exhaustion remain unknown.
+                // Source measurements stay distinct from admitted overlap.
                 entity_hit_ids.extend(entity_results.iter().map(|r| r.memory_id));
                 entity_offered = Some(entity_hit_ids.len());
             }
@@ -1079,6 +1161,8 @@ impl QueryEngine {
                 entity_offered,
                 (query.query_mode == QueryMode::MetadataOnly).then_some(eligible_records.len()),
             );
+            diagnostics.observe_source(RetrievalChannel::Vector, vector_coverage);
+            diagnostics.observe_source(RetrievalChannel::Entity, entity_coverage);
         }
         timings.load_metadata_us = stage_start.elapsed().as_micros() as u64;
         performance.mark("candidate_assembly");
@@ -1260,13 +1344,16 @@ impl QueryEngine {
         namespace_id: NamespaceId,
         fetch_k: usize,
         eligible_ids: &HashSet<MemoryId>,
-    ) -> Result<(Vec<ScoredResult>, u64)> {
+    ) -> Result<(SourceResults<ScoredResult>, u64)> {
         let stage_start = Instant::now();
         let scored = if let Some(emb) = query_embedding {
             self.vector_indexes
-                .search(namespace_id, emb, fetch_k, Some(eligible_ids))?
+                .search_measured(namespace_id, emb, fetch_k, Some(eligible_ids))?
         } else {
-            Vec::new()
+            SourceResults {
+                results: Vec::new(),
+                coverage: None,
+            }
         };
         Ok((scored, stage_start.elapsed().as_micros() as u64))
     }
@@ -1448,7 +1535,7 @@ impl QueryEngine {
     }
 
     /// Stage 8: Compute composite scores and apply temporal boost.
-    fn apply_boosts(&self, candidates: &mut Vec<Candidate>, query: &SearchQuery, explain: bool) {
+    fn apply_boosts(&self, candidates: &mut [Candidate], query: &SearchQuery, explain: bool) {
         for candidate in candidates.iter_mut() {
             let (formula, fts_signal, base_score) = Self::compute_composite_score(candidate);
             candidate.composite_score = base_score;
@@ -1461,6 +1548,7 @@ impl QueryEngine {
                     fts_signal,
                     raw_retrievability: candidate.record.strength,
                     effective_retrievability: candidate.effective_r,
+                    rif_multiplier: candidate.applied_rif_multiplier,
                     activation: candidate.activation_score,
                     activation_depth: candidate.activation_score.and(candidate.graph_depth),
                     base_score,
@@ -2186,26 +2274,33 @@ impl QueryEngine {
     /// Shared filtering logic used by both `passes_filters()` (post-retrieval)
     /// and canonical eligibility scanning (all query modes).
     fn record_passes_filter(record: &CachedRecord, filter: &SearchFilter) -> bool {
+        Self::record_filter_rejection(record, filter).is_none()
+    }
+
+    fn record_filter_rejection(
+        record: &CachedRecord,
+        filter: &SearchFilter,
+    ) -> Option<HardFilterRejection> {
         // Tombstone filter: always exclude tombstoned memories.
         if record.phase == DecayPhase::Tombstone {
-            return false;
+            return Some(HardFilterRejection::Tombstone);
         }
 
         // Phase filter
         if !filter.phases.is_empty() && !filter.phases.contains(&record.phase) {
-            return false;
+            return Some(HardFilterRejection::Phase);
         }
 
         // Strength filter
         if let Some(min_strength) = filter.min_strength {
             if record.strength < min_strength {
-                return false;
+                return Some(HardFilterRejection::Strength);
             }
         }
 
         // Permastore filter
         if filter.permastore_only && !record.is_permastore {
-            return false;
+            return Some(HardFilterRejection::Permastore);
         }
 
         // Admitted queries reuse a compiled predicate. Direct internal callers
@@ -2218,14 +2313,14 @@ impl QueryEngine {
                 .matches(&record.tags, record.labels.as_ref()),
         };
         if !labels_match {
-            return false;
+            return Some(HardFilterRejection::Labels);
         }
 
         // Require tags (ALL must be present)
         if !filter.require_tags.is_empty() {
             for required in &filter.require_tags {
                 if !record.tags.contains(required) {
-                    return false;
+                    return Some(HardFilterRejection::RequiredTag);
                 }
             }
         }
@@ -2233,11 +2328,11 @@ impl QueryEngine {
         // Exclude tags (NONE may be present)
         for excluded in &filter.exclude_tags {
             if record.tags.contains(excluded) {
-                return false;
+                return Some(HardFilterRejection::ExcludedTag);
             }
         }
 
-        true
+        None
     }
 
     /// Hard eligibility is independent of score admission and retrieval channel.
@@ -2246,26 +2341,34 @@ impl QueryEngine {
         query: &SearchQuery,
         namespace_id: NamespaceId,
     ) -> bool {
+        Self::hard_filter_rejection(record, query, namespace_id).is_none()
+    }
+
+    fn hard_filter_rejection(
+        record: &CachedRecord,
+        query: &SearchQuery,
+        namespace_id: NamespaceId,
+    ) -> Option<HardFilterRejection> {
         // Namespace filter: discard candidates from other namespaces.
         // Entity recall and graph expansion can inject cross-namespace
         // candidates; this gate ensures they never reach the results.
         if record.namespace_id != namespace_id {
-            return false;
+            return Some(HardFilterRejection::Namespace);
         }
 
         // Tombstone filter: always exclude tombstoned memories from
         // search results. Their content has been stripped; they only
         // exist as graph relay nodes for spreading activation.
         if record.phase == DecayPhase::Tombstone {
-            return false;
+            return Some(HardFilterRejection::Tombstone);
         }
 
         // Ghost filter
         if record.phase == DecayPhase::Ghost && !query.include_ghosts {
-            return false;
+            return Some(HardFilterRejection::Ghost);
         }
 
-        Self::record_passes_filter(record, &query.filter)
+        Self::record_filter_rejection(record, &query.filter)
     }
 
     /// Check hard eligibility, then score admission on fused direct relevance.

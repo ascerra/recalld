@@ -1,5 +1,6 @@
 // Included in read_view::tests: actual canonical migration/attestation and owner.
 use super::super::similar_selection::{SimilarityExclusion, SimilarityScope, SimilaritySelection};
+use crate::model::EdgeType;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct SimilarClock(AtomicUsize);
@@ -64,7 +65,7 @@ async fn similar_fixture_with_chain(chain_edges: usize) -> SimilarFixture {
 }
 
 // Declared synthetic document recipe, never a lookup of old vector bytes.
-struct SimilarRecipe(crate::model::schema::EmbeddingProfile);
+struct SimilarRecipe(crate::model::schema::EmbeddingProfile, Option<(bool, f32)>);
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for SimilarRecipe {
     fn dimensions(&self) -> usize {
@@ -84,6 +85,21 @@ impl crate::embedding::EmbeddingProvider for SimilarRecipe {
             .split_whitespace()
             .find_map(|v| v.parse::<u128>().ok())
             .expect("synthetic retained document must contain its declared fixture number");
+        if let Some((before_terminal, terminal_cosine)) = self.1 {
+            let start = if before_terminal { 1000 } else { 4000 };
+            if n == 2003 {
+                return Ok(vec![
+                    terminal_cosine,
+                    (1.0 - terminal_cosine * terminal_cosine).sqrt(),
+                    0.,
+                    0.,
+                ]);
+            }
+            if (start..start + 70).contains(&n) {
+                let cosine = [0.6f32, 0.7, 0.8][((n - start) % 3) as usize];
+                return Ok(vec![cosine, (1.0 - cosine * cosine).sqrt(), 0., 0.]);
+            }
+        }
         Ok(match n {
             2002 => vec![0.96, 0.28, 0., 0.],
             2003 => vec![0., 1., 0., 0.],
@@ -97,7 +113,11 @@ impl crate::embedding::EmbeddingProvider for SimilarRecipe {
     }
 }
 
-async fn certify_similar_namespace(source: &std::path::Path, ns: NamespaceId) -> tempfile::TempDir {
+async fn certify_similar_namespace(
+    source: &std::path::Path,
+    ns: NamespaceId,
+    extra: Option<(bool, f32)>,
+) -> tempfile::TempDir {
     use crate::storage::{
         control::MutationScope,
         vector_certification::{ReembedVectors, reembed_fresh},
@@ -113,7 +133,7 @@ async fn certify_similar_namespace(source: &std::path::Path, ns: NamespaceId) ->
     else {
         panic!("Bound fixture")
     };
-    let provider = SimilarRecipe(descriptor.clone());
+    let provider = SimilarRecipe(descriptor.clone(), extra);
     let request = ReembedVectors {
         source: at,
         namespace_id: ns,
@@ -137,6 +157,21 @@ async fn certify_similar_namespace(source: &std::path::Path, ns: NamespaceId) ->
 }
 
 async fn similar_fixture_certification(chain_edges: usize, certify_donor: bool) -> SimilarFixture {
+    similar_fixture_options(chain_edges, certify_donor, None).await
+}
+
+async fn similar_fixture_with_origins(
+    chain_edges: usize,
+    extra: Option<(bool, f32)>,
+) -> SimilarFixture {
+    similar_fixture_options(chain_edges, true, extra).await
+}
+
+async fn similar_fixture_options(
+    chain_edges: usize,
+    certify_donor: bool,
+    extra: Option<(bool, f32)>,
+) -> SimilarFixture {
     use crate::storage::lifecycle_migration::{LifecycleMigrationOptions, migrate_lifecycle};
     use crate::storage::schema_migration::{
         MigrationOptions, ProfileAttestationInput, inspect_schema, migrate_schema,
@@ -168,8 +203,14 @@ async fn similar_fixture_certification(chain_edges: usize, certify_donor: bool) 
         &o,
         NamespaceId::new(1),
         2003,
-        [0., 1., 0., 0.],
-        "terminal",
+        extra.map_or([0., 1., 0., 0.], |(_, score)| {
+            [score, (1.0 - score * score).sqrt(), 0., 0.]
+        }),
+        if extra.is_some() {
+            "explain"
+        } else {
+            "terminal"
+        },
         Some(old),
     )
     .await;
@@ -204,6 +245,34 @@ async fn similar_fixture_certification(chain_edges: usize, certify_donor: bool) 
                 )
                 .await,
             );
+        }
+    }
+    if let Some((before_terminal, _)) = extra {
+        // Actual legacy writes before schema migration; no native graph bypass.
+        // Place origins on either side of terminal2003 in canonical UUID order.
+        let start = if before_terminal { 1000 } else { 4000 };
+        let mut order: Vec<_> = (0..70).collect();
+        if before_terminal {
+            order.reverse();
+        }
+        for n in order {
+            let cosine = [0.6f32, 0.7, 0.8][n % 3];
+            let origin = similar_insert(
+                &o,
+                NamespaceId::new(1),
+                start + n as u128,
+                [cosine, (1.0 - cosine * cosine).sqrt(), 0., 0.],
+                "explain",
+                None,
+            )
+            .await;
+            legacy
+                .storage
+                .read()
+                .unwrap()
+                .add_edge(terminal, origin, EdgeType::Supersedes, 1.0, false, 100)
+                .unwrap();
+            o.complete().await.unwrap();
         }
     }
     // Retain documents until the real remedy finishes, then use real native
@@ -302,9 +371,9 @@ async fn similar_fixture_certification(chain_edges: usize, certify_donor: bool) 
         );
         assert!(after.schema.as_ref().unwrap().inherited_decay.is_none());
     }
-    native = certify_similar_namespace(native.path(), NamespaceId::new(1)).await;
+    native = certify_similar_namespace(native.path(), NamespaceId::new(1), extra).await;
     if certify_donor {
-        native = certify_similar_namespace(native.path(), other).await;
+        native = certify_similar_namespace(native.path(), other, extra).await;
     }
     {
         let mut session = crate::storage::native_lifecycle::NativeLifecycleSession::open(
@@ -479,6 +548,12 @@ async fn similar_v2_bound_scope_exclusions_and_false_byte_identity() {
         )
         .await
         .unwrap();
+    assert_similarity_explanations(&r.value);
+    assert_eq!(r.value.source_id, f.source);
+    assert_eq!(
+        r.value.source_profile,
+        crate::embedding::runtime::tests::profile()
+    );
     assert!(r.receipts.is_empty());
     assert_eq!(f.clock.0.load(Ordering::SeqCst), calls + 1);
     assert_eq!(
@@ -627,6 +702,9 @@ async fn similar_v2_actual_returned_exposure_per_namespace_policy_clock_and_orig
         )
         .await
         .unwrap();
+    assert_similarity_explanations(&r.value);
+    assert_eq!(r.value.source_id, f.source);
+    assert_eq!(r.value.source_namespace.id, NamespaceId::new(1));
     assert_eq!(r.receipts.len(), 2);
     assert_eq!(f.clock.0.load(Ordering::SeqCst), calls + 1);
     assert_eq!(r.value.evaluated_at, 10_000);
@@ -1019,5 +1097,356 @@ async fn similar_v2_actual_chain_64_resolves_65_is_unresolved_history_stays_raw(
             result.rows[2].result.score.unwrap().to_bits(),
             0.0f32.to_bits()
         );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn similar_explanation_actual_own_rejection_and_inherited_max() {
+    use crate::search::{SimilarityAlgorithm, SimilarityOwnAdmission};
+    let f = similar_fixture().await;
+    f.f.storage.write().unwrap().sync().unwrap();
+    let before = bytes(&f.f);
+    for threshold in [None, Some(0.5)] {
+        let mut options =
+            similar_options(SimilarityScope::SameNamespace, VersionMode::Current, false);
+        options.limit = 1;
+        options.min_score = threshold;
+        let selected = f
+            .engine
+            .similar_selected_with_work(f.source, None, options, None)
+            .await
+            .unwrap()
+            .value;
+        let row = &selected.rows[0];
+        assert_eq!(row.result.memory_id, f.terminal);
+        assert_eq!(row.result.composite_score, Some(0.96));
+        let evidence = row
+            .explanation
+            .as_ref()
+            .expect("selected similarity must carry actual cosine evidence");
+        assert_eq!(evidence.algorithm, SimilarityAlgorithm::CosineMax);
+        assert_eq!(evidence.own_cosine, Some(0.0));
+        assert_eq!(evidence.min_score, threshold);
+        assert_eq!(
+            evidence.own_admission,
+            if threshold.is_some() {
+                SimilarityOwnAdmission::RejectedByMinScore
+            } else {
+                SimilarityOwnAdmission::Admitted
+            }
+        );
+        assert_eq!(evidence.admitted_own, threshold.is_none().then_some(0.0));
+        assert_eq!(evidence.inherited_floor, Some(0.96));
+        assert_eq!(evidence.final_similarity, 0.96);
+        assert_eq!(evidence.origins.len(), 1);
+        assert_eq!(evidence.origins[0].origin_id, f.old);
+        assert_eq!(evidence.origins[0].cosine, 0.96);
+        assert_eq!(evidence.omitted_origins, 0);
+        assert_eq!(evidence.version, Some(VersionStatus::Current));
+    }
+    assert_eq!(bytes(&f.f), before);
+}
+
+fn assert_similarity_explanations(selected: &super::super::similar_selection::SelectedSimilarity) {
+    use crate::search::{SimilarityAlgorithm, SimilarityOwnAdmission};
+    for row in &selected.rows {
+        let e = row
+            .explanation
+            .as_ref()
+            .expect("actual selected cosine evidence");
+        assert_eq!(e.algorithm, SimilarityAlgorithm::CosineMax);
+        let expected = e
+            .admitted_own
+            .into_iter()
+            .chain(e.inherited_floor)
+            .max_by(f32::total_cmp)
+            .unwrap();
+        assert_eq!(e.final_similarity.to_bits(), expected.to_bits());
+        assert_eq!(
+            row.result.composite_score.unwrap().to_bits(),
+            expected.to_bits()
+        );
+        assert_eq!(e.admitted_own, row.result.score);
+        match e.own_admission {
+            SimilarityOwnAdmission::Missing => {
+                assert!(e.own_cosine.is_none() && e.admitted_own.is_none())
+            }
+            SimilarityOwnAdmission::RejectedByMinScore => {
+                assert!(e.own_cosine.unwrap() < e.min_score.unwrap());
+                assert!(e.admitted_own.is_none());
+            }
+            SimilarityOwnAdmission::NotAdmitted => {
+                assert!(e.own_cosine.is_some());
+                assert!(e.admitted_own.is_none());
+                assert!(!e.min_score.is_some_and(|min| e.own_cosine.unwrap() < min));
+            }
+            SimilarityOwnAdmission::Admitted => assert_eq!(e.own_cosine, e.admitted_own),
+        }
+        assert!(e.origins.len() <= 64);
+        if let Some(floor) = e.inherited_floor {
+            assert_eq!(e.origins[0].cosine.to_bits(), floor.to_bits());
+        } else {
+            assert!(e.origins.is_empty());
+            assert_eq!(e.omitted_origins, 0);
+        }
+        for pair in e.origins.windows(2) {
+            assert!(
+                pair[0].cosine > pair[1].cosine
+                    || (pair[0].cosine == pair[1].cosine && pair[0].origin_id < pair[1].origin_id)
+            );
+        }
+        for origin in &e.origins {
+            assert_ne!(origin.origin_id, selected.source_id);
+            assert_ne!(origin.origin_id, row.result.memory_id);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn similar_explanation_display_cap_preserves_true_max_in_both_iteration_orders() {
+    for before_terminal in [false, true] {
+        for own in [0.0f32, 1.0] {
+            let f = similar_fixture_with_origins(0, Some((before_terminal, own))).await;
+            f.f.storage.write().unwrap().sync().unwrap();
+            let before = bytes(&f.f);
+            let mut options =
+                similar_options(SimilarityScope::SameNamespace, VersionMode::Current, false);
+            options.filter.require_tags = vec![crate::model::Tag::new("explain").unwrap()];
+            options.min_score = Some(0.5);
+            options.limit = 1;
+            let selected = f
+                .engine
+                .similar_selected_with_work(f.source, None, options, None)
+                .await
+                .unwrap()
+                .value;
+            assert_similarity_explanations(&selected);
+            assert_eq!(selected.coverage.scored_records, 71); // One original cosine per eligible row.
+            assert_eq!(selected.rows.len(), 1);
+            let row = &selected.rows[0];
+            assert_eq!(row.result.memory_id, f.terminal);
+            let e = row.explanation.as_ref().unwrap();
+            assert_eq!(e.own_cosine, Some(own));
+            assert_eq!(e.inherited_floor, Some(0.8));
+            assert_eq!(e.final_similarity, own.max(0.8));
+            assert_eq!(e.origins.len(), 64);
+            assert_eq!(e.omitted_origins, 6);
+            let start = if before_terminal { 1000 } else { 4000 };
+            let mut expected: Vec<_> = (0..70)
+                .map(|n| (fixed_id(start + n), [0.6f32, 0.7, 0.8][n as usize % 3]))
+                .collect();
+            expected.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+            expected.truncate(64);
+            assert_eq!(
+                e.origins
+                    .iter()
+                    .map(|o| (o.origin_id, o.cosine))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(!e.origins.iter().any(|o| o.origin_id == f.old)); // Filtered older predecessor.
+            assert_eq!(bytes(&f.f), before);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn similar_explanation_history_filters_and_tombstone_path_do_not_leak_ids() {
+    let f = similar_fixture_with_chain(2).await;
+    let middle = fixed_id(3001);
+    let policy = crate::storage::native_lifecycle::NativePolicyInputs::default();
+    {
+        let mut storage = f.f.storage.write().unwrap();
+        let intent = storage
+            .meta_store()
+            .capture_native_tombstone(middle, Some(NamespaceId::new(1)), &policy)
+            .unwrap();
+        let mut ctx = MutationContext::unkeyed(NamespaceId::new(1));
+        ctx.contract_version = 2;
+        storage
+            .tombstone_native_record(
+                &ctx,
+                &intent,
+                &policy,
+                &crate::time::ManualClock::new(11_000),
+                None,
+            )
+            .unwrap();
+    }
+    f.owner.complete().await.unwrap();
+    f.f.storage.write().unwrap().sync().unwrap();
+    let before = bytes(&f.f);
+    for mode in [VersionMode::Current, VersionMode::History] {
+        let mut options = similar_options(SimilarityScope::SameNamespace, mode, false);
+        options.filter.require_tags = vec![crate::model::Tag::new("chain").unwrap()];
+        options.min_score = Some(0.5);
+        let selected = f
+            .engine
+            .similar_selected_with_work(f.source, None, options, None)
+            .await
+            .unwrap()
+            .value;
+        assert_similarity_explanations(&selected);
+        assert_eq!(selected.rows.len(), 1);
+        let row = &selected.rows[0];
+        let e = row.explanation.as_ref().unwrap();
+        assert_eq!(
+            row.result.memory_id,
+            fixed_id(if mode == VersionMode::Current {
+                3002
+            } else {
+                3000
+            })
+        );
+        assert_eq!(e.final_similarity, 0.6);
+        assert!(e.origins.iter().all(|o| o.origin_id == fixed_id(3000)));
+        if mode == VersionMode::Current {
+            assert_eq!(e.inherited_floor, Some(0.6));
+            assert_eq!(e.own_cosine, Some(0.0));
+        } else {
+            assert!(e.origins.is_empty());
+            assert_eq!(e.version, Some(VersionStatus::Historical));
+        }
+        assert!(
+            !selected
+                .diagnostics
+                .provenance
+                .as_ref()
+                .unwrap()
+                .contains_key(&middle)
+        );
+    }
+    assert_eq!(bytes(&f.f), before);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn similar_explanation_scored_but_version_budget_rejected_is_not_min_score_rejected() {
+    use super::super::similar_selection::SimilarityOwnAdmission;
+    let f = similar_fixture().await;
+    // Fault/work fixture on the real pinned graph view, not native canonical
+    // edge-writer acceptance: rejected non-Supersedes entries still cost work.
+    {
+        let mut graph = f.owner.graph.write().await;
+        for n in 0..6400 {
+            let padding = fixed_id(10_000 + n);
+            graph
+                .add_node(padding, NamespaceId::new(1), DecayPhase::Full, 1.0, 0)
+                .unwrap();
+            graph
+                .add_edge(padding, f.terminal, EdgeType::Associative, 0.1, false)
+                .unwrap();
+        }
+    }
+    f.f.storage.write().unwrap().sync().unwrap();
+    let before = bytes(&f.f);
+    let selected = f
+        .engine
+        .similar_selected_with_work(
+            f.source,
+            None,
+            similar_options(SimilarityScope::SameNamespace, VersionMode::Current, false),
+            None,
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_similarity_explanations(&selected);
+    assert_eq!(selected.diagnostics.supersession_edges_examined, 12_800);
+    assert_eq!(
+        selected
+            .diagnostics
+            .unresolved
+            .get(&UnresolvedReason::WorkLimit),
+        Some(&1)
+    );
+    let row = selected
+        .rows
+        .iter()
+        .find(|r| r.result.memory_id == f.terminal)
+        .unwrap();
+    let e = row.explanation.as_ref().unwrap();
+    assert_eq!(e.own_cosine, Some(0.0));
+    assert_eq!(e.min_score, None);
+    assert_eq!(e.own_admission, SimilarityOwnAdmission::NotAdmitted);
+    assert_eq!(e.admitted_own, None);
+    assert_eq!(e.inherited_floor, Some(0.96));
+    assert_eq!(
+        e.origins.iter().map(|o| o.origin_id).collect::<Vec<_>>(),
+        vec![f.old]
+    );
+    assert_eq!(bytes(&f.f), before);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn similar_explanation_unresolved_graph_faults_never_expose_path_identities() {
+    for reason in [
+        UnresolvedReason::Branch,
+        UnresolvedReason::Cycle,
+        UnresolvedReason::ForeignNamespace,
+        UnresolvedReason::MissingRecord,
+    ] {
+        let f = similar_fixture().await;
+        // Fault-injected derived structure, deliberately not a claim that the
+        // canonical writer accepts invalid supersession or certifies this view.
+        {
+            let mut graph = f.owner.graph.write().await;
+            match reason {
+                UnresolvedReason::Branch => {
+                    graph
+                        .add_edge(f.live, f.old, EdgeType::Supersedes, 1.0, false)
+                        .unwrap();
+                }
+                UnresolvedReason::Cycle => {
+                    graph
+                        .add_edge(f.old, f.live, EdgeType::Supersedes, 1.0, false)
+                        .unwrap();
+                    graph
+                        .add_edge(f.live, f.terminal, EdgeType::Supersedes, 1.0, false)
+                        .unwrap();
+                }
+                UnresolvedReason::ForeignNamespace => {
+                    graph
+                        .add_edge(f.foreign, f.terminal, EdgeType::Supersedes, 1.0, false)
+                        .unwrap();
+                }
+                UnresolvedReason::MissingRecord => {
+                    graph
+                        .add_node(
+                            fixed_id(9999),
+                            NamespaceId::new(1),
+                            DecayPhase::Full,
+                            1.0,
+                            0,
+                        )
+                        .unwrap();
+                    graph
+                        .add_edge(fixed_id(9999), f.terminal, EdgeType::Supersedes, 1.0, false)
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+        let mut options =
+            similar_options(SimilarityScope::SameNamespace, VersionMode::Current, false);
+        options.min_score = Some(0.5);
+        let selected = f
+            .engine
+            .similar_selected_with_work(f.source, None, options, None)
+            .await
+            .unwrap()
+            .value;
+        assert_similarity_explanations(&selected);
+        assert!(
+            selected
+                .diagnostics
+                .unresolved
+                .get(&reason)
+                .is_some_and(|n| *n > 0)
+        );
+        for row in &selected.rows {
+            assert_ne!(row.result.memory_id, f.old);
+            assert_ne!(row.result.memory_id, f.terminal);
+            assert!(row.explanation.as_ref().unwrap().origins.is_empty());
+        }
     }
 }

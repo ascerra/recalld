@@ -1,0 +1,15 @@
+running 1 test
+
+thread 'search::pipeline::read_view::tests::similar_explanation_actual_own_rejection_and_inherited_max' (300) panicked at src/search/similar_selection_tests.rs:891:14:
+selected similarity must carry actual cosine evidence
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test search::pipeline::read_view::tests::similar_explanation_actual_own_rejection_and_inherited_max ... FAILED
+
+failures:
+
+failures:
+    search::pipeline::read_view::tests::similar_explanation_actual_own_rejection_and_inherited_max
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1041 filtered out; finished in 1.80s
+
+error: test failed, to rerun pass `--lib`
