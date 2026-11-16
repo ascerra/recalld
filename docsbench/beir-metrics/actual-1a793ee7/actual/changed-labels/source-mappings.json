@@ -1,0 +1,1960 @@
+{
+  "actorArtifactSha256": "7ccfb3bc755b6517b5459be3da0e51a9a51bfa0290c87b481a83bfd079c142ea",
+  "mappings": {
+    "01a1e155-3228-7d33-ad93-b01b4d7c2cf4": [
+      "doc000"
+    ],
+    "01a1e155-322b-7753-9b8f-897fbba4cec7": [
+      "doc001"
+    ],
+    "01a1e155-322e-7593-9fe7-6606e39b35cb": [
+      "doc002"
+    ],
+    "01a1e155-3231-7770-b8f5-483ce477387b": [
+      "doc003"
+    ],
+    "01a1e155-3233-77e3-82ec-d24bae66b95e": [
+      "doc004"
+    ],
+    "01a1e155-3236-75a1-ad64-c77015f3813f": [
+      "doc005"
+    ],
+    "01a1e155-3239-73e1-8f8a-6a9b00bc3151": [
+      "doc006"
+    ],
+    "01a1e155-323b-79b0-b178-b5476b3568b0": [
+      "doc007"
+    ],
+    "01a1e155-323e-76c3-abf2-f795f8e6c580": [
+      "doc008"
+    ],
+    "01a1e155-3241-7ac2-a61d-4715a6adb0e9": [
+      "doc009"
+    ],
+    "01a1e155-3244-7a61-98ff-5d0b048787cf": [
+      "doc010"
+    ],
+    "01a1e155-3246-7733-8af6-9672f888718b": [
+      "doc011"
+    ],
+    "01a1e155-3249-7962-91f5-7c34576716eb": [
+      "doc012"
+    ],
+    "01a1e155-324c-7b31-a471-ef62eb516edc": [
+      "doc013"
+    ],
+    "01a1e155-324f-7e20-8858-0a89e28cc36c": [
+      "doc014"
+    ],
+    "01a1e155-3252-7d52-bbcd-ff76181fc1ae": [
+      "doc015"
+    ],
+    "01a1e155-3255-7d50-8511-fc0ff8544031": [
+      "doc016"
+    ],
+    "01a1e155-3258-7831-aa70-1aa58fa1ee40": [
+      "doc017"
+    ],
+    "01a1e155-325b-7413-baaa-eeb9a6fac7fa": [
+      "doc018"
+    ],
+    "01a1e155-325f-7551-9987-0d2edd7b88d3": [
+      "doc019"
+    ],
+    "01a1e155-3262-73c1-85db-3167813a25db": [
+      "doc020"
+    ],
+    "01a1e155-3265-71f3-b792-ff2daedaea8c": [
+      "doc021"
+    ],
+    "01a1e155-3268-74c0-ba23-cc0253a8fc40": [
+      "doc022"
+    ],
+    "01a1e155-326b-71b3-baa2-c993ea1c2057": [
+      "doc023"
+    ],
+    "01a1e155-326e-7f10-9485-6882cb069853": [
+      "doc024"
+    ],
+    "01a1e155-3272-79a1-b708-c910447be776": [
+      "doc025"
+    ],
+    "01a1e155-3275-7d03-8e15-aaaa06d7ac8f": [
+      "doc026"
+    ],
+    "01a1e155-3278-7f22-aefe-1d424e6672e5": [
+      "doc027"
+    ],
+    "01a1e155-327c-7c53-8d08-2d6f2bd83140": [
+      "doc028"
+    ],
+    "01a1e155-327f-7fc2-9fe5-0553431135ca": [
+      "doc029"
+    ],
+    "01a1e155-3283-7421-b0c3-620f59a9f0a1": [
+      "doc030"
+    ],
+    "01a1e155-3286-7330-840e-036ff233be9c": [
+      "doc031"
+    ],
+    "01a1e155-328a-7bb0-931e-99a6dd4c04e5": [
+      "doc032"
+    ],
+    "01a1e155-328e-7d93-a494-c47df205e2ae": [
+      "doc033"
+    ],
+    "01a1e155-3292-7963-ad2b-9465ae529a39": [
+      "doc034"
+    ],
+    "01a1e155-3296-7302-8c11-bd14a156c4e8": [
+      "doc035"
+    ],
+    "01a1e155-329a-7121-bfbe-dff620bc02d8": [
+      "doc036"
+    ],
+    "01a1e155-329e-7600-b627-f606216d8b78": [
+      "doc037"
+    ],
+    "01a1e155-32a1-7010-a49a-546668adccf5": [
+      "doc038"
+    ],
+    "01a1e155-32a5-72e2-9ae8-68c9da3eba97": [
+      "doc039"
+    ],
+    "01a1e155-32a9-7be2-ab41-731cee30f161": [
+      "doc040"
+    ],
+    "01a1e155-32ad-78a1-a2ad-3906d22061e3": [
+      "doc041"
+    ],
+    "01a1e155-32b1-78b3-b802-f48644c49599": [
+      "doc042"
+    ],
+    "01a1e155-32b5-7aa1-a4b7-314e827298ec": [
+      "doc043"
+    ],
+    "01a1e155-32b9-7f32-a664-0bcaddf85870": [
+      "doc044"
+    ],
+    "01a1e155-32bd-7720-a28e-cf8bdd5ec172": [
+      "doc045"
+    ],
+    "01a1e155-32c1-77b1-8a40-c8a49de0d602": [
+      "doc046"
+    ],
+    "01a1e155-32c6-7c50-a53f-d1db59aa4802": [
+      "doc047"
+    ],
+    "01a1e155-32ca-7b51-890b-1b0d06410cac": [
+      "doc048"
+    ],
+    "01a1e155-32ce-72f1-8246-1aa3a19ac3f2": [
+      "doc049"
+    ],
+    "01a1e155-32d3-72b0-8633-7c24390d74e9": [
+      "doc050"
+    ],
+    "01a1e155-32d7-7353-9b5e-758cddca49ef": [
+      "doc051"
+    ],
+    "01a1e155-32db-78b0-8ccb-d69ed22c4064": [
+      "doc052"
+    ],
+    "01a1e155-32e0-7603-9436-8821e43c6686": [
+      "doc053"
+    ],
+    "01a1e155-32e5-7ca2-ba03-5ca86fba008a": [
+      "doc054"
+    ],
+    "01a1e155-32e9-7d91-882e-412724dc4ded": [
+      "doc055"
+    ],
+    "01a1e155-32ee-7ad3-8c4b-69ed3db62bd4": [
+      "doc056"
+    ],
+    "01a1e155-32f3-7232-bd97-341077e202f1": [
+      "doc057"
+    ],
+    "01a1e155-32f8-7480-862e-2d55f6ff8928": [
+      "doc058"
+    ],
+    "01a1e155-32fd-7441-8815-03d540b535b3": [
+      "doc059"
+    ],
+    "01a1e155-3301-7f42-84a8-f422ab5cea25": [
+      "doc060"
+    ],
+    "01a1e155-3306-7842-b820-5452227df2bc": [
+      "doc061"
+    ],
+    "01a1e155-330b-7c51-ac9a-e2f4756e5dc5": [
+      "doc062"
+    ],
+    "01a1e155-3310-71d2-af39-b59720944565": [
+      "doc063"
+    ],
+    "01a1e155-3315-7a21-9cad-58aaaa1e8857": [
+      "doc064"
+    ],
+    "01a1e155-331a-7600-bd59-72da6a0186bb": [
+      "doc065"
+    ],
+    "01a1e155-331f-7371-9e34-374c5f339cb3": [
+      "doc066"
+    ],
+    "01a1e155-3324-7242-894b-3e77e5cb49e9": [
+      "doc067"
+    ],
+    "01a1e155-3328-79c0-9b84-72f388bffc8f": [
+      "doc068"
+    ],
+    "01a1e155-332d-7fa2-be76-504437dee192": [
+      "doc069"
+    ],
+    "01a1e155-3333-79e0-b739-b09e5a8a8360": [
+      "doc070"
+    ],
+    "01a1e155-3338-7a30-bd9e-531d1f34d74f": [
+      "doc071"
+    ],
+    "01a1e155-333d-7a91-9cf8-e52afe5826b5": [
+      "doc072"
+    ],
+    "01a1e155-3342-7500-9db2-6f7ba533e856": [
+      "doc073"
+    ],
+    "01a1e155-3347-7e63-8ad5-fae1b6f649b4": [
+      "doc074"
+    ],
+    "01a1e155-334d-79c0-a790-8e75851efc02": [
+      "doc075"
+    ],
+    "01a1e155-3352-7491-b565-ffdd171a4c50": [
+      "doc076"
+    ],
+    "01a1e155-3357-77e3-ab85-9e779682ce1f": [
+      "doc077"
+    ],
+    "01a1e155-335d-73c1-be55-310d8ea34532": [
+      "doc078"
+    ],
+    "01a1e155-3362-7740-ad05-c53e77bba18c": [
+      "doc079"
+    ],
+    "01a1e155-3368-7b13-aec5-e98fc76ca472": [
+      "doc080"
+    ],
+    "01a1e155-336d-7c11-b4b5-6fa3207fc48b": [
+      "doc081"
+    ],
+    "01a1e155-3373-7150-8cae-bb0d80bd30b6": [
+      "doc082"
+    ],
+    "01a1e155-3378-73d3-b2d8-98b38aed4963": [
+      "doc083"
+    ],
+    "01a1e155-337e-7950-832b-a43bdcfbfc57": [
+      "doc084"
+    ],
+    "01a1e155-3384-7712-b591-f99bf81cafb4": [
+      "doc085"
+    ],
+    "01a1e155-3389-77b1-a692-dd874ac15604": [
+      "doc086"
+    ],
+    "01a1e155-33aa-7c92-8886-3558f6b96cf6": [
+      "doc087"
+    ],
+    "01a1e155-33b3-7012-8a5a-2434bec742e4": [
+      "doc088"
+    ],
+    "01a1e155-33bb-7393-adc3-214f2674309d": [
+      "doc089"
+    ],
+    "01a1e155-33c3-7e60-881a-6bded2ba08c1": [
+      "doc090"
+    ],
+    "01a1e155-33cb-78a3-b728-9aca9635fdd1": [
+      "doc091"
+    ],
+    "01a1e155-33d4-7760-9d54-8ea76636f649": [
+      "doc092"
+    ],
+    "01a1e155-33db-7a03-a2cc-4a4de7bf7f0d": [
+      "doc093"
+    ],
+    "01a1e155-33e3-7eb3-857a-e6a5fb5ce56e": [
+      "doc094"
+    ],
+    "01a1e155-33eb-74a1-a713-f608745afd0b": [
+      "doc095"
+    ],
+    "01a1e155-33f2-7b11-b979-5538ec6e84f7": [
+      "doc096"
+    ],
+    "01a1e155-33fb-7101-af5c-6b805f71ad32": [
+      "doc097"
+    ],
+    "01a1e155-3402-7983-be7a-191f0036e271": [
+      "doc098"
+    ],
+    "01a1e155-3409-7bc3-9e95-410525b3c19d": [
+      "doc099"
+    ],
+    "01a1e155-3410-7501-99f4-59ae75d590d9": [
+      "doc100"
+    ],
+    "01a1e155-3416-7f63-b597-69edc441c59a": [
+      "doc101"
+    ],
+    "01a1e155-341d-7591-99b7-c5b62c6c6340": [
+      "doc102"
+    ],
+    "01a1e155-3423-7b83-9e8a-1a8b44c08054": [
+      "doc103"
+    ],
+    "01a1e155-3429-71e3-928f-4b168f5d896b": [
+      "doc104"
+    ],
+    "01a1e155-3430-72b2-9f11-1fe9faa6996c": [
+      "doc105"
+    ],
+    "01a1e155-3436-7db2-8eaa-adbc99a7e08b": [
+      "doc106"
+    ],
+    "01a1e155-343d-7961-bde3-1f87f48ca7eb": [
+      "doc107"
+    ],
+    "01a1e155-3444-7213-b81d-e9c8002c4423": [
+      "doc108"
+    ],
+    "01a1e155-344a-74c0-b2ee-712e69b6f366": [
+      "doc109"
+    ],
+    "01a1e155-3451-76a2-a6a4-7251fbed1c46": [
+      "doc110"
+    ],
+    "01a1e155-3458-7291-91be-909174e33b76": [
+      "doc111"
+    ],
+    "01a1e155-345f-7cf0-8caf-6cb0aac359f6": [
+      "doc112"
+    ],
+    "01a1e155-3465-7d51-84e6-77b524b51f5b": [
+      "doc113"
+    ],
+    "01a1e155-346c-7bc2-ab5e-bd7a68f12b75": [
+      "doc114"
+    ],
+    "01a1e155-3473-7562-bdfc-33af60c241a7": [
+      "doc115"
+    ],
+    "01a1e155-347a-73c1-8fed-c01ce12695e1": [
+      "doc116"
+    ],
+    "01a1e155-3481-7651-9eec-4407fc7c26f6": [
+      "doc117"
+    ],
+    "01a1e155-3488-7d21-ac13-831440aa1852": [
+      "doc118"
+    ],
+    "01a1e155-3490-7481-838b-33bbcbc4408b": [
+      "doc119"
+    ],
+    "01a1e155-3497-75a2-afec-efc2a21f5037": [
+      "doc120"
+    ],
+    "01a1e155-349e-74f3-855a-8b95d8124316": [
+      "doc121"
+    ]
+  },
+  "sourceMappingVersion": 1,
+  "sources": [
+    {
+      "contentSha256": "6f57f61218aa234762bbe5fe62e62bc07210f439b948cae774d86b6c8748ba4e",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 0,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc000",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 000",
+      "turnId": "doc000"
+    },
+    {
+      "contentSha256": "3d0268312a39cbf7c0c6c057759f2f241b6eaaa8c9d17da50a8fb6671e0daf51",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 1,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc001",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 001",
+      "turnId": "doc001"
+    },
+    {
+      "contentSha256": "a0a185aaf7ffbc3df6af185dd0f83bd03678e1b1163ecd49ce4cea250881f806",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 2,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc002",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 002",
+      "turnId": "doc002"
+    },
+    {
+      "contentSha256": "83d0be9173d16894f632b48ca2ef02452e6dc058080bbadebfc4ecb8445c322b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 3,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc003",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 003",
+      "turnId": "doc003"
+    },
+    {
+      "contentSha256": "9a4ab0c09e4369ad554670e70ef22246e81502066584b7be8e13e75b17754cff",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 4,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc004",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 004",
+      "turnId": "doc004"
+    },
+    {
+      "contentSha256": "0ce5a50d1fd043b7b782d1bb7a102370593bac854546ac2c4598b8473a7a42a7",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 5,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc005",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 005",
+      "turnId": "doc005"
+    },
+    {
+      "contentSha256": "c070084b69197e13b7e8b1b4b000be57ea8059518d279ea023fedb4567d1b65b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 6,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc006",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 006",
+      "turnId": "doc006"
+    },
+    {
+      "contentSha256": "a4b81661ed38dffc34a5b54a04241b729fdec96d7a8389244cef1fa443486dc1",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 7,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc007",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 007",
+      "turnId": "doc007"
+    },
+    {
+      "contentSha256": "8ad550c9545ee6fb99c08bf1c1d30e7a6f153870d5b1cc9acbb7181daccda3c1",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 8,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc008",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 008",
+      "turnId": "doc008"
+    },
+    {
+      "contentSha256": "0abfc16b010872df7b50faeb55c096260c6100ade5e6e4628c24c8938646b627",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 9,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc009",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 009",
+      "turnId": "doc009"
+    },
+    {
+      "contentSha256": "15f7f5039039e8345540f8c1754787b82a5e13bb1558512afa71ecfe2a1029ec",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 10,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc010",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 010",
+      "turnId": "doc010"
+    },
+    {
+      "contentSha256": "98f762c676ab01609973e3ad1403103edee66d52fcf8ada2c17df2fd11903833",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 11,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc011",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 011",
+      "turnId": "doc011"
+    },
+    {
+      "contentSha256": "4e0da1d9c3e1091da628cb5678d3b9e5b61273b3e2a640e00de6f8d002fa2769",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 12,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc012",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 012",
+      "turnId": "doc012"
+    },
+    {
+      "contentSha256": "52fe63f1a51a46b291a33529c13c9aea1c68b761d7d8d68251cc020c114ea1d6",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 13,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc013",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 013",
+      "turnId": "doc013"
+    },
+    {
+      "contentSha256": "580867229270ccf7c4190bced6ccf28f058bb8f82679f8f8a749bb8dba510820",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 14,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc014",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 014",
+      "turnId": "doc014"
+    },
+    {
+      "contentSha256": "2d6372f20cad751fa619b9198ac3f04ce818557836707fb796664df3f4db1100",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 15,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc015",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 015",
+      "turnId": "doc015"
+    },
+    {
+      "contentSha256": "2845eafaf6ff42c82ce4626aa0fc513201c6f16a508d78fcf25960aaec7291dc",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 16,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc016",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 016",
+      "turnId": "doc016"
+    },
+    {
+      "contentSha256": "af7bdac3fc08494d2e78992b6663dbdd36d5031e76b5a71c51b270ba67c2b4fc",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 17,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc017",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 017",
+      "turnId": "doc017"
+    },
+    {
+      "contentSha256": "6e7b7f727ffd996feb4050cffed6b034a6ec3ecf3ae67ea2719e07e4a14d784f",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 18,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc018",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 018",
+      "turnId": "doc018"
+    },
+    {
+      "contentSha256": "ee09677ade154b8fede2a200f091c69f8192160e7807cee58049785bdaac4c86",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 19,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc019",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 019",
+      "turnId": "doc019"
+    },
+    {
+      "contentSha256": "d0b3156bff1f1dcdd8d6fc7f66cd1eaefb940d5be4463020a4094e9ea982ce60",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 20,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc020",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 020",
+      "turnId": "doc020"
+    },
+    {
+      "contentSha256": "58f15a3e99964ed1932892d9e5831114b765e9e7aa11511376a802278e4e5ed5",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 21,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc021",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 021",
+      "turnId": "doc021"
+    },
+    {
+      "contentSha256": "830a42f9efe85224cfdc44101cfaa6f3324bc3bc8644592873653c260442163c",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 22,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc022",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 022",
+      "turnId": "doc022"
+    },
+    {
+      "contentSha256": "34168387ae9c981b207887629969eca5e9ce07505660debe4eed834176cb5c97",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 23,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc023",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 023",
+      "turnId": "doc023"
+    },
+    {
+      "contentSha256": "567ee65ceab8d1fa04cfe6375ca4802b757584e1fe27e1ba037b9456a940a4db",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 24,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc024",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 024",
+      "turnId": "doc024"
+    },
+    {
+      "contentSha256": "5c9161d6e30995a0e39660d9cebe55f5bda71499ad338ea60513afceed1b68e9",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 25,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc025",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 025",
+      "turnId": "doc025"
+    },
+    {
+      "contentSha256": "e2d93a0e45622c621ace522b0133a62f4739418620057d91c853ae2ed2cd8348",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 26,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc026",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 026",
+      "turnId": "doc026"
+    },
+    {
+      "contentSha256": "18d05bf1e179cc05d4ce89308c8b86e3354a720af007079fa13cfca6d7d82069",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 27,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc027",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 027",
+      "turnId": "doc027"
+    },
+    {
+      "contentSha256": "aa0c802ea73cebc1dcb0e239f363d41373f2c300132ac63aab49a65a3b1fe19b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 28,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc028",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 028",
+      "turnId": "doc028"
+    },
+    {
+      "contentSha256": "7488bfe3f05845fef7a0c72821348ab40b38b3689e250bd19b84cbdf9c1d77ed",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 29,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc029",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 029",
+      "turnId": "doc029"
+    },
+    {
+      "contentSha256": "0c6fc66df65cdf24bf0829216880da9e108600b28ac7c4946f6c7fd3c9d3d733",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 30,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc030",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 030",
+      "turnId": "doc030"
+    },
+    {
+      "contentSha256": "71ae8795d2bad9c2b5c90c826b1558a7644d5138a40e766796862d41cf76d6f9",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 31,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc031",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 031",
+      "turnId": "doc031"
+    },
+    {
+      "contentSha256": "4f2d1f9cf0f434a59f7340139b588638974c357ce7a4c259c2687628531c5d67",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 32,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc032",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 032",
+      "turnId": "doc032"
+    },
+    {
+      "contentSha256": "f650f250886354c0392fdb1a89e3633373a1b4697620c52bbf53b5dd7ea538d6",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 33,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc033",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 033",
+      "turnId": "doc033"
+    },
+    {
+      "contentSha256": "8788a5157363bd6b0acf2b4214f87567817e574950457e18c4840ee0e7abd463",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 34,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc034",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 034",
+      "turnId": "doc034"
+    },
+    {
+      "contentSha256": "75d89894d71fd987c1e55336b79fbbc26e3b1712c35fd8c1314bdcc71d1f7b0e",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 35,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc035",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 035",
+      "turnId": "doc035"
+    },
+    {
+      "contentSha256": "8041ce4ebcb897eb126ccfefb9bd55d153b0ae88fc9774a131758fe4b775416a",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 36,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc036",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 036",
+      "turnId": "doc036"
+    },
+    {
+      "contentSha256": "a22547bde78ffe000a19cf16b9286fd0f84db03eb28f46e9df8d652ec2e56021",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 37,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc037",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 037",
+      "turnId": "doc037"
+    },
+    {
+      "contentSha256": "05bf818c37b2ce81de1ccc548960d48a8566ef02498be3e8630034755c545025",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 38,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc038",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 038",
+      "turnId": "doc038"
+    },
+    {
+      "contentSha256": "b2bf9b1b9b3099949857812ba7defb8e93a1cfc41b37d80572b2eff561489e6d",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 39,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc039",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 039",
+      "turnId": "doc039"
+    },
+    {
+      "contentSha256": "fd8cfe5fed1a035d36902adc9a52c2c2c03673725e444e7e3c3b13c06feb62fe",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 40,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc040",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 040",
+      "turnId": "doc040"
+    },
+    {
+      "contentSha256": "da28c2536ff997047cdf5e6317bc7e92743b06c04d7aca0c8eac62595b139111",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 41,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc041",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 041",
+      "turnId": "doc041"
+    },
+    {
+      "contentSha256": "a291f6ac7380c35d74ff75816733bc1c9ae8f118de632f84ee13f31f7ae999f8",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 42,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc042",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 042",
+      "turnId": "doc042"
+    },
+    {
+      "contentSha256": "22986b98a5223e4ca893d95300631592df888da7917b6e91541fa2f8307dc4db",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 43,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc043",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 043",
+      "turnId": "doc043"
+    },
+    {
+      "contentSha256": "07fa92b310667afe92f1da4b71b98d6ad6f03f78d80566ce5cb647738a792656",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 44,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc044",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 044",
+      "turnId": "doc044"
+    },
+    {
+      "contentSha256": "01c47a0bd55c5b7b01a0ab80dfe8f9592ad44c0e1f683929291286281f378026",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 45,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc045",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 045",
+      "turnId": "doc045"
+    },
+    {
+      "contentSha256": "176399aef90e4d8f0b3f6aa34d0644e78959d5befc6944d1f72c5363af065686",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 46,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc046",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 046",
+      "turnId": "doc046"
+    },
+    {
+      "contentSha256": "6adc5d8467c38be8260b75b8255f50a0e1bb7f3d200f4ba4422d5614ecde344c",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 47,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc047",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 047",
+      "turnId": "doc047"
+    },
+    {
+      "contentSha256": "db995b0b7f7e48b0835e0fabddb62bfc734a35422e7a61781c05df5c1390a670",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 48,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc048",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 048",
+      "turnId": "doc048"
+    },
+    {
+      "contentSha256": "0a32b6c191b80bda2a84f14edc7fcddfaa3aa0df2fb90460c3b3293ddd105cc8",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 49,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc049",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 049",
+      "turnId": "doc049"
+    },
+    {
+      "contentSha256": "68a5473db8efb00d0aa595f17a64cbc0a0c2b3804e89849641f0cb84c1a4a33f",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 50,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc050",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 050",
+      "turnId": "doc050"
+    },
+    {
+      "contentSha256": "efeafc929a7b8487385ca6bdfdbfd0302a9cd90049de648c4463ee01fd76764b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 51,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc051",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 051",
+      "turnId": "doc051"
+    },
+    {
+      "contentSha256": "770b77f92c3ad6ee07e8d263d5f93c9d759fc248dd744251cba3e05297c0ac6a",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 52,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc052",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 052",
+      "turnId": "doc052"
+    },
+    {
+      "contentSha256": "908a186bb4dfe8cb39211c62d6d652725446bd15a7fe3fd53ae073c8b0fd204b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 53,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc053",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 053",
+      "turnId": "doc053"
+    },
+    {
+      "contentSha256": "76414789e3150d652e05cea6224e7c20866c31ebeae2c6ce8179552a13ee70d7",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 54,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc054",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 054",
+      "turnId": "doc054"
+    },
+    {
+      "contentSha256": "3c9f2bfb07cf49729b6f56d41c51a3f375765641a0f80245ac9eabaaae910705",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 55,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc055",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 055",
+      "turnId": "doc055"
+    },
+    {
+      "contentSha256": "3dd182731dfe5fc330be4a3704784f6cbf4d6fecbe38cd43a6f7e191c75275af",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 56,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc056",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 056",
+      "turnId": "doc056"
+    },
+    {
+      "contentSha256": "41c69f974ba3fd80795e2aa6f8abf901800097bb90ccdf962feaf2ee75b2d2c6",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 57,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc057",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 057",
+      "turnId": "doc057"
+    },
+    {
+      "contentSha256": "33aeb64bbef6db7952701a311bcc98a019f61c3568cd8d06811bff924ad2b446",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 58,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc058",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 058",
+      "turnId": "doc058"
+    },
+    {
+      "contentSha256": "f53e22f4b5bb627f35fbf1642e41ba14eb1fe860453c4c56a7788038e8e47287",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 59,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc059",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 059",
+      "turnId": "doc059"
+    },
+    {
+      "contentSha256": "22a7fce17d875e92d7e97cf8d97ae505be2ab9a668d15c1de0a12492637d0dcf",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 60,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc060",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 060",
+      "turnId": "doc060"
+    },
+    {
+      "contentSha256": "38771005080c20793a2fbf65bb56214e39b986162d46c97f29a80e09d8274369",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 61,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc061",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 061",
+      "turnId": "doc061"
+    },
+    {
+      "contentSha256": "ef55ac3044b0c3e723ece267574a4c781da9cbf57df426595bbdcc017ec4b050",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 62,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc062",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 062",
+      "turnId": "doc062"
+    },
+    {
+      "contentSha256": "51ab112225aec9008e15bc6e5d426f9ab7a4f15bac955f5f2efaf7e130ec4e46",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 63,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc063",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 063",
+      "turnId": "doc063"
+    },
+    {
+      "contentSha256": "613bef42952e4e54f3ed34711c29d185969f883321ddd34c9fa4fe38e57d9a1c",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 64,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc064",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 064",
+      "turnId": "doc064"
+    },
+    {
+      "contentSha256": "69c665a89b8a23bce9104c81e474ca5c8a915ee87ed80c97e337935fa089f526",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 65,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc065",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 065",
+      "turnId": "doc065"
+    },
+    {
+      "contentSha256": "35ba10f4a60b394b9979533b71911df4dfd0d41d7714d81fd4d56bf82e1a3670",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 66,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc066",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 066",
+      "turnId": "doc066"
+    },
+    {
+      "contentSha256": "f0a79bb54561a49a7f312ac905d3e9cdd8a6582e67bff5a0c63a36db2c19f767",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 67,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc067",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 067",
+      "turnId": "doc067"
+    },
+    {
+      "contentSha256": "81bf6612053a777e994897ff6dfe793b93f6ab4873b0ff3118d25f85da4e716f",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 68,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc068",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 068",
+      "turnId": "doc068"
+    },
+    {
+      "contentSha256": "7b792bbd7fba2377eb9c4184e7ac4bbcc115a5c5d4fcc13734c30251a2ea5b09",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 69,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc069",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 069",
+      "turnId": "doc069"
+    },
+    {
+      "contentSha256": "8ba3244485d43dff46d435071c53512a9f04301c4c0ab291c1760850222ab5c1",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 70,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc070",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 070",
+      "turnId": "doc070"
+    },
+    {
+      "contentSha256": "82a554adf00a3a3e263b4ce6941f61745812d7e5bcc21d2716f88c759bd5b322",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 71,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc071",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 071",
+      "turnId": "doc071"
+    },
+    {
+      "contentSha256": "5dec806b19f70b54c00a3fd2329672f28e443e165d409fbec8ed45d05b43070a",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 72,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc072",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 072",
+      "turnId": "doc072"
+    },
+    {
+      "contentSha256": "382a173236068b63794dcf00750118cae08e8eb788bbbf8c8acb0daf84626e51",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 73,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc073",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 073",
+      "turnId": "doc073"
+    },
+    {
+      "contentSha256": "e4c8020d73437dc23da168d3775683d8e308207a711f72c8bb1f623eaccd3c04",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 74,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc074",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 074",
+      "turnId": "doc074"
+    },
+    {
+      "contentSha256": "29fcbc292abc9d060d791ae28cc2f9031349cc036b0ac237ef0d26ff61a07fe7",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 75,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc075",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 075",
+      "turnId": "doc075"
+    },
+    {
+      "contentSha256": "0bc8160b4d0af4f69ba8b8554ed4ee8d6bbb9afbd95d59fba84d5d1f576334ae",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 76,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc076",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 076",
+      "turnId": "doc076"
+    },
+    {
+      "contentSha256": "592ddd5e8a959bdb365cac37f084221049a9f45bc80bf5af52ff01de4b4c8fd8",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 77,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc077",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 077",
+      "turnId": "doc077"
+    },
+    {
+      "contentSha256": "8a81573f9c41073af88a4f2df7d98095a7def47b95fb73b58572b8c3dbad4c5a",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 78,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc078",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 078",
+      "turnId": "doc078"
+    },
+    {
+      "contentSha256": "f5ae8867a8e793f37b7fcbdd47708416822c32a4a155e197644ee3dc90ebcb0b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 79,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc079",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 079",
+      "turnId": "doc079"
+    },
+    {
+      "contentSha256": "7fabf0d053a375bccc1f6a90872af5f7c8fb02802960943b3f30db2029a28dc7",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 80,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc080",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 080",
+      "turnId": "doc080"
+    },
+    {
+      "contentSha256": "a6200cc3ad35bd98ab74a9f625f532965f048a8fb34f752cb3c74509d4b71ff5",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 81,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc081",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 081",
+      "turnId": "doc081"
+    },
+    {
+      "contentSha256": "9464755dcc6d1072325592a150e7c2ee6b6be77079004833014751b027a3ee3c",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 82,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc082",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 082",
+      "turnId": "doc082"
+    },
+    {
+      "contentSha256": "5139bed7c6c4ccbfa2218f7b57f2d27fb689e0888389ceb44f2f6c44e6211705",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 83,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc083",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 083",
+      "turnId": "doc083"
+    },
+    {
+      "contentSha256": "08fd62ac1d314005602332186056af73e228c8aa9f1eb8574b433f50ec55ce07",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 84,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc084",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 084",
+      "turnId": "doc084"
+    },
+    {
+      "contentSha256": "7b0673d0cdf4de08dd1ba6f9a02ae8cff51e5d7b9e3943c4bafe0bc1d49bc354",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 85,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc085",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 085",
+      "turnId": "doc085"
+    },
+    {
+      "contentSha256": "a91e96ce554cc1d102132ea5f69221349ee227f371bca73e728c4ca99a88a3f7",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 86,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc086",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 086",
+      "turnId": "doc086"
+    },
+    {
+      "contentSha256": "a5e2d8ac21a7b41c0faedf5a9ee28bc778562afcbf8706194200d834e6f2bc00",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 87,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc087",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 087",
+      "turnId": "doc087"
+    },
+    {
+      "contentSha256": "d9d3c50b70e33109eeb3862d85603602a9fa51b3a446ad8d1cd62ea39a2c8d6b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 88,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc088",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 088",
+      "turnId": "doc088"
+    },
+    {
+      "contentSha256": "01b9f0344ff1c34792a9f16ab29c603fca623ac1982a798626799c139739bbd0",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 89,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc089",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 089",
+      "turnId": "doc089"
+    },
+    {
+      "contentSha256": "dea16a58a8233fa8c86020755e4d018510dcd512a9838a60c9958729d5ffb13f",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 90,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc090",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 090",
+      "turnId": "doc090"
+    },
+    {
+      "contentSha256": "fbc2add7cc5484a27f703a5ace4c979aa7a5aa142e0241ac7b9273a6e81a5d81",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 91,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc091",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 091",
+      "turnId": "doc091"
+    },
+    {
+      "contentSha256": "d67d6423c5bbdac0756bde373799edfec30dfb02806551872e11cd28568bdf1b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 92,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc092",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 092",
+      "turnId": "doc092"
+    },
+    {
+      "contentSha256": "09b50160769be049e7fcbfe51e8c5bacac84ab0c72401e0b90566ea156e0f719",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 93,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc093",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 093",
+      "turnId": "doc093"
+    },
+    {
+      "contentSha256": "ab683bbf7c910ee7241a28ff64f3380b515cddda5215d5dee954edce5dd97bdb",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 94,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc094",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 094",
+      "turnId": "doc094"
+    },
+    {
+      "contentSha256": "f53133bb1de6adcce9fd211a1db023c6eb3b8c4f750e53f39f6850602cd78973",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 95,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc095",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 095",
+      "turnId": "doc095"
+    },
+    {
+      "contentSha256": "7508f37a246cba789df9a555332d4e2e66601ba3b47af0b3b6e731b72bf76650",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 96,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc096",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 096",
+      "turnId": "doc096"
+    },
+    {
+      "contentSha256": "9bb6241a517b34277ce8d029f8e92469987696e65c7ec3e3b977155fd72b2a92",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 97,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc097",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 097",
+      "turnId": "doc097"
+    },
+    {
+      "contentSha256": "c0fd1bdbb7b06b23771441ae0526639731550103330d5b109ef9d2598d6b08bc",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 98,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc098",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 098",
+      "turnId": "doc098"
+    },
+    {
+      "contentSha256": "01da40bb69d7e5d49303370df951874bd76d2d51b5da39eb520894f92182e3c1",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 99,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc099",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 099",
+      "turnId": "doc099"
+    },
+    {
+      "contentSha256": "cd342be6b1fe015c7ac4ba84cb925066121c704922ccfcd437ea9c25e8bcc07e",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 100,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc100",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 100",
+      "turnId": "doc100"
+    },
+    {
+      "contentSha256": "96f1173b056cc0e5b5637f234277b6a23858f6890ff8c80f759a47e0b845fdbf",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 101,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc101",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 101",
+      "turnId": "doc101"
+    },
+    {
+      "contentSha256": "79820c3fec33dcc04852fe7d59784ddd2cd9d530ce3d409949fe7b09f691a8ae",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 102,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc102",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 102",
+      "turnId": "doc102"
+    },
+    {
+      "contentSha256": "224f0ba7830f4124f3d088857af25b6c4cd1467c00196e422514682deae4bbc1",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 103,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc103",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 103",
+      "turnId": "doc103"
+    },
+    {
+      "contentSha256": "57a572502c7a2aac2dd7d38822fc2640ba146c8fff5947fe4f240d1d580111bf",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 104,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc104",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 104",
+      "turnId": "doc104"
+    },
+    {
+      "contentSha256": "f406997ec7d775eb27f9151d1d9f0b2322c43e60f77b0124868b424047bf7ec1",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 105,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc105",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 105",
+      "turnId": "doc105"
+    },
+    {
+      "contentSha256": "6ce5cfb8e09aadbbbdfac3255dc5faab0a1ceb242db68b11b748f9ffb3d87def",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 106,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc106",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 106",
+      "turnId": "doc106"
+    },
+    {
+      "contentSha256": "d92100bde3390f3b7c5bdede5f82ecc0340985e9acc86fa2052c919e58a68094",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 107,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc107",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 107",
+      "turnId": "doc107"
+    },
+    {
+      "contentSha256": "eab772ed495f0c2f0830675fb08f25759b0bbc6ef51f9824357ad5aaffc1bfa8",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 108,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc108",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 108",
+      "turnId": "doc108"
+    },
+    {
+      "contentSha256": "0d1d8bcf5cc9f35a88d32bca9af17aa66dc0969eb0ff780f2b10938260d6b009",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 109,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc109",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 109",
+      "turnId": "doc109"
+    },
+    {
+      "contentSha256": "b1af11d23360d9641a1b189fd185bf821198e71b7a59d24fb71a922bc1e14795",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 110,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc110",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 110",
+      "turnId": "doc110"
+    },
+    {
+      "contentSha256": "58f35f7133a27597ebaec8dfb4815fd8d82e5715867dce280733cd8561493974",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 111,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc111",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 111",
+      "turnId": "doc111"
+    },
+    {
+      "contentSha256": "3c89df2a9071041856dc965c240c8617e81035ecf6a38df952328996989d4e76",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 112,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc112",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 112",
+      "turnId": "doc112"
+    },
+    {
+      "contentSha256": "abf2be4cda66d951948a84e771e394870836fd3e076fcd6e048a5810e24d9058",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 113,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc113",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 113",
+      "turnId": "doc113"
+    },
+    {
+      "contentSha256": "6f4ad908cf7271cd66ac0c0772cfbf3f696e68138d492218e183f51c5d2a5a62",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 114,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc114",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 114",
+      "turnId": "doc114"
+    },
+    {
+      "contentSha256": "59372a1e726c0b46afb89212cd9c63f02d00ad7f1784511bafa6b0327d7a280b",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 115,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc115",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 115",
+      "turnId": "doc115"
+    },
+    {
+      "contentSha256": "4db1043be42f36451b649f4a9ebdb7557b7bdbe3c78407c78b5d28c0711a0382",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 116,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc116",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 116",
+      "turnId": "doc116"
+    },
+    {
+      "contentSha256": "237bd9a2c1afb27cff884a559670a382fbe0dcb25a97180f757aec51db654eb3",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 117,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc117",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 117",
+      "turnId": "doc117"
+    },
+    {
+      "contentSha256": "5dfd5fc2b0252f76d7ae962029cd59991214999a39188cd80446b4f902f43c7c",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 118,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc118",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 118",
+      "turnId": "doc118"
+    },
+    {
+      "contentSha256": "3bdf613af6f932c254d60a2a15ba91c2adaeeb209d94f7b8db79598b24a17708",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 119,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc119",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 119",
+      "turnId": "doc119"
+    },
+    {
+      "contentSha256": "674303f7cf9b3453cf3116798500981e9ee916ba8bb0107031ac717e531f4976",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "default",
+      "ordinal": 120,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc120",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 120",
+      "turnId": "doc120"
+    },
+    {
+      "contentSha256": "cae494facb89f3704aa1a3799e891b0c3a69dc85922997e34da8117bef5c6b88",
+      "conversationId": "synthetic-conversation",
+      "groupId": "synthetic-regression",
+      "namespace": "foreign",
+      "ordinal": 121,
+      "role": "user",
+      "sessionId": "synthetic-session",
+      "sourceId": "doc121",
+      "sourceTimestamp": 1767225600000,
+      "summary": "Synthetic document ordinal 121",
+      "turnId": "doc121"
+    }
+  ]
+}
