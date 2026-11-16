@@ -552,6 +552,7 @@ pub struct StorageAccessRecorder {
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     cache: Arc<CacheManager>,
     clock: Arc<dyn crate::time::Clock>,
+    completion: Option<crate::derived_completion::DerivedCompletion>,
 }
 
 impl StorageAccessRecorder {
@@ -563,16 +564,97 @@ impl StorageAccessRecorder {
             storage,
             cache,
             clock: Arc::new(crate::time::SystemClock),
+            completion: None,
         }
     }
     pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
         self.clock = clock;
         self
     }
+    pub(crate) fn with_completion(
+        mut self,
+        owner: crate::derived_completion::DerivedCompletion,
+    ) -> Self {
+        assert!(Arc::ptr_eq(&self.storage, &owner.storage));
+        self.completion = Some(owner);
+        self
+    }
 }
 
 #[async_trait]
 impl AccessRecorder for StorageAccessRecorder {
+    fn supports_native_exposure(&self) -> bool {
+        self.completion.is_some()
+            && self
+                .storage
+                .read()
+                .is_ok_and(|s| s.meta_store().uses_native_lifecycle())
+    }
+
+    async fn record_access_batch_for_publication(
+        &self,
+        accesses: &[(MemoryId, AccessKind)],
+        scope: Option<&crate::storage::control::ExposureScope>,
+        sampled_at: Option<i64>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        policy: Option<&crate::storage::native_lifecycle::NativePolicyInputs>,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        if accesses.is_empty() {
+            return Ok(crate::decay::observation::AccessObservation::from_receipts(
+                Vec::new(),
+            ));
+        }
+        if !matches!(original_contract_version, 1 | 2) {
+            return Err(SearchError::Unavailable(
+                "unsupported original application contract".into(),
+            ));
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| SearchError::Unavailable(e.to_string()))?
+            .meta_store()
+            .uses_native_lifecycle();
+        let receipts = if native {
+            let completion = self.completion.as_ref().ok_or_else(|| {
+                SearchError::Unavailable(
+                    "native exposure requires the configured publication owner".into(),
+                )
+            })?;
+            let policy = policy.ok_or_else(|| {
+                SearchError::Unavailable(
+                    "native exposure requires the query's configured lifecycle policy".into(),
+                )
+            })?;
+            completion
+                .record_native_exposures_with_work(
+                    accesses.to_vec(),
+                    scope.cloned(),
+                    sampled_at.unwrap_or_else(|| self.clock.now_millis()),
+                    policy.clone(),
+                    parent,
+                    original_contract_version,
+                )
+                .await?
+        } else {
+            crate::decay::observation::record_exposures_scoped_with_origin_work(
+                self.storage.clone(),
+                self.cache.clone(),
+                accesses.to_vec(),
+                sampled_at.unwrap_or_else(|| self.clock.now_millis()),
+                scope.cloned(),
+                parent,
+                original_contract_version,
+            )
+            .await?
+        };
+        // Native exposure initially uses the existing full publication fallback.
+        Ok(crate::decay::observation::AccessObservation::from_receipts(
+            receipts,
+        ))
+    }
+
     async fn record_access(
         &self,
         id: MemoryId,

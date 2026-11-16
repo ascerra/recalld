@@ -1,0 +1,58 @@
+{
+  "build.jsonl": {
+    "sha256": "e82aa29806bb5775f5bdf272f7718b54234008df4441d1652b1d5bd3aacefdb0",
+    "bytes": 512229
+  },
+  "build.log": {
+    "sha256": "66980a47fb6e048240fdb282ef7fe9f9565fba97486334bad24c5a8be79f4f8d",
+    "bytes": 100
+  },
+  "cli.log": {
+    "sha256": "89f93296f253c172266355a06d0c621896d0f68ec915070876b10a5ffcb7c876",
+    "bytes": 34369
+  },
+  "clippy.log": {
+    "sha256": "a9b9d2e40491c996607163ce76cabf6ffb08a3f2064b61eb8c31fd5424978b6e",
+    "bytes": 996410
+  },
+  "examples.log": {
+    "sha256": "c36c7281cf48606c6ba2e7cde087013c32b6a7c430355623d39b7e7deb30849d",
+    "bytes": 35536
+  },
+  "fmt.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "focus-adopted_public_.log": {
+    "sha256": "a2702fb046c7f1d6d88795339b27534d4e22d0166ced1e22459579026c2af5d0",
+    "bytes": 55896
+  },
+  "focus-api1_public_.log": {
+    "sha256": "3069fecb577614f67c15019aa567fa84c49e81ce077dbe6028035189b9ba5ba9",
+    "bytes": 58436
+  },
+  "focus-decoder_native_.log": {
+    "sha256": "c218622a8d43c2b7a905c54af6796e6af742a1eb9712f9af2ce59cfc48d4b31f",
+    "bytes": 55677
+  },
+  "focus-inherited_policy_.log": {
+    "sha256": "00c9b45b328668cb5254d833858afbdc0718dfcf5e216b3044a3e51fab3d241d",
+    "bytes": 58055
+  },
+  "focus-legacy_lifecycle.log": {
+    "sha256": "bf319d215406d2fa4e8b285a0407e62e00bf186064d3d41616f2197161f320d2",
+    "bytes": 58258
+  },
+  "focus-native_exposure_.log": {
+    "sha256": "7c05e8262e9fe38961742cb8110b7d3cb9f2ff942d95f1c72e9556e688379abe",
+    "bytes": 56631
+  },
+  "focus-native_record_context_.log": {
+    "sha256": "592c6364d8df93adb5ed6809715db538e5c2651dfe01bc1010b51b69c7e59732",
+    "bytes": 55435
+  },
+  "status.log": {
+    "sha256": "3604b8ffd7f7ab2bf5c3bfdf62970fb58788d634c6a958122c4c398d1fbf2ebf",
+    "bytes": 162
+  }
+}

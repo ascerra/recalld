@@ -32,7 +32,7 @@ impl StrengthContext {
             .as_ref()
             .map_or(LifecycleVersion::LegacyAccessV1, |s| s.lifecycle_version);
         let explicit = lifecycle_version == LifecycleVersion::ExplicitFeedbackV2;
-        if explicit && record_access {
+        if explicit && record_access && !engine.access_recorder.supports_native_exposure() {
             return Err(SearchError::Internal(
                 "explicit-feedback exposure writer unavailable; recordAccess must be false".into(),
             ));

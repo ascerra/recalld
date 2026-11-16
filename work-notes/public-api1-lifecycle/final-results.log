@@ -1,0 +1,37 @@
+corrected-focused.log
+warning: `recalld` (lib) generated 69 warnings (run `cargo fix --lib -p recalld` to apply 4 suggestions)
+warning: `recalld` (lib test) generated 44 warnings (7 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.62s
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1192 filtered out; finished in 14.74s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+corrected-scope.log
+warning: `recalld` (lib) generated 69 warnings (run `cargo fix --lib -p recalld` to apply 4 suggestions)
+warning: `recalld` (lib test) generated 44 warnings (7 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.88s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1205 filtered out; finished in 1.02s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+corrected-full.log
+warning: `recalld` (lib) generated 69 warnings (run `cargo fix --lib -p recalld` to apply 4 suggestions)
+warning: `recalld` (lib test) generated 44 warnings (7 duplicates)
+    Finished `test` profile [unoptimized] target(s) in 0.17s
+test result: ok. 1209 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 549.18s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.94s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+corrected-clippy.log
+warning: `recalld` (lib) generated 949 warnings (run `cargo clippy --fix --lib -p recalld` to apply 112 suggestions)
+warning: `recalld` (bin "recalld") generated 1 warning
+warning: `recalld` (bin "recalld" test) generated 1 warning (1 duplicate)
+warning: `recalld` (lib test) generated 1012 warnings (920 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 6 suggestions)
+    Finished `dev` profile [unoptimized] target(s) in 30.40s

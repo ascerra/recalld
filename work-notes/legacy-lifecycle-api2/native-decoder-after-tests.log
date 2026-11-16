@@ -1,0 +1,7 @@
+
+running 2 tests
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_feedback_quality_binds_success_error_and_malformed_receipts ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_namespace_binds_success_error_and_malformed_receipts ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 1.39s
+
