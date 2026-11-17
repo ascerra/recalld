@@ -299,10 +299,26 @@ async fn coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_pa
                         serde_json::to_value(&receipts[0]).unwrap()
                     );
                 }
+                let crate::storage::control::MutationOutcome::ExposuresRecorded { accesses } =
+                    &receipts[0].outcome
+                else {
+                    panic!("{body}")
+                };
+                assert_eq!(accesses.len(), 1);
+                // Fault1 deliberately poisons the serving handle. Verify the
+                // complete receipt after real reopen, never bypass that gate.
+                let Harness {
+                    f,
+                    engine,
+                    access,
+                    embedding,
+                    ..
+                } = h;
+                drop((engine, access, embedding));
+                let root = f.close();
+                let reopened = crate::storage::RedbStorageEngine::open(root.path()).unwrap();
                 assert_eq!(
-                    h.f.storage
-                        .read()
-                        .unwrap()
+                    reopened
                         .lookup_operation(
                             receipts[0].store_id,
                             crate::storage::control::MutationScope::Namespace(
@@ -313,12 +329,6 @@ async fn coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_pa
                         .unwrap(),
                     Some(receipts[0].clone())
                 );
-                let crate::storage::control::MutationOutcome::ExposuresRecorded { accesses } =
-                    &receipts[0].outcome
-                else {
-                    panic!("{body}")
-                };
-                assert_eq!(accesses.len(), 1);
             }
         }
     }

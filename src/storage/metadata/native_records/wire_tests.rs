@@ -82,7 +82,7 @@ fn public_adapters_with_query(
     native_exposure: bool,
 ) -> (McpBridge, crate::api::AppState) {
     let (_, mut bridge, engine) =
-        readers_with_policy(f, clock.clone(), native_exposure, policy.clone());
+        readers_with_policy(f, clock.clone(), native_exposure, policy.clone(), true);
     let mut config = crate::config::RecalldConfig::default();
     config.decay.decay_rate_multiplier = policy.multiplier;
     let config = Arc::new(config);

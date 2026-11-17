@@ -59,13 +59,20 @@ fn readers_with_exposure(
     clock: Arc<dyn Clock>,
     native_exposure: bool,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
-    readers_with_policy(f, clock, native_exposure, NativePolicyInputs::default())
+    readers_with_policy(
+        f,
+        clock,
+        native_exposure,
+        NativePolicyInputs::default(),
+        native_exposure,
+    )
 }
 fn readers_with_policy(
     f: &Fixture,
     clock: Arc<dyn Clock>,
     native_exposure: bool,
     policy: NativePolicyInputs,
+    point_owner: bool,
 ) -> (axum::Router, McpBridge, Arc<crate::search::QueryEngine>) {
     let provider = Arc::new(NoProvider);
     let recorder =
@@ -91,12 +98,16 @@ fn readers_with_policy(
         Arc::new(recorder),
     )
     .with_lifecycle_inputs(clock.clone(), policy.global.clone(), policy.multiplier);
-    // Point capture needs the actual owner even when observation is disabled.
-    // The recorder's completion/native-exposure capability remains separate.
-    let engine = Arc::new(engine.with_coherent_owner(
-        completion(f),
-        Arc::new(crate::rif::RifEngine::new(Default::default())),
-    ));
+    // Keep the original legacy-dispatch controls separate from owned point
+    // capture. Neither choice grants the recorder observation capability.
+    let engine = Arc::new(if point_owner {
+        engine.with_coherent_owner(
+            completion(f),
+            Arc::new(crate::rif::RifEngine::new(Default::default())),
+        )
+    } else {
+        engine
+    });
     let config = Arc::new(crate::config::RecalldConfig::default());
     let router = crate::api::router(
         crate::api::AppState::new(
@@ -155,11 +166,13 @@ fn readers_with_policy(
             f.graph.clone(),
             chrono_tz::UTC,
         )),
-        storage: Arc::new(
+        storage: Arc::new(if point_owner {
             f.storage_adapter()
                 .with_clock(clock.clone())
-                .with_query_engine(engine.clone()),
-        ),
+                .with_query_engine(engine.clone())
+        } else {
+            f.storage_adapter()
+        }),
         namespaces: Arc::new(f.namespace_adapter()),
         health: Arc::new(crate::test_support::StubBridge::default()),
         default_namespace: "different-default".into(),
@@ -280,7 +293,13 @@ async fn native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_rea
     let mut engine = Some(session.engine);
     for reopen in [false, true] {
         let f = Fixture::from_open_engine(root, engine.take().unwrap());
-        let (api, bridge, query) = readers(&f, clock.clone());
+        let (api, bridge, query) = readers_with_policy(
+            &f,
+            clock.clone(),
+            false,
+            NativePolicyInputs::default(),
+            true,
+        );
         let publisher = completion(&f);
         if !reopen {
             let (status, _) = http(
@@ -507,6 +526,14 @@ async fn native_forget_failed_publication_stays_blocked_until_real_retry_without
         bytes(&d.path),
         before,
         "legacy observing route mutated native state"
+    );
+    drop((api, bridge, query));
+    let (api, bridge, query) = readers_with_policy(
+        &f,
+        clock.clone(),
+        false,
+        NativePolicyInputs::default(),
+        true,
     );
     let forgotten = {
         let mut engine = f.storage.write().unwrap();
