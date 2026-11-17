@@ -75,7 +75,72 @@ fn receipt_charge_bound(value: &Value) -> usize {
         }
     }
 }
+// Shape guards for the SOURCE-derived fixed completion budget. These are not
+// a sample-based bound on arbitrary SearchPipeline implementations.
+fn completion_shape(reply: &GetReply) {
+    let size = |v: &Value| normalized(&serde_json::to_string(v).unwrap()).unwrap().0;
+    if let Some(ready) = &reply.envelope.readiness {
+        let mut header = serde_json::to_value(ready).unwrap();
+        let fields = header.as_object_mut().unwrap();
+        assert_eq!(
+            fields.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec![
+                "committedGeneration",
+                "derived",
+                "pendingWork",
+                "ready",
+                "storeId"
+            ]
+        );
+        let views = fields.remove("derived").unwrap();
+        assert_eq!(views.as_array().unwrap().len(), 4);
+        for view in views.as_array().unwrap() {
+            assert_eq!(
+                view.as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                vec!["appliedGeneration", "name", "ready"]
+            );
+            assert!(matches!(
+                view["name"].as_str(),
+                Some("graph" | "vectors" | "fts" | "entities")
+            ));
+            assert!(size(view) <= 128);
+        }
+        assert!(size(&header) <= 256);
+    }
+    if let Some(error) = &reply.envelope.error {
+        assert!(serde_json::to_vec(&error.code).unwrap().len() <= 64);
+        assert!(serde_json::to_vec(&error.message).unwrap().len() <= 256);
+        assert!(error.field.as_ref().is_none_or(|v| v.len() <= 256));
+        assert!(size(&serde_json::to_value(error).unwrap()) <= 2560);
+    }
+    assert!(reply.envelope.warnings.len() <= 1);
+    assert!(serde_json::to_vec(&reply.envelope.warnings).unwrap().len() <= 256);
+    let mut value = serde_json::to_value(reply).unwrap();
+    let fields = value.as_object_mut().unwrap();
+    for key in [
+        "data",
+        "scope",
+        "readGeneration",
+        "receipt",
+        "observationReceipts",
+        "error",
+        "readiness",
+        "warnings",
+    ] {
+        fields.remove(key);
+    }
+    assert_eq!(
+        fields.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec!["contractVersion", "status"]
+    );
+    assert!(size(&value) + 256 <= 512); // includes omitted fixed container key punctuation
+}
 fn check_shape(reply: &GetReply, label: &str) {
+    completion_shape(reply);
     let raw = serde_json::to_string(reply).unwrap();
     let (charged, count) = normalized(&raw).unwrap();
     let value: Value = serde_json::from_str(&raw).unwrap();

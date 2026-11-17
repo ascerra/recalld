@@ -65,7 +65,8 @@ async fn actual_cold_get_matches_owner_false_and_observes_true_once() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn actual_private_origin_and_capacity_reject_before_observation() {
     let (f, id) = fixture().await;
-    let daemon = PreparedDaemon::start(search(&f)).await;
+    let owner = Arc::new(GetOnly::new(search(&f)));
+    let daemon = PreparedDaemon::start(owner.clone()).await;
     daemon.client.ping().await.unwrap();
     let args = json!({"contractVersion":2,"id":id.to_string(),"recordAccess":true});
     let before = f.storage.read().unwrap().control_state().unwrap();
@@ -97,11 +98,25 @@ async fn actual_private_origin_and_capacity_reject_before_observation() {
     }
     assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
     assert_eq!(f.record(id).unwrap().access_history, history);
+    assert!(
+        owner.origins.lock().unwrap().is_empty(),
+        "no owner/clock entry"
+    );
     daemon.finish().await;
 }
 
-async fn peer(
+pub(crate) async fn peer(
     reply: Value,
+    access: bool,
+    caps: Value,
+    wrong_id: bool,
+    id: crate::model::MemoryId,
+) -> GetReply {
+    peer_build(move |_| reply, access, caps, wrong_id, id).await
+}
+
+async fn peer_build(
+    reply: impl FnOnce(u64) -> Value + Send + 'static,
     access: bool,
     caps: Value,
     wrong_id: bool,
@@ -132,7 +147,10 @@ async fn peer(
             assert_eq!(request.method, GET);
             write_framed_message(
                 &mut stream,
-                &DaemonResponse::success(if wrong_id { request.id + 1 } else { request.id }, reply),
+                &DaemonResponse::success(
+                    if wrong_id { request.id + 1 } else { request.id },
+                    reply(request.id),
+                ),
                 MAX_MESSAGE_SIZE,
             )
             .await
@@ -156,6 +174,164 @@ async fn peer(
 }
 fn capabilities(get: bool) -> Value {
     json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"preparedQueriesV1":false,"preparedGetV1":get})
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_rpc_inner_structure_rejects_before_evidence_acquisition() {
+    let (f, id) = fixture().await;
+    let valid = search(&f)
+        .get_contract(input(id, true), MAX_MESSAGE_SIZE)
+        .await;
+    let receipt = serde_json::to_string(valid.envelope.receipt.as_ref().unwrap()).unwrap();
+    for raw in [
+        format!("{{\"receipt\":{receipt},\"receipt\":{receipt}}}"),
+        format!("{{\"receipt\":{receipt},\"bad\":{{\"x\":0,\"\\u0078\":0}}}}"),
+        format!("{{\"receipt\":{receipt},\"bad\":1e999}}"),
+        format!("{{\"receipt\":{receipt},\"bad\":NaN}}"),
+        format!(
+            "{{\"receipt\":{receipt},\"bad\":{}0{}}}",
+            "[".repeat(33),
+            "]".repeat(33)
+        ),
+        format!(
+            "{{\"receipt\":{receipt},\"bad\":{{{}}}}}",
+            (0..129)
+                .map(|n| format!("\"{n}\":0"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    ] {
+        let result = peer(
+            json!({"wireVersion":1,"httpStatus":503,"replyJson":raw}),
+            true,
+            capabilities(true),
+            false,
+            id,
+        )
+        .await;
+        assert_eq!(result.http_status, 503);
+        assert_eq!(
+            result.envelope.error.unwrap().commit_state,
+            CommitState::Unknown
+        );
+        assert!(
+            result.received_evidence.is_none(),
+            "invalid inner must acquire nothing"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_rpc_independent_inner_and_outer_limits_retain_supported_foreign_evidence() {
+    let (f, id) = fixture().await;
+    let valid = search(&f)
+        .get_contract(input(id, true), MAX_MESSAGE_SIZE)
+        .await;
+    let mut receipt = valid.envelope.receipt.unwrap();
+    // Encoding specimens only; the real point receipt above supplies identity,
+    // but no claim that these foreign outcomes were committed in this store.
+    receipt.outcome = MutationOutcome::BatchReserved {
+        batch_kind: crate::storage::batch::BatchKind::Insert,
+        item_count: u32::MAX,
+        caller_hash: [255; 32],
+        resolution_hash: [255; 32],
+    };
+    let mut large = receipt.clone();
+    large.outcome = MutationOutcome::ExposuresRecorded {
+        accesses: (1..=15000)
+            .map(|n| crate::storage::control::ExposureOutcome {
+                memory_id: crate::model::MemoryId::from_uuid(uuid::Uuid::from_u128(n)),
+                kind: AccessKind::DirectRetrieval,
+                accessed_at: 0,
+            })
+            .collect(),
+    };
+    fn numeric_extra(value: &Value) -> usize {
+        match value {
+            Value::Number(n) => 32usize.saturating_sub(n.to_string().len()),
+            Value::Array(v) => v.iter().map(numeric_extra).sum(),
+            Value::Object(v) => v.values().map(numeric_extra).sum(),
+            _ => 0,
+        }
+    }
+    for receipt in [receipt, large] {
+        let fragment = serde_json::to_string(&receipt).unwrap();
+        let expected: Value = serde_json::from_str(&fragment).unwrap();
+        let extra = numeric_extra(&expected); // integer-only specimens; no float hop
+        for inner_boundary in [true, false] {
+            for delta in [-1isize, 0, 1] {
+                let raw_receipt = fragment.clone();
+                let result = peer_build(
+                    move |request_id| {
+                        let make = |padding: &str| {
+                            let raw = format!(
+                                "{{\"receipt\":{raw_receipt},\"padding\":{}}}",
+                                serde_json::to_string(padding).unwrap()
+                            );
+                            let wrapper = json!({"wireVersion":1,"httpStatus":503,"replyJson":raw});
+                            let frame_len = serde_json::to_vec(&DaemonResponse::success(
+                                request_id,
+                                wrapper.clone(),
+                            ))
+                            .unwrap()
+                            .len();
+                            (wrapper, raw.len() + extra, frame_len)
+                        };
+                        let (_, inner, outer) = make("");
+                        let filler = if inner_boundary {
+                            String::new()
+                        } else {
+                            "\\".repeat(8192 + inner.saturating_sub(outer).div_ceil(2))
+                        };
+                        let (_, inner, outer) = make(&filler);
+                        let target = (response_limit() as isize + delta) as usize;
+                        let size = if inner_boundary { inner } else { outer };
+                        let (wrapper, inner, outer) =
+                            make(&format!("{filler}{}", "x".repeat(target - size)));
+                        if inner_boundary {
+                            assert_eq!(inner, target);
+                            assert!(outer < response_limit());
+                        } else {
+                            assert_eq!(outer, target);
+                            assert!(inner < response_limit());
+                        }
+                        wrapper
+                    },
+                    true,
+                    capabilities(true),
+                    false,
+                    id,
+                )
+                .await;
+                assert_eq!(result.http_status, 503);
+                assert_eq!(
+                    result.envelope.error.as_ref().unwrap().commit_state,
+                    CommitState::Unknown
+                );
+                assert!(result.envelope.receipt.is_none() && result.envelope.data.is_none());
+                assert!(
+                    result.observation_receipts.is_empty() && result.envelope.readiness.is_none()
+                );
+                if delta <= 0 {
+                    assert_eq!(
+                        result.received_evidence.as_ref().unwrap().receipts,
+                        vec![expected.clone()]
+                    );
+                } else {
+                    assert!(result.received_evidence.is_none());
+                }
+                let public =
+                    DaemonResponse::success(u64::MAX, serde_json::to_value(result.mcp()).unwrap());
+                assert!(serde_json::to_vec(&public).unwrap().len() <= MAX_MESSAGE_SIZE);
+            }
+        }
+        let unknown = fragment.replace("\"batchReserved\"", "\"futureReceipt\"");
+        if unknown != fragment {
+            let result = peer(json!({"wireVersion":1,"httpStatus":503,"replyJson":format!("{{\"receipt\":{unknown}}}")}),
+                true, capabilities(true), false, id).await;
+            assert!(result.received_evidence.is_none());
+        }
+    }
 }
 
 #[tokio::test]
@@ -206,23 +382,35 @@ async fn actual_receipt_malformed_reply_keeps_only_received_evidence() {
         control.http_status, 200,
         "get-only capable peer: {control:?}"
     );
-    for (label, mutated) in [
-        ("wrong UUID", {
-            let mut v = original.clone();
-            v["reply"]["data"]["memory"]["id"] = json!(uuid::Uuid::from_u128(7));
-            v
-        }),
+    let raw = original["replyJson"].as_str().unwrap();
+    for (label, replacement) in [
+        (
+            "wrong UUID",
+            raw.replacen(
+                &format!("\"id\":\"{id}\""),
+                &format!("\"id\":\"{}\"", uuid::Uuid::from_u128(7)),
+                1,
+            ),
+        ),
         ("unequal readiness", {
-            let mut v = original.clone();
-            v["reply"]["readiness"]["derived"][0]["appliedGeneration"] = json!(999999);
-            v
+            let parsed: Value = serde_json::from_str(raw).unwrap();
+            let generation = parsed["readiness"]["derived"][0]["appliedGeneration"]
+                .as_str()
+                .unwrap();
+            raw.replacen(
+                &format!("\"appliedGeneration\":\"{generation}\""),
+                "\"appliedGeneration\":\"999999\"",
+                1,
+            )
         }),
-        ("extra field", {
-            let mut v = original.clone();
-            v["reply"]["data"]["memory"]["fabricated"] = json!(true);
-            v
-        }),
+        (
+            "extra field",
+            raw.replacen("\"memory\":{", "\"memory\":{\"fabricated\":true,", 1),
+        ),
     ] {
+        assert_ne!(replacement, raw, "mutation must apply: {label}");
+        let mut mutated = original.clone();
+        mutated["replyJson"] = json!(replacement);
         // The request stays fixed: each single mutation must independently reject.
         let result = peer(mutated, true, capabilities(true), false, id).await;
         assert_eq!(result.http_status, 503, "{label}");

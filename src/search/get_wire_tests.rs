@@ -1304,3 +1304,257 @@ async fn prepared_get_rpc_native_postcommit_unknown_preserves_actual_operation()
         count + 1
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_rpc_native_subnormal_stability_keeps_actual_record_and_receipt_bits() {
+    use crate::daemon::server::prepared_query_tests::PreparedDaemon;
+    use crate::mcp::bridge::SearchPipeline;
+    let f = similar_fixture().await;
+    let id = fixed_id(99991);
+    let policy = f.engine.native_policy_inputs();
+    {
+        let mut storage = f.f.storage.write().unwrap();
+        let ns = storage.get_namespace(f.other).unwrap().unwrap();
+        let crate::model::schema::EmbeddingBinding::Bound { descriptor, .. } =
+            ns.schema.as_ref().unwrap().embedding_binding.clone()
+        else {
+            panic!("bound fixture")
+        };
+        let input = crate::storage::native_records::NativeInsert {
+            memory: InsertMemory {
+                id: Some(id),
+                summary: "actual extreme scalar".into(),
+                full_text: None,
+                tags: vec![],
+                initial_stability: Some(f32::from_bits(1)),
+                created_at: Some(10000),
+                embedding: Some(vec![1., 0., 0., 0.]),
+                parent_id: None,
+                supersedes: None,
+            },
+            observed_at: Some(10000),
+            entities: vec![],
+            topics: vec![],
+            emotions: vec![],
+            embedding_profile: Some(descriptor),
+        };
+        let intent = storage
+            .meta_store()
+            .capture_native_insert(
+                crate::storage::native_lifecycle::LifecycleScope {
+                    namespace_id: f.other,
+                    namespace_name: ns.name,
+                    source: None,
+                },
+                &input,
+                &policy,
+            )
+            .unwrap();
+        storage
+            .insert_native_record(
+                &MutationContext::unkeyed(f.other),
+                &intent,
+                &Vec::new().into(),
+                &policy,
+                &crate::time::ManualClock::new(10000),
+                None,
+            )
+            .unwrap();
+    }
+    f.owner.complete().await.unwrap();
+    assert_eq!(f.f.record(id).unwrap().stability.to_bits(), 1);
+    let adapter = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+        Arc::new(f.engine),
+        Arc::new(crate::embedding::PassthroughProvider::new(4)),
+        f.f.storage.clone(),
+        f.f.graph.clone(),
+        chrono_tz::UTC,
+    ));
+    let daemon = PreparedDaemon::start(adapter).await;
+    let remote = crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+    for access in [false, true] {
+        let before = bytes(&f.f);
+        let history = f.f.record(id).unwrap().access_history.len();
+        let reply = remote
+            .get_contract(
+                point_request(id, access),
+                crate::daemon::protocol::MAX_MESSAGE_SIZE,
+            )
+            .await;
+        assert_eq!(reply.http_status, 200, "{reply:?}");
+        assert_eq!(
+            reply
+                .envelope
+                .data
+                .as_ref()
+                .unwrap()
+                .memory
+                .stability
+                .to_bits(),
+            1
+        );
+        if access {
+            let raw = serde_json::to_string(&reply).unwrap();
+            let receipt = reply.envelope.receipt.unwrap();
+            for (old, new) in [
+                ("\"createdAt\":10000", "\"createdAt\":10001"),
+                ("\"lastAccessedAt\":10000", "\"lastAccessedAt\":10001"),
+                ("\"phase\":\"full\"", "\"phase\":\"summary\""),
+            ] {
+                let altered = raw.replacen(old, new, 1);
+                assert_ne!(altered, raw, "native before mutation must apply: {old}");
+                let rejected = crate::daemon::prepared_get::tests::peer(
+                    serde_json::json!({"wireVersion":1,"httpStatus":200,"replyJson":altered}),
+                    true, serde_json::json!({"protocolVersion":2,"maxMessageSize":crate::daemon::protocol::MAX_MESSAGE_SIZE,
+                        "preparedQueriesV1":false,"preparedGetV1":true}), false, id).await;
+                assert_eq!(rejected.http_status, 503);
+                assert!(rejected.envelope.receipt.is_none() && rejected.envelope.data.is_none());
+                let original: serde_json::Value =
+                    serde_json::from_str(&serde_json::to_string(&receipt).unwrap()).unwrap();
+                assert_eq!(rejected.received_evidence.unwrap().receipts, vec![original]);
+            }
+            assert_eq!(reply.observation_receipts, vec![receipt.clone()]);
+            let crate::storage::control::MutationOutcome::LifecycleExposureRecorded { transition } =
+                &receipt.outcome
+            else {
+                panic!("actual native transition")
+            };
+            assert_eq!(transition.records[0].before.stability.get().to_bits(), 1);
+            assert_eq!(transition.records[0].after.stability.get().to_bits(), 1);
+            assert_eq!(f.f.record(id).unwrap().access_history.len(), history + 1);
+            assert_eq!(
+                f.f.storage
+                    .read()
+                    .unwrap()
+                    .lookup_operation(
+                        receipt.store_id,
+                        crate::storage::control::MutationScope::Namespace(f.other),
+                        receipt.operation_id
+                    )
+                    .unwrap(),
+                Some(receipt)
+            );
+        } else {
+            assert_eq!(bytes(&f.f), before);
+        }
+    }
+    daemon.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_rpc_actual_final_capture_races_preserve_generation_and_conflict() {
+    use crate::daemon::{
+        prepared_get::tests::GetOnly, server::prepared_query_tests::PreparedDaemon,
+    };
+    use crate::mcp::bridge::SearchPipeline;
+    for race in ["unrelated", "terminal", "policy"] {
+        let f = similar_fixture().await;
+        let policy = f.engine.native_policy_inputs();
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let inner = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            Arc::new(f.engine),
+            Arc::new(crate::embedding::PassthroughProvider::new(4)),
+            f.f.storage.clone(),
+            f.f.graph.clone(),
+            chrono_tz::UTC,
+        ));
+        let mut adapter = GetOnly::new(inner);
+        adapter.pause = Some((entered.clone(), release.clone()));
+        let daemon = PreparedDaemon::start(Arc::new(adapter)).await;
+        let remote =
+            crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+        let request = point_request(f.foreign, true);
+        let task = tokio::spawn(async move {
+            remote
+                .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(10), entered.notified())
+            .await
+            .unwrap();
+        let captured =
+            f.f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .generation_ref();
+        let history = f.f.record(f.foreign).unwrap().access_history.len();
+        let change = if race == "policy" {
+            let mut storage = f.f.storage.write().unwrap();
+            let ns = storage.get_namespace(f.other).unwrap().unwrap();
+            let mut replacement = crate::storage::catalog::NamespacePolicy::from(&ns);
+            replacement.decay_rate_multiplier = Some(1.5);
+            let intent = storage
+                .meta_store()
+                .capture_native_policy(
+                    crate::storage::native_lifecycle::LifecycleScope {
+                        namespace_id: f.other,
+                        namespace_name: ns.name,
+                        source: None,
+                    },
+                    &replacement,
+                    &policy,
+                    None,
+                )
+                .unwrap();
+            storage
+                .apply_native_policy(&MutationContext::unkeyed(f.other), &intent, &policy, None)
+                .unwrap()
+                .unwrap()
+        } else {
+            let (ns, target) = if race == "terminal" {
+                (f.other, f.foreign)
+            } else {
+                (NamespaceId::new(1), f.live)
+            };
+            f.owner
+                .forget_native_with_work(
+                    MutationContext::unkeyed(ns),
+                    target,
+                    None,
+                    policy,
+                    Arc::new(crate::time::ManualClock::new(20000)),
+                    None,
+                )
+                .await
+                .unwrap()
+        };
+        let changed = f.f.storage.read().unwrap().control_state().unwrap();
+        release.notify_one();
+        let reply = tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reply.envelope.read_generation, Some(captured));
+        assert_eq!(f.clock.0.load(Ordering::SeqCst), 1, "{race}");
+        if race == "unrelated" {
+            assert_eq!(reply.http_status, 200, "{reply:?}");
+            let receipt = reply.envelope.receipt.as_ref().unwrap();
+            assert!(receipt.committed_generation > change.committed_generation);
+            assert!(receipt.committed_generation > captured.generation.next().unwrap());
+            assert_eq!(reply.observation_receipts, vec![receipt.clone()]);
+            assert_eq!(
+                f.f.record(f.foreign).unwrap().access_history.len(),
+                history + 1
+            );
+        } else {
+            assert_eq!(reply.http_status, 409, "{race}: {reply:?}");
+            assert_eq!(
+                reply.envelope.error.unwrap().commit_state,
+                crate::serialization::contract::CommitState::NotCommitted
+            );
+            assert!(
+                reply.envelope.data.is_none()
+                    && reply.observation_receipts.is_empty()
+                    && reply.received_evidence.is_none()
+            );
+            assert_eq!(
+                f.f.storage.read().unwrap().control_state().unwrap(),
+                changed
+            );
+        }
+        daemon.finish().await;
+    }
+}

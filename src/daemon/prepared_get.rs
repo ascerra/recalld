@@ -3,7 +3,8 @@ use crate::model::{AccessKind, DecayPhase};
 use crate::serialization::contract::{CommitState, ErrorCategory, ExecutionError, Scope, Status};
 use crate::serialization::get::{GetReply, GetRequest};
 use crate::storage::control::MutationOutcome;
-use serde_json::{Value, json};
+use serde_json::{Value, json, value::RawValue};
+use std::collections::BTreeMap;
 
 pub(crate) const GET: &str = "get_contract_v1";
 
@@ -38,15 +39,10 @@ pub(crate) fn response_limit() -> usize {
                 }
             }
         }
-        // The same R1 raw scalar/structure preflight bounds reserialization;
-        // compact JSON escaped inside text costs at most twice its raw bytes.
-        // Known GetReply uses f32 domain fields then MCP to_value; reserve the
-        // existing one-point scalar/receipt/completion bound for that numeric
-        // expansion: 50176 (two receipt aliases/completion/framing) +
-        // 3 MemoryResponse f32 * 32 bytes * 3 MCP copies = 50464 < 65536.
-        // Strict typed decode rejects extra numeric leaves; fixed integers are
-        // exact and variable strings remain counted in raw. Received evidence
-        // stays Value and never reconstructs f32.
+        // Both outer compact framing and inner checked numeric charge are <=F
+        // before typed acquisition. Value evidence plus escaped text is <=3F;
+        // known typed f32/completion growth has its separate one-point reserve.
+        // See TYPED-JSON-PLAN.md for the source-derived two-carrier bound.
         (super::protocol::MAX_MESSAGE_SIZE
             - overhead
             - crate::serialization::get::POINT_EVIDENCE_RESERVE)
@@ -83,36 +79,36 @@ pub(crate) async fn remote(
         )
         .await;
     let mut evidence = vec![];
-    if let Some(result) = exchange.result {
+    if let Some(result) = exchange.result
+        && let Some(raw) = result.get("replyJson").and_then(Value::as_str)
+        && super::prepared_query::shape::check_typed(raw.as_bytes(), response_limit()).is_ok()
+        && let Ok(fields) = serde_json::from_str::<BTreeMap<String, &RawValue>>(raw)
+    {
+        // Both admissions precede any owned typed receipt/reply or evidence.
         if exchange.phase == TransmissionPhase::MatchedReply
             && result.as_object().is_some_and(|o| o.len() == 3)
             && result.get("wireVersion").and_then(Value::as_u64) == Some(1)
-            && let (Some(status), Some(reply)) = (
-                result
-                    .get("httpStatus")
-                    .and_then(Value::as_u64)
-                    .and_then(|v| u16::try_from(v).ok()),
-                result.get("reply"),
-            )
-            && let Ok(reply) = decode(reply, status, &request)
+            && let Some(status) = result
+                .get("httpStatus")
+                .and_then(Value::as_u64)
+                .and_then(|v| u16::try_from(v).ok())
+            && let Ok(reply) = decode(raw, &fields, status, &request)
         {
             return reply;
         }
-        // Named admitted result fragments only, never recursive evidence or
-        // current-operation attribution from an uncorrelated/malformed peer.
-        if let Some(reply) = result.get("reply") {
-            let alias = reply.get("receipt").into_iter();
-            let groups = reply
-                .get("observationReceipts")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten();
-            for value in alias.chain(groups) {
-                if super::prepared_query::decode::receipt(value).is_ok()
-                    && !evidence.contains(value)
-                {
-                    evidence.push(value.clone());
-                }
+        // Named admitted fragments only. Preserve original parsed evidence;
+        // never manufacture replacement JSON from the typed receipt, recurse
+        // into receivedEvidence or assign a foreign receipt to this operation.
+        let groups = fields
+            .get("observationReceipts")
+            .and_then(|v| serde_json::from_str::<Vec<&RawValue>>(v.get()).ok())
+            .unwrap_or_default();
+        for raw in fields.get("receipt").copied().into_iter().chain(groups) {
+            if super::prepared_query::decode::receipt_raw(raw.get()).is_ok()
+                && let Ok(value) = serde_json::from_str::<Value>(raw.get())
+                && !evidence.contains(&value)
+            {
+                evidence.push(value);
             }
         }
     }
@@ -175,17 +171,24 @@ fn framed_reply(mut reply: GetReply) -> Value {
     fn encode(reply: &GetReply) -> Value {
         // DTO consists solely of finite domain scalars, strings and fixed keys;
         // no user Serialize implementation or invalid map key can enter here.
-        let bytes = serde_json::to_vec(&super::prepared_query::Reply {
-            wire_version: 1,
-            http_status: reply.http_status,
-            reply,
+        json!({
+            "wireVersion": 1,
+            "httpStatus": reply.http_status,
+            "replyJson": serde_json::to_string(reply).expect("get domain DTO serializes"),
         })
-        .expect("get domain DTO serializes");
-        serde_json::from_slice(&bytes).expect("serialized get DTO")
     }
     let value = encode(&reply);
     let full = super::protocol::DaemonResponse::success(u64::MAX, value.clone());
-    if serde_json::to_vec(&full).expect("typed get frame").len() <= response_limit() {
+    if serde_json::to_vec(&full).expect("typed get frame").len() <= response_limit()
+        && super::prepared_query::shape::check_typed(
+            value["replyJson"]
+                .as_str()
+                .expect("typed get string")
+                .as_bytes(),
+            response_limit(),
+        )
+        .is_ok()
+    {
         return value;
     }
     reply.envelope.data = None;
@@ -215,12 +218,19 @@ fn framed_reply(mut reply: GetReply) -> Value {
 fn require(value: bool) -> Result<(), ()> {
     value.then_some(()).ok_or(())
 }
-fn decode(value: &Value, status: u16, request: &GetRequest) -> Result<GetReply, ()> {
+fn decode(
+    raw: &str,
+    fields: &BTreeMap<String, &RawValue>,
+    status: u16,
+    request: &GetRequest,
+) -> Result<GetReply, ()> {
     require(
-        value.get("contractVersion").and_then(Value::as_u64) == Some(2)
-            && value.get("receivedEvidence").is_none(),
+        fields
+            .get("contractVersion")
+            .is_some_and(|v| v.get() == "2")
+            && !fields.contains_key("receivedEvidence"),
     )?;
-    let mut reply: GetReply = super::prepared_query::decode::typed(value)?;
+    let mut reply: GetReply = super::prepared_query::decode::typed_raw(raw)?;
     reply.http_status = status;
     require(matches!(status, 200 | 400 | 404 | 409 | 422 | 503))?;
     let ok = reply.envelope.status == Status::Ok;
@@ -299,8 +309,14 @@ fn decode(value: &Value, status: u16, request: &GetRequest) -> Result<GetReply, 
         require(observe == !reply.observation_receipts.is_empty())?;
     }
     for receipt in &reply.observation_receipts {
-        let raw = value.get("receipt").ok_or(())?;
-        super::prepared_query::decode::receipt(raw)?;
+        let raw = fields.get("receipt").ok_or(())?;
+        let aliases: Vec<&RawValue> =
+            serde_json::from_str(fields.get("observationReceipts").ok_or(())?.get())
+                .map_err(|_| ())?;
+        // FiniteF32 equality deliberately equates signed zero; full receipt
+        // aliases still must carry the identical canonical numeric bits.
+        require(aliases.len() == 1 && aliases[0].get() == raw.get())?;
+        super::prepared_query::decode::receipt_raw(raw.get())?;
         let read = reply.envelope.read_generation.ok_or(())?;
         let (ns, _) = scope.ok_or(())?;
         require(
@@ -321,7 +337,12 @@ fn decode(value: &Value, status: u16, request: &GetRequest) -> Result<GetReply, 
                     change.memory_id == request.id && change.kind == AccessKind::DirectRetrieval,
                 )?;
                 if let Some(data) = &reply.envelope.data {
-                    require(transition.sampled_at == data.evaluated_at)?;
+                    require(
+                        transition.sampled_at == data.evaluated_at
+                            && data.memory.phase == change.before.phase
+                            && data.memory.created_at == change.before.created_at
+                            && data.memory.last_accessed_at == change.before.last_accessed_at,
+                    )?;
                 }
             }
             MutationOutcome::ExposuresRecorded { accesses } => {

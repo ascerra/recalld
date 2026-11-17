@@ -138,3 +138,32 @@ not production pre-allocation behavior. Runtime will reuse the bounded visitor,
 retaining its key/depth/node/duplicate controls in both modes. Literal release
 still requires the diagnostic results and exact owner ACK. No global query or
 stored codec has changed.
+
+## Fixed completion allowance: source authority
+
+The8192 allowance excludes receipts, payload, namespace and readGeneration (already
+counted in B). It is not inferred from one serialized specimen. Actual
+`search/get_wire.rs` emits one-point success with `Readiness::from(storage::Readiness)`
+or `GetReply::failure`; `query_response.rs::failure` never echoes storage errors.
+The concrete shape bounds, including32 for EVERY numeric token, are:
+
+- Four `DerivedReadiness` objects: each <=128 bytes (only names graph/vectors/fts/
+  entities, quoted supported generation <=21, boolean, three fixed keys).
+- Readiness header <=256 bytes: UUID38, quoted generation21, pendingWork32,
+  ready5 and fixed keys/brackets. observedWork/pendingWorkScope are absent in
+  this conversion, not a generic readiness-observation bound.
+- Error <=2560 bytes: fixed category/code/commitState/message, optional UUID38,
+  false retryable and fixed keys. Get codes <=64 and messages <=256 serialized
+  bytes; the only caller-derived input pointer is capped256 UTF8bytes, hence
+  <=1538 quoted JSON bytes even if every byte needs six-byte escaping. It is
+  prework only. No observation error source text is exposed.
+- At most one local failure warning <=256 bytes (the fixed READINESS_UNKNOWN
+  message); fixed status plus added envelope/receipt-array/container keys <=512.
+
+Sum4*128+256+2560+256+512=4096<8192. These per-field limits come from the actual
+constructors above, not an arbitrary implementer of SearchPipeline. Remote
+UNVERIFIED_RECEIVED_EVIDENCE has its separately measured fixed outer overhead.
+Changes to those constructors, readiness conversion, fields or emitted constants
+require updating the proof; test guards below check the emitted key sets and
+allowances in addition to end-to-end sizes. Neither this derivation nor the
+diagnostic permits dropping acquired evidence after an oversized decode.

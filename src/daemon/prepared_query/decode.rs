@@ -327,7 +327,20 @@ fn data(
 }
 
 pub(crate) fn receipt(v: &Value) -> Result<WriteReceipt, ()> {
-    let receipt: WriteReceipt = typed(v)?;
+    receipt_identity(typed(v)?)
+}
+
+/// Caller must run the bounded borrowed structural preflight first. Exact typed
+/// bytes preserve f32 identity without the query Value decoder's f64 hop.
+pub(crate) fn typed_raw<T: DeserializeOwned + Serialize>(raw: &str) -> Result<T, ()> {
+    let decoded: T = serde_json::from_str(raw).map_err(|_| ())?;
+    require(serde_json::to_string(&decoded).map_err(|_| ())? == raw)?;
+    Ok(decoded)
+}
+pub(crate) fn receipt_raw(raw: &str) -> Result<WriteReceipt, ()> {
+    receipt_identity(typed_raw(raw)?)
+}
+fn receipt_identity(receipt: WriteReceipt) -> Result<WriteReceipt, ()> {
     require(
         !receipt.store_id.is_nil()
             && !receipt.operation_id.is_nil()

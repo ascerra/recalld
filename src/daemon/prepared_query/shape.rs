@@ -8,6 +8,16 @@ const MAX_DEPTH: usize = 32;
 const MAX_OBJECT_FIELDS: usize = 128;
 
 pub(crate) fn check(bytes: &[u8], limit: usize) -> Result<(), String> {
+    preflight(bytes, limit, false)
+}
+
+/// Get-only typed JSON: bound future Value normalization before any typed reply
+/// or receipt acquisition. Query frames retain exact Number spelling above.
+pub(crate) fn check_typed(bytes: &[u8], limit: usize) -> Result<(), String> {
+    preflight(bytes, limit, true)
+}
+
+fn preflight(bytes: &[u8], limit: usize, typed: bool) -> Result<(), String> {
     if bytes.len() > limit {
         return Err("response exceeds operation frame allowance".into());
     }
@@ -32,10 +42,38 @@ pub(crate) fn check(bytes: &[u8], limit: usize) -> Result<(), String> {
     // Each JSON node consumes at least one input byte. This is explicit and
     // conservative; no reserve from an untrusted sequence length/size hint.
     let mut nodes = bytes.len();
-    inspect(raw, 0, &mut nodes)
+    let mut budget = NumericBudget {
+        charged: bytes.len(),
+        limit,
+        typed,
+    };
+    inspect(raw, 0, &mut nodes, &mut budget)
 }
 
-fn inspect(raw: &RawValue, depth: usize, nodes: &mut usize) -> Result<(), String> {
+struct NumericBudget {
+    charged: usize,
+    limit: usize,
+    typed: bool,
+}
+impl NumericBudget {
+    fn charge(&mut self, token_bytes: usize) -> Result<(), String> {
+        // Pinned serde_json/zmij finite float output <=24 bytes; integer <=20.
+        // Include every numeric leaf, including hashes/counters, not only f32.
+        // See prepared-get-rpc/TYPED-JSON-PLAN.md for feature/version authority.
+        self.charged = self
+            .charged
+            .checked_add(32usize.saturating_sub(token_bytes))
+            .filter(|n| *n <= self.limit)
+            .ok_or("prepared numeric normalization exceeds decode allowance")?;
+        Ok(())
+    }
+}
+fn inspect(
+    raw: &RawValue,
+    depth: usize,
+    nodes: &mut usize,
+    budget: &mut NumericBudget,
+) -> Result<(), String> {
     if depth > MAX_DEPTH || *nodes == 0 {
         return Err("prepared frame structure exceeds decode allowance".into());
     }
@@ -47,6 +85,7 @@ fn inspect(raw: &RawValue, depth: usize, nodes: &mut usize) -> Result<(), String
             Nested {
                 depth: depth + 1,
                 nodes,
+                budget,
             }
             .deserialize(&mut decoder)
             .map_err(|_| "invalid or excessive prepared structure".into())
@@ -55,6 +94,14 @@ fn inspect(raw: &RawValue, depth: usize, nodes: &mut usize) -> Result<(), String
         _ => {
             let number: serde_json::Number =
                 serde_json::from_str(text).map_err(|_| "invalid finite JSON number")?;
+            if budget.typed {
+                // Reject nonfinite/unsupported Number representations above and
+                // fail closed if pinned serializer's documented bound changes.
+                if number.to_string().len() > 32 {
+                    return Err("unsupported prepared numeric representation".into());
+                }
+                return budget.charge(text.len());
+            }
             if number.to_string() != text {
                 return Err("noncanonical prepared number spelling".into());
             }
@@ -66,6 +113,7 @@ fn inspect(raw: &RawValue, depth: usize, nodes: &mut usize) -> Result<(), String
 struct Nested<'a> {
     depth: usize,
     nodes: &'a mut usize,
+    budget: &'a mut NumericBudget,
 }
 impl<'de> DeserializeSeed<'de> for Nested<'_> {
     type Value = ();
@@ -80,7 +128,7 @@ impl<'de> Visitor<'de> for Nested<'_> {
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<(), A::Error> {
         while let Some(raw) = a.next_element::<&RawValue>()? {
-            inspect(raw, self.depth, self.nodes).map_err(serde::de::Error::custom)?;
+            inspect(raw, self.depth, self.nodes, self.budget).map_err(serde::de::Error::custom)?;
         }
         Ok(())
     }
@@ -93,7 +141,7 @@ impl<'de> Visitor<'de> for Nested<'_> {
                 ));
             }
             let raw = a.next_value::<&RawValue>()?;
-            inspect(raw, self.depth, self.nodes).map_err(serde::de::Error::custom)?;
+            inspect(raw, self.depth, self.nodes, self.budget).map_err(serde::de::Error::custom)?;
         }
         Ok(())
     }
@@ -102,6 +150,42 @@ impl<'de> Visitor<'de> for Nested<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn prepared_get_typed_budget_checks_all_numbers_duplicates_and_overflow() {
+        let raw = br#"{"hash":[0,255],"subnormal":1e-45}"#;
+        let charged = raw.len() + (32 - 1) + (32 - 3) + (32 - 5);
+        assert!(check_typed(raw, charged).is_ok());
+        assert!(check_typed(raw, charged - 1).is_err());
+        assert!(
+            check(raw, charged).is_err(),
+            "ranked mode still rejects scalar spelling"
+        );
+        let mut budget = NumericBudget {
+            charged: usize::MAX,
+            limit: usize::MAX,
+            typed: true,
+        };
+        assert!(budget.charge(1).is_err());
+        for raw in [
+            r#"{"x":1,"x":2}"#,
+            r#"{"x":1,"\u0078":2}"#,
+            r#"{"nested":{"x":0,"x":0}}"#,
+            r#"{"x":1e999}"#,
+            "{\"x\": 1}",
+        ] {
+            assert!(check_typed(raw.as_bytes(), 10000).is_err(), "{raw}");
+        }
+        let wide = format!(
+            "{{{}}}",
+            (0..129)
+                .map(|n| format!("\"{n}\":0"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(check_typed(wide.as_bytes(), 10000).is_err());
+        let deep = format!("{}0{}", "[".repeat(33), "]".repeat(33));
+        assert!(check_typed(deep.as_bytes(), 10000).is_err());
+    }
     #[test]
     fn prepared_raw_admission_precedes_owned_values_and_preserves_encoding_bound() {
         for raw in [

@@ -304,14 +304,12 @@ fn prepared_get_rpc_scalar_expansion_and_received_evidence_stay_inside_outer_fra
     reply.observation_receipts = vec![receipt.clone()];
     reply.envelope.readiness = Some(readiness(&receipt));
     fn raw_frame(reply: &GetReply) -> Vec<u8> {
-        // Same typed Reply and normalization used by the actual dispatcher.
-        let bytes = serde_json::to_vec(&crate::daemon::prepared_query::Reply {
-            wire_version: 1,
-            http_status: reply.http_status,
-            reply,
-        })
-        .unwrap();
-        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        // New private carrier emits typed JSON directly, preserving f32 bits.
+        // Earlier ecfe OBJECT-carrier failure is retained in rpc-scalar-failure.
+        let value = serde_json::json!({
+            "wireVersion": 1, "httpStatus": reply.http_status,
+            "replyJson": serde_json::to_string(reply).unwrap(),
+        });
         serde_json::to_vec(&DaemonResponse::success(u64::MAX, value)).unwrap()
     }
     let limit = prepared_get::response_limit();
