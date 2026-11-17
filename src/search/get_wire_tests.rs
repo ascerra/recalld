@@ -1,4 +1,5 @@
 // Actual point consumers using the owned storage/completion fixture.
+include!("api1_point_get_before_tests.rs");
 fn point_request(id: MemoryId, access: bool) -> crate::serialization::get::GetRequest {
     crate::serialization::get::GetRequest::from_mcp(&serde_json::json!({
         "contractVersion": 2, "id": id.to_string(), "recordAccess": access,

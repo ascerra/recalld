@@ -923,6 +923,7 @@ mod store_capability_tests;
 
 #[cfg(test)]
 mod tests {
+    include!("api1_get_before_tests.rs");
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
 
