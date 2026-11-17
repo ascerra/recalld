@@ -466,3 +466,6 @@ fn prepared_get_rpc_direct_typed_json_probe_preserves_valid_domain_float_bits() 
         assert!(canonical(&raw.replacen(&format!("\"createdAt\":{time},"), "", 1)).is_none());
     }
 }
+
+#[path = "get_rpc_budget_probe.rs"]
+mod rpc_budget_probe;

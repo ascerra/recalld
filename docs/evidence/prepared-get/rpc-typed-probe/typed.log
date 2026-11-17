@@ -1,0 +1,13 @@
+
+running 1 test
+test serialization::get::tests::prepared_get_rpc_direct_typed_json_probe_preserves_valid_domain_float_bits ... direct typed GetReply + both tagged receipt aliases bits=00000000 bytes=5986 exact
+direct typed GetReply + both tagged receipt aliases bits=80000000 bytes=5991 exact
+direct typed GetReply + both tagged receipt aliases bits=00000001 bytes=5996 exact
+direct typed GetReply + both tagged receipt aliases bits=00000002 bytes=5996 exact
+direct typed GetReply + both tagged receipt aliases bits=007fffff bytes=6036 exact
+direct typed GetReply + both tagged receipt aliases bits=00800000 bytes=6036 exact
+direct typed GetReply + both tagged receipt aliases bits=3f7fffff bytes=6021 exact
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1761 filtered out; finished in 0.02s
+

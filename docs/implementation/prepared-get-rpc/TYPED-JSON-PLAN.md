@@ -38,7 +38,7 @@ No runtime revision until the exact proposal/probe receives owner/queue ACK.
 - `daemon/prepared_get.rs`: string wrapper emitter; direct typed byte-canonical
   decoder; borrowed named raw-fragment evidence extraction; unchanged semantic
   checks and typed postcommit failure retention. Add native response phase and
-  immutable-created/last-access binding to the validated captured-before state
+  created-at/captured-pre-observation last-access binding to the validated captured-before state
   if source review confirms projection does not change them. Never require
   generation adjacency or substitute a legacy captured-policy witness.
 - `daemon/prepared_query/shape.rs`: factor only the existing compact/duplicate/
@@ -89,3 +89,52 @@ Existing actual cancellation/no-retry/clock/origin/receipt tests must still pass
 The new direct typed test is a diagnostic prerequisite, not implementation or a
 helper-only shipping PR. Full validation/current-head CI/ordinary-route closure
 remain open. No changes to personal stores or benchmark experiments.
+
+## Concrete accounting proposed for the owner gate
+
+The actual enabled dependency features are `default, raw_value, std` for both
+serde_json build fingerprints (012/SERDE-FEATURES.json), not arbitrary_precision
+or float_roundtrip. Cargo.lock pins serde_json1.0.150 and zmij1.0.21. The former
+ser.rs write_f32/write_f64 and number.rs Display use zmij::Buffer::format_finite;
+zmij's BUFFER_SIZE and Buffer storage are24bytes. Integer u64/i64 forms use at
+most20bytes. Thus32 bounds every finite Number emission for this pinned build,
+not merely the sampled values. Feature/version changes require reviewing this
+proof. Nonfinite JSON is rejected; typed f32 overflow cannot pass exact-byte
+roundtrip. Checked addition rejects charge overflow, never wraps or saturates.
+
+All numeric leaves count, including every SHA-array integer, timestamps and
+counters. A normalized native receipt bound must be recomputed from the actual
+shape with32 per number,38 per UUID/quoted-generation/enum, exact keys/commas and
+arrays. The old4096 serializer bound is NOT reused for normalized charge. The
+new diagnostic requires the resulting bound<=8192 per singleton receipt.
+
+Let B be the actual pre-observation MCP bytes counted by core.fits. False point
+success has exactly10 numeric leaves (source-shape assertion), so its complete
+inner normalized charge is <=B+320. The quoted private wrapper adds fewer than
+1024 bytes relative to counted MCP; fixed missing/input/terminal errors are
+checked separately and do not carry observation receipts. They cannot create
+postcommit evidence loss because they never observe. True point success uses
+B+65536<=F. Added inner normalized completion costs at most
+2*8192(receipt aliases)+8192(fixed readiness/error/warnings)+320=24896<65536.
+Its quoted private completion uses raw receipt bounds4096, hence at most
+2*(2*4096+8192)+1024=33792<65536. Therefore pre-admission implies BOTH inner
+charge<=F and quoted frame<=F, including full known/unknown receipt errors;
+this is stronger than merely fitting the raw private frame. The prototype test
+measures the actual final shapes at the core's last accepted escaped-text size.
+
+For arbitrary supported foreign evidence, singleton8192 is not assumed. Before
+any typed acquisition, the entire raw inner string is charged with all numeric
+leaves as above; normalized charge<=F bounds subsequent Value bytes. Structured
+plus escaped text is <=3*F, with fixed remote-error/u64-frame overhead counted
+from actual emitted forms and extra64KiB reserved for known typed scalar growth.
+The diagnostic covers native/foreign BatchReserved and a large synthetic legacy
+exposure receipt, all access/sent error combinations, and independent exact±1
+inner-charge and quoted-frame ceilings. Those are encoding specimens, not
+canonical commits or a new namespace/history authority. Actual runtime checks
+must implement the same count and then repeat these boundaries on real RPC.
+
+The test-only analyzer may allocate RawValue pointer maps; it proves accounting,
+not production pre-allocation behavior. Runtime will reuse the bounded visitor,
+retaining its key/depth/node/duplicate controls in both modes. Literal release
+still requires the diagnostic results and exact owner ACK. No global query or
+stored codec has changed.
