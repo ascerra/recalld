@@ -322,14 +322,20 @@ async fn namespace_profile_http_mcp_use_active_width_before_catalog_allocation()
         crate::serialization::catalog_page::CatalogKind::Namespaces,
     )
     .unwrap();
-    let local = serde_json::to_value(
-        owned
-            .list_catalog_page(request.clone())
-            .await
-            .unwrap()
-            .into_envelope(),
+    let mut pages_bridge = crate::test_support::StubBridge::default().into_bridge();
+    pages_bridge.storage = owned.clone();
+    let local = crate::mcp::tools::dispatch_v2(
+        &pages_bridge,
+        "list_namespaces",
+        json!({"contractVersion":2,"limit":10}),
     )
-    .unwrap();
+    .await;
+    assert_ne!(local.is_error, Some(true), "{local:?}");
+    let local = serde_json::to_value(local).unwrap();
+    let local_envelope: Value =
+        serde_json::from_str(local["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(local["structuredContent"], local_envelope);
+    let local = local_envelope;
     let catalog = serde_json::to_value(
         remote
             .list_catalog_page(request)
