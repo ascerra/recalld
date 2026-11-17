@@ -40,7 +40,17 @@ pub(crate) fn response_limit() -> usize {
         }
         // The same R1 raw scalar/structure preflight bounds reserialization;
         // compact JSON escaped inside text costs at most twice its raw bytes.
-        (super::protocol::MAX_MESSAGE_SIZE - overhead) / 3
+        // Known GetReply uses f32 domain fields then MCP to_value; reserve the
+        // existing one-point scalar/receipt/completion bound for that numeric
+        // expansion: 50176 (two receipt aliases/completion/framing) +
+        // 3 MemoryResponse f32 * 32 bytes * 3 MCP copies = 50464 < 65536.
+        // Strict typed decode rejects extra numeric leaves; fixed integers are
+        // exact and variable strings remain counted in raw. Received evidence
+        // stays Value and never reconstructs f32.
+        (super::protocol::MAX_MESSAGE_SIZE
+            - overhead
+            - crate::serialization::get::POINT_EVIDENCE_RESERVE)
+            / 3
     })
 }
 
@@ -149,7 +159,10 @@ pub(crate) async fn dispatch(
         Ok(mut r) => {
             r.original_contract_version =
                 object["originalContractVersion"].as_u64().unwrap() as u32;
-            search.get_contract(r, response_limit()).await
+            match r.validate() {
+                Ok(()) => search.get_contract(r, response_limit()).await,
+                Err(error) => GetReply::input(error),
+            }
         }
         Err(e) => GetReply::input(e),
     };

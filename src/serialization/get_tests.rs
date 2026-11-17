@@ -289,3 +289,72 @@ fn prepared_get_bound_rejects_unbounded_input_pointer_without_echoing_it() {
     assert!(reply.observation_receipts.is_empty());
     assert!(serde_json::to_vec(&reply.mcp()).unwrap().len() < 4096);
 }
+
+#[test]
+fn prepared_get_rpc_scalar_expansion_and_received_evidence_stay_inside_outer_frame() {
+    use crate::daemon::{
+        prepared_get,
+        protocol::{DaemonResponse, MAX_MESSAGE_SIZE},
+    };
+    // Encoding specimen only: no assertion that these synthetic extreme values
+    // are an actual canonical read, receipt history or current readiness proof.
+    let receipt = maximal_point_receipt();
+    let mut reply = specimen();
+    reply.envelope.receipt = Some(receipt.clone());
+    reply.observation_receipts = vec![receipt.clone()];
+    reply.envelope.readiness = Some(readiness(&receipt));
+    fn raw_frame(reply: &GetReply) -> Vec<u8> {
+        // Same typed Reply and normalization used by the actual dispatcher.
+        let bytes = serde_json::to_vec(&crate::daemon::prepared_query::Reply {
+            wire_version: 1,
+            http_status: reply.http_status,
+            reply,
+        })
+        .unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        serde_json::to_vec(&DaemonResponse::success(u64::MAX, value)).unwrap()
+    }
+    let limit = prepared_get::response_limit();
+    let mut low = 0;
+    let mut high = limit;
+    while low < high {
+        let mid = (low + high + 1) / 2;
+        reply.envelope.data.as_mut().unwrap().memory.full_text = Some("x".repeat(mid));
+        if raw_frame(&reply).len() <= limit {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    for delta in [0, 1] {
+        reply.envelope.data.as_mut().unwrap().memory.full_text = Some("x".repeat(low + delta));
+        let raw = raw_frame(&reply);
+        assert_eq!(prepared_get::admitted_frame(&raw), delta == 0);
+        let outer = DaemonResponse::success(u64::MAX, serde_json::to_value(reply.mcp()).unwrap());
+        assert!(serde_json::to_vec(&outer).unwrap().len() <= MAX_MESSAGE_SIZE);
+    }
+    // Larger separately typed evidence exercises expansion without attributing
+    // synthetic evidence to the current operation or inventing history hashes.
+    // Use the real serializer's enum shape rather than the handwritten variant.
+    let mut legacy = receipt;
+    legacy.outcome = MutationOutcome::ExposuresRecorded {
+        accesses: (1..=15000)
+            .map(|n| crate::storage::control::ExposureOutcome {
+                memory_id: MemoryId::from_uuid(uuid::Uuid::from_u128(n)),
+                kind: AccessKind::DirectRetrieval,
+                accessed_at: 0,
+            })
+            .collect(),
+    };
+    let foreign = serde_json::to_value(&legacy).unwrap();
+    let bytes = serde_json::to_vec(&foreign).unwrap();
+    assert!(bytes.len() < limit);
+    let failure = GetReply::remote_failure(true, true, vec![foreign]);
+    let outer = DaemonResponse::success(u64::MAX, serde_json::to_value(failure.mcp()).unwrap());
+    let size = serde_json::to_vec(&outer).unwrap().len();
+    assert!(size <= MAX_MESSAGE_SIZE);
+    eprintln!(
+        "get F={limit}; received-evidence encoding={}bytes outer={size}bytes",
+        bytes.len()
+    );
+}

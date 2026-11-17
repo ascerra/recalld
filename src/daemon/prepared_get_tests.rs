@@ -266,6 +266,7 @@ pub(crate) struct GetOnly {
     pub inner: Arc<dyn SearchPipeline>,
     pub barrier: Option<fn(&crate::derived_completion::DerivedCompletion)>,
     pub inflate: bool,
+    pub pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
     pub origins: std::sync::Mutex<Vec<u32>>,
 }
 impl GetOnly {
@@ -274,6 +275,7 @@ impl GetOnly {
             inner,
             barrier: None,
             inflate: false,
+            pause: None,
             origins: std::sync::Mutex::new(vec![]),
         }
     }
@@ -289,6 +291,7 @@ impl SearchPipeline for GetOnly {
             .unwrap()
             .push(r.original_contract_version);
         r.before_barrier = self.barrier;
+        r.before_observation = self.pause.clone();
         let mut reply = self.inner.get_contract(r, limit).await;
         if self.inflate
             && let Some(data) = reply.envelope.data.as_mut()
@@ -438,4 +441,201 @@ async fn get_ping_refreshes_capability_before_next_observation_request() {
         reply.envelope.error.unwrap().commit_state,
         CommitState::NotCommitted
     );
+}
+
+#[tokio::test]
+async fn get_ping_enables_previously_absent_capability_without_fallback() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("enable.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        for cap in [false, true] {
+            let ping = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+                .await
+                .unwrap();
+            assert_eq!(ping.method, "ping");
+            write_framed_message(
+                &mut stream,
+                &DaemonResponse::success(ping.id, capabilities(cap)),
+                MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap();
+        }
+        let get = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(get.method, GET);
+        write_framed_message(
+            &mut stream,
+            &DaemonResponse::success(get.id, json!({})),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+    let remote = RemoteSearchAdapter::new(client.clone());
+    let id = crate::model::MemoryId::from_uuid(uuid::Uuid::from_u128(1));
+    assert_eq!(
+        remote
+            .get_contract(input(id, true), MAX_MESSAGE_SIZE)
+            .await
+            .envelope
+            .error
+            .unwrap()
+            .commit_state,
+        CommitState::NotCommitted
+    );
+    client.ping().await.unwrap();
+    assert_eq!(
+        remote
+            .get_contract(input(id, true), MAX_MESSAGE_SIZE)
+            .await
+            .envelope
+            .error
+            .unwrap()
+            .commit_state,
+        CommitState::Unknown
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn get_reconnect_discards_capability_and_does_not_retry_sent_call() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("reset.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut first, _) = listener.accept().await.unwrap();
+        let ping = read_framed_message(&mut first, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(ping.method, "ping");
+        write_framed_message(
+            &mut first,
+            &DaemonResponse::success(ping.id, capabilities(true)),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        let get = read_framed_message(&mut first, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(get.method, GET);
+        drop(first);
+        // Only a second explicit client call can reconnect; it sees an old peer.
+        let (mut second, _) = listener.accept().await.unwrap();
+        let ping = read_framed_message(&mut second, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(ping.method, "ping");
+        write_framed_message(
+            &mut second,
+            &DaemonResponse::success(ping.id, capabilities(false)),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                read_framed_message(&mut second, MAX_MESSAGE_SIZE)
+            )
+            .await
+            .is_err()
+        );
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+    let remote = RemoteSearchAdapter::new(client.clone());
+    let id = crate::model::MemoryId::from_uuid(uuid::Uuid::from_u128(1));
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        remote.get_contract(input(id, true), MAX_MESSAGE_SIZE),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        first.envelope.error.unwrap().commit_state,
+        CommitState::Unknown
+    );
+    assert!(!client.is_connected());
+    let second = remote.get_contract(input(id, true), MAX_MESSAGE_SIZE).await;
+    assert_eq!(
+        second.envelope.error.unwrap().commit_state,
+        CommitState::NotCommitted
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_cancelled_remote_get_finishes_existing_root_without_reobservation() {
+    let (f, id) = fixture().await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut adapter = GetOnly::new(search(&f));
+    adapter.pause = Some((entered.clone(), release.clone()));
+    let daemon = PreparedDaemon::start(Arc::new(adapter)).await;
+    let client = daemon.client.clone();
+    let before = f.record(id).unwrap().access_history.len();
+    let task = tokio::spawn(async move {
+        RemoteSearchAdapter::new(client)
+            .get_contract(input(id, true), MAX_MESSAGE_SIZE)
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .work_tracker()
+            .status()
+            .pending
+            > 0
+    );
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if f.record(id).unwrap().access_history.len() == before + 1
+                && f.storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .work_tracker()
+                    .status()
+                    .pending
+                    == 0
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // Next false call skips the cancelled request's stale response; no retry.
+    // Disable the per-instance wait by providing a release permit for that call.
+    release.notify_one();
+    let result = RemoteSearchAdapter::new(daemon.client.clone())
+        .get_contract(input(id, false), MAX_MESSAGE_SIZE)
+        .await;
+    assert_eq!(result.http_status, 200, "{result:?}");
+    assert_eq!(f.record(id).unwrap().access_history.len(), before + 1);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .work_tracker()
+            .status()
+            .pending,
+        0
+    );
+    daemon.finish().await;
 }

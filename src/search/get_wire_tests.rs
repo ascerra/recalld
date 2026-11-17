@@ -1087,6 +1087,7 @@ async fn prepared_get_rpc_native_origin_projection_and_publication_failure() {
     use crate::daemon::server::prepared_query_tests::PreparedDaemon;
     use crate::mcp::bridge::SearchPipeline;
     let f = similar_fixture().await;
+    let policy = f.engine.native_policy_inputs();
     let inner = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
         Arc::new(f.engine),
         Arc::new(crate::embedding::PassthroughProvider::new(4)),
@@ -1151,6 +1152,47 @@ async fn prepared_get_rpc_native_origin_projection_and_publication_failure() {
         );
     }
     assert_eq!(*adapter.origins.lock().unwrap(), vec![2, 1, 2]);
+    let before_scope = bytes(&f.f);
+    let mut wrong = point_request(f.foreign, true);
+    wrong.namespace = Some("default".into());
+    let rejected = remote
+        .get_contract(wrong, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+        .await;
+    assert_eq!(rejected.http_status, 409, "{rejected:?}");
+    assert_eq!(rejected.envelope.error.unwrap().code, "NAMESPACE_MISMATCH");
+    let missing = remote
+        .get_contract(
+            point_request(MemoryId::from_uuid(uuid::Uuid::from_u128(u128::MAX)), true),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    assert_eq!(missing.http_status, 404, "{missing:?}");
+    assert_eq!(bytes(&f.f), before_scope);
+    f.owner
+        .forget_native_with_work(
+            MutationContext::unkeyed(NamespaceId::new(1)),
+            f.source,
+            Some("default".into()),
+            policy,
+            Arc::new(crate::time::ManualClock::new(20000)),
+            None,
+        )
+        .await
+        .unwrap();
+    let before_marker = bytes(&f.f);
+    let marker = remote
+        .get_contract(
+            point_request(f.source, true),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    assert_eq!(marker.http_status, 200, "{marker:?}");
+    let memory = marker.envelope.data.unwrap().memory;
+    assert_eq!(memory.phase, DecayPhase::Tombstone);
+    assert!(memory.summary.is_none() && memory.full_text.is_none() && memory.tags.is_empty());
+    assert!(marker.observation_receipts.is_empty() && marker.envelope.readiness.is_none());
+    assert_eq!(bytes(&f.f), before_marker);
+
     daemon.finish().await;
     let mut failure = GetOnly::new(inner);
     failure.barrier = Some(|owner| {

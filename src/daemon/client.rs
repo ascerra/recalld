@@ -596,6 +596,12 @@ impl DaemonClient {
         // The answer describes the connection the lock is still protecting.
         let outcome = outcome?;
         state.frame_limit = negotiated_limit(&outcome);
+        state.prepared_get = Some(
+            outcome
+                .get("preparedGetV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
         state.api1_lifecycle = Some(
             outcome
                 .get("api1LifecycleV1")
