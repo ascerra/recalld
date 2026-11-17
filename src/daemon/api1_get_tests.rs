@@ -3,6 +3,7 @@ use super::*;
 use crate::daemon::protocol::{
     DaemonResponse, MAX_MESSAGE_SIZE, read_framed_message, write_framed_message,
 };
+use crate::serialization::contract::CommitState;
 use crate::test_support::{Fixture, MemorySpec};
 use std::sync::Arc;
 

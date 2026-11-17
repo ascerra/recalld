@@ -91,14 +91,12 @@ fn readers_with_policy(
         Arc::new(recorder),
     )
     .with_lifecycle_inputs(clock.clone(), policy.global.clone(), policy.multiplier);
-    let engine = Arc::new(if native_exposure {
-        engine.with_coherent_owner(
-            completion(f),
-            Arc::new(crate::rif::RifEngine::new(Default::default())),
-        )
-    } else {
-        engine
-    });
+    // Point capture needs the actual owner even when observation is disabled.
+    // The recorder's completion/native-exposure capability remains separate.
+    let engine = Arc::new(engine.with_coherent_owner(
+        completion(f),
+        Arc::new(crate::rif::RifEngine::new(Default::default())),
+    ));
     let config = Arc::new(crate::config::RecalldConfig::default());
     let router = crate::api::router(
         crate::api::AppState::new(
@@ -157,13 +155,11 @@ fn readers_with_policy(
             f.graph.clone(),
             chrono_tz::UTC,
         )),
-        storage: Arc::new(if native_exposure {
+        storage: Arc::new(
             f.storage_adapter()
                 .with_clock(clock.clone())
-                .with_query_engine(engine.clone())
-        } else {
-            f.storage_adapter()
-        }),
+                .with_query_engine(engine.clone()),
+        ),
         namespaces: Arc::new(f.namespace_adapter()),
         health: Arc::new(crate::test_support::StubBridge::default()),
         default_namespace: "different-default".into(),

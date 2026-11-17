@@ -188,22 +188,44 @@ async fn public_postcommit_admission_faults_retain_receipts_and_exactly_once_his
                 println!(
                     "postcommit wire transport={transport} operation={operation} fault={fault}: {body}"
                 );
-                let error = observation(&body);
+                let point = transport == "mcp" && operation == "get";
+                let error = if point {
+                    serde_json::from_str(body.as_str().unwrap()).unwrap()
+                } else {
+                    observation(&body)
+                };
                 assert_eq!(error["commitState"], "committed", "{body}");
                 assert_eq!(error["ready"], false);
-                assert!(
-                    error["message"]
-                        .as_str()
-                        .unwrap()
-                        .contains("INDEX_NOT_READY")
-                );
+                if point {
+                    assert_eq!(error["error"], "INDEX_NOT_READY");
+                } else {
+                    assert!(
+                        error["message"]
+                            .as_str()
+                            .unwrap()
+                            .contains("INDEX_NOT_READY")
+                    );
+                }
                 assert!(
                     !body.to_string().contains("fixture"),
                     "result text escaped: {body}"
                 );
-                let receipts: Vec<WriteReceipt> =
-                    serde_json::from_value(error["receipts"].clone()).unwrap();
+                let receipts: Vec<WriteReceipt> = serde_json::from_value(
+                    error[if point {
+                        "observationReceipts"
+                    } else {
+                        "receipts"
+                    }]
+                    .clone(),
+                )
+                .unwrap();
                 assert_eq!(receipts.len(), 1);
+                if point {
+                    assert_eq!(
+                        error["receipt"],
+                        serde_json::to_value(&receipts[0]).unwrap()
+                    );
+                }
                 assert_eq!(receipts[0].committed_generation.get(), generation + 1);
                 let MutationOutcome::ExposuresRecorded { accesses } = &receipts[0].outcome else {
                     panic!("{receipts:?}")

@@ -268,7 +268,10 @@ async fn coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_pa
                 let (ok, body) = call(&h, mcp, similar, true, None).await;
                 assert!(!ok, "{mcp}/{similar}/{fault}: {body}");
                 assert!(!body.contains("owned résumé"));
-                let error: Value = if mcp {
+                let point = mcp && !similar;
+                let error: Value = if point {
+                    serde_json::from_str(&body).unwrap()
+                } else if mcp {
                     let start = body.find("{\"commitState\"").expect(&body);
                     serde_json::Deserializer::from_str(&body[start..])
                         .into_iter()
@@ -279,9 +282,37 @@ async fn coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_pa
                     serde_json::from_str::<Value>(&body).unwrap()["observation"].clone()
                 };
                 assert_eq!(error["commitState"], "committed", "{body}");
-                let receipts: Vec<crate::storage::control::WriteReceipt> =
-                    serde_json::from_value(error["receipts"].clone()).unwrap();
+                let receipts: Vec<crate::storage::control::WriteReceipt> = serde_json::from_value(
+                    error[if point {
+                        "observationReceipts"
+                    } else {
+                        "receipts"
+                    }]
+                    .clone(),
+                )
+                .unwrap();
                 assert_eq!(receipts.len(), 1);
+                if point {
+                    assert_eq!(error["error"], "INDEX_NOT_READY");
+                    assert_eq!(
+                        error["receipt"],
+                        serde_json::to_value(&receipts[0]).unwrap()
+                    );
+                }
+                assert_eq!(
+                    h.f.storage
+                        .read()
+                        .unwrap()
+                        .lookup_operation(
+                            receipts[0].store_id,
+                            crate::storage::control::MutationScope::Namespace(
+                                crate::model::NamespaceId::new(1)
+                            ),
+                            receipts[0].operation_id,
+                        )
+                        .unwrap(),
+                    Some(receipts[0].clone())
+                );
                 let crate::storage::control::MutationOutcome::ExposuresRecorded { accesses } =
                     &receipts[0].outcome
                 else {

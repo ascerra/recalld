@@ -99,7 +99,8 @@ fn public_adapters_with_query(
             chrono_tz::UTC,
         )
         .with_clock(clock.clone())
-        .with_native_lifecycle_policy(policy.clone()),
+        .with_native_lifecycle_policy(policy.clone())
+        .with_query_engine(engine.clone()),
     );
     bridge.default_namespace = "deliberately-wrong".into();
     let state = crate::api::AppState::new(

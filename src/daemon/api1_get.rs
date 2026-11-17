@@ -1,7 +1,7 @@
 //! New ordinary API1 point exchange; the existing prepared O1 era is unchanged.
 use crate::mcp::bridge::{BridgeError, StorageEngine};
 use crate::model::{AccessKind, DecayPhase};
-use crate::serialization::contract::{CommitState, Scope, Status};
+use crate::serialization::contract::{Scope, Status};
 use crate::serialization::get::{GetReply, GetRequest};
 use crate::serialization::get_api1::{
     self as wire, COMPLETION_RESERVE, MAX_FRAGMENTS, Mode, Reply, Request,
