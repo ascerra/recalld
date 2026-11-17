@@ -2,7 +2,8 @@
 
 Modern MCP `tools/list` advertises output schemas for `namespace_stats`,
 `list_tags`, `list_memories`, `recall_memories`, `find_similar_memories`,
-`reinforce_memory`, and `forget_memory`.
+`reinforce_memory`, `forget_memory`, `get_memory`, `store_memory`,
+`store_memories`, and `forget_memories`.
 These describe the existing API1 object results; legacy MCP still omits
 `outputSchema` and `structuredContent`. `list_namespaces` remains a bare JSON
 array in text, without an object wrapper. Plain-text errors do not carry a
@@ -25,6 +26,15 @@ Receipt schemas describe the serialized codec, not proof validity, authenticity,
 request binding or readiness. In particular, a typed malformed receipt retained
 by an invalid-response path must remain representable. Existing plain-text errors
 and legacy-era output remain unchanged.
+
+Point-get and insertion/batch schemas likewise preserve the existing API1
+success and partial/unknown failure layouts. Reservation evidence is not an
+atomic whole-batch receipt. Explicit unverified received evidence stays separate
+from current-operation commitment: point-get retains original JSON strings;
+single/batch error carriers retain their actual typed evidence fields. Generic
+retained receipts describe all supported typed outcomes, without asserting that
+canonical proof validation ran. Declared compatibility `Value` fields remain
+extensible. See [record output boundaries](implementation/live-record-schemas.md).
 
 ## Setup
 
