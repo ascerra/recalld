@@ -166,7 +166,15 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
                 }
                 _ => Err(()),
             };
-            if let Ok((reply, mode)) = decoded {
+            if let Ok((reply, mode)) = decoded
+                && reply.observation_receipts.iter().all(|receipt| {
+                    matches!(
+                        (mode, &receipt.outcome),
+                        (Mode::Native, MutationOutcome::LifecycleExposureRecorded { .. })
+                            | (Mode::Legacy, MutationOutcome::ExposuresRecorded { .. })
+                    )
+                })
+            {
                 return Reply::point(reply, timezone, mode);
             }
         }
