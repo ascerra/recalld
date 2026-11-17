@@ -1,0 +1,149 @@
+//! Live modern v1 structured outputs. Prepared v2 schemas are not capabilities.
+use serde_json::{Value, json};
+
+fn object(properties: Value) -> Value {
+    object_optional(properties, &[])
+}
+
+fn object_optional(properties: Value, optional: &[&str]) -> Value {
+    let required: Vec<_> = properties
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter(|key| !optional.contains(&key.as_str()))
+        .cloned()
+        .collect();
+    json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
+}
+
+fn array(items: Value) -> Value {
+    json!({"type":"array","items":items})
+}
+
+fn nonempty_array(items: Value) -> Value {
+    json!({"type":"array","minItems":1,"items":items})
+}
+
+fn labels() -> Value {
+    let strings = array(json!({"type":"string"}));
+    object(json!({
+        "entities":strings,"topics":strings,"emotions":strings,
+        "provenance":{"enum":["native_v2","legacy_retained_only"]}
+    }))
+}
+
+fn search_hit() -> Value {
+    let string = json!({"type":"string"});
+    let strings = array(string.clone());
+    object_optional(
+        json!({
+            "id":string,"summary":string,"fullText":string,"score":{"type":"number"},
+            "namespace":string,"tags":strings,"entities":nonempty_array(string.clone()),"topics":nonempty_array(string.clone()),
+            "emotions":nonempty_array(string.clone()),"phase":string,"strength":{"type":"number"},
+            "createdAt":string,"lastAccessedAt":string,"labels":labels(),
+            "related":nonempty_array(object(json!({"id":string,"edgeType":string,"weight":{"type":"number"}})))
+        }),
+        &[
+            "fullText", "entities", "topics", "emotions", "labels", "related",
+        ],
+    )
+}
+
+pub(super) fn output(tool: &str) -> Option<Value> {
+    let count = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
+    let name = json!({"type":"string"});
+    Some(match tool {
+        "list_memories" => {
+            let mut entries = array(object_optional(
+                json!({
+                    "id":name,"summary":name,"createdAt":name,
+                    "entities":nonempty_array(name.clone()),"topics":nonempty_array(name.clone()),"labels":labels()
+                }),
+                &["entities", "topics", "labels"],
+            ));
+            entries["maxItems"] = json!(crate::model::constants::MAX_LIST_LIMIT);
+            object(json!({
+                "memories":entries,"total":count,"offset":count,
+                "limit":{"type":"integer","minimum":1,"maximum":crate::model::constants::MAX_LIST_LIMIT}
+            }))
+        }
+        "recall_memories" => {
+            let compact = object(json!({
+                "memories":array(object_optional(json!({
+                    "id":name,"summary":name,"fullText":name,
+                    "entities":nonempty_array(name.clone()),"topics":nonempty_array(name.clone()),"labels":labels()
+                }), &["fullText","entities","topics","labels"])),
+                "count":count
+            }));
+            let neighbor = object_optional(
+                json!({
+                    "id":name,"summary":name,"fullText":name,"edgeType":name,
+                    "connectedTo":name,"weight":{"type":"number"},
+                    "topics":nonempty_array(name.clone()),"emotions":nonempty_array(name.clone()),"labels":labels()
+                }),
+                &["fullText", "topics", "emotions", "labels"],
+            );
+            let full = object_optional(
+                json!({
+                    "memories":array(search_hit()),"count":count,
+                    "graphContext":object(json!({"neighbors":nonempty_array(neighbor),"neighborCount":count}))
+                }),
+                &["graphContext"],
+            );
+            // Empty compact and full results overlap legitimately.
+            json!({"type":"object","anyOf":[compact,full]})
+        }
+        "find_similar_memories" => {
+            let coverage = |known| {
+                object(json!({
+                    "algorithm":{"const":"sampledNearestNeighbors"},
+                    "sampleCap":{"const":crate::mcp::bridge::DUPLICATE_SAMPLE_CAP},
+                    "neighborCap":{"const":crate::mcp::bridge::DUPLICATE_NEIGHBOR_CAP},
+                    "complete":{"const":false},"countsAvailable":{"const":known},
+                    "eligibleCount":if known {count.clone()} else {json!({"type":"null"})},
+                    "sampledCount":if known {count.clone()} else {json!({"type":"null"})},
+                    "skippedVectorCount":if known {count.clone()} else {json!({"type":"null"})},
+                    "truncated":{"type":if known {"boolean"} else {"null"}}
+                }))
+            };
+            let single =
+                object(json!({"sourceId":name,"memories":array(search_hit()),"count":count}));
+            let scan = object(json!({
+                "namespace":name,"threshold":{"type":"number","minimum":0,"maximum":1},
+                "clusters":array(object(json!({
+                    "memories":array(object(json!({"id":name,"summary":name}))),
+                    "maxSimilarity":{"type":"number"}
+                }))),
+                "clusterCount":count,"coverage":{"anyOf":[coverage(true),coverage(false)]}
+            }));
+            json!({"type":"object","anyOf":[single,scan]})
+        }
+        "namespace_stats" => object(json!({
+            "name":name,"memoryCount":count,"tombstoneCount":count,
+            "phaseCounts":object(json!({"full":count,"summary":count,"ghost":count})),
+            "permastoreCount":count,"avgStrength":{"type":"number"},
+            "edgeCount":count,"vectorBytes":count
+        })),
+        "list_tags" => {
+            let bucket = object(json!({
+                "total":count,"truncated":{"type":"boolean"},
+                "items":{"type":"array","maxItems":crate::model::constants::MAX_TAG_LIMIT,
+                    "items":object(json!({"name":name,"count":count}))}
+            }));
+            object(json!({
+                "namespace":{"type":["string","null"]},
+                "memoriesCounted":{"anyOf":[count,{"type":"null"}]},
+                "tags":bucket,"entities":bucket,"topics":bucket,"emotions":bucket
+            }))
+        }
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+#[path = "tool_schema_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "tool_read_schema_tests.rs"]
+mod read_tests;

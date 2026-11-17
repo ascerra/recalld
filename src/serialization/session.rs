@@ -100,9 +100,21 @@ pub(crate) fn document(
         "supportedContractVersions":[1],
         "defaultNamespace":{
             "requestedName":requested,"source":source,"exists":resolved.is_some(),
+            "byIdResolution":"record",
             "resolved":resolved.map(|(name,id,dimension)|json!({"name":name,"id":id,"embeddingDim":dimension}))
         },
         "namespacesAreAccessControls":false,
+        "accessDefaults":{"recall":true,"get":true,"singleSimilarity":true},
+        "versionPolicy":{"omittedApplicationContract":1,"independentOfDiskAndLifecycle":true},
+        "embeddingInputs":{
+            "operation":"api1MemoryStore",
+            "nativeRestSupplied":"explicitMatchingBoundProfileId",
+            "legacyRestWithoutProfileId":"unverified",
+            "legacyRestWithProfileId":"rejected",
+            "mcpV1SingleEmbedding":"ignored",
+            "nativeRemediation":"Use generated embeddings or the namespace's exact Bound embeddingProfileId.",
+            "legacyRemediation":"Omit embeddingProfileId on legacy storage; supplied vectors remain unverified."
+        },
         "limits":{"batchMemories":MAX_BATCH_MEMORIES,"listMemories":MAX_LIST_LIMIT,"tagsPerBucket":MAX_TAG_LIMIT},
         "duplicateScan":{"algorithm":"sampledNearestNeighbors","sampleCap":DUPLICATE_SAMPLE_CAP,"neighborCap":DUPLICATE_NEIGHBOR_CAP,"complete":false}
     });

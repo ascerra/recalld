@@ -1,5 +1,23 @@
 # MCP Integration Guide
 
+Modern MCP `tools/list` advertises output schemas for `namespace_stats`,
+`list_tags`, `list_memories`, `recall_memories`, and `find_similar_memories`.
+These describe the existing API1 object results; legacy MCP still omits
+`outputSchema` and `structuredContent`. `list_namespaces` remains a bare JSON
+array in text, without an object wrapper. Plain-text errors do not carry a
+structured result.
+
+Recall defaults to compact output. Full output includes search metadata and,
+when present, graph neighbors. Both modes can return the same empty result.
+Optional canonical `labels` preserve their exact arrays and provenance
+(`native_v2` or `legacy_retained_only`); present empty arrays remain authoritative.
+Single-memory similarity defaults to the source namespace. Explicit
+`sameNamespace:false` searches compatible namespaces with a matching known
+embedding profile and dimension; unknown or incompatible profiles are excluded.
+Duplicate scan coverage is always nonexhaustive: known counts describe the
+bounded sample, while older/custom bridges report unknown counts and truncation
+as `null`. These schemas do not advertise prepared API2 operations or readiness.
+
 ## Setup
 
 ### Claude Code
