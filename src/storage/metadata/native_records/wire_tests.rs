@@ -781,6 +781,9 @@ async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocate
 #[path = "public_api1_tests.rs"]
 mod public_api1;
 
+#[path = "live_lifecycle_schema_tests.rs"]
+mod live_lifecycle_schemas;
+
 #[path = "public_matrix_tests.rs"]
 mod public_matrix;
 
