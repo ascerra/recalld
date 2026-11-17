@@ -1,0 +1,34 @@
+
+running 1 test
+test native_catalog_adapter::tests::native_catalog_api1_post_result_join_loss_preserves_actual_collected_evidence ... 
+thread 'tokio-rt-worker' (303) panicked at src/native_catalog_adapter_tests.rs:73:9:
+injected API1 worker loss before producer result
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+post-result case api1_before_result: {"commitState":"unknown","error":"SERVICE_UNAVAILABLE","message":"catalog worker outcome is unknown; reconcile before retry","operationId":null}
+API1 actual returned receipt before lost worker: {"storeId":"0f049687-c88d-41c5-85f4-b62a678a578a","operationId":"27d19e90-5676-40da-a35e-afe9138e26ea","committedGeneration":"3","receiptVersion":1,"outcome":{"kind":"nativeNamespaceCreated","transition":{"vectorCertification":{"version":1,"origin":{"storeId":"0f049687-c88d-41c5-85f4-b62a678a578a","generation":"3"},"operationId":"27d19e90-5676-40da-a35e-afe9138e26ea","inventoryRoot":[168,193,65,188,32,139,216,179,126,225,128,102,18,65,129,134,169,152,128,33,84,171,209,179,181,14,228,137,30,142,16,97],"vectorCount":0},"namespaceId":2,"previousMaxId":1,"previousGeneration":"2","name":"lost_worker","createdAt":2000,"profile":{"identityVersion":1,"providerKind":"ollama","modelId":"configured-model","modelRevision":null,"dimension":4,"documentPreprocessing":{"version":"recalld-document-v1","prefix":""},"queryPreprocessing":{"version":"recalld-query-v1","prefix":""},"normalization":"l2_unit_v1"},"policy":{"initialStability":3.7145,"defaultDifficulty":5.0,"thresholds":[0.7,0.3,0.05],"permastoreThreshold":1500.0,"desiredRetention":0.9,"decayRateMultiplier":null},"inheritedDecay":{"version":1,"multiplierBits":1065353216,"adoption":{"storeId":"0f049687-c88d-41c5-85f4-b62a678a578a","generation":"3"},"operationId":"27d19e90-5676-40da-a35e-afe9138e26ea"}}},"replayed":false}
+
+thread 'tokio-rt-worker' (303) panicked at src/native_catalog_adapter_tests.rs:85:13:
+injected API1 worker loss after successful producer result
+post-result case api1_after_result: {"commitState":"unknown","error":"SERVICE_UNAVAILABLE","message":"catalog worker outcome is unknown; reconcile before retry","operationId":null}
+API1 actual error receipt before lost worker: {"storeId":"fa22e65b-edea-4d24-b17b-f4e0ccf8a2e1","operationId":"27d19e90-5676-40da-a35e-afe9138e26ea","committedGeneration":"3","receiptVersion":1,"outcome":{"kind":"nativeNamespaceCreated","transition":{"vectorCertification":{"version":1,"origin":{"storeId":"fa22e65b-edea-4d24-b17b-f4e0ccf8a2e1","generation":"3"},"operationId":"27d19e90-5676-40da-a35e-afe9138e26ea","inventoryRoot":[168,193,65,188,32,139,216,179,126,225,128,102,18,65,129,134,169,152,128,33,84,171,209,179,181,14,228,137,30,142,16,97],"vectorCount":0},"namespaceId":2,"previousMaxId":1,"previousGeneration":"2","name":"lost_worker","createdAt":2000,"profile":{"identityVersion":1,"providerKind":"ollama","modelId":"configured-model","modelRevision":null,"dimension":4,"documentPreprocessing":{"version":"recalld-document-v1","prefix":""},"queryPreprocessing":{"version":"recalld-query-v1","prefix":""},"normalization":"l2_unit_v1"},"policy":{"initialStability":3.7145,"defaultDifficulty":5.0,"thresholds":[0.7,0.3,0.05],"permastoreThreshold":1500.0,"desiredRetention":0.9,"decayRateMultiplier":null},"inheritedDecay":{"version":1,"multiplierBits":1065353216,"adoption":{"storeId":"fa22e65b-edea-4d24-b17b-f4e0ccf8a2e1","generation":"3"},"operationId":"27d19e90-5676-40da-a35e-afe9138e26ea"}}},"replayed":false}
+
+thread 'tokio-rt-worker' (303) panicked at src/native_catalog_adapter_tests.rs:95:13:
+injected API1 worker loss after committed producer error
+post-result case api1_after_known_error: {"commitState":"unknown","error":"SERVICE_UNAVAILABLE","message":"catalog worker outcome is unknown; reconcile before retry","operationId":null}
+API1 actual allocated unknown ID before lost worker: 27d19e90-5676-40da-a35e-afe9138e26ea
+
+thread 'tokio-rt-worker' (303) panicked at src/native_catalog_adapter_tests.rs:102:13:
+injected API1 worker loss after actual unknown producer result
+post-result case api1_after_unknown_error: {"commitState":"unknown","error":"SERVICE_UNAVAILABLE","message":"catalog worker outcome is unknown; reconcile before retry","operationId":null}
+
+thread 'native_catalog_adapter::tests::native_catalog_api1_post_result_join_loss_preserves_actual_collected_evidence' (300) panicked at src/native_catalog_adapter_tests.rs:1203:5:
+actual returned worker evidence lost: [("api1_after_result", Object {"commitState": String("unknown"), "error": String("SERVICE_UNAVAILABLE"), "message": String("catalog worker outcome is unknown; reconcile before retry"), "operationId": Null}), ("api1_after_known_error", Object {"commitState": String("unknown"), "error": String("SERVICE_UNAVAILABLE"), "message": String("catalog worker outcome is unknown; reconcile before retry"), "operationId": Null}), ("api1_after_unknown_error", Object {"commitState": String("unknown"), "error": String("SERVICE_UNAVAILABLE"), "message": String("catalog worker outcome is unknown; reconcile before retry"), "operationId": Null})]
+FAILED
+
+failures:
+
+failures:
+    native_catalog_adapter::tests::native_catalog_api1_post_result_join_loss_preserves_actual_collected_evidence
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1683 filtered out; finished in 3.47s
+
