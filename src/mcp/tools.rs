@@ -813,7 +813,7 @@ fn get_memory_def() -> ToolInfo {
         output_schema: None,
         name: "get_memory".to_string(),
         title: Some("Get Memory".to_string()),
-        description: "Retrieve a specific memory by its ID. This MCP fetch does not record access."
+        description: "Retrieve a specific memory by its ID. recordAccess defaults to true; use recordAccess:false for inspection without recording access."
             .to_string(),
         input_schema: json!({
             "type": "object",

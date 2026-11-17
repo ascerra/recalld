@@ -93,6 +93,25 @@ async fn live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation
                     tool["inputSchema"]["properties"]["contractVersion"]["enum"],
                     json!([1])
                 );
+                if name == "get_memory" {
+                    assert_eq!(
+                        tool["inputSchema"]["properties"]["recordAccess"]["default"],
+                        true
+                    );
+                    assert_eq!(tool["annotations"]["readOnlyHint"], false);
+                    assert!(
+                        tool["description"]
+                            .as_str()
+                            .unwrap()
+                            .contains("recordAccess defaults to true")
+                    );
+                    assert!(
+                        !tool["description"]
+                            .as_str()
+                            .unwrap()
+                            .contains("does not record access")
+                    );
+                }
                 let has_schema = modern && matches!(name, "namespace_stats" | "list_tags");
                 assert_eq!(tool.get("outputSchema").is_some(), has_schema, "{name}");
                 if has_schema {
