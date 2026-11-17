@@ -1,0 +1,156 @@
+{
+  "/recalld-huygens-lifecycle-final-full-004": {
+    "id": "4c4b343cec6eb565611d54f60aec0b0bf07fb16dbe384e30c9db9a3db2ba259c",
+    "imageId": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "image": "recalld-ci:1.94",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-11-17T19:47:48.30120514Z",
+      "FinishedAt": "2026-11-17T20:28:23.326093544Z"
+    },
+    "limits": {
+      "NetworkMode": "none",
+      "NanoCpus": 2000000000,
+      "Memory": 4294967296
+    },
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-implementation/compaction-review-7281918/cargo",
+        "Destination": "/cargo",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/live-lifecycle-004-final-f383d400/output",
+        "Destination": "/evidence",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/schema-validator",
+        "Destination": "/py",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/live-lifecycle-004-final-f383d400/full.sh",
+        "Destination": "/run.sh",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/target",
+        "Destination": "/target",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/live-lifecycle-004-final-f383d400/source",
+        "Destination": "/work",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "environment": [
+      "RUSTUP_TOOLCHAIN=1.94.1",
+      "CARGO_BUILD_JOBS=1"
+    ]
+  },
+  "/recalld-huygens-lifecycle-final-focus-004": {
+    "id": "4165cca49d416e535b0091e3289c6f53edc362a4774bca49d6cb430b36815368",
+    "imageId": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+    "image": "recalld-ci:1.94",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-11-17T19:44:29.850437826Z",
+      "FinishedAt": "2026-11-17T19:46:59.936192799Z"
+    },
+    "limits": {
+      "NetworkMode": "none",
+      "NanoCpus": 2000000000,
+      "Memory": 4294967296
+    },
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-implementation/compaction-review-7281918/cargo",
+        "Destination": "/cargo",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/live-lifecycle-004-final-f383d400/output",
+        "Destination": "/evidence",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/schema-validator",
+        "Destination": "/py",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/live-lifecycle-004-final-f383d400/focus.sh",
+        "Destination": "/run.sh",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/target",
+        "Destination": "/target",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/tmp/recalld-huygens-active-validation/live-lifecycle-004-final-f383d400/source",
+        "Destination": "/work",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "environment": [
+      "RUSTUP_TOOLCHAIN=1.94.1",
+      "CARGO_BUILD_JOBS=1"
+    ]
+  }
+}

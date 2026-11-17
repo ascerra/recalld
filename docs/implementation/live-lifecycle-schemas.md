@@ -29,8 +29,10 @@ one test passed against real owner receipts copied into explicitly authored
 malformed peer specimens, using actual API1 decode and MCP projection. Record
 bytes, generation and clock checks are scoped to that helper, not whole-store
 immutability. Authored absence is codec compatibility, not genuine old writer
-history. The ongoing schema/consumer fixtures need their own frozen validation.
-No full-schema, CI, integration or full-A4 completion claim yet.
+history. Final frozen f383d400 validation passed1770 library+10CLI,8focused Rust
+and71formal output cases; fmt/Clippy0 with warnings. Exact-head CI and integration
+are separate gates. See [the sealed report](../evidence/live-lifecycle-schemas/REPORT.md).
+This is not full A4 completion.
 
 Remaining tools after this slice: get waits Curie's validated API1 shape;
 store/batches need complete actual write/error unions; create awaits N1; delete
@@ -44,4 +46,5 @@ slightly wider than +/-3.4028234663852886e38 from f32-to-f64 widening. Pascal an
 Halley source-reviewed the schema-only correction: derive bounds from the actual
 serde_json f32 endpoint spelling, covering both typed text and Value-first
 emitters. No tolerance, receipt reserialization change or global serde change.
-The original failure is retained in evidence/003-max-red; final proof is pending.
+The original failure is retained in evidence/003-max-red; final004 proves the
+schema correction with unchanged exact typed receipt assertions.
