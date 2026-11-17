@@ -34,20 +34,29 @@ async fn call_with_clock(
             h.f.graph.clone(),
             chrono_tz::UTC,
         ));
-        bridge.storage = Arc::new(
-            crate::mcp::bridge_adapters::McpStorageAdapter::new(
-                h.f.storage.clone(),
-                h.f.cache.clone(),
-                h.embedding.clone(),
-                h.f.vector_index.clone(),
-                h.f.fts_index.clone(),
-                h.f.entity_index.clone(),
-                h.f.graph.clone(),
-                Arc::new(crate::config::RecalldConfig::default()),
-                chrono_tz::UTC,
-            )
-            .with_clock(clock.unwrap_or_else(|| Arc::new(crate::time::SystemClock))),
-        );
+        let ordered_close = clock.is_some() && !similar;
+        let mut storage = crate::mcp::bridge_adapters::McpStorageAdapter::new(
+            h.f.storage.clone(),
+            h.f.cache.clone(),
+            h.embedding.clone(),
+            h.f.vector_index.clone(),
+            h.f.fts_index.clone(),
+            h.f.entity_index.clone(),
+            h.f.graph.clone(),
+            Arc::new(crate::config::RecalldConfig::default()),
+            chrono_tz::UTC,
+        )
+        .with_clock(clock.unwrap_or_else(|| Arc::new(crate::time::SystemClock)));
+        if ordered_close {
+            // This fixture expects successful get readiness after its external
+            // barrier drains the accepted root. Order the two controllers;
+            // concurrent close remains refused by the tracker regression.
+            storage.api1_before_barrier = Some(|owner| {
+                let tracker = owner.storage.read().unwrap().meta_store().work_tracker();
+                tracker.wait_until_open();
+            });
+        }
+        bridge.storage = Arc::new(storage);
         let mut input = json!({"id":id,"recordAccess":access,"limit":1});
         if let Some(scope) = scope {
             input["namespace"] = json!(scope);

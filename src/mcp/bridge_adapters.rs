@@ -1444,6 +1444,10 @@ impl McpStorageAdapter {
             && reply.http_status == 200
             && let Some(receipt) = reply.observation_receipts.last()
         {
+            #[cfg(test)]
+            if let Some(hook) = self.api1_before_barrier {
+                hook(&self.completion());
+            }
             let target = crate::storage::control::GenerationRef {
                 store_id: receipt.store_id,
                 generation: receipt.committed_generation,
