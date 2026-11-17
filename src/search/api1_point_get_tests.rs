@@ -93,6 +93,8 @@ async fn ordinary_point_native_receipt_and_owning_timezone_survive_actual_rpc() 
             serde_json::json!({"id":f.foreign.to_string(),"recordAccess":false}),
         )
         .await;
+        crate::test_support::record_schema_result(&format!("get-native-remote-{remote}"), "get_memory", &result,
+            "actual native API1 public get through direct/Remote owner; existing timezone/receipt/no-observation assertions unchanged");
         let value = result.structured_content.unwrap();
         assert_eq!(
             value["createdAt"],
@@ -149,6 +151,8 @@ async fn ordinary_point_native_unknown_mcp_rpc_keeps_operation_and_pending_root(
     )
     .await;
     assert_eq!(public.is_error, Some(true));
+    crate::test_support::record_schema_result("get-native-unknown", "get_memory", &public,
+        "actual native API1 postcommit fault through framed Remote; original identity and reopen assertions unchanged");
     let value = public.structured_content.unwrap();
     assert_eq!(value["commitState"], "unknown");
     assert!(
@@ -358,6 +362,8 @@ async fn ordinary_point_native_publication_failure_mcp_rpc_keeps_full_typed_rece
         )
         .await;
         assert_eq!(result.is_error, Some(true));
+        crate::test_support::record_schema_result(&format!("get-native-publication-{remote}"), "get_memory", &result,
+            "actual native direct/capable-Remote publication failure; full typed receipt, history and pending work assertions unchanged");
         let value = result.structured_content.unwrap();
         assert_eq!(value["commitState"], "committed");
         assert_eq!(value["ready"], false);
@@ -435,6 +441,8 @@ async fn ordinary_point_failed_rpc_decoder_preserves_real_raw_receipt_through_fi
         crate::daemon::api1_get::tests::fake_peer(malformed, request, serde_json::json!(true))
             .await;
     let tool = result.mcp(&f.foreign.to_string(), false);
+    crate::test_support::record_schema_result("get-peer-unverified", "get_memory", &tool,
+        "actual same-connection malformed peer using a genuine observation receipt; original raw bytes preserved, not current-operation evidence");
     let (mut writer, mut reader) = tokio::net::UnixStream::pair().unwrap();
     let sender = tokio::spawn(async move {
         write_framed_message(

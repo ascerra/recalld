@@ -87,6 +87,12 @@ async fn ordinary_point_legacy_ghost_direct_rpc_preserve_payload_and_one_event()
         };
         let readonly = target.get_api1(input(id, false), response_limit()).await;
         let public = readonly.mcp(&id.to_string(), false);
+        crate::test_support::record_schema_result(
+            &format!("get-legacy-ghost-{remote}"),
+            "get_memory",
+            &public,
+            "actual legacy Ghost direct/capable-Remote point emitter; unchanged payload and observation controls",
+        );
         assert_ne!(public.is_error, Some(true), "{public:?}");
         assert_eq!(
             public.structured_content,
@@ -198,6 +204,12 @@ async fn ordinary_point_legacy_final_admission_keeps_exact_receipt_and_old_diagn
             )
             .await;
             assert_eq!(public.is_error, Some(true), "{public:?}");
+            crate::test_support::record_schema_result(
+                &format!("get-legacy-failure-route-{route}"),
+                "get_memory",
+                &public,
+                "actual legacy API1 observer final-admission failure; full persisted receipt assertions unchanged",
+            );
             let value = public.structured_content.unwrap();
             assert_eq!(value["commitState"], "committed");
             assert!(!value.contains_key("data") && !value.contains_key("contractVersion"));

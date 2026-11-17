@@ -2867,6 +2867,12 @@ mod tests {
         .into_bridge();
 
         let result = handle_forget_memories(&bridge, json!({ "ids": ids })).await;
+        crate::test_support::record_schema_result(
+            "forget-short-compatibility",
+            "forget_memories",
+            &result,
+            "existing StubBridge short result-array regression; compatibility projection, not a live storage writer",
+        );
         let payload: serde_json::Value =
             serde_json::from_str(&tool_text(&result)).expect("the result is JSON");
 

@@ -122,6 +122,10 @@ async fn live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation
                             | "find_similar_memories"
                             | "reinforce_memory"
                             | "forget_memory"
+                            | "get_memory"
+                            | "store_memory"
+                            | "store_memories"
+                            | "forget_memories"
                     );
                 assert_eq!(tool.get("outputSchema").is_some(), has_schema, "{name}");
                 if has_schema {

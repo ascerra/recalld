@@ -3,6 +3,10 @@ use serde_json::{Value, json};
 
 #[path = "tool_lifecycle_schema.rs"]
 mod lifecycle;
+#[path = "tool_receipt_schema.rs"]
+mod receipt;
+#[path = "tool_record_schema.rs"]
+mod record;
 
 fn object(properties: Value) -> Value {
     object_optional(properties, &[])
@@ -56,6 +60,9 @@ pub(super) fn output(tool: &str) -> Option<Value> {
     let count = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
     let name = json!({"type":"string"});
     Some(match tool {
+        "get_memory" | "store_memory" | "store_memories" | "forget_memories" => {
+            record::output(tool)
+        }
         "reinforce_memory" => lifecycle::output(true),
         "forget_memory" => lifecycle::output(false),
         "list_memories" => {
