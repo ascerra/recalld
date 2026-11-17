@@ -55,7 +55,7 @@ fn typed_copy(reply: &GetReply) -> GetReply {
     copied.http_status = reply.http_status;
     copied
 }
-fn receipt_charge_bound(value: &Value) -> usize {
+pub(super) fn receipt_charge_bound(value: &Value) -> usize {
     match value {
         Value::Null => 4,
         Value::Bool(_) => 5,
