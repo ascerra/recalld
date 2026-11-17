@@ -468,3 +468,62 @@ fn api1_point_budget_signed_zero_receipt_aliases_remain_exact() {
         serde_json::from_value(value["observationReceipts"].clone()).unwrap();
     assert_eq!(serde_json::to_string(&typed[0]).unwrap(), expected);
 }
+
+async fn evidence_frame_probe(from_canonical_raw: bool) {
+    use crate::daemon::protocol::{read_framed_response, write_framed_message};
+    let receipt = maximal_point_receipt();
+    let canonical = serde_json::to_string(&receipt).unwrap();
+    let evidence = if from_canonical_raw {
+        // Same raw canonical JSON acquisition as the private decoder; still an
+        // explicitly labeled encoding specimen, not a persisted mutation.
+        serde_json::from_str(&canonical).unwrap()
+    } else {
+        serde_json::to_value(&receipt).unwrap()
+    };
+    let reply = GetReply::remote_failure(true, true, vec![evidence.clone()]);
+    let output = public(&reply, chrono_tz::UTC);
+    assert_eq!(
+        output.structured_content.as_ref().unwrap()["receivedEvidence"]["receipts"][0],
+        evidence,
+        "intermediate evidence fidelity"
+    );
+    let response = DaemonResponse::success(1, serde_json::to_value(output).unwrap());
+    let (mut writer, mut reader) = tokio::net::UnixStream::pair().unwrap();
+    let task = tokio::spawn(async move {
+        write_framed_message(&mut writer, &response, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+    });
+    let parsed = read_framed_response(&mut reader, MAX_MESSAGE_SIZE)
+        .await
+        .unwrap();
+    task.await.unwrap();
+    let result = parsed.result.unwrap();
+    let structured = &result["structuredContent"];
+    assert_eq!(structured["commitState"], "unknown");
+    assert!(structured.get("operationId").is_none());
+    assert!(structured.get("receipt").is_none());
+    assert!(structured.get("contractVersion").is_none());
+    // Typed receipt scalar fidelity is a separate control, not a replacement
+    // for exact preservation of acquired unverified Value evidence.
+    let typed: WriteReceipt =
+        serde_json::from_value(structured["receivedEvidence"]["receipts"][0].clone()).unwrap();
+    assert_eq!(serde_json::to_string(&typed).unwrap(), canonical);
+    eprintln!(
+        "API1 framed evidence raw_acquisition={from_canonical_raw}: unknown/no-current-ID/full-typed-receipt controls passed"
+    );
+    assert_eq!(
+        structured["receivedEvidence"]["receipts"][0], evidence,
+        "emitted-and-peer-parsed evidence must equal original acquired Value"
+    );
+}
+
+#[tokio::test]
+async fn api1_point_budget_wire_authored_value_evidence() {
+    evidence_frame_probe(false).await;
+}
+
+#[tokio::test]
+async fn api1_point_budget_wire_canonical_raw_evidence() {
+    evidence_frame_probe(true).await;
+}
