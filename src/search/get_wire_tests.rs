@@ -1522,6 +1522,7 @@ async fn prepared_get_rpc_actual_final_capture_races_preserve_generation_and_con
                 .unwrap()
         };
         let changed = f.f.storage.read().unwrap().control_state().unwrap();
+        let changed_record = f.f.record(f.foreign).unwrap().encode().unwrap();
         release.notify_one();
         let reply = tokio::time::timeout(Duration::from_secs(10), task)
             .await
@@ -1548,7 +1549,14 @@ async fn prepared_get_rpc_actual_final_capture_races_preserve_generation_and_con
                 (409, "LIFECYCLE_CONFLICT")
             };
             assert_eq!(reply.http_status, status, "{race}: {reply:?}");
-            assert_eq!(reply.envelope.error.as_ref().unwrap().code, code);
+            let error = reply.envelope.error.as_ref().unwrap();
+            assert_eq!(error.code, code);
+            assert!(!error.retryable && error.operation_id.is_none());
+            assert!(reply.envelope.receipt.is_none() && reply.envelope.readiness.is_none());
+            assert_eq!(
+                f.f.record(f.foreign).unwrap().encode().unwrap(),
+                changed_record
+            );
             assert_eq!(
                 reply.envelope.error.unwrap().commit_state,
                 crate::serialization::contract::CommitState::NotCommitted
