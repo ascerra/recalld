@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "588s",
+  "/work/target/debug/examples/performance_probe-0ee84cea2486f6ec",
+  "--test-threads=1"
+]

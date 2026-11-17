@@ -1,0 +1,291 @@
+warning: the `Err`-variant returned from this closure is very large
+   --> src/native_catalog_adapter.rs:69:50
+    |
+ 69 |           let result = tokio::task::spawn_blocking(move || {
+    |  __________________________________________________^
+ 70 | |             let _lease = lease;
+ 71 | |             #[cfg(test)]
+ 72 | |             let _fault = tests::Fault::enter_api1(this.failure);
+...   |
+108 | |             result.map_err(CatalogError::Storage)
+109 | |         })
+    | |_________^
+...
+391 |       Storage(#[from] StorageError),
+    |       ----------------------------- the largest variant contains at least 176 bytes
+    |
+    = help: try reducing the size of `native_catalog_adapter::CatalogError`, for example by boxing large elements or replacing it with `Box<native_catalog_adapter::CatalogError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> src/native_catalog_adapter.rs:89:17
+    |
+ 89 |                 |receipt| surface.check_candidate(receipt),
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> src/native_catalog_adapter.rs:93:42
+    |
+ 93 |               let result = result.and_then(|receipt| {
+    |  __________________________________________^
+ 94 | |                 worker_admission.record(&receipt).map_err(|source| {
+ 95 | |                     StorageError::CommittedMutation {
+ 96 | |                         receipt: Box::new(receipt.clone()),
+...   |
+100 | |                 Ok(receipt)
+101 | |             });
+    | |_____________^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |       Redb(#[from] redb::Error),
+    |       ------------------------- the largest variant contains at least 160 bytes
+...
+100 |       RedbTransaction(#[from] redb::TransactionError),
+    |       ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> src/native_catalog_adapter.rs:169:50
+    |
+169 |           let result = tokio::task::spawn_blocking(move || {
+    |  __________________________________________________^
+170 | |             // Keep the lease with the worker even if its async caller cancels.
+171 | |             let _lease = lease;
+172 | |             #[cfg(test)]
+...   |
+192 | |             result.map_err(CatalogError::Storage)
+193 | |         })
+    | |_________^
+...
+391 |       Storage(#[from] StorageError),
+    |       ----------------------------- the largest variant contains at least 176 bytes
+    |
+    = help: try reducing the size of `native_catalog_adapter::CatalogError`, for example by boxing large elements or replacing it with `Box<native_catalog_adapter::CatalogError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> src/native_catalog_adapter.rs:223:50
+    |
+223 |           let result = tokio::task::spawn_blocking(move || {
+    |  __________________________________________________^
+224 | |             let _lease = lease;
+225 | |             use crate::storage::StorageEngine;
+226 | |             #[cfg(test)]
+...   |
+302 | |             result.map_err(CatalogError::Storage)
+303 | |         })
+    | |_________^
+...
+391 |       Storage(#[from] StorageError),
+    |       ----------------------------- the largest variant contains at least 176 bytes
+    |
+    = help: try reducing the size of `native_catalog_adapter::CatalogError`, for example by boxing large elements or replacing it with `Box<native_catalog_adapter::CatalogError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> src/native_catalog_adapter.rs:232:26
+    |
+232 |               let result = (|| {
+    |  __________________________^
+233 | |                 let ctx = request.write.context(
+234 | |                     MutationScope::Namespace(request.namespace_id),
+235 | |                     ContractVersion::V2,
+...   |
+299 | |                 })
+300 | |             })();
+    | |______________^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |       Redb(#[from] redb::Error),
+    |       ------------------------- the largest variant contains at least 160 bytes
+...
+100 |       RedbTransaction(#[from] redb::TransactionError),
+    |       ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this closure is very large
+   --> src/native_catalog_adapter.rs:265:31
+    |
+265 |                       .and_then(|value| {
+    |  _______________________________^
+266 | |                         value.ok_or(StorageError::NamespaceNotFound(request.namespace_id.get()))
+267 | |                     })
+    | |_____________________^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |       Redb(#[from] redb::Error),
+    |       ------------------------- the largest variant contains at least 160 bytes
+...
+100 |       RedbTransaction(#[from] redb::TransactionError),
+    |       ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:196:42
+    |
+196 |     pub(crate) fn admit_native(&self) -> Result<ReceiptAdmission, StorageError> {
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:201:69
+    |
+201 |     pub(crate) fn check_candidate(&self, receipt: &WriteReceipt) -> Result<(), StorageError> {
+    |                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:220:64
+    |
+220 |     fn check_failure(&self, receipt: Option<&WriteReceipt>) -> Result<(), StorageError> {
+    |                                                                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:242:60
+    |
+242 |     fn check_value(&self, value: &Value, failure: bool) -> Result<(), StorageError> {
+    |                                                            ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:247:59
+    |
+247 |     fn wire_value(&self, value: &Value, failure: bool) -> Result<(Value, usize), StorageError> {
+    |                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:298:66
+    |
+298 | fn check_encoded(value: &impl serde::Serialize, limit: usize) -> Result<(), StorageError> {
+    |                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:318:52
+    |
+318 | pub(crate) fn namespace(receipt: &WriteReceipt) -> Result<NamespaceConfig, StorageError> {
+    |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/storage/error.rs:88:5
+    |
+ 88 |     Redb(#[from] redb::Error),
+    |     ------------------------- the largest variant contains at least 160 bytes
+...
+100 |     RedbTransaction(#[from] redb::TransactionError),
+    |     ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: the `Err`-variant returned from this function is very large
+   --> src/serialization/catalog_api1.rs:329:61
+    |
+329 | pub(crate) fn committed_namespace(receipt: WriteReceipt) -> Result<NamespaceConfig, CatalogError> {
+    |                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: src/native_catalog_adapter.rs:391:5
+    |
+391 |     Storage(#[from] StorageError),
+    |     ----------------------------- the largest variant contains at least 176 bytes
+    |
+    = help: try reducing the size of `native_catalog_adapter::CatalogError`, for example by boxing large elements or replacing it with `Box<native_catalog_adapter::CatalogError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: unnecessary `>= y + 1` or `x - 1 >=`
+   --> src/native_catalog_adapter_tests.rs:695:17
+    |
+695 |         assert!(serde_json::to_vec(&out).unwrap().len() + 1 <= 8_388_608);
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change it to: `serde_json::to_vec(&out).unwrap().len() < 8_388_608`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#int_plus_one
+    = note: `#[warn(clippy::int_plus_one)]` on by default
+
+warning: unnecessary `>= y + 1` or `x - 1 >=`
+   --> src/native_catalog_adapter_tests.rs:784:17
+    |
+784 |         assert!(serde_json::to_vec(&out).unwrap().len() + 1 <= 8_388_608);
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change it to: `serde_json::to_vec(&out).unwrap().len() < 8_388_608`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#int_plus_one

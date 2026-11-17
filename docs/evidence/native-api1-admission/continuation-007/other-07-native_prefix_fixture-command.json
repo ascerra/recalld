@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "596s",
+  "/work/target/debug/examples/native_prefix_fixture-5ec505a29d06f259",
+  "--test-threads=1"
+]

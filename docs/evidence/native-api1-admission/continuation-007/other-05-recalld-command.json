@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "598s",
+  "/work/target/debug/deps/recalld-a9eae8ec84645b14",
+  "--test-threads=1"
+]

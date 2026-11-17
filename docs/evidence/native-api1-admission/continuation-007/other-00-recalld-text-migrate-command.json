@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "599s",
+  "/work/target/debug/deps/recalld_text_migrate-046ae1e0477071b9",
+  "--test-threads=1"
+]

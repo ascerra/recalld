@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "599s",
+  "/work/target/debug/examples/offline_eval-bb64ba06802d0ef1",
+  "--test-threads=1"
+]

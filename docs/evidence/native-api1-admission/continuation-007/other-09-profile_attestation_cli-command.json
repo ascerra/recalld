@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "596s",
+  "/work/target/debug/deps/profile_attestation_cli-faaad369d22caae6",
+  "--test-threads=1"
+]

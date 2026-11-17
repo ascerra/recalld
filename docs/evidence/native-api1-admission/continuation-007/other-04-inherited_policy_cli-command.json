@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "599s",
+  "/work/target/debug/deps/inherited_policy_cli-b6b68acbde41de96",
+  "--test-threads=1"
+]

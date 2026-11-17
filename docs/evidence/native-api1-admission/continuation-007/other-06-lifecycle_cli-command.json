@@ -1,0 +1,8 @@
+[
+  "timeout",
+  "--signal=TERM",
+  "--kill-after=10s",
+  "598s",
+  "/work/target/debug/deps/lifecycle_cli-a6311b351d299cfe",
+  "--test-threads=1"
+]
