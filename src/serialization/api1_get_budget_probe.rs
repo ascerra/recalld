@@ -148,11 +148,32 @@ fn api1_point_budget_projection_versions_receipts_and_unknown_identity() {
                 vec![],
             ),
         ));
-        let value = public(&reply, chrono_tz::UTC).structured_content.unwrap();
+        let output = public(&reply, chrono_tz::UTC);
+        let text = output
+            .content
+            .iter()
+            .find_map(|block| match block {
+                crate::mcp::protocol::ContentBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .unwrap();
+        let raw: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
+            serde_json::from_str(text).unwrap();
+        let canonical = serde_json::to_string(&receipt).unwrap();
+        assert_eq!(raw["receipt"].get(), canonical);
+        let aliases: Vec<&serde_json::value::RawValue> =
+            serde_json::from_str(raw["observationReceipts"].get()).unwrap();
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].get(), canonical);
+        let value = output.structured_content.unwrap();
         assert!(!value.contains_key("contractVersion"));
         assert!(!value.contains_key("data"));
-        assert_eq!(value["receipt"], serde_json::to_value(&receipt).unwrap());
-        assert_eq!(value["observationReceipts"], serde_json::json!([receipt]));
+        let typed: WriteReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
+        let typed_aliases: Vec<WriteReceipt> =
+            serde_json::from_value(value["observationReceipts"].clone()).unwrap();
+        assert_eq!(serde_json::to_string(&typed).unwrap(), canonical);
+        assert_eq!(typed_aliases.len(), 1);
+        assert_eq!(serde_json::to_string(&typed_aliases[0]).unwrap(), canonical);
         if reply.envelope.error.as_ref().unwrap().commit_state == CommitState::Unknown {
             assert_eq!(
                 value.get("operationId").cloned(),
