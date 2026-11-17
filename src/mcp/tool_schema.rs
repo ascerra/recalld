@@ -1,6 +1,9 @@
 //! Live modern v1 structured outputs. Prepared v2 schemas are not capabilities.
 use serde_json::{Value, json};
 
+#[path = "tool_lifecycle_schema.rs"]
+mod lifecycle;
+
 fn object(properties: Value) -> Value {
     object_optional(properties, &[])
 }
@@ -53,6 +56,8 @@ pub(super) fn output(tool: &str) -> Option<Value> {
     let count = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
     let name = json!({"type":"string"});
     Some(match tool {
+        "reinforce_memory" => lifecycle::output(true),
+        "forget_memory" => lifecycle::output(false),
         "list_memories" => {
             let mut entries = array(object_optional(
                 json!({
