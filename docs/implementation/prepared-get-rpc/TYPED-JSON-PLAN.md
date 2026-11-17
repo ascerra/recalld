@@ -167,3 +167,12 @@ Changes to those constructors, readiness conversion, fields or emitted constants
 require updating the proof; test guards below check the emitted key sets and
 allowances in addition to end-to-end sizes. Neither this derivation nor the
 diagnostic permits dropping acquired evidence after an oversized decode.
+
+## Implementation and local validation seal
+
+The owner/queue released these hunks after1d9/013 passed. Runtime1dd implements
+them; source0e3338 (test-only tails) passed1764library/10CLI/15examples, fmt,
+include-format, Clippy with warnings and doctests (4ignored). See
+[final RPC evidence](../../evidence/prepared-get/rpc-final/REPORT.md) for exact
+source/executable/failed-run attribution. Current-main composition/CI and ordinary
+public point-consumer activation are separate remaining gates.
