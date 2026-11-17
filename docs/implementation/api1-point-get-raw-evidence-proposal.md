@@ -1,6 +1,6 @@
 # API1 get: raw evidence proposal after actual final-wire failure
 
-**Source-only; not approved production behavior.** Runtime remains2925. Test sourcefb3bb725 and [sealed3PASS/2FAIL report](../../evidence/api1-point-get/budget-wire/REPORT.md) establish that preserving an intermediate Value does not preserve it through actual final frame parsing. The exact current private O1 decoder and global serde/ToolCallResult contracts must not be silently changed to hide that failure.
+**Source-only; not approved production behavior.** Runtime remains2925. Test sourcefb3bb725 and [sealed3PASS/2FAIL report](../evidence/api1-point-get/budget-wire/REPORT.md) establish that preserving an intermediate Value does not preserve it through actual final frame parsing. The exact current private O1 decoder and global serde/ToolCallResult contracts must not be silently changed to hide that failure.
 
 ## Smallest proposed wire boundary
 
@@ -51,3 +51,5 @@ An optional emitter check at that same old capture→observe boundary refuses ov
 Huygens: agree or reject the exact `receiptsJson` API1 error field/parse semantics and final ToolCallResult route. Halley: exact helper visibility/client/server/legacy typed-error hunk ownership after the parent gate. Feynman: raw receipt validation/provenance and capacity accounting; no parallel codec. A3: legacy singleton/cause semantics remain unchanged by the new typed boundary.
 
 Only after this bounded design review: implement the test-only raw companion/actual-framing diagnostic, then obtain literal production release. Keep017 real3RED,018/019/020 diagnostic failures and their source/executable provenance. No additional parent or public2 activation is proposed.
+
+The reviewed test-only diagnostic now passes five focused checks at738b; [exact report and provenance](../evidence/api1-point-get/raw-carrier/REPORT.md). This does not release runtime hunks or transfer those counts to ordinary consumer code.
