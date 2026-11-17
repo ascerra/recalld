@@ -2058,6 +2058,9 @@ pub(crate) async fn dispatch_v2(
         )
         .await;
     }
+    if name == "get_memory" {
+        return prepared_get(bridge.search.as_ref(), &arguments).await;
+    }
     if name == "find_similar_memories"
         && arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
     {
@@ -2126,6 +2129,21 @@ pub(crate) async fn prepared_similar(
     let reply = match crate::serialization::query::SimilarRequest::from_mcp(arguments) {
         Ok(request) => search.similar_contract(request).await,
         Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    reply.mcp()
+}
+
+pub(crate) async fn prepared_get(
+    search: &dyn crate::mcp::bridge::SearchPipeline,
+    arguments: &serde_json::Value,
+) -> ToolCallResult {
+    let reply = match crate::serialization::get::GetRequest::from_mcp(arguments) {
+        Ok(request) => {
+            search
+                .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .await
+        }
+        Err(error) => crate::serialization::get::GetReply::input(error),
     };
     reply.mcp()
 }

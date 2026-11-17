@@ -448,6 +448,26 @@ pub async fn create_memory(
 /// 2. Look up in cache (hit) or load from storage (miss).
 /// 3. Record an access event (`DirectRetrieval`).
 /// 4. Return 200 with memory, or 404 if not found.
+/// Prepared inner consumer; the public version gate remains unchanged.
+pub(crate) async fn prepared_get(
+    search: &dyn crate::api::state::SearchPipeline,
+    id: crate::model::MemoryId,
+    arguments: &serde_json::Value,
+) -> (StatusCode, Json<crate::serialization::get::GetReply>) {
+    let reply = match crate::serialization::get::GetRequest::from_http(arguments, id) {
+        Ok(request) => {
+            search
+                .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .await
+        }
+        Err(error) => crate::serialization::get::GetReply::input(error),
+    };
+    (
+        StatusCode::from_u16(reply.http_status).expect("get HTTP status"),
+        Json(reply),
+    )
+}
+
 pub async fn get_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,

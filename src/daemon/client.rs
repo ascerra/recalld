@@ -117,6 +117,7 @@ struct ClientState {
     api1_store: Option<bool>,
     api1_store_batch: Option<bool>,
     prepared_queries: Option<bool>,
+    prepared_get: Option<bool>,
     exact_pairs_bits: bool,
     canonical_pages: bool,
 }
@@ -222,6 +223,12 @@ impl DaemonClient {
         params: serde_json::Value,
     ) -> PreparedExchange {
         let mut state = self.state.lock().await;
+        let point = method == super::prepared_get::GET;
+        let limit = if point {
+            super::prepared_get::response_limit()
+        } else {
+            super::prepared_query::response_limit()
+        };
         let outcome = async {
             if state.conn.is_none() && self.reconnect(&mut state).await.is_err() {
                 return PreparedExchange {
@@ -229,13 +236,21 @@ impl DaemonClient {
                     result: None,
                 };
             }
-            if state.prepared_queries.is_none() && state.negotiate().await.is_err() {
+            if (if point {
+                state.prepared_get
+            } else {
+                state.prepared_queries
+            })
+            .is_none()
+                && state.negotiate().await.is_err()
+            {
                 return PreparedExchange {
                     phase: TransmissionPhase::BeforeSend,
                     result: None,
                 };
             }
             let supported = match method {
+                super::prepared_get::GET => state.prepared_get == Some(true),
                 super::prepared_pages::LIST | super::prepared_pages::CATALOG => {
                     state.canonical_pages
                 }
@@ -270,13 +285,7 @@ impl DaemonClient {
             };
             for _ in 0..=MAX_STALE_SKIPS {
                 let frame = match state.conn.as_mut() {
-                    Some(conn) => {
-                        super::protocol::read_frame(
-                            &mut conn.reader,
-                            super::prepared_query::response_limit(),
-                        )
-                        .await
-                    }
+                    Some(conn) => super::protocol::read_frame(&mut conn.reader, limit).await,
                     None => {
                         return PreparedExchange {
                             phase: TransmissionPhase::SentUnattributed,
@@ -300,7 +309,11 @@ impl DaemonClient {
                         };
                     }
                 };
-                if !super::prepared_query::admitted_frame(&frame) {
+                if !(if point {
+                    super::prepared_get::admitted_frame(&frame)
+                } else {
+                    super::prepared_query::admitted_frame(&frame)
+                }) {
                     return PreparedExchange {
                         phase: TransmissionPhase::SentUnattributed,
                         result: None,
@@ -374,6 +387,7 @@ impl DaemonClient {
                 api1_store: None,
                 api1_store_batch: None,
                 prepared_queries: None,
+                prepared_get: None,
                 exact_pairs_bits: false,
                 canonical_pages: false,
             }),
@@ -590,6 +604,12 @@ impl DaemonClient {
         // The answer describes the connection the lock is still protecting.
         let outcome = outcome?;
         state.frame_limit = negotiated_limit(&outcome);
+        state.prepared_get = Some(
+            outcome
+                .get("preparedGetV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
         state.api1_lifecycle = Some(
             outcome
                 .get("api1LifecycleV1")
@@ -622,6 +642,7 @@ impl DaemonClient {
         state.api1_store = None;
         state.api1_store_batch = None;
         state.prepared_queries = None;
+        state.prepared_get = None;
         state.exact_pairs_bits = false;
         state.canonical_pages = false;
         let mut last: Option<String> = None;
@@ -635,6 +656,7 @@ impl DaemonClient {
                     state.api1_store = None;
                     state.api1_store_batch = None;
                     state.prepared_queries = None;
+                    state.prepared_get = None;
                     state.exact_pairs_bits = false;
                     state.canonical_pages = false;
                     match state.negotiate().await {
@@ -697,6 +719,12 @@ impl ClientState {
         self.api1_store = Some(
             result
                 .get("api1StoreV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
+        self.prepared_get = Some(
+            result
+                .get("preparedGetV1")
                 .and_then(serde_json::Value::as_bool)
                 == Some(true),
         );

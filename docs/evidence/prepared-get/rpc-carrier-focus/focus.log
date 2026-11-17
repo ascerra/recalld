@@ -1,0 +1,84 @@
+
+running 42 tests
+test daemon::prepared_get::tests::actual_cold_get_matches_owner_false_and_observes_true_once ... ok
+test daemon::prepared_get::tests::actual_cancelled_remote_get_finishes_existing_root_without_reobservation ... ok
+test daemon::prepared_get::tests::actual_private_origin_and_capacity_reject_before_observation ... ok
+test daemon::prepared_get::tests::actual_final_dispatch_overflow_retains_committed_receipt_in_result ... ok
+test daemon::prepared_get::tests::get_ping_enables_previously_absent_capability_without_fallback ... ok
+test daemon::prepared_get::tests::actual_receipt_malformed_reply_keeps_only_received_evidence ... ok
+test daemon::prepared_get::tests::get_ping_refreshes_capability_before_next_observation_request ... ok
+test daemon::prepared_get::tests::get_reconnect_discards_capability_and_does_not_retry_sent_call ... ok
+test daemon::prepared_get::tests::old_capability_and_sent_failure_remain_distinct ... ok
+test daemon::prepared_get::tests::prepared_get_rpc_inner_structure_rejects_before_evidence_acquisition ... ok
+test daemon::prepared_get::tests::raw_frame_preflight_preserves_scalar_structure_and_exact_limit ... ok
+test daemon::prepared_query::shape::tests::prepared_get_typed_budget_checks_all_numbers_duplicates_and_overflow ... ok
+
+thread 'daemon::server::prepared_query_tests::prepared_get_rpc_actual_owner_and_remote_consumer' (43) panicked at src/daemon/prepared_query_tests.rs:784:5:
+assertion `left == right` failed
+  left: Null
+ right: "01a1ea5d-74cb-7fa2-a454-0b81dd6c2c8c"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test daemon::server::prepared_query_tests::prepared_get_rpc_actual_owner_and_remote_consumer ... FAILED
+test search::pipeline::read_view::tests::prepared_get_actual_budget_rejects_before_exposure_and_missing_scope_is_not_defaulted ... ok
+test daemon::prepared_get::tests::prepared_get_rpc_independent_inner_and_outer_limits_retain_supported_foreign_evidence ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_canonical_applied_outbox_does_not_block_plain_copy ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_canonical_pending_rejects_before_clock_or_observation ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_cancel_keeps_copy_leases_until_worker_exit ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_direct_mcp_rest_share_captured_payload_and_scope ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_false_ignores_unused_derived_stamps_and_preserves_bytes ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_frame_boundary_rejects_before_write_and_keeps_complete_receipt ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_close_accepts_existing_root_descendants_and_keeps_receipt ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_native_only_projection_graph_is_required ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_native_origins_one_exposure_and_terminal_no_policy_projection ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_policy_change_keeps_real_history_and_typed_conflict ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_publication_failure_keeps_exact_receipt_and_allows_rebuild ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_true_one_event_one_clock_and_full_receipt ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_terminal_transition_after_capture_rejects_without_payload ... ok
+test search::pipeline::read_view::tests::prepared_get_actual_unknown_commit_retains_identity_and_reopens_committed_event ... ok
+test search::pipeline::read_view::tests::prepared_get_before_old_consumer_accepts_canonical_point_with_stale_vector ... ignored, BEFORE probe: old point getter still requires unrelated derived views
+test search::pipeline::read_view::tests::prepared_get_actual_unrelated_generation_after_capture_does_not_recapture ... ok
+test search::pipeline::read_view::tests::prepared_get_rpc_native_origin_projection_and_publication_failure ... ok
+
+thread 'search::pipeline::read_view::tests::prepared_get_rpc_actual_final_capture_races_preserve_generation_and_conflict' (120) panicked at src/search/get_wire_tests.rs:1543:13:
+assertion `left == right` failed: terminal: GetReply { envelope: Envelope { contract_version: 2, status: Error, scope: Some(Namespace { namespace_id: NamespaceId(2), namespace: "other" }), data: None, receipt: None, read_generation: Some(GenerationRef { store_id: d6f0d1f9-64f1-48c6-bbef-d810c8ab5d55, generation: Generation(24) }), error: Some(ExecutionError { category: Unavailable, code: "INDEX_NOT_READY", message: "get could not complete", field: None, retryable: false, commit_state: NotCommitted, operation_id: None }), readiness: None, warnings: [] }, observation_receipts: [], received_evidence: None, http_status: 503 }
+  left: 503
+ right: 409
+test search::pipeline::read_view::tests::prepared_get_rpc_actual_final_capture_races_preserve_generation_and_conflict ... FAILED
+test search::pipeline::read_view::tests::prepared_get_rpc_native_postcommit_unknown_preserves_actual_operation ... ok
+test search::pipeline::read_view::tests::prepared_get_strict_parser_preserves_omitted_scope_and_access_intent ... ok
+point receipt "lifecycleExposureRecorded": actual 2321 bytes, scalar/key bound 2837
+point receipt "exposuresRecorded": actual 344 bytes, scalar/key bound 422
+test serialization::get::tests::prepared_get_bound_covers_actual_typed_receipt_aliases_and_completion_fields ... ok
+test serialization::get::tests::prepared_get_bound_exact_limit_and_value_normalized_compact_text ... ok
+test serialization::get::tests::prepared_get_bound_rejects_unbounded_input_pointer_without_echoing_it ... ok
+direct typed GetReply + both tagged receipt aliases bits=00000000 bytes=5986 exact
+direct typed GetReply + both tagged receipt aliases bits=80000000 bytes=5991 exact
+direct typed GetReply + both tagged receipt aliases bits=00000001 bytes=5996 exact
+direct typed GetReply + both tagged receipt aliases bits=00000002 bytes=5996 exact
+direct typed GetReply + both tagged receipt aliases bits=007fffff bytes=6036 exact
+direct typed GetReply + both tagged receipt aliases bits=00800000 bytes=6036 exact
+direct typed GetReply + both tagged receipt aliases bits=3f7fffff bytes=6021 exact
+test serialization::get::tests::prepared_get_rpc_direct_typed_json_probe_preserves_valid_domain_float_bits ... ok
+get F=2774088; received-evidence encoding=1395235bytes outer=2941300bytes
+test serialization::get::tests::prepared_get_rpc_scalar_expansion_and_received_evidence_stay_inside_outer_frame ... ok
+normalized native receipt actual=4600 numeric=92 key/scalar-bound=4933 <=8192
+test search::pipeline::read_view::tests::prepared_get_rpc_native_subnormal_stability_keeps_actual_record_and_receipt_bits ... ok
+candidate false at admission: inner=1383377 charged=1383573 numeric=10 quoted=1389647 public=2773117
+candidate false terminal: inner=741 charged=937 numeric=10 quoted=911 public=1745
+candidate true before: inner=1351121 charged=1351317 numeric=10 quoted=1357391 public=2708605
+candidate true after maximal receipt + readiness: inner=1356070 charged=1361023 numeric=195 quoted=1362764 public=2719263
+candidate committed: inner=5007 charged=9786 numeric=186 quoted=5525 public=10894
+candidate unknown: inner=5065 charged=9844 numeric=186 quoted=5587 public=11014
+candidate missing/input: inner=193 charged=224 numeric=1 quoted=323 public=542
+candidate missing/input: inner=1725 charged=1756 numeric=1 quoted=2115 public=3866
+candidate getF=2774088 MAX=8388608 reserve=65536 checked32 jointbudget
+test serialization::get::tests::rpc_budget_probe::prepared_get_rpc_candidate_joint_budget_charges_every_number_before_evidence ... ok
+
+failures:
+
+failures:
+    daemon::server::prepared_query_tests::prepared_get_rpc_actual_owner_and_remote_consumer
+    search::pipeline::read_view::tests::prepared_get_rpc_actual_final_capture_races_preserve_generation_and_conflict
+
+test result: FAILED. 39 passed; 2 failed; 1 ignored; 0 measured; 1726 filtered out; finished in 70.62s
+

@@ -6,11 +6,11 @@ use serde_json::Value;
 #[path = "prepared_query/data.rs"]
 mod data;
 #[path = "prepared_query/decode.rs"]
-mod decode;
+pub(crate) mod decode;
 #[path = "prepared_query/pairs.rs"]
 mod pairs;
 #[path = "prepared_query/shape.rs"]
-mod shape;
+pub(crate) mod shape;
 
 pub(crate) const QUERY: &str = "query_contract_v1";
 pub(crate) const SIMILAR: &str = "similar_contract_v1";

@@ -1,0 +1,16 @@
+
+running 1 test
+normalized native receipt actual=4600 numeric=92 key/scalar-bound=4933 <=8192
+candidate false at admission: inner=1383377 charged=1383573 numeric=10 quoted=1389647 public=2773117
+candidate false terminal: inner=741 charged=937 numeric=10 quoted=911 public=1745
+candidate true before: inner=1351121 charged=1351317 numeric=10 quoted=1357391 public=2708605
+candidate true after maximal receipt + readiness: inner=1356070 charged=1361023 numeric=195 quoted=1362764 public=2719263
+candidate committed: inner=5007 charged=9786 numeric=186 quoted=5525 public=10894
+candidate unknown: inner=5065 charged=9844 numeric=186 quoted=5587 public=11014
+candidate missing/input: inner=193 charged=224 numeric=1 quoted=323 public=542
+candidate missing/input: inner=1725 charged=1756 numeric=1 quoted=2115 public=3866
+candidate getF=2774088 MAX=8388608 reserve=65536 checked32 jointbudget
+test serialization::get::tests::rpc_budget_probe::prepared_get_rpc_candidate_joint_budget_charges_every_number_before_evidence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1762 filtered out; finished in 7.99s
+

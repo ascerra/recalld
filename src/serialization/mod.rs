@@ -5,6 +5,7 @@
 
 pub mod catalog;
 pub mod contract;
+pub mod get;
 mod json;
 pub mod list;
 pub mod native_batch;
