@@ -1,7 +1,8 @@
 # MCP Integration Guide
 
 Modern MCP `tools/list` advertises output schemas for `namespace_stats`,
-`list_tags`, `list_memories`, `recall_memories`, and `find_similar_memories`.
+`list_tags`, `list_memories`, `recall_memories`, `find_similar_memories`,
+`reinforce_memory`, and `forget_memory`.
 These describe the existing API1 object results; legacy MCP still omits
 `outputSchema` and `structuredContent`. `list_namespaces` remains a bare JSON
 array in text, without an object wrapper. Plain-text errors do not carry a
@@ -17,6 +18,13 @@ embedding profile and dimension; unknown or incompatible profiles are excluded.
 Duplicate scan coverage is always nonexhaustive: known counts describe the
 bounded sample, while older/custom bridges report unknown counts and truncation
 as `null`. These schemas do not advertise prepared API2 operations or readiness.
+
+Feedback and single-forget schemas preserve their existing API1 success shapes
+and describe structured lifecycle failures with complete retained receipts.
+Receipt schemas describe the serialized codec, not proof validity, authenticity,
+request binding or readiness. In particular, a typed malformed receipt retained
+by an invalid-response path must remain representable. Existing plain-text errors
+and legacy-era output remain unchanged.
 
 ## Setup
 

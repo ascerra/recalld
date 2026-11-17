@@ -1,0 +1,13 @@
+{
+  "source": "64667fc6a084b8e55bb0eba875c60b0c675abadb",
+  "rustPassed": 1,
+  "rustFailed": 0,
+  "seconds": 6.01,
+  "formalExit": 1,
+  "formalFailure": "actual emitted +/-3.4028235e38 rejected by schema widened +/-3.4028234663852886e38",
+  "fmtExit": 0,
+  "sourceFilesVerified": 495,
+  "librarySha256": "3738977f2e1285683cd8ba922b0930a96152298df405803b6652aacbcabd5af4",
+  "rustLogSha256": "74d3ee5ddc89198a9c6653ede345eb29813f33875901fc4078eba8c0b04f0d67",
+  "rawRoot": "/tmp/recalld-huygens-active-validation/live-lifecycle-003-max-64667fc6"
+}
