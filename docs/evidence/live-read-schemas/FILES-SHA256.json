@@ -19,6 +19,10 @@
     "sha256": "e11cb7331a286c7269fa11edd903b0e98c7c1ca29fa947cde8146110cfa8ec3a",
     "bytes": 2068
   },
+  "NOTEBOOK.json": {
+    "sha256": "0d01eaa0011abfe3726339df2717afa7366ca011971f36fbad1f24e5090f31da",
+    "bytes": 325
+  },
   "RAW-MANIFEST.json": {
     "sha256": "ca43d5dff8c90289fb7f282cb74b988717b128981c3c6980f600597849ef33a0",
     "bytes": 4175
