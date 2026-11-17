@@ -1,5 +1,9 @@
 # A4 discovery and remaining operation consumers
 
+The implemented D1 slice and its source-specific results are recorded in
+[the validation report](../evidence/live-metadata-schemas/REPORT.md). The remaining
+operation matrix below is planning scope, not a completion claim.
+
 Source/ownership proposal, 2026-11-17. Inspection pin:
 `6f064789473eea310be28e004de38fd52d2aa3d5`.
 Huygens owns wire review; Halley releases exact implementation hunks.
