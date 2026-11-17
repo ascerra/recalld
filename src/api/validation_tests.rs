@@ -22,6 +22,59 @@ fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
     )
 }
 
+#[tokio::test]
+async fn live_metadata_schemas_rest_context_and_existing_stats_shape() {
+    async fn get(app: &Router, path: &str) -> (axum::http::HeaderMap, Value) {
+        let response = app
+            .clone()
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        (headers, serde_json::from_slice(&bytes).unwrap())
+    }
+    let f = Fixture::new();
+    f.insert_memory().await;
+    f.completion().rebuild_all().await.unwrap();
+    let (app, bridge) = fixture_clients(&f);
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let (headers, context) = get(&app, "/capabilities").await;
+    assert_eq!(headers["cache-control"], "private, no-store");
+    assert_eq!(context["supportedContractVersions"], json!([1]));
+    assert_eq!(context["defaultNamespace"]["source"], "legacyHttpDefault");
+    let local = crate::mcp::resources::dispatch_resource(&bridge, "recalld://session")
+        .await
+        .unwrap();
+    let local: Value = serde_json::from_str(local.contents[0].text.as_ref().unwrap()).unwrap();
+    for field in ["accessDefaults", "versionPolicy", "embeddingInputs"] {
+        assert_eq!(context[field], local[field], "{field}");
+    }
+    assert_eq!(
+        context["embeddingInputs"]["legacyRestWithoutProfileId"],
+        "unverified"
+    );
+    assert_eq!(context["embeddingInputs"]["operation"], "api1MemoryStore");
+    assert!(
+        context["embeddingInputs"]["legacyRemediation"]
+            .as_str()
+            .unwrap()
+            .starts_with("Omit embeddingProfileId")
+    );
+    let (_, stats) = get(&app, "/namespaces/default/stats").await;
+    assert_eq!(stats["data"]["memoryCount"], 1);
+    assert_eq!(
+        stats["data"]["phaseCounts"],
+        json!({"full":1,"summary":0,"ghost":0})
+    );
+    assert_eq!(stats["data"]["id"], 1);
+    assert_eq!(stats["data"]["embeddingDim"], crate::test_support::DIM);
+    // REST retains its existing id/dimension fields; no MCP-schema projection.
+    assert!(stats["data"].get("contractVersion").is_none());
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+}
+
 fn fixture_state(f: &Fixture) -> (AppState, crate::mcp::bridge::McpBridge) {
     fixture_state_with_embedding(
         f,

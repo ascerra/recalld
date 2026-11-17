@@ -14,6 +14,7 @@ pub(crate) mod batches;
 pub mod bridge;
 pub mod bridge_adapters;
 pub mod resources;
+mod tool_schema;
 pub mod tools;
 
 pub use http_transport::{McpHttpConfig, mcp_router};

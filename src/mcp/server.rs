@@ -164,7 +164,7 @@ impl McpDispatcher {
             (Era::Legacy, "initialize") => self.handle_initialize(ctx, msg.params),
             (Era::Legacy, "ping") => Ok(Outcome::plain(serde_json::json!({}))),
 
-            (_, "tools/list") => self.handle_tools_list(),
+            (_, "tools/list") => self.handle_tools_list(ctx),
             (_, "tools/call") => self.handle_tools_call(ctx, msg.params).await,
             (_, "resources/list") => self.handle_resources_list(),
             (_, "resources/templates/list") => self.handle_resource_templates_list(),
@@ -271,10 +271,15 @@ impl McpDispatcher {
         Ok(Outcome::plain(serde_json::to_value(result)?))
     }
 
-    fn handle_tools_list(&self) -> Result<Outcome, DispatchError> {
-        let result = ToolsListResult {
+    fn handle_tools_list(&self, ctx: &RequestContext) -> Result<Outcome, DispatchError> {
+        let mut result = ToolsListResult {
             tools: self.handler.tools(),
         };
+        if ctx.era == Era::Legacy {
+            for tool in &mut result.tools {
+                tool.output_schema = None;
+            }
+        }
         Ok(Outcome::cacheable(
             serde_json::to_value(result)?,
             CacheHints::public(CATALOG_TTL_MS),
@@ -538,6 +543,7 @@ pub(crate) mod tests {
     impl McpHandler for StubHandler {
         fn tools(&self) -> Vec<ToolInfo> {
             vec![ToolInfo {
+                output_schema: None,
                 name: "store_memory".to_string(),
                 title: None,
                 description: "Store a memory".to_string(),
