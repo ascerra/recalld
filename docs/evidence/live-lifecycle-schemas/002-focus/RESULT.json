@@ -1,0 +1,14 @@
+{
+  "source": "69c2f9a556d43742f8ef478651034a2bbece6c3f",
+  "newRustPassed": 4,
+  "metadataPassed": 3,
+  "oldPeerPassed": 1,
+  "formalCases": 67,
+  "formalInitial": "Python3.13 import failed for cached Python3.11 rpds ABI; no schema execution",
+  "formalCorrected": "same frozen source/fixtures passed on recalld-ci Python3.11",
+  "fmtExit": 0,
+  "sourceInputsVerified": 495,
+  "librarySha256": "dbd787781f75f5989572b03e86b652721b60996e2f111656338fd7b572c7c31e",
+  "fullSuite": false,
+  "pending": "separate \u00b1MAX boundary probe before schema correction/final freeze"
+}

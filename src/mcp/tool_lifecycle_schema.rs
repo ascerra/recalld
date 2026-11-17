@@ -16,7 +16,12 @@ fn uint(max: u64) -> Value {
 pub(super) fn output(feedback: bool) -> Value {
     let string = json!({"type":"string"});
     let boolean = json!({"type":"boolean"});
-    let number = json!({"type":"number","minimum":-(f32::MAX as f64),"maximum":f32::MAX as f64});
+    // Typed f32 output spells MAX as 3.4028235e38, slightly beyond the exact
+    // f64 widening. Describe the actual emitter; never change receipt values.
+    let max: f64 =
+        serde_json::from_str(&serde_json::to_string(&f32::MAX).expect("finite f32 endpoint"))
+            .expect("numeric f32 endpoint");
+    let number = json!({"type":"number","minimum":-max,"maximum":max});
     let time = json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX});
     let uuid = json!({"type":"string","format":"uuid"});
     let namespace = uint(u32::MAX.into());

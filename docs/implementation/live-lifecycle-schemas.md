@@ -37,3 +37,11 @@ store/batches need complete actual write/error unions; create awaits N1; delete
 requires complete purge-proof shapes. list_namespaces stays an array in text.
 V0 transport/no-queued-work evidence, public2 startup/writer closure, coherent
 read contracts, outer-frame limits and A5 measurements remain separate gates.
+
+The separate extrema fixture source64667fc6 passed its Rust exact typed receipt
+checks but failed formal validation: actual typed f32 output is +/-3.4028235e38,
+slightly wider than +/-3.4028234663852886e38 from f32-to-f64 widening. Pascal and
+Halley source-reviewed the schema-only correction: derive bounds from the actual
+serde_json f32 endpoint spelling, covering both typed text and Value-first
+emitters. No tolerance, receipt reserialization change or global serde change.
+The original failure is retained in evidence/003-max-red; final proof is pending.

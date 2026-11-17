@@ -66,9 +66,10 @@ for path in sorted(pathlib.Path(sys.argv[1]).glob("*.json")):
                     changed["receipt"]["outcome"]["transition"].pop("phaseTimeRule", None)
                     assert validator.is_valid(changed), path.name
                 else:
-                    changed = copy.deepcopy(value)
-                    changed["receipt"]["outcome"]["transition"]["records"][0]["before"]["stability"] = 1e100
-                    reject(changed)
+                    for overflow in [-1e100, 1e100]:
+                        changed = copy.deepcopy(value)
+                        changed["receipt"]["outcome"]["transition"]["records"][0]["before"]["stability"] = overflow
+                        reject(changed)
             # Matching typed malformed receipts are intentionally retained.
             # Extra edges/records and finite out-of-domain values in these fixtures
             # must not be rejected by canonical producer-only assumptions.

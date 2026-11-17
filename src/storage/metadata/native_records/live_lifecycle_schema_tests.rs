@@ -323,111 +323,131 @@ async fn live_lifecycle_schema_actual_native_publication_receipts_and_http_mcp()
     use crate::mcp::protocol::PROTOCOL_VERSION;
     use crate::mcp::server::tests::modern_request;
     use tower::ServiceExt;
-    for operation in [Operation::Feedback, Operation::Forget] {
-        let (f, d, _, bridge, state) = setup_certified().await;
-        // Retain a second actual record so both operations require vector publication.
-        let policy = NativePolicyInputs::default();
-        let intent = f
-            .storage
-            .read()
-            .unwrap()
-            .meta_store()
-            .capture_native_insert(scope(&d), &input(&d), &policy)
-            .unwrap();
-        f.storage
-            .write()
-            .unwrap()
-            .insert_native_record(
-                &MutationContext::unkeyed(d.ns),
-                &intent,
-                &generated(),
-                &policy,
-                &FixedClock(AtomicUsize::new(0)),
-                None,
-            )
-            .unwrap();
-        completion(&f).rebuild_all().await.unwrap();
-        *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
-        let app = crate::mcp::http_transport::mcp_router(Arc::new(bridge), Default::default());
-        let name = tool(operation);
-        let mut result = Value::Null;
-        for (method, params) in [
-            ("tools/list", json!({})),
-            (
-                "tools/call",
-                json!({"name":name,"arguments":{"id":d.parent}}),
-            ),
-        ] {
-            let mut request = Request::post("/mcp")
-                .header("content-type", "application/json")
-                .header("MCP-Protocol-Version", PROTOCOL_VERSION)
-                .header("MCP-Method", method);
-            if method == "tools/call" {
-                request = request.header("MCP-Name", name);
-            }
-            let response = app
-                .clone()
-                .oneshot(
-                    request
-                        .body(Body::from(
-                            serde_json::to_vec(&modern_request(1, method, params)).unwrap(),
-                        ))
+    for remote in [false, true] {
+        for operation in [Operation::Feedback, Operation::Forget] {
+            let (f, d, _, mut bridge, state) = setup_certified().await;
+            // Retain a second actual record so both operations require vector publication.
+            let policy = NativePolicyInputs::default();
+            let intent = f
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .capture_native_insert(scope(&d), &input(&d), &policy)
+                .unwrap();
+            f.storage
+                .write()
+                .unwrap()
+                .insert_native_record(
+                    &MutationContext::unkeyed(d.ns),
+                    &intent,
+                    &generated(),
+                    &policy,
+                    &FixedClock(AtomicUsize::new(0)),
+                    None,
+                )
+                .unwrap();
+            completion(&f).rebuild_all().await.unwrap();
+            *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(8);
+            let socket = tempfile::tempdir().unwrap();
+            let task = if remote {
+                let (adapter, task) = crate::daemon::server::native_lifecycle_test_remote(
+                    bridge.storage.clone(),
+                    &socket.path().join("lifecycle-schema.sock"),
+                )
+                .await;
+                bridge.storage = Arc::new(adapter);
+                Some(task)
+            } else {
+                None
+            };
+            let app = crate::mcp::http_transport::mcp_router(Arc::new(bridge), Default::default());
+            let name = tool(operation);
+            let mut result = Value::Null;
+            for (method, params) in [
+                ("tools/list", json!({})),
+                (
+                    "tools/call",
+                    json!({"name":name,"arguments":{"id":d.parent}}),
+                ),
+            ] {
+                let mut request = Request::post("/mcp")
+                    .header("content-type", "application/json")
+                    .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                    .header("MCP-Method", method);
+                if method == "tools/call" {
+                    request = request.header("MCP-Name", name);
+                }
+                let response = app
+                    .clone()
+                    .oneshot(
+                        request
+                            .body(Body::from(
+                                serde_json::to_vec(&modern_request(1, method, params)).unwrap(),
+                            ))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status().as_u16(), 200);
+                let wire: Value = serde_json::from_slice(
+                    &axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024)
+                        .await
                         .unwrap(),
                 )
-                .await
                 .unwrap();
-            assert_eq!(response.status().as_u16(), 200);
-            let wire: Value = serde_json::from_slice(
-                &axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024)
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
-            assert!(wire.get("error").is_none(), "{wire}");
-            if method == "tools/list" {
-                assert!(
-                    wire["result"]["tools"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .find(|t| t["name"] == name)
-                        .unwrap()["outputSchema"]
-                        .is_object()
-                );
-            } else {
-                result = wire["result"].clone();
+                assert!(wire.get("error").is_none(), "{wire}");
+                if method == "tools/list" {
+                    assert!(
+                        wire["result"]["tools"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|t| t["name"] == name)
+                            .unwrap()["outputSchema"]
+                            .is_object()
+                    );
+                } else {
+                    result = wire["result"].clone();
+                }
             }
+            assert_eq!(
+                result["isError"], true,
+                "actual publication failure: {result}"
+            );
+            let value = record_result(
+                &format!("native-http-remote-{remote}-publication-failure"),
+                name,
+                &result,
+                "actual HTTP MCP tools/list + tools/call, canonical commit followed by vector publication failure",
+            );
+            assert_eq!(value["error"]["commitState"], "committed");
+            assert!(value["readiness"].is_null());
+            let receipt: WriteReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
+            let expected = serde_json::to_string(&receipt).unwrap();
+            *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
+            completion(&f).complete().await.unwrap();
+            drop((app, state));
+            if let Some(task) = task {
+                tokio::time::timeout(std::time::Duration::from_secs(3), task)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+            let root = f.close();
+            let reopened = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
+            let retained = reopened
+                .engine
+                .lookup_operation(
+                    receipt.store_id,
+                    crate::storage::control::MutationScope::Namespace(d.ns),
+                    receipt.operation_id,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(serde_json::to_string(&retained).unwrap(), expected);
+            drop((reopened, root));
         }
-        assert_eq!(
-            result["isError"], true,
-            "actual publication failure: {result}"
-        );
-        let value = record_result(
-            "native-http-publication-failure",
-            name,
-            &result,
-            "actual HTTP MCP tools/list + tools/call, canonical commit followed by vector publication failure",
-        );
-        assert_eq!(value["error"]["commitState"], "committed");
-        assert!(value["readiness"].is_null());
-        let receipt: WriteReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
-        let expected = serde_json::to_string(&receipt).unwrap();
-        *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(4);
-        completion(&f).complete().await.unwrap();
-        drop((app, state));
-        let root = f.close();
-        let reopened = open(&d, Arc::new(FixedClock(AtomicUsize::new(0))));
-        let retained = reopened
-            .engine
-            .lookup_operation(
-                receipt.store_id,
-                crate::storage::control::MutationScope::Namespace(d.ns),
-                receipt.operation_id,
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(serde_json::to_string(&retained).unwrap(), expected);
-        drop((reopened, root));
     }
 }
 
