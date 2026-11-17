@@ -71,6 +71,10 @@ def run(args):
     fields = {"ingest": {"sources", "activeEmbedding"}, "connect": {"activeEmbedding"},
               "query": {"currentQuestion", "expectedMiss"}, "action": {"currentAction"}, "connect_native_prefix": set()}
     if args.context_bundle and phase == "query": fields["query"].add("contextPolicy")
+    if args.combined_context and phase == "query":
+        fields["query"].add("retrievalLimit")
+        if not args.context_bundle or type(projection.get("retrievalLimit")) is not int or projection["retrievalLimit"] != 20:
+            raise ValueError("unsupported combined query depth")
     assert phase in fields and set(projection) == {"phase", "startId", "deliveryOrdinal"} | fields[phase], "unexpected actor projection fields"
     if phase == "action":
         action = projection["currentAction"]
@@ -176,7 +180,7 @@ def run(args):
     else:
         query = projection["currentQuestion"]
         assert set(query) == {"queryId", "text"}
-        result=call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=3 if tokenizer else args.retrieval_limit),
+        result=call("recall_memories", dict(query=query["text"], namespace="default", recordAccess=False, depth=0, limit=projection["retrievalLimit"] if args.combined_context else 3 if tokenizer else args.retrieval_limit),
              "replay-miss" if projection["expectedMiss"] else "query:" + query["queryId"], error=projection["expectedMiss"])
         if tokenizer and not projection["expectedMiss"]:
             context=tokenizer.assemble(encoder,query["text"],result["memories"],projection["contextPolicy"])
@@ -185,6 +189,7 @@ def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context-bundle")
+    parser.add_argument("--combined-context", action="store_true")
     parser.add_argument("--retrieval-limit", type=int, choices=(1,2), default=1)
     parser.add_argument("--accounting", action="store_true")
     for flag in ("read-fd", "write-fd", "deny-fd"):
