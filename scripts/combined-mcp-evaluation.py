@@ -151,10 +151,13 @@ def recorder(h, path, environment, context, embedding):
     return Trace()
 
 
-def reconcile(h, trace, providers):
+def reconcile(h, trace, providers, identity):
+    h["exact_keys"](identity, ("runId", "environmentHash", "episodeId", "groupId"))
     rpc = []; contexts = barriers = 0
     completed = {}; seen_context = set(); last_barrier = -2
     for i, row in enumerate(trace, 1):
+        if any(row.get(k) != value for k, value in identity.items()):
+            raise ValueError("trace identity differs from validated episode")
         if type(row["traceSchemaVersion"]) is not int or row["traceSchemaVersion"] != 2 or row["sequence"] != str(i):
             raise ValueError("unsupported trace version or sequence")
         kind = row["eventKind"]
@@ -167,8 +170,11 @@ def reconcile(h, trace, providers):
             h["exact_keys"](row, ("traceSchemaVersion", "sequence", "eventKind", "runId", "environmentHash", "episodeId", "groupId", "stepId", "deliveryOrdinal", "observation"))
             if kind == "context":
                 prior = completed.get(row["stepId"])
-                if prior is None or row["stepId"] in seen_context or prior["deliveryOrdinal"] != row["deliveryOrdinal"]:
-                    raise ValueError("context lacks unique completed RPC")
+                if (prior is None or row["stepId"] in seen_context or prior["deliveryOrdinal"] != row["deliveryOrdinal"] or
+                    prior["action"].get("method") != "tools/call" or prior["action"].get("params", {}).get("name") != "recall_memories" or
+                    not isinstance(prior.get("outcome"), dict) or prior["outcome"].get("error") is not None or
+                    not isinstance(prior["outcome"].get("result"), dict) or prior["outcome"]["result"].get("isError", False)):
+                    raise ValueError("context lacks unique successful query RPC")
                 seen_context.add(row["stepId"]); contexts += 1
             else:
                 value = row["observation"]

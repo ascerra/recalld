@@ -811,7 +811,7 @@ warm_file_enabled = false
         if trace is not None:
             trace.close()
             try:
-                save(evaluator / "accounting.json", COMBINED["reconcile"](globals(), rows(args.out / "trace.jsonl"), rows(stub.log) if stub.log.exists() else []) if combined else reconcile_accounting(rows(args.out / "trace.jsonl"), rows(stub.log) if stub.log.exists() else []))
+                save(evaluator / "accounting.json", COMBINED["reconcile"](globals(), rows(args.out / "trace.jsonl"), rows(stub.log) if stub.log.exists() else [], dict(runId=environment, environmentHash=environment, episodeId=m["groupContext"]["episodeId"], groupId=m["groupContext"]["groupId"])) if combined else reconcile_accounting(rows(args.out / "trace.jsonl"), rows(stub.log) if stub.log.exists() else []))
             except BaseException as error:
                 accounting_error = error; result.update(status="failed", accountingError=str(error))
         result["artifactsSha256"] = {str(p.relative_to(args.out)): digest(p.read_bytes()) for p in sorted(args.out.rglob("*")) if p.is_file() and p.name != "result.json"}

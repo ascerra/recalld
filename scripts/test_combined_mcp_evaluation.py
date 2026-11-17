@@ -11,6 +11,7 @@ from unittest import mock
 
 H = runpy.run_path(str(Path(__file__).with_name('public-mcp-evaluation.py')))
 C = H['COMBINED']
+IDENTITY=dict(runId='a'*64,environmentHash='a'*64,episodeId='e',groupId='g')
 
 
 def receipt(ordinal=-1, step='0'):
@@ -87,14 +88,14 @@ class Combined(unittest.TestCase):
     def test_trace2_rejects_old_reader_and_bad_control_receipts(self):
         path=self.root/'trace.jsonl'; t=C['recorder'](H,path,'a'*64,dict(episodeId='e',groupId='g'),{})
         t.barrier(receipt()); t.close(); rows=H['rows'](path)
-        self.assertEqual(C['reconcile'](H,rows,[])['barrierObservations'],'1')
+        self.assertEqual(C['reconcile'](H,rows,[],IDENTITY)['barrierObservations'],'1')
         with self.assertRaisesRegex(ValueError,'trace1'): H['reconcile_accounting'](rows,[])
         for change in (lambda r:r['barrier'].update(pendingWork=1),lambda r:r['barrier'].update(storeId='foreign'),
                        lambda r:r['barrier']['derived'][0].update(appliedGeneration='1')):
             value=copy.deepcopy(rows);change(value[0]['observation']['receipt'])
-            with self.assertRaises(ValueError):C['reconcile'](H,value,[])
+            with self.assertRaises(ValueError):C['reconcile'](H,value,[],IDENTITY)
         value=copy.deepcopy(rows);value[0]['eventKind']='future_unknown'
-        with self.assertRaisesRegex(ValueError,'unknown'):C['reconcile'](H,value,[])
+        with self.assertRaisesRegex(ValueError,'unknown'):C['reconcile'](H,value,[],IDENTITY)
 
     def test_unmatched_duplicate_context_rejected_at_delivery(self):
         t=C['recorder'](H,self.root/'trace.jsonl','a'*64,dict(episodeId='e',groupId='g'),{})
@@ -109,6 +110,34 @@ class Combined(unittest.TestCase):
         for track,version in ((C['TRACK'],1),(H['TRACK'],2),(C['TRACK'],True)):
             with self.assertRaisesRegex(ValueError,'independent harness version'):
                 H['validate_build'](dict(track=track,manifestVersion=1,sourceMappingVersion=1,traceSchemaVersion=version),None,None,None)
+
+    def test_trace2_foreign_identity_is_rejected_by_actual_reconciler(self):
+        path=self.root/'trace.jsonl';t=C['recorder'](H,path,'a'*64,dict(episodeId='e',groupId='g'),{})
+        t.barrier(receipt());t.close();rows=H['rows'](path)
+        for field in ('runId','environmentHash','episodeId','groupId'):
+            changed=copy.deepcopy(rows);changed[0][field]='foreign'
+            with self.subTest(field=field),self.assertRaisesRegex(ValueError,'identity'):
+                C['reconcile'](H,changed,[],IDENTITY)
+
+    def test_context_must_follow_actual_successful_query_not_other_outcome(self):
+        path=self.root/'trace.jsonl';t=C['recorder'](H,path,'a'*64,dict(episodeId='e',groupId='g'),{})
+        request=dict(jsonrpc='2.0',id=1,method='tools/call',params=dict(name='recall_memories',arguments=dict(query='q',recordAccess=False)))
+        response=dict(jsonrpc='2.0',id=1,result=dict(content=[dict(type='text',text=json.dumps(dict(memories=[])))]))
+        outgoing=json.dumps(request).encode()+b'\n';incoming=json.dumps(response).encode()+b'\n'
+        fact=dict(accountingVersion=1,requestWireHex=outgoing.hex(),requestBytesIntended=str(len(outgoing)),requestBytesWritten=None,
+            responseWireHex='',responseBytesRead='0',observedClientElapsedNs=None,category='attempt')
+        t.consume(dict(event='attempt',tag='query:q0',stepId='1',deliveryOrdinal=1,request=request,response=None,accounting=fact))
+        fact=dict(fact,requestBytesWritten=str(len(outgoing)),responseWireHex=incoming.hex(),responseBytesRead=str(len(incoming)),observedClientElapsedNs='1',category='success')
+        t.consume(dict(event='outcome',tag='query:q0',stepId='1',deliveryOrdinal=1,request=request,response=response,accounting=fact))
+        t.consume(dict(event='context',tag='context:q0',stepId='1',deliveryOrdinal=1,context={}))
+        t.close();rows=H['rows'](path)
+        self.assertEqual(C['reconcile'](H,rows,[],IDENTITY)['contextObservations'],'1')
+        for change in (lambda v:v[1]['outcome']['result'].update(isError=True),
+                       lambda v:v[1]['action']['params'].update(name='get_memory'),
+                       lambda v:v[1].update(outcome=dict(error=dict(code=-32603,message='protocol failure'))),
+                       lambda v:v[2].update(deliveryOrdinal=2)):
+            value=copy.deepcopy(rows);change(value)
+            with self.assertRaisesRegex(ValueError,'successful query'):C['reconcile'](H,value,[],IDENTITY)
 
     def test_current_constructor_exact_capabilities_and_state_not_old_helper(self):
         control=C['control'](H,-1,-1,self.root/'never-written.jsonl')
