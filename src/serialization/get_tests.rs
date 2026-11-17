@@ -261,10 +261,16 @@ fn prepared_get_bound_exact_limit_and_value_normalized_compact_text() {
         assert!(reply.fits(limit, observe));
         assert!(reply.fits(limit + 1, observe));
         let crate::mcp::protocol::ContentBlock::Text { text } = &tool.content[0];
-        assert_eq!(
-            serde_json::from_str::<Value>(text).unwrap(),
-            Value::Object(tool.structured_content.unwrap())
-        );
+        let structured = Value::Object(tool.structured_content.clone().unwrap());
+        assert_eq!(text, &structured.to_string());
+        // Compare at equal parse boundaries. Without float_roundtrip serde_json
+        // can round a long f64 spelling on parse; an in-memory Value is not the
+        // same boundary as a decoded peer value. Both actual wire copies must
+        // contain identical numeric bytes and decode to the same result.
+        let wire: Value = serde_json::from_slice(&serde_json::to_vec(&tool).unwrap()).unwrap();
+        let parsed_text: Value =
+            serde_json::from_str(wire["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(parsed_text, wire["structuredContent"]);
     }
 }
 

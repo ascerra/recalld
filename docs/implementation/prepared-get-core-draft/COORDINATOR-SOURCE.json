@@ -1,6 +1,6 @@
 {
   "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
-  "status": "85b ownership focus16PASS/1historical ignored; response algebra/tests and bounded input diagnostic not yet executed",
+  "status": "31db focus19PASS/1test assertionFAIL/1historical ignored; test-only equal-wire-parse correction not yet executed",
   "files": [
     {
       "path": "src/api/adapters.rs",
@@ -68,7 +68,7 @@
     },
     {
       "path": "src/serialization/get_tests.rs",
-      "sha256": "6e5a87b0360f1ad3e989a3bd737856eee06d44ab432f75509e78368813f1833a"
+      "sha256": "c8a61a80168d2052fe0f678980264b993d1ad99499386ae3621cc20b6f8a545a"
     },
     {
       "path": "src/serialization/lifecycle_api1.rs",

@@ -1,0 +1,11 @@
+{
+  "head": "31db9cea00800afe5a6a95865a02387fda48e92f",
+  "status": "",
+  "source": "/tmp/recalld-implementation/prepared-get-core",
+  "cache": "/tmp/recalld-curie-o1-build/cargo",
+  "target": "/tmp/recalld-curie-o1-build/target",
+  "network": "none",
+  "cpus": 2,
+  "memory": "4g",
+  "jobs": 1
+}
