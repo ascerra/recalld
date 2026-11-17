@@ -12,7 +12,7 @@ use crate::{
         control::Generation,
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 // Encoded metadata bound per decode, including unrelated rows. The total scan
@@ -22,8 +22,8 @@ pub(crate) const MAX_ROW_BYTES: usize = 1024 * 1024;
 // alongside exact canonical labels. Oversize rejects the entire page, no skips.
 pub(crate) const MAX_PAGE_BYTES: usize =
     (crate::daemon::protocol::MAX_MESSAGE_SIZE - 64 * 1024) / 32;
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListEntry {
     pub id: MemoryId,
     pub summary: String,
@@ -62,8 +62,8 @@ impl ListEntry {
         }
     }
 }
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListData {
     pub memories: Vec<ListEntry>,
     /// Exact filtered live count before continuation; decimal, never JSON number.
@@ -88,6 +88,11 @@ impl ListPage {
             self.data,
         );
         envelope.read_generation = Some(self.binding.at);
+        #[cfg(test)]
+        crate::serialization::page_schema::record_fixture(
+            None,
+            &serde_json::to_value(&envelope).unwrap(),
+        );
         envelope
     }
 }
@@ -174,7 +179,13 @@ pub fn response(result: Result<ListPage, ListError>) -> (u16, Envelope<ListData>
                 ListError::Stale => 409,
                 ListError::Unavailable => 503,
             };
-            (status, Envelope::failure(None, error.execution_error()))
+            let envelope = Envelope::failure(None, error.execution_error());
+            #[cfg(test)]
+            crate::serialization::page_schema::record_fixture(
+                None,
+                &serde_json::to_value(&envelope).unwrap(),
+            );
+            (status, envelope)
         }
     }
 }

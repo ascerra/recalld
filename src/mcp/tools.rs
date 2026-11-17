@@ -1935,6 +1935,11 @@ pub(crate) async fn dispatch_v2(
             Err(error) => Err(error),
         };
         let (status, envelope) = crate::catalog_page::response(result);
+        #[cfg(test)]
+        crate::serialization::page_schema::record_fixture(
+            Some(kind),
+            &serde_json::to_value(&envelope).unwrap(),
+        );
         let mut out = ToolCallResult::json(&envelope)
             .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
         if status >= 400 {
