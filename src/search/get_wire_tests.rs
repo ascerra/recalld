@@ -230,7 +230,79 @@ async fn prepared_get_actual_direct_mcp_rest_share_captured_payload_and_scope() 
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(serde_json::to_value(http_reply).unwrap(), value);
     assert_eq!(value["scope"]["namespace"], "default");
+    // Actual parser/handler rejection happens before core work. This unknown
+    // key used to be echoed as an unbounded JSON pointer in both wire copies.
+    let mut invalid = args;
+    invalid["~/\"\u{0}".repeat(100_000)] = serde_json::Value::Null;
+    let rejected = crate::mcp::tools::prepared_get(&mcp, &invalid).await;
+    assert_eq!(rejected.is_error, Some(true));
+    assert!(serde_json::to_vec(&rejected).unwrap().len() < 4096);
+    invalid.as_object_mut().unwrap().remove("id");
+    invalid.as_object_mut().unwrap().remove("contractVersion");
+    let (status, axum::Json(rejected)) = crate::api::prepared_get(&http, id, &invalid).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(rejected.envelope.error.unwrap().field.as_deref(), Some(""));
     assert_eq!(bytes(&f), before);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_actual_frame_boundary_rejects_before_write_and_keeps_complete_receipt() {
+    use crate::serialization::get::{POINT_EVIDENCE_RESERVE, POINT_FRAME_RESERVE};
+    let f = Fixture::new();
+    let owner = owner(&f);
+    let id = seed(&owner).await;
+    let mut engine = payload_engine(&f, &owner);
+    engine.access_recorder = Arc::new(
+        crate::search::adapters::StorageAccessRecorder::new(f.storage.clone(), f.cache.clone())
+            .with_clock(Arc::new(crate::time::ManualClock::new(123)))
+            .with_completion(owner.clone()),
+    );
+    let mut selected = engine
+        .get_contract(
+            point_request(id, false),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    assert_eq!(selected.http_status, 200);
+    for access in [false, true] {
+        selected.envelope.data.as_mut().unwrap().record_access = access;
+        let reserve = if access {
+            POINT_EVIDENCE_RESERVE
+        } else {
+            POINT_FRAME_RESERVE
+        };
+        let limit = serde_json::to_vec(&selected.mcp()).unwrap().len() + reserve;
+        let before = bytes(&f);
+        let denied = engine
+            .get_contract(point_request(id, access), limit - 1)
+            .await;
+        assert_eq!(
+            denied.envelope.error.as_ref().unwrap().code,
+            "RESPONSE_TOO_LARGE"
+        );
+        assert!(denied.observation_receipts.is_empty() && denied.envelope.data.is_none());
+        assert_eq!(bytes(&f), before);
+        // The typed error frame itself fits this actual boundary budget.
+        assert!(serde_json::to_vec(&denied.mcp()).unwrap().len() + POINT_FRAME_RESERVE < limit);
+        let prior_events = f.record(id).unwrap().access_history.len();
+        let accepted = engine.get_contract(point_request(id, access), limit).await;
+        assert_eq!(accepted.http_status, 200, "{accepted:?}");
+        assert!(serde_json::to_vec(&accepted.mcp()).unwrap().len() + POINT_FRAME_RESERVE <= limit);
+        assert_eq!(
+            f.record(id).unwrap().access_history.len(),
+            prior_events + usize::from(access)
+        );
+        if access {
+            assert_eq!(
+                accepted.envelope.receipt.as_ref(),
+                accepted.observation_receipts.first()
+            );
+            assert_eq!(accepted.observation_receipts.len(), 1);
+            assert!(accepted.envelope.readiness.as_ref().unwrap().ready);
+        } else {
+            assert_eq!(bytes(&f), before);
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,6 +1,6 @@
 {
   "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
-  "status": "85ca focused13PASS/1historical ignored; added actual cancellation/close and canonical-applied outbox tests not yet executed",
+  "status": "85b ownership focus16PASS/1historical ignored; response algebra/tests and bounded input diagnostic not yet executed",
   "files": [
     {
       "path": "src/api/adapters.rs",
@@ -48,7 +48,7 @@
     },
     {
       "path": "src/search/get_wire_tests.rs",
-      "sha256": "e34798335c5018fbc182a64b4cccb9fefa993cdd2e4f7b3fc18d7d5e283d5319"
+      "sha256": "9c8e2ad8a2064092800d87dfc98d4cee70c033980fa5c779c881cc6430f0a267"
     },
     {
       "path": "src/search/pipeline.rs",
@@ -64,7 +64,11 @@
     },
     {
       "path": "src/serialization/get.rs",
-      "sha256": "236c7e69db157601cf29c883424a0cb7a983ebac35db61767db602713ba42a3b"
+      "sha256": "4e8fc274a6122192108782c30fb62f7cfb2b96653fbb4753432f82f8e8313fc2"
+    },
+    {
+      "path": "src/serialization/get_tests.rs",
+      "sha256": "6e5a87b0360f1ad3e989a3bd737856eee06d44ab432f75509e78368813f1833a"
     },
     {
       "path": "src/serialization/lifecycle_api1.rs",

@@ -6,6 +6,15 @@ use crate::storage::control::{GenerationRef, WriteReceipt};
 use serde::Serialize;
 use serde_json::Value;
 
+// One observed UUID: two receipt aliases, each <=4096 compact JSON bytes;
+// fixed completion/error/readiness fields <=8192. MCP contains structured JSON
+// plus its escaped compact text (together <=3x); u64 daemon framing <=1024.
+// 3 * (2 * 4096 + 8192) + 1024 = 50176 < 65536. The derivation and typed
+// maximal-state checks are in get_tests.rs and RESPONSE-BOUND.md. This is not
+// a bound for arbitrary outer MCP IDs or a future receivedEvidence container.
+pub(crate) const POINT_EVIDENCE_RESERVE: usize = 64 * 1024;
+pub(crate) const POINT_FRAME_RESERVE: usize = 1024;
+
 #[derive(Debug, Clone)]
 pub struct GetRequest {
     #[cfg(test)]
@@ -200,7 +209,17 @@ impl GetReply {
         }
     }
 
-    pub(crate) fn input(error: InputError) -> Self {
+    pub(crate) fn input(mut error: InputError) -> Self {
+        // A caller-controlled unknown key may expand when JSON-pointer escaped.
+        // Reject the whole request with a bounded diagnostic, before any work;
+        // never truncate a committed receipt or a selected payload to make room.
+        if error.field.len() > 256 {
+            error = input(
+                error.code,
+                "",
+                "get argument field exceeds diagnostic capacity",
+            );
+        }
         Self::from_failure(super::query_response::QueryReply::input(error))
     }
 
@@ -268,7 +287,11 @@ impl GetReply {
         // The RPC caller must supply its negotiated private frame limit, not
         // merely the larger outer daemon ceiling. Arbitrary outer MCP IDs are
         // not certified by this internal reply check.
-        let reserve = if will_observe { 64 * 1024 } else { 1024 };
+        let reserve = if will_observe {
+            POINT_EVIDENCE_RESERVE
+        } else {
+            POINT_FRAME_RESERVE
+        };
         serde_json::to_vec(&self.mcp())
             .ok()
             .and_then(|bytes| bytes.len().checked_add(reserve))
@@ -296,3 +319,7 @@ impl GetReply {
         self
     }
 }
+
+#[cfg(test)]
+#[path = "get_tests.rs"]
+mod tests;
