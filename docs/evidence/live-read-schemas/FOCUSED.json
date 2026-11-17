@@ -1,0 +1,50 @@
+{
+  "live_read_schemas_": {
+    "sha256": "6ccb76789ff6427a2a93584212235bf7629e6d57b4e337bbae9d81537a51a173",
+    "bytes": 26522,
+    "summary": [
+      "    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 31s",
+      "     Running unittests src/lib.rs (/target/debug/deps/recalld-8b31964f64b2cfc4)",
+      "running 3 tests",
+      "test mcp::tool_schema::read_tests::live_read_schemas_actual_readers_eras_counts_and_false_access ... ok",
+      "test mcp::tool_schema::read_tests::live_read_schemas_http_typed_label_and_old_coverage_specimens ... ok",
+      "test mcp::tool_schema::read_tests::live_read_schemas_actual_dense_scan_reports_sample_truncation ... ok",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1769 filtered out; finished in 0.99s"
+    ]
+  },
+  "live_metadata_schemas_": {
+    "sha256": "0032c29346f008e774bfec770cb2d3ec2dd9dda252c08c48cedb0be80a56cf0d",
+    "bytes": 26481,
+    "summary": [
+      "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s",
+      "     Running unittests src/lib.rs (/target/debug/deps/recalld-8b31964f64b2cfc4)",
+      "running 3 tests",
+      "test mcp::tool_schema::tests::live_metadata_schemas_actual_http_mcp_catalog_and_output ... ok",
+      "test api::handlers::validation_tests::live_metadata_schemas_rest_context_and_existing_stats_shape ... ok",
+      "test mcp::tool_schema::tests::live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation ... ok",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1769 filtered out; finished in 0.53s"
+    ]
+  },
+  "similar_v2_actual_legacy_false_flag_uses_bound_scope_without_current_rewrite": {
+    "sha256": "20e488a8d01b8da991db6e606f272ebadb1708934cdc513e8c4583955c8f12dc",
+    "bytes": 26297,
+    "summary": [
+      "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s",
+      "     Running unittests src/lib.rs (/target/debug/deps/recalld-8b31964f64b2cfc4)",
+      "running 1 test",
+      "test search::pipeline::read_view::tests::similar_v2_actual_legacy_false_flag_uses_bound_scope_without_current_rewrite ... ok",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1771 filtered out; finished in 7.73s"
+    ]
+  },
+  "session_context_resolves_each_bridge": {
+    "sha256": "cefc2319acad5e8ea4ac2be478f4bd99ac1eeabd5de739e8ac5ba9bd1a50fb8a",
+    "bytes": 26288,
+    "summary": [
+      "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s",
+      "     Running unittests src/lib.rs (/target/debug/deps/recalld-8b31964f64b2cfc4)",
+      "running 1 test",
+      "test mcp::resources::tests::session_context_resolves_each_bridge_without_public_caching_or_invented_identity ... ok",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1771 filtered out; finished in 0.23s"
+    ]
+  }
+}

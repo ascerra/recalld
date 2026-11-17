@@ -1260,7 +1260,7 @@ fn find_similar_memories_def() -> ToolInfo {
                 },
                 "sameNamespace": {
                     "type": "boolean",
-                    "description": "Legacy selector (default: true). The current single-mode adapter always uses the source record namespace, including when false. Ignored in scan mode.",
+                    "description": "Single mode: true (default) restricts results to the source namespace; false explicitly searches namespaces with a matching known embedding profile and dimension. Namespaces with unknown or incompatible profiles are excluded. Ignored in scan mode.",
                     "default": true
                 }
             }
