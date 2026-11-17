@@ -37,6 +37,7 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = ("scripts/combined-mcp-evaluation.py", "scripts/test_combined_mcp_evaluation.py", "scripts/test_combined_mcp_episode.py",
+         "tests/live_tool_schema_conformance.py", "tests/page_schema_conformance.py",
          # Exact retained format1/4 histories used by the admission/replay tests.
          'src/mcp/fixtures/legacy-compound-before.zip',
          'src/mcp/fixtures/legacy-compound-before.zip.json',
