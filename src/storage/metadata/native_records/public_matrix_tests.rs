@@ -381,7 +381,7 @@ async fn public_matrix_summary_extreme_clocks_sticky_permastore_and_forget() {
                 completion(&f).rebuild_all().await.unwrap();
                 assert_eq!(f.record(d.parent).unwrap().text_length, 0);
                 let receipt_state = receipts(&f);
-                let read = mcp(
+                let read = super::super::mcp(
                     &bridge,
                     "get_memory",
                     json!({"id": d.parent, "namespace": "native", "recordAccess": false}),
@@ -420,7 +420,7 @@ async fn public_matrix_summary_extreme_clocks_sticky_permastore_and_forget() {
             completion(&f).rebuild_all().await.unwrap();
             let (mut bridge, state) = public_adapters(&f, clock.clone());
             let remote = remote_lane(lane, &mut bridge).await;
-            let read = mcp(
+            let read = super::super::mcp(
                 &bridge,
                 "get_memory",
                 json!({"id": d.parent, "namespace": "native", "recordAccess": false}),
