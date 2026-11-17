@@ -358,3 +358,111 @@ fn prepared_get_rpc_scalar_expansion_and_received_evidence_stay_inside_outer_fra
         bytes.len()
     );
 }
+
+#[test]
+fn prepared_get_rpc_direct_typed_json_probe_preserves_valid_domain_float_bits() {
+    fn canonical(raw: &str) -> Option<GetReply> {
+        let reply: GetReply = serde_json::from_str(raw).ok()?;
+        (serde_json::to_string(&reply).ok()?.as_bytes() == raw.as_bytes()).then_some(reply)
+    }
+    let time = chrono::DateTime::<chrono::Utc>::MIN_UTC.timestamp_millis();
+    for bits in [0u32, 0x80000000, 1, 2, 0x007fffff, 0x00800000, 0x3f7fffff] {
+        let strength = f32::from_bits(bits);
+        let mut receipt = maximal_point_receipt();
+        let MutationOutcome::LifecycleExposureRecorded { transition } = &mut receipt.outcome else {
+            unreachable!()
+        };
+        transition.records[0].before.strength = strength.try_into().unwrap();
+        transition.records[0].after =
+            crate::storage::native_lifecycle::exposed(&transition.records[0].before, time).unwrap();
+        let captured = transition.capture_generation;
+        let state = transition.records[0].before.clone();
+        if let MutationOutcome::LifecycleExposureRecorded { transition } = &receipt.outcome {
+            transition.validate(&receipt, false).unwrap();
+        }
+        let mut reply = specimen();
+        reply.envelope.read_generation = Some(captured);
+        reply.envelope.receipt = Some(receipt.clone());
+        reply.observation_receipts = vec![receipt.clone()];
+        reply.envelope.readiness = Some(readiness(&receipt));
+        let data = reply.envelope.data.as_mut().unwrap();
+        data.evaluated_at = time;
+        data.memory.created_at = time;
+        data.memory.last_accessed_at = time;
+        data.memory.phase = DecayPhase::Summary;
+        data.memory.full_text = None;
+        data.memory.strength = strength;
+        data.memory.decay_strength = state.decay_strength.get();
+        data.memory.stability = state.stability.get();
+        let raw = serde_json::to_string(&reply).unwrap();
+        let decoded = canonical(&raw).expect("whole flattened GetReply must roundtrip exact bytes");
+        assert_eq!(
+            decoded
+                .envelope
+                .data
+                .as_ref()
+                .unwrap()
+                .memory
+                .strength
+                .to_bits(),
+            bits
+        );
+        assert_eq!(
+            decoded
+                .envelope
+                .data
+                .as_ref()
+                .unwrap()
+                .memory
+                .stability
+                .to_bits(),
+            f32::MAX.to_bits()
+        );
+        for alias in [
+            decoded.envelope.receipt.as_ref().unwrap(),
+            &decoded.observation_receipts[0],
+        ] {
+            let MutationOutcome::LifecycleExposureRecorded { transition } = &alias.outcome else {
+                unreachable!()
+            };
+            assert_eq!(transition.records[0].before.strength.get().to_bits(), bits);
+            assert_eq!(transition.records[0].after.strength.get().to_bits(), bits);
+            assert_eq!(
+                transition.records[0].before.stability.get().to_bits(),
+                f32::MAX.to_bits()
+            );
+            transition.validate(alias, false).unwrap();
+            let fragment = serde_json::to_string(alias).unwrap();
+            let received: WriteReceipt = serde_json::from_str(&fragment).unwrap();
+            assert_eq!(serde_json::to_string(&received).unwrap(), fragment);
+        }
+        eprintln!(
+            "direct typed GetReply + both tagged receipt aliases bits={bits:08x} bytes={} exact",
+            raw.len()
+        );
+        for replacement in ["1e999", "1e39", "NaN", "\"NaN\""] {
+            let needle = format!("\"strength\":{}", serde_json::to_string(&strength).unwrap());
+            let invalid = raw.replacen(&needle, &format!("\"strength\":{replacement}"), 1);
+            assert!(canonical(&invalid).is_none(), "{replacement}");
+        }
+        assert!(
+            canonical(&raw.replacen(
+                "\"contractVersion\":2",
+                "\"contractVersion\":2,\"contractVersion\":2",
+                1
+            ))
+            .is_none()
+        );
+        assert!(
+            canonical(&raw.replacen("\"memory\":{", "\"memory\":{\"unknown\":0,", 1)).is_none()
+        );
+        assert!(
+            canonical(&raw.replacen("\"records\":[{", "\"records\":[{\"unknown\":0,", 1)).is_none()
+        );
+        assert!(
+            canonical(&raw.replacen(&format!("\"evaluatedAt\":{time}"), "\"evaluatedAt\":1.5", 1))
+                .is_none()
+        );
+        assert!(canonical(&raw.replacen(&format!("\"createdAt\":{time},"), "", 1)).is_none());
+    }
+}
