@@ -52,7 +52,12 @@ impl Mode {
 }
 
 #[derive(Debug)]
-pub enum Reply {
+pub struct Reply {
+    pub(crate) inner: Content,
+}
+
+#[derive(Debug)]
+pub(crate) enum Content {
     /// Only an actual owner or a fully validated private result enters here.
     #[doc(hidden)]
     Point {
@@ -72,27 +77,39 @@ pub enum Reply {
 }
 impl Reply {
     pub(crate) fn point(reply: GetReply, timezone: chrono_tz::Tz, mode: Mode) -> Self {
-        Self::Point {
-            reply: Box::new(reply),
-            timezone,
-            native: mode == Mode::Native,
+        Self {
+            inner: Content::Point {
+                reply: Box::new(reply),
+                timezone,
+                native: mode == Mode::Native,
+            },
         }
     }
     pub(crate) fn unavailable(access: bool, sent: bool) -> Self {
-        Self::Unverified {
-            reply: Box::new(GetReply::remote_failure(access, sent, vec![])),
-            receipts_json: vec![],
+        Self::unverified(GetReply::remote_failure(access, sent, vec![]), vec![])
+    }
+    pub(crate) fn compatibility(value: Result<Option<MemoryRecord>, BridgeError>) -> Self {
+        Self {
+            inner: Content::Compatibility(value),
+        }
+    }
+    pub(crate) fn unverified(reply: GetReply, receipts_json: Vec<String>) -> Self {
+        Self {
+            inner: Content::Unverified {
+                reply: Box::new(reply),
+                receipts_json,
+            },
         }
     }
     pub(crate) fn mcp(self, id_spelling: &str, scoped: bool) -> ToolCallResult {
-        match self {
-            Self::Compatibility(result) => match result {
+        match self.inner {
+            Content::Compatibility(result) => match result {
                 Ok(Some(record)) => ToolCallResult::json(&record)
                     .unwrap_or_else(|_| ToolCallResult::error("Memory serialization failed")),
                 Ok(None) => ToolCallResult::error(format!("Memory not found: {id_spelling}")),
                 Err(error) => ToolCallResult::error(format!("Failed to get memory: {error}")),
             },
-            Self::Point {
+            Content::Point {
                 reply, timezone, ..
             } => {
                 if reply.http_status == 404 && reply.observation_receipts.is_empty() {
@@ -104,7 +121,7 @@ impl Reply {
                 }
                 project(&reply, timezone, &[])
             }
-            Self::Unverified {
+            Content::Unverified {
                 reply,
                 receipts_json,
             } => project(&reply, chrono_tz::UTC, &receipts_json),

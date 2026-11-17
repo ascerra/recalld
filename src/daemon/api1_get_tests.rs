@@ -27,7 +27,7 @@ fn input(id: crate::model::MemoryId, access: bool) -> Request {
         record_access: access,
     }
 }
-async fn fake_peer(value: Value, request: Request, capability: Value) -> Reply {
+pub(crate) async fn fake_peer(value: Value, request: Request, capability: Value) -> Reply {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("point-peer.sock");
     let listener = tokio::net::UnixListener::bind(&path).unwrap();
@@ -96,7 +96,7 @@ async fn ordinary_point_legacy_ghost_direct_rpc_preserve_payload_and_one_event()
         assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
         let n = f.record(id).unwrap().access_history.len();
         let reply = target.get_api1(input(id, true), response_limit()).await;
-        let Reply::Point { reply, native, .. } = reply else {
+        let wire::Content::Point { reply, native, .. } = reply.inner else {
             panic!("actual legacy point reply")
         };
         assert!(!native);
@@ -245,11 +245,14 @@ async fn ordinary_point_legacy_final_admission_keeps_exact_receipt_and_old_diagn
 async fn legacy_malformed_payload(full_text: bool) {
     let (f, id) = legacy(DecayPhase::Ghost).await;
     let adapter = f.storage_adapter();
-    let Reply::Point {
+    let wire::Content::Point {
         mut reply,
         timezone,
         ..
-    } = adapter.get_api1(input(id, false), response_limit()).await
+    } = adapter
+        .get_api1(input(id, false), response_limit())
+        .await
+        .inner
     else {
         panic!()
     };
@@ -265,7 +268,7 @@ async fn legacy_malformed_payload(full_text: bool) {
     )
     .await;
     assert!(
-        matches!(reply, Reply::Unverified { .. }),
+        matches!(reply.inner, wire::Content::Unverified { .. }),
         "malformed legacy payload was accepted: {reply:?}"
     );
 }
@@ -286,10 +289,10 @@ async fn ordinary_point_bad_capability_does_not_send_a_get() {
         json!("true"),
     )
     .await;
-    let Reply::Unverified {
+    let wire::Content::Unverified {
         reply,
         receipts_json,
-    } = result
+    } = result.inner
     else {
         panic!()
     };

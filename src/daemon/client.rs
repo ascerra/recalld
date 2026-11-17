@@ -223,6 +223,13 @@ impl ExchangeError {
 /// rejected before a single byte reaches the socket, so it cannot corrupt
 /// the stream for subsequent calls.
 pub struct DaemonClient {
+    #[cfg(test)]
+    api1_get_pause: std::sync::Mutex<
+        Option<(
+            std::sync::Arc<tokio::sync::Notify>,
+            std::sync::Arc<tokio::sync::Notify>,
+        )>,
+    >,
     socket_path: PathBuf,
     state: Mutex<ClientState>,
     /// Mirrors `state.conn.is_some()` so [`DaemonClient::is_connected`] can
@@ -258,6 +265,14 @@ impl DaemonClient {
                 // The attributed exchange rechecks capability under its mutex.
                 // A reconnect/downgrade here fails closed, never changes lanes.
                 drop(state);
+                #[cfg(test)]
+                {
+                    let pause = self.api1_get_pause.lock().unwrap().take();
+                    if let Some((entered, release)) = pause {
+                        entered.notify_one();
+                        release.notified().await;
+                    }
+                }
                 Api1GetExchange::Prepared(self.call_prepared(super::api1_get::GET, params).await)
             }
             Ok(false) => {
@@ -455,6 +470,8 @@ impl DaemonClient {
     pub async fn connect(socket_path: &Path) -> std::io::Result<Self> {
         let stream = UnixStream::connect(socket_path).await?;
         Ok(Self {
+            #[cfg(test)]
+            api1_get_pause: std::sync::Mutex::new(None),
             socket_path: socket_path.to_path_buf(),
             state: Mutex::new(ClientState {
                 conn: Some(Connection::new(stream)),

@@ -25,7 +25,7 @@ fn ordinary_adapter(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ordinary_point_native_receipt_and_owning_timezone_survive_actual_rpc() {
     use crate::mcp::bridge::StorageEngine as _;
-    use crate::serialization::get_api1::{Reply, Request};
+    use crate::serialization::get_api1::{Content, Request};
     for remote in [false, true] {
         let f = similar_fixture().await;
         let engine = Arc::new(f.engine);
@@ -55,11 +55,11 @@ async fn ordinary_point_native_receipt_and_owning_timezone_survive_actual_rpc() 
                 crate::daemon::api1_get::response_limit(),
             )
             .await;
-        let Reply::Point {
+        let Content::Point {
             reply,
             timezone: actual_timezone,
             native,
-        } = reply
+        } = reply.inner
         else {
             panic!("actual owned reply")
         };
@@ -190,7 +190,7 @@ async fn ordinary_point_native_unknown_mcp_rpc_keeps_operation_and_pending_root(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ordinary_point_native_old_alias_and_preobserve_budget_do_not_write() {
     use crate::mcp::bridge::StorageEngine as _;
-    use crate::serialization::get_api1::{Reply, Request};
+    use crate::serialization::get_api1::{Content, Request};
     let f = similar_fixture().await;
     let adapter = ordinary_adapter(&f.f, Arc::new(f.engine), f.clock.clone(), chrono_tz::UTC);
     f.clock.0.store(0, Ordering::SeqCst);
@@ -210,7 +210,7 @@ async fn ordinary_point_native_old_alias_and_preobserve_budget_do_not_write() {
             1024,
         )
         .await;
-    let Reply::Point { reply, .. } = reply else {
+    let Content::Point { reply, .. } = reply.inner else {
         panic!()
     };
     assert_ne!(reply.http_status, 200);
@@ -321,4 +321,252 @@ async fn ordinary_point_native_cancelled_graph_wait_retains_unresolved_work() {
     drop(lease);
     assert!(tracker.status().unresolved > 0);
     assert_eq!(f.f.record(f.foreign).unwrap().access_history.len(), count);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_point_native_publication_failure_mcp_rpc_keeps_full_typed_receipt() {
+    for remote in [false, true] {
+        let f = similar_fixture().await;
+        let n = f.f.record(f.foreign).unwrap().access_history.len();
+        let mut adapter =
+            ordinary_adapter(&f.f, Arc::new(f.engine), f.clock.clone(), chrono_tz::UTC);
+        Arc::get_mut(&mut adapter).unwrap().api1_before_barrier = Some(|owner| {
+            owner
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .invalidate_derived_view(crate::storage::publication::DerivedView::Fts);
+        });
+        let root = tempfile::tempdir().unwrap();
+        let (target, task): (Arc<dyn crate::mcp::bridge::StorageEngine>, _) = if remote {
+            let (target, task) = crate::daemon::server::native_lifecycle_test_remote(
+                adapter.clone(),
+                &root.path().join("publication.sock"),
+            )
+            .await;
+            (Arc::new(target), Some(task))
+        } else {
+            (adapter.clone(), None)
+        };
+        let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+        bridge.storage = target;
+        let result = crate::mcp::tools::dispatch_tool(
+            &bridge,
+            "get_memory",
+            serde_json::json!({"id":f.foreign.to_string()}),
+        )
+        .await;
+        assert_eq!(result.is_error, Some(true));
+        let value = result.structured_content.unwrap();
+        assert_eq!(value["commitState"], "committed");
+        assert_eq!(value["ready"], false);
+        assert!(!value.contains_key("data") && !value.contains_key("receivedEvidence"));
+        let receipt: crate::storage::control::WriteReceipt =
+            serde_json::from_value(value["receipt"].clone()).unwrap();
+        let aliases: Vec<crate::storage::control::WriteReceipt> =
+            serde_json::from_value(value["observationReceipts"].clone()).unwrap();
+        assert_eq!(aliases, vec![receipt.clone()]);
+        assert_eq!(value["operationId"], receipt.operation_id.to_string());
+        assert_eq!(f.f.record(f.foreign).unwrap().access_history.len(), n + 1);
+        assert_eq!(
+            f.f.storage
+                .read()
+                .unwrap()
+                .lookup_operation(
+                    receipt.store_id,
+                    crate::storage::control::MutationScope::Namespace(f.other),
+                    receipt.operation_id
+                )
+                .unwrap(),
+            Some(receipt)
+        );
+        assert_eq!(
+            f.f.storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .work_tracker()
+                .status()
+                .pending,
+            0
+        );
+        f.owner.complete().await.unwrap();
+        drop(bridge);
+        drop(adapter);
+        if let Some(task) = task {
+            tokio::time::timeout(std::time::Duration::from_secs(3), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_point_failed_rpc_decoder_preserves_real_raw_receipt_through_final_frame() {
+    use crate::daemon::protocol::{
+        DaemonResponse, MAX_MESSAGE_SIZE, read_framed_response, write_framed_message,
+    };
+    use crate::mcp::bridge::StorageEngine as _;
+    use crate::serialization::get_api1::{self as wire, Content, Request};
+    let f = similar_fixture().await;
+    let adapter = ordinary_adapter(&f.f, Arc::new(f.engine), f.clock.clone(), chrono_tz::UTC);
+    let request = Request {
+        id: f.foreign,
+        namespace: None,
+        record_access: true,
+    };
+    let result = adapter
+        .get_api1(request.clone(), crate::daemon::api1_get::response_limit())
+        .await;
+    let Content::Point {
+        reply, timezone, ..
+    } = result.inner
+    else {
+        panic!()
+    };
+    assert_eq!(reply.http_status, 200);
+    let canonical = serde_json::to_string(reply.envelope.receipt.as_ref().unwrap()).unwrap();
+    let mut malformed = wire::tagged(&reply, timezone, wire::Mode::Native);
+    malformed["httpStatus"] = serde_json::json!(503); // Inconsistent with its success body.
+    let before = bytes(&f.f);
+    let result =
+        crate::daemon::api1_get::tests::fake_peer(malformed, request, serde_json::json!(true))
+            .await;
+    let tool = result.mcp(&f.foreign.to_string(), false);
+    let (mut writer, mut reader) = tokio::net::UnixStream::pair().unwrap();
+    let sender = tokio::spawn(async move {
+        write_framed_message(
+            &mut writer,
+            &DaemonResponse::success(u64::MAX, serde_json::to_value(tool).unwrap()),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+    });
+    let value = read_framed_response(&mut reader, MAX_MESSAGE_SIZE)
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    sender.await.unwrap();
+    let text: serde_json::Value =
+        serde_json::from_str(value["content"][0]["text"].as_str().unwrap()).unwrap();
+    for body in [&text, &value["structuredContent"]] {
+        assert_eq!(body["commitState"], "unknown");
+        assert!(
+            body.get("receipt").is_none()
+                && body.get("operationId").is_none()
+                && body.get("readiness").is_none()
+        );
+        assert_eq!(
+            body["receivedEvidence"]["receiptsJson"],
+            serde_json::json!([canonical])
+        );
+        let typed: crate::storage::control::WriteReceipt = serde_json::from_str(
+            body["receivedEvidence"]["receiptsJson"][0]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_string(&typed).unwrap(), canonical);
+    }
+    assert_eq!(
+        bytes(&f.f),
+        before,
+        "malformed-peer probe never invokes another observer"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_point_capable_lost_reply_never_repeats_actual_native_exposure() {
+    use crate::daemon::protocol::{
+        DaemonResponse, MAX_MESSAGE_SIZE, read_framed_message, write_framed_message,
+    };
+    use crate::mcp::bridge::StorageEngine as _;
+    use crate::serialization::get_api1::{Content, Request};
+    let f = similar_fixture().await;
+    let count = f.f.record(f.foreign).unwrap().access_history.len();
+    let adapter = ordinary_adapter(&f.f, Arc::new(f.engine), f.clock.clone(), chrono_tz::UTC);
+    let root = tempfile::tempdir().unwrap();
+    let (backend, backend_task) = crate::daemon::server::native_lifecycle_test_remote(
+        adapter.clone(),
+        &root.path().join("backend.sock"),
+    )
+    .await;
+    let path = root.path().join("drop-reply.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let id = f.foreign;
+    let peer = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let ping = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(ping.method, "ping");
+        write_framed_message(&mut stream,&DaemonResponse::success(ping.id,
+            serde_json::json!({"protocolVersion":2,"maxMessageSize":MAX_MESSAGE_SIZE,"api1GetV1":true})),MAX_MESSAGE_SIZE).await.unwrap();
+        let get = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(get.method, crate::daemon::api1_get::GET);
+        assert_eq!(get.params["id"], id.to_string());
+        assert_eq!(get.params["originalContractVersion"], 1);
+        let result = backend
+            .get_api1(
+                Request {
+                    id,
+                    namespace: None,
+                    record_access: true,
+                },
+                crate::daemon::api1_get::response_limit(),
+            )
+            .await;
+        let Content::Point { reply, .. } = result.inner else {
+            panic!()
+        };
+        assert_eq!(reply.http_status, 200);
+        assert!(reply.envelope.readiness.as_ref().unwrap().ready);
+        let receipt = reply.envelope.receipt.unwrap();
+        drop(stream); // Actual owner completed; only the caller's reply is lost.
+        receipt
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = Arc::new(crate::daemon::bridge_adapters::RemoteStorageAdapter::new(
+        client,
+    ));
+    let result = crate::mcp::tools::dispatch_tool(
+        &bridge,
+        "get_memory",
+        serde_json::json!({"id":id.to_string()}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    let value = result.structured_content.unwrap();
+    assert_eq!(value["commitState"], "unknown");
+    assert!(value.get("operationId").is_none() && value.get("receipt").is_none());
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(3), peer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(f.f.record(id).unwrap().access_history.len(), count + 1);
+    assert_eq!(
+        f.f.storage
+            .read()
+            .unwrap()
+            .lookup_operation(
+                receipt.store_id,
+                crate::storage::control::MutationScope::Namespace(f.other),
+                receipt.operation_id
+            )
+            .unwrap(),
+        Some(receipt)
+    );
+    drop(bridge);
+    drop(adapter);
+    tokio::time::timeout(std::time::Duration::from_secs(3), backend_task)
+        .await
+        .unwrap()
+        .unwrap();
 }

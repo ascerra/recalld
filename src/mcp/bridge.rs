@@ -130,7 +130,7 @@ pub trait StorageEngine: Send + Sync {
         request: crate::serialization::get_api1::Request,
         _response_limit: usize,
     ) -> crate::serialization::get_api1::Reply {
-        crate::serialization::get_api1::Reply::Compatibility(
+        crate::serialization::get_api1::Reply::compatibility(
             self.get_memory(
                 request.id,
                 request.record_access,

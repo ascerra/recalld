@@ -53,8 +53,16 @@ impl QueryEngine {
         request: crate::serialization::get_api1::Request,
         response_limit: usize,
         timezone: chrono_tz::Tz,
+        #[cfg(test)] before_barrier: Option<fn(&crate::derived_completion::DerivedCompletion)>,
     ) -> crate::serialization::get::GetReply {
-        self.get_point_owned(request.point(), response_limit, Some(timezone))
+        let point = request.point();
+        #[cfg(test)]
+        let point = {
+            let mut point = point;
+            point.before_barrier = before_barrier;
+            point
+        };
+        self.get_point_owned(point, response_limit, Some(timezone))
             .await
     }
 

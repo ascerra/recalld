@@ -100,8 +100,8 @@ pub(crate) async fn dispatch(
         record_access: params["recordAccess"].as_bool().unwrap(),
     };
     let reply = storage.get_api1(request, response_limit()).await;
-    match reply {
-        Reply::Point {
+    match reply.inner {
+        wire::Content::Point {
             reply,
             timezone,
             native,
@@ -110,7 +110,7 @@ pub(crate) async fn dispatch(
             timezone,
             if native { Mode::Native } else { Mode::Legacy },
         )),
-        Reply::Unverified {
+        wire::Content::Unverified {
             reply,
             receipts_json,
         } if receipts_json.is_empty() => Ok(wire::tagged(&reply, chrono_tz::UTC, Mode::Native)),
@@ -132,7 +132,7 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
     let exchange = client.call_api1_get(params, &request).await;
     let exchange = match exchange {
         super::client::Api1GetExchange::Compatibility(value) => {
-            return Reply::Compatibility(value.and_then(|value| {
+            return Reply::compatibility(value.and_then(|value| {
                 serde_json::from_value(value).map_err(|e| BridgeError::Internal(e.to_string()))
             }));
         }
@@ -183,10 +183,7 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
             .warnings
             .push("UNVERIFIED_RECEIVED_EVIDENCE".into());
     }
-    Reply::Unverified {
-        reply: Box::new(reply),
-        receipts_json: evidence,
-    }
+    Reply::unverified(reply, evidence)
 }
 
 fn require(value: bool) -> Result<(), ()> {
@@ -254,6 +251,12 @@ fn decode_legacy(
     }
     // Historical Ghost gets expose the retained legacy payload and record an
     // event. Never substitute Native's Full/Summary predicate here.
+    require(memory.summary.is_some())?;
+    if memory.phase == DecayPhase::Ghost {
+        // Actual legacy hydration never loads Ghost text, even if old text
+        // bytes remain in an append-only file. Its retained summary is distinct.
+        require(memory.full_text.is_none())?;
+    }
     if memory.phase == DecayPhase::Tombstone {
         require(
             memory.summary.as_ref().is_none_or(String::is_empty)
@@ -396,4 +399,4 @@ fn acquire(raw: &str, limit: usize) -> Result<Vec<String>, ()> {
 
 #[cfg(test)]
 #[path = "api1_get_tests.rs"]
-mod tests;
+pub(crate) mod tests;

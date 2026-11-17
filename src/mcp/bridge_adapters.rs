@@ -1155,6 +1155,8 @@ impl bridge::SearchPipeline for McpSearchAdapter {
 
 /// Adapts `RedbStorageEngine` + subsystems to the MCP `StorageEngine` trait.
 pub struct McpStorageAdapter {
+    #[cfg(test)]
+    pub(crate) api1_before_barrier: Option<fn(&crate::derived_completion::DerivedCompletion)>,
     catalog_profile: Option<crate::serialization::session::ActiveEmbedding>,
     /// Test-only, per-instance fault after completed children and known root
     /// finish: 1 invalidates FTS publication; 2 withdraws the canonical handle.
@@ -1527,6 +1529,8 @@ impl McpStorageAdapter {
         cache.bind_storage(&storage);
         Self {
             catalog_profile: None,
+            #[cfg(test)]
+            api1_before_barrier: None,
             native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             #[cfg(test)]
@@ -2440,7 +2444,13 @@ impl bridge::StorageEngine for McpStorageAdapter {
             };
             return Reply::point(
                 engine
-                    .get_api1_point(request, response_limit, self.timezone)
+                    .get_api1_point(
+                        request,
+                        response_limit,
+                        self.timezone,
+                        #[cfg(test)]
+                        self.api1_before_barrier,
+                    )
                     .await,
                 self.timezone,
                 Mode::Native,

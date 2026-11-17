@@ -458,3 +458,77 @@ async fn api1_point_raw_escaping_and_exact_acquisition_limits() {
         escaped.len()
     );
 }
+
+#[test]
+fn ordinary_point_production_emitter_last_admitted_payload_keeps_full_completion() {
+    use crate::serialization::get_api1 as wire;
+    let limit = crate::daemon::api1_get::response_limit();
+    assert_eq!(limit, raw_limit().0);
+    let timezone = "America/Argentina/ComodRivadavia"
+        .parse::<chrono_tz::Tz>()
+        .unwrap();
+    let mut reply = encoding_specimen();
+    let mut low = 0;
+    let mut high = limit;
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        reply.envelope.data.as_mut().unwrap().memory.full_text = Some("\\".repeat(mid));
+        if wire::fits(&reply, timezone, wire::Mode::Native, limit, true) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    for n in [low - 1, low, low + 1] {
+        reply.envelope.data.as_mut().unwrap().memory.full_text = Some("\\".repeat(n));
+        assert_eq!(
+            wire::fits(&reply, timezone, wire::Mode::Native, limit, true),
+            n <= low
+        );
+    }
+    reply.envelope.data.as_mut().unwrap().memory.full_text = Some("\\".repeat(low));
+    // Maximal typed encoding specimen, not a fabricated committed history.
+    let receipt = maximal_point_receipt();
+    reply.envelope.receipt = Some(receipt.clone());
+    reply.observation_receipts = vec![receipt.clone()];
+    reply.envelope.readiness = Some(readiness(&receipt));
+    assert!(wire::fits(
+        &reply,
+        timezone,
+        wire::Mode::Native,
+        limit,
+        false
+    ));
+    let tagged = serde_json::to_vec(&DaemonResponse::success(
+        u64::MAX,
+        wire::tagged(&reply, timezone, wire::Mode::Native),
+    ))
+    .unwrap();
+    assert!(tagged.len() + 4 <= limit);
+    for error in [
+        crate::storage::StorageError::RecoveryRequired("not echoed".repeat(4096)),
+        crate::storage::StorageError::WorkerOutcomeUnknown("not echoed".into()),
+    ] {
+        let failure = GetReply::failure(SearchError::Observation(
+            crate::decay::observation::ObservationError::storage(
+                crate::storage::StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(error),
+                },
+                vec![],
+            ),
+        ));
+        let public = wire::project(&failure, timezone, &[]);
+        assert!(serde_json::to_vec(&public).unwrap().len() < wire::COMPLETION_RESERVE);
+        let typed: WriteReceipt =
+            serde_json::from_value(public.structured_content.unwrap()["receipt"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_string(&typed).unwrap(),
+            serde_json::to_string(&receipt).unwrap()
+        );
+    }
+    eprintln!(
+        "production API1 emitter limit={limit} lastbackslashes={low} complete_tag={} ownerTz={timezone}",
+        tagged.len()
+    );
+}
