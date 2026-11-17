@@ -170,8 +170,10 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
                 && reply.observation_receipts.iter().all(|receipt| {
                     matches!(
                         (mode, &receipt.outcome),
-                        (Mode::Native, MutationOutcome::LifecycleExposureRecorded { .. })
-                            | (Mode::Legacy, MutationOutcome::ExposuresRecorded { .. })
+                        (
+                            Mode::Native,
+                            MutationOutcome::LifecycleExposureRecorded { .. }
+                        ) | (Mode::Legacy, MutationOutcome::ExposuresRecorded { .. })
                     )
                 })
             {
