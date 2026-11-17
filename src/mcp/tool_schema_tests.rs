@@ -112,7 +112,15 @@ async fn live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation
                             .contains("does not record access")
                     );
                 }
-                let has_schema = modern && matches!(name, "namespace_stats" | "list_tags");
+                let has_schema = modern
+                    && matches!(
+                        name,
+                        "namespace_stats"
+                            | "list_tags"
+                            | "list_memories"
+                            | "recall_memories"
+                            | "find_similar_memories"
+                    );
                 assert_eq!(tool.get("outputSchema").is_some(), has_schema, "{name}");
                 if has_schema {
                     schemas.insert(name.to_owned(), tool["outputSchema"].clone());
