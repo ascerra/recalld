@@ -64,6 +64,8 @@ impl QueryEngine {
                     request.namespace.as_deref(),
                     request.record_access,
                     &work,
+                    #[cfg(test)]
+                    request.copy_pause.clone(),
                 ),
             )
             .await
@@ -177,6 +179,7 @@ impl QueryEngine {
         namespace: Option<&str>,
         record_access: bool,
         work: &WorkTicket,
+        #[cfg(test)] copy_pause: Option<Arc<crate::serialization::get::PointCopyPause>>,
     ) -> Result<(PointSelection, Option<GraphLease>)> {
         let (owner, _) = self.coherent_owner.as_ref().ok_or_else(|| {
             SearchError::Unavailable("prepared get requires the actual publication owner".into())
@@ -203,6 +206,8 @@ impl QueryEngine {
                 publication.clone(),
                 None,
                 None,
+                #[cfg(test)]
+                copy_pause.clone(),
             )
             .await?;
         match first {
@@ -220,6 +225,8 @@ impl QueryEngine {
                         publication,
                         Some(graph.clone()),
                         Some(at),
+                        #[cfg(test)]
+                        copy_pause,
                     )
                     .await?
                 {
@@ -242,6 +249,7 @@ impl QueryEngine {
         publication: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
         graph: Option<GraphLease>,
         expected: Option<GenerationRef>,
+        #[cfg(test)] copy_pause: Option<Arc<crate::serialization::get::PointCopyPause>>,
     ) -> Result<PointAttempt> {
         let (owner, _) = self.coherent_owner.as_ref().expect("checked point owner");
         let storage = owner.storage.clone();
@@ -301,13 +309,18 @@ impl QueryEngine {
                     } else {
                         None
                     };
-                    Ok(PointAttempt::Captured(PointSelection {
+                    let selected = PointSelection {
                         at,
                         evaluated_at: clock.now_millis(),
                         payload,
                         donors,
                         intent,
-                    }))
+                    };
+                    #[cfg(test)]
+                    if let Some(pause) = copy_pause {
+                        pause.pause()?;
+                    }
+                    Ok(PointAttempt::Captured(selected))
                 })
                 .map_err(read_error);
             storage.meta_store().finish_work(child);

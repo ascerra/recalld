@@ -15,6 +15,8 @@ pub struct GetRequest {
         std::sync::Arc<tokio::sync::Notify>,
         std::sync::Arc<tokio::sync::Notify>,
     )>,
+    #[cfg(test)]
+    pub(crate) copy_pause: Option<std::sync::Arc<PointCopyPause>>,
     pub id: MemoryId,
     pub namespace: Option<String>,
     pub record_access: bool,
@@ -113,11 +115,50 @@ impl GetRequest {
             before_barrier: None,
             #[cfg(test)]
             before_observation: None,
+            #[cfg(test)]
+            copy_pause: None,
             id,
             namespace,
             record_access,
             original_contract_version: 2,
         })
+    }
+}
+
+/// Owned test latch; bounded fallback prevents a cancelled test from stranding
+/// a blocking worker. It is never a serving admission or authority mechanism.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct PointCopyPause {
+    pub entered: tokio::sync::Notify,
+    released: std::sync::Mutex<bool>,
+    wake: std::sync::Condvar,
+    pub timed_out: std::sync::atomic::AtomicBool,
+}
+#[cfg(test)]
+impl PointCopyPause {
+    pub(crate) fn pause(&self) -> Result<(), crate::storage::StorageError> {
+        self.entered.notify_one();
+        let (released, _) = self
+            .wake
+            .wait_timeout_while(
+                self.released.lock().unwrap(),
+                std::time::Duration::from_secs(5),
+                |v| !*v,
+            )
+            .unwrap();
+        if !*released {
+            self.timed_out
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            return Err(crate::storage::StorageError::RecoveryRequired(
+                "test point-copy latch expired".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.wake.notify_all();
     }
 }
 

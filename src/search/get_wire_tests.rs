@@ -119,6 +119,83 @@ async fn prepared_get_actual_canonical_pending_rejects_before_clock_or_observati
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_actual_canonical_applied_outbox_does_not_block_plain_copy() {
+    let f = Fixture::new();
+    let owner = owner(&f);
+    let engine = payload_engine(&f, &owner);
+    let id = fixed_id(9822);
+    // Use the real commit-first writer, stopping before derived completion.
+    let receipt = f
+        .storage
+        .write()
+        .unwrap()
+        .insert_memory_with_receipt(
+            &MutationContext::unkeyed(NamespaceId::new(1)),
+            &InsertMemory {
+                id: Some(id),
+                summary: "pending publication".into(),
+                full_text: Some("canonical text while derived views are dirty".into()),
+                tags: vec![],
+                initial_stability: None,
+                created_at: Some(100),
+                embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
+                parent_id: None,
+                supersedes: None,
+            },
+            &[],
+            100,
+        )
+        .unwrap();
+    {
+        let storage = f.storage.read().unwrap();
+        let pending = storage.meta_store().pending_effects().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].receipt, receipt);
+        assert!(pending[0].canonical_applied);
+        assert!(storage.meta_store().needs_effects_rebuild());
+        assert!(storage.meta_store().effects_stamp().is_err());
+    }
+    let before = bytes(&f);
+    let reply = engine
+        .get_contract(
+            point_request(id, false),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    assert_eq!(reply.http_status, 200, "{reply:?}");
+    assert_eq!(
+        reply.envelope.data.unwrap().memory.full_text.as_deref(),
+        Some("canonical text while derived views are dirty")
+    );
+    assert_eq!(
+        reply.envelope.read_generation.unwrap().generation,
+        receipt.committed_generation
+    );
+    assert!(reply.envelope.readiness.is_none() && reply.observation_receipts.is_empty());
+    assert_eq!(bytes(&f), before);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .len(),
+        1
+    );
+    owner.complete().await.unwrap();
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_get_actual_direct_mcp_rest_share_captured_payload_and_scope() {
     let f = Fixture::new();
     let owner = owner(&f);
@@ -710,6 +787,195 @@ async fn prepared_get_actual_unknown_commit_retains_identity_and_reopens_committ
             .len(),
         initial + 1
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_actual_cancel_keeps_copy_leases_until_worker_exit() {
+    use crate::serialization::get::PointCopyPause;
+    // Always release on an assertion failure as well as the successful path.
+    struct Release(Arc<PointCopyPause>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.release();
+        }
+    }
+    let f = similar_fixture().await;
+    let engine = Arc::new(f.engine);
+    let before = bytes(&f.f);
+    let before_record = f.f.record(f.foreign).unwrap();
+    let at =
+        f.f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref();
+    let tracker = f.f.storage.read().unwrap().meta_store().work_tracker();
+    let publication =
+        f.f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .derived_publication
+            .clone();
+    let storage_refs = Arc::strong_count(&f.f.storage);
+    let pause = Arc::new(PointCopyPause::default());
+    let release = Release(pause.clone());
+    let mut request = point_request(f.foreign, true);
+    request.copy_pause = Some(pause.clone());
+    let reader = engine.clone();
+    let task = tokio::spawn(async move {
+        reader
+            .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), pause.entered.notified())
+        .await
+        .unwrap();
+    assert!(f.f.storage.try_write().is_err());
+    assert!(f.f.graph.try_write().is_err());
+    assert!(publication.try_write().is_err());
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    // Cancelling the await must not release leases owned by spawn_blocking.
+    assert!(f.f.storage.try_write().is_err());
+    assert!(f.f.graph.try_write().is_err());
+    assert!(publication.try_write().is_err());
+    assert_eq!(tracker.status().unresolved, 1);
+    drop(release);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if Arc::strong_count(&f.f.storage) == storage_refs
+                && f.f.storage.try_write().is_ok()
+                && f.f.graph.try_write().is_ok()
+                && publication.try_write().is_ok()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!pause.timed_out.load(Ordering::SeqCst));
+    assert_eq!(tracker.status().pending, 1);
+    assert_eq!(tracker.status().unresolved, 1);
+    assert_eq!(bytes(&f.f), before);
+    assert_eq!(f.clock.0.load(Ordering::SeqCst), 1);
+    assert!(
+        f.owner
+            .readiness_barrier(at, Instant::now() + Duration::from_millis(50))
+            .await
+            .is_err()
+    );
+    // The timeout may return before the closer's worker drops its capture.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !tracker.status().admission_open {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let id = f.foreign;
+    drop(engine);
+    drop(f.owner);
+    let root = f.f.close();
+    let storage = crate::storage::RedbStorageEngine::open_native(root.path()).unwrap();
+    assert_eq!(storage.control_state().unwrap().generation_ref(), at);
+    assert_eq!(
+        storage.get_record(id).unwrap().unwrap().to_bytes(),
+        before_record.to_bytes()
+    );
+    assert_eq!(storage.meta_store().work_tracker().status().pending, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_actual_close_accepts_existing_root_descendants_and_keeps_receipt() {
+    let f = similar_fixture().await;
+    let at =
+        f.f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .generation_ref();
+    let initial_events = f.f.record(f.foreign).unwrap().access_history.len();
+    let tracker = f.f.storage.read().unwrap().meta_store().work_tracker();
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let mut request = point_request(f.foreign, true);
+    request.before_observation = Some((entered.clone(), release.clone()));
+    let engine = Arc::new(f.engine);
+    let reader = engine.clone();
+    let task = tokio::spawn(async move {
+        reader
+            .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    let owner = f.owner.clone();
+    let closing = tokio::spawn(async move { owner.readiness_barrier(at, deadline()).await });
+    let watching = tracker.clone();
+    tokio::task::spawn_blocking(move || watching.wait_until_closed())
+        .await
+        .unwrap();
+    // Release before assertions so an assertion failure cannot strand the task.
+    let rejected_root = f.owner.accept_work(None).is_err();
+    let still_draining = !closing.is_finished();
+    release.notify_one();
+    assert!(rejected_root && still_draining);
+    let reply = tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap();
+    let ready = tokio::time::timeout(Duration::from_secs(10), closing)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let receipt = reply
+        .envelope
+        .receipt
+        .as_ref()
+        .expect("full known exposure receipt");
+    assert_eq!(reply.observation_receipts, vec![receipt.clone()]);
+    assert_eq!(reply.envelope.read_generation, Some(at));
+    match reply.http_status {
+        200 => assert!(reply.envelope.readiness.as_ref().unwrap().ready),
+        503 => {
+            // Two barriers may race after the accepted root finishes. A losing
+            // controller must keep the known receipt and withhold the payload.
+            assert!(reply.envelope.data.is_none());
+            assert_eq!(
+                reply.envelope.error.as_ref().unwrap().commit_state,
+                crate::serialization::contract::CommitState::Committed
+            );
+        }
+        _ => panic!("unexpected point outcome: {reply:?}"),
+    }
+    assert!(ready.ready && ready.committed_generation >= receipt.committed_generation);
+    assert_eq!(
+        f.f.storage
+            .read()
+            .unwrap()
+            .lookup_operation(
+                receipt.store_id,
+                crate::storage::control::MutationScope::Namespace(f.other),
+                receipt.operation_id
+            )
+            .unwrap(),
+        Some(receipt.clone())
+    );
+    assert_eq!(
+        f.f.record(f.foreign).unwrap().access_history.len(),
+        initial_events + 1
+    );
+    assert_eq!(f.clock.0.load(Ordering::SeqCst), 1);
+    assert_eq!(tracker.status().pending, 0);
+    assert_eq!(tracker.status().unresolved, 0);
+    assert!(tracker.status().admission_open);
 }
 
 #[test]

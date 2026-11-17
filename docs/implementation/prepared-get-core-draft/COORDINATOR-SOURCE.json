@@ -1,6 +1,6 @@
 {
   "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
-  "status": "source reviewed; first-focus702 passed12/1ignored; policy counterexampled66 failed1; new typed cause not executed",
+  "status": "85ca focused13PASS/1historical ignored; added actual cancellation/close and canonical-applied outbox tests not yet executed",
   "files": [
     {
       "path": "src/api/adapters.rs",
@@ -44,11 +44,11 @@
     },
     {
       "path": "src/search/get_wire.rs",
-      "sha256": "7120f33369e6f32fef390cbc113c42c4dddcb5a75f7af93e5f902d9d1cd1ab2d"
+      "sha256": "d6baf6b3d0ba9260e1cbbeb3dc7dd6faa36ed7f28aa5cb5c39322174973d2f1d"
     },
     {
       "path": "src/search/get_wire_tests.rs",
-      "sha256": "2f08a7a220e68cb6433575064ea897dec78c5c6634fb7cfa195d4b73b7accbd6"
+      "sha256": "e34798335c5018fbc182a64b4cccb9fefa993cdd2e4f7b3fc18d7d5e283d5319"
     },
     {
       "path": "src/search/pipeline.rs",
@@ -64,7 +64,7 @@
     },
     {
       "path": "src/serialization/get.rs",
-      "sha256": "5279cf8bb84157599aef160a0668495361733cdaf744f30754a0d43641fa6b10"
+      "sha256": "236c7e69db157601cf29c883424a0cb7a983ebac35db61767db602713ba42a3b"
     },
     {
       "path": "src/serialization/lifecycle_api1.rs",

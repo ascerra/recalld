@@ -20,9 +20,15 @@ First compile atde44083848a96d2a64e8f22a74b601728a570225 failed with two E0631 W
 
 ## Remaining before final proof/publication
 
-- Native policy change with unchanged record token (where an actual valid writer can produce it), cancellation/close ordering, real canonical_applied+derived_dirty outbox admission, and complete boundary-size tests.
+- Cancellation/close ordering, real canonical_applied+derived_dirty outbox admission, and complete boundary-size tests. The actual native policy writer changes both policy and record tokens; its preserved RED and typed409 correction are recorded below. No artificial policy-only history is claimed.
 - The current64KiB single-exposure evidence reserve is a draft bound, NOT yet proved. Derive maximal typed exposure/state/history-event/receipt aliases and readiness/error encodings, exact escaping and private frame allowance; test each real transport frame. Do not treat existing query reserve as get proof.
 - Shared daemon handoff is still unreleased. R1 is now on actualmain200; consume that validated parent only when its connection primitive is used. R2 is not a convenience dependency. Malformed-peer full received evidence must be retained without becoming attributable current-get commitment. No remote get or arbitrary outer request-ID framing guarantee yet.
 - Appropriate frozen full/fmt/Clippy, exact-head CI and owner review after the complete actual consumer. No partial READY or public2/native startup claim.
 
 Cleanup: one owned active cache/target exists at /tmp/recalld-curie-o1-build. Only compressed dependency archives+registry index (~105MiB) were copied once; no target/source cache clone or network fetch. No bytes released/deleted. Sole central cleanup ownership remains unchanged.
+
+## Typed conflict correction and ownership test draft
+
+Source85ca326fd0c889bbac824026030cd2195c28b0b3 passed13 focused/1historical ignored; see [typed conflict seal](../../evidence/prepared-get/typed-conflict-focus/REPORT.md). Generic query mapping and serialized ObservationError remain unchanged; only prepared get uses the internal typed cause.
+
+The next test-only hook is a per-request bounded blocking copy latch, retaining actual publication/graph/engine leases after caller cancellation. New tests cover detached-worker exit, unresolved-root barrier failure and strict reopen; actual admission close followed by descendants under the original root and exact known receipt; and real insertion outbox canonical_applied=true with derived_dirty=true allowing a false materialized point copy without acknowledging the outbox. These new tests are not yet executed. No shared RPC edits, new dependency or READY claim.
