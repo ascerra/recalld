@@ -1,0 +1,286 @@
+{
+  "CONTAINER.json": {
+    "sha256": "65a8d7b4a0930854ad347739b267ddec161744dc30efa6c1a51615b37654c0a4",
+    "bytes": 1336
+  },
+  "EXECUTABLES-AFTER.json": {
+    "sha256": "3b5f48b91173429642bc0554a619db1077f0103f4b7cb70c6c50809e2c8b3c1a",
+    "bytes": 3248
+  },
+  "EXECUTABLES-BEFORE.json": {
+    "sha256": "a0b8effcc52bda48d2a308040a750fcbc16e9bd95d7e9e1fdd922b39aebddbeb",
+    "bytes": 3059
+  },
+  "FOCUSED.json": {
+    "sha256": "098d47387b57669feaa0c6035035b59175be2cd1f57326104c35e2a8488524a8",
+    "bytes": 2843
+  },
+  "METADATA-FIXTURE-PARITY.json": {
+    "sha256": "e11cb7331a286c7269fa11edd903b0e98c7c1ca29fa947cde8146110cfa8ec3a",
+    "bytes": 2068
+  },
+  "RAW-MANIFEST.json": {
+    "sha256": "ca43d5dff8c90289fb7f282cb74b988717b128981c3c6980f600597849ef33a0",
+    "bytes": 4175
+  },
+  "REPORT.md": {
+    "sha256": "81bc130447b789b579537e26ff447c9ac240ea9fe539a454cff5a95e7eea00b3",
+    "bytes": 7074
+  },
+  "RESULTS.json": {
+    "sha256": "cfc57a64f00e05dcf96ac67fd4c36ef67595fd0016c16101b121be0829dd9e52",
+    "bytes": 838
+  },
+  "SOURCE-AFTER.json": {
+    "sha256": "75fd885677e14559c2cf1e5da25f07a6d46acc2795350bcdccd31f178be2cc77",
+    "bytes": 144
+  },
+  "SOURCE.json": {
+    "sha256": "aecdb717957b757a1bcbd28e723ea9701cc899c4fb9ac5524ec1e0a3e0ff33a4",
+    "bytes": 54423
+  },
+  "cargo.txt": {
+    "sha256": "9562ed378541eafda18b74165d433e0134bdd672bac222acce660972dbbf0ec2",
+    "bytes": 329
+  },
+  "focus.sh": {
+    "sha256": "6f46f23e5455dd46079daf84b63582bb153403993b6c9b2e63e21a2186db478e",
+    "bytes": 956
+  },
+  "formal-metadata-full.log": {
+    "sha256": "eed317118395beb92ab7ffd12499a2b0c5f091b51cc25b12fda1b47a7ac9fff7",
+    "bytes": 65
+  },
+  "formal-metadata.log": {
+    "sha256": "eed317118395beb92ab7ffd12499a2b0c5f091b51cc25b12fda1b47a7ac9fff7",
+    "bytes": 65
+  },
+  "formal-read-full.log": {
+    "sha256": "9f85e535e430fd44bbbd7d7a7b6f5ddcab40a4ea53fdd4eec916fbcb183b4042",
+    "bytes": 64
+  },
+  "formal-read.log": {
+    "sha256": "9f85e535e430fd44bbbd7d7a7b6f5ddcab40a4ea53fdd4eec916fbcb183b4042",
+    "bytes": 64
+  },
+  "full-memory.events": {
+    "sha256": "23350926d105d440dfe2bf673d986959d557cda921625f42da78624d4b4be862",
+    "bytes": 74
+  },
+  "full-memory.peak": {
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+    "bytes": 11
+  },
+  "full-status.txt": {
+    "sha256": "ffe50c87789a99ba5c10a0e4b6833ec6a12d6cca1fdadec55ce3b5f08480ca4b",
+    "bytes": 41
+  },
+  "full-summary.log": {
+    "sha256": "0a335f9d978f75cb48ebb7a1c033485f756ae46d31f2336c0673b2f92f749e58",
+    "bytes": 3220
+  },
+  "full.sh": {
+    "sha256": "bf48665736ba30e7ee10b19251ed5039fa68fa2e991ddd5afd84266e0b96e3c9",
+    "bytes": 1940
+  },
+  "memory.events": {
+    "sha256": "8c54bece27222e1e5c9c25e458ee00ea46cd533b0413c1417507be15e0a33549",
+    "bytes": 74
+  },
+  "memory.peak": {
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+    "bytes": 11
+  },
+  "read-fixtures/reader-dense-ties-find_similar_memories.json": {
+    "sha256": "8aa3acf1c23df58660c659df7d5b174c8c5bdbff26d6922ccf9c0480a63e39bd",
+    "bytes": 16954
+  },
+  "read-fixtures/reader-false-default-recall_memories.json": {
+    "sha256": "e3750d0982ef5ce0821045fbf4517e816c5e56c296904be2159fdd5823d2b6c9",
+    "bytes": 3591
+  },
+  "read-fixtures/reader-false-empty-compact-recall_memories.json": {
+    "sha256": "59ba4e40f81e0b03df7f20c9972cb0610ffee8df58163b7b70415bb67035c0d0",
+    "bytes": 3488
+  },
+  "read-fixtures/reader-false-empty-full-recall_memories.json": {
+    "sha256": "59ba4e40f81e0b03df7f20c9972cb0610ffee8df58163b7b70415bb67035c0d0",
+    "bytes": 3488
+  },
+  "read-fixtures/reader-false-empty-list_memories.json": {
+    "sha256": "6f89380892f7e666753ea5749abf6a7c73c53a1d81f9835dd50abf7f0cd24ace",
+    "bytes": 1164
+  },
+  "read-fixtures/reader-false-first-list_memories.json": {
+    "sha256": "c161df7e631b0db39330b5baa001fd84cb8bb10448fa70a8b0f496a02d62d581",
+    "bytes": 1304
+  },
+  "read-fixtures/reader-false-full-all-recall_memories.json": {
+    "sha256": "9ab50c129012978b9f02ad43b9907b56acb9cd7bac1208499343e533e1d8dfa8",
+    "bytes": 4993
+  },
+  "read-fixtures/reader-false-full-recall_memories.json": {
+    "sha256": "02c688a445d53f34e71aa6192c273cbc6edbbebeb554d05b25b3f2df1821038a",
+    "bytes": 4246
+  },
+  "read-fixtures/reader-false-max-list_memories.json": {
+    "sha256": "6972af298470fdedfab63520d34c1cbdf8951e307246690a3ab655d35fec6259",
+    "bytes": 1590
+  },
+  "read-fixtures/reader-false-offset-list_memories.json": {
+    "sha256": "4e45aa03d32841b0e21c52424dde2ed23c042c2fdf4fcba3534eec149a2d77d7",
+    "bytes": 1304
+  },
+  "read-fixtures/reader-false-past-list_memories.json": {
+    "sha256": "634f68c02815f43bd4b8590a05058fb841615bdd918e5ce8af3794185d21ac8b",
+    "bytes": 1164
+  },
+  "read-fixtures/reader-false-scan-empty-find_similar_memories.json": {
+    "sha256": "a79adb9fcb2425d0f27faf7e5bde1c5048b41883419070a13cda298097b35ce0",
+    "bytes": 3703
+  },
+  "read-fixtures/reader-false-scan-find_similar_memories.json": {
+    "sha256": "4bbdd37884ddfe05fc45cade60c0bd03c4791059449288491455d380114103d3",
+    "bytes": 3931
+  },
+  "read-fixtures/reader-false-single-find_similar_memories.json": {
+    "sha256": "b6be0b8621ade7a501937158eff48c34d5a082e280407904eb48c0b857f22bef",
+    "bytes": 4138
+  },
+  "read-fixtures/reader-true-default-recall_memories.json": {
+    "sha256": "e3750d0982ef5ce0821045fbf4517e816c5e56c296904be2159fdd5823d2b6c9",
+    "bytes": 3591
+  },
+  "read-fixtures/reader-true-empty-compact-recall_memories.json": {
+    "sha256": "59ba4e40f81e0b03df7f20c9972cb0610ffee8df58163b7b70415bb67035c0d0",
+    "bytes": 3488
+  },
+  "read-fixtures/reader-true-empty-full-recall_memories.json": {
+    "sha256": "59ba4e40f81e0b03df7f20c9972cb0610ffee8df58163b7b70415bb67035c0d0",
+    "bytes": 3488
+  },
+  "read-fixtures/reader-true-empty-list_memories.json": {
+    "sha256": "6f89380892f7e666753ea5749abf6a7c73c53a1d81f9835dd50abf7f0cd24ace",
+    "bytes": 1164
+  },
+  "read-fixtures/reader-true-first-list_memories.json": {
+    "sha256": "c161df7e631b0db39330b5baa001fd84cb8bb10448fa70a8b0f496a02d62d581",
+    "bytes": 1304
+  },
+  "read-fixtures/reader-true-full-all-recall_memories.json": {
+    "sha256": "9ab50c129012978b9f02ad43b9907b56acb9cd7bac1208499343e533e1d8dfa8",
+    "bytes": 4993
+  },
+  "read-fixtures/reader-true-full-recall_memories.json": {
+    "sha256": "776948a558b4cd8a29aa560c9edb0d3d38d2026e37188225ebab1da8dfe7825a",
+    "bytes": 4246
+  },
+  "read-fixtures/reader-true-max-list_memories.json": {
+    "sha256": "6972af298470fdedfab63520d34c1cbdf8951e307246690a3ab655d35fec6259",
+    "bytes": 1590
+  },
+  "read-fixtures/reader-true-offset-list_memories.json": {
+    "sha256": "4e45aa03d32841b0e21c52424dde2ed23c042c2fdf4fcba3534eec149a2d77d7",
+    "bytes": 1304
+  },
+  "read-fixtures/reader-true-past-list_memories.json": {
+    "sha256": "634f68c02815f43bd4b8590a05058fb841615bdd918e5ce8af3794185d21ac8b",
+    "bytes": 1164
+  },
+  "read-fixtures/reader-true-scan-empty-find_similar_memories.json": {
+    "sha256": "a79adb9fcb2425d0f27faf7e5bde1c5048b41883419070a13cda298097b35ce0",
+    "bytes": 3703
+  },
+  "read-fixtures/reader-true-scan-find_similar_memories.json": {
+    "sha256": "4bbdd37884ddfe05fc45cade60c0bd03c4791059449288491455d380114103d3",
+    "bytes": 3931
+  },
+  "read-fixtures/reader-true-single-find_similar_memories.json": {
+    "sha256": "b6be0b8621ade7a501937158eff48c34d5a082e280407904eb48c0b857f22bef",
+    "bytes": 4138
+  },
+  "read-fixtures/specimen-absent-compact-recall_memories.json": {
+    "sha256": "6f673e809d0bf9ce5dd42d31f1349bebb1b9f9dd62d1450a67ba6e3262f205f4",
+    "bytes": 3612
+  },
+  "read-fixtures/specimen-absent-full-recall_memories.json": {
+    "sha256": "20831c4bd1b21c5e552a60b19db7130220032a56be2d4f549f450860a3e98495",
+    "bytes": 4105
+  },
+  "read-fixtures/specimen-absent-list_memories.json": {
+    "sha256": "d5a94e639e05c8f56839221acaf762f16be917b7c8c5793f797e14da2dc0be25",
+    "bytes": 1327
+  },
+  "read-fixtures/specimen-absent-old-scan-find_similar_memories.json": {
+    "sha256": "0e4326944d3e6120302acd8cc355a61e215ed025125958062ad58dd5a3289bae",
+    "bytes": 3882
+  },
+  "read-fixtures/specimen-absent-single-find_similar_memories.json": {
+    "sha256": "8c5e8571bf90fd86d3ba7abc72628b27c21caa5674f29d009af75238dd23a5be",
+    "bytes": 3890
+  },
+  "read-fixtures/specimen-authoritative-empty-compact-recall_memories.json": {
+    "sha256": "e6424e962d75cdd2ccc2f576f6b21347eb504d77f9d27d39d9ef0c34aa76d018",
+    "bytes": 3688
+  },
+  "read-fixtures/specimen-authoritative-empty-full-recall_memories.json": {
+    "sha256": "bf70fd37712819a456e5d36d9c3fdd0940021c26933627a79c57fd9d3689bebd",
+    "bytes": 4257
+  },
+  "read-fixtures/specimen-authoritative-empty-list_memories.json": {
+    "sha256": "b331d94f9de6c0f8dcf5f21522134a128e1766a32b78274523f888d84e5dd6d9",
+    "bytes": 1403
+  },
+  "read-fixtures/specimen-authoritative-empty-old-scan-find_similar_memories.json": {
+    "sha256": "2b298ed29f96bed1e1cf3a2bcd719384ca6fad4d16afa63b500839ee825a279e",
+    "bytes": 3882
+  },
+  "read-fixtures/specimen-authoritative-empty-single-find_similar_memories.json": {
+    "sha256": "d4e46c2861130383776872fa93f2fa52a72e3ab9b60f79c8f0dddcb7dc5797f6",
+    "bytes": 3966
+  },
+  "read-fixtures/specimen-retained-compact-recall_memories.json": {
+    "sha256": "bb75f11063f0d41e2ff17544a294ea7127731dd3e30cb71f282bfc10e6040468",
+    "bytes": 3706
+  },
+  "read-fixtures/specimen-retained-full-recall_memories.json": {
+    "sha256": "e044cbc97a478ecd8a073663cb448236b4b1acb94ae46e1666a9bc6bf6ca9141",
+    "bytes": 4293
+  },
+  "read-fixtures/specimen-retained-list_memories.json": {
+    "sha256": "db5c98e46e5be3ee76657fba8154f0286966f2e80d7074a7cd0ea6103fc6cb96",
+    "bytes": 1421
+  },
+  "read-fixtures/specimen-retained-old-scan-find_similar_memories.json": {
+    "sha256": "50ad2149cb6d186c27e9966abb39a1518cf817564d5e597dfc991088e29928be",
+    "bytes": 3882
+  },
+  "read-fixtures/specimen-retained-single-find_similar_memories.json": {
+    "sha256": "a769e9bbd10dbe10b5de78ffe95e9b3e1b0fb845f0238b72dddd72c8cf9f4aad",
+    "bytes": 3984
+  },
+  "read-fixtures/specimen-unicode-native-compact-recall_memories.json": {
+    "sha256": "00cf7b028eb930e36192015ad8d91c1d72080d107f2c2613fff1958bc2129255",
+    "bytes": 3742
+  },
+  "read-fixtures/specimen-unicode-native-full-recall_memories.json": {
+    "sha256": "47771106f33397f1dc74a65e9df0ed9da7b1e5e3a1cc3fd18e861988ceed2f53",
+    "bytes": 4365
+  },
+  "read-fixtures/specimen-unicode-native-list_memories.json": {
+    "sha256": "02966f92f22a6a0a24a34384bc460b42115322dabf343d89957e3233cba5dbf1",
+    "bytes": 1457
+  },
+  "read-fixtures/specimen-unicode-native-old-scan-find_similar_memories.json": {
+    "sha256": "5c68cc456647c1dbd00cc0ea713aa4e06730a79f2e3616dec75320ad11202e71",
+    "bytes": 3882
+  },
+  "read-fixtures/specimen-unicode-native-single-find_similar_memories.json": {
+    "sha256": "e3db222dae63ca0e389a7e0a7572e30c728a087c46a85f8f66fe37c1f34abed4",
+    "bytes": 4020
+  },
+  "rustc.txt": {
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+    "bytes": 197
+  }
+}

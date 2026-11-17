@@ -1,0 +1,28 @@
+     Running unittests src/lib.rs (/target/debug/deps/recalld-8b31964f64b2cfc4)
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_export_genuine_old_one ... ignored, genuine BEFORE exporter; only run on recorded pre-extension source
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_export_genuine157 ... ignored, genuine157 exporter; execute only on recorded pre-admission source
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_export_genuine157_faults ... ignored, genuine157 fault exporter; pre-admission source only
+test mcp::legacy_lifecycle_tests::legacy_api2_generate_genuine_before_one_fixture ... ignored, fixture generator: only execute on the recorded pre-correction source
+test storage::metadata::native_records::tests::store_batches::wire::native_single_wire_genuine_before_dense_full_receipt_fits_all_transports ... ignored, requires immutable BEFORE123 producer artifacts via RECALLD_SINGLE_BEFORE_ARTIFACTS
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_private_before_timestamp_rejection_export ... ignored, historical fixture generator: run only on recorded158 source
+test result: ok. 1766 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 2080.65s
+     Running unittests src/main.rs (/target/debug/deps/recalld-e3511e97d96c1bb5)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_cli.rs (/target/debug/deps/recalld_cli-af23d66ef4eb6fd9)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_schema.rs (/target/debug/deps/recalld_schema-f88e5b6d282be2fe)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/recalld_text_migrate.rs (/target/debug/deps/recalld_text_migrate-89ef39f5299d9e87)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/inherited_policy_cli.rs (/target/debug/deps/inherited_policy_cli-55f09460c02dd6ae)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.74s
+     Running tests/lifecycle_cli.rs (/target/debug/deps/lifecycle_cli-5bae1aa288409852)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.62s
+     Running tests/profile_attestation_cli.rs (/target/debug/deps/profile_attestation_cli-e203f21f7c00a546)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.21s
+     Running tests/text_migration_cli.rs (/target/debug/deps/text_migration_cli-9d4a9dc03f7ddb52)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s
+     Running tests/vector_certification_cli.rs (/target/debug/deps/vector_certification_cli-1e106a1b26764bb3)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.06s
+   Doc-tests recalld
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
