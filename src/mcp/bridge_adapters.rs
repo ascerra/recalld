@@ -1419,11 +1419,14 @@ impl McpStorageAdapter {
             } else {
                 observed
             };
-            observed.finish(
-                check_read_admission(&self.storage, stamp)
-                    .await
-                    .map_err(PointError::Bridge),
-            )
+            let admission = check_read_admission(&self.storage, stamp).await;
+            if budget.is_some() {
+                observed.finish(admission.map_err(PointError::Bridge))
+            } else {
+                // Preserve the old alias's exact leaf Debug diagnostic. Only
+                // the capable route retains typed failures beyond this point.
+                observed.finish(admission).map_err(PointError::Bridge)
+            }
         }
         .await;
         if budget.is_some() && result.as_ref().err().is_some_and(PointError::unknown) {
@@ -1467,8 +1470,13 @@ impl McpStorageAdapter {
         }
         if let Some(limit) = budget
             && reply.http_status == 200
-            && !crate::serialization::get_api1::fits(&reply, self.timezone,
-                crate::serialization::get_api1::Mode::Legacy, limit, false)
+            && !crate::serialization::get_api1::fits(
+                &reply,
+                self.timezone,
+                crate::serialization::get_api1::Mode::Legacy,
+                limit,
+                false,
+            )
         {
             return Ok(reply.oversize());
         }

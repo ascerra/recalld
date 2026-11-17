@@ -393,3 +393,7 @@ fn acquire(raw: &str, limit: usize) -> Result<Vec<String>, ()> {
         .collect();
     Ok(raw.into_iter().map(|r| r.get().to_owned()).collect())
 }
+
+#[cfg(test)]
+#[path = "api1_get_tests.rs"]
+mod tests;

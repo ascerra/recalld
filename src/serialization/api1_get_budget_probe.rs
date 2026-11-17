@@ -524,11 +524,13 @@ async fn evidence_frame_probe(from_canonical_raw: bool) {
 }
 
 #[tokio::test]
+#[ignore = "Rejected Value-only carrier BEFORE; exact failures retained in budget-wire evidence"]
 async fn api1_point_budget_wire_authored_value_evidence() {
     evidence_frame_probe(false).await;
 }
 
 #[tokio::test]
+#[ignore = "Rejected Value-only carrier BEFORE; exact failures retained in budget-wire evidence"]
 async fn api1_point_budget_wire_canonical_raw_evidence() {
     evidence_frame_probe(true).await;
 }

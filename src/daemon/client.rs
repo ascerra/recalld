@@ -35,11 +35,8 @@ const MAX_STALE_SKIPS: usize = 8;
 /// `SearchPipeline::similar`).
 ///
 /// The methods that remain are pure reads of storage, the namespace table,
-/// or process health. `get_memory` qualifies because the *daemon* path
-/// (`McpStorageAdapter::get_memory`) reads the record straight out of
-/// storage and records nothing; the access-recording `get_memory` lives on
-/// the in-process query engine, which the socket never reaches. Should the
-/// adapter ever start recording accesses, it has to come off this list.
+/// or process health. Ordinary `get_memory` records exposure too; only its
+/// explicit `get_memory_read_only` alias is eligible for automatic replay.
 ///
 /// Mutating methods are excluded for the usual reasons: they mint new
 /// server-side state (`store_memory` allocates a fresh id, so a replay
@@ -1199,7 +1196,7 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
 
@@ -1218,13 +1215,13 @@ mod tests {
         // The socket was never touched, so the next call still works.
         assert!(client.is_connected());
         client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
 
         // Exactly the two small calls reached the wire.
         assert_eq!(stub.methods().len(), 2);
-        assert_eq!(stub.count("get_memory"), 2);
+        assert_eq!(stub.count("get_memory_read_only"), 2);
         assert_eq!(stub.count("store_memory"), 0);
     }
 
@@ -1236,13 +1233,13 @@ mod tests {
 
         // The first call is swallowed; the client reconnects and retries.
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
         assert!(client.is_connected());
 
         client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
         assert_eq!(stub.count("ping"), 1, "reconnect renegotiates exactly once");
@@ -1311,7 +1308,7 @@ mod tests {
         // The client is healthy again for the next call.
         assert!(client.is_connected());
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
     }
@@ -1322,7 +1319,7 @@ mod tests {
         let stub = Stub::start(Behavior::Healthy);
         let client = DaemonClient::connect(&stub.path).await.unwrap();
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
 
@@ -1331,8 +1328,12 @@ mod tests {
         let err = tokio::time::timeout(Duration::from_secs(5), async {
             // The first call discovers the dead peer; the second starts with
             // no connection at all. Both must terminate.
-            let _ = client.call("get_memory", json!({ "id": "b" })).await;
-            client.call("get_memory", json!({ "id": "c" })).await
+            let _ = client
+                .call("get_memory_read_only", json!({ "id": "b" }))
+                .await;
+            client
+                .call("get_memory_read_only", json!({ "id": "c" }))
+                .await
         })
         .await
         .expect("reconnect must not loop forever")
@@ -1351,11 +1352,11 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
         let result = client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
 
@@ -1377,7 +1378,7 @@ mod tests {
         assert!(text.contains("id mismatch"), "{text}");
 
         let result = client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
@@ -1390,7 +1391,7 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         let err = client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap_err();
         assert!(matches!(err, BridgeError::TooLarge(_)), "{err}");
@@ -1398,7 +1399,7 @@ mod tests {
         // The oversized frame was drained, so the stream is still aligned.
         assert!(client.is_connected());
         let result = client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
@@ -1416,7 +1417,7 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         let err = client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap_err();
         assert!(
@@ -1430,7 +1431,7 @@ mod tests {
         // The stream is still aligned, so the next call goes through.
         assert!(client.is_connected());
         let result = client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
@@ -1472,7 +1473,11 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let reader = {
             let client = client.clone();
-            tokio::spawn(async move { client.call("get_memory", json!({ "id": "a" })).await })
+            tokio::spawn(async move {
+                client
+                    .call("get_memory_read_only", json!({ "id": "a" }))
+                    .await
+            })
         };
 
         pinger.await.unwrap().unwrap();
@@ -1510,6 +1515,9 @@ mod tests {
             "feedback_api1_v1",
             "forget_api1_v1",
             "shutdown",
+            "get_memory",
+            "get_memory_scoped",
+            "get_api1_v1",
             // Not mutations, but not effect-free either: both record an
             // access per result, which moves the decay schedule.
             "search",
@@ -1521,7 +1529,7 @@ mod tests {
             "ping",
             "check_health",
             "scan_duplicates",
-            "get_memory",
+            "get_memory_read_only",
             "list_namespaces",
             "namespace_stats",
             "list_memories",
