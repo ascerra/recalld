@@ -207,7 +207,7 @@ fn api1_point_raw_admission_rejects_malformed_recursive_and_excess_count() {
     for bad in [
         format!("{{\"receipt\":{raw},\"receipt\":{raw}}}"),
         format!("{{\"receipt\":{raw},\"rece\\u0069pt\":{raw}}}"),
-        format!("{{\"receivedEvidence\":{{\"receipt\":{raw}}}}"),
+        format!("{{\"receivedEvidence\":{{\"receipt\":{raw}}}}}"),
         format!(
             "{{\"observationReceipts\":[{}]}}",
             vec!["null"; MAX_FRAGMENTS + 1].join(",")
