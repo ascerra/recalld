@@ -1,0 +1,166 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794941686.379494
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "prepared_",
+      "--",
+      "--nocapture",
+      "--test-threads=2"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "46479a60c3a3bda06ad6301593daee667fc47de716916a4e8784f3190b5829fa"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794941890.3395324
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "strict_query_",
+      "--",
+      "--nocapture",
+      "--test-threads=2"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "46479a60c3a3bda06ad6301593daee667fc47de716916a4e8784f3190b5829fa"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794941904.8575923
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "live_metadata_schemas_",
+      "--",
+      "--nocapture",
+      "--test-threads=2"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "46479a60c3a3bda06ad6301593daee667fc47de716916a4e8784f3190b5829fa"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794941905.6712623
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "session_context_resolves_each_bridge_without_public_caching_or_invented_identity",
+      "--",
+      "--nocapture",
+      "--test-threads=2"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "46479a60c3a3bda06ad6301593daee667fc47de716916a4e8784f3190b5829fa"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794941906.262471
+  },
+  {
+    "command": [
+      "cargo",
+      "clippy",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--all-targets"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794941963.2376208
+  },
+  {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--bin",
+      "recalld"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794942031.5048575
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-conformance.py",
+      "--inside",
+      "--fixture-version",
+      "3"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "../recalld": "614b2248d23701d733bc6cdaee8a332af3abed0c0d8aafad9ba4a8ac10b55e83"
+    },
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794942120.5542712
+  },
+  {
+    "command": [
+      "python3",
+      "/work/output/check-public.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "../recalld": "614b2248d23701d733bc6cdaee8a332af3abed0c0d8aafad9ba4a8ac10b55e83"
+    },
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794942121.1313896
+  }
+]

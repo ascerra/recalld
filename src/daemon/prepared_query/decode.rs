@@ -59,7 +59,7 @@ impl Expected {
 
 /// Typed decode plus exact canonical output equality closes serde's ignored
 /// fields/defaults. Do not manufacture StoredReceipt request hashes here.
-fn typed<T: DeserializeOwned + Serialize>(v: &Value) -> Result<T, ()> {
+pub(crate) fn typed<T: DeserializeOwned + Serialize>(v: &Value) -> Result<T, ()> {
     let decoded: T = serde_json::from_value(v.clone()).map_err(|_| ())?;
     let bytes = serde_json::to_vec(&decoded).map_err(|_| ())?;
     let encoded: Value = serde_json::from_slice(&bytes).map_err(|_| ())?;
@@ -326,8 +326,21 @@ fn data(
     Ok(returned)
 }
 
-pub(super) fn receipt(v: &Value) -> Result<WriteReceipt, ()> {
-    let receipt: WriteReceipt = typed(v)?;
+pub(crate) fn receipt(v: &Value) -> Result<WriteReceipt, ()> {
+    receipt_identity(typed(v)?)
+}
+
+/// Caller must run the bounded borrowed structural preflight first. Exact typed
+/// bytes preserve f32 identity without the query Value decoder's f64 hop.
+pub(crate) fn typed_raw<T: DeserializeOwned + Serialize>(raw: &str) -> Result<T, ()> {
+    let decoded: T = serde_json::from_str(raw).map_err(|_| ())?;
+    require(serde_json::to_string(&decoded).map_err(|_| ())? == raw)?;
+    Ok(decoded)
+}
+pub(crate) fn receipt_raw(raw: &str) -> Result<WriteReceipt, ()> {
+    receipt_identity(typed_raw(raw)?)
+}
+fn receipt_identity(receipt: WriteReceipt) -> Result<WriteReceipt, ()> {
     require(
         !receipt.store_id.is_nil()
             && !receipt.operation_id.is_nil()

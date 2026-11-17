@@ -1,0 +1,96 @@
+{
+  "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
+  "status": "893 frozen full1718library/10CLI/15examples PASS;4library+4doc ignored;fmt/clippy0; RPC pending, NOT READY",
+  "files": [
+    {
+      "path": "src/api/adapters.rs",
+      "sha256": "05442b93d69c352fd51eeb3fd27df456130c3ec4d2be253db9120bc68758cfae"
+    },
+    {
+      "path": "src/api/handlers.rs",
+      "sha256": "e81fe03e1971fa5325efe13c6965a6fac1583104769777822cce29b8fa0cfff2"
+    },
+    {
+      "path": "src/api/mod.rs",
+      "sha256": "ac4040a7dbec9f2445473a3fc8f69443ea2a6d5d007af2be750d8197df2e1453"
+    },
+    {
+      "path": "src/api/state.rs",
+      "sha256": "643364ead7cfafdccbfc24940cd42175af807412964462c2684f273775e873a2"
+    },
+    {
+      "path": "src/decay/observation.rs",
+      "sha256": "62499d9f1e8ba91cff28d98bc851b693e4a213b882041bbd9d539028cf7cd489"
+    },
+    {
+      "path": "src/derived_completion/native_exposure.rs",
+      "sha256": "cb8db8361978b12a590d678b4a3f35ef0f28fc53ca970ab9043780c7a2cc9187"
+    },
+    {
+      "path": "src/mcp/bridge.rs",
+      "sha256": "da89bb5a06d71994564ab51d4a045c50cd6d23ca43145c007e0ebcf6e7e4d859"
+    },
+    {
+      "path": "src/mcp/bridge_adapters.rs",
+      "sha256": "4438e94a34694b43154ca54fb7379a2b38e43f69ea11b3b44174d18453b85c4d"
+    },
+    {
+      "path": "src/mcp/tools.rs",
+      "sha256": "d63702e7e188de5c6ae824951a91cff10328f382b8f9c1ea37b8521c7ed4bec4"
+    },
+    {
+      "path": "src/search/adapters.rs",
+      "sha256": "d60d97755036bb78ecb4b149e0f934828c1ea1b55b67dbfb45ee605864915b7e"
+    },
+    {
+      "path": "src/search/get_wire.rs",
+      "sha256": "d6baf6b3d0ba9260e1cbbeb3dc7dd6faa36ed7f28aa5cb5c39322174973d2f1d"
+    },
+    {
+      "path": "src/search/get_wire_tests.rs",
+      "sha256": "9c8e2ad8a2064092800d87dfc98d4cee70c033980fa5c779c881cc6430f0a267"
+    },
+    {
+      "path": "src/search/pipeline.rs",
+      "sha256": "5aa97cccfe9b04e80c464390f3f9c008098ea4e960a7d86cd7aa0b85d763a0a3"
+    },
+    {
+      "path": "src/search/read_view.rs",
+      "sha256": "1987817b0dd550750a92428a56f7bbfb32a18e7425c38292821185abda232530"
+    },
+    {
+      "path": "src/search/strength.rs",
+      "sha256": "2532d8931756715f1f39772e47fc304e868361416b131b417515b23aa20f77d5"
+    },
+    {
+      "path": "src/serialization/get.rs",
+      "sha256": "4e8fc274a6122192108782c30fb62f7cfb2b96653fbb4753432f82f8e8313fc2"
+    },
+    {
+      "path": "src/serialization/get_tests.rs",
+      "sha256": "c8a61a80168d2052fe0f678980264b993d1ad99499386ae3621cc20b6f8a545a"
+    },
+    {
+      "path": "src/serialization/lifecycle_api1.rs",
+      "sha256": "0ed8c99a4c441fd438be05c93d9e51ad722e0e214972353709eb94c8744dd658"
+    },
+    {
+      "path": "src/serialization/mod.rs",
+      "sha256": "08ac8f709eb68d3c483190fd5ecb078bd3d5ca8712d0a23bd601fa2f418f41cf"
+    },
+    {
+      "path": "src/storage/engine/read_payload.rs",
+      "sha256": "2dc78a6398118598201ecc4a7cec83a729959ac3d4c1c480f930e66bad067e52"
+    },
+    {
+      "path": "src/storage/metadata.rs",
+      "sha256": "ef907697248d467c2c27d8c22944e028efb81a157ad93ebd9a15ca936ce5882c"
+    },
+    {
+      "path": "src/storage/metadata/publication.rs",
+      "sha256": "ac8a8a964a23d997a7a7378ded4d7a475bd1e68536f44270639024c7c80a95ad"
+    }
+  ],
+  "format": "cargo fmt --all, recalld-ci:1.94, RUSTUP_TOOLCHAIN=1.94.1, network none; exit0",
+  "validated_source": "893f48919ec1efbb68d42ee434ec68eede463f39"
+}

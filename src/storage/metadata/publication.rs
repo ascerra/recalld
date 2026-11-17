@@ -129,7 +129,67 @@ pub(crate) struct CanonicalReadView {
     vector_validation: Arc<RwLock<Option<super::certification::OwnedVectorValidation>>>,
 }
 
+/// Borrowed authority for one synchronous canonical point copy. Only the owner
+/// constructs this facade; neither its transaction nor owner can be substituted.
+pub(crate) struct PointRead<'a> {
+    owner: &'a MetadataStore,
+    view: &'a CanonicalReadView,
+    graph_applied: Option<control::GenerationRef>,
+}
+
+impl PointRead<'_> {
+    pub(crate) fn view(&self) -> &CanonicalReadView {
+        self.view
+    }
+
+    /// Caller retains the actual graph read lease. A lease alone is not a stamp.
+    pub(crate) fn require_graph(&self) -> Result<(), StorageError> {
+        if self.graph_applied != Some(self.view.at) {
+            return Err(StorageError::RecoveryRequired(
+                "point projection graph generation is unavailable".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn capture_exposure(
+        &self,
+        scope: crate::storage::native_lifecycle::LifecycleScope,
+        id: MemoryId,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Result<crate::storage::native_lifecycle::ExposureIntent, StorageError> {
+        self.owner.capture_exposure_at(
+            &self.view.read,
+            scope,
+            &[(id, crate::model::AccessKind::DirectRetrieval)],
+            policy,
+        )
+    }
+}
+
 impl MetadataStore {
+    /// Caller holds engine read ownership through this synchronous copy, and
+    /// the actual graph lease when projecting graph-dependent strength.
+    pub(crate) fn with_point_read<T>(
+        &self,
+        copy: impl for<'a> FnOnce(PointRead<'a>) -> Result<T, StorageError>,
+    ) -> Result<T, StorageError> {
+        let _publication = self
+            .publication
+            .read()
+            .map_err(|_| StorageError::RecoveryRequired("metadata publication poisoned".into()))?;
+        // Existing owned-mode/lineage admission rejects canonical_pending and
+        // active purge, but unrelated stale derived views do not gate a point.
+        let view = self.open_canonical_read()?;
+        let graph_applied =
+            self.view_publication.state(view.at).applied[DerivedView::Graph as usize];
+        copy(PointRead {
+            owner: self,
+            view: &view,
+            graph_applied,
+        })
+    }
+
     pub(crate) fn capture_read_view(&self) -> Result<CanonicalReadView, StorageError> {
         let _publication = self
             .publication

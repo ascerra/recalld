@@ -664,7 +664,7 @@ async fn prepared_remote_capability_refusal_and_lost_reply_never_fallback_or_rep
     task.await.unwrap();
 }
 
-fn search(f: &Fixture) -> Arc<McpSearchAdapter> {
+pub(crate) fn search(f: &Fixture) -> Arc<McpSearchAdapter> {
     let provider = Arc::new(crate::embedding::PassthroughProvider::new(4));
     let rif = Arc::new(crate::rif::RifEngine::new(crate::rif::RifConfig {
         enabled: false,
@@ -748,4 +748,41 @@ async fn prepared_remote_actual_query_matches_owned_false_read() {
         serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(&reply).unwrap()).unwrap(),
         local_value
     );
+}
+
+/// Actual owned point succeeds locally; the same real daemon must consume it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_rpc_actual_owner_and_remote_consumer() {
+    let f = Fixture::new();
+    let id = f
+        .insert_memory_with(MemorySpec {
+            summary: "owned point RPC",
+            embedding: Some(&[1., 0., 0., 0.]),
+            ..MemorySpec::new(crate::model::NamespaceId::new(1))
+        })
+        .await;
+    f.completion().rebuild_all().await.unwrap();
+    let search = search(&f);
+    let arguments = json!({"contractVersion":2,"id":id.to_string(),"recordAccess":false});
+    let input = crate::serialization::get::GetRequest::from_mcp(&arguments).unwrap();
+    let local = search.get_contract(input, MAX_MESSAGE_SIZE).await;
+    assert_eq!(local.http_status, 200, "actual owner control: {local:?}");
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let daemon = PreparedDaemon::start(search).await;
+    daemon.client.ping().await.unwrap();
+    let remote = daemon.client.call("get_contract_v1", json!({
+        "arguments":arguments,"responseLimit":crate::daemon::prepared_get::response_limit(),"originalContractVersion":2,
+    })).await;
+    daemon.finish().await;
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
+    assert!(
+        remote.is_ok(),
+        "actual owner succeeds but Remote get is missing: {remote:?}"
+    );
+    let remote = remote.unwrap();
+    assert_eq!(remote["httpStatus"], 200);
+    let raw = remote["replyJson"].as_str().unwrap();
+    let reply: crate::serialization::get::GetReply = serde_json::from_str(raw).unwrap();
+    assert_eq!(serde_json::to_string(&reply).unwrap(), raw);
+    assert_eq!(reply.envelope.data.unwrap().memory.id, id);
 }
