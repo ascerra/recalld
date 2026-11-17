@@ -56,7 +56,8 @@ fn public(reply: &GetReply, timezone: chrono_tz::Tz) -> ToolCallResult {
             warnings: &reply.envelope.warnings,
         };
         let text = serde_json::to_string(&failure).unwrap();
-        let value: Value = serde_json::from_str(&text).unwrap();
+        // Preserve already received evidence Values without another parse cycle.
+        let value = serde_json::to_value(&failure).unwrap();
         let mut result = ToolCallResult::text(text);
         result.structured_content = value.as_object().cloned();
         result.is_error = Some(true);
@@ -115,6 +116,23 @@ fn public_fits(reply: &GetReply, timezone: chrono_tz::Tz, limit: usize, reserve:
     projected_bytes(reply, timezone)
         .checked_add(reserve)
         .is_some_and(|size| size <= limit)
+}
+
+fn pre_admitted(
+    reply: &GetReply,
+    timezone: chrono_tz::Tz,
+    allowance: usize,
+    reserve: usize,
+) -> bool {
+    let Some(inner_limit) = allowance.checked_sub(reserve) else {
+        return false;
+    };
+    shape::check_typed(&serde_json::to_vec(reply).unwrap(), inner_limit).is_ok()
+        && tagged(reply)
+            .len()
+            .checked_add(reserve)
+            .is_some_and(|n| n <= allowance)
+        && public_fits(reply, timezone, MAX_MESSAGE_SIZE, reserve)
 }
 
 fn encoding_specimen() -> GetReply {
@@ -354,4 +372,99 @@ fn api1_point_budget_actual_pretty_emitter_and_tagged_completion() {
         "API1 foreign15000 specimen raw={} public={output_bytes}; unverified only",
         raw.len()
     );
+
+    // Check complete actual encodings at the last accepted escaped payload,
+    // rather than assuming an independently fitting prefix guarantees growth.
+    let mut large = encoding_specimen();
+    let timezone = chrono_tz::Asia::Kathmandu;
+    let mut low = 0;
+    let mut high = allowance;
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        large.envelope.data.as_mut().unwrap().memory.full_text = Some("\\".repeat(mid));
+        if pre_admitted(&large, timezone, allowance, RESERVE) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    large.envelope.data.as_mut().unwrap().memory.full_text = Some("\\".repeat(low + 1));
+    assert!(!pre_admitted(&large, timezone, allowance, RESERVE));
+    large.envelope.data.as_mut().unwrap().memory.full_text = Some("\\".repeat(low));
+    assert!(pre_admitted(&large, timezone, allowance, RESERVE));
+    let native = maximal_point_receipt();
+    large.envelope.receipt = Some(native.clone());
+    large.observation_receipts = vec![native.clone()];
+    large.envelope.readiness = Some(readiness(&native));
+    assert!(shape::check_typed(&serde_json::to_vec(&large).unwrap(), allowance).is_ok());
+    assert!(tagged(&large).len() <= allowance);
+    assert!(projected_bytes(&large, timezone) <= MAX_MESSAGE_SIZE);
+    eprintln!(
+        "API1 last-admitted backslashes={low}; completed tagged={} public={}",
+        tagged(&large).len(),
+        projected_bytes(&large, timezone)
+    );
+    for source in [
+        crate::storage::StorageError::RecoveryRequired("not echoed".into()),
+        crate::storage::StorageError::WorkerOutcomeUnknown("not echoed".into()),
+    ] {
+        let failed = GetReply::failure(SearchError::Observation(
+            crate::decay::observation::ObservationError::storage(
+                crate::storage::StorageError::CommittedMutation {
+                    receipt: Box::new(native.clone()),
+                    source: Box::new(source),
+                },
+                vec![],
+            ),
+        ));
+        assert!(projected_bytes(&failed, timezone) <= RESERVE);
+        assert!(shape::check_typed(&serde_json::to_vec(&failed).unwrap(), allowance).is_ok());
+        assert!(tagged(&failed).len() <= allowance);
+    }
+}
+
+#[test]
+fn api1_point_budget_signed_zero_receipt_aliases_remain_exact() {
+    let mut receipt = maximal_point_receipt();
+    if let MutationOutcome::LifecycleExposureRecorded { transition } = &mut receipt.outcome {
+        transition.records[0].before.strength = (-0.0f32).try_into().unwrap();
+        transition.records[0].after.strength = (-0.0f32).try_into().unwrap();
+    }
+    if let MutationOutcome::LifecycleExposureRecorded { transition } = &receipt.outcome {
+        transition.validate(&receipt, false).unwrap();
+    }
+    let reply = GetReply::failure(SearchError::Observation(
+        crate::decay::observation::ObservationError::storage(
+            crate::storage::StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(crate::storage::StorageError::RecoveryRequired(
+                    "not echoed".into(),
+                )),
+            },
+            vec![],
+        ),
+    ));
+    let output = public(&reply, chrono_tz::UTC);
+    let text = output
+        .content
+        .iter()
+        .find_map(|block| match block {
+            crate::mcp::protocol::ContentBlock::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .unwrap();
+    let raw: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
+        serde_json::from_str(text).unwrap();
+    let aliases: Vec<&serde_json::value::RawValue> =
+        serde_json::from_str(raw["observationReceipts"].get()).unwrap();
+    let expected = serde_json::to_string(&receipt).unwrap();
+    assert!(expected.contains("\"strength\":-0.0"));
+    assert_eq!(raw["receipt"].get(), expected);
+    assert_eq!(aliases[0].get(), expected);
+    let value = output.structured_content.unwrap();
+    let typed: WriteReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
+    assert_eq!(serde_json::to_string(&typed).unwrap(), expected);
+    let typed: Vec<WriteReceipt> =
+        serde_json::from_value(value["observationReceipts"].clone()).unwrap();
+    assert_eq!(serde_json::to_string(&typed[0]).unwrap(), expected);
 }
