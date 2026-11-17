@@ -1540,7 +1540,15 @@ async fn prepared_get_rpc_actual_final_capture_races_preserve_generation_and_con
                 history + 1
             );
         } else {
-            assert_eq!(reply.http_status, 409, "{race}: {reply:?}");
+            // Existing final writer checks terminal content eligibility before
+            // record token conflict; preserve its typed503, not a new remapping.
+            let (status, code) = if race == "terminal" {
+                (503, "INDEX_NOT_READY")
+            } else {
+                (409, "LIFECYCLE_CONFLICT")
+            };
+            assert_eq!(reply.http_status, status, "{race}: {reply:?}");
+            assert_eq!(reply.envelope.error.as_ref().unwrap().code, code);
             assert_eq!(
                 reply.envelope.error.unwrap().commit_state,
                 crate::serialization::contract::CommitState::NotCommitted

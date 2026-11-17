@@ -781,5 +781,8 @@ async fn prepared_get_rpc_actual_owner_and_remote_consumer() {
     );
     let remote = remote.unwrap();
     assert_eq!(remote["httpStatus"], 200);
-    assert_eq!(remote["reply"]["data"]["memory"]["id"], id.to_string());
+    let raw = remote["replyJson"].as_str().unwrap();
+    let reply: crate::serialization::get::GetReply = serde_json::from_str(raw).unwrap();
+    assert_eq!(serde_json::to_string(&reply).unwrap(), raw);
+    assert_eq!(reply.envelope.data.unwrap().memory.id, id);
 }
