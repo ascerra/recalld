@@ -36,19 +36,25 @@ def fixture(episode, h, variant):
     return actor, labels, cache, schedule
 
 
-def prepare(args, h):
+def prepare(args, h, answer=False):
     if args.context_profile not in ("default", "boundary") or args.combined_variant not in VARIANTS:
         raise ValueError("unsupported combined fixture")
     h["CONTEXT"]["TOKEN"]["load"](args.context_assets)
     sources = registry(h)
     groups, splits = h["GROUPED"]["maps"](sources, h)  # Before questions, labels or caches.
     manifest = h["build_manifest"](args, json.loads(args.build.read_text()))
-    versions, capabilities = h["track_profile"](TRACK)
-    manifest.update(track=TRACK, traceSchemaVersion=2, versions=versions, capabilities=capabilities,
+    track = h["ANSWER"]["TRACK"] if answer else TRACK
+    versions, capabilities = h["track_profile"](track)
+    manifest.update(track=track, traceSchemaVersion=2, versions=versions, capabilities=capabilities,
         executables=dict(ownedEvaluator=h["digest"](args.binary.read_bytes()), scorer=h["digest"](args.scorer.read_bytes())),
         contextPolicy=h["CONTEXT"]["TOKEN"]["policy"](args.context_profile), contextFixture="standard",
         combinedVariant=args.combined_variant, accountingPolicy=h["ACCOUNTING_POLICY"],
         groupMapVersion=1, splitMapVersion=1, aggregateProfile=h["GROUPED"]["PROFILE"], executionScope=SCOPE)
+    if answer:
+        if args.context_profile != "default" or args.answer_variant not in h["ANSWER"]["VARIANTS"]:
+            raise ValueError("unsupported recorded answer fixture")
+        manifest.update(answerPolicy=h["ANSWER"]["policy"](), answerVariant=args.answer_variant,
+            combinedVariant=args.answer_variant if args.answer_variant in ("gold", "future") else "baseline")
     args.out.mkdir()
     ref = h["GROUPED"]["reference"]
     for key, name, value in (("sourceRegistry", "source-registry.json", sources), ("groupMap", "group-map.json", groups), ("splitMap", "split-map.json", splits)):
@@ -58,23 +64,28 @@ def prepare(args, h):
         identity = episode["episodeId"]
         (args.out / "episodes" / identity).mkdir(parents=True)
         artifacts = {key: ref(args.out, f"episodes/{identity}/{name}", value, h)
-            for (key, name), value in zip(h["GROUPED"]["ARTIFACTS"], fixture(episode, h, args.combined_variant))}
-        manifest["episodes"].append(dict(episodeId=identity, artifacts=artifacts))
+            for (key, name), value in zip(h["GROUPED"]["ARTIFACTS"], fixture(episode, h, manifest["combinedVariant"]))}
+        member = dict(episodeId=identity, artifacts=artifacts)
+        if answer:
+            member["roleCache"] = ref(args.out, f"episodes/{identity}/recorded-answer-cache.json", h["ANSWER"]["cache"](identity, args.answer_variant), h)
+        manifest["episodes"].append(member)
     manifest["dataset"] = dict(kind="generated-synthetic-grouped", upstreamRevision=None, upstreamUrl=None,
         thirdPartyLicense=None, sourceRegistrySha256=manifest["sourceRegistry"]["sha256"], intendedUse="contract-diagnostic-only")
     h["save"](args.out / "manifest.json", manifest)
 
 
-def validate(args, h):
+def validate(args, h, answer=False):
     raw = args.manifest.read_bytes(); m = json.loads(raw); root = args.manifest.parent
     h["exact_keys"](m, (*h["COMMON_FIELDS"], "contextPolicy", "contextFixture", "combinedVariant", "accountingPolicy",
-        "groupMapVersion", "splitMapVersion", "aggregateProfile", "executionScope", "sourceRegistry", "groupMap", "splitMap", "episodes", "dataset"))
-    if (m["track"] != TRACK or m["combinedVariant"] not in VARIANTS or m["contextFixture"] != "standard" or
+        "groupMapVersion", "splitMapVersion", "aggregateProfile", "executionScope", "sourceRegistry", "groupMap", "splitMap", "episodes", "dataset",
+        *(("answerPolicy", "answerVariant") if answer else ())))
+    if (m["track"] != (h["ANSWER"]["TRACK"] if answer else TRACK) or m["combinedVariant"] not in VARIANTS or m["contextFixture"] != "standard" or
         m["executionScope"] != SCOPE or m["aggregateProfile"] != h["GROUPED"]["PROFILE"] or
         any(type(m[k]) is not int or m[k] != 1 for k in ("groupMapVersion", "splitMapVersion")) or
         h["encoded"](m["accountingPolicy"]) != h["encoded"](h["ACCOUNTING_POLICY"])):
         raise ValueError("unsupported combined policy")
     h["validate_build"](m, args.binary, args.scorer, args.source_root)
+    if answer: h["ANSWER"]["validate_policy"](m, h)
     load = h["GROUPED"]["load"]
     sources = load(root, m["sourceRegistry"], "source-registry.json", h)
     if h["encoded"](sources) != h["encoded"](registry(h)):
@@ -92,7 +103,7 @@ def validate(args, h):
     seen, bundles, roster = set(), [], []
     environment = h["digest"](raw)
     for member in m["episodes"]:
-        h["exact_keys"](member, ("episodeId", "artifacts"))
+        h["exact_keys"](member, ("episodeId", "artifacts", *(("roleCache",) if answer else ())))
         identity = member["episodeId"]
         if identity not in expected or identity in seen:
             raise ValueError("unknown or duplicate episode")
@@ -107,7 +118,12 @@ def validate(args, h):
         context = dict(episodeId=identity, groupId=group, split=splits["groups"][group],
             queryIds=sorted(q["queryId"] for q in artifacts[3]["queries"]), groupMapSha256=m["groupMap"]["sha256"], splitMapSha256=m["splitMap"]["sha256"])
         episode["groupContext"] = context
-        bundles.append((episode, *artifacts, h["digest"](h["encoded"](dict(cohortEnvironmentHash=environment, **context)))))
+        episode_environment = h["digest"](h["encoded"](dict(cohortEnvironmentHash=environment, **context)))
+        if answer:
+            role_cache = load(root, member["roleCache"], f"episodes/{identity}/recorded-answer-cache.json", h)
+            h["ANSWER"]["validate_cache"](role_cache, identity, m["answerVariant"], h)
+            episode.update(roleCache=member["roleCache"], answerCache=role_cache, answerEnvironment=episode_environment)
+        bundles.append((episode, *artifacts, episode_environment))
         roster.append({k: context[k] for k in ("episodeId", "groupId", "split", "queryIds")})
     if [r["episodeId"] for r in roster] != sorted(expected):
         raise ValueError("noncanonical cohort order")
@@ -255,8 +271,8 @@ def verify_episode(args, h, manifest, schedule, wire, receipts):
         responseReadGeneration=None, readinessScope="post-delivery-barrier-not-response-readview", nativeWrites=False))
 
 
-def run(args, h):
-    prepared = validate(args, h)  # Entire cohort before output/provider/store.
+def run(args, h, prepared=None):
+    prepared = prepared or validate(args, h)  # Entire cohort before output/provider/store.
     h["GROUPED"]["run"](args, h, prepared=prepared)
     m, _, roster, environment = prepared
     status_path = args.out / "episode-status.json"

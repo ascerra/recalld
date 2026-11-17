@@ -187,6 +187,19 @@ def run(args):
             print(json.dumps(dict(event="context",tag="context:"+query["queryId"],stepId=str(serial),deliveryOrdinal=projection["deliveryOrdinal"],context=context)),flush=True)
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--recorded-answer":
+        # Parent passes descriptor numbers only to prove none was inherited.
+        for number in sys.argv[2:]:
+            try:
+                os.fstat(int(number))
+            except OSError:
+                continue
+            raise RuntimeError("recorded answer inherited a public/control descriptor")
+        import recorded_answer
+        envelope = recorded_answer.decode(sys.stdin.buffer.read())
+        result = recorded_answer.consume(envelope)
+        print(json.dumps(dict(event="recorded-answer", isolation=dict(inheritedDescriptorsClosed=True, checked=len(sys.argv) - 2), result=result)), flush=True)
+        sys.exit(0)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context-bundle")
     parser.add_argument("--combined-context", action="store_true")

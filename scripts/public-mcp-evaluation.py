@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 
+ANSWER = runpy.run_path(str(Path(__file__).with_name("recorded-answer-mcp-evaluation.py")))
 COMBINED = runpy.run_path(str(Path(__file__).with_name("combined-mcp-evaluation.py")))
 CONTEXT = runpy.run_path(str(Path(__file__).with_name("context-mcp-evaluation.py")))
 PAIRED = runpy.run_path(str(Path(__file__).with_name("paired-mcp-evaluation.py")))
@@ -36,7 +37,8 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
                     canonicalSchemaAttested=False)
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
-EXTRA = ("scripts/combined-mcp-evaluation.py", "scripts/test_combined_mcp_evaluation.py", "scripts/test_combined_mcp_episode.py",
+EXTRA = ("scripts/recorded_answer.py", "scripts/recorded-answer-mcp-evaluation.py", "scripts/fixtures/recorded-answer.json",
+         "scripts/test_recorded_answer.py", "scripts/test_recorded_answer_episode.py", "scripts/combined-mcp-evaluation.py", "scripts/test_combined_mcp_evaluation.py", "scripts/test_combined_mcp_episode.py",
          "tests/live_tool_schema_conformance.py", "tests/page_schema_conformance.py",
          # Exact retained format1/4 histories used by the admission/replay tests.
          'src/mcp/fixtures/legacy-compound-before.zip',
@@ -274,6 +276,9 @@ def reconcile_accounting(trace_rows, provider_rows):
 
 
 def track_profile(track):
+    if track == ANSWER["TRACK"]:
+        versions, capabilities = track_profile(COMBINED["TRACK"])
+        return dict(versions, recordedAnswerConsumerVersion=1, roleTraceSchemaVersion=1), dict(capabilities, recordedAnswer=True, answerQuality=False, modelUsage=False)
     if track == COMBINED["TRACK"]:
         return dict(VERSIONS, privateControlVersion=1, combinedConsumerVersion=1, ownedConstructorProfile="legacy-checkpoint-sweep-v1"), dict(CAPABILITIES, barrier=True, completeExternalAccounting=True, groupedContext=True, clock="lifecycle-owned-unadvanced", lifecycleClockControlled=True, canonicalAllocationControlled=True)
     if track == NATIVE_SWEEP["TRACK"]:
@@ -338,10 +343,10 @@ COMMON_FIELDS = ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion"
 
 
 def validate_build(m, binary, scorer, source_root):
-    if any(type(m[k]) is not int or m[k] != (2 if k == "traceSchemaVersion" and m["track"] == COMBINED["TRACK"] else 1) for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
+    if any(type(m[k]) is not int or m[k] != (2 if k == "traceSchemaVersion" and m["track"] in (COMBINED["TRACK"], ANSWER["TRACK"]) else 1) for k in ("manifestVersion", "sourceMappingVersion", "traceSchemaVersion")):
         raise ValueError("unsupported independent harness version")
     versions, capabilities = track_profile(m["track"])
-    if m["track"] not in (TRACK, COMBINED["TRACK"], CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], PAIRED["ARM_TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
+    if m["track"] not in (TRACK, ANSWER["TRACK"], COMBINED["TRACK"], CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], PAIRED["ARM_TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) or encoded(m["versions"]) != encoded(versions) or encoded(m["capabilities"]) != encoded(capabilities):
         raise ValueError("unsupported public/schema/control requirements")
     if encoded(m["limits"]) != encoded(dict(cpus=2, memoryBytes=4294967296)) or m["scoringProfile"] != "synthetic-unique-source-v1":
         raise ValueError("unsupported resources/scorer")
@@ -357,7 +362,7 @@ def validate_build(m, binary, scorer, source_root):
     required |= {"Cargo.toml", "Cargo.lock", *EXTRA}
     if not required <= m["sourceFilesSha256"].keys():
         raise ValueError("missing source pins")
-    expected_executables = {"ownedEvaluator" if m["track"] in (COMBINED["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}
+    expected_executables = {"ownedEvaluator" if m["track"] in (ANSWER["TRACK"], COMBINED["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(binary.read_bytes()), "scorer": digest(scorer.read_bytes())}
     if m["track"] in (NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]):
         expected_executables["nativePrefixFixture"] = digest(binary.with_name("native_prefix_fixture").read_bytes())
     if m["executables"] != expected_executables:
@@ -438,6 +443,8 @@ def build_manifest(args, build):
 
 
 def prepare(args):
+    if getattr(args, "track", TRACK) == ANSWER["TRACK"]:
+        return COMBINED["prepare"](args, globals(), answer=True)
     if getattr(args, "track", TRACK) == COMBINED["TRACK"]:
         return COMBINED["prepare"](args, globals())
     if getattr(args, "track", TRACK) == PAIRED["TRACK"]:
@@ -455,7 +462,7 @@ def prepare(args):
     m = dict(manifestVersion=1, sourceMappingVersion=1, traceSchemaVersion=1, track=args.track, versions=track_profile(args.track)[0],
              capabilities=track_profile(args.track)[1], sourceCommit=build["sourceCommit"], sourceFilesSha256=build["sourceFilesSha256"],
              containerImageId=build["containerImageId"], limits=dict(cpus=2, memoryBytes=4294967296),
-             executables={"ownedEvaluator" if args.track in (COMBINED["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
+             executables={"ownedEvaluator" if args.track in (ANSWER["TRACK"], COMBINED["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]) else "recalld": digest(args.binary.read_bytes()), "scorer": digest(args.scorer.read_bytes())},
              activeEmbedding=json.loads(subprocess.check_output([str(args.scorer), "--profile"]))["activeEmbedding"], scoringProfile="synthetic-unique-source-v1")
     if context: m.update(track=CONTEXT["TRACK"],contextPolicy=CONTEXT["TOKEN"]["policy"](profile),contextFixture=kind)
     if args.track == BEIR["TRACK"]:
@@ -531,6 +538,8 @@ class Replay(http.server.BaseHTTPRequestHandler):
 
 
 def run_episode(args, prepared=None):
+    if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == ANSWER["TRACK"]:
+        return ANSWER["run"](args, globals())
     if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == COMBINED["TRACK"]:
         return COMBINED["run"](args, globals())
     if prepared is None and json.loads(args.manifest.read_bytes()).get("track") == PAIRED["TRACK"]:
@@ -544,7 +553,8 @@ def run_episode(args, prepared=None):
     if prepared is None and json.loads(args.manifest.read_text()).get("track") in (RESET["TRACK"], SWEEP["TRACK"]):
         return RESET["run"](args, globals())
     m, actor, labels, cache, schedule, environment = prepared or validate(args.manifest, args.binary, args.scorer, args.source_root, beir_reference=getattr(args, "beir_reference", None), context_assets=getattr(args, "context_assets", None))
-    combined = m["track"] == COMBINED["TRACK"]
+    answer = m["track"] == ANSWER["TRACK"]
+    combined = answer or m["track"] == COMBINED["TRACK"]
     owned = combined or m["track"] == OWNED["TRACK"]
     beir = m["track"] == BEIR["TRACK"]
     scripted = (owned and not combined) or beir or m["track"] == CONFORMANCE["TRACK"]
@@ -654,6 +664,9 @@ warm_file_enabled = false
                     for name in ("context_tokenizer.py","context-tokenizer-lock.json"):
                         shutil.copyfile(Path(__file__).with_name(name),root/name)
                         assert digest((root/name).read_bytes())==m["sourceFilesSha256"]["scripts/"+name]
+                if answer:
+                    shutil.copyfile(Path(__file__).with_name("recorded_answer.py"), root / "recorded_answer.py")
+                    assert digest((root / "recorded_answer.py").read_bytes()) == m["sourceFilesSha256"]["scripts/recorded_answer.py"]
                 start_id = 0
                 # The supervisor owns this schedule. Each actor process sees only its current question.
                 for ordinal in range(len(schedule["steps"]) + 1 if scripted else len(schedule["queries"]) + 2):
@@ -711,6 +724,9 @@ warm_file_enabled = false
                         receipt = control.checkpoint(ordinal, start_id)
                         if combined: trace.barrier(receipt)
                         save(evaluator / "readiness-receipts.json", control.receipts)
+                    if answer and ordinal > 0 and not miss:
+                        ANSWER["step"](args, globals(), m, question, ordinal, delivered, root, actor_path,
+                            control_fds, (process.stdin.fileno(), process.stdout.fileno()))
                     with (evaluator / "schedule-ledger.jsonl").open("a") as log:
                         log.write(json.dumps(dict(deliveryOrdinal=ordinal, acknowledgedThroughStepId=str(start_id))) + "\n")
                 stop()
@@ -757,6 +773,8 @@ warm_file_enabled = false
                     legacy_trace.write(json.dumps(dict(traceSchemaVersion=1, runId=environment, episodeId=args.out.name, groupId=m.get("groupContext", {}).get("groupId", "synthetic-regression"),
                         stepId=row["stepId"], environmentHash=environment, action=row["request"], outcome=row["response"],
                         readGeneration=None, readiness=(dict(available=True, scope="post-delivery-barrier-not-response-readview", receiptFile="evaluator/readiness-receipts.json", deliveryOrdinal=row["deliveryOrdinal"]) if owned else dict(available=False)), simulatedTimeMs=None, snapshot=None, reward=None)) + "\n")
+        if answer and runtime_failure is None:
+            ANSWER["finish"](args, globals(), m, environment)
         if runtime_failure:
             result.update(actorActions=len(outcomes), storeMappings=len(mappings))
             raise RuntimeError(runtime_failure)
@@ -801,12 +819,17 @@ warm_file_enabled = false
         if process is not None and process.poll() is None:
             process.terminate()
             process.wait(timeout=10)
+        if answer and process is not None:
+            process_events[-1]["exitCode"] = process.returncode
+            save(evaluator / "process-events.json", process_events)
         for fd in control_fds:
             os.close(fd)
         os.close(guard_read)
         os.close(guard_write)
         stub.shutdown()
         stub.server_close()
+        if answer:
+            ANSWER["status"](args, globals(), m)
         accounting_error = None
         if trace is not None:
             trace.close()
@@ -888,9 +911,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
     p = sub.add_parser("prepare")
-    p.add_argument("--track", choices=(TRACK, COMBINED["TRACK"], CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
+    p.add_argument("--track", choices=(TRACK, ANSWER["TRACK"], COMBINED["TRACK"], CONTEXT["TRACK"], BEIR["TRACK"], GROUPED["TRACK"], PAIRED["TRACK"], ACCOUNTING_TRACK, CONFORMANCE["TRACK"], OWNED["TRACK"], RESET["TRACK"], SWEEP["TRACK"], NATIVE["TRACK"], NATIVE_SWEEP["TRACK"]), default=TRACK)
     for flag in ("binary", "scorer", "build", "out"): p.add_argument("--" + flag, type=Path, required=True)
     p.add_argument("--beir-reference", type=Path)
+    p.add_argument("--answer-variant", choices=ANSWER["VARIANTS"], default="baseline")
     p.add_argument("--combined-variant", choices=COMBINED["VARIANTS"], default="baseline")
     p.add_argument("--context-profile", choices=tuple(CONTEXT["PROFILES"]), default="default")
     p.add_argument("--context-assets", type=Path)
