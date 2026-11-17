@@ -218,7 +218,7 @@ fn framed_reply(mut reply: GetReply) -> Value {
 fn require(value: bool) -> Result<(), ()> {
     value.then_some(()).ok_or(())
 }
-fn decode(
+pub(super) fn decode(
     raw: &str,
     fields: &BTreeMap<String, &RawValue>,
     status: u16,

@@ -1,3 +1,4 @@
+pub(crate) mod api1_get;
 pub mod bridge_adapters;
 pub mod client;
 pub mod lifecycle;

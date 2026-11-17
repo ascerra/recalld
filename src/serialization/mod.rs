@@ -6,6 +6,7 @@
 pub mod catalog;
 pub mod contract;
 pub mod get;
+pub mod get_api1;
 mod json;
 pub mod list;
 pub mod native_batch;

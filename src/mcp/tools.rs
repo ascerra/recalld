@@ -855,18 +855,18 @@ async fn handle_get_memory(bridge: &McpBridge, arguments: serde_json::Value) -> 
         Ok(value) => value,
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
-    match bridge
+    bridge
         .storage
-        .get_memory(id, record_access, namespace)
+        .get_api1(
+            crate::serialization::get_api1::Request {
+                id,
+                record_access,
+                namespace: namespace.map(str::to_owned),
+            },
+            crate::daemon::api1_get::response_limit(),
+        )
         .await
-    {
-        Ok(Some(record)) => match ToolCallResult::json(&record) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Ok(None) => ToolCallResult::error(format!("Memory not found: {id_str}")),
-        Err(e) => ToolCallResult::error(format!("Failed to get memory: {e}")),
-    }
+        .mcp(id_str, namespace.is_some())
 }
 
 // ═══════════════════════════════════════════════════════════════════════

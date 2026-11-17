@@ -430,6 +430,17 @@ impl bridge::StorageEngine for RemoteStorageAdapter {
             .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
     }
 
+    fn supports_api1_get(&self) -> bool {
+        true
+    }
+    async fn get_api1(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        response_limit: usize,
+    ) -> crate::serialization::get_api1::Reply {
+        super::api1_get::remote(&self.client, request, response_limit).await
+    }
+
     async fn get_memory(
         &self,
         id: MemoryId,

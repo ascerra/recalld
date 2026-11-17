@@ -66,7 +66,6 @@ fn is_retry_safe(method: &str) -> bool {
             | "session_context_v1"
             | "check_health"
             | "scan_duplicates"
-            | "get_memory"
             | "search_read_only"
             | "get_memory_read_only"
             | "find_similar_read_only"
@@ -118,6 +117,7 @@ struct ClientState {
     api1_store_batch: Option<bool>,
     prepared_queries: Option<bool>,
     prepared_get: Option<bool>,
+    api1_get: Option<bool>,
     exact_pairs_bits: bool,
     canonical_pages: bool,
 }
@@ -150,6 +150,25 @@ pub(crate) struct PreparedExchange {
     pub(crate) phase: TransmissionPhase,
     /// A fully admitted response result; no typed receipt has been acquired.
     pub(crate) result: Option<serde_json::Value>,
+}
+
+pub(crate) enum Api1GetExchange {
+    Prepared(PreparedExchange),
+    Compatibility(Result<serde_json::Value, BridgeError>),
+}
+fn api1_get_capability(value: &serde_json::Value) -> Result<bool, BridgeError> {
+    if !value.is_object() {
+        return Err(BridgeError::Unavailable(
+            "malformed get capability handshake".into(),
+        ));
+    }
+    match value.get("api1GetV1") {
+        None => Ok(false),
+        Some(serde_json::Value::Bool(value)) => Ok(*value),
+        _ => Err(BridgeError::Unavailable(
+            "malformed api1GetV1 capability".into(),
+        )),
+    }
 }
 
 /// A failed exchange, plus whether the connection survived it. Existing callers
@@ -217,14 +236,70 @@ pub struct DaemonClient {
 impl DaemonClient {
     /// Prepared-only single exchange, without reconnect/replay after send. The
     /// shared mutex covers negotiation and the entire attributed response.
+    pub(crate) async fn call_api1_get(
+        &self,
+        params: serde_json::Value,
+        request: &crate::serialization::get_api1::Request,
+    ) -> Api1GetExchange {
+        let mut state = self.state.lock().await;
+        let ready = async {
+            if state.conn.is_none() {
+                self.reconnect(&mut state).await?;
+            }
+            if state.api1_get.is_none() {
+                state.negotiate().await?;
+            }
+            Ok::<_, BridgeError>(state.api1_get == Some(true))
+        }
+        .await;
+        match ready {
+            Err(_) => Api1GetExchange::Prepared(PreparedExchange {
+                phase: TransmissionPhase::BeforeSend,
+                result: None,
+            }),
+            Ok(true) => {
+                // The attributed exchange rechecks capability under its mutex.
+                // A reconnect/downgrade here fails closed, never changes lanes.
+                drop(state);
+                Api1GetExchange::Prepared(self.call_prepared(super::api1_get::GET, params).await)
+            }
+            Ok(false) => {
+                let method = if request.record_access {
+                    "get_memory"
+                } else {
+                    "get_memory_read_only"
+                };
+                let mut old = serde_json::json!({"id":request.id.to_string(),"recordAccess":request.record_access});
+                let method = if let Some(namespace) = &request.namespace {
+                    old["namespace"] = serde_json::json!(namespace);
+                    old.as_object_mut().unwrap().remove("recordAccess");
+                    if request.record_access {
+                        "get_memory_scoped".to_owned()
+                    } else {
+                        "get_memory_scoped_read_only".to_owned()
+                    }
+                } else {
+                    method.to_owned()
+                };
+                let result = self.call_locked(&mut state, &method, old).await;
+                self.connected
+                    .store(state.conn.is_some(), AtomicOrdering::Relaxed);
+                Api1GetExchange::Compatibility(result)
+            }
+        }
+    }
+
     pub(crate) async fn call_prepared(
         &self,
         method: &str,
         params: serde_json::Value,
     ) -> PreparedExchange {
         let mut state = self.state.lock().await;
+        let api1 = method == super::api1_get::GET;
         let point = method == super::prepared_get::GET;
-        let limit = if point {
+        let limit = if api1 {
+            super::api1_get::response_limit()
+        } else if point {
             super::prepared_get::response_limit()
         } else {
             super::prepared_query::response_limit()
@@ -236,7 +311,9 @@ impl DaemonClient {
                     result: None,
                 };
             }
-            if (if point {
+            if (if api1 {
+                state.api1_get
+            } else if point {
                 state.prepared_get
             } else {
                 state.prepared_queries
@@ -250,6 +327,7 @@ impl DaemonClient {
                 };
             }
             let supported = match method {
+                super::api1_get::GET => state.api1_get == Some(true),
                 super::prepared_get::GET => state.prepared_get == Some(true),
                 super::prepared_pages::LIST | super::prepared_pages::CATALOG => {
                     state.canonical_pages
@@ -309,7 +387,9 @@ impl DaemonClient {
                         };
                     }
                 };
-                if !(if point {
+                if !(if api1 {
+                    super::api1_get::admitted_frame(&frame)
+                } else if point {
                     super::prepared_get::admitted_frame(&frame)
                 } else {
                     super::prepared_query::admitted_frame(&frame)
@@ -388,6 +468,7 @@ impl DaemonClient {
                 api1_store_batch: None,
                 prepared_queries: None,
                 prepared_get: None,
+                api1_get: None,
                 exact_pairs_bits: false,
                 canonical_pages: false,
             }),
@@ -603,6 +684,8 @@ impl DaemonClient {
             .store(state.conn.is_some(), AtomicOrdering::Relaxed);
         // The answer describes the connection the lock is still protecting.
         let outcome = outcome?;
+        state.api1_get = None;
+        state.api1_get = Some(api1_get_capability(&outcome)?);
         state.frame_limit = negotiated_limit(&outcome);
         state.prepared_get = Some(
             outcome
@@ -643,6 +726,7 @@ impl DaemonClient {
         state.api1_store_batch = None;
         state.prepared_queries = None;
         state.prepared_get = None;
+        state.api1_get = None;
         state.exact_pairs_bits = false;
         state.canonical_pages = false;
         let mut last: Option<String> = None;
@@ -657,6 +741,7 @@ impl DaemonClient {
                     state.api1_store_batch = None;
                     state.prepared_queries = None;
                     state.prepared_get = None;
+                    state.api1_get = None;
                     state.exact_pairs_bits = false;
                     state.canonical_pages = false;
                     match state.negotiate().await {
@@ -703,6 +788,8 @@ impl ClientState {
             params: handshake_params(),
         };
         let result = self.exchange(&mut request).await.map_err(|e| e.error)?;
+        self.api1_get = None;
+        self.api1_get = Some(api1_get_capability(&result)?);
         self.frame_limit = negotiated_limit(&result);
         self.api1_lifecycle = Some(
             result
