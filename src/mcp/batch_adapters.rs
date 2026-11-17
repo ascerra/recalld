@@ -204,6 +204,10 @@ impl McpStorageAdapter {
         let kind = input.kind;
         let parent = input.batch_operation_id;
         let version = input.mutation_version;
+        let legacy_semantic_write = version == 4
+            && prepared
+                .iter()
+                .any(|item| matches!(item.plan, BatchItemPlan::Insert { .. }));
         let config = self.config.clone();
         let storage = self.storage.clone();
         let worker = work.child().map_err(StorageError::from)?;
@@ -231,7 +235,16 @@ impl McpStorageAdapter {
                         )
                     } else {
                         storage.meta_store().reserve_batch_version_with_work(
-                            &ctx, version, kind, &plans, parent, Some(&worker), || Ok(None),
+                            &ctx, version, kind, &plans, parent, Some(&worker), || {
+                                // Matching replay precedes fresh semantic admission;
+                                // rejection cannot reserve parent or child IDs.
+                                if legacy_semantic_write {
+                                    return Err(StorageError::UnsupportedMutation(
+                                        crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into(),
+                                    ));
+                                }
+                                Ok(None)
+                            },
                         )
                     };
                     timer.outcome(reservation.is_ok());
@@ -559,8 +572,13 @@ impl McpStorageAdapter {
                                 "RECONCILIATION_REQUIRED"
                             }));
                         if unavailable {
-                            outcome.items[index].error.as_mut().unwrap().field =
-                                self.native_store_blocker(prepared).map(str::to_owned);
+                            outcome.items[index].error.as_mut().unwrap().field = self
+                                .native_store_blocker(prepared)
+                                .or_else(|| {
+                                    (input.mutation_version == 4 && prepared.store.is_some())
+                                        .then_some("embeddingProfileId")
+                                })
+                                .map(str::to_owned);
                         }
                         break;
                     }

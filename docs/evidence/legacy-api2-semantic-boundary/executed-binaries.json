@@ -1,0 +1,41 @@
+{
+  "source": "82ad4d949a7b52ca414d2c54517574db28e8a92b",
+  "executables": {
+    "/target/debug/deps/recalld-212d4a4f320696fe": {
+      "sha256": "e61a70a07f615ba87581da178cc8728fe5f276abccdca9156186370b557f3345",
+      "bytes": 118412152
+    },
+    "/target/debug/deps/recalld-08988f66227b33f7": {
+      "sha256": "de37992065517eaaeeb44ed035ba3ae24a7779266e83b578ea626903f3d545cd",
+      "bytes": 1059120
+    },
+    "/target/debug/deps/recalld_cli-8d07a58ae0104b99": {
+      "sha256": "1f36dbbaa6f146b0d5c60aa1aad498eeeec5d62cbbe52d23d0ad3db13f13f460",
+      "bytes": 1057744
+    },
+    "/target/debug/deps/recalld_text_migrate-8d07f13a73aa26e5": {
+      "sha256": "7a78448ca9c1c07995e2f308fb7aca43ab74a3a2c5b523cb28b041357f65b197",
+      "bytes": 1057760
+    },
+    "/target/debug/deps/lifecycle_cli-deffe0c58979bc70": {
+      "sha256": "eca3ab75fba4999e3b757d8262a9513029b2337f6e54ecd3ab1c5e30f70632d0",
+      "bytes": 13668800
+    },
+    "/target/debug/deps/text_migration_cli-55598fe3418b6f4f": {
+      "sha256": "2bf5f9e1bb24625e4a52579421e19ca1f355dcf5757f47199d1c347e8501f454",
+      "bytes": 13357128
+    },
+    "/target/debug/recalld": {
+      "sha256": "67b100fb72f084ccc5dc97b1b7cb2998f91bc166dc8641b13081cb8a3f08c298",
+      "bytes": 93217384
+    },
+    "/target/debug/recalld-cli": {
+      "sha256": "7e7c7ef822175a3b04dea9bc3bda7565ba6b98f5ec93d1077ed0089dfd56f42e",
+      "bytes": 20238472
+    },
+    "/target/debug/recalld-text-migrate": {
+      "sha256": "63f39be6fd920c68b6de6a097942f92ac687ce9c5493e28a52a790bff4380c12",
+      "bytes": 13571464
+    }
+  }
+}

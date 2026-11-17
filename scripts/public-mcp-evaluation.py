@@ -36,6 +36,23 @@ CAPABILITIES = dict(publicMcp=True, publicV2=False, fullA6=False, coherentReadVi
 VERSIONS = dict(publicContractVersion=1, canonicalSchemaVersion=None,
                 canonicalRepresentation="unattested-via-public-v1", contextVersion=1)
 EXTRA = (
+         # Exact retained format1/4 histories used by the admission/replay tests.
+         'src/mcp/fixtures/legacy-compound-before.zip',
+         'src/mcp/fixtures/legacy-compound-before.zip.json',
+         'src/mcp/fixtures/legacy-semantic-before/completed.zip',
+         'src/mcp/fixtures/legacy-semantic-before/fault-false.zip',
+         'src/mcp/fixtures/legacy-semantic-before/fault-true.zip',
+         'src/mcp/fixtures/legacy-semantic-before/faults.json',
+         'src/mcp/fixtures/legacy-semantic-before/history.json',
+         'src/mcp/fixtures/legacy-semantic-before/pending.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process-after_batch_commit.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process-after_canonical_ack.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process-after_edge_commit.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process-after_insert_payload_sync.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process-after_metadata_commit.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process-before_batch_commit.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process-before_metadata_commit.zip',
+         'src/mcp/fixtures/legacy-semantic-before/process.json',
          "tests/query-schema-requirements.txt", "tests/query_schema_conformance.py",
          # Exact native replay inputs; no directory wildcard or ambient scratch.
          'src/storage/vector_certification/fixtures/pending-before-certification.zip',

@@ -1,0 +1,272 @@
+[
+    {
+        "Id": "b870f88f2a925edeaba602ea0269509e354e6ea3a2908d3dfe90c6ea918a97e4",
+        "Created": "2026-11-16T22:29:29.848499393Z",
+        "Path": "python3",
+        "Args": [
+            "/work/output/execute.py"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-16T22:29:30.024882383Z",
+            "FinishedAt": "2026-11-16T23:06:29.754898369Z"
+        },
+        "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+        "ResolvConfPath": "/var/lib/docker/containers/b870f88f2a925edeaba602ea0269509e354e6ea3a2908d3dfe90c6ea918a97e4/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/b870f88f2a925edeaba602ea0269509e354e6ea3a2908d3dfe90c6ea918a97e4/hostname",
+        "HostsPath": "/var/lib/docker/containers/b870f88f2a925edeaba602ea0269509e354e6ea3a2908d3dfe90c6ea918a97e4/hosts",
+        "LogPath": "/var/lib/docker/containers/b870f88f2a925edeaba602ea0269509e354e6ea3a2908d3dfe90c6ea918a97e4/b870f88f2a925edeaba602ea0269509e354e6ea3a2908d3dfe90c6ea918a97e4-json.log",
+        "Name": "/recalld-merge-queue-164",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": null,
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {
+                    "max-file": "5",
+                    "max-size": "20m"
+                }
+            },
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": [
+                "ALL"
+            ],
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": true,
+            "SecurityOpt": [
+                "no-new-privileges"
+            ],
+            "Tmpfs": {
+                "/tmp": "rw,nosuid,nodev,exec,size=1g"
+            },
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 8407482368,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 6442450944,
+            "NanoCpus": 2000000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 6442450944,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": 512,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "Mounts": [
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr164-09857bbb/source",
+                    "Target": "/work/source",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/cargo",
+                    "Target": "/cargo"
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/target",
+                    "Target": "/work/target"
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr164-09857bbb/output",
+                    "Target": "/work/output"
+                }
+            ],
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/cargo",
+                "Destination": "/cargo",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr164-09857bbb/output",
+                "Destination": "/work/output",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr164-09857bbb/source",
+                "Destination": "/work/source",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-pr22-a20ab593/target",
+                "Destination": "/work/target",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "b870f88f2a92",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "HOME=/tmp",
+                "RUSTUP_TOOLCHAIN=1.94.1",
+                "RECALLD_A6_SOURCE_COMMIT=09857bbb1ef6ef10228d817c468018b4a454fb36",
+                "CARGO_NET_OFFLINE=true",
+                "CARGO_BUILD_JOBS=1",
+                "RECALLD_A6_SOURCE_TREE_SHA256=32aced8e71de6283f9acd85cb134541136c28fb5c898bde647184041c20df629",
+                "RECALLD_A6_IMAGE_ID=sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+                "CARGO_HOME=/cargo",
+                "CARGO_TARGET_DIR=/work/target",
+                "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "RUSTUP_HOME=/usr/local/rustup",
+                "RUST_VERSION=1.94.1"
+            ],
+            "Cmd": [
+                "python3",
+                "/work/output/execute.py"
+            ],
+            "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+            "Volumes": null,
+            "WorkingDir": "/work/source",
+            "Entrypoint": null,
+            "Labels": {
+                "org.opencontainers.image.source": "https://github.com/rust-lang/docker-rust"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "none": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "9f8d771a69aae6568ca4386f95a53838dae6a2faa7f0494668ca6d561de2ff98",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:3065526a10807e4b0672a1c23f6a167f6b42ba75efdae5deaf7afdbd4d554544",
+            "size": 1448,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]

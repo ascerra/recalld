@@ -1,0 +1,67 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794866758.9902303
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_conformance.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794866759.09665
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_offline_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794866759.1812618
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794866759.3403585
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "legacy_semantic_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 101,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794866779.7172768
+  }
+]

@@ -98,8 +98,8 @@ pub(crate) fn child_matches(
     use control::MutationOutcome::*;
     matches!(
         (version, kind, outcome),
-        (1, BatchKind::Insert, MemoryInserted { .. })
-            | (1, BatchKind::Forget, MemoryTombstoned { .. })
+        (1 | 4, BatchKind::Insert, MemoryInserted { .. })
+            | (1 | 4, BatchKind::Forget, MemoryTombstoned { .. })
             | (2, BatchKind::Insert, NativeMemoryInserted { .. })
             | (2, BatchKind::Forget, NativeMemoryTombstoned { .. })
             | (3, BatchKind::Insert, NativeMemoryInsertedWithLinks { .. })

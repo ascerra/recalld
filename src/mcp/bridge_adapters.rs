@@ -15,6 +15,10 @@ mod native_store_batch;
 #[path = "native_store_single.rs"]
 mod native_store_single;
 
+#[cfg(test)]
+#[path = "legacy_compound_origin_tests.rs"]
+mod legacy_compound_origin_tests;
+
 use crate::decay::observation::Observed;
 use std::sync::Arc;
 
@@ -42,6 +46,7 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
             bridge::BridgeError::PartiallyApplied(error.to_string())
         }
         crate::storage::StorageError::ProviderVectorUnavailable(_)
+        | crate::storage::StorageError::UnsupportedMutation(_)
         | crate::storage::StorageError::VectorCertificationRequired { .. } => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
@@ -1406,6 +1411,15 @@ impl McpStorageAdapter {
                     }
                 }
 
+                if child.as_ref().is_some_and(|c| c.is_legacy_api2()) {
+                    // Existing child lookup above keeps the original receipt/kind.
+                    // A blocked pending child is never finalized or reallocated.
+                    return Err(bridge::BridgeError::Unavailable(
+                        crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into(),
+                    )
+                    .into());
+                }
+
                 effects_stamp(&self.storage).await?;
 
                 use crate::model::constants::{
@@ -2048,7 +2062,9 @@ impl bridge::StorageEngine for McpStorageAdapter {
         {
             return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreBatchV1/store_batch_api1_v1 before inserting a batch".into()));
         }
-        if input.mutation_version == 3 || input.expected_generation.is_some() {
+        if input.mutation_version == 3
+            || input.expected_generation.is_some() && input.mutation_version != 4
+        {
             return Err(bridge::BridgeError::Unavailable(
                 "linked native batch consumer remains gated pending transport validation".into(),
             ));
