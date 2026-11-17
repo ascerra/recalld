@@ -322,7 +322,7 @@ fn api1_point_raw_owning_timezone_tag_is_bounded() {
         // Count the actual proposed private carrier's fixed keys, version,
         // kind, maximum status width and owning timezone separately from its
         // quoted reply JSON. The reply itself is counted by pre-admission.
-        let tag = json!({"wireVersion":1,"kind":"native","httpStatus":503,
+        let tag = serde_json::json!({"wireVersion":1,"kind":"native","httpStatus":503,
             "timezone":name,"replyJson":""});
         assert!(serde_json::to_vec(&tag).unwrap().len() <= 256);
     }
