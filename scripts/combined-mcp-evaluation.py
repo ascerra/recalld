@@ -187,6 +187,31 @@ def reconcile(h, trace, providers):
     return result
 
 
+def control(h, read_fd, write_fd, log):
+    class Controlled(h["OWNED"]["Control"]):
+        def handshake(self):
+            expected = h["SWEEP"]["control_capabilities"](h["RESET"]["CONTROL_CAPABILITIES"])
+            if h["encoded"](self.call("capabilities", {})) != h["encoded"](expected):
+                raise ValueError("unsupported combined owned-constructor capabilities")
+            self.call("reset", {}, error="UNSUPPORTED_CONTROL")
+            self.call("logicalHash", {}, error="UNSUPPORTED_CONTROL")
+
+        def checkpoint(self, ordinal, acknowledged):
+            before = h["RESET"]["checked_state"](h, self.call("inspect", {}))
+            at = before["committed"]
+            report = h["OWNED"]["checked_barrier"](self.call("barrier", dict(target=at, deadlineMs=30000)), at)
+            after = h["RESET"]["checked_state"](h, self.call("inspect", {}))
+            if before != after or after["committed"] != dict(storeId=report["storeId"], generation=report["committedGeneration"]):
+                raise ValueError("serialized owned state changed during barrier")
+            if self.receipts and (at["storeId"] != self.receipts[-1]["after"]["storeId"] or h["OWNED"]["generation"](at["generation"]) < h["OWNED"]["generation"](self.receipts[-1]["after"]["generation"])):
+                raise ValueError("lineage changed or generation regressed")
+            receipt = dict(deliveryOrdinal=ordinal, acknowledgedThroughStepId=str(acknowledged), target=at,
+                barrier=report, after=after["committed"], runtimeState=after["runtimeState"])
+            self.receipts.append(receipt)
+            return receipt
+    return Controlled(read_fd, write_fd, log)
+
+
 def control_negatives(control, initial):
     # Actual rejected controls, not a claim of an actual blocked-worker timeout.
     for deadline in (0, 30001, True):
@@ -201,7 +226,7 @@ def verify_episode(args, h, manifest, schedule, wire, receipts):
     if len(receipts) != len(schedule["queries"]) + 3:
         raise ValueError("missing initial/ingest/query/miss barrier")
     initial = receipts[1]["after"]  # Ingestion completed.
-    if any(r["after"] != initial for r in receipts[2:]):
+    if any(r["after"] != initial or r["runtimeState"] != receipts[1]["runtimeState"] for r in receipts[2:]):
         raise ValueError("false query or cache miss changed canonical generation")
     contexts = json.loads((args.out / "evaluator/context-validation.json").read_text())["queries"]
     mapping = json.loads((args.out / "source-mappings.json").read_text())["mappings"]

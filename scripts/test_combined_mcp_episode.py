@@ -90,7 +90,14 @@ def main():
         if track!=h['OWNED']['TRACK']:
             a.binary=args.binary.parent.parent/'recalld'
             m=json.loads(a.manifest.read_text());m['executables']={'recalld':h['digest'](a.binary.read_bytes()),'scorer':h['digest'](args.scorer.read_bytes())};h['save'](a.manifest,m)
-        run(a);done(name,status='passed')
+        if track==h['OWNED']['TRACK']:
+            try:run(a)
+            except ValueError as error:
+                assert str(error)=='unsupported private control capabilities'
+                assert not list((a.out/'actor-inputs').iterdir())
+                done(name,status='expected-incompatibility',reason=str(error),oldProfileUnchanged=True)
+            else:raise AssertionError('old owned profile unexpectedly accepted new constructor')
+        else:run(a);done(name,status='passed')
     h['save'](args.out/'result.json',dict(status='passed',successfulCombinedCohorts=3,combinedEpisodes=21,combinedQueries=84,checks=checks,
         trueDelayedWorkerTimeoutProven=False,independentStartupDeterminism=False,fullA6=False))
 

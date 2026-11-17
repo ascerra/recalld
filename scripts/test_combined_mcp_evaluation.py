@@ -110,6 +110,22 @@ class Combined(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'independent harness version'):
                 H['validate_build'](dict(track=track,manifestVersion=1,sourceMappingVersion=1,traceSchemaVersion=version),None,None,None)
 
+    def test_current_constructor_exact_capabilities_and_state_not_old_helper(self):
+        control=C['control'](H,-1,-1,self.root/'never-written.jsonl')
+        expected=H['SWEEP']['control_capabilities'](H['RESET']['CONTROL_CAPABILITIES'])
+        control.call=lambda method,params,error=None:copy.deepcopy(expected) if method=='capabilities' else {}
+        control.handshake()
+        for value in (H['OWNED']['CAPABILITIES'],dict(expected,methods=expected['methods']+['future-method'])):
+            control.call=lambda *a,**k:value
+            with self.assertRaisesRegex(ValueError,'owned-constructor'):control.handshake()
+        state=dict(committed=receipt()['target'],logicalHash=None,snapshot=False,
+            runtimeState=dict(nowMillis=1000,allocation=dict(version=1,seed=[7]*32,counter=0,lastMemoryMillis=None)))
+        control.call=lambda method,params:copy.deepcopy(state if method=='inspect' else receipt()['barrier'])
+        value=control.checkpoint(-1,0)
+        self.assertEqual(value['runtimeState'],state['runtimeState'])
+        state['snapshot']=True
+        with self.assertRaisesRegex(ValueError,'not a checkpoint'):control.checkpoint(0,1)
+
     def test_control_timeout_is_checker_only_and_no_automatic_retry(self):
         import os
         read,write=os.pipe(); request,peer=os.pipe()

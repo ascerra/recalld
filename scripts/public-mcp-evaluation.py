@@ -275,7 +275,7 @@ def reconcile_accounting(trace_rows, provider_rows):
 
 def track_profile(track):
     if track == COMBINED["TRACK"]:
-        return dict(VERSIONS, privateControlVersion=1, combinedConsumerVersion=1), dict(CAPABILITIES, barrier=True, completeExternalAccounting=True, groupedContext=True)
+        return dict(VERSIONS, privateControlVersion=1, combinedConsumerVersion=1, ownedConstructorProfile="legacy-checkpoint-sweep-v1"), dict(CAPABILITIES, barrier=True, completeExternalAccounting=True, groupedContext=True, clock="lifecycle-owned-unadvanced", lifecycleClockControlled=True, canonicalAllocationControlled=True)
     if track == NATIVE_SWEEP["TRACK"]:
         versions, capabilities = track_profile(NATIVE["TRACK"])
         return dict(versions, sweepControlVersion=1, sweepOriginalContractVersion=1, physicalCompactionContractVersion=1, nativePrefixFixtureVersion=3, inheritedPolicyAdoptionVersion=1), dict(capabilities,
@@ -623,7 +623,7 @@ warm_file_enabled = false
                         process = child  # cleanup still owns child if handshake fails
                         os.close(request_read); control_fds.remove(request_read)
                         os.close(response_write); control_fds.remove(response_write)
-                        control = OWNED["Control"](response_read, request_write, evaluator / "control-wire.jsonl")
+                        control = COMBINED["control"](globals(), response_read, request_write, evaluator / "control-wire.jsonl") if combined else OWNED["Control"](response_read, request_write, evaluator / "control-wire.jsonl")
                         control.handshake()
                         initial_receipt = control.checkpoint(-1, 0)
                         if combined:
