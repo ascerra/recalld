@@ -570,3 +570,71 @@ async fn ordinary_point_capable_lost_reply_never_repeats_actual_native_exposure(
         .unwrap()
         .unwrap();
 }
+
+async fn ordinary_native_wrong_mode(failure: bool) {
+    use crate::mcp::bridge::StorageEngine as _;
+    use crate::serialization::get_api1::{self as wire, Content, Request};
+    let f = similar_fixture().await;
+    let mut adapter = ordinary_adapter(&f.f, Arc::new(f.engine), f.clock.clone(), chrono_tz::UTC);
+    if failure {
+        Arc::get_mut(&mut adapter).unwrap().api1_before_barrier = Some(|owner| {
+            owner
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .invalidate_derived_view(crate::storage::publication::DerivedView::Fts);
+        });
+    }
+    let request = Request {
+        id: f.foreign,
+        namespace: None,
+        record_access: true,
+    };
+    let result = adapter
+        .get_api1(request.clone(), crate::daemon::api1_get::response_limit())
+        .await;
+    let Content::Point {
+        reply,
+        timezone,
+        native,
+    } = result.inner
+    else {
+        panic!()
+    };
+    assert!(native);
+    assert_eq!(reply.http_status, if failure { 503 } else { 200 });
+    let raw = serde_json::to_string(reply.envelope.receipt.as_ref().unwrap()).unwrap();
+    let result = crate::daemon::api1_get::tests::fake_peer(
+        wire::tagged(&reply, timezone, wire::Mode::Legacy),
+        request,
+        serde_json::json!(true),
+    )
+    .await;
+    assert!(
+        matches!(result.inner, Content::Unverified { .. }),
+        "native receipt accepted under Legacy tag: {result:?}"
+    );
+    let value = result
+        .mcp(&f.foreign.to_string(), false)
+        .structured_content
+        .unwrap();
+    assert_eq!(value["commitState"], "unknown");
+    assert!(
+        !value.contains_key("receipt")
+            && !value.contains_key("operationId")
+            && !value.contains_key("readiness")
+    );
+    assert_eq!(
+        value["receivedEvidence"]["receiptsJson"],
+        serde_json::json!([raw])
+    );
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_point_mode_before_native_success_cannot_claim_legacy() {
+    ordinary_native_wrong_mode(false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_point_mode_before_native_failure_cannot_claim_legacy() {
+    ordinary_native_wrong_mode(true).await;
+}

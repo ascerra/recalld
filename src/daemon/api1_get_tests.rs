@@ -330,3 +330,57 @@ fn ordinary_point_production_raw_count_duplicates_and_overflow() {
     assert!(candidates.push(null).is_err());
     assert!(candidates.raw.is_empty());
 }
+
+async fn legacy_wrong_mode(failure: bool) {
+    let (f, id) = legacy(DecayPhase::Full).await;
+    let adapter = f.storage_adapter();
+    if failure {
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .observation_fault
+            .store(2, std::sync::atomic::Ordering::SeqCst);
+    }
+    let result = adapter.get_api1(input(id, true), response_limit()).await;
+    let wire::Content::Point {
+        reply,
+        timezone,
+        native,
+    } = result.inner
+    else {
+        panic!()
+    };
+    assert!(!native);
+    assert_eq!(reply.http_status, if failure { 503 } else { 200 });
+    let raw = serde_json::to_string(reply.envelope.receipt.as_ref().unwrap()).unwrap();
+    let result = fake_peer(
+        wire::tagged(&reply, timezone, Mode::Native),
+        input(id, true),
+        json!(true),
+    )
+    .await;
+    assert!(
+        matches!(result.inner, wire::Content::Unverified { .. }),
+        "legacy receipt accepted under Native tag: {result:?}"
+    );
+    let value = result
+        .mcp(&id.to_string(), false)
+        .structured_content
+        .unwrap();
+    assert_eq!(value["commitState"], "unknown");
+    assert!(
+        !value.contains_key("receipt")
+            && !value.contains_key("operationId")
+            && !value.contains_key("readiness")
+    );
+    assert_eq!(value["receivedEvidence"]["receiptsJson"], json!([raw]));
+}
+#[tokio::test]
+async fn ordinary_point_mode_before_legacy_success_cannot_claim_native() {
+    legacy_wrong_mode(false).await;
+}
+#[tokio::test]
+async fn ordinary_point_mode_before_legacy_failure_cannot_claim_native() {
+    legacy_wrong_mode(true).await;
+}
