@@ -449,3 +449,50 @@ The source audit of the MCP `u16` dimension projection found an existing bound:
 `NativeNamespaceInput::prepare` obtains `profile_id()`, which validates the
 owned profile dimension in `1..=8192` before construction. No width cast fix or
 new provider attestation is needed. This is a source conclusion, not a new test.
+
+Rust API compatibility: existing namespace-registry implementors retain default
+forwarding to their old legacy create method. The new bounded entry receives an
+opaque descriptor and returns `CatalogApi1Error` for local MCP; HTTP retains its
+boxed typed-error convention. Descriptor and worker-snapshot construction stay
+crate-controlled, with no public deserializer. Adding `Api1WorkerUnknown` to the
+public `CatalogError` enum requires downstream exhaustive matches to handle
+that variant as unknown, preserving its typed cause. The old unbounded native
+create entry refuses before work; callers must use the admitted local entry.
+No existing legacy wire payload, global BridgeError or daemon method changed.
+
+## Remaining Remote consumer, source-only handoff
+
+Huygens's review pin is R2 client
+`c297f17310ee2688a0fe5e27e7fc84c8f3de471a` plus the local API at `22bc5f0c`.
+These are inspection references, not an approved WIP merge. An actual Remote
+leaf must use the queue's frozen main and the validated, published local N1
+consumer. Curie's O1 RPC reservation has priority; Halley must release exact
+catalog client/server/bridge hunks before any implementation.
+
+`call_prepared` is a result-only query exchange and cannot carry the catalog
+error arm. `call_api1_mutation` selects a route under the connection mutex but
+its BridgeError result does not retain the required exchange phase. The proposed
+narrow catalog exchange reuses that mutex, negotiation and reconnect reset,
+while preserving phase and the entire bounded matched result/error. Capability
+and legacy-route selection happen before writing; no fallback after sending a
+mutation. No second connection, request registry or post-error receipt lookup.
+
+Only a validated response descriptor may cross the wire: actual upstream MCP
+ID/era/surface and bounded policy, never ReceiptAdmission authority. The server
+reconstructs admission using its actual current peer limit. The same fresh
+transaction checks both the exact upstream MCP emitter and the exact daemon
+response/error-string escaping, including IDs. Neither a minimum of capacities
+nor a query-derived multiplier proves this joint bound.
+
+A matched partial-application error needs strict whole-failure/full-receipt
+decoding and binding to this Catalog/native-create request. Malformed or
+wrong-ID responses cannot establish a committed receipt; phase must remain
+unknown and any separately received evidence remain explicitly unverified.
+The bounded malformed-evidence representation still needs concrete wire review;
+this plan does not authorize dropping evidence or inventing a receipt reference.
+
+Required actual probes: old legacy positive; unnegotiated 1 MiB native refusal
+before work; negotiated 8 MiB plus escaped upstream IDs at both exact limits;
+full known and unknown receipt cases; lost replies and no post-send fallback.
+Existing native unbounded aliases continue to refuse before work. Local N1
+validation is not Remote completion, ordinary startup or public2 activation.

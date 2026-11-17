@@ -1,0 +1,8 @@
+paired_scoring::tests::hand_calculated_paired_micro_macro_and_same_draws: test
+paired_scoring::tests::insufficient_groups_are_not_fake_intervals: test
+paired_scoring::tests::unknown_zero_and_mismatched_eligibility_remain_explicit: test
+source_scoring::tests::ledger_counts_no_memory_rejection_truncation_and_partial_attempts: test
+source_scoring::tests::source_scorer_hand_calculated_cases_and_denominators: test
+tests::actual_episode_projection_requires_mapped_public_ids_and_known_queries: test
+tests::grouped_actual_scorer_distinguishes_query_micro_group_macro_and_unscored: test
+tests::grouped_scorer_rejects_missing_duplicate_unbound_and_rehashed_split_inputs: test

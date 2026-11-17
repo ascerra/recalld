@@ -78,5 +78,9 @@
   "compile-summary.txt": {
     "sha256": "9e6696c117071875cb9af89bdbc4bd2d0e3369a60fe7467efe79a4074127fb57",
     "bytes": 180
+  },
+  "run.sh": {
+    "sha256": "d58ae870c119555d806512e337cc73aee05b43e30d1b1fd45d6c9befdaed54c2",
+    "bytes": 1928
   }
 }
