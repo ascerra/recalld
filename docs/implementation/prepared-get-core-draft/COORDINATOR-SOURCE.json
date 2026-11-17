@@ -1,6 +1,6 @@
 {
   "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
-  "status": "31db focus19PASS/1test assertionFAIL/1historical ignored; test-only equal-wire-parse correction not yet executed",
+  "status": "893 frozen full1718library/10CLI/15examples PASS;4library+4doc ignored;fmt/clippy0; RPC pending, NOT READY",
   "files": [
     {
       "path": "src/api/adapters.rs",
@@ -91,5 +91,6 @@
       "sha256": "ac8a8a964a23d997a7a7378ded4d7a475bd1e68536f44270639024c7c80a95ad"
     }
   ],
-  "format": "cargo fmt --all, recalld-ci:1.94, RUSTUP_TOOLCHAIN=1.94.1, network none; exit0"
+  "format": "cargo fmt --all, recalld-ci:1.94, RUSTUP_TOOLCHAIN=1.94.1, network none; exit0",
+  "validated_source": "893f48919ec1efbb68d42ee434ec68eede463f39"
 }

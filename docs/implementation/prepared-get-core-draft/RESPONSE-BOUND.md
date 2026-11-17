@@ -85,5 +85,6 @@ smaller than even the fixed error frame (the earlier128byte reject probe was
 never a transport claim). The later real private get RPC must pass its actual
 negotiated F, reject unsupported capacity before work, and retain malformed-peer
 receivedEvidence without assigning it current-operation commitment. Do not
-claim the direct reserve establishes those R1 consumer requirements. At this
-writing the new bound/input tests have not run; no completed proof/READY claim.
+claim the direct reserve establishes those R1 consumer requirements. The corrected bound module passed3 checks at893; full1718library/10CLI/15examples
+then passed on that source. See the core-final seal for the retained31db test-only
+failure and exact attribution. RPC remains pending; no O1 READY claim.

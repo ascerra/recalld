@@ -1,7 +1,9 @@
 # Prepared get: source draft, not ready for publication
 
-**Current update:** [COORDINATOR.md](COORDINATOR.md) records the actual coordinator,
-direct consumers and first focused validation plan. The helper-only description
+**Current update:** [core/direct full seal](../../evidence/prepared-get/core-final/REPORT.md)
+records exact893 source1718library/10CLI/15example passes, format/Clippy and retained
+failures. RPC is still pending; this is not O1 READY.
+[COORDINATOR.md](COORDINATOR.md) retains the implementation chronology. The helper-only description
 below is historical at7939d6d; no execution claim is superseded by source work.
 
 ## Historical literal helper review

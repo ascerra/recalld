@@ -1,0 +1,142 @@
+{
+  "root": "/tmp/recalld-curie-o1-build/runs/007-893f4891",
+  "files": {
+    "EXECUTABLE.json": {
+      "bytes": 224,
+      "sha256": "aa61341e17e950824849c41b0673cc934f5e002f889ecf4ee559e0e222271422"
+    },
+    "FULL-EXECUTABLES.json": {
+      "bytes": 2890,
+      "sha256": "84aecd0357c847efff0ed2bb6dcfb69ea07e062fd4f680435cce3006796f47f1"
+    },
+    "SOURCE-AFTER.json": {
+      "bytes": 73,
+      "sha256": "827f9fe465259678dd55e20ccb0fffe417d05c96c8d35d3f785ecfab2c9b689a"
+    },
+    "SOURCE.json": {
+      "bytes": 297,
+      "sha256": "a03749e693818ad9354b0cc7269246ac36022b817eda4e231906e4a68b366cce"
+    },
+    "bound.exit": {
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "bound.log": {
+      "bytes": 603,
+      "sha256": "2a4398f22d9f987402393316c6e630c1e4f5915701d45bd39023d239e0b112de"
+    },
+    "build.exit": {
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "build.jsonl": {
+      "bytes": 371349,
+      "sha256": "01ff46aec13c0327c31c0d7a9a631f05602e3d847c6050cb12595cc4a7b5fec9"
+    },
+    "build.log": {
+      "bytes": 110,
+      "sha256": "90e39f02ca20c420078faaafe4400d7fa0aeb7a11eee50dba1bc089aa4494390"
+    },
+    "clippy-memory.events": {
+      "bytes": 70,
+      "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+    },
+    "clippy-memory.peak": {
+      "bytes": 11,
+      "sha256": "2e4399963202988bd0fa400803a64f96f217ec4c061ecb19480d6518943ec75e"
+    },
+    "clippy.exit": {
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "clippy.log": {
+      "bytes": 1196465,
+      "sha256": "f37570b4c64b34c4f190b7cc3d205889d44e62520648f349559cdfbda6d42f58"
+    },
+    "doc-memory.events": {
+      "bytes": 73,
+      "sha256": "5e309ede9f74770bcc8e2a74b9dc372789094272dd2d83c0200f481e03de659b"
+    },
+    "doc-memory.peak": {
+      "bytes": 11,
+      "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb"
+    },
+    "doc.exit": {
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "doc.log": {
+      "bytes": 40942,
+      "sha256": "4d2eafeae4f09ca229faf7debc67208fee1dc30810652acfecf33a709ee44d55"
+    },
+    "fmt-memory.events": {
+      "bytes": 70,
+      "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+    },
+    "fmt-memory.peak": {
+      "bytes": 10,
+      "sha256": "35f82481b2ed511c3b7c2634ca2858f3fd39e6e4603a3288b6f3382c577fd710"
+    },
+    "fmt.exit": {
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "fmt.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "full-memory.events": {
+      "bytes": 73,
+      "sha256": "5e309ede9f74770bcc8e2a74b9dc372789094272dd2d83c0200f481e03de659b"
+    },
+    "full-memory.peak": {
+      "bytes": 11,
+      "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb"
+    },
+    "full.exit": {
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "full.log": {
+      "bytes": 259750,
+      "sha256": "5ec4d08f297830eabe78b85ea684f29685b6c5f582bde2d497da76c21ebcf96e"
+    },
+    "included-fmt-memory.events": {
+      "bytes": 70,
+      "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+    },
+    "included-fmt-memory.peak": {
+      "bytes": 10,
+      "sha256": "35f82481b2ed511c3b7c2634ca2858f3fd39e6e4603a3288b6f3382c577fd710"
+    },
+    "included-fmt.exit": {
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "included-fmt.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "memory.events": {
+      "bytes": 74,
+      "sha256": "9b76ce9abd34905b09e18960b97e8461b18fbf81331e35185204a1e8fb1c7593"
+    },
+    "memory.peak": {
+      "bytes": 11,
+      "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb"
+    },
+    "rustc.txt": {
+      "bytes": 197,
+      "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce"
+    },
+    "test-memory.events": {
+      "bytes": 70,
+      "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+    },
+    "test-memory.peak": {
+      "bytes": 9,
+      "sha256": "a254b308bc02f3f83537cacbef07948ef9d49f0bb1ae798d3e5ad66f20cb9c96"
+    }
+  },
+  "retention": "active incomplete O1; no PR; central cleanup ownership"
+}

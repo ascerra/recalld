@@ -32,3 +32,7 @@ Cleanup: one owned active cache/target exists at /tmp/recalld-curie-o1-build. On
 Source85ca326fd0c889bbac824026030cd2195c28b0b3 passed13 focused/1historical ignored; see [typed conflict seal](../../evidence/prepared-get/typed-conflict-focus/REPORT.md). Generic query mapping and serialized ObservationError remain unchanged; only prepared get uses the internal typed cause.
 
 The next test-only hook is a per-request bounded blocking copy latch, retaining actual publication/graph/engine leases after caller cancellation. New tests cover detached-worker exit, unresolved-root barrier failure and strict reopen; actual admission close followed by descendants under the original root and exact known receipt; and real insertion outbox canonical_applied=true with derived_dirty=true allowing a false materialized point copy without acknowledging the outbox. These new tests are not yet executed. No shared RPC edits, new dependency or READY claim.
+
+## Frozen core/direct full result
+
+See [exact893 full seal](../../evidence/prepared-get/core-final/REPORT.md):1718library/10CLI/15example PASS;4library+4doc ignored;fmt/Clippy exit0 withwarnings. Source/executable identity and all retained failures are pinned there. Cancellation/close/outbox and bound controls above now passed. Actual shared RPC remains unedited and blocks O1 READY.
