@@ -1,6 +1,7 @@
 pub mod bridge_adapters;
 pub mod client;
 pub mod lifecycle;
+pub(crate) mod prepared_query;
 pub mod protocol;
 pub mod server;
 

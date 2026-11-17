@@ -23,6 +23,11 @@ pub struct SimilarRequest {
     pub(crate) options: crate::search::SimilaritySelection,
     pub(crate) explain: bool,
 }
+
+// Only the existing prepared selectors cross the private RPC boundary. Keep
+// conversion next to their parser so internal-only filters cannot disappear.
+#[path = "query_rpc.rs"]
+mod rpc;
 impl SimilarRequest {
     pub(crate) fn from_mcp(value: &Value) -> Result<Self, InputError> {
         if ContractVersion::from_mcp(value)? != ContractVersion::V2 {

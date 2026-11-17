@@ -56,6 +56,7 @@ impl DaemonServer {
                 tz,
             )
             .with_clock(system.clock().clone())
+            .with_catalog_profile_context(system.embedding().as_ref())
             .with_query_engine(system.query_engine().clone()),
         );
         let namespaces: Arc<dyn NamespaceRegistry> = Arc::new(
@@ -490,6 +491,11 @@ async fn dispatch_bounded(
     };
     let namespace = namespace.as_deref();
     match method {
+        super::prepared_query::QUERY
+        | super::prepared_query::SIMILAR
+        | super::prepared_query::PAIRS => {
+            super::prepared_query::dispatch(search, method, params, frame_limit).await
+        }
         // Doubles as the protocol handshake. A v1 client ignores the extra
         // fields; a v2 client uses them to size its outgoing frames.
         "ping" => Ok(serde_json::json!({
@@ -498,6 +504,8 @@ async fn dispatch_bounded(
             "api1LifecycleV1": storage.supports_api1_lifecycle(),
             "api1StoreV1": storage.supports_api1_store(),
             "api1StoreBatchV1": storage.supports_api1_store_batch(),
+            "preparedQueriesV1": search.supports_prepared_queries(),
+            "exactPairsBitsV1": search.supports_prepared_queries(),
         })),
 
         "store_batch_api1_v1" => {
@@ -1573,6 +1581,10 @@ mod coverage_tests;
 #[cfg(test)]
 #[path = "producer_tests.rs"]
 mod producer_tests;
+
+#[cfg(test)]
+#[path = "prepared_query_tests.rs"]
+pub(crate) mod prepared_query_tests;
 
 #[cfg(test)]
 pub(crate) async fn native_lifecycle_test_remote(

@@ -86,5 +86,30 @@ for path in sorted(root.glob("*.json")):
             bad = copy.deepcopy(value)
             del bad["error"]["commitState"]
             assert not validator.is_valid(bad), path.name
+        if "receivedEvidence" in value:
+            evidence = value["receivedEvidence"]["receipts"][0]
+            headers = {"storeId", "operationId", "committedGeneration", "receiptVersion", "outcome", "replayed"}
+            assert set(evidence) == headers
+            for field in headers:
+                bad = copy.deepcopy(value)
+                del bad["receivedEvidence"]["receipts"][0][field]
+                assert not validator.is_valid(bad), (path.name, "missing evidence header", field)
+            for field, invalid in [("storeId", 1), ("operationId", 1), ("committedGeneration", 1),
+                                   ("receiptVersion", 2), ("replayed", 1), ("extra", True),
+                                   ("outcome", []), ("outcome", {}), ("outcome", {"kind": 1})]:
+                bad = copy.deepcopy(value)
+                bad["receivedEvidence"]["receipts"][0][field] = invalid
+                assert not validator.is_valid(bad), (path.name, "evidence header", field)
+            bad = copy.deepcopy(value)
+            bad["error"]["commitState"] = "committed"
+            assert not validator.is_valid(bad), (path.name, "unverified evidence is not commitment")
+            bad = copy.deepcopy(value)
+            bad["warnings"] = []
+            assert not validator.is_valid(bad), (path.name, "unverified warning required")
+            # Deliberately opaque in this HEADER schema. The separate Rust peer
+            # regression rejects this unknown kind before evidence acquisition.
+            opaque = copy.deepcopy(value)
+            opaque["receivedEvidence"]["receipts"][0]["outcome"] = {"kind": "futureUnknownKind", "opaque": [1, None]}
+            validator.validate(opaque)
 assert checked >= 40, f"missing actual fixtures: {checked}"
 print(f"PASS {checked} actual output/input cases plus output mutation negatives")

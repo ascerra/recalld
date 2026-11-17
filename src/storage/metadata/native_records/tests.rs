@@ -834,6 +834,11 @@ fn native_admission_uses_the_owned_tracker_and_rejects_closed_or_foreign_work() 
     assert_eq!(tracker.status().unresolved, 0);
 }
 
+#[path = "list_tests.rs"]
+mod canonical_list;
+
+#[path = "catalog_tests.rs"]
+mod catalog_pages;
 #[test]
 fn owned_ids_actual_native_insert_uses_single_clock_sample_and_replay_allocates_nothing() {
     use crate::storage::ids::{IdKind, IdSource, SeededIds};
