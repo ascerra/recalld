@@ -8,25 +8,48 @@ use crate::storage::{
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_catalog_api1_http_invalid_snapshot_is_bounded_unknown_error() {
-    for mode in ["api1_invalid_multiple", "api1_invalid_conflict", "api1_invalid_unadmitted"] {
+    for mode in [
+        "api1_invalid_multiple",
+        "api1_invalid_conflict",
+        "api1_invalid_unadmitted",
+    ] {
         let (f, _, provider) = fixture();
         let tracker = f.storage.read().unwrap().meta_store().work_tracker();
         let (mut state, bridge) = fixture_state(&f);
         drop(bridge);
-        state.namespaces = Arc::new(NamespaceRegistryAdapter::new(f.storage.clone()).with_native_catalog(
-            provider, NativePolicyInputs::default(), Arc::new(FixedClock), f.cache.clone(),
-            f.graph.clone(), f.vector_index.clone(), f.fts_index.clone(), f.entity_index.clone())
-            .with_catalog_fault(mode));
+        state.namespaces = Arc::new(
+            NamespaceRegistryAdapter::new(f.storage.clone())
+                .with_native_catalog(
+                    provider,
+                    NativePolicyInputs::default(),
+                    Arc::new(FixedClock),
+                    f.cache.clone(),
+                    f.graph.clone(),
+                    f.vector_index.clone(),
+                    f.fts_index.clone(),
+                    f.entity_index.clone(),
+                )
+                .with_catalog_fault(mode),
+        );
         let app = crate::api::router(state, &Default::default());
-        let response = app.oneshot(Request::post("/namespaces").header("content-type", "application/json")
-            .body(Body::from(json!({"name":"invalid_http"}).to_string())).unwrap()).await.unwrap();
+        let response = app
+            .oneshot(
+                Request::post("/namespaces")
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({"name":"invalid_http"}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["error"], "INTERNAL_ERROR");
         assert_eq!(value["commitState"], "unknown");
         assert_eq!(value["operationId"], Value::Null);
-        for absent in ["receipt", "receipts", "ready", "retryable"] { assert!(value.get(absent).is_none()); }
+        for absent in ["receipt", "receipts", "ready", "retryable"] {
+            assert!(value.get(absent).is_none());
+        }
         assert_eq!(tracker.status().pending, 2);
         assert_eq!(tracker.status().unresolved, 2);
     }

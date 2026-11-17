@@ -95,14 +95,22 @@ pub(super) fn api1_after_result(
                 }
                 "api1_invalid_conflict" => {
                     extra.replayed = true;
-                    assert!(matches!(admission.record(&extra), Err(StorageError::ReceiptEvidenceConflict)));
+                    assert!(matches!(
+                        admission.record(&extra),
+                        Err(StorageError::ReceiptEvidenceConflict)
+                    ));
                 }
                 _ => {
-                    let MutationOutcome::NativeNamespaceCreated { transition } = &mut extra.outcome else { unreachable!() };
+                    let MutationOutcome::NativeNamespaceCreated { transition } = &mut extra.outcome
+                    else {
+                        unreachable!()
+                    };
                     transition.name = "x".repeat(8_388_609);
                     admission.fail(&StorageError::CommittedMutation {
                         receipt: Box::new(extra),
-                        source: Box::new(StorageError::RecoveryRequired("synthetic collector invariant".into())),
+                        source: Box::new(StorageError::RecoveryRequired(
+                            "synthetic collector invariant".into(),
+                        )),
                     });
                 }
             }

@@ -108,9 +108,11 @@ impl NativeCatalogAdapter {
             result.map_err(CatalogError::Storage)
         })
         .await
-        .map_err(|_| CatalogError::Api1WorkerUnknown(Box::new(
-            crate::serialization::catalog_api1::CatalogWorkerEvidence::capture(admission),
-        )))?;
+        .map_err(|_| {
+            CatalogError::Api1WorkerUnknown(Box::new(
+                crate::serialization::catalog_api1::CatalogWorkerEvidence::capture(admission),
+            ))
+        })?;
         let receipt = result?;
         // The actual worker has dropped storage/publication locks. This pass
         // admits only the receipt returned above, never foreign pending work.
@@ -431,6 +433,30 @@ pub(crate) fn response(result: Result<WriteReceipt, CatalogError>) -> (u16, Cata
 
 fn failure(error: CatalogError) -> (u16, CatalogEnvelope) {
     use ErrorCategory::*;
+    // API1 uses its own projector. Defensively reject invalid evidence here
+    // too, rather than silently dropping it if this shared error is misrouted.
+    let worker_evidence = if let CatalogError::Api1WorkerUnknown(evidence) = &error {
+        match evidence.checked() {
+            Ok((operation, receipt)) => Some((operation, receipt.cloned())),
+            Err(invalid) => {
+                tracing::error!(evidence = ?invalid, "catalog worker evidence invariant violated");
+                return (500, Envelope::failure(
+                    Some(Scope::Catalog { kind: CatalogKind::Catalog }),
+                    ExecutionError {
+                        category: Internal,
+                        code: "INTERNAL_ERROR".into(),
+                        message: "Catalog evidence invariant violated; outcome unknown. Reconcile before retry.".into(),
+                        field: None,
+                        retryable: false,
+                        commit_state: CommitState::Unknown,
+                        operation_id: None,
+                    },
+                ));
+            }
+        }
+    } else {
+        None
+    };
     let (status, category, code, field, state, operation_id, retryable) = match &error {
         CatalogError::Input(e) => (
             400,
@@ -571,19 +597,22 @@ fn failure(error: CatalogError) -> (u16, CatalogEnvelope) {
             None,
             false,
         ),
-        CatalogError::Api1WorkerUnknown(evidence) => (
-            503, Unavailable, "STORAGE_UNAVAILABLE", None, CommitState::Unknown,
-            match evidence.checked() { Ok((operation, _)) => operation, Err(_) => None },
+        CatalogError::Api1WorkerUnknown(_) => (
+            503,
+            Unavailable,
+            "STORAGE_UNAVAILABLE",
+            None,
+            CommitState::Unknown,
+            worker_evidence
+                .as_ref()
+                .and_then(|(operation, _)| *operation),
             false,
         ),
     };
     let message = error.to_string();
     let receipt = match error {
         CatalogError::Storage(StorageError::CommittedMutation { receipt, .. }) => Some(*receipt),
-        CatalogError::Api1WorkerUnknown(evidence) => match evidence.checked() {
-            Ok((_, receipt)) => receipt.cloned(),
-            Err(_) => None, // Full invalid snapshot remains in the error message above.
-        },
+        CatalogError::Api1WorkerUnknown(_) => worker_evidence.and_then(|(_, receipt)| receipt),
         _ => None,
     };
     let mut out = Envelope::failure(

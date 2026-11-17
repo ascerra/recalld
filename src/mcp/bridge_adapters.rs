@@ -2807,7 +2807,10 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         if !native {
             return self.create_namespace(input).await.map_err(Into::into);
         }
-        let adapter = self.native_catalog.as_ref().ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?;
+        let adapter = self
+            .native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?;
         let receipt = adapter
             .create_api1_bounded(
                 catalog_api1::input(input),

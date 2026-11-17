@@ -16,7 +16,11 @@ use uuid::Uuid;
 const LOCAL_LIMIT: usize = 8_388_608;
 
 type WorkerSnapshot = Result<
-    (Option<crate::storage::maintenance::FailureKind>, Vec<WriteReceipt>, Option<WriteReceipt>),
+    (
+        Option<crate::storage::maintenance::FailureKind>,
+        Vec<WriteReceipt>,
+        Option<WriteReceipt>,
+    ),
     crate::storage::maintenance::InvalidReceiptEvidence,
 >;
 
@@ -34,13 +38,18 @@ impl std::fmt::Display for CatalogWorkerEvidence {
 }
 impl std::error::Error for CatalogWorkerEvidence {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.snapshot { Err(invalid) => Some(invalid), Ok(_) => None }
+        match &self.snapshot {
+            Err(invalid) => Some(invalid),
+            Ok(_) => None,
+        }
     }
 }
 
 impl CatalogWorkerEvidence {
     pub(crate) fn capture(admission: &ReceiptAdmission) -> Self {
-        Self { snapshot: admission.snapshot() }
+        Self {
+            snapshot: admission.snapshot(),
+        }
     }
 
     #[cfg(test)]
@@ -52,7 +61,10 @@ impl CatalogWorkerEvidence {
                 assert!(failed.is_none());
                 assert!(!receipts[0].replayed);
                 if mode == "api1_invalid_conflict" {
-                    assert_eq!(*kind, Some(crate::storage::maintenance::FailureKind::Conflict));
+                    assert_eq!(
+                        *kind,
+                        Some(crate::storage::maintenance::FailureKind::Conflict)
+                    );
                     assert!(receipts[1].replayed);
                     assert_eq!(receipts[0].operation_id, receipts[1].operation_id);
                 } else {
@@ -64,9 +76,17 @@ impl CatalogWorkerEvidence {
                 assert_eq!(invalid.prior.len(), 1);
                 assert_eq!(invalid.unadmitted.len(), 1);
                 assert!(invalid.failed_receipt.is_some());
-                let MutationOutcome::NativeNamespaceCreated { transition } = &invalid.unadmitted[0].outcome else { panic!("full unadmitted proof lost") };
+                let MutationOutcome::NativeNamespaceCreated { transition } =
+                    &invalid.unadmitted[0].outcome
+                else {
+                    panic!("full unadmitted proof lost")
+                };
                 assert_eq!(transition.name.len(), 8_388_609);
-                assert_eq!(crate::storage::control::encode(&invalid.unadmitted[0]).unwrap(), crate::storage::control::encode(invalid.failed_receipt.as_ref().unwrap()).unwrap());
+                assert_eq!(
+                    crate::storage::control::encode(&invalid.unadmitted[0]).unwrap(),
+                    crate::storage::control::encode(invalid.failed_receipt.as_ref().unwrap())
+                        .unwrap()
+                );
             }
             _ => panic!("unexpected invalid evidence kind"),
         }
@@ -74,23 +94,33 @@ impl CatalogWorkerEvidence {
 
     pub(crate) fn checked(&self) -> Result<(Option<Uuid>, Option<&WriteReceipt>), &Self> {
         use crate::storage::maintenance::FailureKind;
-        let Ok((kind, receipts, failed)) = &self.snapshot else { return Err(self); };
+        let Ok((kind, receipts, failed)) = &self.snapshot else {
+            return Err(self);
+        };
         let receipt = match receipts.as_slice() {
             [] => None,
             [receipt] => {
-                if namespace(receipt).is_err() { return Err(self); }
+                if namespace(receipt).is_err() {
+                    return Err(self);
+                }
                 Some(receipt)
             }
             _ => return Err(self),
         };
         if matches!(kind, Some(FailureKind::Conflict))
-            || (matches!(kind, Some(FailureKind::Known)) && receipt.is_none()) {
+            || (matches!(kind, Some(FailureKind::Known)) && receipt.is_none())
+        {
             return Err(self);
         }
         if let Some(failed) = failed {
-            let Some(receipt) = receipt else { return Err(self); };
-            match (crate::storage::control::encode(failed), crate::storage::control::encode(receipt)) {
-                (Ok(left), Ok(right)) if left == right => {},
+            let Some(receipt) = receipt else {
+                return Err(self);
+            };
+            match (
+                crate::storage::control::encode(failed),
+                crate::storage::control::encode(receipt),
+            ) {
+                (Ok(left), Ok(right)) if left == right => {}
                 _ => return Err(self),
             }
         }
@@ -378,15 +408,33 @@ pub(crate) fn internal_failure(invalid: &CatalogWorkerEvidence) -> (u16, Value) 
     // evidence is not a normally admitted receipt and must not become an
     // unbounded Debug payload on the wire.
     tracing::error!(evidence = ?invalid, "catalog worker evidence invariant violated");
-    (500, evidence("INTERNAL_ERROR", "unknown", None, None, None,
-        "Catalog evidence invariant violated; outcome unknown. Reconcile before retry."))
+    (
+        500,
+        evidence(
+            "INTERNAL_ERROR",
+            "unknown",
+            None,
+            None,
+            None,
+            "Catalog evidence invariant violated; outcome unknown. Reconcile before retry.",
+        ),
+    )
 }
 
 pub(crate) fn try_failure(error: &CatalogError) -> Result<(u16, Value), &CatalogWorkerEvidence> {
     if let CatalogError::Api1WorkerUnknown(evidence) = error {
         let (operation, receipt) = evidence.checked()?;
-        return Ok((503, self::evidence("SERVICE_UNAVAILABLE", "unknown", operation,
-            receipt, None, "Catalog worker outcome unknown; reconcile retained evidence before retry.")));
+        return Ok((
+            503,
+            self::evidence(
+                "SERVICE_UNAVAILABLE",
+                "unknown",
+                operation,
+                receipt,
+                None,
+                "Catalog worker outcome unknown; reconcile retained evidence before retry.",
+            ),
+        ));
     }
     let (mut receipt, mut source) = match error {
         CatalogError::Storage(source) => (None, Some(source)),
