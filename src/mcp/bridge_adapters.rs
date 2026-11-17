@@ -203,6 +203,9 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    fn supports_prepared_get(&self) -> bool {
+        self.query_engine.supports_prepared_get()
+    }
     async fn get_contract(
         &self,
         request: crate::serialization::get::GetRequest,

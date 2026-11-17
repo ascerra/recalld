@@ -29,6 +29,13 @@ impl RemoteSearchAdapter {
 
 #[async_trait]
 impl SearchPipeline for RemoteSearchAdapter {
+    async fn get_contract(
+        &self,
+        request: crate::serialization::get::GetRequest,
+        response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        super::prepared_get::remote(&self.client, request, response_limit).await
+    }
     async fn scan_duplicate_pairs(
         &self,
         request: crate::serialization::scan::ExactScanRequest,

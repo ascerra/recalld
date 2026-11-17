@@ -36,6 +36,10 @@ fn exposed_phase(phase: DecayPhase) -> bool {
 }
 
 impl QueryEngine {
+    pub(crate) fn supports_prepared_get(&self) -> bool {
+        self.coherent_owner.is_some()
+    }
+
     pub(crate) async fn get_contract(
         &self,
         request: crate::serialization::get::GetRequest,

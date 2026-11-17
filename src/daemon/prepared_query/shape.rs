@@ -7,7 +7,7 @@ use std::{collections::BTreeSet, fmt};
 const MAX_DEPTH: usize = 32;
 const MAX_OBJECT_FIELDS: usize = 128;
 
-pub(super) fn check(bytes: &[u8], limit: usize) -> Result<(), String> {
+pub(crate) fn check(bytes: &[u8], limit: usize) -> Result<(), String> {
     if bytes.len() > limit {
         return Err("response exceeds operation frame allowance".into());
     }

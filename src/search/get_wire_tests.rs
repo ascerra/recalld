@@ -1080,3 +1080,185 @@ fn prepared_get_strict_parser_preserves_omitted_scope_and_access_intent() {
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_rpc_native_origin_projection_and_publication_failure() {
+    use crate::daemon::prepared_get::tests::GetOnly;
+    use crate::daemon::server::prepared_query_tests::PreparedDaemon;
+    use crate::mcp::bridge::SearchPipeline;
+    let f = similar_fixture().await;
+    let inner = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+        Arc::new(f.engine),
+        Arc::new(crate::embedding::PassthroughProvider::new(4)),
+        f.f.storage.clone(),
+        f.f.graph.clone(),
+        chrono_tz::UTC,
+    ));
+    let adapter = Arc::new(GetOnly::new(inner.clone()));
+    assert!(!adapter.supports_prepared_queries());
+    let daemon = PreparedDaemon::start(adapter.clone()).await;
+    let remote = crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+    let before = bytes(&f.f);
+    let direct = inner
+        .get_contract(
+            point_request(f.foreign, false),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    let received = remote
+        .get_contract(
+            point_request(f.foreign, false),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    assert_eq!(received.http_status, 200, "{received:?}");
+    assert_eq!(
+        serde_json::to_value(&direct).unwrap(),
+        serde_json::to_value(&received).unwrap()
+    );
+    assert_eq!(bytes(&f.f), before);
+    for origin in [1, 2] {
+        let calls = f.clock.0.load(Ordering::SeqCst);
+        let count = f.f.record(f.foreign).unwrap().access_history.len();
+        let mut request = point_request(f.foreign, true);
+        request.original_contract_version = origin;
+        let reply = remote
+            .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+            .await;
+        assert_eq!(reply.http_status, 200, "{reply:?}");
+        assert_eq!(f.clock.0.load(Ordering::SeqCst), calls + 1);
+        assert_eq!(
+            f.f.record(f.foreign).unwrap().access_history.len(),
+            count + 1
+        );
+        let receipt = reply.envelope.receipt.unwrap();
+        assert_eq!(reply.observation_receipts, vec![receipt.clone()]);
+        assert!(matches!(
+            receipt.outcome,
+            crate::storage::control::MutationOutcome::LifecycleExposureRecorded { .. }
+        ));
+        assert_eq!(
+            f.f.storage
+                .read()
+                .unwrap()
+                .lookup_operation(
+                    receipt.store_id,
+                    crate::storage::control::MutationScope::Namespace(f.other),
+                    receipt.operation_id
+                )
+                .unwrap(),
+            Some(receipt)
+        );
+    }
+    assert_eq!(*adapter.origins.lock().unwrap(), vec![2, 1, 2]);
+    daemon.finish().await;
+    let mut failure = GetOnly::new(inner);
+    failure.barrier = Some(|owner| {
+        owner
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .invalidate_derived_view(crate::storage::publication::DerivedView::Fts)
+    });
+    let daemon = PreparedDaemon::start(Arc::new(failure)).await;
+    let remote = crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+    let reply = remote
+        .get_contract(
+            point_request(f.foreign, true),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    assert_eq!(reply.http_status, 503, "{reply:?}");
+    assert_eq!(
+        reply.envelope.error.unwrap().commit_state,
+        crate::serialization::contract::CommitState::Committed
+    );
+    assert!(reply.envelope.data.is_none() && reply.received_evidence.is_none());
+    let receipt = reply.envelope.receipt.unwrap();
+    assert_eq!(reply.observation_receipts, vec![receipt.clone()]);
+    f.owner.complete().await.unwrap();
+    assert_eq!(
+        f.f.storage
+            .read()
+            .unwrap()
+            .lookup_operation(
+                receipt.store_id,
+                crate::storage::control::MutationScope::Namespace(f.other),
+                receipt.operation_id
+            )
+            .unwrap(),
+        Some(receipt)
+    );
+    daemon.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_rpc_native_postcommit_unknown_preserves_actual_operation() {
+    use crate::daemon::server::prepared_query_tests::PreparedDaemon;
+    use crate::mcp::bridge::SearchPipeline;
+    let f = similar_fixture().await;
+    let count = f.f.record(f.foreign).unwrap().access_history.len();
+    let store =
+        f.f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .store_id;
+    let adapter = Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+        Arc::new(f.engine),
+        Arc::new(crate::embedding::PassthroughProvider::new(4)),
+        f.f.storage.clone(),
+        f.f.graph.clone(),
+        chrono_tz::UTC,
+    ));
+    f.f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .observation_fault
+        .store(3, Ordering::SeqCst);
+    let daemon = PreparedDaemon::start(adapter).await;
+    let remote = crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+    let reply = remote
+        .get_contract(
+            point_request(f.foreign, true),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await;
+    assert_eq!(reply.http_status, 503, "{reply:?}");
+    assert!(reply.envelope.data.is_none() && reply.received_evidence.is_none());
+    let error = reply.envelope.error.unwrap();
+    assert_eq!(
+        error.commit_state,
+        crate::serialization::contract::CommitState::Unknown
+    );
+    let operation = error
+        .operation_id
+        .expect("actual storage unknown operation");
+    assert!(reply.observation_receipts.is_empty());
+    daemon.finish().await;
+    drop(remote);
+    drop(f.owner);
+    let root = f.f.close();
+    let storage = crate::storage::RedbStorageEngine::open_native(root.path()).unwrap();
+    let receipt = storage
+        .lookup_operation(
+            store,
+            crate::storage::control::MutationScope::Namespace(f.other),
+            operation,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(receipt.operation_id, operation);
+    assert_eq!(
+        storage
+            .get_record(f.foreign)
+            .unwrap()
+            .unwrap()
+            .access_history
+            .len(),
+        count + 1
+    );
+}

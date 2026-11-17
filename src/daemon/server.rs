@@ -491,6 +491,9 @@ async fn dispatch_bounded(
     };
     let namespace = namespace.as_deref();
     match method {
+        super::prepared_get::GET => {
+            super::prepared_get::dispatch(search, params, frame_limit).await
+        }
         super::prepared_query::QUERY
         | super::prepared_query::SIMILAR
         | super::prepared_query::PAIRS => {
@@ -505,6 +508,7 @@ async fn dispatch_bounded(
             "api1StoreV1": storage.supports_api1_store(),
             "api1StoreBatchV1": storage.supports_api1_store_batch(),
             "preparedQueriesV1": search.supports_prepared_queries(),
+            "preparedGetV1": search.supports_prepared_get(),
             "exactPairsBitsV1": search.supports_prepared_queries(),
         })),
 

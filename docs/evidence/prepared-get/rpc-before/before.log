@@ -1,0 +1,15 @@
+
+running 1 test
+test daemon::server::prepared_query_tests::prepared_get_rpc_actual_owner_and_remote_consumer ... 
+thread 'daemon::server::prepared_query_tests::prepared_get_rpc_actual_owner_and_remote_consumer' (8) panicked at src/daemon/prepared_query_tests.rs:776:5:
+actual owner succeeds but Remote get is missing: Err(InvalidInput("unknown method: get_contract_v1"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    daemon::server::prepared_query_tests::prepared_get_rpc_actual_owner_and_remote_consumer
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1747 filtered out; finished in 0.13s
+

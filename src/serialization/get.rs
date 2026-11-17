@@ -3,7 +3,7 @@ use super::contract::*;
 use crate::model::MemoryId;
 use crate::search::{MemoryResponse, SearchError};
 use crate::storage::control::{GenerationRef, WriteReceipt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // One observed UUID: two receipt aliases, each <=4096 compact JSON bytes;
@@ -179,7 +179,7 @@ fn input(code: &'static str, field: &str, message: &'static str) -> InputError {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetData {
     pub evaluated_at: i64,
@@ -187,24 +187,33 @@ pub struct GetData {
     pub memory: MemoryResponse,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetReply {
     #[serde(flatten)]
     pub envelope: Envelope<GetData>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observation_receipts: Vec<WriteReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) received_evidence: Option<super::query_response::ReceivedQueryEvidence>,
     #[serde(skip)]
     pub http_status: u16,
 }
 
 impl GetReply {
+    pub(crate) fn remote_failure(access: bool, sent: bool, evidence: Vec<Value>) -> Self {
+        Self::from_failure(super::query_response::QueryReply::remote_failure(
+            access, sent, evidence,
+        ))
+    }
+
     pub(crate) fn success(scope: Scope, at: GenerationRef, data: GetData) -> Self {
         let mut envelope = Envelope::success(scope, data);
         envelope.read_generation = Some(at);
         Self {
             envelope,
             observation_receipts: Vec::new(),
+            received_evidence: None,
             http_status: 200,
         }
     }
@@ -267,6 +276,7 @@ impl GetReply {
         Self {
             envelope,
             observation_receipts: failure.observation_receipts,
+            received_evidence: failure.received_evidence,
             http_status: failure.http_status,
         }
     }

@@ -59,7 +59,7 @@ impl Expected {
 
 /// Typed decode plus exact canonical output equality closes serde's ignored
 /// fields/defaults. Do not manufacture StoredReceipt request hashes here.
-fn typed<T: DeserializeOwned + Serialize>(v: &Value) -> Result<T, ()> {
+pub(crate) fn typed<T: DeserializeOwned + Serialize>(v: &Value) -> Result<T, ()> {
     let decoded: T = serde_json::from_value(v.clone()).map_err(|_| ())?;
     let bytes = serde_json::to_vec(&decoded).map_err(|_| ())?;
     let encoded: Value = serde_json::from_slice(&bytes).map_err(|_| ())?;
@@ -326,7 +326,7 @@ fn data(
     Ok(returned)
 }
 
-pub(super) fn receipt(v: &Value) -> Result<WriteReceipt, ()> {
+pub(crate) fn receipt(v: &Value) -> Result<WriteReceipt, ()> {
     let receipt: WriteReceipt = typed(v)?;
     require(
         !receipt.store_id.is_nil()

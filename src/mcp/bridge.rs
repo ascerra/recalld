@@ -24,6 +24,9 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    fn supports_prepared_get(&self) -> bool {
+        false
+    }
     async fn get_contract(
         &self,
         _request: crate::serialization::get::GetRequest,
