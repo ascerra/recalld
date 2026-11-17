@@ -4632,6 +4632,12 @@ mod tests {
             .await
             .expect("forced delete");
 
+        crate::test_support::record_schema_result(
+            "delete-legacy-success",
+            "delete_namespace",
+            &crate::mcp::protocol::ToolCallResult::json(&result).unwrap(),
+            "actual legacy forced purge adapter through the production typed MCP emitter; retained record/index/directory assertions, not a separate public invocation",
+        );
         assert!(result.deleted);
         assert_eq!(result.memories_deleted, 1);
         assert_eq!(result.fts_rows_removed, 1);

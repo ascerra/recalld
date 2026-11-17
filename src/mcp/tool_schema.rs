@@ -1,6 +1,8 @@
 //! Live modern v1 structured outputs. Prepared v2 schemas are not capabilities.
 use serde_json::{Value, json};
 
+#[path = "tool_catalog_schema.rs"]
+mod catalog;
 #[path = "tool_lifecycle_schema.rs"]
 mod lifecycle;
 #[path = "tool_receipt_schema.rs"]
@@ -60,6 +62,7 @@ pub(super) fn output(tool: &str) -> Option<Value> {
     let count = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
     let name = json!({"type":"string"});
     Some(match tool {
+        "delete_namespace" => catalog::delete_output(),
         "get_memory" | "store_memory" | "store_memories" | "forget_memories" => {
             record::output(tool)
         }

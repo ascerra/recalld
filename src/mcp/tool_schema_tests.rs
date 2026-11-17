@@ -126,6 +126,7 @@ async fn live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation
                             | "store_memory"
                             | "store_memories"
                             | "forget_memories"
+                            | "delete_namespace"
                     );
                 assert_eq!(tool.get("outputSchema").is_some(), has_schema, "{name}");
                 if has_schema {

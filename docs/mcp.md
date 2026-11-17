@@ -3,7 +3,7 @@
 Modern MCP `tools/list` advertises output schemas for `namespace_stats`,
 `list_tags`, `list_memories`, `recall_memories`, `find_similar_memories`,
 `reinforce_memory`, `forget_memory`, `get_memory`, `store_memory`,
-`store_memories`, and `forget_memories`.
+`store_memories`, `forget_memories`, and `delete_namespace`.
 These describe the existing API1 object results; legacy MCP still omits
 `outputSchema` and `structuredContent`. `list_namespaces` remains a bare JSON
 array in text, without an object wrapper. Plain-text errors do not carry a
@@ -35,6 +35,12 @@ single/batch error carriers retain their actual typed evidence fields. Generic
 retained receipts describe all supported typed outcomes, without asserting that
 canonical proof validation ran. Declared compatibility `Value` fields remain
 extensible. See [record output boundaries](implementation/live-record-schemas.md).
+
+Delete-namespace structured failures retain full start/step/final purge evidence.
+An unknown operation remains unknown even when earlier progress has a receipt;
+missing physical metrics and readiness are never invented. Create-namespace still
+has no output schema because its legacy partial-error path accepts arbitrary JSON
+objects. See [catalog boundaries](implementation/live-delete-schema.md).
 
 ## Setup
 
