@@ -88,20 +88,30 @@ impl NativeCatalogAdapter {
                 Some(&worker_admission),
                 |receipt| surface.check_candidate(receipt),
             );
+            // Record only actual returned evidence, before the worker's
+            // fallible tail. The private transaction candidate is not authority.
+            let result = result.and_then(|receipt| {
+                worker_admission.record(&receipt).map_err(|source| {
+                    StorageError::CommittedMutation {
+                        receipt: Box::new(receipt.clone()),
+                        source: Box::new(source),
+                    }
+                })?;
+                Ok(receipt)
+            });
+            if let Err(error) = &result {
+                worker_admission.fail(error);
+            }
             #[cfg(test)]
-            tests::api1_after_result(this.failure, &result);
+            tests::api1_after_result(this.failure, &result, &worker_admission);
             storage.meta_store().finish_work(child);
             result.map_err(CatalogError::Storage)
         })
         .await
-        .map_err(|_| CatalogError::WorkerUnknown)?;
+        .map_err(|_| CatalogError::Api1WorkerUnknown(Box::new(
+            crate::serialization::catalog_api1::CatalogWorkerEvidence::capture(admission),
+        )))?;
         let receipt = result?;
-        admission.record(&receipt).map_err(|source| {
-            CatalogError::Storage(StorageError::CommittedMutation {
-                receipt: Box::new(receipt.clone()),
-                source: Box::new(source),
-            })
-        })?;
         // The actual worker has dropped storage/publication locks. This pass
         // admits only the receipt returned above, never foreign pending work.
         self.completion
@@ -371,6 +381,8 @@ pub(crate) fn policy_response(
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
+    #[error("catalog worker outcome unknown; reconcile retained evidence")]
+    Api1WorkerUnknown(#[source] Box<crate::serialization::catalog_api1::CatalogWorkerEvidence>),
     #[error("{0}")]
     Input(#[from] InputError),
     #[error("{0}")]
@@ -559,10 +571,19 @@ fn failure(error: CatalogError) -> (u16, CatalogEnvelope) {
             None,
             false,
         ),
+        CatalogError::Api1WorkerUnknown(evidence) => (
+            503, Unavailable, "STORAGE_UNAVAILABLE", None, CommitState::Unknown,
+            match evidence.checked() { Ok((operation, _)) => operation, Err(_) => None },
+            false,
+        ),
     };
     let message = error.to_string();
     let receipt = match error {
         CatalogError::Storage(StorageError::CommittedMutation { receipt, .. }) => Some(*receipt),
+        CatalogError::Api1WorkerUnknown(evidence) => match evidence.checked() {
+            Ok((_, receipt)) => receipt.cloned(),
+            Err(_) => None, // Full invalid snapshot remains in the error message above.
+        },
         _ => None,
     };
     let mut out = Envelope::failure(

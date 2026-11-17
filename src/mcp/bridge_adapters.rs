@@ -2796,7 +2796,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         &self,
         input: bridge::CreateNamespaceInput,
         admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
-    ) -> Result<bridge::NamespaceInfo, bridge::BridgeError> {
+    ) -> Result<bridge::NamespaceInfo, crate::serialization::catalog_api1::CatalogApi1Error> {
         use crate::serialization::catalog_api1;
         let native = self
             .storage
@@ -2805,20 +2805,16 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             .meta_store()
             .uses_native_lifecycle();
         if !native {
-            return self.create_namespace(input).await;
+            return self.create_namespace(input).await.map_err(Into::into);
         }
-        let adapter = self.native_catalog.as_ref().ok_or_else(|| {
-            catalog_api1::bridge_failure(crate::native_catalog_adapter::CatalogError::Unavailable)
-        })?;
+        let adapter = self.native_catalog.as_ref().ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?;
         let receipt = adapter
             .create_api1_bounded(
                 catalog_api1::input(input),
                 admission.with_timezone(self.timezone),
             )
-            .await
-            .map_err(catalog_api1::bridge_failure)?;
-        let ns =
-            catalog_api1::committed_namespace(receipt).map_err(catalog_api1::bridge_failure)?;
+            .await?;
+        let ns = catalog_api1::committed_namespace(receipt)?;
         Ok(catalog_api1::info(ns, self.timezone))
     }
 

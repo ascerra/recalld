@@ -11,6 +11,9 @@ use crate::{
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+#[path = "native_catalog_invalid_tests.rs"]
+mod invalid_tests;
+
 pub(crate) struct Provider {
     available: AtomicBool,
     calls: AtomicUsize,
@@ -74,8 +77,37 @@ pub(super) fn api1_before_result(point: Option<&str>) {
     }
 }
 
-pub(super) fn api1_after_result(point: Option<&str>, result: &Result<WriteReceipt, StorageError>) {
+pub(super) fn api1_after_result(
+    point: Option<&str>,
+    result: &Result<WriteReceipt, StorageError>,
+    admission: &crate::storage::maintenance::ReceiptAdmission,
+) {
     match point {
+        Some("api1_invalid_multiple" | "api1_invalid_conflict" | "api1_invalid_unadmitted") => {
+            // Deliberately corrupt only the private test collector after a real
+            // returned receipt. These are impossible fresh-collector states,
+            // not additional canonical writes or attacker-authored history.
+            let mut extra = result.as_ref().expect("actual catalog receipt").clone();
+            match point.unwrap() {
+                "api1_invalid_multiple" => {
+                    extra.operation_id = uuid::Uuid::from_u128(7);
+                    admission.record(&extra).unwrap();
+                }
+                "api1_invalid_conflict" => {
+                    extra.replayed = true;
+                    assert!(matches!(admission.record(&extra), Err(StorageError::ReceiptEvidenceConflict)));
+                }
+                _ => {
+                    let MutationOutcome::NativeNamespaceCreated { transition } = &mut extra.outcome else { unreachable!() };
+                    transition.name = "x".repeat(8_388_609);
+                    admission.fail(&StorageError::CommittedMutation {
+                        receipt: Box::new(extra),
+                        source: Box::new(StorageError::RecoveryRequired("synthetic collector invariant".into())),
+                    });
+                }
+            }
+            panic!("injected invalid private catalog evidence");
+        }
         Some("api1_after_result") => {
             let receipt = result.as_ref().expect("actual successful producer result");
             eprintln!(

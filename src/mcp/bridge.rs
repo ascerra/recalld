@@ -308,8 +308,8 @@ pub trait NamespaceRegistry: Send + Sync {
         &self,
         input: CreateNamespaceInput,
         _admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
-    ) -> Result<NamespaceInfo, BridgeError> {
-        self.create_namespace(input).await
+    ) -> Result<NamespaceInfo, crate::serialization::catalog_api1::CatalogApi1Error> {
+        self.create_namespace(input).await.map_err(Into::into)
     }
 
     /// Get detailed statistics for a namespace by name.

@@ -15,6 +15,105 @@ use uuid::Uuid;
 
 const LOCAL_LIMIT: usize = 8_388_608;
 
+type WorkerSnapshot = Result<
+    (Option<crate::storage::maintenance::FailureKind>, Vec<WriteReceipt>, Option<WriteReceipt>),
+    crate::storage::maintenance::InvalidReceiptEvidence,
+>;
+
+/// Opaque snapshot of the existing per-request collector, including invalid
+/// state. It cannot be constructed from transport arguments.
+#[derive(Debug)]
+pub struct CatalogWorkerEvidence {
+    snapshot: WorkerSnapshot,
+}
+
+impl std::fmt::Display for CatalogWorkerEvidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("catalog worker result evidence retained")
+    }
+}
+impl std::error::Error for CatalogWorkerEvidence {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.snapshot { Err(invalid) => Some(invalid), Ok(_) => None }
+    }
+}
+
+impl CatalogWorkerEvidence {
+    pub(crate) fn capture(admission: &ReceiptAdmission) -> Self {
+        Self { snapshot: admission.snapshot() }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn assert_invalid_retained_for_test(&self, mode: &str) {
+        assert!(self.checked().is_err());
+        match (&self.snapshot, mode) {
+            (Ok((kind, receipts, failed)), "api1_invalid_multiple" | "api1_invalid_conflict") => {
+                assert_eq!(receipts.len(), 2);
+                assert!(failed.is_none());
+                assert!(!receipts[0].replayed);
+                if mode == "api1_invalid_conflict" {
+                    assert_eq!(*kind, Some(crate::storage::maintenance::FailureKind::Conflict));
+                    assert!(receipts[1].replayed);
+                    assert_eq!(receipts[0].operation_id, receipts[1].operation_id);
+                } else {
+                    assert!(kind.is_none());
+                    assert_eq!(receipts[1].operation_id, Uuid::from_u128(7));
+                }
+            }
+            (Err(invalid), "api1_invalid_unadmitted") => {
+                assert_eq!(invalid.prior.len(), 1);
+                assert_eq!(invalid.unadmitted.len(), 1);
+                assert!(invalid.failed_receipt.is_some());
+                let MutationOutcome::NativeNamespaceCreated { transition } = &invalid.unadmitted[0].outcome else { panic!("full unadmitted proof lost") };
+                assert_eq!(transition.name.len(), 8_388_609);
+                assert_eq!(crate::storage::control::encode(&invalid.unadmitted[0]).unwrap(), crate::storage::control::encode(invalid.failed_receipt.as_ref().unwrap()).unwrap());
+            }
+            _ => panic!("unexpected invalid evidence kind"),
+        }
+    }
+
+    pub(crate) fn checked(&self) -> Result<(Option<Uuid>, Option<&WriteReceipt>), &Self> {
+        use crate::storage::maintenance::FailureKind;
+        let Ok((kind, receipts, failed)) = &self.snapshot else { return Err(self); };
+        let receipt = match receipts.as_slice() {
+            [] => None,
+            [receipt] => {
+                if namespace(receipt).is_err() { return Err(self); }
+                Some(receipt)
+            }
+            _ => return Err(self),
+        };
+        if matches!(kind, Some(FailureKind::Conflict))
+            || (matches!(kind, Some(FailureKind::Known)) && receipt.is_none()) {
+            return Err(self);
+        }
+        if let Some(failed) = failed {
+            let Some(receipt) = receipt else { return Err(self); };
+            match (crate::storage::control::encode(failed), crate::storage::control::encode(receipt)) {
+                (Ok(left), Ok(right)) if left == right => {},
+                _ => return Err(self),
+            }
+        }
+        let operation = match kind {
+            Some(FailureKind::Unknown(Some(id))) if !id.is_nil() => Some(*id),
+            Some(FailureKind::Unknown(Some(_))) => return Err(self),
+            _ => None,
+        };
+        Ok((operation, receipt))
+    }
+}
+
+/// Only the new local create entry uses this typed error. Global BridgeError
+/// and daemon protocol remain unchanged; invalid evidence stays typed until
+/// the actual local tool boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum CatalogApi1Error {
+    #[error(transparent)]
+    Legacy(#[from] crate::mcp::bridge::BridgeError),
+    #[error(transparent)]
+    Native(#[from] CatalogError),
+}
+
 /// Public only because local adapter traits carry it. Callers cannot deserialize
 /// or construct authority; the actual emitter constructs the descriptor.
 #[derive(Clone)]
@@ -268,6 +367,27 @@ fn evidence(
 /// Unknown takes precedence over separately retained known evidence. Generic
 /// committed failures do not establish any derived readiness observation.
 pub(crate) fn failure(error: &CatalogError) -> (u16, Value) {
+    match try_failure(error) {
+        Ok(value) => value,
+        Err(invalid) => internal_failure(invalid),
+    }
+}
+
+pub(crate) fn internal_failure(invalid: &CatalogWorkerEvidence) -> (u16, Value) {
+    // Keep the full typed cause until this final endpoint boundary. Invalid
+    // evidence is not a normally admitted receipt and must not become an
+    // unbounded Debug payload on the wire.
+    tracing::error!(evidence = ?invalid, "catalog worker evidence invariant violated");
+    (500, evidence("INTERNAL_ERROR", "unknown", None, None, None,
+        "Catalog evidence invariant violated; outcome unknown. Reconcile before retry."))
+}
+
+pub(crate) fn try_failure(error: &CatalogError) -> Result<(u16, Value), &CatalogWorkerEvidence> {
+    if let CatalogError::Api1WorkerUnknown(evidence) = error {
+        let (operation, receipt) = evidence.checked()?;
+        return Ok((503, self::evidence("SERVICE_UNAVAILABLE", "unknown", operation,
+            receipt, None, "Catalog worker outcome unknown; reconcile retained evidence before retry.")));
+    }
     let (mut receipt, mut source) = match error {
         CatalogError::Storage(source) => (None, Some(source)),
         _ => (None, None),
@@ -327,14 +447,10 @@ pub(crate) fn failure(error: &CatalogError) -> (u16, Value) {
         .map(ToString::to_string)
         .unwrap_or_else(|| error.to_string());
     let message = crate::model::validation::truncate_on_char_boundary(&message, 512);
-    (
+    Ok((
         status,
         evidence(code, state, operation, receipt, ready, message),
-    )
-}
-
-pub(crate) fn bridge_failure(error: CatalogError) -> crate::mcp::bridge::BridgeError {
-    crate::mcp::bridge::BridgeError::PartiallyApplied(failure(&error).1.to_string())
+    ))
 }
 
 pub(crate) fn outcome_unknown(error: &CatalogError) -> bool {
@@ -349,7 +465,7 @@ pub(crate) fn outcome_unknown(error: &CatalogError) -> bool {
         }
     }
     match error {
-        CatalogError::WorkerUnknown => true,
+        CatalogError::WorkerUnknown | CatalogError::Api1WorkerUnknown(_) => true,
         CatalogError::Storage(source) => storage(source),
         _ => false,
     }

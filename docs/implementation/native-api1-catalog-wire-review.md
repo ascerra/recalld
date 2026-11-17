@@ -284,8 +284,10 @@ Proposed exact local hunks and signatures:
   API1 create tool after existing argument/version checks. Default forwarding is
   safe only because the old owned-native entry remains rejected.
 - `mcp/bridge.rs`: override that method on `McpBridge`; add
-  `NamespaceRegistry::create_namespace_bounded(input, admission)` with the
-  existing `Result<NamespaceInfo, BridgeError>` and legacy default forwarding.
+  `NamespaceRegistry::create_namespace_bounded(input, admission)` with a local
+  `CatalogApi1Error::{Legacy(BridgeError), Native(CatalogError)}` result and legacy
+  default forwarding. This keeps invalid native evidence typed to the endpoint
+  without changing global BridgeError or the daemon protocol.
   `mcp/tools.rs` changes only the create handler/forwarding, not get or search.
 - `mcp/bridge_adapters.rs`: implement the bounded override with actual format
   selection, original legacy call or native adapter dispatch. Preserve the
@@ -387,3 +389,48 @@ actual emitted full MCP/HTTP bytes for a 3.7145 receipt against the correspondin
 candidate representation, and separately compare decoded canonical f32 receipt
 bytes after reopen. This is a source correction and unexecuted regression, not
 an observed N1 runtime failure. No global serde change or new transport format.
+
+## Actual worker handoff RED and correction
+
+Run003 on `25ac7749` passed 35 focused tests. Separate run004 on `96f29f2a`
+executed four cfg(test) worker-loss cases and failed its aggregate assertion:
+post-result loss dropped actual returned Ok/CommittedMutation receipts and an
+already returned CommitOutcomeUnknown operation ID. Before-result unknown
+remained correct. Full identities and strict reopen were actual test oracles;
+the runtime never performs readback. Reports are under
+`docs/evidence/native-api1-admission/local-003` and `local-004-red`.
+
+The correction records/fails only the actual producer result into the existing
+collector inside the worker, before its fallible tail. Join loss retains the
+entire typed snapshot in `Api1WorkerUnknown`. A checked normal projection allows
+zero or one full native catalog receipt, with an unknown-operation ID only from
+the collector's actual `FailureKind::Unknown(Some(id))`. A known receipt's ID
+does not become an invented unknown-operation ID. No fake redb CommitError,
+candidate recording, lookup, new registry or E1 core change is involved.
+
+Fresh collector invariant: input excludes key/CAS; no replay can return an old
+receipt. The producer only checks the admission before staging and returns one
+actual receipt or one error. The native catalog/handle errors have at most one
+receipt wrapper; pending foreign effects are rejected before their payload is
+decoded under the authoritative mutation guard. The worker alone writes its
+private collector once from this result, before any completion. Its identical
+receipt bytes were prechecked with the same collector budget. No external
+transport can supply or mutate the collector. Thus multiple/conflicting/
+unadmitted snapshots are internal invariant failures, not valid fresh replies.
+
+Invalid snapshots are nevertheless retained in full as a typed cause through
+the HTTP boxed CatalogError or the new local MCP CatalogApi1Error to the final
+endpoint. Checked projection rejects them. The endpoint logs the typed cause
+internally and emits a **bounded error-only INTERNAL_ERROR**, current status
+unknown, null operation ID, and no receipt/array, readiness or retry/success
+claim. It does not dump an unbounded Debug snapshot on the wire. Normal admitted
+known receipts are never truncated or suppressed by this invalid-state path.
+The existing normal MCP PartiallyApplied string/parse emitter remains unchanged.
+
+New negative tests deliberately corrupt only a private test collector after a
+real commit (two entries, conflicting replay decoration, or an oversized
+unadmitted entry). They separately assert full typed retention, unresolved work,
+unchanged canonical history, and bounded actual MCP/HTTP INTERNAL responses.
+These synthetic invalid snapshots are not claimed to be reachable from a valid
+fresh request or to represent additional canonical mutations. Correction and
+new negatives remain unvalidated until their next frozen run.
