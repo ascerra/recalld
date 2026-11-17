@@ -434,3 +434,18 @@ unchanged canonical history, and bounded actual MCP/HTTP INTERNAL responses.
 These synthetic invalid snapshots are not claimed to be reachable from a valid
 fresh request or to represent additional canonical mutations. Correction and
 new negatives remain unvalidated until their next frozen run.
+
+The corrected runtime is frozen at `22bc5f0c598aa0c78bb95926cbd418769b8dd7b6`
+for run005. Huygens and Halley reviewed the exact source. The shared version2
+catalog projector also explicitly rejects an invalid API1 worker snapshot:
+one checked projection, full typed internal trace, bounded `INTERNAL_ERROR`
+with unknown outcome, and no receipt, operation ID or readiness. API1 does not
+route through that projector; its regression is a defensive alternate-sink
+test, not a claim of a currently reachable version2 defect. Valid zero/one
+receipt projections preserve their prior fields. No global BridgeError,
+daemon protocol, E1 core or startup admission changes are included.
+
+The source audit of the MCP `u16` dimension projection found an existing bound:
+`NativeNamespaceInput::prepare` obtains `profile_id()`, which validates the
+owned profile dimension in `1..=8192` before construction. No width cast fix or
+new provider attestation is needed. This is a source conclusion, not a new test.
