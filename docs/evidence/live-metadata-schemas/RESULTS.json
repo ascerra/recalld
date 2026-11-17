@@ -1,0 +1,75 @@
+{
+  "source": "13ff718d5fafcf7637a298e8b30a671ea63cfb46",
+  "runtime": "16b2aa17d0f94e7963e8021db9e3df62eaf6b754",
+  "statuses": [
+    "fmt 0",
+    "clippy 0",
+    "full 0"
+  ],
+  "harnesses": [
+    {
+      "label": "unittests src/lib.rs",
+      "path": "/target/debug/deps/recalld-8b31964f64b2cfc4",
+      "result": "ok. 1763 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 2142.07s"
+    },
+    {
+      "label": "unittests src/main.rs",
+      "path": "/target/debug/deps/recalld-e3511e97d96c1bb5",
+      "result": "ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "label": "unittests src/bin/recalld_cli.rs",
+      "path": "/target/debug/deps/recalld_cli-af23d66ef4eb6fd9",
+      "result": "ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "label": "unittests src/bin/recalld_schema.rs",
+      "path": "/target/debug/deps/recalld_schema-f88e5b6d282be2fe",
+      "result": "ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "label": "unittests src/bin/recalld_text_migrate.rs",
+      "path": "/target/debug/deps/recalld_text_migrate-89ef39f5299d9e87",
+      "result": "ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "label": "tests/inherited_policy_cli.rs",
+      "path": "/target/debug/deps/inherited_policy_cli-55f09460c02dd6ae",
+      "result": "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.38s"
+    },
+    {
+      "label": "tests/lifecycle_cli.rs",
+      "path": "/target/debug/deps/lifecycle_cli-5bae1aa288409852",
+      "result": "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.53s"
+    },
+    {
+      "label": "tests/profile_attestation_cli.rs",
+      "path": "/target/debug/deps/profile_attestation_cli-e203f21f7c00a546",
+      "result": "ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.77s"
+    },
+    {
+      "label": "tests/text_migration_cli.rs",
+      "path": "/target/debug/deps/text_migration_cli-9d4a9dc03f7ddb52",
+      "result": "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.32s"
+    },
+    {
+      "label": "tests/vector_certification_cli.rs",
+      "path": "/target/debug/deps/vector_certification_cli-1e106a1b26764bb3",
+      "result": "ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.67s"
+    },
+    {
+      "label": "doctests",
+      "result": "ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    }
+  ],
+  "focused": [
+    "3 passed, 0 failed",
+    "1 passed, 0 failed"
+  ],
+  "memoryEvents": "low 0\nhigh 0\nmax 9214\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+  "memoryPeakBytes": 4294967296,
+  "libraryExecutable": "23e1c3469c0cef53ee2d6619cb0afad822a1745c5b876c606def2dca599ffaa1",
+  "verifiedCliExecutables": 4,
+  "verifiedExecutablePaths": 14,
+  "sourceVerified": true
+}

@@ -223,6 +223,28 @@ mod tests {
                 let text = result["contents"][0]["text"].as_str().unwrap();
                 let context: Value = serde_json::from_str(text).unwrap();
                 assert_eq!(context["supportedContractVersions"], json!([1]));
+                assert_eq!(context["defaultNamespace"]["byIdResolution"], "record");
+                assert_eq!(
+                    context["accessDefaults"],
+                    json!({"recall":true,"get":true,"singleSimilarity":true})
+                );
+                assert_eq!(
+                    context["versionPolicy"],
+                    json!({"omittedApplicationContract":1,"independentOfDiskAndLifecycle":true})
+                );
+                assert_eq!(context["embeddingInputs"]["operation"], "api1MemoryStore");
+                assert_eq!(
+                    context["embeddingInputs"]["legacyRestWithProfileId"],
+                    "rejected"
+                );
+                assert_eq!(
+                    context["embeddingInputs"]["nativeRestSupplied"],
+                    "explicitMatchingBoundProfileId"
+                );
+                assert_eq!(
+                    context["embeddingInputs"]["mcpV1SingleEmbedding"],
+                    "ignored"
+                );
                 assert_eq!(context["defaultNamespace"]["requestedName"], requested);
                 assert_eq!(context["duplicateScan"]["complete"], false);
                 assert_eq!(

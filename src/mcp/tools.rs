@@ -54,6 +54,7 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         list_tags_def(),
     ];
     for tool in &mut tools {
+        tool.output_schema = super::tool_schema::output(&tool.name);
         tool.input_schema["properties"]["contractVersion"] = json!({
             "type": "integer", "enum": [1], "default": 1,
             "description": "Application contract version. This server currently supports version 1 only."
@@ -131,6 +132,7 @@ pub async fn dispatch_tool(
 
 fn store_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "store_memory".to_string(),
         title: Some("Store Memory".to_string()),
         // The near-duplicate half of this description teaches the
@@ -266,6 +268,7 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
 
 fn store_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "store_memories".to_string(),
         title: Some("Store Memories (Batch)".to_string()),
         description: "Store multiple memories in a single call. Each item has the \
@@ -623,6 +626,7 @@ async fn handle_store_memories(bridge: &McpBridge, arguments: serde_json::Value)
 
 fn recall_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "recall_memories".to_string(),
         title: Some("Recall Memories".to_string()),
         description: "Search for relevant memories using a natural language query. \
@@ -806,9 +810,10 @@ async fn handle_recall_memories(
 
 fn get_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "get_memory".to_string(),
         title: Some("Get Memory".to_string()),
-        description: "Retrieve a specific memory by its ID. This MCP fetch does not record access."
+        description: "Retrieve a specific memory by its ID. recordAccess defaults to true; use recordAccess:false for inspection without recording access."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -875,6 +880,7 @@ async fn handle_get_memory(bridge: &McpBridge, arguments: serde_json::Value) -> 
 
 fn reinforce_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "reinforce_memory".to_string(),
         title: Some("Reinforce Memory".to_string()),
         description: "Strengthen a memory that proved useful. Increases its \
@@ -950,6 +956,7 @@ async fn handle_reinforce_memory(
 
 fn forget_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "forget_memory".to_string(),
         title: Some("Forget Memory".to_string()),
         // "Permanently delete" was wrong in both directions: the record
@@ -1020,6 +1027,7 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
 
 fn forget_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "forget_memories".to_string(),
         title: Some("Forget Memories (Batch)".to_string()),
         description: "Delete several memories in a single call. Each moves to the \
@@ -1200,6 +1208,7 @@ async fn handle_forget_memories(
 
 fn find_similar_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "find_similar_memories".to_string(),
         title: Some("Find Similar Memories".to_string()),
         description: "Find memories semantically similar to a specific existing \
@@ -1421,6 +1430,7 @@ async fn handle_find_similar_scan(
 
 fn create_namespace_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "create_namespace".to_string(),
         title: Some("Create Namespace".to_string()),
         description: "Create a new memory namespace for organizing memories by \
@@ -1512,6 +1522,7 @@ async fn handle_create_namespace(
 
 fn delete_namespace_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "delete_namespace".to_string(),
         title: Some("Delete Namespace".to_string()),
         description: "Destroy a namespace and everything in it: every memory, every \
@@ -1628,6 +1639,7 @@ async fn handle_delete_namespace(
 
 fn namespace_stats_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "namespace_stats".to_string(),
         title: Some("Namespace Stats".to_string()),
         description: "Get statistics for a memory namespace: live memory count, \
@@ -1691,6 +1703,7 @@ async fn handle_namespace_stats(
 
 fn list_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "list_memories".to_string(),
         title: Some("List Memories".to_string()),
         description: "List all memories in a namespace with pagination and optional \
@@ -1789,6 +1802,7 @@ async fn handle_list_memories(bridge: &McpBridge, arguments: serde_json::Value) 
 
 fn list_namespaces_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "list_namespaces".to_string(),
         title: Some("List Namespaces".to_string()),
         description: "List every memory namespace with its ID, embedding dimensions, live \
@@ -1832,6 +1846,7 @@ async fn handle_list_namespaces(
 
 fn list_tags_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "list_tags".to_string(),
         title: Some("List Tags".to_string()),
         description: "List the tag vocabulary with per-label memory counts, most common \
