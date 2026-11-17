@@ -1,0 +1,24 @@
+[
+  {
+    "command": [
+      "/work/target/debug/deps/recalld-8b31964f64b2cfc4",
+      "native_records::tests::canonical_list",
+      "--nocapture",
+      "--test-threads=2"
+    ],
+    "exitCode": 0,
+    "finished": 1794942213.162596,
+    "passed": 2
+  },
+  {
+    "command": [
+      "/work/target/debug/deps/recalld-8b31964f64b2cfc4",
+      "native_records::tests::catalog_pages",
+      "--nocapture",
+      "--test-threads=2"
+    ],
+    "exitCode": 0,
+    "finished": 1794942217.2076547,
+    "passed": 4
+  }
+]

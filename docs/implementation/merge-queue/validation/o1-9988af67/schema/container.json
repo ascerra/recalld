@@ -1,0 +1,326 @@
+[
+    {
+        "Id": "0b3a41b7ff6dd2f82a61ce3eb3f78304d1513c45e8a75a340d5d427a42c6f7da",
+        "Created": "2026-11-17T19:03:37.619509258Z",
+        "Path": "python3",
+        "Args": [
+            "-c",
+            "import pathlib,json,hashlib,zipfile,sys,runpy,importlib.metadata\nout=pathlib.Path('/evidence');target=out/'python';target.mkdir()\nfor name,sha in json.loads((out/'wheels.json').read_text()).items():\n p=pathlib.Path('/wheels')/name;assert hashlib.sha256(p.read_bytes()).hexdigest()==sha\n with zipfile.ZipFile(p) as z:\n  assert all(not pathlib.PurePosixPath(n).is_absolute() and '..' not in pathlib.PurePosixPath(n).parts for n in z.namelist());z.extractall(target)\nsys.path.insert(0,str(target));assert importlib.metadata.version('jsonschema')=='4.25.1'\nactual={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/fixtures').glob('*.json')};assert actual==json.loads((out/'fixture-before.json').read_text())\ncount=sum(len(v) if isinstance(v,list) else 1 for v in (json.loads(p.read_text()) for p in pathlib.Path('/fixtures').glob('*.json')));assert count>=63,count\nsys.argv=['/runner.py','/fixtures'];runpy.run_path('/runner.py',run_name='__main__')\nassert actual=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/fixtures').glob('*.json')}\n(out/'result.json').write_text(json.dumps({'caseCount':count,'fixtureHashes':actual,'jsonschema':'4.25.1','runnerSha256':hashlib.sha256(pathlib.Path('/runner.py').read_bytes()).hexdigest()}))\npage_actual={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/page-fixtures').glob('*.json')};assert page_actual==json.loads((out/'page-before.json').read_text()) and len(page_actual)>=22\nsys.argv=['/page-runner.py','/page-fixtures'];runpy.run_path('/page-runner.py',run_name='__main__')\nassert page_actual=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/page-fixtures').glob('*.json')}\n(out/'page-result.json').write_text(json.dumps({'caseCount':len(page_actual),'fixtureHashes':page_actual,'runnerSha256':hashlib.sha256(pathlib.Path('/page-runner.py').read_bytes()).hexdigest()}))\nlive_actual={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/live-fixtures').glob('*.json')};assert live_actual==json.loads((out/'live-before.json').read_text()) and len(live_actual)>=13\nsys.argv=['/live-runner.py','/live-fixtures'];runpy.run_path('/live-runner.py',run_name='__main__')\nassert live_actual=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/live-fixtures').glob('*.json')}\n(out/'live-result.json').write_text(json.dumps({'caseCount':len(live_actual),'fixtureHashes':live_actual,'runnerSha256':hashlib.sha256(pathlib.Path('/live-runner.py').read_bytes()).hexdigest()}))\n"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-11-17T19:03:37.704644213Z",
+            "FinishedAt": "2026-11-17T19:03:39.079465625Z"
+        },
+        "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+        "ResolvConfPath": "/var/lib/docker/containers/0b3a41b7ff6dd2f82a61ce3eb3f78304d1513c45e8a75a340d5d427a42c6f7da/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/0b3a41b7ff6dd2f82a61ce3eb3f78304d1513c45e8a75a340d5d427a42c6f7da/hostname",
+        "HostsPath": "/var/lib/docker/containers/0b3a41b7ff6dd2f82a61ce3eb3f78304d1513c45e8a75a340d5d427a42c6f7da/hosts",
+        "LogPath": "/var/lib/docker/containers/0b3a41b7ff6dd2f82a61ce3eb3f78304d1513c45e8a75a340d5d427a42c6f7da/0b3a41b7ff6dd2f82a61ce3eb3f78304d1513c45e8a75a340d5d427a42c6f7da-json.log",
+        "Name": "/recalld-merge-queue-o1-d1-schema",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": null,
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {
+                    "max-file": "5",
+                    "max-size": "20m"
+                }
+            },
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": [
+                "ALL"
+            ],
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": true,
+            "SecurityOpt": [
+                "no-new-privileges"
+            ],
+            "Tmpfs": {
+                "/tmp": "rw,nosuid,nodev,size=64m"
+            },
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 8407482368,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 4294967296,
+            "NanoCpus": 2000000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 4294967296,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "Mounts": [
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/schema-fixtures",
+                    "Target": "/fixtures",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/page-fixtures",
+                    "Target": "/page-fixtures",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/live-fixtures",
+                    "Target": "/live-fixtures",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/source/tests/query_schema_conformance.py",
+                    "Target": "/runner.py",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/source/tests/page_schema_conformance.py",
+                    "Target": "/page-runner.py",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/source/tests/live_tool_schema_conformance.py",
+                    "Target": "/live-runner.py",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-huygens-active-validation/schema-wheels",
+                    "Target": "/wheels",
+                    "ReadOnly": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/schema-native-validation",
+                    "Target": "/evidence"
+                }
+            ],
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/schema-native-validation",
+                "Destination": "/evidence",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/schema-fixtures",
+                "Destination": "/fixtures",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/live-fixtures",
+                "Destination": "/live-fixtures",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/source/tests/live_tool_schema_conformance.py",
+                "Destination": "/live-runner.py",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/output/page-fixtures",
+                "Destination": "/page-fixtures",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/source/tests/page_schema_conformance.py",
+                "Destination": "/page-runner.py",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-implementation/merge-queue/.queue/validation-o1-9988af67/source/tests/query_schema_conformance.py",
+                "Destination": "/runner.py",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/tmp/recalld-huygens-active-validation/schema-wheels",
+                "Destination": "/wheels",
+                "Mode": "",
+                "RW": false,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "0b3a41b7ff6d",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "HOME=/tmp",
+                "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "RUSTUP_HOME=/usr/local/rustup",
+                "CARGO_HOME=/usr/local/cargo",
+                "RUST_VERSION=1.94.1",
+                "RUSTUP_TOOLCHAIN=1.94.1"
+            ],
+            "Cmd": [
+                "python3",
+                "-c",
+                "import pathlib,json,hashlib,zipfile,sys,runpy,importlib.metadata\nout=pathlib.Path('/evidence');target=out/'python';target.mkdir()\nfor name,sha in json.loads((out/'wheels.json').read_text()).items():\n p=pathlib.Path('/wheels')/name;assert hashlib.sha256(p.read_bytes()).hexdigest()==sha\n with zipfile.ZipFile(p) as z:\n  assert all(not pathlib.PurePosixPath(n).is_absolute() and '..' not in pathlib.PurePosixPath(n).parts for n in z.namelist());z.extractall(target)\nsys.path.insert(0,str(target));assert importlib.metadata.version('jsonschema')=='4.25.1'\nactual={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/fixtures').glob('*.json')};assert actual==json.loads((out/'fixture-before.json').read_text())\ncount=sum(len(v) if isinstance(v,list) else 1 for v in (json.loads(p.read_text()) for p in pathlib.Path('/fixtures').glob('*.json')));assert count>=63,count\nsys.argv=['/runner.py','/fixtures'];runpy.run_path('/runner.py',run_name='__main__')\nassert actual=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/fixtures').glob('*.json')}\n(out/'result.json').write_text(json.dumps({'caseCount':count,'fixtureHashes':actual,'jsonschema':'4.25.1','runnerSha256':hashlib.sha256(pathlib.Path('/runner.py').read_bytes()).hexdigest()}))\npage_actual={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/page-fixtures').glob('*.json')};assert page_actual==json.loads((out/'page-before.json').read_text()) and len(page_actual)>=22\nsys.argv=['/page-runner.py','/page-fixtures'];runpy.run_path('/page-runner.py',run_name='__main__')\nassert page_actual=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/page-fixtures').glob('*.json')}\n(out/'page-result.json').write_text(json.dumps({'caseCount':len(page_actual),'fixtureHashes':page_actual,'runnerSha256':hashlib.sha256(pathlib.Path('/page-runner.py').read_bytes()).hexdigest()}))\nlive_actual={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/live-fixtures').glob('*.json')};assert live_actual==json.loads((out/'live-before.json').read_text()) and len(live_actual)>=13\nsys.argv=['/live-runner.py','/live-fixtures'];runpy.run_path('/live-runner.py',run_name='__main__')\nassert live_actual=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/live-fixtures').glob('*.json')}\n(out/'live-result.json').write_text(json.dumps({'caseCount':len(live_actual),'fixtureHashes':live_actual,'runnerSha256':hashlib.sha256(pathlib.Path('/live-runner.py').read_bytes()).hexdigest()}))\n"
+            ],
+            "Image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+            "Volumes": null,
+            "WorkingDir": "",
+            "Entrypoint": null,
+            "Labels": {
+                "org.opencontainers.image.source": "https://github.com/rust-lang/docker-rust"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "none": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "9f8d771a69aae6568ca4386f95a53838dae6a2faa7f0494668ca6d561de2ff98",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:3065526a10807e4b0672a1c23f6a167f6b42ba75efdae5deaf7afdbd4d554544",
+            "size": 1448,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]
