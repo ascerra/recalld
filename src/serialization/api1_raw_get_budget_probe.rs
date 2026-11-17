@@ -1,5 +1,6 @@
 //! New API1 error-only raw carrier diagnostic; original O1 is unchanged.
 use super::*;
+use serde::de::{DeserializeSeed, SeqAccess, Visitor};
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,6 +11,51 @@ struct Acquired<'a> {
     raw: Vec<&'a RawValue>,
 }
 
+// Count every named candidate, including invalid receipts and repeated aliases,
+// before retaining a pointer or invoking the typed validator. Do not reserve
+// from the peer's sequence size hint.
+struct Candidates<'a> {
+    raw: Vec<&'a RawValue>,
+    bytes: usize,
+    limit: usize,
+}
+
+impl<'a> Candidates<'a> {
+    fn push(&mut self, raw: &'a RawValue) -> Result<(), ()> {
+        if self.raw.len() >= MAX_FRAGMENTS {
+            return Err(());
+        }
+        self.bytes = self
+            .bytes
+            .checked_add(raw.get().len())
+            .filter(|n| *n <= self.limit)
+            .ok_or(())?;
+        self.raw.push(raw);
+        Ok(())
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for &mut Candidates<'de> {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+        d.deserialize_seq(self)
+    }
+}
+impl<'de> Visitor<'de> for &mut Candidates<'de> {
+    type Value = ();
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("bounded raw receipt array")
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut array: A) -> Result<(), A::Error> {
+        while let Some(raw) = array.next_element::<&RawValue>()? {
+            self.push(raw).map_err(|()| {
+                serde::de::Error::custom("receipt count or byte allowance exceeded")
+            })?;
+        }
+        Ok(())
+    }
+}
+
 fn acquire(raw: &str, limit: usize) -> Result<Acquired<'_>, ()> {
     // All structure/count/byte admission precedes typed receipt acquisition.
     shape::check_typed(raw.as_bytes(), limit).map_err(|_| ())?;
@@ -17,33 +63,24 @@ fn acquire(raw: &str, limit: usize) -> Result<Acquired<'_>, ()> {
     if fields.contains_key("receivedEvidence") {
         return Err(());
     }
-    let groups: Vec<&RawValue> = fields
-        .get("observationReceipts")
-        .map(|raw| serde_json::from_str(raw.get()))
-        .transpose()
-        .map_err(|_| ())?
-        .unwrap_or_default();
-    let count = usize::from(fields.contains_key("receipt"))
-        .checked_add(groups.len())
-        .ok_or(())?;
-    if count > MAX_FRAGMENTS {
-        return Err(());
+    let mut candidates = Candidates {
+        raw: Vec::new(),
+        bytes: 0,
+        limit,
+    };
+    if let Some(raw) = fields.get("receipt") {
+        candidates.push(raw)?;
     }
-    let candidates: Vec<_> = fields
-        .get("receipt")
-        .copied()
-        .into_iter()
-        .chain(groups)
-        .collect();
-    let total = candidates
-        .iter()
-        .try_fold(0usize, |n, r| n.checked_add(r.get().len()))
-        .ok_or(())?;
-    if total > limit {
-        return Err(());
+    if let Some(groups) = fields.get("observationReceipts") {
+        let mut decoder = serde_json::Deserializer::from_str(groups.get());
+        (&mut candidates)
+            .deserialize(&mut decoder)
+            .map_err(|_| ())?;
+        decoder.end().map_err(|_| ())?;
     }
     let mut seen = BTreeSet::new();
     let raw = candidates
+        .raw
         .into_iter()
         .filter(|r| {
             crate::daemon::prepared_query::decode::receipt_raw(r.get()).is_ok()
@@ -231,6 +268,68 @@ fn api1_point_raw_admission_rejects_malformed_recursive_and_excess_count() {
         );
     }
     assert!(acquire(&format!("{{\"receipt\":{raw}}}"), 10).is_err());
+}
+
+#[test]
+fn api1_point_raw_borrowed_visitor_counts_before_push_and_dedup() {
+    let raw = serde_json::to_string(&maximal_point_receipt()).unwrap();
+    let (limit, _) = raw_limit();
+    for count in [MAX_FRAGMENTS - 1, MAX_FRAGMENTS, MAX_FRAGMENTS + 1] {
+        let incoming = format!(
+            "{{\"receipt\":{raw},\"observationReceipts\":[{}]}}",
+            vec![raw.as_str(); count - 1].join(",")
+        );
+        let result = acquire(&incoming, limit);
+        if count <= MAX_FRAGMENTS {
+            assert_eq!(
+                result.unwrap().raw.len(),
+                1,
+                "only exact aliases deduplicate"
+            );
+        } else {
+            assert!(result.is_err(), "dedup cannot bypass input count admission");
+        }
+    }
+    let null: &RawValue = serde_json::from_str("null").unwrap();
+    let mut candidates = Candidates {
+        raw: vec![null; MAX_FRAGMENTS],
+        bytes: 4 * MAX_FRAGMENTS,
+        limit: usize::MAX,
+    };
+    assert!(candidates.push(null).is_err());
+    assert_eq!(candidates.raw.len(), MAX_FRAGMENTS);
+    assert_eq!(candidates.bytes, 4 * MAX_FRAGMENTS);
+    candidates.raw.clear();
+    candidates.bytes = usize::MAX;
+    assert!(candidates.push(null).is_err());
+    assert!(
+        candidates.raw.is_empty(),
+        "overflow refuses before retention"
+    );
+}
+
+#[test]
+fn api1_point_raw_owning_timezone_tag_is_bounded() {
+    let mut longest = (0, "");
+    for timezone in chrono_tz::TZ_VARIANTS {
+        let name = timezone.name();
+        assert_eq!(name.parse::<chrono_tz::Tz>().unwrap(), timezone);
+        let encoded = serde_json::to_vec(name).unwrap().len();
+        assert!(encoded <= 64, "{name}");
+        if encoded > longest.0 {
+            longest = (encoded, name);
+        }
+        // Count the actual proposed private carrier's fixed keys, version,
+        // kind, maximum status width and owning timezone separately from its
+        // quoted reply JSON. The reply itself is counted by pre-admission.
+        let tag = json!({"wireVersion":1,"kind":"native","httpStatus":503,
+            "timezone":name,"replyJson":""});
+        assert!(serde_json::to_vec(&tag).unwrap().len() <= 256);
+    }
+    eprintln!(
+        "owning timezone maximum encoded bytes={} name={}",
+        longest.0, longest.1
+    );
 }
 
 #[tokio::test]
