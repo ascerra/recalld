@@ -169,11 +169,44 @@ fn namespace_tree(
 async fn namespace_profile_http_mcp_use_active_width_before_catalog_allocation() {
     let f = Fixture::new();
     // Existing default is 4; actual provider is 8. Omission must not inherit 4.
-    let provider = Arc::new(crate::embedding::OllamaProvider::new(
-        "fixture-model".into(),
-        8,
-    ));
-    let (app, bridge) = fixture_clients_with_embedding(&f, provider);
+    use crate::embedding::EmbeddingProvider as _;
+    use crate::mcp::bridge::StorageEngine as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountedProvider {
+        inner: crate::embedding::OllamaProvider,
+        calls: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl crate::embedding::EmbeddingProvider for CountedProvider {
+        fn dimensions(&self) -> usize {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.dimensions()
+        }
+        fn model_name(&self) -> &str {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.model_name()
+        }
+        fn profile(&self) -> Option<crate::model::schema::EmbeddingProfile> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.profile()
+        }
+        async fn embed(&self, _: &str) -> Result<Vec<f32>, crate::embedding::EmbeddingError> {
+            panic!("namespace creation and metadata pages must not embed")
+        }
+    }
+    struct NoPageClock;
+    impl crate::time::Clock for NoPageClock {
+        fn now_millis(&self) -> i64 {
+            panic!("metadata pages must not sample a clock")
+        }
+    }
+    let provider = Arc::new(CountedProvider {
+        inner: crate::embedding::OllamaProvider::new("fixture-model".into(), 8),
+        calls: AtomicUsize::new(0),
+    });
+    let configured_profile = provider.inner.profile().unwrap().profile_id().unwrap();
+    let (app, bridge) = fixture_clients_with_embedding(&f, provider.clone());
     let before = namespace_tree(f.path());
     let generation = f
         .storage
@@ -252,6 +285,103 @@ async fn namespace_profile_http_mcp_use_active_width_before_catalog_allocation()
             .embedding_dim,
         4
     );
+
+    // Read the actual public-created namespaces over the same owner's private
+    // daemon connection. Configuration identity must not attest legacy rows.
+    let owned = Arc::new(
+        crate::mcp::bridge_adapters::McpStorageAdapter::new(
+            f.storage.clone(),
+            f.cache.clone(),
+            provider.clone(),
+            f.vector_index.clone(),
+            f.fts_index.clone(),
+            f.entity_index.clone(),
+            f.graph.clone(),
+            Arc::new(Default::default()),
+            chrono_tz::UTC,
+        )
+        .with_catalog_profile_context(provider.as_ref())
+        .with_clock(Arc::new(NoPageClock)),
+    );
+    let calls = provider.calls.load(Ordering::SeqCst);
+    let before_pages = namespace_tree(f.path());
+    let control = f.storage.read().unwrap().control_state().unwrap();
+    let at = crate::storage::control::GenerationRef {
+        store_id: control.store_id,
+        generation: control.committed_generation,
+    };
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        owned.clone(),
+        &socket.path().join("profile-pages.sock"),
+    )
+    .await;
+    remote.test_client().ping().await.unwrap();
+    let request = crate::serialization::catalog_page::CatalogPageRequest::from_mcp(
+        &json!({"contractVersion":2,"limit":10}),
+        crate::serialization::catalog_page::CatalogKind::Namespaces,
+    )
+    .unwrap();
+    let mut pages_bridge = crate::test_support::StubBridge::default().into_bridge();
+    pages_bridge.storage = owned.clone();
+    let local = crate::mcp::tools::dispatch_v2(
+        &pages_bridge,
+        "list_namespaces",
+        json!({"contractVersion":2,"limit":10}),
+    )
+    .await;
+    assert_ne!(local.is_error, Some(true), "{local:?}");
+    let local = serde_json::to_value(local).unwrap();
+    let local_envelope: Value =
+        serde_json::from_str(local["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(local["structuredContent"], local_envelope);
+    let local = local_envelope;
+    let catalog = serde_json::to_value(
+        remote
+            .list_catalog_page(request)
+            .await
+            .unwrap()
+            .into_envelope(),
+    )
+    .unwrap();
+    assert_eq!(catalog, local);
+    assert_eq!(catalog["readGeneration"], serde_json::to_value(at).unwrap());
+    assert_eq!(catalog["data"]["total"], "5");
+    assert_eq!(catalog["data"]["complete"], true);
+    assert_eq!(
+        catalog["data"]["configuredEmbedding"],
+        json!({"identity":"configuration","dimension":8,"profileId":configured_profile})
+    );
+    let rows = catalog["data"]["namespaces"].as_array().unwrap();
+    assert_eq!(rows.len(), 5);
+    for row in rows {
+        let name = row["name"].as_str().unwrap();
+        assert_eq!(row["embeddingDim"], if name == "default" { 4 } else { 8 });
+        assert!(row["embeddingProfileId"].is_null());
+        assert!(row["bindingProvenance"].is_null());
+        assert_eq!(row["profileCompatibility"], "unknownNamespaceProfile");
+        let request = crate::serialization::list::ListPageRequest::from_mcp(
+            &json!({"contractVersion":2,"namespace":name,"limit":1}),
+        )
+        .unwrap();
+        let page = serde_json::to_value(
+            remote
+                .list_canonical_page(request)
+                .await
+                .unwrap()
+                .into_envelope(),
+        )
+        .unwrap();
+        assert_eq!(page["readGeneration"], serde_json::to_value(at).unwrap());
+        assert_eq!(page["scope"]["namespace"], name);
+        assert_eq!(page["scope"]["namespaceId"], row["id"]);
+        assert_eq!(page["data"]["total"], "0");
+        assert_eq!(page["data"]["memories"], json!([]));
+    }
+    drop(remote);
+    task.await.unwrap();
+    assert_eq!(provider.calls.load(Ordering::SeqCst), calls);
+    assert_eq!(namespace_tree(f.path()), before_pages);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

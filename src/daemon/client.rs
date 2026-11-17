@@ -118,6 +118,7 @@ struct ClientState {
     api1_store_batch: Option<bool>,
     prepared_queries: Option<bool>,
     exact_pairs_bits: bool,
+    canonical_pages: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -234,10 +235,19 @@ impl DaemonClient {
                     result: None,
                 };
             }
-            if state.prepared_queries != Some(true)
-                || state.frame_limit < MAX_MESSAGE_SIZE
-                || (method == super::prepared_query::PAIRS && !state.exact_pairs_bits)
-            {
+            let supported = match method {
+                super::prepared_pages::LIST | super::prepared_pages::CATALOG => {
+                    state.canonical_pages
+                }
+                super::prepared_query::PAIRS => {
+                    state.prepared_queries == Some(true) && state.exact_pairs_bits
+                }
+                super::prepared_query::QUERY | super::prepared_query::SIMILAR => {
+                    state.prepared_queries == Some(true)
+                }
+                _ => false,
+            };
+            if !supported || state.frame_limit < MAX_MESSAGE_SIZE {
                 return PreparedExchange {
                     phase: TransmissionPhase::BeforeSend,
                     result: None,
@@ -365,6 +375,7 @@ impl DaemonClient {
                 api1_store_batch: None,
                 prepared_queries: None,
                 exact_pairs_bits: false,
+                canonical_pages: false,
             }),
             connected: AtomicBool::new(true),
         })
@@ -612,6 +623,7 @@ impl DaemonClient {
         state.api1_store_batch = None;
         state.prepared_queries = None;
         state.exact_pairs_bits = false;
+        state.canonical_pages = false;
         let mut last: Option<String> = None;
 
         for (attempt, backoff_ms) in RECONNECT_BACKOFF_MS.iter().enumerate() {
@@ -624,6 +636,7 @@ impl DaemonClient {
                     state.api1_store_batch = None;
                     state.prepared_queries = None;
                     state.exact_pairs_bits = false;
+                    state.canonical_pages = false;
                     match state.negotiate().await {
                         Ok(()) => return Ok(()),
                         Err(e) => {
@@ -693,6 +706,10 @@ impl ClientState {
                 .and_then(serde_json::Value::as_bool)
                 == Some(true),
         );
+        self.canonical_pages = result
+            .get("canonicalPagesV1")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
         self.exact_pairs_bits = result
             .get("exactPairsBitsV1")
             .and_then(serde_json::Value::as_bool)

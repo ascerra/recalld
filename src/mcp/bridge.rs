@@ -109,6 +109,11 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Private canonical metadata pages require an actual owning implementation.
+    fn supports_canonical_pages(&self) -> bool {
+        false
+    }
+
     /// Optional identity captured from the configured provider when this adapter
     /// was constructed. Metadata calls never invoke a provider to obtain it.
     fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {

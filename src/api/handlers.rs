@@ -2906,6 +2906,11 @@ pub(crate) async fn catalog_v2(
         page.with_active_embedding(active)
     });
     let (status, envelope) = crate::catalog_page::response(result);
+    #[cfg(test)]
+    crate::serialization::page_schema::record_fixture(
+        Some(kind),
+        &serde_json::to_value(&envelope).unwrap(),
+    );
     (
         StatusCode::from_u16(status).expect("fixed catalog status"),
         Json(envelope),

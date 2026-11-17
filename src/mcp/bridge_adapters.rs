@@ -1807,6 +1807,10 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    fn supports_canonical_pages(&self) -> bool {
+        true
+    }
+
     fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
         self.catalog_profile.clone()
     }
