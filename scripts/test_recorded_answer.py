@@ -56,7 +56,10 @@ class Recorded(unittest.TestCase):
     def setup_manifest(self,variant='baseline'):
         tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);root=Path(tmp.name)
         binary=root/'binary';binary.write_bytes(b'not-executable')
-        build=H['ROOT']/'docsbench/combined-control-consumer/evidence/build.json'
+        build=root/'build.json'
+        runtime={str(p.relative_to(H['ROOT'])):H['digest'](p.read_bytes()) for p in (H['ROOT']/'src').rglob('*.rs')}
+        runtime.update({name:H['digest']((H['ROOT']/name).read_bytes()) for name in ('Cargo.toml','Cargo.lock')})
+        H['save'](build,dict(sourceCommit='a'*40,sourceFilesSha256=runtime,containerImageId='sha256:'+'b'*64))
         args=SimpleNamespace(track=A['TRACK'],binary=binary,scorer=binary,build=build,out=root/'inputs',
             context_profile='default',context_assets=root/'assets',combined_variant='baseline',answer_variant=variant,
             source_root=H['ROOT'],manifest=root/'inputs/manifest.json')
