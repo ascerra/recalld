@@ -31,30 +31,35 @@ struct Api1Failure<'a> {
     warnings: &'a [String],
 }
 
+fn failure_fields(reply: &GetReply) -> Api1Failure<'_> {
+    let error = reply.envelope.error.as_ref().unwrap();
+    Api1Failure {
+        error: &error.code,
+        category: &error.category,
+        message: &error.message,
+        field: error.field.as_deref(),
+        retryable: error.retryable,
+        commit_state: &error.commit_state,
+        ready: false,
+        scope: reply.envelope.scope.as_ref(),
+        receipt: reply.envelope.receipt.as_ref(),
+        observation_receipts: &reply.observation_receipts,
+        read_generation: reply.envelope.read_generation.as_ref(),
+        readiness: reply.envelope.readiness.as_ref(),
+        // An available prior receipt must never become a fabricated unknown ID.
+        operation_id: error.operation_id.or_else(|| {
+            (error.commit_state == CommitState::Committed)
+                .then(|| reply.envelope.receipt.as_ref().map(|r| r.operation_id))
+                .flatten()
+        }),
+        received_evidence: reply.received_evidence.as_ref(),
+        warnings: &reply.envelope.warnings,
+    }
+}
+
 fn public(reply: &GetReply, timezone: chrono_tz::Tz) -> ToolCallResult {
-    if let Some(error) = &reply.envelope.error {
-        let failure = Api1Failure {
-            error: &error.code,
-            category: &error.category,
-            message: &error.message,
-            field: error.field.as_deref(),
-            retryable: error.retryable,
-            commit_state: &error.commit_state,
-            ready: false,
-            scope: reply.envelope.scope.as_ref(),
-            receipt: reply.envelope.receipt.as_ref(),
-            observation_receipts: &reply.observation_receipts,
-            read_generation: reply.envelope.read_generation.as_ref(),
-            readiness: reply.envelope.readiness.as_ref(),
-            // An available prior receipt must never become a fabricated unknown ID.
-            operation_id: error.operation_id.or_else(|| {
-                (error.commit_state == CommitState::Committed)
-                    .then(|| reply.envelope.receipt.as_ref().map(|r| r.operation_id))
-                    .flatten()
-            }),
-            received_evidence: reply.received_evidence.as_ref(),
-            warnings: &reply.envelope.warnings,
-        };
+    if reply.envelope.error.is_some() {
+        let failure = failure_fields(reply);
         let text = serde_json::to_string(&failure).unwrap();
         // Preserve already received evidence Values without another parse cycle.
         let value = serde_json::to_value(&failure).unwrap();
@@ -527,3 +532,6 @@ async fn api1_point_budget_wire_authored_value_evidence() {
 async fn api1_point_budget_wire_canonical_raw_evidence() {
     evidence_frame_probe(true).await;
 }
+
+#[path = "api1_raw_get_budget_probe.rs"]
+mod raw_carrier;
