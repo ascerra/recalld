@@ -18,8 +18,10 @@ async fn live_lifecycle_schema_retained_codec_is_not_canonical_proof() {
         match &mut malformed.outcome {
             MutationOutcome::LifecycleFeedbackApplied { transition } => {
                 // FiniteF32 decodes these; canonical LifecycleState does not.
-                transition.records[0].before.stability = (-7_f32).try_into().unwrap();
-                transition.records[0].after.difficulty = (-9_f32).try_into().unwrap();
+                // Actual typed f32 emitters can spell MAX beyond its exact f64
+                // widening. The schema must accept the emitted JSON too.
+                transition.records[0].before.stability = f32::MAX.try_into().unwrap();
+                transition.records[0].after.difficulty = (-f32::MAX).try_into().unwrap();
                 transition.feedback.as_mut().unwrap().decay_rate_multiplier =
                     (-3_f32).try_into().unwrap();
             }
