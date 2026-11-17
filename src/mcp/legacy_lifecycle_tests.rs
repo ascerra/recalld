@@ -206,7 +206,12 @@ fn state(
             .with_clock(clock)
             .with_native_lifecycle_policy(Default::default()),
         ),
-        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+        Arc::new(NamespaceRegistryAdapter::new(
+            f.storage.clone(),
+            std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                crate::test_support::DIM,
+            )),
+        )),
         Arc::new(NoopMetricsCollector),
     );
     (state, query)

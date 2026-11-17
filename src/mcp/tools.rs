@@ -1439,7 +1439,7 @@ fn create_namespace_def() -> ToolInfo {
                 },
                 "embeddingDim": {
                     "type": "integer",
-                    "description": "Integer 1-8192; null is invalid. Fixed after creation. Omission inherits the default namespace dimension (fallback 1536).",
+                    "description": "Integer 1-8192; null is invalid. Must equal the active provider dimension; omission selects that dimension. Fixed after creation.",
                     "minimum": 1,
                     "maximum": 8192
                 },
@@ -1935,6 +1935,11 @@ pub(crate) async fn dispatch_v2(
             Err(error) => Err(error),
         };
         let (status, envelope) = crate::catalog_page::response(result);
+        #[cfg(test)]
+        crate::serialization::page_schema::record_fixture(
+            Some(kind),
+            &serde_json::to_value(&envelope).unwrap(),
+        );
         let mut out = ToolCallResult::json(&envelope)
             .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
         if status >= 400 {
@@ -3046,7 +3051,23 @@ mod tests {
         use crate::storage::StorageEngine as _;
         let fixture = crate::test_support::Fixture::new();
         let mut bridge = crate::test_support::StubBridge::default().into_bridge();
-        bridge.namespaces = std::sync::Arc::new(fixture.namespace_adapter());
+        // Positive range controls require an actually matching active provider.
+        let dimension = if reject {
+            crate::test_support::DIM
+        } else {
+            value.as_u64().unwrap() as usize
+        };
+        bridge.namespaces =
+            std::sync::Arc::new(crate::mcp::bridge_adapters::McpNamespaceAdapter::new(
+                fixture.storage.clone(),
+                std::sync::Arc::new(crate::embedding::PassthroughProvider::new(dimension)),
+                fixture.cache.clone(),
+                fixture.vector_index.clone(),
+                fixture.fts_index.clone(),
+                fixture.entity_index.clone(),
+                fixture.graph.clone(),
+                chrono_tz::UTC,
+            ));
         let result = dispatch_tool(
             &bridge,
             "create_namespace",

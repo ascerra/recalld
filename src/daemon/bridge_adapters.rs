@@ -165,6 +165,20 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn list_canonical_page(
+        &self,
+        request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        super::prepared_pages::remote_list(&self.client, request).await
+    }
+
+    async fn list_catalog_page(
+        &self,
+        request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        super::prepared_pages::remote_catalog(&self.client, request).await
+    }
+
     async fn store_api1(
         &self,
         request: crate::serialization::store_api1::Request,

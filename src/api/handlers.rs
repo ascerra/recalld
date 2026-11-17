@@ -1648,6 +1648,7 @@ async fn create_namespace_v1(
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {
     use crate::decay::lifecycle::LifecycleError;
     use crate::derived_completion::catalog::CatalogCreateError;
+    use crate::embedding::runtime::NamespaceProfileError;
     use crate::storage::StorageError;
     let error: Box<dyn std::error::Error + Send + Sync> = match error
         .downcast::<CatalogCreateError>()
@@ -1663,6 +1664,21 @@ fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> Ap
         },
         Err(error) => error,
     };
+    if let Some(error) = error.downcast_ref::<NamespaceProfileError>() {
+        return match error {
+            NamespaceProfileError::InvalidDimension => AppError::BadRequest {
+                message: error.to_string(),
+                field: Some("embeddingDim".into()),
+            },
+            NamespaceProfileError::InactiveDimension { .. } => AppError::UnprocessableEntity {
+                message: error.to_string(),
+                field: Some("embeddingDim".into()),
+            },
+            NamespaceProfileError::Unavailable(_) => AppError::ServiceUnavailable {
+                message: error.to_string(),
+            },
+        };
+    }
     if matches!(
         error.downcast_ref::<LifecycleError>(),
         Some(LifecycleError::InvalidInput(_))
@@ -2910,6 +2926,11 @@ pub(crate) async fn catalog_v2(
         page.with_active_embedding(active)
     });
     let (status, envelope) = crate::catalog_page::response(result);
+    #[cfg(test)]
+    crate::serialization::page_schema::record_fixture(
+        Some(kind),
+        &serde_json::to_value(&envelope).unwrap(),
+    );
     (
         StatusCode::from_u16(status).expect("fixed catalog status"),
         Json(envelope),

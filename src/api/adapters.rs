@@ -1746,6 +1746,7 @@ pub struct NamespaceRegistryAdapter {
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     clock: Arc<dyn crate::time::Clock>,
+    embedding: Arc<dyn EmbeddingProvider>,
 }
 
 impl NamespaceRegistryAdapter {
@@ -1784,17 +1785,21 @@ impl NamespaceRegistryAdapter {
     }
 
     /// Storage-only reads. Creation requires `from_system` to bind actual publishers.
-    pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
+    pub fn new(
+        storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+        embedding: Arc<dyn EmbeddingProvider>,
+    ) -> Self {
         Self {
             completion: None,
             native_catalog: None,
             storage,
+            embedding,
             clock: Arc::new(crate::time::SystemClock),
         }
     }
     /// Bind creates to the same system's accepted work and derived publishers.
     pub fn from_system(system: &crate::Recalld) -> Self {
-        Self::new(system.storage().clone())
+        Self::new(system.storage().clone(), system.embedding().clone())
             .with_completion(crate::derived_completion::DerivedCompletion {
                 storage: system.storage().clone(),
                 cache: system.cache().clone(),
@@ -1931,11 +1936,13 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         let completion = self.completion.as_ref().ok_or_else(|| {
             crate::storage::StorageError::InvalidMutation("namespace creation requires an owner-bound registry; use NamespaceRegistryAdapter::from_system".into())
         })?;
+        let dim =
+            crate::embedding::runtime::creation_dimension(self.embedding.as_ref(), embedding_dim)?;
         let config = NamespaceConfig {
             schema: None,
             id: NamespaceId::UNSET,
             name: name.into(),
-            embedding_dim: 1536,
+            embedding_dim: dim,
             initial_stability,
             default_difficulty: 5.0,
             phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
@@ -1952,7 +1959,7 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
             1.0,
         )?;
         Ok(completion
-            .create_legacy_namespace(config, embedding_dim, self.clock.clone())
+            .create_legacy_namespace(config, Some(dim), self.clock.clone())
             .await?)
     }
 }
@@ -2224,7 +2231,13 @@ mod tests {
         use crate::api::state::NamespaceRegistry as _;
         use crate::mcp::bridge::{BridgeError, CreateNamespaceInput, NamespaceRegistry as _};
         let f = Fixture::new();
-        let http = NamespaceRegistryAdapter::new(f.storage.clone()).with_completion(f.completion());
+        let http = NamespaceRegistryAdapter::new(
+            f.storage.clone(),
+            std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                crate::test_support::DIM,
+            )),
+        )
+        .with_completion(f.completion());
         let mcp = f.namespace_adapter();
         for (stability, multiplier) in [
             (0.0, None),

@@ -15,15 +15,15 @@ use crate::{
         control::{Generation, GenerationRef},
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 pub(crate) const MAX_NAMESPACE_ROWS: usize = 100_000;
 pub(crate) const MAX_CATALOG_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const MAX_LABELS: usize = 100_000;
 pub(crate) const MAX_LABEL_BYTES: usize = 8 * 1024 * 1024;
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub enum ProfileCompatibility {
     Compatible,
     UnknownNamespaceProfile,
@@ -31,8 +31,8 @@ pub enum ProfileCompatibility {
     DimensionMismatch,
     ProfileMismatch,
 }
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NamespaceEntry {
     pub id: NamespaceId,
     pub name: String,
@@ -74,30 +74,30 @@ impl NamespaceEntry {
         })
     }
 }
-#[derive(Debug, Default, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LabelSources {
     pub raw_tags: Generation,
     pub canonical_legacy_retained_only: Generation,
     pub canonical_native_v2: Generation,
 }
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LabelEntry {
     pub name: String,
     pub count: Generation,
     pub sources: LabelSources,
 }
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LabelBucket {
     pub total: Generation,
     /// True iff this bucket has more entries after this page's anchor.
     pub truncated: bool,
     pub items: Vec<LabelEntry>,
 }
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TagData {
     pub memories_counted: Generation,
     pub limit: usize,
@@ -108,8 +108,8 @@ pub struct TagData {
     pub complete: bool,
     pub next_cursor: Option<String>,
 }
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NamespaceData {
     pub namespaces: Vec<NamespaceEntry>,
     pub total: Generation,
@@ -118,7 +118,7 @@ pub struct NamespaceData {
     pub next_cursor: Option<String>,
     pub configured_embedding: Option<ActiveEmbedding>,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum CatalogData {
     Namespaces(NamespaceData),
@@ -135,6 +135,9 @@ impl CatalogPage {
     /// Unavailable context never blocks metadata access or invents compatibility.
     pub(crate) fn with_active_embedding(mut self, active: Option<ActiveEmbedding>) -> Self {
         if let CatalogData::Namespaces(data) = &mut self.data {
+            // A decoded Remote page already carries the daemon configuration.
+            // Do not replace it with the client adapter context (including None).
+            let active = data.configured_embedding.clone().or(active);
             for entry in &mut data.namespaces {
                 entry.profile_compatibility = match (&entry.embedding_profile_id, &active) {
                     (None, _) => ProfileCompatibility::UnknownNamespaceProfile,
@@ -165,8 +168,18 @@ impl CatalogPage {
         self
     }
     pub fn into_envelope(self) -> Envelope<CatalogData> {
+        #[cfg(test)]
+        let kind = match &self.data {
+            CatalogData::Namespaces(_) => CatalogKind::Namespaces,
+            CatalogData::Tags(_) => CatalogKind::Tags,
+        };
         let mut out = Envelope::success(self.scope, self.data);
         out.read_generation = Some(self.at);
+        #[cfg(test)]
+        crate::serialization::page_schema::record_fixture(
+            Some(kind),
+            &serde_json::to_value(&out).unwrap(),
+        );
         out
     }
 }

@@ -1744,5 +1744,89 @@ async fn native_document_recipe_plain_batch_with_explicit_auxiliary_disable() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_single_wire_actual_unknown_commit_keeps_original_operation_on_reopen() {
+    struct UnknownClock;
+    impl Clock for UnknownClock {
+        fn now_millis(&self) -> i64 {
+            crate::storage::metadata::effects::FAIL_AFTER_RECORD_COMMIT.with(|flag| flag.set(true));
+            86_400_000
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let d = certified_fixture(root.path());
+    let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    completion(&f).rebuild_all().await.unwrap();
+    let p = provider(&d);
+    let a = Arc::new(
+        adapter(&f, p.clone(), clock.clone(), Default::default())
+            .with_clock(Arc::new(UnknownClock)),
+    );
+    let body = serde_json::json!({"namespaceId":d.ns,"storeId":f.storage.read().unwrap().control_state().unwrap().store_id,"idempotencyKey":"wire-unknown-semantic","summary":"actual unknown wire outcome","checkDuplicates":false});
+    let request =
+        crate::serialization::native_single::Request::parse(&body, true, None, "native").unwrap();
+    let rpc = crate::daemon::server::native_method_test_rpc(
+        a.clone(),
+        serde_json::to_value(&request).unwrap(),
+        "store_native_single_observed_v1",
+    )
+    .await;
+    assert!(rpc.error.is_none(), "{rpc:?}");
+    let reply: crate::serialization::native_single::Reply =
+        serde_json::from_value(rpc.result.unwrap()).unwrap();
+    assert!(reply.receipt.is_none());
+    let error = reply.error.unwrap();
+    assert_eq!(error.code, "COMMIT_OUTCOME_UNKNOWN");
+    assert_eq!(
+        error.commit_state,
+        crate::serialization::contract::CommitState::Unknown
+    );
+    let operation = error.operation_id.unwrap();
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .work_tracker()
+            .status()
+            .unresolved
+            > 0
+    );
+    assert_eq!(p.calls.load(Ordering::SeqCst), 1);
+    drop(a);
+    let root = f.close();
+    let s = open(&d, clock.clone());
+    let f = Fixture::from_open_engine(root, s.engine);
+    let mut p = provider(&d);
+    Arc::get_mut(&mut p).unwrap().profile = None;
+    let a = Arc::new(adapter(&f, p.clone(), clock.clone(), Default::default()));
+    let rpc = crate::daemon::server::native_method_test_rpc(
+        a,
+        serde_json::to_value(request).unwrap(),
+        "store_native_single_observed_v1",
+    )
+    .await;
+    assert!(rpc.error.is_none(), "{rpc:?}");
+    let reply: crate::serialization::native_single::Reply =
+        serde_json::from_value(rpc.result.unwrap()).unwrap();
+    assert!(reply.error.is_none(), "{:?}", reply.error);
+    let mut receipt = reply.receipt.unwrap();
+    assert!(receipt.replayed);
+    assert_eq!(receipt.operation_id, operation);
+    receipt.replayed = false;
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .lookup_operation(receipt.store_id, MutationScope::Namespace(d.ns), operation)
+            .unwrap(),
+        Some(receipt)
+    );
+    assert_eq!(p.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(p.profiles.load(Ordering::SeqCst), 0);
+}
+
 #[path = "owned_ids_producer_tests.rs"]
 mod owned_ids;

@@ -49,6 +49,16 @@ impl McpStorageAdapter {
                     .storage
                     .read()
                     .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+                // This immutable owned entry mode is known before any provider,
+                // clock, reservation or native mutation. Do not misclassify an
+                // unsupported legacy semantic request as an uncertain commit.
+                // Native and legacy receipts have different original kinds;
+                // this endpoint must never guess a legacy replay/fallback.
+                if !engine.meta_store().uses_native_lifecycle() {
+                    return Err(StorageError::UnsupportedMutation(
+                        crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into(),
+                    ));
+                }
                 let namespace_id = match parsed.namespace_id {
                     Some(id) => id,
                     None => {

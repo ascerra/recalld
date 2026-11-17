@@ -1,0 +1,79 @@
+[
+  {
+    "archive": "process-before_batch_commit.zip",
+    "before": {
+      "committedGeneration": "2",
+      "controlSchemaVersion": 1,
+      "removalLedgerVersion": 1,
+      "storeId": "13f676eb-1575-4566-97af-6544362c93d8"
+    },
+    "exit": 91,
+    "point": "before_batch_commit"
+  },
+  {
+    "archive": "process-after_batch_commit.zip",
+    "before": {
+      "committedGeneration": "2",
+      "controlSchemaVersion": 1,
+      "removalLedgerVersion": 1,
+      "storeId": "a4f4bbc0-479d-4e42-8220-4a8ddf331cc5"
+    },
+    "exit": 91,
+    "point": "after_batch_commit"
+  },
+  {
+    "archive": "process-after_insert_payload_sync.zip",
+    "before": {
+      "committedGeneration": "2",
+      "controlSchemaVersion": 1,
+      "removalLedgerVersion": 1,
+      "storeId": "2f9c019b-c880-4c60-a163-57ef34682c4e"
+    },
+    "exit": 91,
+    "point": "after_insert_payload_sync"
+  },
+  {
+    "archive": "process-before_metadata_commit.zip",
+    "before": {
+      "committedGeneration": "2",
+      "controlSchemaVersion": 1,
+      "removalLedgerVersion": 1,
+      "storeId": "3d8bee37-5bfa-4d95-af36-e11da3341f85"
+    },
+    "exit": 91,
+    "point": "before_metadata_commit"
+  },
+  {
+    "archive": "process-after_metadata_commit.zip",
+    "before": {
+      "committedGeneration": "2",
+      "controlSchemaVersion": 1,
+      "removalLedgerVersion": 1,
+      "storeId": "9608680d-5a8f-4520-bf18-5418f4cb6874"
+    },
+    "exit": 91,
+    "point": "after_metadata_commit"
+  },
+  {
+    "archive": "process-after_edge_commit.zip",
+    "before": {
+      "committedGeneration": "2",
+      "controlSchemaVersion": 1,
+      "removalLedgerVersion": 1,
+      "storeId": "877e09f9-76d9-495a-923e-90bc7e64ee10"
+    },
+    "exit": 91,
+    "point": "after_edge_commit"
+  },
+  {
+    "archive": "process-after_canonical_ack.zip",
+    "before": {
+      "committedGeneration": "2",
+      "controlSchemaVersion": 1,
+      "removalLedgerVersion": 1,
+      "storeId": "38091e32-53c6-477b-9cd8-08338e3bb092"
+    },
+    "exit": 91,
+    "point": "after_canonical_ack"
+  }
+]

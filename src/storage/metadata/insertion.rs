@@ -202,11 +202,6 @@ impl MetadataStore {
     ) -> Result<WriteReceipt, StorageError> {
         guard.check(self)?;
         ctx.validate()?;
-        if ctx.contract_version != 1 {
-            return Err(StorageError::InvalidMutationContext(
-                "explicit-v2 insertion is not enabled".into(),
-            ));
-        }
         let MutationScope::Namespace(namespace) = ctx.scope else {
             return Err(StorageError::InvalidMutationContext(
                 "insertion requires namespace scope".into(),
@@ -250,6 +245,14 @@ impl MetadataStore {
         let stability = input.initial_stability.unwrap_or(config.initial_stability);
         let hash = input.request_hash(ctx, stability, config.embedding_dim)?;
         control::replay_or_check(&tx, ctx, hash)?;
+        // Replay, original lineage/CAS and reserved-child policy have been
+        // checked under this final publication guard. A wrapper is not authority
+        // to write an unbound API2 vector, even with all selection disabled.
+        if ctx.contract_version == 2 {
+            return Err(StorageError::UnsupportedMutation(
+                crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into(),
+            ));
+        }
         let timestamp = input.created_at.unwrap_or(sampled_at);
         if chrono::DateTime::from_timestamp_millis(timestamp).is_none()
             || chrono::DateTime::from_timestamp_millis(sampled_at).is_none()

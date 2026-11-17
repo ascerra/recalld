@@ -10,6 +10,7 @@ mod json;
 pub mod list;
 pub mod native_batch;
 pub mod native_single;
+pub(crate) mod page_schema;
 pub(crate) mod pair_cursor;
 pub mod policy;
 pub mod query;

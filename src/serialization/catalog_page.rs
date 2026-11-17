@@ -182,6 +182,17 @@ pub(crate) struct CatalogCursor {
     pub tag_after: [Option<String>; 4],
 }
 impl CatalogCursor {
+    /// Shared exact bucket/display-label anchor; not authentication or storage encoding.
+    pub(crate) fn label_anchor(bucket: usize, label: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"recalld-catalog-label-v1");
+        h.update((bucket as u64).to_be_bytes());
+        h.update((label.len() as u64).to_be_bytes());
+        h.update(label.as_bytes());
+        h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    }
+
     pub(crate) fn invalid() -> InputError {
         invalid(
             "INVALID_CURSOR",

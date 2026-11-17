@@ -137,6 +137,34 @@ async fn catalog_page_native_unicode_empty_provenance_actual_transports_and_reop
         .unwrap(),
         first
     );
+    // R2 actual native producer -> owned adapter -> framed Remote -> MCP.
+    // Existing public HTTP result above remains an independent transport control.
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, remote_task) = crate::daemon::server::native_lifecycle_test_remote(
+        bridge.storage.clone(),
+        &socket.path().join("catalog.sock"),
+    )
+    .await;
+    let mut remote_bridge = crate::test_support::StubBridge::default().into_bridge();
+    remote_bridge.default_namespace = bridge.default_namespace.clone();
+    remote_bridge.storage = Arc::new(remote);
+    assert_eq!(mcp(&remote_bridge, "list_tags", args.clone()).await, first);
+    let list_args = json!({"contractVersion":2,"namespace":"native","limit":200});
+    assert_eq!(
+        mcp(&remote_bridge, "list_memories", list_args.clone()).await,
+        mcp(&bridge, "list_memories", list_args).await
+    );
+    assert_eq!(
+        mcp(
+            &remote_bridge,
+            "list_namespaces",
+            json!({"contractVersion":2})
+        )
+        .await,
+        mcp(&bridge, "list_namespaces", json!({"contractVersion":2})).await
+    );
+    drop(remote_bridge);
+    remote_task.await.unwrap();
     let namespaces = mcp(&bridge, "list_namespaces", json!({"contractVersion":2})).await;
     assert_eq!(
         namespaces["data"]["namespaces"][0]["profileCompatibility"],
@@ -174,10 +202,22 @@ async fn catalog_page_native_unicode_empty_provenance_actual_transports_and_reop
     let mut r = CatalogPageRequest::from_mcp(&args, CatalogKind::Tags).unwrap();
     r.cursor = Some(cursor);
     r.limit = 2;
-    let next = catalog_page::read(f.storage.clone(), r)
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        Arc::new(storage_adapter(&f, Arc::new(NoProvider))),
+        &socket.path().join("reopen.sock"),
+    )
+    .await;
+    let next = crate::mcp::bridge::StorageEngine::list_catalog_page(&remote, r.clone())
         .await
-        .unwrap()
-        .into_envelope();
+        .unwrap();
+    let local = catalog_page::read(f.storage.clone(), r).await.unwrap();
+    assert_eq!(
+        serde_json::to_vec(&next.data).unwrap(),
+        serde_json::to_vec(&local.data).unwrap()
+    );
+    drop(remote);
+    task.await.unwrap();
+    let next = next.into_envelope();
     let next = serde_json::to_value(next).unwrap();
     assert_eq!(next["readGeneration"], first["readGeneration"]);
     assert_eq!(
@@ -246,12 +286,97 @@ async fn catalog_page_native_unknown_profile_preserves_retained_only_without_pro
         "unknownNamespaceProfile"
     );
     assert!(namespaces["data"]["namespaces"][0]["embeddingProfileId"].is_null());
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        bridge.storage.clone(),
+        &socket.path().join("retained.sock"),
+    )
+    .await;
+    let mut remote_bridge = crate::test_support::StubBridge::default().into_bridge();
+    remote_bridge.storage = Arc::new(remote);
+    assert_eq!(
+        mcp(&remote_bridge, "list_tags", json!({"contractVersion":2})).await,
+        tags
+    );
+    assert_eq!(
+        mcp(
+            &remote_bridge,
+            "list_namespaces",
+            json!({"contractVersion":2})
+        )
+        .await,
+        namespaces
+    );
+    drop(remote_bridge);
+    task.await.unwrap();
     assert_eq!(readers::bytes(&target), before);
     assert_eq!(clock.0.load(Ordering::SeqCst), 0);
 }
 struct ConfiguredProvider {
     descriptor: crate::model::schema::EmbeddingProfile,
     calls: AtomicUsize,
+}
+
+#[tokio::test]
+async fn catalog_page_authored_legacy_width_inventory_does_not_widen_creation() {
+    // Authored canonical-metadata reader fixture in an already-open legacy
+    // engine, NOT an old-writer/native-publication or reopen-validity proof.
+    let f = Fixture::new();
+    let before = readers::bytes(f.path());
+    let mut invalid = NamespaceConfig::default_namespace(0);
+    invalid.name = "new-wide".into();
+    invalid.embedding_dim = 8193;
+    assert!(
+        f.storage
+            .write()
+            .unwrap()
+            .create_namespace(&invalid)
+            .is_err()
+    );
+    assert_eq!(readers::bytes(f.path()), before);
+    {
+        let storage = f.storage.write().unwrap();
+        let mut config = storage.get_namespace(NamespaceId::new(1)).unwrap().unwrap();
+        assert!(config.schema.is_none());
+        config.embedding_dim = 8193;
+        let tx = storage.meta_store().db.begin_write().unwrap();
+        tx.open_table(NAMESPACE_TABLE)
+            .unwrap()
+            .insert(1, serde_json::to_vec(&config).unwrap().as_slice())
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    let owned = Arc::new(storage_adapter(&f, Arc::new(NoProvider)));
+    let before = readers::bytes(f.path());
+    let request =
+        CatalogPageRequest::from_mcp(&json!({"contractVersion":2}), CatalogKind::Namespaces)
+            .unwrap();
+    let local =
+        crate::mcp::bridge::StorageEngine::list_catalog_page(owned.as_ref(), request.clone())
+            .await
+            .unwrap();
+    let socket = tempfile::tempdir().unwrap();
+    let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+        owned,
+        &socket.path().join("wide.sock"),
+    )
+    .await;
+    let page = crate::mcp::bridge::StorageEngine::list_catalog_page(&remote, request)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&page.data).unwrap(),
+        serde_json::to_vec(&local.data).unwrap()
+    );
+    let value = serde_json::to_value(page.into_envelope()).unwrap();
+    assert_eq!(value["data"]["namespaces"][0]["embeddingDim"], 8193);
+    assert_eq!(
+        value["data"]["namespaces"][0]["profileCompatibility"],
+        "unknownNamespaceProfile"
+    );
+    drop(remote);
+    task.await.unwrap();
+    assert_eq!(readers::bytes(f.path()), before);
 }
 #[async_trait::async_trait]
 impl crate::embedding::EmbeddingProvider for ConfiguredProvider {
@@ -313,6 +438,25 @@ async fn catalog_page_profile_compatibility_uses_supplied_configuration_not_equa
         )
         .unwrap();
         assert_eq!(h, m);
+        let socket = tempfile::tempdir().unwrap();
+        let (remote, task) = crate::daemon::server::native_lifecycle_test_remote(
+            bridge.storage.clone(),
+            &socket.path().join("profile.sock"),
+        )
+        .await;
+        let mut remote_bridge = crate::test_support::StubBridge::default().into_bridge();
+        remote_bridge.storage = Arc::new(remote);
+        assert_eq!(
+            mcp(
+                &remote_bridge,
+                "list_namespaces",
+                json!({"contractVersion":2})
+            )
+            .await,
+            m
+        );
+        drop(remote_bridge);
+        task.await.unwrap();
         assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
     }
     assert_eq!(readers::bytes(&d.path), before);

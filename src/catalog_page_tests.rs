@@ -14,6 +14,52 @@ fn request(kind: CatalogKind, mut value: Value) -> CatalogPageRequest {
     }
     CatalogPageRequest::from_mcp(&value, kind).unwrap()
 }
+
+#[test]
+fn catalog_page_captured_unknown_configuration_cannot_be_overwritten() {
+    use crate::serialization::session::ActiveEmbedding;
+    let configuration = ActiveEmbedding::Configuration {
+        dimension: 4,
+        profile_id: format!("ep1:{}", "a".repeat(64)),
+    };
+    let page = |context| CatalogPage {
+        at: GenerationRef {
+            store_id: uuid::Uuid::new_v4(),
+            generation: Default::default(),
+        },
+        scope: crate::serialization::contract::Scope::Catalog {
+            kind: crate::serialization::contract::CatalogKind::Catalog,
+        },
+        data: CatalogData::Namespaces(NamespaceData {
+            namespaces: vec![],
+            total: Default::default(),
+            limit: 50,
+            complete: true,
+            next_cursor: None,
+            configured_embedding: context,
+        }),
+    };
+    for (carried, outer, expected) in [
+        (
+            Some(configuration.clone()),
+            None,
+            Some(configuration.clone()),
+        ),
+        (
+            Some(ActiveEmbedding::Unknown { dimension: 4 }),
+            Some(configuration.clone()),
+            Some(ActiveEmbedding::Unknown { dimension: 4 }),
+        ),
+        (None, Some(configuration.clone()), Some(configuration)),
+        (None, None, None),
+    ] {
+        let p = page(carried).with_active_embedding(outer);
+        let CatalogData::Namespaces(data) = p.data else {
+            panic!()
+        };
+        assert_eq!(data.configured_embedding, expected);
+    }
+}
 fn files(path: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
     fn visit(
         root: &std::path::Path,

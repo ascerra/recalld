@@ -15,6 +15,10 @@ mod native_store_batch;
 #[path = "native_store_single.rs"]
 mod native_store_single;
 
+#[cfg(test)]
+#[path = "legacy_compound_origin_tests.rs"]
+mod legacy_compound_origin_tests;
+
 use crate::decay::observation::Observed;
 use std::sync::Arc;
 
@@ -42,6 +46,7 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
             bridge::BridgeError::PartiallyApplied(error.to_string())
         }
         crate::storage::StorageError::ProviderVectorUnavailable(_)
+        | crate::storage::StorageError::UnsupportedMutation(_)
         | crate::storage::StorageError::VectorCertificationRequired { .. } => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
@@ -1418,6 +1423,15 @@ impl McpStorageAdapter {
                     }
                 }
 
+                if child.as_ref().is_some_and(|c| c.is_legacy_api2()) {
+                    // Existing child lookup above keeps the original receipt/kind.
+                    // A blocked pending child is never finalized or reallocated.
+                    return Err(bridge::BridgeError::Unavailable(
+                        crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into(),
+                    )
+                    .into());
+                }
+
                 effects_stamp(&self.storage).await?;
 
                 use crate::model::constants::{
@@ -1805,6 +1819,10 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    fn supports_canonical_pages(&self) -> bool {
+        true
+    }
+
     fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
         self.catalog_profile.clone()
     }
@@ -2056,7 +2074,9 @@ impl bridge::StorageEngine for McpStorageAdapter {
         {
             return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreBatchV1/store_batch_api1_v1 before inserting a batch".into()));
         }
-        if input.mutation_version == 3 || input.expected_generation.is_some() {
+        if input.mutation_version == 3
+            || input.expected_generation.is_some() && input.mutation_version != 4
+        {
             return Err(bridge::BridgeError::Unavailable(
                 "linked native batch consumer remains gated pending transport validation".into(),
             ));
@@ -2564,6 +2584,7 @@ fn build_list_tags_response(
 pub struct McpNamespaceAdapter {
     native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    embedding: Arc<dyn EmbeddingProvider>,
     cache: Arc<CacheManager>,
     vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -2607,6 +2628,7 @@ impl McpNamespaceAdapter {
     /// the indexes a namespace deletion has to clean.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+        embedding: Arc<dyn EmbeddingProvider>,
         cache: Arc<CacheManager>,
         vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -2618,6 +2640,7 @@ impl McpNamespaceAdapter {
         Self {
             native_catalog: None,
             storage,
+            embedding,
             cache,
             vector_index,
             fts_index,
@@ -2804,11 +2827,21 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         crate::model::validation::validate_namespace_name(&input.name)
             .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
 
+        let dim = crate::embedding::runtime::creation_dimension(
+            self.embedding.as_ref(),
+            input.embedding_dim.map(u32::from),
+        )
+        .map_err(|error| match error {
+            crate::embedding::runtime::NamespaceProfileError::Unavailable(_) => {
+                bridge::BridgeError::Unavailable(error.to_string())
+            }
+            _ => bridge::BridgeError::InvalidInput(error.to_string()),
+        })?;
         let config = NamespaceConfig {
             schema: None,
             id: NamespaceId::UNSET,
             name: input.name,
-            embedding_dim: 1536,
+            embedding_dim: dim,
             initial_stability: input.initial_stability.unwrap_or(3.7145),
             default_difficulty: 5.0,
             phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
@@ -2825,11 +2858,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .create_legacy_namespace(
-            config,
-            input.embedding_dim.map(u32::from),
-            self.clock.clone(),
-        )
+        .create_legacy_namespace(config, Some(dim), self.clock.clone())
         .await
         .map_err(map_catalog_create_error)?;
         Ok(bridge::NamespaceInfo {
@@ -4828,6 +4857,7 @@ pub fn direct_bridge(
     let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> = Arc::new(
         McpNamespaceAdapter::new(
             system.storage().clone(),
+            system.embedding().clone(),
             system.cache().clone(),
             system.vector_index().clone(),
             system.fts_index().clone(),
