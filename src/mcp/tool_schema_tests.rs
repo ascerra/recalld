@@ -204,21 +204,36 @@ async fn live_metadata_schemas_actual_http_mcp_catalog_and_output() {
         ),
     ] {
         let request = modern_request(1, method, args);
-        let response = app
-            .clone()
-            .oneshot(
-                Request::post("/mcp")
-                    .header("content-type", "application/json")
-                    .header("MCP-Protocol-Version", PROTOCOL_VERSION)
-                    .header("MCP-Method", method)
-                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), 200);
+        let http_request = |with_name: bool| {
+            let mut builder = Request::post("/mcp")
+                .header("content-type", "application/json")
+                .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                .header("MCP-Method", method);
+            if with_name && method == "tools/call" {
+                builder = builder.header("MCP-Name", "namespace_stats");
+            }
+            builder
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap()
+        };
+        if method == "tools/call" {
+            let rejected = app.clone().oneshot(http_request(false)).await.unwrap();
+            assert_eq!(rejected.status(), 400);
+            let bytes = to_bytes(rejected.into_body(), 1024 * 1024).await.unwrap();
+            let rejected: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(rejected["error"]["code"], HEADER_MISMATCH);
+            assert!(
+                rejected["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("missing required Mcp-Name")
+            );
+        }
+        let response = app.clone().oneshot(http_request(true)).await.unwrap();
+        let status = response.status();
         let raw = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
         let response: Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(status, 200, "{method}: {response}");
         assert!(response.get("error").is_none(), "{response}");
         let result = &response["result"];
         if method == "tools/list" {

@@ -22,7 +22,7 @@ fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
     )
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn live_metadata_schemas_rest_context_and_existing_stats_shape() {
     async fn get(app: &Router, path: &str) -> (axum::http::HeaderMap, Value) {
         let response = app
