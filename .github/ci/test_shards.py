@@ -133,7 +133,6 @@ def run(shard, directory, os_name):
         selector = ["--lib"] if kind == "lib" else ["--" + kind, name]
         prefix = directory / key.replace(":", "-")
         executable = artifact["executable"]
-        binary_hash = fingerprint(executable)
         # Listing executes no test body. Execution below remains through Cargo,
         # preserving its runtime environment, working directory and libtest stack.
         names = listing(command([executable, "--list", "--format", "pretty"],
@@ -146,12 +145,14 @@ def run(shard, directory, os_name):
         selected = selection(harness, shard, ordinal)
         assigned = kind == "lib" or ordinal % SHARDS == shard
         status = {}
+        binary_hash = None
         if assigned:
+            binary_hash = fingerprint(executable)
             check(selected or not names, "empty shard would execute an unfiltered harness")
             args = CARGO + selector + ["--", "--color", "never", "--format", "pretty", "--exact"] + selected
             check(sum(len(a.encode()) + 1 for a in args) < 120_000, "exact filters exceed bounded argv")
             status = results(command(args, prefix.with_suffix(".run.log")), selected, ignored)
-        check(fingerprint(executable) == binary_hash, "test executable changed during execution")
+            check(fingerprint(executable) == binary_hash, "test executable changed during execution")
         evidence[key] = {"selected": selected, "results": status,
                          "executed": assigned, "binary_sha256": binary_hash}
     docs = None
@@ -188,7 +189,9 @@ def verify(reports, source, os_name):
             check(evidence["selected"] == selected, "wrong shard partition")
             check(evidence["executed"] == (harness["kind"] == "lib" or ordinal % SHARDS == shard),
                   "harness execution missing")
-            check(re.fullmatch(r"[0-9a-f]{64}", evidence["binary_sha256"]), "missing binary identity")
+            check(bool(re.fullmatch(r"[0-9a-f]{64}", evidence["binary_sha256"] or ""))
+                  if evidence["executed"] else evidence["binary_sha256"] is None,
+                  "missing or unexpected executed binary identity")
             expected_results = {n: "ignored" if n in harness["ignored"] else "ok" for n in selected}
             check(evidence["results"] == expected_results, "missing/failed/extra test result")
             found.extend(selected)

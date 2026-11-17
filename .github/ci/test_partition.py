@@ -28,7 +28,7 @@ def reports():
             evidence[key] = {"selected": selected,
                              "results": {n: "ignored" if n in harness["ignored"] else "ok" for n in selected},
                              "executed": harness["kind"] == "lib" or ordinal % shards.SHARDS == index,
-                             "binary_sha256": "a" * 64}
+                             "binary_sha256": "a" * 64 if harness["kind"] == "lib" or ordinal % shards.SHARDS == index else None}
         output.append({"source": "source", "os": "os", "compiler": "rustc", "cargo": "cargo",
                        "shard": index, "shards": shards.SHARDS, "success": True,
                        "inventory": copy.deepcopy(inventory), "evidence": evidence,
