@@ -148,7 +148,7 @@ async fn peer(
     });
     let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
     let request = input(id, access);
-    let result = RemoteSearchAdapter::new(client)
+    let result = RemoteSearchAdapter::new(client.clone())
         .get_contract(request, MAX_MESSAGE_SIZE)
         .await;
     task.await.unwrap();
@@ -362,4 +362,80 @@ async fn actual_final_dispatch_overflow_retains_committed_receipt_in_result() {
     );
     assert_eq!(f.record(id).unwrap().access_history.len(), before + 1);
     daemon.finish().await;
+}
+
+#[tokio::test]
+async fn get_ping_refreshes_capability_before_next_observation_request() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("ping.sock");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let initial = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(initial.method, "ping");
+        write_framed_message(
+            &mut stream,
+            &DaemonResponse::success(initial.id, capabilities(true)),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        let get = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(get.method, GET);
+        write_framed_message(
+            &mut stream,
+            &DaemonResponse::success(get.id, json!({})),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        let ping = read_framed_message(&mut stream, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(ping.method, "ping");
+        write_framed_message(
+            &mut stream,
+            &DaemonResponse::success(ping.id, capabilities(false)),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            read_framed_message(&mut stream, MAX_MESSAGE_SIZE),
+        )
+        .await
+        {
+            Ok(Ok(request)) => {
+                write_framed_message(
+                    &mut stream,
+                    &DaemonResponse::success(request.id, json!({})),
+                    MAX_MESSAGE_SIZE,
+                )
+                .await
+                .unwrap();
+                1
+            }
+            _ => 0,
+        }
+    });
+    let client = Arc::new(crate::daemon::DaemonClient::connect(&path).await.unwrap());
+    let remote = RemoteSearchAdapter::new(client.clone());
+    let id = crate::model::MemoryId::from_uuid(uuid::Uuid::from_u128(1));
+    let _ = remote.get_contract(input(id, true), MAX_MESSAGE_SIZE).await;
+    client.ping().await.unwrap();
+    let reply = remote.get_contract(input(id, true), MAX_MESSAGE_SIZE).await;
+    let sent = server.await.unwrap();
+    assert_eq!(
+        sent, 0,
+        "an explicit capability downgrade must precede admission"
+    );
+    assert_eq!(
+        reply.envelope.error.unwrap().commit_state,
+        CommitState::NotCommitted
+    );
 }
