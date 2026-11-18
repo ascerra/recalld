@@ -14,6 +14,9 @@ use crate::api::adapters::*;
 use crate::storage::StorageEngine as _;
 use crate::test_support::Fixture;
 
+#[path = "catalog_api1_tests.rs"]
+mod catalog_api1_tests;
+
 fn fixture_clients(f: &Fixture) -> (Router, crate::mcp::bridge::McpBridge) {
     let (state, bridge) = fixture_state(f);
     (

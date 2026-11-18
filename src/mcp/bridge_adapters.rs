@@ -3092,6 +3092,18 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
     ) -> Result<bridge::NamespaceInfo, bridge::BridgeError> {
         use crate::model::NamespaceConfig;
 
+        if self
+            .storage
+            .read()
+            .map_err(|_| bridge::BridgeError::Storage("storage lock poisoned".into()))?
+            .meta_store()
+            .uses_native_lifecycle()
+        {
+            return Err(bridge::BridgeError::InvalidInput(
+                "native namespace creation requires local response admission".into(),
+            ));
+        }
+
         // Validated here as well as at the tool layer, and this is the
         // load-bearing copy for the same reason the `default` guard in
         // `delete_namespace` is: the daemon socket dispatches
@@ -3142,6 +3154,35 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             memory_count: 0,
             created_at: format_timestamp(config.created_at, self.timezone),
         })
+    }
+
+    async fn create_namespace_bounded(
+        &self,
+        input: bridge::CreateNamespaceInput,
+        admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
+    ) -> Result<bridge::NamespaceInfo, crate::serialization::catalog_api1::CatalogApi1Error> {
+        use crate::serialization::catalog_api1;
+        let native = self
+            .storage
+            .read()
+            .map_err(|_| bridge::BridgeError::Storage("storage lock poisoned".into()))?
+            .meta_store()
+            .uses_native_lifecycle();
+        if !native {
+            return self.create_namespace(input).await.map_err(Into::into);
+        }
+        let adapter = self
+            .native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?;
+        let receipt = adapter
+            .create_api1_bounded(
+                catalog_api1::input(input),
+                admission.with_timezone(self.timezone),
+            )
+            .await?;
+        let ns = catalog_api1::committed_namespace(receipt)?;
+        Ok(catalog_api1::info(ns, self.timezone))
     }
 
     async fn namespace_stats(

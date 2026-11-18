@@ -1489,12 +1489,51 @@ async fn handle_create_namespace(
     bridge: &McpBridge,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    handle_create_namespace_bounded(bridge, arguments, None).await
+}
+
+pub(crate) async fn handle_create_namespace_bounded(
+    bridge: &McpBridge,
+    arguments: serde_json::Value,
+    admission: Option<crate::serialization::catalog_api1::CatalogReplyAdmission>,
+) -> ToolCallResult {
     let input = match args::parse_create_namespace(&arguments) {
         Ok(input) => input,
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
 
-    match bridge.namespaces.create_namespace(input).await {
+    let result = match admission {
+        Some(admission) => {
+            bridge
+                .namespaces
+                .create_namespace_bounded(input, admission)
+                .await
+        }
+        None => bridge
+            .namespaces
+            .create_namespace(input)
+            .await
+            .map_err(Into::into),
+    };
+    let result = match result {
+        Ok(info) => Ok(info),
+        Err(crate::serialization::catalog_api1::CatalogApi1Error::Legacy(error)) => Err(error),
+        Err(crate::serialization::catalog_api1::CatalogApi1Error::Native(error)) => {
+            match crate::serialization::catalog_api1::try_failure(&error) {
+                Ok((_, value)) => Err(crate::mcp::bridge::BridgeError::PartiallyApplied(
+                    value.to_string(),
+                )),
+                Err(invalid) => {
+                    let (_, value) = crate::serialization::catalog_api1::internal_failure(invalid);
+                    let mut result =
+                        ToolCallResult::json(&value).expect("static catalog internal error");
+                    result.is_error = Some(true);
+                    return result;
+                }
+            }
+        }
+    };
+    match result {
         Ok(info) => match ToolCallResult::json(&info) {
             Ok(r) => r,
             Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),

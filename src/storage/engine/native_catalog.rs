@@ -17,6 +17,29 @@ impl RedbStorageEngine {
         clock: &dyn Clock,
         parent: Option<&WorkTicket>,
     ) -> Result<WriteReceipt, StorageError> {
+        self.create_native_namespace_with_provider_bounded(
+            ctx,
+            input,
+            provider,
+            policy,
+            clock,
+            parent,
+            None,
+            |_| Ok(()),
+        )
+    }
+
+    pub(crate) fn create_native_namespace_with_provider_bounded(
+        &mut self,
+        ctx: &MutationContext,
+        input: &NativeNamespaceInput,
+        provider: &dyn crate::embedding::EmbeddingProvider,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+        check_candidate: impl FnOnce(&WriteReceipt) -> Result<(), StorageError>,
+    ) -> Result<WriteReceipt, StorageError> {
         if let Some(receipt) = self
             .meta_store
             .lookup_native_namespace_replay(ctx, input, parent)?
@@ -49,7 +72,16 @@ impl RedbStorageEngine {
                 field: "embeddingProfileId",
             });
         }
-        self.create_native_namespace(ctx, input, &profile, policy, clock, parent)
+        self.create_native_namespace_bounded(
+            ctx,
+            input,
+            &profile,
+            policy,
+            clock,
+            parent,
+            admission,
+            check_candidate,
+        )
     }
 
     pub(crate) fn create_native_namespace(
@@ -60,6 +92,29 @@ impl RedbStorageEngine {
         policy: &NativePolicyInputs,
         clock: &dyn Clock,
         parent: Option<&WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.create_native_namespace_bounded(
+            ctx,
+            input,
+            active_profile,
+            policy,
+            clock,
+            parent,
+            None,
+            |_| Ok(()),
+        )
+    }
+
+    fn create_native_namespace_bounded(
+        &mut self,
+        ctx: &MutationContext,
+        input: &NativeNamespaceInput,
+        active_profile: &EmbeddingProfile,
+        policy: &NativePolicyInputs,
+        clock: &dyn Clock,
+        parent: Option<&WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+        check_candidate: impl FnOnce(&WriteReceipt) -> Result<(), StorageError>,
     ) -> Result<WriteReceipt, StorageError> {
         self.ensure_available()?;
         let meta = &self.meta_store;
@@ -78,6 +133,8 @@ impl RedbStorageEngine {
                     active_profile,
                     policy,
                     clock,
+                    admission,
+                    check_candidate,
                     prepare,
                 )
             },
