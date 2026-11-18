@@ -1,0 +1,14 @@
+{
+  "source": "7c4e2f9b3b8e541939b908a34ff25f8088525eae",
+  "filesUnchanged": 502,
+  "executableRecordsUnchanged": 19,
+  "stages": {
+    "build": "0",
+    "clippy": "0",
+    "doc": "0",
+    "driver": "1",
+    "fmt": "0",
+    "full": "101",
+    "include-fmt": "0"
+  }
+}

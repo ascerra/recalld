@@ -467,3 +467,6 @@ fn prepared_get_rpc_direct_typed_json_probe_preserves_valid_domain_float_bits() 
 
 #[path = "get_rpc_budget_probe.rs"]
 mod rpc_budget_probe;
+
+#[path = "api1_get_budget_probe.rs"]
+mod api1_budget_probe;

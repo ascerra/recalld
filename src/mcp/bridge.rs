@@ -121,6 +121,24 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Ordinary point routing must be implemented by the actual serving owner.
+    fn supports_api1_get(&self) -> bool {
+        false
+    }
+    async fn get_api1(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        _response_limit: usize,
+    ) -> crate::serialization::get_api1::Reply {
+        crate::serialization::get_api1::Reply::compatibility(
+            self.get_memory(
+                request.id,
+                request.record_access,
+                request.namespace.as_deref(),
+            )
+            .await,
+        )
+    }
     /// Private canonical metadata pages require an actual owning implementation.
     fn supports_canonical_pages(&self) -> bool {
         false

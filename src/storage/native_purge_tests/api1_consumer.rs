@@ -211,6 +211,12 @@ async fn native_api1_purge_success_counts_actual_orphan_fts_rows_and_directory()
         })
         .await
         .unwrap();
+    crate::test_support::record_schema_result(
+        "delete-native-success",
+        "delete_namespace",
+        &crate::mcp::protocol::ToolCallResult::json(&result).unwrap(),
+        "actual native purge adapter success through the same typed MCP emitter; physical metrics and readiness assertions unchanged, not a separate public invocation",
+    );
     assert_eq!(
         (
             result.memories_deleted,
@@ -591,6 +597,12 @@ async fn native_api1_purge_race_actual_mcp_eras_remote_and_legacy_frames() {
         let before = counters(&fx);
         resume.send(()).unwrap();
         let (result, bytes) = task.await.unwrap();
+        crate::test_support::record_schema_value(
+            &format!("delete-race-{surface}"),
+            "delete_namespace",
+            &result,
+            "actual forced competing completion; modern/legacy MCP, capable Remote and legacy daemon frames; no invented physical metrics",
+        );
         assert_eq!(result["error"], "PURGE_METRICS_UNAVAILABLE");
         assert_eq!(result["commitEvidenceScope"], "purgeComplete");
         assert_eq!(
@@ -634,6 +646,12 @@ async fn native_api1_purge_full_start_and_child_errors_survive_actual_frames() {
         let result =
             crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message)
                 .unwrap();
+        crate::test_support::record_schema_value(
+            &format!("delete-known-{child}"),
+            "delete_namespace",
+            &result,
+            "actual legacy daemon start/child failure then production structured parser; complete genuine retained receipt and no readiness",
+        );
         let p = fx
             .storage
             .read()
@@ -693,6 +711,12 @@ async fn native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejec
         crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&good.to_string())
             .is_some()
     );
+    crate::test_support::record_schema_value(
+        "delete-decoder-valid",
+        "delete_namespace",
+        &good,
+        "genuine retained start receipt through production typed parser; original f32 bits and malformed peer rejection assertions unchanged",
+    );
     let retained: control::WriteReceipt = serde_json::from_value(good["receipt"].clone()).unwrap();
     let control::MutationOutcome::NativeNamespacePurgeStarted { transition } = retained.outcome
     else {
@@ -707,6 +731,29 @@ async fn native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejec
             .to_bits(),
         0x406dba5e
     );
+    // Unknown operation identity is independently parsed and its original UUID
+    // spelling survives. Do not impose receipt canonical spelling on this field.
+    let operation = uuid::Uuid::parse_str(good["operationId"].as_str().unwrap()).unwrap();
+    for (label, spelling) in [
+        ("simple", operation.simple().to_string()),
+        ("urn", operation.urn().to_string()),
+        ("braced", operation.braced().to_string()),
+    ] {
+        let mut peer = good.clone();
+        peer["operationId"] = serde_json::json!(spelling);
+        let emitted =
+            crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&peer.to_string())
+                .unwrap();
+        assert_eq!(emitted["operationId"], spelling);
+        assert_eq!(emitted["receipt"], good["receipt"]);
+        assert_eq!(emitted["commitState"], "unknown");
+        crate::test_support::record_schema_value(
+            &format!("delete-uuid-{label}"),
+            "delete_namespace",
+            &emitted,
+            "authored alternate spelling of the same genuine unknown operation ID through the actual parser; retained receipt unchanged, not a new mutation",
+        );
+    }
     for change in 0..14 {
         let mut bad = good.clone();
         match change {
@@ -1858,6 +1905,12 @@ async fn native_api1_purge_unknown_outcomes_survive_actual_bounded_frames() {
         let result =
             crate::mcp::bridge_adapters::native_purge_api1::structured_failure(&error.message)
                 .unwrap();
+        crate::test_support::record_schema_value(
+            &format!("delete-unknown-{fault}"),
+            "delete_namespace",
+            &result,
+            "actual unknown worker/child through legacy daemon framing and production structured parser; null/reserved operation IDs and prior receipt scope preserved",
+        );
         assert_eq!(result["error"], "COMMIT_OUTCOME_UNKNOWN");
         assert_eq!(result["commitState"], "unknown");
         if let Some(start) = &start {

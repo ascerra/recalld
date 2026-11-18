@@ -1,0 +1,5 @@
+[
+  "src/api/coherent_by_id_tests.rs",
+  "src/storage/metadata/native_records/reader_tests.rs",
+  "src/storage/metadata/native_records/wire_tests.rs"
+]

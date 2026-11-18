@@ -98,6 +98,17 @@ impl WorkTracker {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn wait_until_open(&self) {
+        let limit = Instant::now() + std::time::Duration::from_secs(5);
+        let mut state = self.0.state.lock().unwrap();
+        while state.closed {
+            let left = limit.saturating_duration_since(Instant::now());
+            assert!(!left.is_zero(), "drain never reopened admission");
+            (state, _) = self.0.changed.wait_timeout(state, left).unwrap();
+        }
+    }
+
     fn status_locked(state: &State) -> WorkStatus {
         WorkStatus {
             admission_open: !state.closed,

@@ -1,7 +1,9 @@
 # MCP Integration Guide
 
 Modern MCP `tools/list` advertises output schemas for `namespace_stats`,
-`list_tags`, `list_memories`, `recall_memories`, and `find_similar_memories`.
+`list_tags`, `list_memories`, `recall_memories`, `find_similar_memories`,
+`reinforce_memory`, `forget_memory`, `get_memory`, `store_memory`,
+`store_memories`, `forget_memories`, and `delete_namespace`.
 These describe the existing API1 object results; legacy MCP still omits
 `outputSchema` and `structuredContent`. `list_namespaces` remains a bare JSON
 array in text, without an object wrapper. Plain-text errors do not carry a
@@ -17,6 +19,28 @@ embedding profile and dimension; unknown or incompatible profiles are excluded.
 Duplicate scan coverage is always nonexhaustive: known counts describe the
 bounded sample, while older/custom bridges report unknown counts and truncation
 as `null`. These schemas do not advertise prepared API2 operations or readiness.
+
+Feedback and single-forget schemas preserve their existing API1 success shapes
+and describe structured lifecycle failures with complete retained receipts.
+Receipt schemas describe the serialized codec, not proof validity, authenticity,
+request binding or readiness. In particular, a typed malformed receipt retained
+by an invalid-response path must remain representable. Existing plain-text errors
+and legacy-era output remain unchanged.
+
+Point-get and insertion/batch schemas likewise preserve the existing API1
+success and partial/unknown failure layouts. Reservation evidence is not an
+atomic whole-batch receipt. Explicit unverified received evidence stays separate
+from current-operation commitment: point-get retains original JSON strings;
+single/batch error carriers retain their actual typed evidence fields. Generic
+retained receipts describe all supported typed outcomes, without asserting that
+canonical proof validation ran. Declared compatibility `Value` fields remain
+extensible. See [record output boundaries](implementation/live-record-schemas.md).
+
+Delete-namespace structured failures retain full start/step/final purge evidence.
+An unknown operation remains unknown even when earlier progress has a receipt;
+missing physical metrics and readiness are never invented. Create-namespace still
+has no output schema because its legacy partial-error path accepts arbitrary JSON
+objects. See [catalog boundaries](implementation/live-delete-schema.md).
 
 ## Setup
 

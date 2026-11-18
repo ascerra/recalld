@@ -45,11 +45,60 @@ impl QueryEngine {
         request: crate::serialization::get::GetRequest,
         response_limit: usize,
     ) -> crate::serialization::get::GetReply {
+        self.get_point_owned(request, response_limit, None).await
+    }
+
+    pub(crate) async fn get_api1_point(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        response_limit: usize,
+        timezone: chrono_tz::Tz,
+        #[cfg(test)] before_barrier: Option<fn(&crate::derived_completion::DerivedCompletion)>,
+    ) -> crate::serialization::get::GetReply {
+        let point = request.point();
+        #[cfg(test)]
+        let point = {
+            let mut point = point;
+            point.before_barrier = before_barrier;
+            point
+        };
+        self.get_point_owned(point, response_limit, Some(timezone))
+            .await
+    }
+
+    async fn get_point_owned(
+        &self,
+        request: crate::serialization::get::GetRequest,
+        response_limit: usize,
+        api1_timezone: Option<chrono_tz::Tz>,
+    ) -> crate::serialization::get::GetReply {
         use crate::serialization::contract::{CommitState, Scope};
         use crate::serialization::get::{GetData, GetReply};
-        if let Err(error) = request.validate() {
+        if api1_timezone.is_some() {
+            // API1 accepts syntactically valid nil as a real admitted missing
+            // lookup. Do not widen the separate prepared/public2 validator.
+            if let Some(name) = &request.namespace
+                && crate::model::validation::validate_namespace_name(name).is_err()
+            {
+                return GetReply::input(crate::serialization::contract::InputError {
+                    code: "OUT_OF_RANGE",
+                    field: "/namespace".into(),
+                    message: "invalid namespace assertion",
+                });
+            }
+        } else if let Err(error) = request.validate() {
             return GetReply::input(error);
         }
+        let fits = |reply: &GetReply, observe| match api1_timezone {
+            Some(timezone) => crate::serialization::get_api1::fits(
+                reply,
+                timezone,
+                crate::serialization::get_api1::Mode::Native,
+                response_limit,
+                observe,
+            ),
+            None => reply.fits(response_limit, observe),
+        };
         let Some((owner, _)) = &self.coherent_owner else {
             return GetReply::failure(SearchError::Unavailable(
                 "prepared get owner unavailable".into(),
@@ -95,7 +144,7 @@ impl QueryEngine {
                     memory: response,
                 },
             );
-            if !reply.fits(response_limit, will_observe) {
+            if !fits(&reply, will_observe) {
                 return Ok(reply.oversize());
             }
             #[cfg(test)]
@@ -169,7 +218,7 @@ impl QueryEngine {
                 }
             }
         }
-        if reply.http_status == 200 && !reply.fits(response_limit, false) {
+        if reply.http_status == 200 && !fits(&reply, false) {
             return reply.oversize();
         }
         reply

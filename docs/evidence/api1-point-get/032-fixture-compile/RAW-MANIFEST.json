@@ -1,0 +1,65 @@
+{
+  "root": "/tmp/recalld-curie-o1-build/runs/032-api1-fixture-tail",
+  "files": {
+    "SOURCE.json": {
+      "bytes": 55551,
+      "sha256": "5f0ffa060b8d08d6205091334e266a785b6ff1655fef42c3555ebc6a1821377c"
+    },
+    "ERRORS.txt": {
+      "bytes": 1233,
+      "sha256": "21caf62a35561ca87735ebc7432cf08edbfa08fd129749e55e4e8650e6886be4"
+    },
+    "SOURCE-AFTER.json": {
+      "bytes": 126,
+      "sha256": "de21fbffd60c4cacee6cf9fbc6e628cb69211a8cdd7638d9b22ea21ff0dc97e3"
+    },
+    "build-memory.peak": {
+      "bytes": 11,
+      "sha256": "300890e07bc0bc680867428bfa679132aa3465616c22fca99d406d838dae2045"
+    },
+    "build.sh": {
+      "bytes": 437,
+      "sha256": "eb590ab5fde200afab425f5293e29253e2d1e5bef79af5035c2d217dd8aaa293"
+    },
+    "CHECKS-CONTAINER.json": {
+      "bytes": 1042,
+      "sha256": "f06ef14608504ffda54017717bc2a51283860a454beca2d6fb2a34b945e415d7"
+    },
+    "FILES.json": {
+      "bytes": 352,
+      "sha256": "7b2e70625b3de2a92dcfd7e73da3f699bf6f9303d608bbb6d23d568dc9458f16"
+    },
+    "BUILD-CONTAINER.json": {
+      "bytes": 1042,
+      "sha256": "f931ddfa37e937091a5784aca76b96377b345d8a0c3a8619465346a30cd7a907"
+    },
+    "build.finished": {
+      "bytes": 21,
+      "sha256": "7dddf160f67880712425cd31b3287b625a2e755bb517f5c58e545f4463a9e514"
+    },
+    "build.jsonl": {
+      "bytes": 302082,
+      "sha256": "fd01dd45e15cc03aa93336ede222b7737c5f1855e0e2986729254f984a7501c2"
+    },
+    "checks.sh": {
+      "bytes": 895,
+      "sha256": "e997f444f1c63e31225d638f9267fbf8d8247a72ceb6edd232bcc0a08447caf8"
+    },
+    "build-memory.events": {
+      "bytes": 70,
+      "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+    },
+    "build.exit": {
+      "bytes": 4,
+      "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+    },
+    "build.started": {
+      "bytes": 21,
+      "sha256": "41995a2c95ce14d3386bbad6dff8f545512fbf8c0410571cf80868462c6dd28e"
+    },
+    "build.log": {
+      "bytes": 128,
+      "sha256": "f5cc9e41e41e3623cf319d7a7c99b877a9075a9da3be3ad344721f84fe01411d"
+    }
+  }
+}

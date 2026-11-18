@@ -381,15 +381,14 @@ async fn public_matrix_summary_extreme_clocks_sticky_permastore_and_forget() {
                 completion(&f).rebuild_all().await.unwrap();
                 assert_eq!(f.record(d.parent).unwrap().text_length, 0);
                 let receipt_state = receipts(&f);
-                let read = f
-                    .storage_adapter()
-                    .with_clock(clock.clone())
-                    .get_memory(d.parent, false, Some("native"))
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert!(read.full_text.is_none());
-                assert_eq!(read.summary, original.summary);
+                let read = super::super::mcp(
+                    &bridge,
+                    "get_memory",
+                    json!({"id": d.parent, "namespace": "native", "recordAccess": false}),
+                )
+                .await;
+                assert!(read.get("fullText").is_none_or(Value::is_null));
+                assert_eq!(read["summary"], json!(original.summary));
                 assert_eq!(receipts(&f), receipt_state);
                 ready(&f);
             }
@@ -421,15 +420,14 @@ async fn public_matrix_summary_extreme_clocks_sticky_permastore_and_forget() {
             completion(&f).rebuild_all().await.unwrap();
             let (mut bridge, state) = public_adapters(&f, clock.clone());
             let remote = remote_lane(lane, &mut bridge).await;
-            let read = f
-                .storage_adapter()
-                .with_clock(clock.clone())
-                .get_memory(d.parent, false, Some("native"))
-                .await
-                .unwrap()
-                .unwrap();
-            assert!(read.full_text.is_none());
-            assert_eq!(read.summary, original.summary);
+            let read = super::super::mcp(
+                &bridge,
+                "get_memory",
+                json!({"id": d.parent, "namespace": "native", "recordAccess": false}),
+            )
+            .await;
+            assert!(read.get("fullText").is_none_or(Value::is_null));
+            assert_eq!(read["summary"], json!(original.summary));
             let before = f.record(d.parent).unwrap();
             clock.time.store(min, Ordering::SeqCst);
             let (ok, reply) =
