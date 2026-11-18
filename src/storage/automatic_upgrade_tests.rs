@@ -495,6 +495,8 @@ fn crashed_pending_upgrade_blocks_offline_and_native_writes() {
 fn upgrade_only_acquisition_cannot_bypass_lock_or_journal_identity() {
     let (_root, path) = fixture();
     let (engine, transaction) = prepare_upgrade(&path, 1795025815000, Box::new(SystemIds)).unwrap();
+    // Journal identity uses the owned canonical path, including macOS /var aliases.
+    let path = engine.db_path().to_path_buf();
     assert!(StoreOwnership::acquire_for_upgrade(&path, true).is_err());
     drop(engine);
     drop(transaction);

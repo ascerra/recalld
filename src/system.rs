@@ -1212,6 +1212,57 @@ mod tests {
             .unwrap();
     }
 
+    fn assert_erased_marker(memory: &crate::search::MemoryResponse, id: crate::model::MemoryId) {
+        assert_eq!(memory.id, id);
+        assert_eq!(memory.phase, crate::model::DecayPhase::Tombstone);
+        assert!(memory.summary.is_none() && memory.full_text.is_none());
+        assert!(memory.tags.is_empty());
+        assert!(
+            memory
+                .labels
+                .as_ref()
+                .is_none_or(|labels| labels.is_empty())
+        );
+    }
+    async fn native_point(
+        system: &Recalld,
+        id: crate::model::MemoryId,
+    ) -> crate::serialization::get::GetReply {
+        let adapter = crate::mcp::bridge_adapters::direct_bridge(system, "default".into()).storage;
+        let result = adapter
+            .get_api1(
+                crate::serialization::get_api1::Request {
+                    id,
+                    namespace: Some("default".into()),
+                    record_access: false,
+                },
+                crate::daemon::protocol::MAX_MESSAGE_SIZE,
+            )
+            .await;
+        let crate::serialization::get_api1::Content::Point {
+            reply,
+            native: true,
+            ..
+        } = result.inner
+        else {
+            panic!("production bridge must admit native point reads");
+        };
+        *reply
+    }
+    async fn assert_erased_reads(system: &Recalld, id: crate::model::MemoryId) {
+        let before = system.storage.read().unwrap().control_state().unwrap();
+        let marker = system.query_engine.get_memory(id).await.unwrap().unwrap();
+        assert_erased_marker(&marker, id);
+        let reply = native_point(system, id).await;
+        assert_eq!(reply.http_status, 200);
+        assert!(reply.observation_receipts.is_empty() && reply.envelope.readiness.is_none());
+        assert_erased_marker(&reply.envelope.data.unwrap().memory, id);
+        assert_eq!(
+            system.storage.read().unwrap().control_state().unwrap(),
+            before
+        );
+    }
+
     #[tokio::test]
     async fn effects_block_cached_queries_and_reopen_rebuilds_deleted_fts_rows() {
         let fx = Fixture::new();
@@ -1315,14 +1366,7 @@ mod tests {
                 .meta_store()
                 .needs_effects_rebuild()
         );
-        assert!(
-            system
-                .query_engine
-                .get_memory(dead)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert_erased_reads(&system, dead).await;
         assert!(system.vector_index.read().await.get_vector(dead).is_none());
         assert!(!system.graph.read().await.contains(&dead));
         let hits = system
@@ -1356,31 +1400,6 @@ mod tests {
             system.graph.clone(),
             chrono_tz::UTC,
         );
-        let adapter = crate::mcp::bridge_adapters::direct_bridge(&system, "default".into()).storage;
-        async fn get_status(
-            adapter: &dyn crate::mcp::bridge::StorageEngine,
-            id: crate::model::MemoryId,
-        ) -> u16 {
-            let result = adapter
-                .get_api1(
-                    crate::serialization::get_api1::Request {
-                        id,
-                        namespace: Some("default".into()),
-                        record_access: false,
-                    },
-                    crate::daemon::protocol::MAX_MESSAGE_SIZE,
-                )
-                .await;
-            let crate::serialization::get_api1::Content::Point {
-                reply,
-                native: true,
-                ..
-            } = result.inner
-            else {
-                panic!("production bridge must admit native point reads");
-            };
-            reply.http_status
-        }
         let stale = crate::model::CachedRecord::from(
             &system
                 .storage
@@ -1398,25 +1417,69 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert_eq!(get_status(adapter.as_ref(), dead).await, 503);
-        assert_eq!(get_status(adapter.as_ref(), live).await, 503);
-        system.complete_pending_effects().await.unwrap();
-        system.cache.insert(dead, stale).await;
-        assert!(
-            system
-                .query_engine
-                .get_memory(dead)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(get_status(adapter.as_ref(), dead).await, 404);
-        assert_eq!(get_status(adapter.as_ref(), live).await, 200);
+        let (dirty, outbox) = {
+            let engine = system.storage.read().unwrap();
+            let metadata = engine.meta_store();
+            assert!(metadata.needs_effects_rebuild());
+            let state = metadata.publication_state().unwrap();
+            assert!(!state.matches_canonical());
+            let pending = metadata.pending_effects().unwrap();
+            assert_eq!(pending.len(), 1);
+            assert!(pending[0].canonical_applied);
+            (state, crate::storage::control::encode(&pending).unwrap())
+        };
+        // Canonical point reads expose no erased content and do not repair views.
+        let marker = native_point(&system, dead).await;
+        assert_eq!(marker.http_status, 200);
+        assert!(marker.observation_receipts.is_empty() && marker.envelope.readiness.is_none());
+        assert_erased_marker(&marker.envelope.data.unwrap().memory, dead);
+        let present = native_point(&system, live).await;
+        assert_eq!(present.http_status, 200);
+        assert_eq!(present.envelope.data.unwrap().memory.id, live);
+        assert!(present.observation_receipts.is_empty() && present.envelope.readiness.is_none());
+        {
+            let engine = system.storage.read().unwrap();
+            let metadata = engine.meta_store();
+            assert!(metadata.needs_effects_rebuild());
+            assert_eq!(metadata.publication_state().unwrap(), dirty);
+            assert_eq!(
+                crate::storage::control::encode(&metadata.pending_effects().unwrap()).unwrap(),
+                outbox
+            );
+        }
         assert!(
             search
                 .find_similar(live, 5, None, true, true, None)
                 .await
-                .is_ok()
+                .is_err()
+        );
+        system.complete_pending_effects().await.unwrap();
+        {
+            let engine = system.storage.read().unwrap();
+            let metadata = engine.meta_store();
+            assert!(metadata.pending_effects().unwrap().is_empty());
+            let ready = metadata.publication_state().unwrap();
+            assert_eq!(ready.canonical, dirty.canonical);
+            assert!(ready.matches_canonical());
+        }
+        system.cache.insert(dead, stale).await;
+        assert_erased_reads(&system, dead).await;
+        assert_eq!(native_point(&system, live).await.http_status, 200);
+        let hits = search
+            .find_similar(live, 5, None, true, true, None)
+            .await
+            .unwrap();
+        assert!(hits.iter().all(|hit| hit.id != dead.to_string()));
+        assert!(system.vector_index.read().await.get_vector(dead).is_none());
+        assert!(
+            system
+                .fts_index
+                .lock()
+                .await
+                .search(ns(), "fixture", 10)
+                .unwrap()
+                .iter()
+                .all(|hit| hit.0 != dead)
         );
     }
 
@@ -1470,14 +1533,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(
-            system
-                .query_engine
-                .get_memory(dead)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert_erased_reads(&system, dead).await;
         assert!(system.fts_index.lock().await.is_empty().unwrap());
         assert!(system.vector_index.read().await.get_vector(dead).is_none());
         system.complete_pending_effects().await.unwrap();
