@@ -348,7 +348,7 @@ pub struct RedbStorageEngine {
     edge_store: EdgeStore,
     /// Exclusive file lock preventing multi-process access.
     _lock_file: crate::storage::ownership::OwnedFileLock,
-    _ownership: crate::storage::ownership::StoreOwnership,
+    _ownership: std::sync::Arc<crate::storage::ownership::StoreOwnership>,
     // Isolated fixture clones retain their ancestor owners until every worker
     // releases this actual engine. Empty in all production constructors.
     pub(crate) fixture_owners: Vec<crate::storage::ownership::OwnedFileLock>,
@@ -453,6 +453,16 @@ impl RedbStorageEngine {
         native: bool,
         ids: Box<dyn super::ids::IdSource>,
     ) -> Result<Self, StorageError> {
+        Self::open_shared_owned_with_ids(std::sync::Arc::new(ownership), native, ids)
+    }
+
+    /// Retain stable ownership in both the pending upgrade and runtime until
+    /// readiness commits, or all runtime handles close before rollback.
+    pub(crate) fn open_shared_owned_with_ids(
+        ownership: std::sync::Arc<crate::storage::ownership::StoreOwnership>,
+        native: bool,
+        ids: Box<dyn super::ids::IdSource>,
+    ) -> Result<Self, StorageError> {
         let db_path = ownership.path.clone();
         std::fs::create_dir_all(&db_path)?;
         let lock_file = crate::storage::ownership::lock_directory(&db_path)?;
@@ -492,7 +502,15 @@ impl RedbStorageEngine {
             )?;
             let descriptor = prepared.seal(state.store_id, id, 2)?;
             crate::storage::text::generation::write_rejection_gate(&db_path, &descriptor)?;
-            meta_store.select_text_generation(state.committed_generation, &descriptor, &vec![])?;
+            if native {
+                meta_store.initialize_native_text(&descriptor)?;
+            } else {
+                meta_store.select_text_generation(
+                    state.committed_generation,
+                    &descriptor,
+                    &vec![],
+                )?;
+            }
         }
         let selected_text = meta_store.text_selection_for_recovery()?;
         let text_store = match &selected_text {

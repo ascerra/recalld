@@ -14,6 +14,7 @@
 //! - `error` — Unified `StorageError` type
 //! - `fsync` — Filesystem sync helpers for crash safety
 
+pub(crate) mod automatic_upgrade;
 pub mod batch;
 pub mod canonical_schema;
 pub(crate) mod canonical_vector_snapshot;

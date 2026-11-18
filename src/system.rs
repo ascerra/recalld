@@ -30,6 +30,9 @@ use crate::storage::engine::RedbStorageEngine;
 // Import the StorageEngine trait so its methods are in scope.
 use crate::storage::StorageEngine as _;
 
+#[path = "system_startup.rs"]
+mod startup;
+
 // ═══════════════════════════════════════════════════════════════════════
 // Startup vector-index load
 // ═══════════════════════════════════════════════════════════════════════
@@ -279,13 +282,58 @@ impl Recalld {
         clock: Arc<dyn crate::time::Clock>,
         ids: Box<dyn crate::storage::ids::IdSource>,
     ) -> Result<Self> {
-        let engine = RedbStorageEngine::open_with_ids(&config.storage.data_dir, false, ids)
-            .map_err(|e| RecalldError::Init {
-                step: "open_storage",
-                message: format!("failed to open storage at {}: {e}", config.storage.data_dir),
-                source: Some(Box::new(e)),
+        let embedding = startup::build_embedding(&config).await?;
+        let (engine, transaction) =
+            startup::open_storage(&config, clock.as_ref(), ids, embedding.as_ref()).map_err(
+                |e| RecalldError::Init {
+                    step: "automatic_schema_upgrade",
+                    message: format!(
+                        "failed to prepare native storage at {}: {e}",
+                        config.storage.data_dir
+                    ),
+                    source: Some(Box::new(e)),
+                },
+            )?;
+        let mut core = match Self::with_prepared_storage(config, clock, engine, embedding).await {
+            Ok(core) => core,
+            Err(error) => {
+                // The failed constructor has dropped all engine/index handles.
+                // The transaction retains stable ownership through rollback.
+                if let Some(transaction) = transaction {
+                    let backup = transaction.backup_path();
+                    transaction.abort().map_err(|rollback| RecalldError::Init {
+                        step: "automatic_schema_rollback",
+                        message: format!(
+                            "startup failed: {error}; rollback failed: {rollback}; recovery required; backup: {}",
+                            backup.as_ref().map_or_else(|| "none (current store)".into(), |p| p.display().to_string()),
+                        ),
+                        source: Some(Box::new(rollback)),
+                    })?;
+                    if let Some(backup) = backup {
+                        return Err(RecalldError::Init {
+                            step: "automatic_schema_startup",
+                            message: format!(
+                                "startup failed: {error}; original restored; backup retained at {}",
+                                backup.display(),
+                            ),
+                            source: Some(Box::new(error)),
+                        });
+                    }
+                }
+                return Err(error);
+            }
+        };
+        if let Some(transaction) = transaction {
+            // On commit I/O error, Drop leaves journal recovery authoritative.
+            // Never blindly abort an ambiguous durable commit.
+            transaction.commit().map_err(|error| RecalldError::Init {
+                step: "automatic_schema_commit",
+                message: error.to_string(),
+                source: Some(Box::new(error)),
             })?;
-        Self::with_owned_storage(config, clock, engine).await
+        }
+        core.start_background();
+        Ok(core)
     }
 
     /// Internal construction over one already-owned engine. Selection and
@@ -295,33 +343,38 @@ impl Recalld {
         clock: Arc<dyn crate::time::Clock>,
         engine: RedbStorageEngine,
     ) -> Result<Self> {
-        let validate = || -> anyhow::Result<bool> {
-            anyhow::ensure!(
-                std::path::Path::new(&config.storage.data_dir).canonicalize()? == engine.db_path(),
-                "owned engine/config root mismatch"
-            );
-            let native = engine.control_state()?.control_schema_version == 2;
-            if native {
-                anyhow::ensure!(
-                    config.decay.disable_sweep
-                        && !config.rif.enabled
-                        && !config.graph.autolink_enabled,
-                    "native prefix requires explicit disabled sweep, RIF and autolink"
-                );
-                let default = engine
-                    .get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)?;
-                anyhow::ensure!(
-                    default.is_some_and(|ns| ns.schema.is_some()),
-                    "native prefix requires an existing schema2 default namespace"
-                );
+        let embedding = startup::build_embedding(&config).await?;
+        let mut core = Self::with_prepared_storage(config, clock, engine, embedding).await?;
+        core.start_background();
+        Ok(core)
+    }
+
+    async fn with_prepared_storage(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        engine: RedbStorageEngine,
+        embedding: Arc<dyn EmbeddingProvider>,
+    ) -> Result<Self> {
+        if std::path::Path::new(&config.storage.data_dir)
+            .canonicalize()
+            .ok()
+            .as_deref()
+            != Some(engine.db_path())
+        {
+            return Err(RecalldError::Init {
+                step: "owned_storage_preflight",
+                message: "owned engine/config root mismatch".into(),
+                source: None,
+            });
+        }
+        startup::validate_native(&config, &engine, embedding.as_ref()).map_err(|e| {
+            RecalldError::Init {
+                step: "native_profile",
+                message: e.to_string(),
+                source: Some(Box::new(e)),
             }
-            Ok(native)
-        };
-        let native_prefix = validate().map_err(|e| RecalldError::Init {
-            step: "owned_storage_preflight",
-            message: e.to_string(),
-            source: None,
         })?;
+        let native_prefix = true;
         let config = Arc::new(config);
         let (shutdown_tx, _) = watch::channel(false);
         let drain_notify = Arc::new(Notify::new());
@@ -422,80 +475,6 @@ impl Recalld {
             tracing::info!("cache manager initialized");
             Arc::new(mgr)
         };
-
-        // -- Step 4: Create embedding provider ------------------------
-        let embedding: Arc<dyn EmbeddingProvider> = {
-            let emb_config = embedding::EmbeddingConfig {
-                provider: match config.embedding.provider {
-                    crate::config::EmbeddingProvider::OpenAI => embedding::ProviderType::OpenAI,
-                    crate::config::EmbeddingProvider::Ollama => embedding::ProviderType::Ollama,
-                    crate::config::EmbeddingProvider::Passthrough => {
-                        embedding::ProviderType::Passthrough
-                    }
-                    crate::config::EmbeddingProvider::Bedrock => embedding::ProviderType::Bedrock,
-                },
-                dimensions: config.embedding.dimensions,
-                model: config.embedding.model_name.clone(),
-                api_key: std::env::var(&config.embedding.api_key_env).ok(),
-                base_url: Some(config.embedding.base_url.clone()),
-                batch_size: Some(config.embedding.batch_size),
-                timeout_secs: None,
-                region: Some(config.embedding.region.clone()),
-                cache_embeddings: false,
-                cache_max_entries: 1000,
-            };
-            let provider = embedding::build_provider(
-                &emb_config,
-                &config.embedding.document_prefix,
-                &config.embedding.query_prefix,
-            )
-            .await
-            .map_err(|e| RecalldError::Init {
-                step: "create_embedding_provider",
-                message: format!("failed to create embedding provider: {}", e,),
-                source: None,
-            })?;
-            tracing::info!(
-                provider = ?config.embedding.provider,
-                model = %config.embedding.model_name,
-                dimensions = config.embedding.dimensions,
-                document_prefix = %config.embedding.document_prefix,
-                query_prefix = %config.embedding.query_prefix,
-                "embedding provider ready"
-            );
-            Arc::from(provider)
-        };
-
-        if native_prefix {
-            let profile = embedding.profile().ok_or_else(|| RecalldError::Init {
-                step: "native_profile",
-                message: "provider profile missing".into(),
-                source: None,
-            })?;
-            let storage_r = storage.read().map_err(|e| RecalldError::Init {
-                step: "native_profile",
-                message: e.to_string(),
-                source: None,
-            })?;
-            for namespace in
-                storage_r
-                    .meta_store()
-                    .list_namespaces()
-                    .map_err(|e| RecalldError::Init {
-                        step: "native_profile",
-                        message: e.to_string(),
-                        source: Some(Box::new(e)),
-                    })?
-            {
-                crate::embedding::profile::require_compatible(&namespace, &profile).map_err(
-                    |e| RecalldError::Init {
-                        step: "native_profile",
-                        message: e.to_string(),
-                        source: None,
-                    },
-                )?;
-            }
-        }
 
         // -- Step 5: Create RIF engine --------------------------------
         let rif_engine = {
@@ -775,58 +754,6 @@ impl Recalld {
             Arc::new(engine)
         };
 
-        // -- Step 8: Ensure "default" namespace exists ----------------
-        {
-            let storage_r = storage.read().map_err(|e| RecalldError::Init {
-                step: "check_default_namespace",
-                message: format!("storage lock poisoned: {}", e),
-                source: None,
-            })?;
-            let has_default = storage_r
-                .get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)
-                .map_err(|e| RecalldError::Init {
-                    step: "check_default_namespace",
-                    message: format!("failed to check default namespace: {}", e),
-                    source: Some(Box::new(e)),
-                })?
-                .is_some();
-            drop(storage_r);
-
-            if !has_default {
-                let ns_config = crate::model::NamespaceConfig {
-                    schema: None,
-                    id: crate::model::NamespaceId::UNSET,
-                    name: crate::model::constants::DEFAULT_NAMESPACE_NAME.to_string(),
-                    embedding_dim: config.embedding.dimensions as u32,
-                    initial_stability: 3.7145,
-                    default_difficulty: 5.0,
-                    phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
-                    permastore_threshold: 1500.0,
-                    created_at: clock.now_millis(),
-                    desired_retention: 0.9,
-                    decay_rate_multiplier: None,
-                };
-                let mut storage_w = storage.write().map_err(|e| RecalldError::Init {
-                    step: "create_default_namespace",
-                    message: format!("storage lock poisoned: {}", e),
-                    source: None,
-                })?;
-                let ns_id =
-                    storage_w
-                        .create_namespace(&ns_config)
-                        .map_err(|e| RecalldError::Init {
-                            step: "create_default_namespace",
-                            message: format!("failed to create default namespace: {}", e,),
-                            source: Some(Box::new(e)),
-                        })?;
-                tracing::info!(
-                    id = ns_id.get(),
-                    dimensions = config.embedding.dimensions,
-                    "created default namespace"
-                );
-            }
-        }
-
         // A reopened FTS file has no durable generation certificate. Rebuild
         // through the actual publisher before exposing this owner or starting
         // background writers; never stamp an unchecked reused index as current.
@@ -846,52 +773,46 @@ impl Recalld {
             source: Some(Box::new(e)),
         })?;
 
-        // -- Step 9: Start decay sweep runner -------------------------
-        let (decay_runner, decay_handle) = if config.decay.disable_sweep {
-            tracing::info!("decay sweep disabled by config");
-            (None, None)
+        // Construct but do not start background writers until upgrade commit.
+        let decay_runner = if config.decay.disable_sweep {
+            None
         } else {
-            let sweep_cfg = SweepConfig {
-                interval: Duration::from_secs_f64(config.decay.sweep_interval_hours * 3600.0),
-                sweep_on_startup: true,
-                ..SweepConfig::default()
-            };
-            let decay_cfg = Arc::new(DecayConfig::default());
-            let activation_cfg = ActivationConfig::default();
-
-            match DecaySweepRunner::new(
-                sweep_cfg,
-                decay_cfg,
-                activation_cfg,
+            let interval = Duration::try_from_secs_f64(config.decay.sweep_interval_hours * 3600.0)
+                .map_err(|error| RecalldError::Init {
+                    step: "prepare_decay_runner",
+                    message: error.to_string(),
+                    source: None,
+                })?;
+            let runner = DecaySweepRunner::new(
+                SweepConfig {
+                    interval,
+                    sweep_on_startup: true,
+                    ..SweepConfig::default()
+                },
+                Arc::new(DecayConfig::default()),
+                ActivationConfig::default(),
                 storage.clone(),
                 graph.clone(),
                 cache.clone(),
                 config.decay.decay_rate_multiplier,
-            ) {
-                Ok(runner) => {
-                    let runner = runner.with_clock(clock.clone());
-                    let runner =
-                        runner.with_completion(crate::derived_completion::DerivedCompletion {
-                            storage: storage.clone(),
-                            cache: cache.clone(),
-                            graph: graph.clone(),
-                            vectors: vector_index.clone(),
-                            fts: fts_index.clone(),
-                            entities: entity_index.clone(),
-                        });
-                    let handle = runner.start();
-                    tracing::info!("decay sweep runner started");
-                    (Some(runner), Some(handle))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        %e,
-                        "decay sweep runner failed to start, continuing without sweeps"
-                    );
-                    (None, None)
-                }
-            }
+            )
+            .map_err(|error| RecalldError::Init {
+                step: "prepare_decay_runner",
+                message: error.to_string(),
+                source: None,
+            })?;
+            Some(runner.with_clock(clock.clone()).with_completion(
+                crate::derived_completion::DerivedCompletion {
+                    storage: storage.clone(),
+                    cache: cache.clone(),
+                    graph: graph.clone(),
+                    vectors: vector_index.clone(),
+                    fts: fts_index.clone(),
+                    entities: entity_index.clone(),
+                },
+            ))
         };
+        let decay_handle = None;
 
         tracing::info!("Recalld initialized");
 
@@ -914,6 +835,12 @@ impl Recalld {
             inflight_count,
             state: SystemState::Ready,
         })
+    }
+
+    fn start_background(&mut self) {
+        if let Some(runner) = &self.decay_runner {
+            self.decay_handle = Some(runner.start());
+        }
     }
 
     /// Shared clock for creation, feedback and sweeps in this instance.

@@ -1,0 +1,41 @@
+{
+  "producerTag": "v1.0.0",
+  "releaseArchiveSha256": "6dc79d3092b066b6b9e7d21c5bd1b6cb08b55d65711a9f2cd726a24c963c5b5c",
+  "created": [
+    {
+      "data": {
+        "id": "01a1efe0-44d5-7751-afc2-5294512dabb6",
+        "namespace": "default",
+        "summary": "Release migration alpha",
+        "fullText": "Unicode original café 🌱\nfull text preserved.",
+        "tags": [
+          "fixture/release",
+          "entity/fixture-entity",
+          "topic/compatibility"
+        ]
+      }
+    },
+    {
+      "data": {
+        "id": "01a1efe0-44e3-7c73-a695-f9f1be9af83f",
+        "namespace": "default",
+        "summary": "Release migration child",
+        "fullText": "Child payload",
+        "tags": []
+      }
+    },
+    {
+      "data": {
+        "id": "01a1efe0-44f7-75f2-a32e-c9d63024da0f",
+        "namespace": "compat-other",
+        "summary": "Namespace isolated gamma",
+        "fullText": "Other namespace payload",
+        "tags": []
+      }
+    }
+  ],
+  "namespaceIds": {
+    "default": 1,
+    "compat-other": 2
+  }
+}
