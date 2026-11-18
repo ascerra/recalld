@@ -159,16 +159,17 @@ async fn rest(adapter: &NamespaceRegistryAdapter, body: &Value, key: Option<&str
 async fn native_catalog_wire_real_cross_transport_replay_and_reopen() {
     let (fixture, path, provider) = fixture();
     let state = fixture.storage.read().unwrap().control_state().unwrap();
-    let adapter = NamespaceRegistryAdapter::new(fixture.storage.clone()).with_native_catalog(
-        provider.clone(),
-        NativePolicyInputs::default(),
-        Arc::new(FixedClock),
-        fixture.cache.clone(),
-        fixture.graph.clone(),
-        fixture.vector_index.clone(),
-        fixture.fts_index.clone(),
-        fixture.entity_index.clone(),
-    );
+    let adapter = NamespaceRegistryAdapter::new(fixture.storage.clone(), provider.clone())
+        .with_native_catalog(
+            provider.clone(),
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+            fixture.cache.clone(),
+            fixture.graph.clone(),
+            fixture.vector_index.clone(),
+            fixture.fts_index.clone(),
+            fixture.entity_index.clone(),
+        );
     let mut bridge = crate::test_support::StubBridge::default().into_bridge();
     bridge.namespaces = Arc::new(fixture.namespace_adapter().with_native_catalog(
         provider.clone(),
@@ -260,16 +261,17 @@ async fn native_catalog_wire_real_cross_transport_replay_and_reopen() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_catalog_wire_invalid_before_provider_and_typed_profile_conflict() {
     let (fixture, path, provider) = fixture();
-    let adapter = NamespaceRegistryAdapter::new(fixture.storage.clone()).with_native_catalog(
-        provider.clone(),
-        NativePolicyInputs::default(),
-        Arc::new(FixedClock),
-        fixture.cache.clone(),
-        fixture.graph.clone(),
-        fixture.vector_index.clone(),
-        fixture.fts_index.clone(),
-        fixture.entity_index.clone(),
-    );
+    let adapter = NamespaceRegistryAdapter::new(fixture.storage.clone(), provider.clone())
+        .with_native_catalog(
+            provider.clone(),
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+            fixture.cache.clone(),
+            fixture.graph.clone(),
+            fixture.vector_index.clone(),
+            fixture.fts_index.clone(),
+            fixture.entity_index.clone(),
+        );
     let before = bytes(&path);
     for request in [
         json!({"name":"created","embeddingDim":8193}),
@@ -299,16 +301,18 @@ async fn native_catalog_wire_invalid_before_provider_and_typed_profile_conflict(
         0
     );
 
-    let unknown = NamespaceRegistryAdapter::new(fixture.storage.clone()).with_native_catalog(
-        Arc::new(UnknownProvider),
-        NativePolicyInputs::default(),
-        Arc::new(FixedClock),
-        fixture.cache.clone(),
-        fixture.graph.clone(),
-        fixture.vector_index.clone(),
-        fixture.fts_index.clone(),
-        fixture.entity_index.clone(),
-    );
+    let unknown_provider = Arc::new(UnknownProvider);
+    let unknown = NamespaceRegistryAdapter::new(fixture.storage.clone(), unknown_provider.clone())
+        .with_native_catalog(
+            unknown_provider,
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+            fixture.cache.clone(),
+            fixture.graph.clone(),
+            fixture.vector_index.clone(),
+            fixture.fts_index.clone(),
+            fixture.entity_index.clone(),
+        );
     let (status, out) = rest(&unknown, &json!({"name":"unbound"}), None).await;
     assert_eq!(status, 503);
     assert_eq!(out["error"]["code"], "EMBEDDING_UNAVAILABLE");
@@ -389,7 +393,7 @@ async fn native_catalog_wire_actual_fault_receipt_and_unknown_reconcile() {
         );
         let request = json!({"contractVersion":2,"name":"created","storeId":state.store_id,"idempotencyKey":"fault","expectedGeneration":state.committed_generation});
         let envelope = if matches!(point, "before_handle_publish" | "commit_unknown") {
-            let adapter = NamespaceRegistryAdapter::new(fixture.storage.clone())
+            let adapter = NamespaceRegistryAdapter::new(fixture.storage.clone(), provider.clone())
                 .with_native_catalog(
                     provider.clone(),
                     NativePolicyInputs::default(),
@@ -515,7 +519,7 @@ fn rest_adapter(
     provider: Arc<Provider>,
     clock: Arc<dyn Clock>,
 ) -> NamespaceRegistryAdapter {
-    NamespaceRegistryAdapter::new(f.storage.clone()).with_native_catalog(
+    NamespaceRegistryAdapter::new(f.storage.clone(), provider.clone()).with_native_catalog(
         provider,
         NativePolicyInputs::default(),
         clock,

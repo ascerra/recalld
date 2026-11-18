@@ -1,0 +1,6 @@
+fmt 0
+clippy 0
+compile 0
+formal 0
+full 0
+hashes 0

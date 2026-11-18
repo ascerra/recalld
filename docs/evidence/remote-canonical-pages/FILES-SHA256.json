@@ -1,0 +1,42 @@
+{
+  "docs/evidence/remote-canonical-pages/BEFORE.md": {
+    "sha256": "aa95161dfbc6f63f1186f557685446c41fe9935b4e1a193e50f2f874f8537a32",
+    "bytes": 2395
+  },
+  "docs/evidence/remote-canonical-pages/COUNT-RED.md": {
+    "sha256": "8560b727d50333ba051bc22f4e69a47060c00b2c04bb1214353685d062efcf77",
+    "bytes": 2477
+  },
+  "docs/evidence/remote-canonical-pages/FOCUSED.md": {
+    "sha256": "9a501f4297f60fe391d7817460d404f7d2e72205a2e46e8144d59e924e98db30",
+    "bytes": 3854
+  },
+  "docs/evidence/remote-canonical-pages/NOTEBOOK.json": {
+    "sha256": "b178ef7c56385baef9d4b1ed09c9749843ccf345a9a7746af9dcbe753d7355a3",
+    "bytes": 421
+  },
+  "docs/evidence/remote-canonical-pages/REPORT.md": {
+    "sha256": "e51db7b74af5235ca9cf881733dc35fb126c87d23a73bcab3d9e11a26c2ed55b",
+    "bytes": 8510
+  },
+  "docs/evidence/remote-canonical-pages/development-runs.json": {
+    "sha256": "acb4dec48b3101b5f8e8f3547630e09a79668896e3f1e026a3f580007fc2e15a",
+    "bytes": 8887
+  },
+  "docs/evidence/remote-canonical-pages/full-validation.json": {
+    "sha256": "b22db2224a9df44b8faef9f35a83dea94287f4b26bec63749f63d89cfda18cac",
+    "bytes": 9929
+  },
+  "docs/evidence/remote-canonical-pages/source-manifest.json": {
+    "sha256": "b2dba20b69a5a7340e2f0716286b6afc15d90a135e982ed78e6e627f7ed8b71c",
+    "bytes": 51327
+  },
+  "docs/implementation/remote-canonical-pages-plan.md": {
+    "sha256": "36a6b28742de02784ba835b8945c9a0725c3d98b834ee0cbede7640727f1c19e",
+    "bytes": 7429
+  },
+  "docs/implementation/remote-canonical-pages.md": {
+    "sha256": "51fd41b98a9088262f71108a9b673d0180665a3816b37e007b3b64a78390be2d",
+    "bytes": 4015
+  }
+}

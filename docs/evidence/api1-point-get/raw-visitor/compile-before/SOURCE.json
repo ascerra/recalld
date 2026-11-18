@@ -1,0 +1,10 @@
+{
+  "head": "4554bf7dc8a5caad599a206958ae5a4a7f7e3962",
+  "worktree": "/tmp/recalld-implementation/api1-point-get",
+  "runtime": "2925a7289055b27ffda2583a81b656442f347632",
+  "files": {
+    "src/serialization/api1_raw_get_budget_probe.rs": "4ac1aa717b1a518f76a39829e005191110ce4680c0437807716bcbae50bfdd56",
+    "src/serialization/api1_get_budget_probe.rs": "52e13a6633c1e3117d7b1bea066372980a6784ed0fa4742b8cce7f4e8158c021",
+    "Cargo.lock": "a6f73ed9223bb1d6a7a02f893067d8c537c77aa515b5837d33a041271400669e"
+  }
+}

@@ -1,0 +1,173 @@
+{
+  "note": "Earlier compile/fmt failures and diagnostic runs, not shipping-composition proof. Paths relative to external artifact root; no caches/build outputs committed.",
+  "artifacts": {
+    "boundaries/fmt.log": {
+      "sha256": "17c6d0a067e38f0674180364f2f2e9950f6e959cac26de5efe7ce0105910077f",
+      "bytes": 515
+    },
+    "boundaries/status": {
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    "boundaries-2/executed-binary-sha256.json": {
+      "sha256": "8dbfa6a6aeafa4b9aab5029e3e2ad576b5d00ac8600f1be46f387e9e7ced14c3",
+      "bytes": 739
+    },
+    "boundaries-2/fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "boundaries-2/focused.log": {
+      "sha256": "8b31f1657d5e206c39244c5cd8f955069de4fd2ce62129e9b083ec9823fc776d",
+      "bytes": 8287
+    },
+    "boundaries-2/source-before.log": {
+      "sha256": "b098305c424570d08f31fab885c936ddcc1aaf4732e8b07e3b24e6827de9791b",
+      "bytes": 6960
+    },
+    "boundaries-2/status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "final/clean.log": {
+      "sha256": "ab2e886450a998041d9395f84bb33059d6116274e5096ffc7afacabf152253df",
+      "bytes": 38
+    },
+    "final/clippy.log": {
+      "sha256": "faa3b712e82c9392046c6079e2d525cf4c8e8d9cd80752b5367a8169de9f204b",
+      "bytes": 601181
+    },
+    "final/commit.txt": {
+      "sha256": "3557adad148087b68e1b34ed67b6d6e12b83f5dd4ada54f1e660599d2e121137",
+      "bytes": 41
+    },
+    "final/container.txt": {
+      "sha256": "f1e8c196c2a2dbaaf4e6a978c78c565a6d52e1ddcb49250f76b3d6135c19b2ec",
+      "bytes": 701
+    },
+    "final/executed-binary-sha256.json": {
+      "sha256": "593f2e71aa38a35fb3e0117f0e5c9b5487a2e9dc4fa105af19306e3595990c8e",
+      "bytes": 739
+    },
+    "final/fmt-check.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "final/fmt-format-scratch.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "final/focused.log": {
+      "sha256": "b814ae615f8e2ff1461f1627441a6e319442db19e2cd93bd2780b06ec932be58",
+      "bytes": 8442
+    },
+    "final/full.log": {
+      "sha256": "edc0394b47d4076b9e49d8f186a75bfe362dcbd44a9a09329f7d81a319a3765e",
+      "bytes": 104252
+    },
+    "final/source-after.log": {
+      "sha256": "cb63abf3427cc087ab5a3592101743e29c67c67ce75b9a038313ec3b582b559c",
+      "bytes": 32720
+    },
+    "final/source-before.log": {
+      "sha256": "cb63abf3427cc087ab5a3592101743e29c67c67ce75b9a038313ec3b582b559c",
+      "bytes": 32720
+    },
+    "final/source-sha256.json": {
+      "sha256": "376fcec8139077a169ba07ca2602472ecb86e70183da0a02e2d4f9d210640dee",
+      "bytes": 77504
+    },
+    "final/status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "final/verification.json": {
+      "sha256": "fcb2096a6d54bc7ce0e13c2dd3bff5466a24bd219c4d9b21f59c22fe84890ecd",
+      "bytes": 102
+    },
+    "focused/fmt.log": {
+      "sha256": "fe777f17cf4cbc028ed633a7c123b93a8801922ed411ab1ef7a589cfca23f122",
+      "bytes": 254
+    },
+    "focused/status": {
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    "focused-2/executed-binary-sha256.json": {
+      "sha256": "fcfe37f51aa7ab0be8b3fc5a09b81d1550bdbb28f19c8a79b0ceaf6e6431f26e",
+      "bytes": 739
+    },
+    "focused-2/fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "focused-2/focused.log": {
+      "sha256": "1abd220281b88a924c73f44e92ba92232b9d4f4a5dc98cfdf298b217a7544b15",
+      "bytes": 8458
+    },
+    "focused-2/new-source/src/canonical_list.rs": {
+      "sha256": "401377380e3dc1b50b63b11447c2847e80390002126a0ddeff8b15f97d64d01b",
+      "bytes": 7590
+    },
+    "focused-2/new-source/src/canonical_list_tests.rs": {
+      "sha256": "1d92eef1e379651d219c3e632372520244f9cadfe5d25c1aa0e6b331ac617666",
+      "bytes": 5272
+    },
+    "focused-2/new-source/src/serialization/list.rs": {
+      "sha256": "aebd3c9a983a69b8c1f5cbeee75563f795cad034f4a9de78271aca285ad67751",
+      "bytes": 12514
+    },
+    "focused-2/new-source/src/storage/metadata/canonical_list.rs": {
+      "sha256": "45d0c81422b11ae25ebe746b2b7e2163cd2f0af63c21c887194ef02ed7f5f451",
+      "bytes": 5673
+    },
+    "focused-2/new-source/src/storage/metadata/canonical_scope.rs": {
+      "sha256": "0e9fb2e9a6695b406108820b23d591cd4bca17c33e5656b29f39861a575b9962",
+      "bytes": 2825
+    },
+    "focused-2/new-source/src/storage/metadata/native_records/list_tests.rs": {
+      "sha256": "b37e7e3da4b04b71fc89d9a0e16e1d343b3b59b49481ff01bf41c222a87aff50",
+      "bytes": 6252
+    },
+    "focused-2/source-note.txt": {
+      "sha256": "7044153a174ca716ba81679a868acf0c31e0aa4536c4edfd4215d3f1a1934be9",
+      "bytes": 184
+    },
+    "focused-2/source-sha256.json": {
+      "sha256": "6701f9a5562e1d2c61dd356528392dac89b8fce5fb40bdbfdb6f0ba0337f043c",
+      "bytes": 22833
+    },
+    "focused-2/status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "focused-2/tracked.patch": {
+      "sha256": "a49270feb38942e282a1302b91f71daee312bf04e2dcf4edc47521329c1c1032",
+      "bytes": 14567
+    },
+    "initial/clean.log": {
+      "sha256": "7b9e32e7853bcb4daf645d3ee5a326b0256025f399e2a9efa7ad3359a33ce21d",
+      "bytes": 38
+    },
+    "initial/fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "initial/focused.log": {
+      "sha256": "f64fcca1dbb202d8fc6dc1709fcd905ffa6e7fcd9d158adc71f5566e0de693d6",
+      "bytes": 9371
+    },
+    "initial/manifest-preserved.json": {
+      "sha256": "2e72ca3ade22e691dd8e5056b70bdcc04d40b6b307f948099cd0ea51d557f05b",
+      "bytes": 22833
+    },
+    "initial/pre-format-source-sha256.json": {
+      "sha256": "2e72ca3ade22e691dd8e5056b70bdcc04d40b6b307f948099cd0ea51d557f05b",
+      "bytes": 22833
+    },
+    "initial/status": {
+      "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "bytes": 4
+    }
+  }
+}

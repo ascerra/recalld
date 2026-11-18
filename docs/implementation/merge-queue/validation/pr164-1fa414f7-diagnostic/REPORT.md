@@ -1,0 +1,7 @@
+# PR164 exact native-single admission diagnostic
+
+Exact source `1fa414f766a98c7a92d4afb4dfe2f3b25670a756` adds only owner-reviewed counters and read-only diagnostics to the original failing test. Request, uncertified fixture, original assertions and intended reopen checks are unchanged. Formatting passed; the exact case **failed0passed/1failed** at the original expected-COMMIT_OUTCOME_UNKNOWN assertion in2.18s. No full run occurred.
+
+Actual reply is UNAVAILABLE with explicit offline re-embedding certification required, NotCommitted, no operationID/receipt/readiness/data. Provider, profile and sampled-clock calls were all zero. Before/after ControlState are exactly equal (same storeId/schema2/G6). This demonstrates precommit certification admission in this fixture; it does not demonstrate committed-receipt loss. The source review places certification before the intended clock-injected commit fault. A genuine certified-fixture correction is proposed separately, preserving original unknown/reopen assertions; no corrected result is claimed here.
+
+Actual offline pinned Rust1.94.1/aarch64,2CPU6GiB,oneprivatecache/HOME/data. Source hashes host-verified before/after, executablehash checked and APFS clone retained before any package clean. Peak6GiB/max6400/OOM0/kill0. Originalfd1 24PASS1FAIL1ignored and4c71 compilefailure stay separately attributed/protected. No production weakening, retry-only clearance, activation or deletion claim.

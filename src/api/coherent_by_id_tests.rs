@@ -34,20 +34,29 @@ async fn call_with_clock(
             h.f.graph.clone(),
             chrono_tz::UTC,
         ));
-        bridge.storage = Arc::new(
-            crate::mcp::bridge_adapters::McpStorageAdapter::new(
-                h.f.storage.clone(),
-                h.f.cache.clone(),
-                h.embedding.clone(),
-                h.f.vector_index.clone(),
-                h.f.fts_index.clone(),
-                h.f.entity_index.clone(),
-                h.f.graph.clone(),
-                Arc::new(crate::config::RecalldConfig::default()),
-                chrono_tz::UTC,
-            )
-            .with_clock(clock.unwrap_or_else(|| Arc::new(crate::time::SystemClock))),
-        );
+        let ordered_close = clock.is_some() && !similar;
+        let mut storage = crate::mcp::bridge_adapters::McpStorageAdapter::new(
+            h.f.storage.clone(),
+            h.f.cache.clone(),
+            h.embedding.clone(),
+            h.f.vector_index.clone(),
+            h.f.fts_index.clone(),
+            h.f.entity_index.clone(),
+            h.f.graph.clone(),
+            Arc::new(crate::config::RecalldConfig::default()),
+            chrono_tz::UTC,
+        )
+        .with_clock(clock.unwrap_or_else(|| Arc::new(crate::time::SystemClock)));
+        if ordered_close {
+            // This fixture expects successful get readiness after its external
+            // barrier drains the accepted root. Order the two controllers;
+            // concurrent close remains refused by the tracker regression.
+            storage.api1_before_barrier = Some(|owner| {
+                let tracker = owner.storage.read().unwrap().meta_store().work_tracker();
+                tracker.wait_until_open();
+            });
+        }
+        bridge.storage = Arc::new(storage);
         let mut input = json!({"id":id,"recordAccess":access,"limit":1});
         if let Some(scope) = scope {
             input["namespace"] = json!(scope);
@@ -268,7 +277,10 @@ async fn coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_pa
                 let (ok, body) = call(&h, mcp, similar, true, None).await;
                 assert!(!ok, "{mcp}/{similar}/{fault}: {body}");
                 assert!(!body.contains("owned résumé"));
-                let error: Value = if mcp {
+                let point = mcp && !similar;
+                let error: Value = if point {
+                    serde_json::from_str(&body).unwrap()
+                } else if mcp {
                     let start = body.find("{\"commitState\"").expect(&body);
                     serde_json::Deserializer::from_str(&body[start..])
                         .into_iter()
@@ -279,15 +291,53 @@ async fn coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_pa
                     serde_json::from_str::<Value>(&body).unwrap()["observation"].clone()
                 };
                 assert_eq!(error["commitState"], "committed", "{body}");
-                let receipts: Vec<crate::storage::control::WriteReceipt> =
-                    serde_json::from_value(error["receipts"].clone()).unwrap();
+                let receipts: Vec<crate::storage::control::WriteReceipt> = serde_json::from_value(
+                    error[if point {
+                        "observationReceipts"
+                    } else {
+                        "receipts"
+                    }]
+                    .clone(),
+                )
+                .unwrap();
                 assert_eq!(receipts.len(), 1);
+                if point {
+                    assert_eq!(error["error"], "INDEX_NOT_READY");
+                    assert_eq!(
+                        error["receipt"],
+                        serde_json::to_value(&receipts[0]).unwrap()
+                    );
+                }
                 let crate::storage::control::MutationOutcome::ExposuresRecorded { accesses } =
                     &receipts[0].outcome
                 else {
                     panic!("{body}")
                 };
                 assert_eq!(accesses.len(), 1);
+                // Fault1 deliberately poisons the serving handle. Verify the
+                // complete receipt after real reopen, never bypass that gate.
+                let Harness {
+                    f,
+                    engine,
+                    access,
+                    embedding,
+                    ..
+                } = h;
+                drop((engine, access, embedding));
+                let root = f.close();
+                let reopened = crate::storage::RedbStorageEngine::open(root.path()).unwrap();
+                assert_eq!(
+                    reopened
+                        .lookup_operation(
+                            receipts[0].store_id,
+                            crate::storage::control::MutationScope::Namespace(
+                                crate::model::NamespaceId::new(1)
+                            ),
+                            receipts[0].operation_id,
+                        )
+                        .unwrap(),
+                    Some(receipts[0].clone())
+                );
             }
         }
     }

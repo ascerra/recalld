@@ -510,7 +510,8 @@ async fn run_serve(
                 system.entity_index().clone(),
                 system.graph().clone(),
             )
-            .with_clock(system.clock().clone()),
+            .with_clock(system.clock().clone())
+            .with_catalog_profile_context(system.embedding().as_ref()),
         );
         let cache: Arc<dyn recalld::api::RecordCache> =
             Arc::new(RecordCacheAdapter::new(system.cache().clone()));

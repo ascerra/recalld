@@ -17,6 +17,8 @@ mod errors;
 mod handlers;
 mod store_api1;
 #[cfg(test)]
+pub(crate) use handlers::prepared_get;
+#[cfg(test)]
 pub(crate) use handlers::search_v2;
 #[cfg(test)]
 pub(crate) use handlers::similar_v2;
@@ -152,6 +154,12 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod vector_query_tests;
+
+#[cfg(test)]
+pub(crate) use handlers::list_memories_v2;
+
+#[cfg(test)]
+pub(crate) use handlers::catalog_v2;
 
 #[cfg(test)]
 mod legacy_label_tests;

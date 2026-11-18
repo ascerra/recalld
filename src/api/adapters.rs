@@ -86,6 +86,15 @@ impl SearchPipelineAdapter {
 
 #[async_trait]
 impl state::SearchPipeline for SearchPipelineAdapter {
+    async fn get_contract(
+        &self,
+        request: crate::serialization::get::GetRequest,
+        response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        self.query_engine
+            .get_contract(request, response_limit)
+            .await
+    }
     async fn similar_contract(
         &self,
         request: crate::serialization::query::SimilarRequest,
@@ -412,6 +421,7 @@ impl state::SearchPipeline for SearchPipelineAdapter {
 
 /// Adapts `RedbStorageEngine` to the API `StorageEngine` trait.
 pub struct StorageEngineAdapter {
+    catalog_profile: Option<crate::serialization::session::ActiveEmbedding>,
     native_policy: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     clock: Arc<dyn crate::time::Clock>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
@@ -429,6 +439,14 @@ pub struct StorageEngineAdapter {
 }
 
 impl StorageEngineAdapter {
+    /// Capture actual configuration identity once; this is not provider
+    /// availability, namespace attestation, or a readiness guarantee.
+    pub fn with_catalog_profile_context(mut self, provider: &dyn EmbeddingProvider) -> Self {
+        self.catalog_profile =
+            crate::serialization::session::ActiveEmbedding::from_provider(provider).ok();
+        self
+    }
+
     pub(crate) fn with_native_lifecycle_policy(
         mut self,
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
@@ -449,6 +467,7 @@ impl StorageEngineAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            catalog_profile: None,
             native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             storage,
@@ -468,6 +487,24 @@ impl StorageEngineAdapter {
 
 #[async_trait]
 impl state::StorageEngine for StorageEngineAdapter {
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        self.catalog_profile.clone()
+    }
+
+    async fn list_catalog_page(
+        &self,
+        request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        crate::catalog_page::read(self.storage.clone(), request).await
+    }
+
+    async fn list_canonical_page(
+        &self,
+        request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        crate::canonical_list::list_page(self.storage.clone(), request).await
+    }
+
     async fn forget_api1(
         &self,
         id: MemoryId,
@@ -1744,6 +1781,7 @@ pub struct NamespaceRegistryAdapter {
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     clock: Arc<dyn crate::time::Clock>,
+    embedding: Arc<dyn EmbeddingProvider>,
 }
 
 impl NamespaceRegistryAdapter {
@@ -1782,17 +1820,21 @@ impl NamespaceRegistryAdapter {
     }
 
     /// Storage-only reads. Creation requires `from_system` to bind actual publishers.
-    pub fn new(storage: Arc<std::sync::RwLock<RedbStorageEngine>>) -> Self {
+    pub fn new(
+        storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+        embedding: Arc<dyn EmbeddingProvider>,
+    ) -> Self {
         Self {
             completion: None,
             native_catalog: None,
             storage,
+            embedding,
             clock: Arc::new(crate::time::SystemClock),
         }
     }
     /// Bind creates to the same system's accepted work and derived publishers.
     pub fn from_system(system: &crate::Recalld) -> Self {
-        Self::new(system.storage().clone())
+        Self::new(system.storage().clone(), system.embedding().clone())
             .with_completion(crate::derived_completion::DerivedCompletion {
                 storage: system.storage().clone(),
                 cache: system.cache().clone(),
@@ -1929,11 +1971,13 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         let completion = self.completion.as_ref().ok_or_else(|| {
             crate::storage::StorageError::InvalidMutation("namespace creation requires an owner-bound registry; use NamespaceRegistryAdapter::from_system".into())
         })?;
+        let dim =
+            crate::embedding::runtime::creation_dimension(self.embedding.as_ref(), embedding_dim)?;
         let config = NamespaceConfig {
             schema: None,
             id: NamespaceId::UNSET,
             name: name.into(),
-            embedding_dim: 1536,
+            embedding_dim: dim,
             initial_stability,
             default_difficulty: 5.0,
             phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
@@ -1950,7 +1994,7 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
             1.0,
         )?;
         Ok(completion
-            .create_legacy_namespace(config, embedding_dim, self.clock.clone())
+            .create_legacy_namespace(config, Some(dim), self.clock.clone())
             .await?)
     }
 }
@@ -2222,7 +2266,13 @@ mod tests {
         use crate::api::state::NamespaceRegistry as _;
         use crate::mcp::bridge::{BridgeError, CreateNamespaceInput, NamespaceRegistry as _};
         let f = Fixture::new();
-        let http = NamespaceRegistryAdapter::new(f.storage.clone()).with_completion(f.completion());
+        let http = NamespaceRegistryAdapter::new(
+            f.storage.clone(),
+            std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                crate::test_support::DIM,
+            )),
+        )
+        .with_completion(f.completion());
         let mcp = f.namespace_adapter();
         for (stability, multiplier) in [
             (0.0, None),

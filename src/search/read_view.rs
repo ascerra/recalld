@@ -717,6 +717,7 @@ mod tests {
 
     include!("payload_tests.rs");
     include!("query_wire_tests.rs");
+    include!("get_wire_tests.rs");
     include!("similar_selection_tests.rs");
 
     struct Embeddings {

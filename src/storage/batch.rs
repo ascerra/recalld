@@ -66,6 +66,14 @@ pub struct BatchItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BatchProgress {
+    /// Required original API/CAS evidence for legacy writer format4 only.
+    /// Historical formats omit this field byte-for-byte.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub legacy_origin: Option<LegacyBatchOrigin>,
     /// Original API identity, independent of the native writer codec. Historical
     /// native 2/3 omit this field; their receipt and manifest bytes stay unchanged.
     #[serde(
@@ -100,6 +108,21 @@ pub struct BatchReservationPrecondition {
     pub proof_version: u32,
     pub expected_generation: Generation,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LegacyBatchOrigin {
+    pub proof_version: u32,
+    pub contract_version: u32,
+    // No serde default: explicit null means no CAS; absence is malformed proof.
+    #[serde(deserialize_with = "required_nullable_generation")]
+    pub expected_generation: Option<Generation>,
+}
+fn required_nullable_generation<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Generation>, D::Error> {
+    Option::<Generation>::deserialize(d)
+}
 fn present_precondition<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<BatchReservationPrecondition>, D::Error> {
@@ -107,11 +130,34 @@ fn present_precondition<'de, D: serde::Deserializer<'de>>(
 }
 impl BatchProgress {
     pub(crate) fn original_contract(&self) -> Result<u32, super::StorageError> {
+        match (&self.legacy_origin, self.version) {
+            (Some(proof), 4)
+                if proof.proof_version == 1
+                    && proof.contract_version == 2
+                    && self.reservation_precondition.is_none() => {}
+            (None, 1..=3) => {}
+            _ => {
+                return Err(super::StorageError::InvalidControl(
+                    "legacy batch origin/version mismatch".into(),
+                ));
+            }
+        }
         original_contract(self.version, self.request_context.as_ref())
     }
     pub(crate) fn reservation_expected_generation(
         &self,
     ) -> Result<Option<Generation>, super::StorageError> {
+        self.original_contract()?;
+        if let Some(proof) = &self.legacy_origin {
+            if proof.expected_generation.is_some_and(|g| {
+                g.next().ok() != Some(self.reservation_receipt.committed_generation)
+            }) {
+                return Err(super::StorageError::InvalidControl(
+                    "legacy batch CAS proof mismatch".into(),
+                ));
+            }
+            return Ok(proof.expected_generation);
+        }
         let Some(proof) = &self.reservation_precondition else {
             return Ok(None);
         };
@@ -175,6 +221,7 @@ impl BatchItemPlan {
 /// Neither caller nor daemon can supply arbitrary canonical operation IDs.
 #[derive(Debug, Clone)]
 pub(crate) struct BatchChild {
+    pub(super) legacy_origin: Option<LegacyBatchOrigin>,
     pub(super) version: u32,
     pub(super) request_context: Option<RetainedRequestContext>,
     pub(super) store_id: Uuid,
@@ -186,6 +233,10 @@ pub(crate) struct BatchChild {
     pub(super) canonical_hash: [u8; 32],
 }
 impl BatchChild {
+    pub(crate) fn is_legacy_api2(&self) -> bool {
+        self.version == 4
+    }
+
     pub(crate) fn resolve_store_profile(
         &self,
         input: &super::native_store::NativeStoreInput,
@@ -232,6 +283,7 @@ impl BatchProgress {
     pub(crate) fn child(&self, index: usize) -> Option<BatchChild> {
         let item = self.items.get(index)?;
         Some(BatchChild {
+            legacy_origin: self.legacy_origin.clone(),
             version: self.version,
             request_context: self.request_context.clone(),
             store_id: self.reservation_receipt.store_id,
@@ -411,6 +463,7 @@ pub(crate) fn caller_hash_origin(
             1 => "batch_caller_v1",
             2 => "batch_caller_v2",
             3 => "batch_caller_v3",
+            4 => "batch_caller_v4",
             _ => unreachable!(),
         },
         &[&super::control::encode(&(kind, hashes))?],
@@ -455,6 +508,7 @@ pub(crate) fn resolution_hash_origin(
             1 => "batch_resolved_v1",
             2 => "batch_resolved_v2",
             3 => "batch_resolved_v3",
+            4 => "batch_resolved_v4",
             _ => unreachable!(),
         },
         &[&super::control::encode(&rows)?],
@@ -466,7 +520,7 @@ pub(crate) fn resolution_hash_origin(
 pub(crate) fn contract_version(version: u32) -> Result<u32, super::StorageError> {
     match version {
         1 => Ok(1),
-        2 | 3 => Ok(2),
+        2 | 3 | 4 => Ok(2),
         _ => Err(super::StorageError::InvalidControl(
             "unsupported batch version".into(),
         )),
@@ -478,6 +532,7 @@ pub(crate) fn original_contract(
 ) -> Result<u32, super::StorageError> {
     match version {
         1 if context.is_none() => Ok(1),
+        4 if context.is_none() => Ok(2),
         2 | 3 => RetainedRequestContext::native_contract(context),
         _ => Err(super::StorageError::InvalidControl(
             "invalid batch request context/version".into(),
@@ -490,6 +545,7 @@ pub(crate) fn retained_context(
 ) -> Result<Option<RetainedRequestContext>, super::StorageError> {
     match version {
         1 if contract == 1 => Ok(None),
+        4 if contract == 2 => Ok(None),
         2 | 3 => RetainedRequestContext::from_contract(contract),
         _ => Err(super::StorageError::InvalidMutationContext(
             "unsupported batch writer/request contract".into(),
@@ -501,6 +557,7 @@ pub(crate) fn reservation_domain(version: u32) -> Result<&'static str, super::St
         1 => Ok("batch_reserve_v1"),
         2 => Ok("batch_reserve_v2"),
         3 => Ok("batch_reserve_v3"),
+        4 => Ok("batch_reserve_v4"),
         _ => Err(super::StorageError::InvalidControl(
             "unsupported batch version".into(),
         )),
@@ -511,6 +568,7 @@ pub(crate) fn rejection_domain(version: u32) -> Result<&'static str, super::Stor
         1 => Ok("batch_item_error_v1"),
         2 => Ok("batch_item_error_v2"),
         3 => Ok("batch_item_error_v3"),
+        4 => Ok("batch_item_error_v4"),
         _ => Err(super::StorageError::InvalidControl(
             "unsupported batch version".into(),
         )),

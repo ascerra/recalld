@@ -16,6 +16,10 @@ pub enum StorageError {
     ReceiptEvidenceConflict,
     /// Existing item receipts remain retained. This is reservation evidence only,
     /// never an assertion that the batch committed atomically or became ready.
+    /// Known fresh admission failure; no canonical operation was attempted.
+    #[error("unsupported mutation: {0}")]
+    UnsupportedMutation(String),
+
     #[error("RESPONSE_TOO_LARGE: complete native batch result exceeds transport budget")]
     BatchResponseTooLarge {
         reservation_receipt: Option<Box<crate::storage::control::WriteReceipt>>,

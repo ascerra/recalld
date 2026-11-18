@@ -1,0 +1,305 @@
+[
+  {
+    "archive": "fault-false.zip",
+    "input": {
+      "batchOperationId": null,
+      "defaultNamespace": "default",
+      "idempotencyKey": "historical-fault",
+      "items": [
+        {
+          "checkDuplicates": false,
+          "fullText": "synthetic retained text",
+          "summary": "legacy original intent"
+        }
+      ],
+      "kind": "insert",
+      "mutationVersion": 4,
+      "resultVersion": 1,
+      "storeId": "81e0b609-2207-474a-9e67-190abd422c0d"
+    },
+    "outcome": {
+      "batchOperationId": "9ddadc72-1dae-4a9d-8537-7a04374b3db3",
+      "bookkeepingReceipts": [],
+      "failed": 0,
+      "items": [
+        {
+          "error": {
+            "code": "INDEX_NOT_READY",
+            "field": null
+          },
+          "index": 0,
+          "namespaceId": 1,
+          "operationId": "8334dfdf-2c65-46f4-b3b7-7fb3e0e64dd6",
+          "ready": false,
+          "receipt": {
+            "committedGeneration": "4",
+            "operationId": "8334dfdf-2c65-46f4-b3b7-7fb3e0e64dd6",
+            "outcome": {
+              "createdAt": 1794711319943,
+              "edgesPut": 0,
+              "embeddingDim": 4,
+              "initialStabilityBits": 1080932958,
+              "kind": "memoryInserted",
+              "memoryId": "01a1dd21-7587-7c40-b699-466e6481ea3a"
+            },
+            "receiptVersion": 1,
+            "replayed": false,
+            "storeId": "81e0b609-2207-474a-9e67-190abd422c0d"
+          },
+          "result": {
+            "createdAt": "2026-11-15 02:55:19 UTC",
+            "id": "01a1dd21-7587-7c40-b699-466e6481ea3a",
+            "namespace": "default",
+            "phase": "Full",
+            "stability": 3.714499950408935,
+            "strength": 1.0
+          },
+          "retryable": false,
+          "status": "ok"
+        }
+      ],
+      "reservationReceipt": {
+        "committedGeneration": "3",
+        "operationId": "9ddadc72-1dae-4a9d-8537-7a04374b3db3",
+        "outcome": {
+          "batch_kind": "insert",
+          "caller_hash": [
+            213,
+            112,
+            92,
+            132,
+            147,
+            214,
+            248,
+            126,
+            238,
+            254,
+            251,
+            222,
+            219,
+            34,
+            207,
+            138,
+            24,
+            213,
+            214,
+            33,
+            185,
+            227,
+            18,
+            143,
+            212,
+            65,
+            158,
+            202,
+            42,
+            176,
+            13,
+            197
+          ],
+          "item_count": 1,
+          "kind": "batchReserved",
+          "resolution_hash": [
+            67,
+            58,
+            45,
+            245,
+            145,
+            112,
+            14,
+            92,
+            65,
+            161,
+            54,
+            67,
+            206,
+            203,
+            35,
+            160,
+            129,
+            229,
+            196,
+            129,
+            188,
+            182,
+            173,
+            58,
+            105,
+            166,
+            54,
+            245,
+            108,
+            226,
+            72,
+            102
+          ]
+        },
+        "receiptVersion": 1,
+        "replayed": false,
+        "storeId": "81e0b609-2207-474a-9e67-190abd422c0d"
+      },
+      "reservationState": "committed",
+      "resultVersion": 1,
+      "storeId": "81e0b609-2207-474a-9e67-190abd422c0d",
+      "succeeded": 1,
+      "total": 1,
+      "unknownBookkeepingOperations": [],
+      "unresolved": 0
+    },
+    "receipt": {
+      "committedGeneration": "4",
+      "operationId": "8334dfdf-2c65-46f4-b3b7-7fb3e0e64dd6",
+      "outcome": {
+        "createdAt": 1794711319943,
+        "edgesPut": 0,
+        "embeddingDim": 4,
+        "initialStabilityBits": 1080932958,
+        "kind": "memoryInserted",
+        "memoryId": "01a1dd21-7587-7c40-b699-466e6481ea3a"
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "81e0b609-2207-474a-9e67-190abd422c0d"
+    }
+  },
+  {
+    "archive": "fault-true.zip",
+    "input": {
+      "batchOperationId": null,
+      "defaultNamespace": "default",
+      "idempotencyKey": "historical-fault",
+      "items": [
+        {
+          "checkDuplicates": false,
+          "fullText": "synthetic retained text",
+          "summary": "legacy original intent"
+        }
+      ],
+      "kind": "insert",
+      "mutationVersion": 4,
+      "resultVersion": 1,
+      "storeId": "12dc9d6f-7417-4aeb-afe5-8918a79d7163"
+    },
+    "outcome": {
+      "batchOperationId": "8abf9d2c-5639-4821-903c-7e98fe26d09c",
+      "bookkeepingReceipts": [],
+      "failed": 0,
+      "items": [
+        {
+          "error": {
+            "code": "COMMIT_OUTCOME_UNKNOWN",
+            "field": null
+          },
+          "index": 0,
+          "namespaceId": 1,
+          "operationId": "f9019315-4bcd-4973-97ad-dd6abe0e6fae",
+          "ready": false,
+          "retryable": false,
+          "status": "unknown"
+        }
+      ],
+      "reservationReceipt": {
+        "committedGeneration": "3",
+        "operationId": "8abf9d2c-5639-4821-903c-7e98fe26d09c",
+        "outcome": {
+          "batch_kind": "insert",
+          "caller_hash": [
+            213,
+            112,
+            92,
+            132,
+            147,
+            214,
+            248,
+            126,
+            238,
+            254,
+            251,
+            222,
+            219,
+            34,
+            207,
+            138,
+            24,
+            213,
+            214,
+            33,
+            185,
+            227,
+            18,
+            143,
+            212,
+            65,
+            158,
+            202,
+            42,
+            176,
+            13,
+            197
+          ],
+          "item_count": 1,
+          "kind": "batchReserved",
+          "resolution_hash": [
+            127,
+            101,
+            98,
+            248,
+            174,
+            255,
+            164,
+            112,
+            146,
+            28,
+            72,
+            0,
+            159,
+            15,
+            68,
+            110,
+            43,
+            230,
+            61,
+            91,
+            20,
+            90,
+            234,
+            204,
+            170,
+            43,
+            234,
+            65,
+            87,
+            139,
+            29,
+            223
+          ]
+        },
+        "receiptVersion": 1,
+        "replayed": false,
+        "storeId": "12dc9d6f-7417-4aeb-afe5-8918a79d7163"
+      },
+      "reservationState": "committed",
+      "resultVersion": 1,
+      "storeId": "12dc9d6f-7417-4aeb-afe5-8918a79d7163",
+      "succeeded": 0,
+      "total": 1,
+      "unknownBookkeepingOperations": [],
+      "unresolved": 1
+    },
+    "receipt": {
+      "committedGeneration": "4",
+      "operationId": "f9019315-4bcd-4973-97ad-dd6abe0e6fae",
+      "outcome": {
+        "createdAt": 1794711320297,
+        "edgesPut": 0,
+        "embeddingDim": 4,
+        "initialStabilityBits": 1080932958,
+        "kind": "memoryInserted",
+        "memoryId": "01a1dd21-76e9-73c1-88f0-2eaef552ca6d"
+      },
+      "receiptVersion": 1,
+      "replayed": false,
+      "storeId": "12dc9d6f-7417-4aeb-afe5-8918a79d7163"
+    }
+  }
+]

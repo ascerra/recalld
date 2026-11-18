@@ -1,0 +1,85 @@
+....EE.EE
+======================================================================
+ERROR: test_last_member_cache_preflight_without_output (__main__.Recorded.test_last_member_cache_preflight_without_output)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/source/scripts/test_recorded_answer.py", line 76, in test_last_member_cache_preflight_without_output
+    args,h=self.setup_manifest();m=json.loads(args.manifest.read_text())
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/source/scripts/test_recorded_answer.py", line 65, in setup_manifest
+    C['prepare'](args,h,answer=True)
+  File "/source/scripts/combined-mcp-evaluation.py", line 45, in prepare
+    manifest = h["build_manifest"](args, json.loads(args.build.read_text()))
+                                                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1059, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1045, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/source/docsbench/combined-control-consumer/evidence/build.json'
+
+======================================================================
+ERROR: test_policy_change_cannot_rekey_frozen_output (__main__.Recorded.test_policy_change_cannot_rekey_frozen_output)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/source/scripts/test_recorded_answer.py", line 85, in test_policy_change_cannot_rekey_frozen_output
+    args,h=self.setup_manifest();m=json.loads(args.manifest.read_text());m['answerPolicy']['configuration']['parser']='new'
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/source/scripts/test_recorded_answer.py", line 65, in setup_manifest
+    C['prepare'](args,h,answer=True)
+  File "/source/scripts/combined-mcp-evaluation.py", line 45, in prepare
+    manifest = h["build_manifest"](args, json.loads(args.build.read_text()))
+                                                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1059, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1045, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/source/docsbench/combined-control-consumer/evidence/build.json'
+
+======================================================================
+ERROR: test_role_reconcile_complete_identity_and_correlation (__main__.Recorded.test_role_reconcile_complete_identity_and_correlation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/source/scripts/test_recorded_answer.py", line 91, in test_role_reconcile_complete_identity_and_correlation
+    args,h=self.setup_manifest();_,bundles,_,_=C['validate'](args,h,answer=True)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/source/scripts/test_recorded_answer.py", line 65, in setup_manifest
+    C['prepare'](args,h,answer=True)
+  File "/source/scripts/combined-mcp-evaluation.py", line 45, in prepare
+    manifest = h["build_manifest"](args, json.loads(args.build.read_text()))
+                                                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1059, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1045, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/source/docsbench/combined-control-consumer/evidence/build.json'
+
+======================================================================
+ERROR: test_whole_roster_and_missing_entry_is_declared (__main__.Recorded.test_whole_roster_and_missing_entry_is_declared)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/source/scripts/test_recorded_answer.py", line 71, in test_whole_roster_and_missing_entry_is_declared
+    args,h=self.setup_manifest('middle-miss');m,bundles,roster,_=C['validate'](args,h,answer=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/source/scripts/test_recorded_answer.py", line 65, in setup_manifest
+    C['prepare'](args,h,answer=True)
+  File "/source/scripts/combined-mcp-evaluation.py", line 45, in prepare
+    manifest = h["build_manifest"](args, json.loads(args.build.read_text()))
+                                                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1059, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1045, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/source/docsbench/combined-control-consumer/evidence/build.json'
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.047s
+
+FAILED (errors=4)

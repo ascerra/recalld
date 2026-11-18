@@ -23,6 +23,57 @@ use crate::model::{DecayPhase, MemoryId, NamespaceId};
 use crate::storage::engine::RedbStorageEngine;
 use crate::storage::{PersistedEdge, StorageEngine as StorageEngineTrait};
 
+/// Optional artifact sink for the existing real record-emitter regressions.
+/// This records outputs, not a replacement backend or a receipt verifier.
+pub(crate) fn record_schema_value(
+    label: &str,
+    tool: &str,
+    value: &serde_json::Value,
+    provenance: &str,
+) {
+    let Some(dir) = std::env::var_os("RECALLD_LIVE_RECORD_SCHEMA_FIXTURES") else {
+        return;
+    };
+    let schema = crate::mcp::tools::tool_definitions()
+        .into_iter()
+        .find(|t| t.name == tool)
+        .unwrap()
+        .output_schema
+        .expect("actual registered output schema");
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("{label}-{tool}.json")),
+        serde_json::to_vec(&serde_json::json!({
+            "tool":tool,"schema":schema,"value":value,"fixtureProvenance":provenance
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+pub(crate) fn record_schema_result(
+    label: &str,
+    tool: &str,
+    result: &crate::mcp::protocol::ToolCallResult,
+    provenance: &str,
+) {
+    if std::env::var_os("RECALLD_LIVE_RECORD_SCHEMA_FIXTURES").is_none() {
+        return;
+    }
+    let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
+    let value = serde_json::from_str(text).expect("selected structured emitter");
+    record_schema_value(&format!("{label}-text"), tool, &value, provenance);
+    if let Some(value) = &result.structured_content {
+        record_schema_value(
+            &format!("{label}-structured"),
+            tool,
+            &serde_json::Value::Object(value.clone()),
+            provenance,
+        );
+    }
+}
+
 /// Embedding width used by the fixture namespace. Small on purpose:
 /// these tests are about bookkeeping, not vectors.
 pub(crate) const DIM: usize = 4;
@@ -329,6 +380,7 @@ impl Fixture {
     pub(crate) fn namespace_adapter(&self) -> crate::mcp::bridge_adapters::McpNamespaceAdapter {
         crate::mcp::bridge_adapters::McpNamespaceAdapter::new(
             self.storage.clone(),
+            Arc::new(crate::embedding::PassthroughProvider::new(DIM)),
             self.cache.clone(),
             self.vector_index.clone(),
             self.fts_index.clone(),

@@ -1,0 +1,6 @@
+{
+  "reason": "Initial driver6 and legacy/direct tail8 page fixtures insufficient; original failures retained. Add actual native list/catalog transport tests on same executable, no runtime/source change or rebuild.",
+  "source": "9988af67439a19813decb8c01ddddb97b91fc09b",
+  "executableSHA256": "46479a60c3a3bda06ad6301593daee667fc47de716916a4e8784f3190b5829fa",
+  "started": 1794942207.25809
+}

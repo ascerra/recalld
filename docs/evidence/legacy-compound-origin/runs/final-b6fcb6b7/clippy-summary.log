@@ -1,0 +1,5 @@
+Successful clippy summary; raw log SHA256 deafaf4c90f2198b4c061e591680109a3077e81535ad995e9f2f85e6a412227d
+
+warning: `recalld` (lib test) generated 1115 warnings (995 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 11 suggestions)
+    Finished `dev` profile [unoptimized] target(s) in 9.21s
+New test closure also emits the existing result_large_err warning. No warning suppression added.

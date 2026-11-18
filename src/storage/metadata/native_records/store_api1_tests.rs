@@ -111,7 +111,12 @@ fn router(
                 config,
                 false,
             )),
-            Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+            Arc::new(NamespaceRegistryAdapter::new(
+                f.storage.clone(),
+                std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                    crate::test_support::DIM,
+                )),
+            )),
             Arc::new(NoopMetricsCollector),
         )
         .with_native_batches(a, "native".into()),
@@ -154,6 +159,12 @@ async fn native_api1_store_actual_mcp_unicode_and_ignored_single_vector() {
     )
     .await;
     assert_ne!(r.is_error, Some(true), "{r:?}");
+    crate::test_support::record_schema_result(
+        "store-native-unicode",
+        "store_memory",
+        &r,
+        "actual API1 native store through public MCP dispatch, real migration/certification fixture; not startup activation",
+    );
     let crate::mcp::protocol::ContentBlock::Text { text } = &r.content[0];
     let value: Value = serde_json::from_str(text).unwrap();
     assert!(value.get("contractVersion").is_none());
@@ -299,6 +310,12 @@ async fn native_api1_store_publication_failure_keeps_full_receipt_and_projection
     assert_eq!(status.as_u16(), 503, "{out}");
     assert_eq!(out["commitState"], "committed");
     assert_eq!(out["ready"], false);
+    crate::test_support::record_schema_value(
+        "store-known-failure",
+        "store_memory",
+        &out,
+        "actual API1 REST publication failure using the shared store Failure emitter also consumed by MCP; full receipt/reopen checks unchanged",
+    );
     let receipt: WriteReceipt = serde_json::from_value(out["receipt"].clone()).unwrap();
     assert_eq!(out["receipt"], canonical(&receipt));
     assert_eq!(out["readiness"]["ready"], false);
@@ -436,6 +453,12 @@ async fn native_api1_store_legacy_shapes_and_explicit_profile_constraint() {
     assert!(value.get("contractVersion").is_none());
     assert_eq!(value["namespace"], "default");
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+    crate::test_support::record_schema_result(
+        "store-legacy-success",
+        "store_memory",
+        &r,
+        "actual public MCP legacy generated insertion; historical ignored embedding selector behavior preserved",
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -516,3 +539,6 @@ async fn native_api1_store_remote_negotiation_small_peer_and_native_reopen() {
 
 #[path = "batch_api1_tests.rs"]
 mod batch_api1;
+
+#[path = "live_record_schema_tests.rs"]
+mod live_record_schemas;

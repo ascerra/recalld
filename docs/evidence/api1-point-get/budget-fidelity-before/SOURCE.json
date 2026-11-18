@@ -1,0 +1,15 @@
+{
+  "head": "4d22cc1e09c0ac97df716a561b7dd149e4054468",
+  "runtimeParent": "2925a7289055b27ffda2583a81b656442f347632",
+  "source": "/tmp/recalld-implementation/api1-point-get",
+  "status": "",
+  "files": {
+    "Cargo.toml": "8c6aa5c4148563d23fe3f5b0a0fc31a3e1dfe7ae90c1962f77d6ee6b82617b63",
+    "Cargo.lock": "a6f73ed9223bb1d6a7a02f893067d8c537c77aa515b5837d33a041271400669e",
+    "src/serialization/get_tests.rs": "51dad8999e4aaf799a6a32cf5441ad2221a8790784f9945a053125ace7ebda7a",
+    "src/serialization/get_rpc_budget_probe.rs": "37f84ac219c12c2865c9af1d9e56b6cdad7723c3240d7db02ccfa6e52849a5ce",
+    "src/serialization/api1_get_budget_probe.rs": "9cf5af61560159ce8a941971c52b1be56f283be5dcc0721f64b4a54625e20be2"
+  },
+  "sameSourceRootAsPrevious": true,
+  "scope": "assertion-only fidelity correction; projection prototype unchanged"
+}

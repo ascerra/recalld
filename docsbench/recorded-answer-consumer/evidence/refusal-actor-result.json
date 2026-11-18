@@ -1,0 +1,1 @@
+{"event": "recorded-answer", "isolation": {"inheritedDescriptorsClosed": true, "checked": 4}, "result": {"status": "unavailable", "reason": "recorded-refusal", "outputSha256": "f6435a0c76d0e51b0f2527e6730370dac3f5a731236877ea10a6a1d4d3a698d8", "output": {"citations": [], "roleOutputVersion": 1, "status": "refused", "text": "Recorded diagnostic refusal"}}}

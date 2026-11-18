@@ -29,6 +29,32 @@ impl RemoteSearchAdapter {
 
 #[async_trait]
 impl SearchPipeline for RemoteSearchAdapter {
+    async fn get_contract(
+        &self,
+        request: crate::serialization::get::GetRequest,
+        response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        super::prepared_get::remote(&self.client, request, response_limit).await
+    }
+    async fn scan_duplicate_pairs(
+        &self,
+        request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        super::prepared_query::remote_pairs(&self.client, request).await
+    }
+    async fn query_contract(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        super::prepared_query::remote_query(&self.client, request).await
+    }
+    async fn similar_contract(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        super::prepared_query::remote_similar(&self.client, request).await
+    }
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError> {
         let params =
             serde_json::to_value(&query).map_err(|e| BridgeError::Internal(e.to_string()))?;
@@ -139,6 +165,20 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn list_canonical_page(
+        &self,
+        request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        super::prepared_pages::remote_list(&self.client, request).await
+    }
+
+    async fn list_catalog_page(
+        &self,
+        request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        super::prepared_pages::remote_catalog(&self.client, request).await
+    }
+
     async fn store_api1(
         &self,
         request: crate::serialization::store_api1::Request,
@@ -388,6 +428,17 @@ impl bridge::StorageEngine for RemoteStorageAdapter {
         let result = self.client.call("store_memory", params).await?;
         serde_json::from_value(result)
             .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
+    }
+
+    fn supports_api1_get(&self) -> bool {
+        true
+    }
+    async fn get_api1(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        response_limit: usize,
+    ) -> crate::serialization::get_api1::Reply {
+        super::api1_get::remote(&self.client, request, response_limit).await
     }
 
     async fn get_memory(

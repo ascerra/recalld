@@ -1,0 +1,1 @@
+RuntimeError('undeclared target asset requires explicit allowlist: tests/page_schema_conformance.py')

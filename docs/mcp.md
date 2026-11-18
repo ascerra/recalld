@@ -1,5 +1,47 @@
 # MCP Integration Guide
 
+Modern MCP `tools/list` advertises output schemas for `namespace_stats`,
+`list_tags`, `list_memories`, `recall_memories`, `find_similar_memories`,
+`reinforce_memory`, `forget_memory`, `get_memory`, `store_memory`,
+`store_memories`, `forget_memories`, and `delete_namespace`.
+These describe the existing API1 object results; legacy MCP still omits
+`outputSchema` and `structuredContent`. `list_namespaces` remains a bare JSON
+array in text, without an object wrapper. Plain-text errors do not carry a
+structured result.
+
+Recall defaults to compact output. Full output includes search metadata and,
+when present, graph neighbors. Both modes can return the same empty result.
+Optional canonical `labels` preserve their exact arrays and provenance
+(`native_v2` or `legacy_retained_only`); present empty arrays remain authoritative.
+Single-memory similarity defaults to the source namespace. Explicit
+`sameNamespace:false` searches compatible namespaces with a matching known
+embedding profile and dimension; unknown or incompatible profiles are excluded.
+Duplicate scan coverage is always nonexhaustive: known counts describe the
+bounded sample, while older/custom bridges report unknown counts and truncation
+as `null`. These schemas do not advertise prepared API2 operations or readiness.
+
+Feedback and single-forget schemas preserve their existing API1 success shapes
+and describe structured lifecycle failures with complete retained receipts.
+Receipt schemas describe the serialized codec, not proof validity, authenticity,
+request binding or readiness. In particular, a typed malformed receipt retained
+by an invalid-response path must remain representable. Existing plain-text errors
+and legacy-era output remain unchanged.
+
+Point-get and insertion/batch schemas likewise preserve the existing API1
+success and partial/unknown failure layouts. Reservation evidence is not an
+atomic whole-batch receipt. Explicit unverified received evidence stays separate
+from current-operation commitment: point-get retains original JSON strings;
+single/batch error carriers retain their actual typed evidence fields. Generic
+retained receipts describe all supported typed outcomes, without asserting that
+canonical proof validation ran. Declared compatibility `Value` fields remain
+extensible. See [record output boundaries](implementation/live-record-schemas.md).
+
+Delete-namespace structured failures retain full start/step/final purge evidence.
+An unknown operation remains unknown even when earlier progress has a receipt;
+missing physical metrics and readiness are never invented. Create-namespace still
+has no output schema because its legacy partial-error path accepts arbitrary JSON
+objects. See [catalog boundaries](implementation/live-delete-schema.md).
+
 ## Setup
 
 ### Claude Code
@@ -882,12 +924,16 @@ MCP coverage counts and `truncated` are unknown (`null`) because the legacy brid
 
 Create a new memory namespace. Namespaces organize data; they are not access controls. Each namespace has its own embedding space and decay configuration. Embedding dimensions are fixed after creation.
 
+Creation uses the single active provider's dimension. Existing v1 namespaces remain
+legacy-unverified: checking the active configuration does not attest stored vectors
+or persist a profile binding. Schema-v2 serving remains gated.
+
 #### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | string | yes | -- | Alphanumeric, hyphens, underscores; 1-64 chars |
-| `embeddingDim` | integer | no | *inherited* | Integer 1–8192; null is invalid. Inherits the `default` namespace dimension (fallback 1536), fixed after creation. |
+| `embeddingDim` | integer | no | active provider | Integer 1–8192; null is invalid. Must equal the active provider dimension; omission selects it. Fixed after creation. |
 | `initialStability` | number | no | `3.7145` | Positive finite starting stability in days for new memories |
 | `desiredRetention` | number | no | `0.9` | Target retention rate (0.0-1.0) |
 | `decayRateMultiplier` | number | no | *inherited* | Finite and nonnegative: 1.0 = normal, 2.0 = 2x slower decay, 0.5 = 2x faster, 0.0 = disabled |

@@ -1,0 +1,37 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "executedCliBinariesSha256": {},
+    "finished": 1794867854.6126072
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "storage::metadata::native_records::tests::store_producers::native_single_wire_actual_unknown_commit_keeps_original_operation_on_reopen",
+      "--",
+      "--exact",
+      "--nocapture"
+    ],
+    "exitCode": 101,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "ecd9ec13959ea6ee3714e21c2966b385eedbac7cc340dc9dda6d654b68f11c95"
+    },
+    "executedCliBinariesSha256": {},
+    "finished": 1794867951.0269568
+  }
+]

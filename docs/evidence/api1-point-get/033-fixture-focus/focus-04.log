@@ -1,0 +1,17 @@
+
+running 1 test
+
+thread 'storage::metadata::native_records::tests::readers::native_forget_failed_publication_stays_blocked_until_real_retry_without_resurrection' (44) panicked at src/storage/metadata/native_records/reader_tests.rs:501:5:
+assertion `left == right` failed: {"error":"INTERNAL_ERROR","message":"an internal error occurred"}
+  left: 500
+ right: 503
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::metadata::native_records::tests::readers::native_forget_failed_publication_stays_blocked_until_real_retry_without_resurrection ... FAILED
+
+failures:
+
+failures:
+    storage::metadata::native_records::tests::readers::native_forget_failed_publication_stays_blocked_until_real_retry_without_resurrection
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1845 filtered out; finished in 3.78s
+

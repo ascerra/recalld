@@ -1,0 +1,12 @@
+[
+  "coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_payload",
+  "public_postcommit_admission_faults_retain_receipts_and_exactly_once_history",
+  "scoped_read_only_controls_survive_http_mcp_and_framed_daemon",
+  "native_forget_failed_publication_stays_blocked_until_real_retry_without_resurrection",
+  "public_matrix_summary_extreme_clocks_sticky_permastore_and_forget",
+  "native_writer_publication_http_mcp_and_reopen_keep_exact_labels_and_read_only_bytes",
+  "native_exposure_deferred_selection_never_writes_and_unsupported_recorder_stays_closed",
+  "native_maintenance_accepted_publication_failure_replays_full_receipt_then_removes_content",
+  "ordinary_point_native_old_alias_and_preobserve_budget_do_not_write",
+  "native_exposure_invalid_configured_policy_fails_without_writes_and_empty_has_no_work"
+]

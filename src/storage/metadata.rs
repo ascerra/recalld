@@ -8,10 +8,13 @@
 //! See CS-07 for the full specification.
 
 pub(crate) mod batch;
+mod canonical_list;
+mod canonical_scope;
 mod canonical_vector_snapshot;
 mod catalog;
 #[cfg(test)]
 mod catalog_completion_tests;
+mod catalog_page;
 mod certification;
 pub(crate) mod effects;
 mod inherited_policy;
@@ -31,7 +34,7 @@ mod native_store_profile;
 pub(crate) use native_store_profile::NativeStoreProfileResolution;
 mod observation;
 mod publication;
-pub(crate) use publication::CanonicalReadView;
+pub(crate) use publication::{CanonicalReadView, PointRead};
 pub(crate) mod purge;
 mod purge_budget;
 pub(crate) mod removal_ledger;

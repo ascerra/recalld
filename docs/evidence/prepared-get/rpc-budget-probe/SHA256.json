@@ -1,0 +1,13 @@
+{
+  "EXECUTABLE.json": "7345097c35b76621907a6f86aa3bfdcfb2ff421b6ae37c5d6734809657ebd028",
+  "REPORT.md": "bf592af18736a340bc16da90647b9bf282ce0cedafeae94ad741526719d01ca7",
+  "SOURCE.json": "52b4701cc1f11aae361bf80fa44a5d3d66bf9007625d086ee5515d2147b276d7",
+  "budget.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "budget.log": "2ef9150970afbe8e9173d2d34fc227340b6ffbfecf32011455ad4df47f570718",
+  "build-memory.events": "d0a4e7ce404b0c90a0bd0f3c02266e2af9c786efe4b9e99fce704a2b7c63ccfa",
+  "build-memory.peak": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+  "build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "build.log": "60401fc712de92ed866ed1b58f5e9a439734af2e240b8bfd12fdebc20ad48e29",
+  "test-memory.events": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+  "test-memory.peak": "f1c07f123d1485e7258ee5a531a843632a2c8b288a53ea1e02b3dadcb9eec0aa"
+}

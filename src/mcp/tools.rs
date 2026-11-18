@@ -54,6 +54,7 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         list_tags_def(),
     ];
     for tool in &mut tools {
+        tool.output_schema = super::tool_schema::output(&tool.name);
         tool.input_schema["properties"]["contractVersion"] = json!({
             "type": "integer", "enum": [1], "default": 1,
             "description": "Application contract version. This server currently supports version 1 only."
@@ -131,6 +132,7 @@ pub async fn dispatch_tool(
 
 fn store_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "store_memory".to_string(),
         title: Some("Store Memory".to_string()),
         // The near-duplicate half of this description teaches the
@@ -266,6 +268,7 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
 
 fn store_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "store_memories".to_string(),
         title: Some("Store Memories (Batch)".to_string()),
         description: "Store multiple memories in a single call. Each item has the \
@@ -623,6 +626,7 @@ async fn handle_store_memories(bridge: &McpBridge, arguments: serde_json::Value)
 
 fn recall_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "recall_memories".to_string(),
         title: Some("Recall Memories".to_string()),
         description: "Search for relevant memories using a natural language query. \
@@ -806,9 +810,10 @@ async fn handle_recall_memories(
 
 fn get_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "get_memory".to_string(),
         title: Some("Get Memory".to_string()),
-        description: "Retrieve a specific memory by its ID. This MCP fetch does not record access."
+        description: "Retrieve a specific memory by its ID. recordAccess defaults to true; use recordAccess:false for inspection without recording access."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -855,18 +860,18 @@ async fn handle_get_memory(bridge: &McpBridge, arguments: serde_json::Value) -> 
         Ok(value) => value,
         Err(e) => return ToolCallResult::error(e.to_string()),
     };
-    match bridge
+    bridge
         .storage
-        .get_memory(id, record_access, namespace)
+        .get_api1(
+            crate::serialization::get_api1::Request {
+                id,
+                record_access,
+                namespace: namespace.map(str::to_owned),
+            },
+            crate::daemon::api1_get::response_limit(),
+        )
         .await
-    {
-        Ok(Some(record)) => match ToolCallResult::json(&record) {
-            Ok(r) => r,
-            Err(e) => ToolCallResult::error(format!("Serialization error: {e}")),
-        },
-        Ok(None) => ToolCallResult::error(format!("Memory not found: {id_str}")),
-        Err(e) => ToolCallResult::error(format!("Failed to get memory: {e}")),
-    }
+        .mcp(id_str, namespace.is_some())
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -875,6 +880,7 @@ async fn handle_get_memory(bridge: &McpBridge, arguments: serde_json::Value) -> 
 
 fn reinforce_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "reinforce_memory".to_string(),
         title: Some("Reinforce Memory".to_string()),
         description: "Strengthen a memory that proved useful. Increases its \
@@ -950,6 +956,7 @@ async fn handle_reinforce_memory(
 
 fn forget_memory_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "forget_memory".to_string(),
         title: Some("Forget Memory".to_string()),
         // "Permanently delete" was wrong in both directions: the record
@@ -1020,6 +1027,7 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
 
 fn forget_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "forget_memories".to_string(),
         title: Some("Forget Memories (Batch)".to_string()),
         description: "Delete several memories in a single call. Each moves to the \
@@ -1200,6 +1208,7 @@ async fn handle_forget_memories(
 
 fn find_similar_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "find_similar_memories".to_string(),
         title: Some("Find Similar Memories".to_string()),
         description: "Find memories semantically similar to a specific existing \
@@ -1251,7 +1260,7 @@ fn find_similar_memories_def() -> ToolInfo {
                 },
                 "sameNamespace": {
                     "type": "boolean",
-                    "description": "Legacy selector (default: true). The current single-mode adapter always uses the source record namespace, including when false. Ignored in scan mode.",
+                    "description": "Single mode: true (default) restricts results to the source namespace; false explicitly searches namespaces with a matching known embedding profile and dimension. Namespaces with unknown or incompatible profiles are excluded. Ignored in scan mode.",
                     "default": true
                 }
             }
@@ -1421,6 +1430,7 @@ async fn handle_find_similar_scan(
 
 fn create_namespace_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "create_namespace".to_string(),
         title: Some("Create Namespace".to_string()),
         description: "Create a new memory namespace for organizing memories by \
@@ -1439,7 +1449,7 @@ fn create_namespace_def() -> ToolInfo {
                 },
                 "embeddingDim": {
                     "type": "integer",
-                    "description": "Integer 1-8192; null is invalid. Fixed after creation. Omission inherits the default namespace dimension (fallback 1536).",
+                    "description": "Integer 1-8192; null is invalid. Must equal the active provider dimension; omission selects that dimension. Fixed after creation.",
                     "minimum": 1,
                     "maximum": 8192
                 },
@@ -1512,6 +1522,7 @@ async fn handle_create_namespace(
 
 fn delete_namespace_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "delete_namespace".to_string(),
         title: Some("Delete Namespace".to_string()),
         description: "Destroy a namespace and everything in it: every memory, every \
@@ -1628,6 +1639,7 @@ async fn handle_delete_namespace(
 
 fn namespace_stats_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "namespace_stats".to_string(),
         title: Some("Namespace Stats".to_string()),
         description: "Get statistics for a memory namespace: live memory count, \
@@ -1691,6 +1703,7 @@ async fn handle_namespace_stats(
 
 fn list_memories_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "list_memories".to_string(),
         title: Some("List Memories".to_string()),
         description: "List all memories in a namespace with pagination and optional \
@@ -1789,6 +1802,7 @@ async fn handle_list_memories(bridge: &McpBridge, arguments: serde_json::Value) 
 
 fn list_namespaces_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "list_namespaces".to_string(),
         title: Some("List Namespaces".to_string()),
         description: "List every memory namespace with its ID, embedding dimensions, live \
@@ -1832,6 +1846,7 @@ async fn handle_list_namespaces(
 
 fn list_tags_def() -> ToolInfo {
     ToolInfo {
+        output_schema: None,
         name: "list_tags".to_string(),
         title: Some("List Tags".to_string()),
         description: "List the tag vocabulary with per-label memory counts, most common \
@@ -1909,6 +1924,64 @@ pub(crate) async fn dispatch_v2(
     name: &str,
     arguments: serde_json::Value,
 ) -> ToolCallResult {
+    if matches!(name, "list_namespaces" | "list_tags") {
+        use crate::serialization::catalog_page::{CatalogKind, CatalogPageRequest};
+        let kind = if name == "list_namespaces" {
+            CatalogKind::Namespaces
+        } else {
+            CatalogKind::Tags
+        };
+        let result = match CatalogPageRequest::from_mcp(&arguments, kind) {
+            Ok(mut request) => {
+                if !request.all_namespaces {
+                    request
+                        .namespace
+                        .get_or_insert_with(|| bridge.default_namespace().into());
+                }
+                bridge.storage.list_catalog_page(request).await
+            }
+            Err(error) => Err(error.into()),
+        };
+        let result = match result {
+            Ok(page) => {
+                let active = bridge.storage.catalog_profile_context();
+                Ok(page.with_active_embedding(active))
+            }
+            Err(error) => Err(error),
+        };
+        let (status, envelope) = crate::catalog_page::response(result);
+        #[cfg(test)]
+        crate::serialization::page_schema::record_fixture(
+            Some(kind),
+            &serde_json::to_value(&envelope).unwrap(),
+        );
+        let mut out = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        if status >= 400 {
+            out.is_error = Some(true);
+        }
+        return out;
+    }
+
+    if name == "list_memories" {
+        let result = match crate::serialization::list::ListPageRequest::from_mcp(&arguments) {
+            Ok(mut request) => {
+                request
+                    .namespace
+                    .get_or_insert_with(|| bridge.default_namespace().into());
+                bridge.storage.list_canonical_page(request).await
+            }
+            Err(error) => Err(error.into()),
+        };
+        let (status, envelope) = crate::canonical_list::response(result);
+        let mut result = ToolCallResult::json(&envelope)
+            .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+        if status >= 400 {
+            result.is_error = Some(true);
+        }
+        return result;
+    }
+
     if name == "update_namespace_policy" {
         let mut namespace_id = None;
         let result = match crate::serialization::policy::PolicyRequest::from_mcp(&arguments) {
@@ -1985,6 +2058,9 @@ pub(crate) async fn dispatch_v2(
         )
         .await;
     }
+    if name == "get_memory" {
+        return prepared_get(bridge.search.as_ref(), &arguments).await;
+    }
     if name == "find_similar_memories"
         && arguments.get("mode").and_then(serde_json::Value::as_str) != Some("scan")
     {
@@ -2053,6 +2129,21 @@ pub(crate) async fn prepared_similar(
     let reply = match crate::serialization::query::SimilarRequest::from_mcp(arguments) {
         Ok(request) => search.similar_contract(request).await,
         Err(error) => crate::serialization::query_response::QueryReply::input(error),
+    };
+    reply.mcp()
+}
+
+pub(crate) async fn prepared_get(
+    search: &dyn crate::mcp::bridge::SearchPipeline,
+    arguments: &serde_json::Value,
+) -> ToolCallResult {
+    let reply = match crate::serialization::get::GetRequest::from_mcp(arguments) {
+        Ok(request) => {
+            search
+                .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .await
+        }
+        Err(error) => crate::serialization::get::GetReply::input(error),
     };
     reply.mcp()
 }
@@ -2776,6 +2867,12 @@ mod tests {
         .into_bridge();
 
         let result = handle_forget_memories(&bridge, json!({ "ids": ids })).await;
+        crate::test_support::record_schema_result(
+            "forget-short-compatibility",
+            "forget_memories",
+            &result,
+            "existing StubBridge short result-array regression; compatibility projection, not a live storage writer",
+        );
         let payload: serde_json::Value =
             serde_json::from_str(&tool_text(&result)).expect("the result is JSON");
 
@@ -2975,7 +3072,23 @@ mod tests {
         use crate::storage::StorageEngine as _;
         let fixture = crate::test_support::Fixture::new();
         let mut bridge = crate::test_support::StubBridge::default().into_bridge();
-        bridge.namespaces = std::sync::Arc::new(fixture.namespace_adapter());
+        // Positive range controls require an actually matching active provider.
+        let dimension = if reject {
+            crate::test_support::DIM
+        } else {
+            value.as_u64().unwrap() as usize
+        };
+        bridge.namespaces =
+            std::sync::Arc::new(crate::mcp::bridge_adapters::McpNamespaceAdapter::new(
+                fixture.storage.clone(),
+                std::sync::Arc::new(crate::embedding::PassthroughProvider::new(dimension)),
+                fixture.cache.clone(),
+                fixture.vector_index.clone(),
+                fixture.fts_index.clone(),
+                fixture.entity_index.clone(),
+                fixture.graph.clone(),
+                chrono_tz::UTC,
+            ));
         let result = dispatch_tool(
             &bridge,
             "create_namespace",

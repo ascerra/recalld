@@ -33,6 +33,15 @@ use crate::storage::StorageError;
 /// expansion.
 #[async_trait::async_trait]
 pub trait SearchPipeline: Send + Sync {
+    async fn get_contract(
+        &self,
+        _request: crate::serialization::get::GetRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        crate::serialization::get::GetReply::failure(SearchError::Unavailable(
+            "prepared get requires the actual coherent owner".into(),
+        ))
+    }
     async fn similar_contract(
         &self,
         _request: crate::serialization::query::SimilarRequest,
@@ -282,6 +291,27 @@ pub trait SearchPipeline: Send + Sync {
 /// Persistent storage engine (meta.db, fulltext.dat, vectors.dat, edges.db).
 #[async_trait::async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Optional identity captured from the configured provider when this adapter
+    /// was constructed. Metadata calls never invoke a provider to obtain it.
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        None
+    }
+    /// Canonical catalogs; older/remote adapters fail closed without v1 fallback.
+    async fn list_catalog_page(
+        &self,
+        _request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        Err(crate::catalog_page::CatalogError::Unavailable)
+    }
+
+    /// Canonical metadata page; unsupported/remote adapters fail closed.
+    async fn list_canonical_page(
+        &self,
+        _request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        Err(crate::canonical_list::ListError::Unavailable)
+    }
+
     /// Physical control format, never inferred from API version or a namespace.
     async fn native_store_format(&self) -> Result<bool, StorageError> {
         Ok(false)
@@ -889,6 +919,7 @@ pub struct NamespaceListInfo {
 pub struct AppState {
     /// Optional same-owner native batch producer. Absence fails closed.
     pub native_batches: Option<Arc<dyn crate::mcp::bridge::StorageEngine>>,
+    /// Frozen configured default for contract2; v1 omission behavior is unchanged.
     pub default_namespace: String,
     /// The search pipeline: embedding, vector search, graph expansion.
     pub search: Arc<dyn SearchPipeline>,
@@ -916,6 +947,11 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn with_default_namespace(mut self, namespace: String) -> Self {
+        self.default_namespace = namespace;
+        self
+    }
+
     pub fn with_native_batches(
         mut self,
         producer: Arc<dyn crate::mcp::bridge::StorageEngine>,

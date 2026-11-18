@@ -1,0 +1,11 @@
+
+running 3 tests
+API1 old peer access=true: get_frames=1 actual_events=1 result=Err(Internal("daemon connection lost while awaiting the response to `get_memory` (Internal error: daemon connection lost while awaiting the response to `get_memory`: connection closed by peer); the operation may or may not have been applied. The connection has been re-established - verify with recall_memories before retrying."))
+test daemon::client::tests::api1_point_before_old_peer_lost_observing_reply_never_repeats ... ok
+API1 projection remote=false: actual=0.99999636 captured=0.99999636 materialized=1.0; false bytes/scope/payload/one-clock controls passed
+test search::pipeline::read_view::tests::api1_point_before_direct_native_uses_captured_projection ... ok
+API1 projection remote=true: actual=0.99999636 captured=0.99999636 materialized=1.0; false bytes/scope/payload/one-clock controls passed
+test search::pipeline::read_view::tests::api1_point_before_remote_native_uses_captured_projection ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1821 filtered out; finished in 9.19s
+

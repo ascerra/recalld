@@ -184,7 +184,7 @@ pub(crate) fn prepare_api1_store(
 }
 
 pub(crate) fn prepare(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::BridgeError> {
-    if !matches!(input.mutation_version, 1 | 2)
+    if !matches!(input.mutation_version, 1 | 2 | 4)
         || input.result_version != 1
         || input.items.is_empty()
         || input.items.len() > crate::model::constants::MAX_BATCH_MEMORIES
@@ -215,7 +215,8 @@ pub(crate) fn prepare(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::B
         .map(|(index, value)| match input.kind {
             BatchKind::Insert => {
                 let parsed = parse_store(value, index, &input.default_namespace);
-                let request_hash = item_hash(
+                let request_hash = item_hash_version(
+                    input.mutation_version,
                     input.kind,
                     value,
                     parsed.as_ref().ok(),
@@ -265,7 +266,13 @@ pub(crate) fn prepare(input: &BatchInput) -> Result<Vec<PreparedItem>, bridge::B
                 }
             }
             BatchKind::Forget => {
-                let request_hash = item_hash(input.kind, value, None, &input.default_namespace)?;
+                let request_hash = item_hash_version(
+                    input.mutation_version,
+                    input.kind,
+                    value,
+                    None,
+                    &input.default_namespace,
+                )?;
                 let id = value
                     .as_str()
                     .and_then(|s| uuid::Uuid::parse_str(s).ok())
@@ -393,6 +400,16 @@ fn item_hash(
     parsed: Option<&bridge::StoreInput>,
     default_namespace: &str,
 ) -> Result<[u8; 32], bridge::BridgeError> {
+    item_hash_version(1, kind, original, parsed, default_namespace)
+}
+
+fn item_hash_version(
+    version: u32,
+    kind: BatchKind,
+    original: &Value,
+    parsed: Option<&bridge::StoreInput>,
+    default_namespace: &str,
+) -> Result<[u8; 32], bridge::BridgeError> {
     let encoded = (|| -> Result<Vec<u8>, crate::storage::StorageError> {
         if let Some(input) = parsed {
             // Fixed semantic defaults expand before hashing. Mutable policy
@@ -434,15 +451,21 @@ fn item_hash(
         }
     })()
     .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
+    let (contract_version, domain) = match version {
+        1 => (1, "batch_item_intent_v1"),
+        4 => (2, "batch_item_intent_v4"),
+        _ => {
+            return Err(bridge::BridgeError::InvalidInput(
+                "unsupported legacy batch format".into(),
+            ));
+        }
+    };
     let ctx = MutationContext {
+        contract_version,
         scope: MutationScope::Catalog,
         ..MutationContext::unkeyed(crate::model::NamespaceId::new(1))
     };
-    Ok(control::request_hash(
-        &ctx,
-        "batch_item_intent_v1",
-        &[&encoded],
-    ))
+    Ok(control::request_hash(&ctx, domain, &[&encoded]))
 }
 
 fn unknown_fields(value: &Value) -> Value {

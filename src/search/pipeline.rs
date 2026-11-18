@@ -31,6 +31,8 @@ pub use explanation::{
     DirectScoreEvidence, InheritedScoreExplanation, MAX_EXPLANATION_SOURCES, MinScoreDisposition,
     OwnScoreExplanation, ScoreExplanation, ScoreFormula,
 };
+#[path = "get_wire.rs"]
+mod get_wire;
 #[path = "payload_selection.rs"]
 mod payload_selection;
 #[path = "query_wire.rs"]
@@ -279,6 +281,23 @@ pub trait AccessRecorder: Send + Sync {
     /// Only a configured, owned native writer may admit observing v2 reads.
     fn supports_native_exposure(&self) -> bool {
         false
+    }
+
+    /// Prepared point observations retain their captured native witness. A
+    /// recorder must opt in; this default never silently performs a fresh capture.
+    async fn record_point_for_publication(
+        &self,
+        _id: MemoryId,
+        _scope: &crate::storage::control::ExposureScope,
+        _intent: Option<crate::storage::native_lifecycle::ExposureIntent>,
+        _sampled_at: i64,
+        _parent: Option<&crate::storage::work::WorkTicket>,
+        _policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        _original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        Err(SearchError::Unavailable(
+            "captured point observer unavailable".into(),
+        ))
     }
 
     async fn record_similarity_for_publication(

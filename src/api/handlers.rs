@@ -448,6 +448,26 @@ pub async fn create_memory(
 /// 2. Look up in cache (hit) or load from storage (miss).
 /// 3. Record an access event (`DirectRetrieval`).
 /// 4. Return 200 with memory, or 404 if not found.
+/// Prepared inner consumer; the public version gate remains unchanged.
+pub(crate) async fn prepared_get(
+    search: &dyn crate::api::state::SearchPipeline,
+    id: crate::model::MemoryId,
+    arguments: &serde_json::Value,
+) -> (StatusCode, Json<crate::serialization::get::GetReply>) {
+    let reply = match crate::serialization::get::GetRequest::from_http(arguments, id) {
+        Ok(request) => {
+            search
+                .get_contract(request, crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .await
+        }
+        Err(error) => crate::serialization::get::GetReply::input(error),
+    };
+    (
+        StatusCode::from_u16(reply.http_status).expect("get HTTP status"),
+        Json(reply),
+    )
+}
+
 pub async fn get_memory(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -695,6 +715,67 @@ fn feedback_error(error: Box<dyn std::error::Error + Send + Sync>, id: &str) -> 
 /// 6. Convert to MemoryResponse objects.
 /// 7. Return ListMemoriesResponse with pagination metadata.
 pub async fn list_memories(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::serialization::contract::ContractVersion;
+    use axum::{extract::FromRequestParts, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(version) => version,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    let (mut parts, _) = request.into_parts();
+    if version == ContractVersion::V1 {
+        let params = match Query::<ListMemoriesQuery>::from_request_parts(&mut parts, &state).await
+        {
+            Ok(params) => params,
+            Err(error) => return error.into_response(),
+        };
+        return list_memories_v1(State(state), params).await.into_response();
+    }
+    let Query(params) =
+        match Query::<Vec<(String, String)>>::from_request_parts(&mut parts, &state).await {
+            Ok(params) => params,
+            Err(error) => return error.into_response(),
+        };
+    list_memories_v2(state.storage.as_ref(), &state.default_namespace, &params).await
+}
+pub(crate) async fn list_memories_v2(
+    storage: &dyn super::state::StorageEngine,
+    default_namespace: &str,
+    params: &[(String, String)],
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let result = match crate::serialization::list::ListPageRequest::from_http(params) {
+        Ok(mut request) => {
+            request
+                .namespace
+                .get_or_insert_with(|| default_namespace.into());
+            storage.list_canonical_page(request).await
+        }
+        Err(error) => Err(error.into()),
+    };
+    let (status, envelope) = crate::canonical_list::response(result);
+    (
+        axum::http::StatusCode::from_u16(status).expect("fixed status"),
+        Json(envelope),
+    )
+        .into_response()
+}
+async fn list_memories_v1(
     State(state): State<AppState>,
     Query(params): Query<ListMemoriesQuery>,
 ) -> Result<Json<ApiResponse<ListMemoriesResponse>>, AppError> {
@@ -1386,7 +1467,7 @@ async fn find_similar_admitted(
 // ═══════════════════════════════════════════════════════════════════════
 
 /// GET /namespaces -- list all namespaces.
-pub async fn list_namespaces(
+async fn list_namespaces_v1(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<Vec<NamespaceListItem>>>, AppError> {
     let stamp = state.storage.effects_stamp().await?;
@@ -1567,6 +1648,7 @@ async fn create_namespace_v1(
 fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> AppError {
     use crate::decay::lifecycle::LifecycleError;
     use crate::derived_completion::catalog::CatalogCreateError;
+    use crate::embedding::runtime::NamespaceProfileError;
     use crate::storage::StorageError;
     let error: Box<dyn std::error::Error + Send + Sync> = match error
         .downcast::<CatalogCreateError>()
@@ -1582,6 +1664,21 @@ fn namespace_create_error(error: Box<dyn std::error::Error + Send + Sync>) -> Ap
         },
         Err(error) => error,
     };
+    if let Some(error) = error.downcast_ref::<NamespaceProfileError>() {
+        return match error {
+            NamespaceProfileError::InvalidDimension => AppError::BadRequest {
+                message: error.to_string(),
+                field: Some("embeddingDim".into()),
+            },
+            NamespaceProfileError::InactiveDimension { .. } => AppError::UnprocessableEntity {
+                message: error.to_string(),
+                field: Some("embeddingDim".into()),
+            },
+            NamespaceProfileError::Unavailable(_) => AppError::ServiceUnavailable {
+                message: error.to_string(),
+            },
+        };
+    }
     if matches!(
         error.downcast_ref::<LifecycleError>(),
         Some(LifecycleError::InvalidInput(_))
@@ -2730,6 +2827,113 @@ pub async fn capabilities(State(state): State<super::state::AppState>) -> axum::
         axum::http::HeaderValue::from_static("private, no-store"),
     );
     response
+}
+
+pub async fn list_namespaces(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    catalog_route(
+        state,
+        request,
+        crate::serialization::catalog_page::CatalogKind::Namespaces,
+    )
+    .await
+}
+pub async fn list_tags(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    catalog_route(
+        state,
+        request,
+        crate::serialization::catalog_page::CatalogKind::Tags,
+    )
+    .await
+}
+async fn catalog_route(
+    state: AppState,
+    request: axum::extract::Request,
+    kind: crate::serialization::catalog_page::CatalogKind,
+) -> axum::response::Response {
+    use crate::serialization::{catalog_page::CatalogKind, contract::ContractVersion};
+    use axum::{extract::FromRequestParts, response::IntoResponse};
+    let version = match super::middleware::request_contract_version(request.headers()) {
+        Ok(v) => v,
+        Err(message) => {
+            return AppError::BadRequest {
+                message,
+                field: Some("contractVersion".into()),
+            }
+            .into_response();
+        }
+    };
+    if let Err(error) = version.require_supported() {
+        return AppError::BadRequest {
+            message: error.to_string(),
+            field: Some("contractVersion".into()),
+        }
+        .into_response();
+    }
+    if version == ContractVersion::V1 {
+        return if kind == CatalogKind::Namespaces {
+            list_namespaces_v1(State(state)).await.into_response()
+        } else {
+            AppError::BadRequest {
+                message: "tag continuation requires contractVersion 2".into(),
+                field: Some("contractVersion".into()),
+            }
+            .into_response()
+        };
+    }
+    let (mut parts, _) = request.into_parts();
+    let Query(params) =
+        match Query::<Vec<(String, String)>>::from_request_parts(&mut parts, &state).await {
+            Ok(q) => q,
+            Err(error) => return error.into_response(),
+        };
+    catalog_v2(
+        state.storage.as_ref(),
+        &state.default_namespace,
+        &params,
+        kind,
+    )
+    .await
+}
+pub(crate) async fn catalog_v2(
+    storage: &dyn super::state::StorageEngine,
+    default_namespace: &str,
+    params: &[(String, String)],
+    kind: crate::serialization::catalog_page::CatalogKind,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let result =
+        match crate::serialization::catalog_page::CatalogPageRequest::from_http(params, kind) {
+            Ok(mut request) => {
+                if !request.all_namespaces {
+                    request
+                        .namespace
+                        .get_or_insert_with(|| default_namespace.into());
+                }
+                storage.list_catalog_page(request).await
+            }
+            Err(error) => Err(error.into()),
+        };
+    let result = result.map(|page| {
+        let active = storage.catalog_profile_context();
+        page.with_active_embedding(active)
+    });
+    let (status, envelope) = crate::catalog_page::response(result);
+    #[cfg(test)]
+    crate::serialization::page_schema::record_fixture(
+        Some(kind),
+        &serde_json::to_value(&envelope).unwrap(),
+    );
+    (
+        StatusCode::from_u16(status).expect("fixed catalog status"),
+        Json(envelope),
+    )
+        .into_response()
 }
 
 /// Contract2-only numeric policy replacement; existing application gate remains.
