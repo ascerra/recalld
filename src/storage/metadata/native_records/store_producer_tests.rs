@@ -1156,7 +1156,9 @@ async fn native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mut
             .await
             .err()
             .unwrap();
-        if case == 3 {
+        if case == 0 {
+            assert!(matches!(error, StorageError::EmbeddingProfileRequired));
+        } else if case == 3 {
             assert!(matches!(error, StorageError::EmbeddingProfileMismatch));
             assert_eq!(error.to_string(), "EMBEDDING_PROFILE_MISMATCH");
         } else if case >= 5 {
@@ -1414,9 +1416,14 @@ async fn batch_profile_id_mismatch_and_invalid_pair_are_retained_without_provide
         json!({"summary":"mismatch", "embedding":[1.,0.,0.,0.],"embeddingProfileId":format!("ep1:{}", "0".repeat(64))}),
         json!({"summary":"null", "embedding":[1.,0.,0.,0.],"embeddingProfileId":null}),
         json!({"summary":"unpaired", "embeddingProfileId":d.profile.profile_id().unwrap()}),
+        json!({"summary":"missing ID in bound namespace", "embedding":[1.,0.,0.,0.]}),
     ];
     let out = a.mutate_native_batch(r.clone()).await.unwrap();
-    assert_eq!(out.outcome.failed, 3);
+    assert_eq!(out.outcome.failed, 4);
+    assert_eq!(
+        out.outcome.items[3].error.as_ref().unwrap().code,
+        "INVALID_INPUT"
+    );
     assert_eq!(
         out.outcome.items[0].error.as_ref().unwrap().code,
         "CONFLICT"

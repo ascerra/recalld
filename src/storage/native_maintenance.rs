@@ -159,6 +159,7 @@ pub(crate) fn plan(
             after.lifecycle.has_summary = false;
             after.content = erased;
             after.content.vector = before.content.vector.clone();
+            after.content.embedding_origin = before.content.embedding_origin.clone();
         }
     }
     Ok(PlannedDecay::Phase(after))

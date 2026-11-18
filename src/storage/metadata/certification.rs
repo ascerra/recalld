@@ -17,6 +17,43 @@ pub(super) struct VectorValidationCommit {
     created: Option<(u32, VectorCertification)>,
 }
 impl OwnedVectorValidation {
+    fn require_insert(
+        &self,
+        tx: &redb::WriteTransaction,
+        namespace_id: NamespaceId,
+        content: &crate::storage::native_records::ContentProof,
+        execution: Option<&crate::storage::vector_certification::VectorExecution>,
+    ) -> Result<(), StorageError> {
+        let table = tx.open_table(NAMESPACE_TABLE)?;
+        let value = table
+            .get(namespace_id.get())?
+            .ok_or(StorageError::NamespaceNotFound(namespace_id.get()))?;
+        let namespace = NamespaceConfig::decode(value.value())?;
+        if namespace.id != namespace_id {
+            return Err(StorageError::InvalidControl(
+                "insert namespace identity mismatch".into(),
+            ));
+        }
+        self.require_namespace(self.at, &namespace)?;
+        content.validate_namespace_profile(&namespace)?;
+        if matches!(
+            namespace.schema.as_ref().unwrap().embedding_binding,
+            crate::model::schema::EmbeddingBinding::UnknownLegacy
+        ) {
+            // The validated creation transition carries evidence for this row,
+            // never a namespace certification or an assertion about old vectors.
+            if content.embedding_origin.is_none() || execution.is_some() {
+                return Err(StorageError::RecoveryRequired(
+                    "unknown namespace insertion lacks per-record creation evidence".into(),
+                ));
+            }
+        } else if execution.map(|e| &e.certification) != self.namespaces.get(&namespace_id.get()) {
+            return Err(StorageError::RecoveryRequired(
+                "fresh vector lacks owned certification/execution proof".into(),
+            ));
+        }
+        Ok(())
+    }
     pub(super) fn require_at(&self, at: GenerationRef) -> Result<(), StorageError> {
         if self.at != at {
             return Err(StorageError::RecoveryRequired(
@@ -31,6 +68,27 @@ impl OwnedVectorValidation {
         namespace: &NamespaceConfig,
     ) -> Result<(), StorageError> {
         self.require_at(at)?;
+        if namespace.schema.as_ref().is_some_and(|schema| {
+            matches!(
+                schema.embedding_binding,
+                crate::model::schema::EmbeddingBinding::UnknownLegacy
+            )
+        }) {
+            namespace
+                .schema
+                .as_ref()
+                .unwrap()
+                .validate(namespace)
+                .map_err(StorageError::InvalidControl)?;
+            // Structural validation and canonical generation remain mandatory;
+            // no certification is fabricated for compatibility comparisons.
+            if self.namespaces.contains_key(&namespace.id.get()) {
+                return Err(StorageError::RecoveryRequired(
+                    "unknown namespace has certified inventory".into(),
+                ));
+            }
+            return Ok(());
+        }
         let binding = namespace
             .schema
             .as_ref()
@@ -232,33 +290,21 @@ impl MetadataStore {
             }
             MutationOutcome::NativeMemoryInserted { transition } => {
                 transition.validate(receipt, true)?;
-                let expected = owned.namespaces.get(&transition.namespace_id.get());
-                if expected.is_none()
-                    || transition
-                        .vector_execution
-                        .as_ref()
-                        .map(|e| &e.certification)
-                        != expected
-                {
-                    return Err(StorageError::RecoveryRequired(
-                        "fresh vector lacks owned certification/execution proof".into(),
-                    ));
-                }
+                owned.require_insert(
+                    tx,
+                    transition.namespace_id,
+                    &transition.primary()?.after.content,
+                    transition.vector_execution.as_ref(),
+                )?;
             }
             MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
                 transition.validate(receipt)?;
-                let expected = owned.namespaces.get(&transition.namespace_id.get());
-                if expected.is_none()
-                    || transition
-                        .vector_execution
-                        .as_ref()
-                        .map(|e| &e.certification)
-                        != expected
-                {
-                    return Err(StorageError::RecoveryRequired(
-                        "fresh linked vector lacks owned certification/execution proof".into(),
-                    ));
-                }
+                owned.require_insert(
+                    tx,
+                    transition.namespace_id,
+                    &transition.primary()?.after.content,
+                    transition.vector_execution.as_ref(),
+                )?;
             }
             // These existing typed writers preserve vectors or remove exact
             // owned references. Their transaction/ledger validators remain in

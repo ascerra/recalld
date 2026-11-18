@@ -158,6 +158,43 @@ pub(crate) fn read_selection(
 }
 
 impl MetadataStore {
+    /// Constructor-only text publication for empty native genesis. Unlike a
+    /// compaction this has no previous payload, relocated refs or receipt.
+    pub(crate) fn initialize_native_text(
+        &self,
+        descriptor: &TextGeneration,
+    ) -> Result<(), StorageError> {
+        let tx = self.db.begin_write()?;
+        let state = control::read_control(&tx)?;
+        if !self.native_lifecycle_only
+            || state.control_schema_version != 2
+            || state.committed_generation != Generation::default()
+            || tx.open_table(META_TABLE)?.len()? != 0
+            || tx.open_table(NAMESPACE_TABLE)?.len()? != 0
+            || tx.open_table(CATALOG)?.len()? != 0
+        {
+            return Err(StorageError::InvalidControl(
+                "native text genesis requires empty schema2 storage".into(),
+            ));
+        }
+        descriptor.validate(state.store_id)?;
+        if descriptor.format_version != 2 {
+            return Err(StorageError::InvalidControl(
+                "native text genesis requires format2".into(),
+            ));
+        }
+        {
+            let mut catalog = tx.open_table(CATALOG)?;
+            catalog.insert(
+                descriptor.id.to_string().as_str(),
+                control::encode(descriptor)?.as_slice(),
+            )?;
+            catalog.insert("active", control::encode(&descriptor.id)?.as_slice())?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub(crate) fn text_compaction_guard_with_work(
         &self,
         parent: Option<&WorkTicket>,

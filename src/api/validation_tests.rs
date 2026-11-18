@@ -98,7 +98,7 @@ fn fixture_clients_with_embedding(
     )
 }
 
-fn fixture_state_with_embedding(
+pub(crate) fn fixture_state_with_embedding(
     f: &Fixture,
     embedding: Arc<dyn crate::embedding::EmbeddingProvider>,
 ) -> (AppState, crate::mcp::bridge::McpBridge) {

@@ -22,7 +22,7 @@ impl MetadataStore {
             return Err(StorageError::MutationNamespaceMismatch);
         };
         if input.insert.embedding_profile.is_some()
-            || input.insert.memory.embedding.is_some() != supplied_profile_id.is_some()
+            || (input.insert.memory.embedding.is_none() && supplied_profile_id.is_some())
         {
             return Err(StorageError::InvalidMutation("native wire vector requires only its profile ID; generated vectors omit the selector".into()));
         }
@@ -40,9 +40,7 @@ impl MetadataStore {
                 primary.lifecycle.stability.get(),
                 primary.lifecycle.difficulty.get(),
                 transition.embedding_dim,
-                primary.content.profile_id.as_deref().ok_or_else(|| {
-                    StorageError::InvalidControl("linked creation profile missing".into())
-                })?,
+                primary.content.profile_id.as_deref(),
                 &transition.settings,
                 supplied_profile_id,
             )?;
@@ -54,6 +52,20 @@ impl MetadataStore {
             return Ok(NativeStoreProfileResolution::Replay(receipt));
         }
         let mut resolved = input.clone();
+        if input.insert.memory.embedding.is_some() && supplied_profile_id.is_none() {
+            let table = tx.open_table(NAMESPACE_TABLE)?;
+            let row = table
+                .get(namespace_id.get())?
+                .ok_or(StorageError::NamespaceNotFound(namespace_id.get()))?;
+            let namespace = NamespaceConfig::decode(row.value())?;
+            if namespace
+                .schema
+                .as_ref()
+                .is_none_or(|s| !matches!(s.embedding_binding, EmbeddingBinding::UnknownLegacy))
+            {
+                return Err(StorageError::EmbeddingProfileRequired);
+            }
+        }
         if let Some(requested) = supplied_profile_id {
             if requested.len() != 68
                 || !requested.starts_with("ep1:")

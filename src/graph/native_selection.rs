@@ -36,7 +36,7 @@ pub(crate) struct NativeCandidate {
 pub(crate) struct NativeCandidates {
     pub generation: GenerationRef,
     pub namespace_id: NamespaceId,
-    pub profile_id: String,
+    pub profile_id: Option<String>,
     pub candidates: Vec<NativeCandidate>,
     demand: SelectionDemand,
 }
@@ -108,9 +108,8 @@ pub(crate) fn capture(
         input.embedding_profile.as_ref()
     } else {
         generated.profile.as_ref()
-    }
-    .ok_or_else(|| profile_error("native candidate profile missing".into()))?;
-    let profile_id = crate::embedding::profile::require_compatible(&intent.namespace, profile)
+    };
+    let profile_id = crate::embedding::profile::native_binding(&intent.namespace, profile)
         .map_err(|e| profile_error(e.to_string()))?;
     let mut query = input
         .memory
@@ -256,7 +255,7 @@ impl NativeCandidates {
         if self.demand != SelectionDemand::from_intent(intent)
             || self.generation != insert.capture_generation()
             || self.namespace_id != insert.scope.namespace_id
-            || Some(self.profile_id.as_str())
+            || self.profile_id.as_deref()
                 != crate::storage::native_records::profile_id(&insert.namespace).as_deref()
         {
             return Err(conflict(

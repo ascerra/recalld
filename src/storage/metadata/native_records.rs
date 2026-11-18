@@ -51,11 +51,7 @@ pub(super) fn replay_insert(
         original.lifecycle.stability.get(),
         original.lifecycle.difficulty.get(),
         transition.embedding_dim,
-        original
-            .content
-            .profile_id
-            .as_deref()
-            .ok_or_else(|| invalid("creation profile missing"))?,
+        original.content.profile_id.as_deref(),
     )?;
     control::replay_or_check(tx, ctx, hash)
 }
@@ -88,11 +84,6 @@ impl MetadataStore {
                 .ok_or(StorageError::NamespaceNotFound(scope.namespace_id.get()))?
                 .value(),
         )?;
-        if profile_id(&namespace).is_none() {
-            return Err(StorageError::InvalidMutation(
-                "native insertion requires an explicitly bound namespace profile".into(),
-            ));
-        }
         self.require_certified_namespace(capture.generation, &namespace)?;
         Ok(NativeInsertIntent {
             scope,
@@ -201,7 +192,7 @@ impl MetadataStore {
         clock: &dyn Clock,
         embedding: &[f32],
         generated: &crate::embedding::runtime::GeneratedEmbedding,
-        profile: &crate::model::schema::EmbeddingProfile,
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
         existing_edges: &[PersistedEdge],
         text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
         stage: impl FnOnce(&NamespaceConfig, &mut DiskRecord, &[f32]) -> Result<(), StorageError>,
@@ -263,27 +254,34 @@ impl MetadataStore {
         let generation = state.committed_generation.next()?;
         let input = &intent.original;
         input.validate()?;
-        let binding = crate::embedding::profile::require_compatible(&ns, profile).map_err(|e| {
+        let binding = crate::embedding::profile::native_binding(&ns, profile).map_err(|e| {
             if prepared.is_some() && input.memory.embedding.is_none() {
                 StorageError::ProviderVectorUnavailable(e.to_string())
             } else {
                 StorageError::InvalidMutation(e.to_string())
             }
         })?;
+        if binding.is_none() {
+            let mut records = Vec::new();
+            for row in tx.open_table(META_TABLE)?.iter()? {
+                let (_, bytes) = row?;
+                let record = DiskRecord::from_bytes(bytes.value())?;
+                if record.namespace_id == ns.id.get() {
+                    records.push(record);
+                }
+            }
+            crate::embedding::profile::check_record_generators(&records, profile)
+                .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
+        }
         if let Some(supplied) = &input.embedding_profile {
-            crate::embedding::profile::require_compatible(&ns, supplied)
+            crate::embedding::profile::native_binding(&ns, Some(supplied))
                 .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
         }
         let stability = input
             .memory
             .initial_stability
             .unwrap_or(ns.initial_stability);
-        if ns
-            .schema
-            .as_ref()
-            .is_some_and(|s| s.vector_certification.is_some())
-            && input.memory.embedding.is_none()
-        {
+        if input.memory.embedding.is_none() {
             generated
                 .verify_document(&input.document_v1())
                 .map_err(|e| StorageError::ProviderVectorUnavailable(e.to_string()))?;
@@ -305,7 +303,7 @@ impl MetadataStore {
                 stability,
                 ns.default_difficulty,
                 ns.embedding_dim,
-                &binding,
+                binding.as_deref(),
                 &p.intent.settings,
             )?
         } else {
@@ -314,7 +312,7 @@ impl MetadataStore {
                 stability,
                 ns.default_difficulty,
                 ns.embedding_dim,
-                &binding,
+                binding.as_deref(),
             )?
         };
         control::replay_or_check(&tx, ctx, hash)?;
@@ -422,6 +420,27 @@ impl MetadataStore {
                     phase_changed_at: created,
                     policy_revision: intent.capture.revision,
                     record_generation: Generation::default().next()?,
+                },
+                embedding_origin: if binding.is_none() {
+                    Some(if input.memory.embedding.is_some() {
+                        crate::model::schema::EmbeddingOrigin::Supplied {
+                            profile_id: input
+                                .embedding_profile
+                                .as_ref()
+                                .map(|p| p.profile_id())
+                                .transpose()
+                                .map_err(StorageError::InvalidMutation)?,
+                        }
+                    } else {
+                        crate::model::schema::EmbeddingOrigin::Generated {
+                            descriptor: profile
+                                .ok_or(StorageError::ProviderConfigurationUnavailable)?
+                                .clone(),
+                            document_sha256: hash_bytes(input.document_v1().as_bytes()),
+                        }
+                    })
+                } else {
+                    None
                 },
                 labels: input.labels(),
                 vector: Some(VectorReference {
@@ -680,6 +699,7 @@ impl MetadataStore {
             fields.labels.topics.clear();
             fields.labels.emotions.clear();
             fields.vector = None;
+            fields.embedding_origin = None;
             tx.open_table(META_TABLE)?.insert(
                 intent.memory_id.as_bytes().as_slice(),
                 record.encode()?.as_slice(),

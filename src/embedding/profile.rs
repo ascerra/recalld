@@ -76,6 +76,59 @@ pub fn require_compatible(
     Ok(active_id)
 }
 
+/// Native compatibility is an explicit absence of namespace provenance, not a
+/// profile match. Known bindings remain strict. An absent active descriptor is
+/// permitted only for caller-supplied vectors; generated writers check their
+/// sealed provider evidence separately.
+pub(crate) fn native_binding(
+    namespace: &NamespaceConfig,
+    active: Option<&EmbeddingProfile>,
+) -> Result<Option<String>, ProfileError> {
+    let schema = namespace
+        .schema
+        .as_ref()
+        .ok_or(ProfileError::InvalidNamespace)?;
+    schema
+        .validate(namespace)
+        .map_err(|_| ProfileError::InvalidNamespace)?;
+    if let Some(active) = active {
+        active
+            .validate()
+            .map_err(|_| ProfileError::InvalidDescriptor)?;
+        if active.dimension != namespace.embedding_dim {
+            return Err(ProfileError::DimensionMismatch);
+        }
+    }
+    match schema.embedding_binding {
+        EmbeddingBinding::UnknownLegacy => Ok(None),
+        EmbeddingBinding::Bound { .. } => {
+            require_compatible(namespace, active.ok_or(ProfileError::UnknownLegacy)?).map(Some)
+        }
+    }
+}
+
+/// Unknown old vectors retain legacy compatibility assumptions. Evidence for
+/// newly generated vectors must not silently mix known different generators.
+pub(crate) fn check_record_generators<'a>(
+    records: impl IntoIterator<Item = &'a crate::model::DiskRecord>,
+    active: Option<&'a EmbeddingProfile>,
+) -> Result<(), ProfileError> {
+    let mut expected = active;
+    for record in records {
+        if let Some(crate::model::schema::EmbeddingOrigin::Generated { descriptor, .. }) = record
+            .schema
+            .as_ref()
+            .and_then(|s| s.embedding_origin.as_ref())
+        {
+            if expected.is_some_and(|p| p != descriptor) {
+                return Err(ProfileError::ProfileMismatch);
+            }
+            expected = Some(descriptor);
+        }
+    }
+    Ok(())
+}
+
 /// A validated operator proposal, NOT verified vector provenance or a binding.
 /// Storage must verify vector provenance/ownership and atomically adopt it under
 /// the all-writer barrier. This value grants no serving or mutation permission.

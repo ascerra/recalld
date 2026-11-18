@@ -193,7 +193,7 @@ fn retained(engine: &RedbStorageEngine) -> BTreeMap<String, Vec<u8>> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn heterogeneous_private_startup_profile_gate_remains_closed() {
+async fn heterogeneous_startup_preserves_namespace_bindings() {
     let root = tempfile::tempdir().unwrap();
     let (path, at) = fixture(root.path()).await;
     let mut config = RecalldConfig::default();
@@ -215,20 +215,11 @@ async fn heterogeneous_private_startup_profile_gate_remains_closed() {
         engine,
     )
     .await;
-    let error = result.as_ref().err().map(ToString::to_string);
-    eprintln!("ACTUAL_PRIVATE_STARTUP_RESULT {error:?}");
-    assert!(matches!(
-        &result,
-        Err(RecalldError::Init {
-            step: "native_profile",
-            ..
-        })
-    ));
-    drop(result);
+    let system = result.unwrap();
+    system.shutdown().await.unwrap();
     let engine = RedbStorageEngine::open_native(&path).unwrap();
     assert_eq!(engine.control_state().unwrap().generation_ref(), at);
     assert_eq!(retained(&engine), before);
-    // The private profile restriction deliberately remains; no activation here.
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

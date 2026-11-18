@@ -49,13 +49,6 @@ impl Request {
                 ));
             }
         }
-        if self.input.embedding.is_some() && self.profile_id.is_none() {
-            return Err(invalid(
-                "EMBEDDING_PROFILE_REQUIRED",
-                "embeddingProfileId",
-                "native supplied embeddings require the canonical Bound profile ID",
-            ));
-        }
         if self.input.embedding.is_none() && self.profile_id.is_some() {
             return Err(invalid(
                 "INVALID_INPUT",

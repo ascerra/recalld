@@ -56,6 +56,9 @@ pub enum StorageError {
     #[error("EMBEDDING_PROFILE_MISMATCH")]
     EmbeddingProfileMismatch,
 
+    #[error("EMBEDDING_PROFILE_REQUIRED")]
+    EmbeddingProfileRequired,
+
     #[error("NAMESPACE_MISMATCH")]
     MutationNamespaceMismatch,
 

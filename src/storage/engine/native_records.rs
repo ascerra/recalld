@@ -139,16 +139,7 @@ impl RedbStorageEngine {
             .original
             .embedding_profile
             .as_ref()
-            .or(generated.profile.as_ref())
-            .ok_or_else(|| {
-                if prepared.is_some() && intent.original.memory.embedding.is_none() {
-                    StorageError::ProviderVectorUnavailable(
-                        "native embedding profile missing".into(),
-                    )
-                } else {
-                    StorageError::InvalidMutation("native embedding profile missing".into())
-                }
-            })?;
+            .or(generated.profile.as_ref());
         let vectors = &mut self.vector_manager;
         let text = &mut self.text_store;
         let mut staged = false;

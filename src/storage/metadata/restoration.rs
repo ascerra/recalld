@@ -421,6 +421,7 @@ pub(crate) fn reconcile(
             }
             if terminal.is_some() {
                 schema.vector = None;
+                schema.embedding_origin = None;
             }
             // Ledger entries carry no event time. Preserve the existing
             // lifecycle timestamps/provenance rather than invent a phase time.

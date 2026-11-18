@@ -61,15 +61,24 @@ pub(crate) struct StoreOwnership {
 
 impl StoreOwnership {
     pub fn acquire(path: &Path) -> Result<Self, StorageError> {
-        Self::acquire_mode(path, false)
+        Self::acquire_mode(path, false, false)
     }
 
     /// Engine startup may finish a journal; inspection/backup must not publish it.
     pub(crate) fn acquire_recovering(path: &Path) -> Result<Self, StorageError> {
-        Self::acquire_mode(path, true)
+        Self::acquire_mode(path, true, false)
     }
 
-    fn acquire_mode(path: &Path, recover: bool) -> Result<Self, StorageError> {
+    /// Only automatic-upgrade classification/recovery may retain an owner with
+    /// an upgrade journal. This never bypasses the OS lock or path validation.
+    pub(crate) fn acquire_for_upgrade(
+        path: &Path,
+        recover_restore: bool,
+    ) -> Result<Self, StorageError> {
+        Self::acquire_mode(path, recover_restore, true)
+    }
+
+    fn acquire_mode(path: &Path, recover: bool, upgrade: bool) -> Result<Self, StorageError> {
         let absolute = std::path::absolute(path)?;
         let name = absolute.file_name().ok_or(StorageError::InvalidPath)?;
         let parent = absolute.parent().ok_or(StorageError::InvalidPath)?;
@@ -99,7 +108,24 @@ impl StoreOwnership {
             pending,
             _file: file,
         };
+        let upgrade_pending = super::automatic_upgrade::pending(&owner.path);
+        let upgrading = upgrade_pending.is_symlink() || upgrade_pending.try_exists()?;
+        if upgrading && !upgrade {
+            return Err(StorageError::RecoveryRequired(format!(
+                "pending automatic upgrade at {}; recover through runtime startup before another operation",
+                upgrade_pending.display()
+            )));
+        }
         if owner.pending.is_symlink() || owner.pending.try_exists()? {
+            if upgrading {
+                return Err(StorageError::RecoveryRequired(
+                    "overlapping restore and upgrade journals".into(),
+                ));
+            }
+            // Classification may report pending recovery without opening data.
+            if upgrade && !recover {
+                return Ok(owner);
+            }
             if !recover {
                 return Err(StorageError::RecoveryRequired(format!(
                     "interrupted restore at {}; recover through engine startup before inspection or another operation",

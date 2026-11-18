@@ -99,7 +99,7 @@ impl NativeInsert {
         if self.memory.full_text.as_deref() == Some("") {
             return Err(StorageError::EmptyText);
         }
-        if self.memory.embedding.is_some() != self.embedding_profile.is_some() {
+        if self.memory.embedding.is_none() && self.embedding_profile.is_some() {
             return Err(StorageError::InvalidMutation(
                 "supplied vector and explicit profile must be provided together".into(),
             ));
@@ -119,7 +119,7 @@ impl NativeInsert {
         stability: f32,
         difficulty: f32,
         dimensions: u32,
-        profile_id: &str,
+        profile_id: Option<&str>,
     ) -> Result<[u8; 32], StorageError> {
         // Reuse exact original caller float bits/default expansion. The v2
         // operation tag and additional fields keep its identity distinct.
@@ -147,7 +147,7 @@ impl NativeInsert {
         stability: f32,
         difficulty: f32,
         dimensions: u32,
-        profile_id: &str,
+        profile_id: Option<&str>,
         supplied_profile: Option<&str>,
     ) -> Result<[u8; 32], StorageError> {
         let original = self.memory.request_hash(ctx, stability, dimensions)?;
@@ -219,11 +219,21 @@ pub struct ContentProof {
     pub text_sha256: Option<[u8; 32]>,
     pub vector: Option<VectorReference>,
     pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_origin: Option<crate::model::schema::EmbeddingOrigin>,
 }
 impl ContentProof {
     /// Shared shape check also applies to historical receipts whose records
     /// were removed after a restore. None preserves unknown legacy provenance.
     pub(crate) fn validate_profile_commitment(&self) -> Result<(), StorageError> {
+        if let Some(origin) = &self.embedding_origin {
+            origin.validate().map_err(StorageError::InvalidControl)?;
+            if self.profile_id.is_some() || self.vector.is_none() {
+                return Err(invalid(
+                    "compatibility origin conflicts with namespace profile or removed vector",
+                ));
+            }
+        }
         if let Some(profile) = &self.profile_id {
             if profile.len() != 68
                 || !profile.starts_with("ep1:")
@@ -247,6 +257,13 @@ impl ContentProof {
             return Err(invalid(
                 "native profile commitment differs from namespace binding",
             ));
+        }
+        if let Some(crate::model::schema::EmbeddingOrigin::Generated { descriptor, .. }) =
+            &self.embedding_origin
+        {
+            if descriptor.dimension != namespace.embedding_dim {
+                return Err(invalid("record generator dimension differs from namespace"));
+            }
         }
         Ok(())
     }
@@ -276,6 +293,7 @@ impl ContentProof {
             },
             vector: schema.vector.clone(),
             profile_id: profile_id(namespace),
+            embedding_origin: schema.embedding_origin.clone(),
         })
     }
     pub(crate) fn erased(&self) -> Result<Self, StorageError> {
@@ -295,6 +313,7 @@ impl ContentProof {
         })?;
         result.text_sha256 = None;
         result.vector = None;
+        result.embedding_origin = None;
         Ok(result)
     }
 }
@@ -332,7 +351,8 @@ impl NativeRecordState {
             && self.content.labels_sha256 == hash_value(&schema.labels)?
             && self.content.extensions_sha256 == hash_value(&schema.extensions)?
             && self.content.label_provenance == schema.labels.provenance
-            && self.content.vector == schema.vector)
+            && self.content.vector == schema.vector
+            && self.content.embedding_origin == schema.embedding_origin)
     }
     pub(crate) fn tombstone(
         &self,
@@ -483,7 +503,7 @@ pub(crate) fn validate_creation_primary(
         || n.decay_strength.get() != 1.
         || after.history_sha256 != history_hash(&[])?
         || after.content.label_provenance != LabelProvenance::NativeV2
-        || after.content.profile_id.is_none()
+        || (after.content.profile_id.is_none() && after.content.embedding_origin.is_none())
         || after.content.vector.is_none()
         || after.content.extensions_sha256
             != hash_value(&BTreeMap::<String, serde_json::Value>::new())?
@@ -737,7 +757,9 @@ pub(crate) fn validate_retained_creation(
         .as_ref()
         .ok_or_else(|| invalid("native canonical record schema missing"))?;
     let Some(creation) = creation else {
-        if schema.lifecycle.timestamp_origin == TimestampOrigin::Native {
+        if schema.lifecycle.timestamp_origin == TimestampOrigin::Native
+            || schema.embedding_origin.is_some()
+        {
             return Err(invalid("native record has no typed creation proof"));
         }
         return Ok(());
@@ -762,6 +784,7 @@ pub(crate) fn validate_retained_creation(
         || current.label_provenance != LabelProvenance::NativeV2
         || current.profile_id != expected.profile_id
         || current.extensions_sha256 != expected.extensions_sha256
+        || (mask & EMBEDDING == 0 && current.embedding_origin != expected.embedding_origin)
         || (mask & SUMMARY == 0 && current.summary_sha256 != expected.summary_sha256)
         || (mask & TAGS == 0
             && (current.tags_sha256 != expected.tags_sha256
