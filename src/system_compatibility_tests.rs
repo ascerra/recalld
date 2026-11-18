@@ -271,6 +271,22 @@ async fn released_v1_new_schema_query_write_restart_preserves_unknown_provenance
     );
     assert_old_data(&system, &expected);
     system.shutdown().await.unwrap();
+    // Unknown old vectors are not proof that two known generators are compatible.
+    let mut drifted = cfg.clone();
+    drifted.embedding.model_name = "different-known-generator".into();
+    let system = Recalld::new(drifted).await.unwrap();
+    assert_eq!(mock.calls(), 2);
+    assert!(
+        system
+            .query_engine
+            .search(query("default", None, Some("drift")))
+            .await
+            .is_err(),
+        "known generator mismatch must fail before provider calls"
+    );
+    assert_eq!(mock.calls(), 2);
+    assert_old_data(&system, &expected);
+    system.shutdown().await.unwrap();
     let system = Recalld::new(cfg.clone()).await.unwrap();
     assert_eq!(mock.calls(), 2, "restart must not reembed");
     assert_old_data(&system, &expected);
