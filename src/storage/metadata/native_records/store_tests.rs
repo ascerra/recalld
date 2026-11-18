@@ -24,7 +24,7 @@ fn original(d: &Data) -> NativeStoreInput {
 fn selection(intent: &NativeStoreIntent, d: &Data) -> FrozenInsertLinks {
     FrozenInsertLinks {
         generation: intent.insert_intent().capture_generation(),
-        profile_id: d.profile.profile_id().unwrap(),
+        profile_id: Some(d.profile.profile_id().unwrap()),
         static_links: vec![
             (d.parent, EdgeType::Associative, 0.9),
             (d.parent, EdgeType::Entity, 0.5),
@@ -129,7 +129,7 @@ fn native_store_atomic_edges_tokens_temporal_clock_and_replay() {
         .unwrap();
     let current_plan = FrozenInsertLinks {
         generation: current_intent.insert_intent().capture_generation(),
-        profile_id: d.profile.profile_id().unwrap(),
+        profile_id: Some(d.profile.profile_id().unwrap()),
         static_links: vec![],
         temporal: vec![],
         advisory: Some(vec![]),
@@ -195,7 +195,7 @@ fn native_store_plan_generation_scope_profile_and_provider_faults_precede_alloca
     for case in 0..8 {
         let mut bad = base.clone();
         match case {
-            0 => bad.profile_id = format!("ep1:{}", "0".repeat(64)),
+            0 => bad.profile_id = Some(format!("ep1:{}", "0".repeat(64))),
             1 => bad.static_links[0].2 = f32::NAN,
             2 => bad.static_links.push(bad.static_links[0]),
             3 => bad.temporal[0].1 += 1,
@@ -269,7 +269,7 @@ fn native_store_advisory_disabled_checked_empty_and_temporal_uuid_ties() {
         let intent = session.capture_store(scope(&d), &input, &cfg).unwrap();
         let links = FrozenInsertLinks {
             generation: intent.insert_intent().capture_generation(),
-            profile_id: d.profile.profile_id().unwrap(),
+            profile_id: Some(d.profile.profile_id().unwrap()),
             static_links: vec![],
             temporal: vec![],
             advisory: requested.then(Vec::new),

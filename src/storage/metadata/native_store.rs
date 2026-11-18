@@ -1,6 +1,6 @@
 //! Frozen same-insertion planning and replay. No provider or payload allocation.
 use super::*;
-use crate::storage::native_lifecycle::{LifecycleScope, NativePolicyInputs, invalid};
+use crate::storage::native_lifecycle::{LifecycleScope, NativePolicyInputs};
 use crate::storage::native_records::{NativeInsertIntent, profile_id};
 use crate::storage::native_store::*;
 use std::collections::BTreeSet;
@@ -29,11 +29,7 @@ pub(super) fn replay_store(
         primary.lifecycle.stability.get(),
         primary.lifecycle.difficulty.get(),
         transition.embedding_dim,
-        primary
-            .content
-            .profile_id
-            .as_deref()
-            .ok_or_else(|| invalid("linked creation profile missing"))?,
+        primary.content.profile_id.as_deref(),
         &transition.settings,
     )?;
     control::replay_or_check(tx, ctx, hash)
@@ -105,7 +101,7 @@ impl MetadataStore {
                 "linked store candidate generation changed".into(),
             ));
         }
-        if profile_id(&intent.insert.namespace).as_deref() != Some(&links.profile_id) {
+        if profile_id(&intent.insert.namespace).as_deref() != links.profile_id.as_deref() {
             return Err(StorageError::InvalidMutation(
                 "linked store candidate profile differs".into(),
             ));

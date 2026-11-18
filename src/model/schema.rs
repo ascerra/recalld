@@ -240,12 +240,44 @@ pub struct VectorReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum EmbeddingOrigin {
+    Generated {
+        descriptor: EmbeddingProfile,
+        document_sha256: [u8; 32],
+    },
+    Supplied {
+        profile_id: Option<String>,
+    },
+}
+impl EmbeddingOrigin {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Generated { descriptor, .. } => descriptor.validate(),
+            Self::Supplied { profile_id } => {
+                if profile_id
+                    .as_ref()
+                    .is_some_and(|id| !crate::embedding::profile::valid_profile_id(id))
+                {
+                    return Err("invalid supplied vector profile assertion".into());
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RecordSchemaV2 {
     pub lifecycle: LifecycleFields,
     pub labels: StructuredLabels,
     /// None for tombstones. Unknown legacy model identity is namespace-bound.
     pub vector: Option<VectorReference>,
+    /// Native insertion evidence in an unknown namespace, backed by its typed
+    /// creation commitment. Never promotes a namespace or describes legacy rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_origin: Option<EmbeddingOrigin>,
     /// Unknown required features block decode. Optional fields round-trip verbatim.
     pub required_features: Vec<String>,
     pub extensions: BTreeMap<String, serde_json::Value>,
@@ -260,6 +292,7 @@ impl RecordSchemaV2 {
             lifecycle: LifecycleFields::from_legacy(record, migration_now),
             labels: StructuredLabels::from_legacy(record),
             vector,
+            embedding_origin: None,
             required_features: vec![],
             extensions: BTreeMap::new(),
         }
@@ -269,6 +302,15 @@ impl RecordSchemaV2 {
             return Err("unknown required record feature".into());
         }
         self.labels.validate()?;
+        if let Some(origin) = &self.embedding_origin {
+            origin.validate()?;
+            if self.lifecycle.timestamp_origin != TimestampOrigin::Native {
+                return Err("legacy record cannot claim native embedding origin".into());
+            }
+            if self.vector.is_none() {
+                return Err("embedding origin without a retained vector".into());
+            }
+        }
         if !record.strength.is_finite()
             || !record.decay_strength.is_finite()
             || !record.stability.is_finite()

@@ -95,7 +95,17 @@ pub(crate) fn resolve_bound(
     multiplier: f64,
 ) -> Result<EffectiveLifecyclePolicy, StorageError> {
     supported_inputs(global)?;
-    if ns.schema.is_some() && ns.decay_rate_multiplier.is_none() {
+    let legacy_compatibility = ns.schema.as_ref().is_some_and(|schema| {
+        schema.lifecycle_version == LifecycleVersion::LegacyAccessV1
+            && matches!(
+                schema.embedding_binding,
+                crate::model::schema::EmbeddingBinding::UnknownLegacy
+            )
+            && schema.inherited_decay.is_none()
+    });
+    // Legacy operations used the current runtime multiplier. Preserve that
+    // behavior without recording an adoption or claiming a historical value.
+    if ns.schema.is_some() && ns.decay_rate_multiplier.is_none() && !legacy_compatibility {
         let binding = ns.schema.as_ref().unwrap().inherited_decay.as_ref().ok_or_else(||
             StorageError::InvalidMutation("inherited policy is unknown; explicitly preview/adopt before dependent operations".into()))?;
         binding.validate()?;

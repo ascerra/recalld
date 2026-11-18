@@ -33,6 +33,10 @@ use crate::storage::StorageEngine as _;
 #[path = "system_startup.rs"]
 mod startup;
 
+#[cfg(test)]
+#[path = "system_compatibility_tests.rs"]
+mod compatibility_tests;
+
 // ═══════════════════════════════════════════════════════════════════════
 // Startup vector-index load
 // ═══════════════════════════════════════════════════════════════════════

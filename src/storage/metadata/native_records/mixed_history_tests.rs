@@ -24,7 +24,7 @@ pub(super) fn linked(s: &mut NativeLifecycleSession, d: &Data, key: &str) -> Mem
     let intent = s.capture_store(scope(d), &original, &settings).unwrap();
     let plan = FrozenInsertLinks {
         generation: intent.insert_intent().capture_generation(),
-        profile_id: d.profile.profile_id().unwrap(),
+        profile_id: Some(d.profile.profile_id().unwrap()),
         static_links: vec![(d.parent, EdgeType::Associative, 0.9)],
         temporal: vec![],
         advisory: None,

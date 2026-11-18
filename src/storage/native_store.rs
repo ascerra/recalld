@@ -48,7 +48,7 @@ impl NativeStoreIntent {
 #[derive(Debug, Clone)]
 pub struct FrozenInsertLinks {
     pub generation: GenerationRef,
-    pub profile_id: String,
+    pub profile_id: Option<String>,
     /// New record -> existing target; explicit parent/supersedes stay in input.
     pub static_links: Vec<(MemoryId, EdgeType, f32)>,
     /// All eligible temporal candidates, before one core-clock selection.
@@ -88,7 +88,7 @@ impl NativeStoreInput {
         stability: f32,
         difficulty: f32,
         dimensions: u32,
-        profile: &str,
+        profile: Option<&str>,
         settings: &NativeStoreSettings,
     ) -> Result<[u8; 32], StorageError> {
         let original = self
@@ -103,7 +103,7 @@ impl NativeStoreInput {
         stability: f32,
         difficulty: f32,
         dimensions: u32,
-        profile: &str,
+        profile: Option<&str>,
         settings: &NativeStoreSettings,
         supplied_profile: Option<&str>,
     ) -> Result<[u8; 32], StorageError> {

@@ -12,11 +12,11 @@ pub(super) fn validate_native(
             "runtime requires native schema2".into(),
         ));
     }
-    let profile = provider
-        .profile()
-        .ok_or(StorageError::ProviderConfigurationUnavailable)?;
-    if provider.dimensions() != profile.dimension as usize {
-        return Err(StorageError::ProviderConfigurationUnavailable);
+    if let Some(profile) = provider.profile() {
+        profile.validate().map_err(StorageError::InvalidMutation)?;
+        if provider.dimensions() != profile.dimension as usize {
+            return Err(StorageError::ProviderConfigurationUnavailable);
+        }
     }
     let namespaces = engine.list_namespaces()?;
     if !namespaces
@@ -28,13 +28,14 @@ pub(super) fn validate_native(
         ));
     }
     for namespace in namespaces {
-        crate::embedding::profile::require_compatible(&namespace, &profile).map_err(|error| {
-            StorageError::RecoveryRequired(format!(
-                "namespace {} cannot enter native runtime: {error}; no provenance is inferred during automatic upgrade",
-                namespace.id.get(),
-            ))
-        })?;
+        namespace
+            .schema
+            .as_ref()
+            .ok_or_else(|| StorageError::InvalidControl("missing native namespace schema".into()))?
+            .validate(&namespace)
+            .map_err(StorageError::InvalidControl)?;
     }
+
     Ok(())
 }
 
@@ -201,7 +202,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migration_rejects_unknown_provenance_and_restores_original() {
+    async fn migration_preserves_unknown_provenance_in_native_runtime() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("db");
         {
@@ -211,26 +212,16 @@ mod tests {
             legacy.create_namespace(&namespace).unwrap();
             legacy.sync().unwrap();
         }
-        let before = std::fs::read(path.join("meta.db")).unwrap();
-        let error = Recalld::new(config(&path))
-            .await
-            .err()
-            .expect("unknown provenance must fail");
-        assert!(
-            error.to_string().contains("provenance is unknown"),
-            "{error}"
-        );
-        assert_eq!(before, std::fs::read(path.join("meta.db")).unwrap());
-        let legacy = RedbStorageEngine::open(&path).unwrap();
-        assert_eq!(legacy.control_state().unwrap().control_schema_version, 1);
-        assert!(
-            legacy
-                .get_namespace_by_name("default")
-                .unwrap()
-                .unwrap()
-                .schema
-                .is_none()
-        );
+        let core = Recalld::new(config(&path)).await.unwrap();
+        let storage = core.storage.read().unwrap();
+        assert_eq!(storage.control_state().unwrap().control_schema_version, 2);
+        let namespace = storage.get_namespace_by_name("default").unwrap().unwrap();
+        assert!(matches!(
+            namespace.schema.unwrap().embedding_binding,
+            crate::model::schema::EmbeddingBinding::UnknownLegacy
+        ));
+        drop(storage);
+        core.shutdown().await.unwrap();
     }
 
     #[tokio::test]
