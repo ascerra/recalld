@@ -33,7 +33,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features
 
   test_shards:
-    name: Test shard (${{ matrix.os }}, ${{ matrix.shard }})
+    name: Tests — ${{ matrix.os == 'ubuntu-latest' && 'Ubuntu' || 'macOS' }} — group ${{ fromJSON('[1, 2, 3, 4]')[matrix.shard] }} of 4
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
