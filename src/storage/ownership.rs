@@ -61,12 +61,12 @@ pub(crate) struct StoreOwnership {
 
 impl StoreOwnership {
     pub fn acquire(path: &Path) -> Result<Self, StorageError> {
-        Self::acquire_mode(path, false, false)
+        Self::acquire_mode(path, false, false, false)
     }
 
     /// Engine startup may finish a journal; inspection/backup must not publish it.
     pub(crate) fn acquire_recovering(path: &Path) -> Result<Self, StorageError> {
-        Self::acquire_mode(path, true, false)
+        Self::acquire_mode(path, true, false, false)
     }
 
     /// Only automatic-upgrade classification/recovery may retain an owner with
@@ -75,10 +75,21 @@ impl StoreOwnership {
         path: &Path,
         recover_restore: bool,
     ) -> Result<Self, StorageError> {
-        Self::acquire_mode(path, recover_restore, true)
+        Self::acquire_mode(path, recover_restore, true, false)
     }
 
-    fn acquire_mode(path: &Path, recover: bool, upgrade: bool) -> Result<Self, StorageError> {
+    /// Only the container mover may hold the child's stable lock while its
+    /// layout journal is pending. Other recovery fences remain in force.
+    pub(super) fn acquire_for_layout(path: &Path) -> Result<Self, StorageError> {
+        Self::acquire_mode(path, false, false, true)
+    }
+
+    fn acquire_mode(
+        path: &Path,
+        recover: bool,
+        upgrade: bool,
+        layout: bool,
+    ) -> Result<Self, StorageError> {
         let absolute = std::path::absolute(path)?;
         let name = absolute.file_name().ok_or(StorageError::InvalidPath)?;
         let parent = absolute.parent().ok_or(StorageError::InvalidPath)?;
@@ -108,6 +119,9 @@ impl StoreOwnership {
             pending,
             _file: file,
         };
+        if !layout {
+            super::container_layout::check_store_path(&owner.path)?;
+        }
         let upgrade_pending = super::automatic_upgrade::pending(&owner.path);
         let upgrading = upgrade_pending.is_symlink() || upgrade_pending.try_exists()?;
         if upgrading && !upgrade {

@@ -454,12 +454,42 @@ async fn run_bench(config: RecalldConfig, target: BenchTarget, format: &str) -> 
     }
 }
 
+fn container_layout(
+    config: &mut RecalldConfig,
+    serving: bool,
+) -> Result<
+    Option<recalld::storage::container_layout::ContainerLayout>,
+    recalld::storage::StorageError,
+> {
+    let Some(root) = std::env::var_os("RECALLD_CONTAINER_DATA_ROOT") else {
+        return Ok(None);
+    };
+    let lease = recalld::storage::container_layout::configured_layout(
+        std::path::Path::new(&root),
+        std::path::Path::new(&config.storage.data_dir),
+        serving,
+    )?;
+    config.storage.data_dir = lease
+        .store_path()
+        .to_str()
+        .ok_or(recalld::storage::StorageError::InvalidPath)?
+        .into();
+    Ok(Some(lease))
+}
+
 async fn run_serve(
-    config: RecalldConfig,
+    mut config: RecalldConfig,
     bind: std::net::SocketAddr,
     port: Option<u16>,
     default_namespace: String,
 ) -> ExitCode {
+    let _layout = match container_layout(&mut config, true) {
+        Ok(lease) => lease,
+        Err(error) => {
+            tracing::error!(%error, "container layout startup failed");
+            return ExitCode::FAILURE;
+        }
+    };
     let bind = if let Some(p) = port {
         std::net::SocketAddr::new(bind.ip(), p)
     } else {
@@ -652,7 +682,14 @@ fn create_direct_mcp_bridge(
     recalld::mcp::bridge_adapters::direct_bridge(system, default_namespace)
 }
 
-async fn run_mcp_direct(loaded: LoadedConfig) -> ExitCode {
+async fn run_mcp_direct(mut loaded: LoadedConfig) -> ExitCode {
+    let _layout = match container_layout(&mut loaded.config, true) {
+        Ok(lease) => lease,
+        Err(error) => {
+            tracing::error!(%error, "container layout startup failed");
+            return ExitCode::FAILURE;
+        }
+    };
     let default_namespace = loaded.default_namespace;
     let system = match Recalld::new(loaded.config).await {
         Ok(s) => s,
@@ -777,11 +814,22 @@ async fn auto_start_daemon(
 // ── Backup & restore commands ──────────────────────────────────────
 
 async fn run_backup_command(
-    config: RecalldConfig,
+    mut config: RecalldConfig,
     destination: std::path::PathBuf,
     source_data_dir: Option<std::path::PathBuf>,
     force: bool,
 ) -> ExitCode {
+    let _layout = if source_data_dir.is_none() {
+        match container_layout(&mut config, false) {
+            Ok(lease) => lease,
+            Err(error) => {
+                tracing::error!(%error, "container layout resolution failed");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
     match recalld::backup::run_backup(&config, &destination, source_data_dir.as_deref(), force)
         .await
     {
@@ -809,13 +857,21 @@ async fn run_backup_command(
 }
 
 async fn run_restore_command(
-    config: RecalldConfig,
+    mut config: RecalldConfig,
     backup_path: std::path::PathBuf,
     force: bool,
     no_stop_daemon: bool,
     historical: bool,
 ) -> ExitCode {
     use recalld::backup::{RestoreOptions, restore_from_backup};
+
+    let _layout = match container_layout(&mut config, false) {
+        Ok(lease) => lease,
+        Err(error) => {
+            tracing::error!(%error, "container layout resolution failed");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let data_dir = std::path::PathBuf::from(&config.storage.data_dir);
 
@@ -876,7 +932,7 @@ async fn run_daemon(config: RecalldConfig, action: DaemonAction) -> ExitCode {
     }
 }
 
-async fn run_daemon_foreground(config: RecalldConfig, idle_timeout: Duration) -> ExitCode {
+async fn run_daemon_foreground(mut config: RecalldConfig, idle_timeout: Duration) -> ExitCode {
     let socket = recalld::daemon::socket_path();
 
     if recalld::daemon::is_daemon_alive(&socket).unwrap_or(false) {
@@ -884,6 +940,13 @@ async fn run_daemon_foreground(config: RecalldConfig, idle_timeout: Duration) ->
         return ExitCode::FAILURE;
     }
 
+    let _layout = match container_layout(&mut config, true) {
+        Ok(lease) => lease,
+        Err(error) => {
+            tracing::error!(%error, "container layout startup failed");
+            return ExitCode::FAILURE;
+        }
+    };
     let system = match Recalld::new(config).await {
         Ok(s) => s,
         Err(e) => {
