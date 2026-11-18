@@ -446,11 +446,19 @@ async fn released_v1_new_schema_query_write_restart_preserves_unknown_provenance
     let system = Recalld::new(cfg.clone()).await.unwrap();
     // Actual generation evidence must survive proof validation and not
     // make the newly created record impossible to forget.
+    // Match the public MCP/API1 route; delete_memory is the legacy-only bridge.
+    let forgotten = adapter(&system)
+        .api1_lifecycle(
+            crate::serialization::lifecycle_api1::request(inserted, 3, Some("default")),
+            crate::serialization::native_lifecycle::Operation::Forget,
+        )
+        .await;
     assert!(
-        adapter(&system)
-            .delete_memory(inserted, Some("default"))
-            .await
-            .unwrap()
+        matches!(
+            forgotten.value,
+            Some(crate::serialization::lifecycle_api1::Value::Forget { deleted: true })
+        ),
+        "native API1 forget failed: {forgotten:?}"
     );
     assert_old_data(&system, &expected);
     system.shutdown().await.unwrap();
