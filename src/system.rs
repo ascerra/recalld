@@ -1379,7 +1379,8 @@ mod tests {
             crate::model::DecayPhase::Tombstone
         );
         let recalled = system.query_engine.search(serde_json::from_value(serde_json::json!({
-            "namespace":"default", "queryMode":"metadata_only", "recordAccess":false, "limit":10
+            "namespace":"default", "queryMode":"metadata_only", "recordAccess":false, "limit":10,
+            "filter":{"minStrength":0.0}
         })).unwrap()).await.unwrap();
         assert!(recalled.results.iter().all(|hit| hit.memory_id != dead));
         assert!(recalled.results.iter().any(|hit| hit.memory_id == live));
