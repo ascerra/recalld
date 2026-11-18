@@ -1,0 +1,636 @@
+   Compiling recalld v1.0.0 (/work/source)
+warning: unused import: `catalog::rename_new_directory`
+  --> src/storage/engine.rs:11:16
+   |
+11 | pub(crate) use catalog::rename_new_directory;
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `checkpoint::StagedCanonical`
+  --> src/storage/engine.rs:13:16
+   |
+13 | pub(crate) use checkpoint::StagedCanonical;
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::storage::StorageEngine`
+ --> src/system_inherited_policy_tests.rs:6:5
+  |
+6 | use crate::storage::StorageEngine as _;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `StorageEngine`
+ --> src/search/origin_tests.rs:5:5
+  |
+5 |     StorageEngine as _,
+  |     ^^^^^^^^^^^^^
+
+warning: unused variable: `hydration`
+   --> src/api/handlers.rs:940:9
+    |
+940 |     let hydration = crate::performance::Timer::new("rest.hydration");
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hydration`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src/storage/metadata/native_catalog.rs:63:17
+   |
+63 |             let mut namespaces = tx.open_table(NAMESPACE_TABLE)?;
+   |                 ----^^^^^^^^^^
+   |                 |
+   |                 help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: type `lifecycle_api1::Reply` is more private than the item `<api::adapters::StorageEngineAdapter as api::state::StorageEngine>::forget_api1`
+   --> src/api/adapters.rs:454:1
+    |
+454 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<api::adapters::StorageEngineAdapter as api::state::StorageEngine>::forget_api1` is reachable at visibility `pub`
+    |
+note: but type `lifecycle_api1::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/lifecycle_api1.rs:23:1
+    |
+ 23 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<api::adapters::StorageEngineAdapter as api::state::StorageEngine>::forget_native`
+   --> src/api/adapters.rs:454:1
+    |
+454 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<api::adapters::StorageEngineAdapter as api::state::StorageEngine>::forget_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:20:1
+    |
+ 20 | pub(crate) struct Request {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `<api::adapters::StorageEngineAdapter as api::state::StorageEngine>::forget_native`
+   --> src/api/adapters.rs:454:1
+    |
+454 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<api::adapters::StorageEngineAdapter as api::state::StorageEngine>::forget_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:247:1
+    |
+247 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `lifecycle_api1::Reply` is more private than the item `<api::adapters::FsrsEngineAdapter as api::state::FsrsEngine>::feedback_api1`
+    --> src/api/adapters.rs:1460:1
+     |
+1460 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<api::adapters::FsrsEngineAdapter as api::state::FsrsEngine>::feedback_api1` is reachable at visibility `pub`
+     |
+note: but type `lifecycle_api1::Reply` is only usable at visibility `pub(crate)`
+    --> src/serialization/lifecycle_api1.rs:23:1
+     |
+  23 | pub(crate) struct Reply {
+     | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<api::adapters::FsrsEngineAdapter as api::state::FsrsEngine>::feedback_native`
+    --> src/api/adapters.rs:1460:1
+     |
+1460 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<api::adapters::FsrsEngineAdapter as api::state::FsrsEngine>::feedback_native` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:20:1
+     |
+  20 | pub(crate) struct Request {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `<api::adapters::FsrsEngineAdapter as api::state::FsrsEngine>::feedback_native`
+    --> src/api/adapters.rs:1460:1
+     |
+1460 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<api::adapters::FsrsEngineAdapter as api::state::FsrsEngine>::feedback_native` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:247:1
+     |
+ 247 | pub(crate) struct Reply {
+     | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `lifecycle_api1::Reply` is more private than the item `api::state::StorageEngine::forget_api1`
+   --> src/api/state.rs:271:1
+    |
+271 | #[async_trait::async_trait]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `api::state::StorageEngine::forget_api1` is reachable at visibility `pub`
+    |
+note: but type `lifecycle_api1::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/lifecycle_api1.rs:23:1
+    |
+ 23 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `api::state::StorageEngine::forget_native`
+   --> src/api/state.rs:271:1
+    |
+271 | #[async_trait::async_trait]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `api::state::StorageEngine::forget_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:20:1
+    |
+ 20 | pub(crate) struct Request {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `api::state::StorageEngine::forget_native`
+   --> src/api/state.rs:271:1
+    |
+271 | #[async_trait::async_trait]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `api::state::StorageEngine::forget_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:247:1
+    |
+247 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `lifecycle_api1::Reply` is more private than the item `api::state::FsrsEngine::feedback_api1`
+   --> src/api/state.rs:596:1
+    |
+596 | #[async_trait::async_trait]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `api::state::FsrsEngine::feedback_api1` is reachable at visibility `pub`
+    |
+note: but type `lifecycle_api1::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/lifecycle_api1.rs:23:1
+    |
+ 23 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `api::state::FsrsEngine::feedback_native`
+   --> src/api/state.rs:596:1
+    |
+596 | #[async_trait::async_trait]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `api::state::FsrsEngine::feedback_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:20:1
+    |
+ 20 | pub(crate) struct Request {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `api::state::FsrsEngine::feedback_native`
+   --> src/api/state.rs:596:1
+    |
+596 | #[async_trait::async_trait]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `api::state::FsrsEngine::feedback_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:247:1
+    |
+247 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle`
+   --> src/daemon/bridge_adapters.rs:140:1
+    |
+140 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:20:1
+    |
+ 20 | pub(crate) struct Request {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Operation` is more private than the item `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle`
+   --> src/daemon/bridge_adapters.rs:140:1
+    |
+140 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Operation` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:15:1
+    |
+ 15 | pub(crate) enum Operation {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `lifecycle_api1::Reply` is more private than the item `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle`
+   --> src/daemon/bridge_adapters.rs:140:1
+    |
+140 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle` is reachable at visibility `pub`
+    |
+note: but type `lifecycle_api1::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/lifecycle_api1.rs:23:1
+    |
+ 23 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::forget_native`
+   --> src/daemon/bridge_adapters.rs:140:1
+    |
+140 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::forget_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:20:1
+    |
+ 20 | pub(crate) struct Request {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::forget_native`
+   --> src/daemon/bridge_adapters.rs:140:1
+    |
+140 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::forget_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:247:1
+    |
+247 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::feedback_native`
+   --> src/daemon/bridge_adapters.rs:140:1
+    |
+140 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::feedback_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:20:1
+    |
+ 20 | pub(crate) struct Request {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::feedback_native`
+   --> src/daemon/bridge_adapters.rs:140:1
+    |
+140 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `<RemoteStorageAdapter as mcp::bridge::StorageEngine>::feedback_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:247:1
+    |
+247 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `mcp::bridge::StorageEngine::api1_lifecycle`
+  --> src/mcp/bridge.rs:79:1
+   |
+79 | #[async_trait]
+   | ^^^^^^^^^^^^^^ method `mcp::bridge::StorageEngine::api1_lifecycle` is reachable at visibility `pub`
+   |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+  --> src/serialization/native_lifecycle.rs:20:1
+   |
+20 | pub(crate) struct Request {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Operation` is more private than the item `mcp::bridge::StorageEngine::api1_lifecycle`
+  --> src/mcp/bridge.rs:79:1
+   |
+79 | #[async_trait]
+   | ^^^^^^^^^^^^^^ method `mcp::bridge::StorageEngine::api1_lifecycle` is reachable at visibility `pub`
+   |
+note: but type `serialization::native_lifecycle::Operation` is only usable at visibility `pub(crate)`
+  --> src/serialization/native_lifecycle.rs:15:1
+   |
+15 | pub(crate) enum Operation {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `lifecycle_api1::Reply` is more private than the item `mcp::bridge::StorageEngine::api1_lifecycle`
+  --> src/mcp/bridge.rs:79:1
+   |
+79 | #[async_trait]
+   | ^^^^^^^^^^^^^^ method `mcp::bridge::StorageEngine::api1_lifecycle` is reachable at visibility `pub`
+   |
+note: but type `lifecycle_api1::Reply` is only usable at visibility `pub(crate)`
+  --> src/serialization/lifecycle_api1.rs:23:1
+   |
+23 | pub(crate) struct Reply {
+   | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `mcp::bridge::StorageEngine::forget_native`
+  --> src/mcp/bridge.rs:79:1
+   |
+79 | #[async_trait]
+   | ^^^^^^^^^^^^^^ method `mcp::bridge::StorageEngine::forget_native` is reachable at visibility `pub`
+   |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+  --> src/serialization/native_lifecycle.rs:20:1
+   |
+20 | pub(crate) struct Request {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `mcp::bridge::StorageEngine::forget_native`
+   --> src/mcp/bridge.rs:79:1
+    |
+ 79 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `mcp::bridge::StorageEngine::forget_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:247:1
+    |
+247 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `mcp::bridge::StorageEngine::feedback_native`
+  --> src/mcp/bridge.rs:79:1
+   |
+79 | #[async_trait]
+   | ^^^^^^^^^^^^^^ method `mcp::bridge::StorageEngine::feedback_native` is reachable at visibility `pub`
+   |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+  --> src/serialization/native_lifecycle.rs:20:1
+   |
+20 | pub(crate) struct Request {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `mcp::bridge::StorageEngine::feedback_native`
+   --> src/mcp/bridge.rs:79:1
+    |
+ 79 | #[async_trait]
+    | ^^^^^^^^^^^^^^ method `mcp::bridge::StorageEngine::feedback_native` is reachable at visibility `pub`
+    |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+   --> src/serialization/native_lifecycle.rs:247:1
+    |
+247 | pub(crate) struct Reply {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle`
+    --> src/mcp/bridge_adapters.rs:1607:1
+     |
+1607 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:20:1
+     |
+  20 | pub(crate) struct Request {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Operation` is more private than the item `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle`
+    --> src/mcp/bridge_adapters.rs:1607:1
+     |
+1607 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Operation` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:15:1
+     |
+  15 | pub(crate) enum Operation {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `lifecycle_api1::Reply` is more private than the item `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle`
+    --> src/mcp/bridge_adapters.rs:1607:1
+     |
+1607 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::api1_lifecycle` is reachable at visibility `pub`
+     |
+note: but type `lifecycle_api1::Reply` is only usable at visibility `pub(crate)`
+    --> src/serialization/lifecycle_api1.rs:23:1
+     |
+  23 | pub(crate) struct Reply {
+     | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::feedback_native`
+    --> src/mcp/bridge_adapters.rs:1607:1
+     |
+1607 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::feedback_native` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:20:1
+     |
+  20 | pub(crate) struct Request {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::feedback_native`
+    --> src/mcp/bridge_adapters.rs:1607:1
+     |
+1607 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::feedback_native` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:247:1
+     |
+ 247 | pub(crate) struct Reply {
+     | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Request` is more private than the item `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::forget_native`
+    --> src/mcp/bridge_adapters.rs:1607:1
+     |
+1607 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::forget_native` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Request` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:20:1
+     |
+  20 | pub(crate) struct Request {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `serialization::native_lifecycle::Reply` is more private than the item `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::forget_native`
+    --> src/mcp/bridge_adapters.rs:1607:1
+     |
+1607 | #[async_trait]
+     | ^^^^^^^^^^^^^^ method `<mcp::bridge_adapters::McpStorageAdapter as mcp::bridge::StorageEngine>::forget_native` is reachable at visibility `pub`
+     |
+note: but type `serialization::native_lifecycle::Reply` is only usable at visibility `pub(crate)`
+    --> src/serialization/native_lifecycle.rs:247:1
+     |
+ 247 | pub(crate) struct Reply {
+     | ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `clear_for_frozen_fixture` is never used
+   --> src/cache/manager.rs:353:25
+    |
+123 | impl CacheManager {
+    | ----------------- method in this implementation
+...
+353 |     pub(crate) async fn clear_for_frozen_fixture(&self) {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `publish_edge_plan` is never used
+   --> src/graph/autolink.rs:221:21
+    |
+221 | pub(crate) async fn publish_edge_plan(
+    |                     ^^^^^^^^^^^^^^^^^
+
+warning: function `caller_hash` is never used
+   --> src/storage/batch.rs:305:15
+    |
+305 | pub(crate) fn caller_hash(
+    |               ^^^^^^^^^^^
+
+warning: function `resolution_hash` is never used
+   --> src/storage/batch.rs:332:15
+    |
+332 | pub(crate) fn resolution_hash(items: &[BatchItem]) -> Result<[u8; 32], super::StorageError> {
+    |               ^^^^^^^^^^^^^^^
+
+warning: field `fixture_owners` is never read
+   --> src/storage/engine.rs:354:16
+    |
+338 | pub struct RedbStorageEngine {
+    |            ----------------- field in this struct
+...
+354 |     pub(crate) fixture_owners: Vec<crate::storage::ownership::OwnedFileLock>,
+    |                ^^^^^^^^^^^^^^
+
+warning: struct `StagedCanonical` is never constructed
+ --> src/storage/engine/checkpoint.rs:8:19
+  |
+8 | pub(crate) struct StagedCanonical {
+  |                   ^^^^^^^^^^^^^^^
+
+warning: method `path` is never used
+  --> src/storage/engine/checkpoint.rs:15:19
+   |
+14 | impl StagedCanonical {
+   | -------------------- method in this implementation
+15 |     pub(crate) fn path(&self) -> PathBuf {
+   |                   ^^^^
+
+warning: function `check` is never used
+  --> src/storage/engine/checkpoint.rs:20:4
+   |
+20 | fn check(deadline: Instant) -> Result<(), StorageError> {
+   |    ^^^^^
+
+warning: function `copy_file` is never used
+  --> src/storage/engine/checkpoint.rs:29:4
+   |
+29 | fn copy_file(source: &Path, target: &Path, deadline: Instant) -> Result<(), StorageError> {
+   |    ^^^^^^^^^
+
+warning: method `stage_frozen_canonical` is never used
+  --> src/storage/engine/checkpoint.rs:54:19
+   |
+49 | impl RedbStorageEngine {
+   | ---------------------- method in this implementation
+...
+54 |     pub(crate) fn stage_frozen_canonical(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `insert_memory_with_work` is never used
+  --> src/storage/engine/insertion.rs:46:19
+   |
+ 4 | impl RedbStorageEngine {
+   | ---------------------- method in this implementation
+...
+46 |     pub(crate) fn insert_memory_with_work(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `validate_clock` is never used
+  --> src/storage/ids.rs:47:19
+   |
+46 | impl IdState {
+   | ------------ method in this implementation
+47 |     pub(crate) fn validate_clock(&self, millis: i64) -> Result<(), StorageError> {
+   |                   ^^^^^^^^^^^^^^
+
+warning: function `isolated_legacy_hash` is never used
+   --> src/storage/logical_export.rs:403:15
+    |
+403 | pub(crate) fn isolated_legacy_hash(
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `isolated_native_hash` is never used
+   --> src/storage/logical_export.rs:423:15
+    |
+423 | pub(crate) fn isolated_native_hash(
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `batch_id` is never read
+   --> src/storage/metadata/batch.rs:941:9
+    |
+938 | pub(crate) struct NativeBatchBookkeepingRef {
+    |                   ------------------------- field in this struct
+...
+941 |     pub batch_id: Uuid,
+    |         ^^^^^^^^
+
+warning: method `acknowledge_derived_effects` is never used
+    --> src/storage/metadata/effects.rs:1030:19
+     |
+ 308 | impl MetadataStore {
+     | ------------------ method in this implementation
+...
+1030 |     pub(crate) fn acknowledge_derived_effects(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `tombstone_with_effects` and `tombstone_reserved_with_effects` are never used
+  --> src/storage/metadata/tombstone.rs:5:19
+   |
+ 4 | impl MetadataStore {
+   | ------------------ methods in this implementation
+ 5 |     pub(crate) fn tombstone_with_effects(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^
+...
+15 |     pub(crate) fn tombstone_reserved_with_effects(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `frozen_id_state` is never used
+  --> src/storage/metadata/work.rs:73:19
+   |
+70 | impl MetadataStore {
+   | ------------------ method in this implementation
+...
+73 |     pub(crate) fn frozen_id_state(
+   |                   ^^^^^^^^^^^^^^^
+
+warning: methods `compact_write_new_file` and `compact_finalize` are never used
+   --> src/storage/text.rs:392:19
+    |
+198 | impl TextStore {
+    | -------------- methods in this implementation
+...
+392 |     pub(super) fn compact_write_new_file(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+...
+402 |     pub(super) fn compact_finalize(&mut self) -> Result<(), StorageError> {
+    |                   ^^^^^^^^^^^^^^^^
+
+warning: method `finish_batch` is never used
+   --> src/storage/vectors.rs:536:19
+    |
+305 | impl VectorStore {
+    | ---------------- method in this implementation
+...
+536 |     pub(super) fn finish_batch(&mut self) -> Result<()> {
+    |                   ^^^^^^^^^^^^
+
+warning: methods `derived_owner` and `readiness_barrier` are never used
+   --> src/system.rs:979:19
+    |
+254 | impl Recalld {
+    | ------------ methods in this implementation
+...
+979 |     pub(crate) fn derived_owner(&self) -> crate::derived_completion::DerivedCompletion {
+    |                   ^^^^^^^^^^^^^
+...
+993 |     pub(crate) async fn readiness_barrier(
+    |                         ^^^^^^^^^^^^^^^^^
+
+warning: `recalld` (lib test) generated 60 warnings (run `cargo fix --lib -p recalld --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 32.07s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-b2844bb1c4a63074)
+
+running 1 test
+ACTUAL_NATIVE_API1_PURGE_RESULT Err(PartiallyApplied("INDEX_NOT_READY commitState=committed ready=false receipt={\"storeId\":\"c69d2177-1dd8-4dda-875b-98b36114162c\",\"operationId\":\"df942b1b-552f-4937-8991-665be215c6be\",\"committedGeneration\":\"18\",\"receiptVersion\":1,\"outcome\":{\"kind\":\"nativeNamespacePurgeAdvanced\",\"transition\":{\"parentOperationId\":\"7bbad30f-3d65-436a-a0c3-b3116d288a56\",\"namespaceId\":1,\"previousGeneration\":\"17\",\"sequence\":3,\"stage\":\"complete\",\"chunk\":null}},\"replayed\":false} cause=storage recovery required: Storage error: INDEX_NOT_READY commitState=committed ready=false receipt={\"storeId\":\"c69d2177-1dd8-4dda-875b-98b36114162c\",\"operationId\":\"2ae17c64-c7b1-43c0-989c-01f42bacf815\",\"committedGeneration\":\"16\",\"receiptVersion\":1,\"outcome\":{\"kind\":\"nativeNamespacePurgeAdvanced\",\"transition\":{\"parentOperationId\":\"7bbad30f-3d65-436a-a0c3-b3116d288a56\",\"namespaceId\":1,\"previousGeneration\":\"15\",\"sequence\":1,\"stage\":\"deleting\",\"chunk\":{\"deletions\":[{\"memoryId\":\"01a1e202-1566-7292-9c26-11f7a564f1dd\",\"namespaceId\":1,\"before\":{\"lifecycle\":{\"lifecycle\":{\"observedAt\":1000,\"retrievedAt\":null,\"reinforcedAt\":null,\"decayAnchorAt\":1000,\"lifecycleVersion\":\"legacy_access_v1\",\"lifecycleUpdatedAt\":1000,\"timestampOrigin\":\"legacy_inferred\",\"phaseChangedAt\":2000,\"policyRevision\":\"0\",\"recordGeneration\":\"0\"},\"createdAt\":1000,\"lastAccessedAt\":1000,\"stability\":3.7145,\"difficulty\":5.0,\"strength\":1.0,\"decayStrength\":1.0,\"phase\":\"full\",\"isPermastore\":false,\"hasSummary\":true,\"hasText\":true},\"edgeCount\":1,\"historySha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"content\":{\"summarySha256\":[16,31,86,106,251,133,88,131,46,6,192,5,19,112,246,98,34,233,253,63,101,193,234,19,115,224,90,206,114,40,164,232],\"tagsSha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"labelsSha256\":[188,35,245,228,157,108,161,210,233,63,33,53,70,4,42,175,201,157,82,12,74,109,79,211,251,120,186,101,142,119,63,50],\"labelProvenance\":\"legacy_retained_only\",\"extensionsSha256\":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138],\"textSha256\":null,\"vector\":{\"slot\":0,\"allocationEpoch\":\"0\",\"sha256\":[204,175,111,24,53,121,73,126,139,252,215,16,69,192,66,134,253,60,46,96,243,100,30,62,234,22,75,118,26,68,148,183]},\"profileId\":null}},\"history\":[]},{\"memoryId\":\"01a1e202-1568-7a20-88c2-2d469a57c8fd\",\"namespaceId\":1,\"before\":{\"lifecycle\":{\"lifecycle\":{\"observedAt\":1000,\"retrievedAt\":null,\"reinforcedAt\":null,\"decayAnchorAt\":1000,\"lifecycleVersion\":\"legacy_access_v1\",\"lifecycleUpdatedAt\":1000,\"timestampOrigin\":\"legacy_inferred\",\"phaseChangedAt\":2000,\"policyRevision\":\"0\",\"recordGeneration\":\"0\"},\"createdAt\":1000,\"lastAccessedAt\":1000,\"stability\":3.7145,\"difficulty\":5.0,\"strength\":0.2,\"decayStrength\":0.2,\"phase\":\"summary\",\"isPermastore\":false,\"hasSummary\":true,\"hasText\":false},\"edgeCount\":0,\"historySha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"content\":{\"summarySha256\":[222,41,36,122,98,53,219,8,235,161,81,58,64,93,117,123,232,242,3,156,93,168,229,63,143,228,17,115,1,34,153,194],\"tagsSha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"labelsSha256\":[188,35,245,228,157,108,161,210,233,63,33,53,70,4,42,175,201,157,82,12,74,109,79,211,251,120,186,101,142,119,63,50],\"labelProvenance\":\"legacy_retained_only\",\"extensionsSha256\":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138],\"textSha256\":null,\"vector\":{\"slot\":1,\"allocationEpoch\":\"0\",\"sha256\":[204,175,111,24,53,121,73,126,139,252,215,16,69,192,66,134,253,60,46,96,243,100,30,62,234,22,75,118,26,68,148,183]},\"profileId\":null}},\"history\":[]},{\"memoryId\":\"01a1e202-1568-7a20-88c2-2d56f6076a7e\",\"namespaceId\":1,\"before\":{\"lifecycle\":{\"lifecycle\":{\"observedAt\":1000,\"retrievedAt\":null,\"reinforcedAt\":null,\"decayAnchorAt\":1000,\"lifecycleVersion\":\"legacy_access_v1\",\"lifecycleUpdatedAt\":1000,\"timestampOrigin\":\"legacy_inferred\",\"phaseChangedAt\":2000,\"policyRevision\":\"0\",\"recordGeneration\":\"0\"},\"createdAt\":1000,\"lastAccessedAt\":1000,\"stability\":3.7145,\"difficulty\":5.0,\"strength\":0.05,\"decayStrength\":0.05,\"phase\":\"ghost\",\"isPermastore\":false,\"hasSummary\":false,\"hasText\":false},\"edgeCount\":0,\"historySha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"content\":{\"summarySha256\":[227,176,196,66,152,252,28,20,154,251,244,200,153,111,185,36,39,174,65,228,100,155,147,76,164,149,153,27,120,82,184,85],\"tagsSha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"labelsSha256\":[188,35,245,228,157,108,161,210,233,63,33,53,70,4,42,175,201,157,82,12,74,109,79,211,251,120,186,101,142,119,63,50],\"labelProvenance\":\"legacy_retained_only\",\"extensionsSha256\":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138],\"textSha256\":null,\"vector\":{\"slot\":2,\"allocationEpoch\":\"0\",\"sha256\":[204,175,111,24,53,121,73,126,139,252,215,16,69,192,66,134,253,60,46,96,243,100,30,62,234,22,75,118,26,68,148,183]},\"profileId\":null}},\"history\":[]},{\"memoryId\":\"01a1e202-1569-7ae1-8a85-bf8a769575c0\",\"namespaceId\":1,\"before\":{\"lifecycle\":{\"lifecycle\":{\"observedAt\":1000,\"retrievedAt\":null,\"reinforcedAt\":null,\"decayAnchorAt\":1000,\"lifecycleVersion\":\"legacy_access_v1\",\"lifecycleUpdatedAt\":1000,\"timestampOrigin\":\"legacy_inferred\",\"phaseChangedAt\":2000,\"policyRevision\":\"0\",\"recordGeneration\":\"0\"},\"createdAt\":1000,\"lastAccessedAt\":1000,\"stability\":3.7145,\"difficulty\":5.0,\"strength\":0.0,\"decayStrength\":0.0,\"phase\":\"tombstone\",\"isPermastore\":false,\"hasSummary\":false,\"hasText\":false},\"edgeCount\":0,\"historySha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"content\":{\"summarySha256\":[227,176,196,66,152,252,28,20,154,251,244,200,153,111,185,36,39,174,65,228,100,155,147,76,164,149,153,27,120,82,184,85],\"tagsSha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"labelsSha256\":[188,35,245,228,157,108,161,210,233,63,33,53,70,4,42,175,201,157,82,12,74,109,79,211,251,120,186,101,142,119,63,50],\"labelProvenance\":\"legacy_retained_only\",\"extensionsSha256\":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138],\"textSha256\":null,\"vector\":null,\"profileId\":null}},\"history\":[]}],\"peers\":[{\"namespaceId\":2,\"change\":{\"memoryId\":\"01a1e202-156e-73e3-bd19-a27498fc5398\",\"before\":{\"lifecycle\":{\"lifecycle\":{\"observedAt\":1000,\"retrievedAt\":null,\"reinforcedAt\":null,\"decayAnchorAt\":1000,\"lifecycleVersion\":\"legacy_access_v1\",\"lifecycleUpdatedAt\":1000,\"timestampOrigin\":\"legacy_inferred\",\"phaseChangedAt\":2000,\"policyRevision\":\"0\",\"recordGeneration\":\"0\"},\"createdAt\":1000,\"lastAccessedAt\":1000,\"stability\":3.7145,\"difficulty\":5.0,\"strength\":1.0,\"decayStrength\":1.0,\"phase\":\"full\",\"isPermastore\":false,\"hasSummary\":true,\"hasText\":true},\"edgeCount\":1,\"historySha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"content\":{\"summarySha256\":[176,88,245,248,198,230,165,67,0,252,132,67,197,213,15,101,60,219,7,178,91,18,68,215,213,82,254,4,22,0,108,100],\"tagsSha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"labelsSha256\":[188,35,245,228,157,108,161,210,233,63,33,53,70,4,42,175,201,157,82,12,74,109,79,211,251,120,186,101,142,119,63,50],\"labelProvenance\":\"legacy_retained_only\",\"extensionsSha256\":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138],\"textSha256\":null,\"vector\":{\"slot\":0,\"allocationEpoch\":\"0\",\"sha256\":[204,175,111,24,53,121,73,126,139,252,215,16,69,192,66,134,253,60,46,96,243,100,30,62,234,22,75,118,26,68,148,183]},\"profileId\":null}},\"after\":{\"lifecycle\":{\"lifecycle\":{\"observedAt\":1000,\"retrievedAt\":null,\"reinforcedAt\":null,\"decayAnchorAt\":1000,\"lifecycleVersion\":\"legacy_access_v1\",\"lifecycleUpdatedAt\":1000,\"timestampOrigin\":\"legacy_inferred\",\"phaseChangedAt\":2000,\"policyRevision\":\"0\",\"recordGeneration\":\"1\"},\"createdAt\":1000,\"lastAccessedAt\":1000,\"stability\":3.7145,\"difficulty\":5.0,\"strength\":1.0,\"decayStrength\":1.0,\"phase\":\"full\",\"isPermastore\":false,\"hasSummary\":true,\"hasText\":true},\"edgeCount\":0,\"historySha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"content\":{\"summarySha256\":[176,88,245,248,198,230,165,67,0,252,132,67,197,213,15,101,60,219,7,178,91,18,68,215,213,82,254,4,22,0,108,100],\"tagsSha256\":[79,83,205,161,140,43,170,12,3,84,187,95,154,62,203,229,237,18,171,77,142,17,186,135,60,47,17,22,18,2,185,69],\"labelsSha256\":[188,35,245,228,157,108,161,210,233,63,33,53,70,4,42,175,201,157,82,12,74,109,79,211,251,120,186,101,142,119,63,50],\"labelProvenance\":\"legacy_retained_only\",\"extensionsSha256\":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138],\"textSha256\":null,\"vector\":{\"slot\":0,\"allocationEpoch\":\"0\",\"sha256\":[204,175,111,24,53,121,73,126,139,252,215,16,69,192,66,134,253,60,46,96,243,100,30,62,234,22,75,118,26,68,148,183]},\"profileId\":null}}}}],\"removedEdges\":[{\"source\":\"01a1e202-1566-7292-9c26-11f7a564f1dd\",\"target\":\"01a1e202-1568-7a20-88c2-2d469a57c8fd\",\"edgeType\":\"parent_child\",\"weightBits\":1056964608,\"autoCreated\":false,\"createdAt\":0},{\"source\":\"01a1e202-156e-73e3-bd19-a27498fc5398\",\"target\":\"01a1e202-1566-7292-9c26-11f7a564f1dd\",\"edgeType\":\"associative\",\"weightBits\":1048576000,\"autoCreated\":false,\"createdAt\":0}]}}},\"replayed\":false} cause=storage recovery required: derived completion failed; retry completion or reopen: dimension mismatch: expected 8, got 4"))
+ACTUAL_NATIVE_API1_PURGE_STAGE Complete
+
+thread 'storage::native_purge_tests::api1_consumer::native_api1_purge_retains_known_receipt_on_publication_failure' (287) panicked at src/storage/native_purge_tests/api1_consumer.rs:45:10:
+known native purge failure must preserve a typed full receipt: Error("expected value", line: 1, column: 1)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::native_purge_tests::api1_consumer::native_api1_purge_retains_known_receipt_on_publication_failure ... FAILED
+
+failures:
+
+failures:
+    storage::native_purge_tests::api1_consumer::native_api1_purge_retains_known_receipt_on_publication_failure
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 0.66s
+
+error: test failed, to rerun pass `--lib`

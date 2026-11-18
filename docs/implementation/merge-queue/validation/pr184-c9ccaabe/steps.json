@@ -1,0 +1,404 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794852763.1638467
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_conformance.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794852763.2678826
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_offline_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794852763.3589575
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test_public_mcp_evaluation.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794852763.5285516
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "vector_owner",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794852842.2643714
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "prepared_evidence_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794852868.261676
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "strict_query_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794852881.112822
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "similar_v",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794852928.4781604
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "similar_explanation_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853010.320729
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "native_query_admission",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853013.9393935
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "supplied_query_certification",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853025.67976
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "rif_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853032.4651947
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "coherent_v2_payload",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853033.0585618
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "trace_provenance_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853034.1975398
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "performance_errors_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853034.5884624
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "sampling_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853041.1382353
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--lib",
+      "performance_trace_",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40"
+    },
+    "finished": 1794853041.7859893
+  },
+  {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--all-targets"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {
+      "debug/deps/recalld-8b31964f64b2cfc4": "672b56b06664d3efabe6fa811cc7f0987f603d6d7e19f2c11136c6cdb41d9b40",
+      "debug/deps/recalld-e3511e97d96c1bb5": "f71093e4cbe4652973ee7691af9ad8921469ade9d27a096675cf631b160725ac",
+      "debug/deps/recalld_cli-af23d66ef4eb6fd9": "a15f28d7483a736af20f6dc9e131034efb67986a659b881eb533aa2bf8fb469e",
+      "debug/deps/recalld_schema-f88e5b6d282be2fe": "d72e73411d8b257dd685d317421d1602545c27eca49ad7d255c8d28aa573afe8",
+      "debug/deps/recalld_text_migrate-89ef39f5299d9e87": "6efabe98ca2f5c7789e2488923b414373825d3f09c4eb4cab7dcd8de36089090",
+      "debug/deps/inherited_policy_cli-55f09460c02dd6ae": "1e8040431a123c1159d59c26ec07d3bdf6305969bc408087bfb99c94327e1b35",
+      "debug/deps/lifecycle_cli-5bae1aa288409852": "4a66494f2c12e1a6cd378a0f1388cf1311e2c4ae37102e10a08663fe6a4555a2",
+      "debug/deps/profile_attestation_cli-e203f21f7c00a546": "139f9c2cc984af4b791c6cb6ad27a6b0d08bd6be055476af8076ae1195f6529b",
+      "debug/deps/text_migration_cli-9d4a9dc03f7ddb52": "b5f8f8ae60fd10237f5e7a3e2d191ddc42268400a3297b165de6b76a7a1c2ac1",
+      "debug/deps/vector_certification_cli-1e106a1b26764bb3": "65f13c384c206d4024de4e299ba6eec01898a41c11ad0036304aa12f99771f7e",
+      "debug/examples/native_prefix_fixture-d5e400b9a5e43be0": "7373ab4316ab71adf80b132879ccb25c02ed8efe4566809e671ebff34164964d",
+      "debug/examples/offline_eval-a4d9b061895d675e": "a09e3d40f4124063c61051848744deac541cf7d7bc9e317c5a973b4afb13f752",
+      "debug/examples/owned_evaluator-962f1919193c8893": "d7b81aeb012c113f9f412195a57bf0f8156ccd3385032f46b38d990c384139ff",
+      "debug/examples/performance_probe-1ba5be5867dfd2ed": "f0688d028793ece0a873f3f00773910734a5f1844f2cf7036e983f76a462f984",
+      "debug/examples/score_mcp_episode-cf46f9fa17b90ad6": "3af9dcf47cdeee5516920091155405f915fbcf97721de9f4bae8fd48ecb01bb9"
+    },
+    "finished": 1794854766.1586719
+  },
+  {
+    "command": [
+      "python3",
+      "/work/output/check-schema.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794854766.9824424
+  },
+  {
+    "command": [
+      "cargo",
+      "clippy",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--all-features",
+      "--all-targets"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794854816.4566798
+  },
+  {
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "-j1",
+      "--features",
+      "bench",
+      "--bin",
+      "recalld"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {},
+    "testExecutablesSha256": {},
+    "finished": 1794854859.4683695
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/public-conformance.py",
+      "--inside",
+      "--fixture-version",
+      "3"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "../recalld": "3a968de380a004728659dde8d18ebb6afc1ed5fe31e4e7f50b929f6e29b60148"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794854950.128359
+  },
+  {
+    "command": [
+      "python3",
+      "/work/output/check-public.py"
+    ],
+    "exitCode": 0,
+    "binariesBeforeSha256": {
+      "../recalld": "3a968de380a004728659dde8d18ebb6afc1ed5fe31e4e7f50b929f6e29b60148"
+    },
+    "testExecutablesSha256": {},
+    "finished": 1794854950.650672
+  }
+]

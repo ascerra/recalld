@@ -1,0 +1,112 @@
+{
+  "environmentHash": "28381ab6654df7e34d0f4e687b91f6c5966fe4417b0b684054e9af750e7cf4e0",
+  "profile": "synthetic-unique-source-v1",
+  "scoring": {
+    "allRequiredEvidenceRate": 0.5,
+    "denominatorUnit": "measured-query-event",
+    "means": {
+      "binarySourceNdcgAt10": 0.622038473168458,
+      "extractionEvidenceRetention": 1.0,
+      "retrievalRecallAt10": 0.75,
+      "retrievalRecallAt20": 0.75,
+      "retrievalRecallAt5": 0.75
+    },
+    "profile": "synthetic-unique-source-v1",
+    "queryEvents": "4",
+    "scored": "2",
+    "semanticQualityClaim": false,
+    "unknownAnnotations": "1",
+    "zeroLabelUnscored": "1"
+  },
+  "semanticQualityClaim": false,
+  "trace": [
+    {
+      "metrics": {
+        "allRequiredEvidence": false,
+        "annotatedSourceUnits": 2,
+        "annotationStatus": "scored",
+        "answerQuality": "not measured",
+        "binarySourceNdcgAt10": 0.6131471927654584,
+        "extractionEvidenceRetention": 1.0,
+        "propositionPreservation": "not measured",
+        "retrievalRecallAt10": 0.5,
+        "retrievalRecallAt20": 0.5,
+        "retrievalRecallAt5": 0.5,
+        "retrievedUniqueSourceUnits": 2,
+        "scored": true
+      },
+      "queryId": "q0",
+      "retrievedSourceIds": [
+        "turn-0",
+        "turn-1"
+      ]
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": 0,
+        "annotationStatus": "zero_label",
+        "reason": "zero_annotated_sources",
+        "scored": false
+      },
+      "queryId": "q1",
+      "retrievedSourceIds": [
+        "turn-0",
+        "turn-1"
+      ]
+    },
+    {
+      "metrics": {
+        "annotatedSourceUnits": null,
+        "annotationStatus": "unknown",
+        "reason": "missing_annotations",
+        "scored": false
+      },
+      "queryId": "q2",
+      "retrievedSourceIds": [
+        "turn-0",
+        "turn-1"
+      ]
+    },
+    {
+      "metrics": {
+        "allRequiredEvidence": true,
+        "annotatedSourceUnits": 1,
+        "annotationStatus": "scored",
+        "answerQuality": "not measured",
+        "binarySourceNdcgAt10": 0.6309297535714575,
+        "extractionEvidenceRetention": 1.0,
+        "propositionPreservation": "not measured",
+        "retrievalRecallAt10": 1.0,
+        "retrievalRecallAt20": 1.0,
+        "retrievalRecallAt5": 1.0,
+        "retrievedUniqueSourceUnits": 2,
+        "scored": true
+      },
+      "queryId": "q3",
+      "retrievedSourceIds": [
+        "turn-0",
+        "turn-1"
+      ]
+    }
+  ],
+  "turnCoverage": {
+    "acceptedMemoryCoverage": 1.0,
+    "countUnit": "unique-source-turn",
+    "eligible": "4",
+    "eventCount": "12",
+    "ledgerVersion": 1,
+    "pending": "0",
+    "processed": "4",
+    "processedCoverage": 1.0,
+    "propositionPreservation": "not measured",
+    "statuses": {
+      "accepted": "4",
+      "attempted": "4",
+      "no_op": "0",
+      "rejected": "0",
+      "seen": "4",
+      "truncated": "0"
+    },
+    "unseen": "0"
+  }
+}

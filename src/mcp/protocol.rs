@@ -96,11 +96,16 @@ pub const CATALOG_TTL_MS: u64 = 3_600_000;
 pub const RESOURCE_READ_TTL_MS: u64 = 0;
 
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
-pub const SERVER_INSTRUCTIONS: &str = "Recalld is an AI memory system with human-like forgetting. \
-     Use store_memory to save observations, recall_memories to \
-     search by semantic similarity, and reinforce_memory to \
-     strengthen useful memories. Memories decay naturally over \
-     time unless reinforced.";
+pub const SERVER_INSTRUCTIONS: &str = "Read recalld://session first. Recalld is an AI memory system. Namespaces organize data; they are not access controls. \
+     Store/search use the resolved session default when namespace is omitted; by-ID operations \
+     use the record namespace. Supply namespace explicitly for reproducible workflows. \
+     Use recordAccess:false for evaluation or inspection. Reinforce only deliberate usefulness \
+     feedback. Inspect every batch item: legacy batch flags do not guarantee every item succeeded. \
+     Current duplicate scans are bounded and non-exhaustive; similarity is not proof of equivalence, \
+     so do not automatically delete close matches. Forget is logical removal, not backup erasure. \
+     Application contract 1 is supported; explicit contract 2 fails before work. Public v2 retries, \
+     exact-pair cursors and readiness are not enabled. Do not infer embedding-profile identity from \
+     matching dimensions.";
 
 // ── JSON-RPC error codes ────────────────────────────────────────────
 
@@ -329,6 +334,9 @@ pub struct ToolInfo {
     pub description: String,
     /// JSON Schema for the tool's input parameters.
     pub input_schema: serde_json::Value,
+    /// Schema of structured output, advertised only in the supported modern era.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
     /// Behavioral hints for tool UIs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<ToolAnnotations>,
@@ -357,9 +365,13 @@ pub struct ToolAnnotations {
 pub struct ToolCallParams {
     /// Name of the tool to call.
     pub name: String,
-    /// Tool input arguments.
-    #[serde(default)]
+    /// Tool input arguments. Omission means an empty object; explicit null is preserved.
+    #[serde(default = "empty_tool_arguments")]
     pub arguments: serde_json::Value,
+}
+
+fn empty_tool_arguments() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 /// Result of a tool call.
@@ -368,6 +380,10 @@ pub struct ToolCallParams {
 pub struct ToolCallResult {
     /// Content blocks in the result.
     pub content: Vec<ContentBlock>,
+    /// Object-shaped JSON for machine-readable clients. Legacy transports
+    /// omit this field while retaining the identical JSON text block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<serde_json::Map<String, serde_json::Value>>,
     /// Set to `true` if the tool call failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
@@ -386,14 +402,22 @@ impl ToolCallResult {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
             content: vec![ContentBlock::Text { text: text.into() }],
+            structured_content: None,
             is_error: None,
         }
     }
 
-    /// Build a JSON result (serialized to text).
+    /// Build JSON text and, for object payloads, matching structured content.
     pub fn json(value: &impl Serialize) -> Result<Self, serde_json::Error> {
         let text = serde_json::to_string_pretty(value)?;
-        Ok(Self::text(text))
+        let value: serde_json::Value = serde_json::from_str(&text)?;
+        let mut result = Self::text(text);
+        // MCP structured content must be an object. Preserve legacy array
+        // and scalar payloads instead of silently changing their shape.
+        if let serde_json::Value::Object(object) = value {
+            result.structured_content = Some(object);
+        }
+        Ok(result)
     }
 
     /// Build an error result.
@@ -402,6 +426,7 @@ impl ToolCallResult {
             content: vec![ContentBlock::Text {
                 text: message.into(),
             }],
+            structured_content: None,
             is_error: Some(true),
         }
     }
@@ -920,6 +945,45 @@ mod tests {
                 META_CLIENT_CAPABILITIES: {},
             }
         })
+    }
+
+    #[test]
+    fn structured_json_matches_text_and_preserves_non_object_shapes() {
+        let value = serde_json::json!({"id": "memory", "count": 2});
+        let result = ToolCallResult::json(&value).unwrap();
+        let wire = serde_json::to_value(&result).unwrap();
+        assert_eq!(wire["structuredContent"], value);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(wire["content"][0]["text"].as_str().unwrap())
+                .unwrap(),
+            value
+        );
+        for value in [
+            serde_json::json!([1, 2]),
+            serde_json::json!(null),
+            serde_json::json!(3),
+        ] {
+            let wire = serde_json::to_value(ToolCallResult::json(&value).unwrap()).unwrap();
+            assert!(wire.get("structuredContent").is_none());
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(
+                    wire["content"][0]["text"].as_str().unwrap()
+                )
+                .unwrap(),
+                value
+            );
+        }
+        let legacy: ToolCallResult = serde_json::from_value(
+            serde_json::json!({"content":[{"type":"text","text":"legacy"}]}),
+        )
+        .unwrap();
+        assert!(legacy.structured_content.is_none());
+        assert!(
+            serde_json::to_value(ToolCallResult::error("failure"))
+                .unwrap()
+                .get("structuredContent")
+                .is_none()
+        );
     }
 
     /// Every MCP revision names this field `resourceTemplates`. Without

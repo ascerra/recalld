@@ -1,0 +1,12 @@
+{
+  "path": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-public-api1-lifecycle-1364b27",
+  "copy_sha256": "06a436fcf5abd447652c0ed8964a93808712510492ed19d8253d1eee4e69712c",
+  "files": {
+    "REPORT.md": "d61809384829ebecc2812fb5d321865abd891dbae621fc720042dbf37964720b",
+    "validation.json": "3f6e4339f061d878c7f36d7cd373f7d86b353410b0e30c7a8a449380a1a8d3b7",
+    "corrected-all-executables.json": "ee4181a9a9423e0e2c7ae7cb46d86624412620641f55cefb7cd8182d0bc67e0d",
+    "build-inputs-sha256.json": "ede7e261ce63f188c72bbfbe07cf7464d7332cf80276d889f92547f0f93720f6"
+  },
+  "verified": true,
+  "raw_archived": false
+}

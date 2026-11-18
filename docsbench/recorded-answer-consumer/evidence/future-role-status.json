@@ -1,0 +1,25 @@
+{
+  "accepted": 3,
+  "planned": 4,
+  "queries": [
+    {
+      "queryId": "q0",
+      "status": "accepted"
+    },
+    {
+      "queryId": "q1",
+      "status": "accepted"
+    },
+    {
+      "queryId": "q2",
+      "status": "accepted"
+    },
+    {
+      "queryId": "q3",
+      "status": "rejected"
+    }
+  ],
+  "rejected": 1,
+  "unattempted": 0,
+  "unknown": 0
+}

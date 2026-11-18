@@ -1,0 +1,18 @@
+warning: the `Err`-variant returned from this closure is very large
+  --> tests/vector_certification_cli.rs:68:26
+   |
+68 |           .for_each_record(|row| {
+   |  __________________________^
+69 | |             if row.record.namespace_id == expected_calls.get() && row.embedding.is_some() {
+70 | |                 let labels = &row.record.schema.as_ref().unwrap().labels;
+...  |
+97 | |             Ok(())
+98 | |         })
+   | |_________^ the `Err`-variant is at least 176 bytes
+   |
+   = help: try reducing the size of `recalld::storage::StorageError`, for example by boxing large elements or replacing it with `Box<recalld::storage::StorageError>`
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+   = note: `#[warn(clippy::result_large_err)]` on by default
+
+warning: `recalld` (test "vector_certification_cli") generated 1 warning
+    Finished `dev` profile [unoptimized] target(s) in 0.56s

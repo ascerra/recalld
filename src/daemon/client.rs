@@ -35,11 +35,8 @@ const MAX_STALE_SKIPS: usize = 8;
 /// `SearchPipeline::similar`).
 ///
 /// The methods that remain are pure reads of storage, the namespace table,
-/// or process health. `get_memory` qualifies because the *daemon* path
-/// (`McpStorageAdapter::get_memory`) reads the record straight out of
-/// storage and records nothing; the access-recording `get_memory` lives on
-/// the in-process query engine, which the socket never reaches. Should the
-/// adapter ever start recording accesses, it has to come off this list.
+/// or process health. Ordinary `get_memory` records exposure too; only its
+/// explicit `get_memory_read_only` alias is eligible for automatic replay.
 ///
 /// Mutating methods are excluded for the usual reasons: they mint new
 /// server-side state (`store_memory` allocates a fresh id, so a replay
@@ -63,9 +60,12 @@ fn is_retry_safe(method: &str) -> bool {
     matches!(
         method,
         "ping"
+            | "session_context_v1"
             | "check_health"
             | "scan_duplicates"
-            | "get_memory"
+            | "search_read_only"
+            | "get_memory_read_only"
+            | "find_similar_read_only"
             | "list_namespaces"
             | "namespace_stats"
             | "list_memories"
@@ -109,11 +109,70 @@ struct ClientState {
     /// Largest frame the daemon is known to accept. Held at the protocol v1
     /// limit until a `ping` negotiates something larger.
     frame_limit: usize,
+    api1_lifecycle: Option<bool>,
+    api1_store: Option<bool>,
+    api1_store_batch: Option<bool>,
+    prepared_queries: Option<bool>,
+    prepared_get: Option<bool>,
+    api1_get: Option<bool>,
+    exact_pairs_bits: bool,
+    canonical_pages: bool,
 }
 
-/// A failed exchange, plus whether the connection survived it.
+#[derive(Clone, Copy)]
+enum Api1Capability {
+    Lifecycle,
+    Store,
+    StoreBatch,
+}
+impl Api1Capability {
+    fn supported(self, state: &ClientState) -> Option<bool> {
+        match self {
+            Self::Lifecycle => state.api1_lifecycle,
+            Self::Store => state.api1_store,
+            Self::StoreBatch => state.api1_store_batch,
+        }
+    }
+}
+
+/// Attribution is independent of connection health. In particular a drained
+/// malformed frame leaves a usable connection but cannot settle a sent write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransmissionPhase {
+    BeforeSend,
+    SentUnattributed,
+    MatchedReply,
+}
+pub(crate) struct PreparedExchange {
+    pub(crate) phase: TransmissionPhase,
+    /// A fully admitted response result; no typed receipt has been acquired.
+    pub(crate) result: Option<serde_json::Value>,
+}
+
+pub(crate) enum Api1GetExchange {
+    Prepared(PreparedExchange),
+    Compatibility(Result<serde_json::Value, BridgeError>),
+}
+fn api1_get_capability(value: &serde_json::Value) -> Result<bool, BridgeError> {
+    if !value.is_object() {
+        return Err(BridgeError::Unavailable(
+            "malformed get capability handshake".into(),
+        ));
+    }
+    match value.get("api1GetV1") {
+        None => Ok(false),
+        Some(serde_json::Value::Bool(value)) => Ok(*value),
+        _ => Err(BridgeError::Unavailable(
+            "malformed api1GetV1 capability".into(),
+        )),
+    }
+}
+
+/// A failed exchange, plus whether the connection survived it. Existing callers
+/// retain their old `lost` behavior; new prepared callers use typed attribution.
 struct ExchangeError {
     error: BridgeError,
+    phase: TransmissionPhase,
     /// The connection was poisoned and must be re-established. When set, the
     /// request may or may not have been applied by the daemon: neither a
     /// failed write nor a failed read proves the daemon did not act.
@@ -124,12 +183,36 @@ impl ExchangeError {
     /// The call failed but the connection is still usable and the outcome is
     /// known (nothing was sent, or the daemon answered definitively).
     fn settled(error: BridgeError) -> Self {
-        Self { error, lost: false }
+        Self {
+            error,
+            lost: false,
+            phase: TransmissionPhase::BeforeSend,
+        }
     }
 
     /// The connection was poisoned; the outcome of the call is unknown.
     fn lost(error: BridgeError) -> Self {
-        Self { error, lost: true }
+        Self {
+            error,
+            lost: true,
+            phase: TransmissionPhase::SentUnattributed,
+        }
+    }
+
+    fn unattributed(error: BridgeError) -> Self {
+        Self {
+            error,
+            lost: false,
+            phase: TransmissionPhase::SentUnattributed,
+        }
+    }
+
+    fn matched(error: BridgeError) -> Self {
+        Self {
+            error,
+            lost: false,
+            phase: TransmissionPhase::MatchedReply,
+        }
     }
 }
 
@@ -140,6 +223,13 @@ impl ExchangeError {
 /// rejected before a single byte reaches the socket, so it cannot corrupt
 /// the stream for subsequent calls.
 pub struct DaemonClient {
+    #[cfg(test)]
+    api1_get_pause: std::sync::Mutex<
+        Option<(
+            std::sync::Arc<tokio::sync::Notify>,
+            std::sync::Arc<tokio::sync::Notify>,
+        )>,
+    >,
     socket_path: PathBuf,
     state: Mutex<ClientState>,
     /// Mirrors `state.conn.is_some()` so [`DaemonClient::is_connected`] can
@@ -148,6 +238,231 @@ pub struct DaemonClient {
 }
 
 impl DaemonClient {
+    /// Prepared-only single exchange, without reconnect/replay after send. The
+    /// shared mutex covers negotiation and the entire attributed response.
+    pub(crate) async fn call_api1_get(
+        &self,
+        params: serde_json::Value,
+        request: &crate::serialization::get_api1::Request,
+    ) -> Api1GetExchange {
+        let mut state = self.state.lock().await;
+        let ready = async {
+            if state.conn.is_none() {
+                self.reconnect(&mut state).await?;
+            }
+            if state.api1_get.is_none() {
+                state.negotiate().await?;
+            }
+            Ok::<_, BridgeError>(state.api1_get == Some(true))
+        }
+        .await;
+        match ready {
+            Err(_) => Api1GetExchange::Prepared(PreparedExchange {
+                phase: TransmissionPhase::BeforeSend,
+                result: None,
+            }),
+            Ok(true) => {
+                // The attributed exchange rechecks capability under its mutex.
+                // A reconnect/downgrade here fails closed, never changes lanes.
+                drop(state);
+                #[cfg(test)]
+                {
+                    let pause = self.api1_get_pause.lock().unwrap().take();
+                    if let Some((entered, release)) = pause {
+                        entered.notify_one();
+                        release.notified().await;
+                    }
+                }
+                Api1GetExchange::Prepared(self.call_prepared(super::api1_get::GET, params).await)
+            }
+            Ok(false) => {
+                let method = if request.record_access {
+                    "get_memory"
+                } else {
+                    "get_memory_read_only"
+                };
+                let mut old = serde_json::json!({"id":request.id.to_string(),"recordAccess":request.record_access});
+                let method = if let Some(namespace) = &request.namespace {
+                    old["namespace"] = serde_json::json!(namespace);
+                    old.as_object_mut().unwrap().remove("recordAccess");
+                    if request.record_access {
+                        "get_memory_scoped".to_owned()
+                    } else {
+                        "get_memory_scoped_read_only".to_owned()
+                    }
+                } else {
+                    method.to_owned()
+                };
+                let result = self.call_locked(&mut state, &method, old).await;
+                self.connected
+                    .store(state.conn.is_some(), AtomicOrdering::Relaxed);
+                Api1GetExchange::Compatibility(result)
+            }
+        }
+    }
+
+    pub(crate) async fn call_prepared(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> PreparedExchange {
+        let mut state = self.state.lock().await;
+        let api1 = method == super::api1_get::GET;
+        let point = method == super::prepared_get::GET;
+        let limit = if api1 {
+            super::api1_get::response_limit()
+        } else if point {
+            super::prepared_get::response_limit()
+        } else {
+            super::prepared_query::response_limit()
+        };
+        let outcome = async {
+            if state.conn.is_none() && self.reconnect(&mut state).await.is_err() {
+                return PreparedExchange {
+                    phase: TransmissionPhase::BeforeSend,
+                    result: None,
+                };
+            }
+            if (if api1 {
+                state.api1_get
+            } else if point {
+                state.prepared_get
+            } else {
+                state.prepared_queries
+            })
+            .is_none()
+                && state.negotiate().await.is_err()
+            {
+                return PreparedExchange {
+                    phase: TransmissionPhase::BeforeSend,
+                    result: None,
+                };
+            }
+            let supported = match method {
+                super::api1_get::GET => state.api1_get == Some(true),
+                super::prepared_get::GET => state.prepared_get == Some(true),
+                super::prepared_pages::LIST | super::prepared_pages::CATALOG => {
+                    state.canonical_pages
+                }
+                super::prepared_query::PAIRS => {
+                    state.prepared_queries == Some(true) && state.exact_pairs_bits
+                }
+                super::prepared_query::QUERY | super::prepared_query::SIMILAR => {
+                    state.prepared_queries == Some(true)
+                }
+                _ => false,
+            };
+            if !supported || state.frame_limit < MAX_MESSAGE_SIZE {
+                return PreparedExchange {
+                    phase: TransmissionPhase::BeforeSend,
+                    result: None,
+                };
+            }
+            let mut request = DaemonRequest {
+                jsonrpc: "2.0".into(),
+                id: 0,
+                method: method.into(),
+                params,
+            };
+            let id = match state.send_request(&mut request).await {
+                Ok(id) => id,
+                Err(error) => {
+                    return PreparedExchange {
+                        phase: error.phase,
+                        result: None,
+                    };
+                }
+            };
+            for _ in 0..=MAX_STALE_SKIPS {
+                let frame = match state.conn.as_mut() {
+                    Some(conn) => super::protocol::read_frame(&mut conn.reader, limit).await,
+                    None => {
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                };
+                let frame = match frame {
+                    Ok(frame) => frame,
+                    Err(FrameError::OversizedDiscarded { .. } | FrameError::Malformed(_)) => {
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                    Err(_) => {
+                        state.conn = None;
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                };
+                if !(if api1 {
+                    super::api1_get::admitted_frame(&frame)
+                } else if point {
+                    super::prepared_get::admitted_frame(&frame)
+                } else {
+                    super::prepared_query::admitted_frame(&frame)
+                }) {
+                    return PreparedExchange {
+                        phase: TransmissionPhase::SentUnattributed,
+                        result: None,
+                    };
+                }
+                // The bounded raw structural/scalar pass above precedes this
+                // owned tree, including all malformed-reply evidence paths.
+                let response: serde_json::Value = match serde_json::from_slice(&frame) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return PreparedExchange {
+                            phase: TransmissionPhase::SentUnattributed,
+                            result: None,
+                        };
+                    }
+                };
+                if let Some(old) = response.get("id").and_then(serde_json::Value::as_u64) {
+                    if old != 0 && old < id {
+                        continue;
+                    }
+                }
+                let correlated = response.get("id").and_then(serde_json::Value::as_u64) == Some(id)
+                    && response.get("jsonrpc").and_then(serde_json::Value::as_str) == Some("2.0")
+                    && response.as_object().is_some_and(|o| {
+                        o.keys()
+                            .all(|k| matches!(k.as_str(), "jsonrpc" | "id" | "result" | "error"))
+                    })
+                    && response.get("error").is_none()
+                    && response.get("result").is_some();
+                let result = response.get("result").cloned();
+                if response
+                    .get("id")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|other| other > id)
+                {
+                    state.conn = None;
+                }
+                return PreparedExchange {
+                    phase: if correlated {
+                        TransmissionPhase::MatchedReply
+                    } else {
+                        TransmissionPhase::SentUnattributed
+                    },
+                    result,
+                };
+            }
+            state.conn = None;
+            PreparedExchange {
+                phase: TransmissionPhase::SentUnattributed,
+                result: None,
+            }
+        }
+        .await;
+        self.connected
+            .store(state.conn.is_some(), AtomicOrdering::Relaxed);
+        outcome
+    }
     /// Connects to the daemon at the given Unix socket path.
     ///
     /// The frame limit starts at the conservative protocol v1 value; call
@@ -155,11 +470,21 @@ impl DaemonClient {
     pub async fn connect(socket_path: &Path) -> std::io::Result<Self> {
         let stream = UnixStream::connect(socket_path).await?;
         Ok(Self {
+            #[cfg(test)]
+            api1_get_pause: std::sync::Mutex::new(None),
             socket_path: socket_path.to_path_buf(),
             state: Mutex::new(ClientState {
                 conn: Some(Connection::new(stream)),
                 next_id: 1,
                 frame_limit: LEGACY_MAX_MESSAGE_SIZE,
+                api1_lifecycle: None,
+                api1_store: None,
+                api1_store_batch: None,
+                prepared_queries: None,
+                prepared_get: None,
+                api1_get: None,
+                exact_pairs_bits: false,
+                canonical_pages: false,
             }),
             connected: AtomicBool::new(true),
         })
@@ -192,6 +517,98 @@ impl DaemonClient {
         self.connected
             .store(state.conn.is_some(), AtomicOrdering::Relaxed);
         outcome
+    }
+
+    /// Choose the old/new API1 mutation route on the negotiated connection,
+    /// before writing. A reconnect after a lost mutation never retries it.
+    pub(crate) async fn call_api1_lifecycle(
+        &self,
+        new_method: &str,
+        new_params: serde_json::Value,
+        old_method: &str,
+        old_params: serde_json::Value,
+    ) -> Result<(bool, serde_json::Value), BridgeError> {
+        self.call_api1_mutation(
+            Api1Capability::Lifecycle,
+            new_method,
+            new_params,
+            Some((old_method, old_params)),
+        )
+        .await
+    }
+
+    pub(crate) async fn call_api1_store(
+        &self,
+        params: serde_json::Value,
+        legacy_params: Option<serde_json::Value>,
+    ) -> Result<(bool, serde_json::Value), BridgeError> {
+        self.call_api1_mutation(
+            Api1Capability::Store,
+            "store_api1_v1",
+            params,
+            legacy_params.map(|p| ("store_memory", p)),
+        )
+        .await
+    }
+
+    pub(crate) async fn call_api1_store_batch(
+        &self,
+        params: serde_json::Value,
+        legacy_params: Option<serde_json::Value>,
+    ) -> Result<(bool, serde_json::Value), BridgeError> {
+        self.call_api1_mutation(
+            Api1Capability::StoreBatch,
+            "store_batch_api1_v1",
+            params,
+            legacy_params.map(|v| ("mutate_batch", v)),
+        )
+        .await
+    }
+
+    async fn call_api1_mutation(
+        &self,
+        capability: Api1Capability,
+        new_method: &str,
+        new_params: serde_json::Value,
+        legacy: Option<(&str, serde_json::Value)>,
+    ) -> Result<(bool, serde_json::Value), BridgeError> {
+        let mut state = self.state.lock().await;
+        let result = async {
+            if state.conn.is_none() {
+                self.reconnect(&mut state).await?;
+            }
+            if capability.supported(&state).is_none() {
+                if let Err(error) = state.negotiate().await {
+                    if state.conn.is_none() {
+                        self.reconnect(&mut state).await?;
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            let capable = capability.supported(&state) == Some(true);
+            if capable && state.frame_limit < MAX_MESSAGE_SIZE {
+                return Err(BridgeError::TooLarge(
+                    "API1 mutation requires negotiated full receipt frames before work".into(),
+                ));
+            }
+            let (method, params) = if capable {
+                (new_method, new_params)
+            } else {
+                legacy.ok_or_else(|| {
+                    BridgeError::InvalidInput(
+                        "API1 store constraint requires a capable daemon; no mutation was sent"
+                            .into(),
+                    )
+                })?
+            };
+            let value = self.call_locked(&mut state, method, params).await?;
+            Ok((capable, value))
+        }
+        .await;
+        self.connected
+            .store(state.conn.is_some(), AtomicOrdering::Relaxed);
+        result
     }
 
     async fn call_locked(
@@ -280,7 +697,34 @@ impl DaemonClient {
         self.connected
             .store(state.conn.is_some(), AtomicOrdering::Relaxed);
         // The answer describes the connection the lock is still protecting.
-        state.frame_limit = negotiated_limit(&outcome?);
+        let outcome = outcome?;
+        state.api1_get = None;
+        state.api1_get = Some(api1_get_capability(&outcome)?);
+        state.frame_limit = negotiated_limit(&outcome);
+        state.prepared_get = Some(
+            outcome
+                .get("preparedGetV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
+        state.api1_lifecycle = Some(
+            outcome
+                .get("api1LifecycleV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
+        state.api1_store_batch = Some(
+            outcome
+                .get("api1StoreBatchV1")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        );
+        state.api1_store = Some(
+            outcome
+                .get("api1StoreV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
         Ok(())
     }
 
@@ -291,6 +735,14 @@ impl DaemonClient {
     async fn reconnect(&self, state: &mut ClientState) -> Result<(), BridgeError> {
         state.conn = None;
         state.frame_limit = LEGACY_MAX_MESSAGE_SIZE;
+        state.api1_lifecycle = None;
+        state.api1_store = None;
+        state.api1_store_batch = None;
+        state.prepared_queries = None;
+        state.prepared_get = None;
+        state.api1_get = None;
+        state.exact_pairs_bits = false;
+        state.canonical_pages = false;
         let mut last: Option<String> = None;
 
         for (attempt, backoff_ms) in RECONNECT_BACKOFF_MS.iter().enumerate() {
@@ -298,6 +750,14 @@ impl DaemonClient {
                 Ok(stream) => {
                     state.conn = Some(Connection::new(stream));
                     state.frame_limit = LEGACY_MAX_MESSAGE_SIZE;
+                    state.api1_lifecycle = None;
+                    state.api1_store = None;
+                    state.api1_store_batch = None;
+                    state.prepared_queries = None;
+                    state.prepared_get = None;
+                    state.api1_get = None;
+                    state.exact_pairs_bits = false;
+                    state.canonical_pages = false;
                     match state.negotiate().await {
                         Ok(()) => return Ok(()),
                         Err(e) => {
@@ -342,18 +802,51 @@ impl ClientState {
             params: handshake_params(),
         };
         let result = self.exchange(&mut request).await.map_err(|e| e.error)?;
+        self.api1_get = None;
+        self.api1_get = Some(api1_get_capability(&result)?);
         self.frame_limit = negotiated_limit(&result);
+        self.api1_lifecycle = Some(
+            result
+                .get("api1LifecycleV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
+        self.api1_store_batch = Some(
+            result
+                .get("api1StoreBatchV1")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        );
+        self.api1_store = Some(
+            result
+                .get("api1StoreV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
+        self.prepared_get = Some(
+            result
+                .get("preparedGetV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
+        self.prepared_queries = Some(
+            result
+                .get("preparedQueriesV1")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        );
+        self.canonical_pages = result
+            .get("canonicalPagesV1")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+        self.exact_pairs_bits = result
+            .get("exactPairsBitsV1")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
         Ok(())
     }
 
-    /// One request/response round trip on the current connection.
-    ///
-    /// Assigns `request.id` so a retry gets a fresh id while reusing the
-    /// (potentially large) params without cloning them.
-    async fn exchange(
-        &mut self,
-        request: &mut DaemonRequest,
-    ) -> Result<serde_json::Value, ExchangeError> {
+    async fn send_request(&mut self, request: &mut DaemonRequest) -> Result<u64, ExchangeError> {
         let method = request.method.clone();
         let limit = self.frame_limit;
         request.id = self.next_id;
@@ -363,9 +856,12 @@ impl ClientState {
         let written = match self.conn.as_mut() {
             Some(conn) => write_framed_request(&mut conn.writer, request, limit).await,
             None => {
-                return Err(ExchangeError::lost(BridgeError::Internal(
-                    "daemon connection is not established".into(),
-                )));
+                return Err(ExchangeError {
+                    phase: TransmissionPhase::BeforeSend,
+                    ..ExchangeError::lost(BridgeError::Internal(
+                        "daemon connection is not established".into(),
+                    ))
+                });
             }
         };
 
@@ -389,6 +885,21 @@ impl ClientState {
             });
         }
 
+        Ok(id)
+    }
+
+    /// One request/response round trip on the current connection.
+    ///
+    /// Assigns `request.id` so a retry gets a fresh id while reusing the
+    /// (potentially large) params without cloning them.
+    async fn exchange(
+        &mut self,
+        request: &mut DaemonRequest,
+    ) -> Result<serde_json::Value, ExchangeError> {
+        let method = request.method.clone();
+        let limit = self.frame_limit;
+        let id = self.send_request(request).await?;
+
         for _ in 0..=MAX_STALE_SKIPS {
             let read = match self.conn.as_mut() {
                 Some(conn) => read_framed_response(&mut conn.reader, limit).await,
@@ -408,12 +919,12 @@ impl ClientState {
                 // wrong move when the daemon simply emitted a frame we could
                 // not parse.
                 Err(e @ FrameError::OversizedDiscarded { .. }) => {
-                    return Err(ExchangeError::settled(BridgeError::TooLarge(format!(
+                    return Err(ExchangeError::unattributed(BridgeError::TooLarge(format!(
                         "the daemon's response to `{method}` could not be delivered: {e}"
                     ))));
                 }
                 Err(FrameError::Malformed(detail)) => {
-                    return Err(ExchangeError::settled(BridgeError::Internal(format!(
+                    return Err(ExchangeError::unattributed(BridgeError::Internal(format!(
                         "the daemon's response to `{method}` could not be parsed: {detail}; \
                          the connection is still usable and the call can be retried"
                     ))));
@@ -436,17 +947,17 @@ impl ClientState {
                             "daemon reported an unattributable protocol error".into(),
                         )
                     });
-                return Err(ExchangeError::settled(error));
+                return Err(ExchangeError::unattributed(error));
             }
 
             match response.id.cmp(&id) {
                 Ordering::Equal => {
                     if let Some(err) = response.error {
-                        return Err(ExchangeError::settled(err.into_bridge_error()));
+                        return Err(ExchangeError::matched(err.into_bridge_error()));
                     }
                     return match response.result {
                         Some(result) => Ok(result),
-                        None => Err(ExchangeError::settled(BridgeError::Internal(
+                        None => Err(ExchangeError::unattributed(BridgeError::Internal(
                             "empty daemon response".into(),
                         ))),
                     };
@@ -508,7 +1019,12 @@ fn negotiated_limit(result: &serde_json::Value) -> usize {
 }
 
 #[cfg(test)]
+#[path = "store_capability_tests.rs"]
+mod store_capability_tests;
+
+#[cfg(test)]
 mod tests {
+    include!("api1_get_before_tests.rs");
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
 
@@ -697,7 +1213,7 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
 
@@ -716,13 +1232,13 @@ mod tests {
         // The socket was never touched, so the next call still works.
         assert!(client.is_connected());
         client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
 
         // Exactly the two small calls reached the wire.
         assert_eq!(stub.methods().len(), 2);
-        assert_eq!(stub.count("get_memory"), 2);
+        assert_eq!(stub.count("get_memory_read_only"), 2);
         assert_eq!(stub.count("store_memory"), 0);
     }
 
@@ -734,13 +1250,13 @@ mod tests {
 
         // The first call is swallowed; the client reconnects and retries.
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
         assert!(client.is_connected());
 
         client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
         assert_eq!(stub.count("ping"), 1, "reconnect renegotiates exactly once");
@@ -809,7 +1325,7 @@ mod tests {
         // The client is healthy again for the next call.
         assert!(client.is_connected());
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
     }
@@ -820,7 +1336,7 @@ mod tests {
         let stub = Stub::start(Behavior::Healthy);
         let client = DaemonClient::connect(&stub.path).await.unwrap();
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
 
@@ -829,8 +1345,12 @@ mod tests {
         let err = tokio::time::timeout(Duration::from_secs(5), async {
             // The first call discovers the dead peer; the second starts with
             // no connection at all. Both must terminate.
-            let _ = client.call("get_memory", json!({ "id": "b" })).await;
-            client.call("get_memory", json!({ "id": "c" })).await
+            let _ = client
+                .call("get_memory_read_only", json!({ "id": "b" }))
+                .await;
+            client
+                .call("get_memory_read_only", json!({ "id": "c" }))
+                .await
         })
         .await
         .expect("reconnect must not loop forever")
@@ -849,11 +1369,11 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
         let result = client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
 
@@ -875,7 +1395,7 @@ mod tests {
         assert!(text.contains("id mismatch"), "{text}");
 
         let result = client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
@@ -888,7 +1408,7 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         let err = client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap_err();
         assert!(matches!(err, BridgeError::TooLarge(_)), "{err}");
@@ -896,7 +1416,7 @@ mod tests {
         // The oversized frame was drained, so the stream is still aligned.
         assert!(client.is_connected());
         let result = client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
@@ -914,7 +1434,7 @@ mod tests {
         let client = DaemonClient::connect(&stub.path).await.unwrap();
 
         let err = client
-            .call("get_memory", json!({ "id": "a" }))
+            .call("get_memory_read_only", json!({ "id": "a" }))
             .await
             .unwrap_err();
         assert!(
@@ -928,7 +1448,7 @@ mod tests {
         // The stream is still aligned, so the next call goes through.
         assert!(client.is_connected());
         let result = client
-            .call("get_memory", json!({ "id": "b" }))
+            .call("get_memory_read_only", json!({ "id": "b" }))
             .await
             .unwrap();
         assert_eq!(result, json!({ "ok": true }));
@@ -970,7 +1490,11 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let reader = {
             let client = client.clone();
-            tokio::spawn(async move { client.call("get_memory", json!({ "id": "a" })).await })
+            tokio::spawn(async move {
+                client
+                    .call("get_memory_read_only", json!({ "id": "a" }))
+                    .await
+            })
         };
 
         pinger.await.unwrap().unwrap();
@@ -1001,7 +1525,16 @@ mod tests {
             "reinforce_memory",
             "delete_memory",
             "delete_memories",
+            "forget_native_v1",
+            "feedback_native_v1",
+            "forget_lifecycle_v1",
+            "feedback_lifecycle_v1",
+            "feedback_api1_v1",
+            "forget_api1_v1",
             "shutdown",
+            "get_memory",
+            "get_memory_scoped",
+            "get_api1_v1",
             // Not mutations, but not effect-free either: both record an
             // access per result, which moves the decay schedule.
             "search",
@@ -1013,7 +1546,7 @@ mod tests {
             "ping",
             "check_health",
             "scan_duplicates",
-            "get_memory",
+            "get_memory_read_only",
             "list_namespaces",
             "namespace_stats",
             "list_memories",

@@ -1,0 +1,49 @@
+{
+  "image": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "mounts": [
+    {
+      "Type": "bind",
+      "Source": "/tmp/recalld-implementation/compaction-review-7281918/cargo",
+      "Destination": "/cargo",
+      "Mode": "",
+      "RW": true,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/tmp/recalld-huygens-active-validation/live-read-schemas-001-fb127823/output",
+      "Destination": "/evidence",
+      "Mode": "",
+      "RW": true,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/tmp/recalld-huygens-active-validation/live-read-schemas-001-fb127823/full.sh",
+      "Destination": "/run.sh",
+      "Mode": "",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/tmp/recalld-huygens-active-validation/target",
+      "Destination": "/target",
+      "Mode": "",
+      "RW": true,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/tmp/recalld-huygens-active-validation/live-read-schemas-001-fb127823/source",
+      "Destination": "/work",
+      "Mode": "",
+      "RW": false,
+      "Propagation": "rprivate"
+    }
+  ],
+  "nanoCpus": 2000000000,
+  "memory": 4294967296,
+  "network": "none",
+  "startedAt": "2026-11-17T18:27:30.848720024Z"
+}

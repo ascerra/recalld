@@ -1,0 +1,11 @@
+{
+  "capturedUtc": "2026-11-16T03:00:56.061395+00:00",
+  "scope": "late in-run sample, not final container counters",
+  "exit": 0,
+  "stderr": "",
+  "cgroups": {
+    "cpu.stat": "usage_usec 1530511704\nuser_usec 1422476025\nsystem_usec 108035678\nnice_usec 0\nnr_periods 9653\nnr_throttled 448\nthrottled_usec 1465955\nnr_bursts 0\nburst_usec 0\n",
+    "memory.peak": "4294967296\n",
+    "memory.events": "low 0\nhigh 0\nmax 90772\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+  }
+}

@@ -1,0 +1,49 @@
+   Compiling recalld v1.0.0 (/work)
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1908:19
+     |
+1908 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0061]: this method takes 4 arguments but 3 arguments were supplied
+   --> src/mcp/batch_adapters.rs:942:14
+    |
+942 |             .run_batch_accepted(input, &work, None)
+    |              ^^^^^^^^^^^^^^^^^^-------------------- argument #4 of type `std::option::Option<Surface>` is missing
+    |
+note: method defined here
+   --> src/mcp/batch_adapters.rs:135:14
+    |
+135 |     async fn run_batch_accepted(
+    |              ^^^^^^^^^^^^^^^^^^
+...
+140 |         surface: Option<crate::serialization::batch_api1::Surface>,
+    |         ----------------------------------------------------------
+help: provide the argument
+    |
+942 |             .run_batch_accepted(input, &work, None, /* std::option::Option<Surface> */)
+    |                                                   ++++++++++++++++++++++++++++++++++++
+
+warning: unused import: `StorageEngine`
+ --> src/search/origin_tests.rs:5:5
+  |
+5 |     StorageEngine as _,
+  |     ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1497:9
+     |
+1497 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+For more information about this error, try `rustc --explain E0061`.
+warning: `recalld` (lib test) generated 3 warnings
+error: could not compile `recalld` (lib test) due to 1 previous error; 3 warnings emitted

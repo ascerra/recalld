@@ -1,0 +1,95 @@
+{
+  "attempted": 7,
+  "environmentHash": "0a8bac5c63694f0c7d94f913912330a08620aa5bd178fcfc327f02cf90d0ce74",
+  "episodes": [
+    {
+      "episodeId": "episode-0",
+      "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+      "queryIds": [
+        "q0",
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "split": "train",
+      "status": "passed"
+    },
+    {
+      "episodeId": "episode-1",
+      "groupId": "1bdf0bd021d76236a3911706d0d631f74e3279a7e118a1de56bd0589d7d0aaff",
+      "queryIds": [
+        "q0",
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "split": "train",
+      "status": "passed"
+    },
+    {
+      "episodeId": "episode-2",
+      "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+      "queryIds": [
+        "q0",
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "split": "development",
+      "status": "passed"
+    },
+    {
+      "episodeId": "episode-3",
+      "groupId": "d44e6bd153687cb6548db56fe8e61f770bd2bc9cdbe6fdbf9858c9b6cf7e60d4",
+      "queryIds": [
+        "q0",
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "split": "development",
+      "status": "passed"
+    },
+    {
+      "episodeId": "episode-4",
+      "groupId": "31f0d64cf5a1440e303c7ec07e60939e788deb59af60f37f1e2db5671af77595",
+      "queryIds": [
+        "q0",
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "split": "test",
+      "status": "passed"
+    },
+    {
+      "episodeId": "episode-5",
+      "groupId": "a343734946bb2dd7057599c6b033977db8631ebe245aadc943e3d4ed5d879697",
+      "queryIds": [
+        "q0",
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "split": "train",
+      "status": "passed"
+    },
+    {
+      "episodeId": "episode-6",
+      "groupId": "91986d0f429efab4cf04d04d7b527c8c1da2e5b44b024b541f69745725ab9f05",
+      "queryIds": [
+        "q0",
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "split": "train",
+      "status": "passed"
+    }
+  ],
+  "failed": 0,
+  "planned": 7,
+  "status": "passed",
+  "succeeded": 7,
+  "unattempted": 0
+}

@@ -32,20 +32,57 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --all-features
 
-  test:
-    name: Test (${{ matrix.os }})
+  test_shards:
+    name: Test shard (${{ matrix.os }}, ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.94"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-features
+      - name: Validate test partition runner
+        if: matrix.shard == 0
+        run: python3 -m unittest discover -s .github/ci -p 'test_*.py'
+      - name: Run assigned tests with ordinary Cargo/libtest
+        run: python3 .github/ci/test_shards.py run --shard '${{ matrix.shard }}' --os '${{ matrix.os }}' --directory ci-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-${{ matrix.os }}-${{ matrix.shard }}
+          path: ci-results/
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    # Preserve the existing required checks. A failed/cancelled/missing shard
+    # must never become a successful or skipped aggregate.
+    name: Test (${{ matrix.os }})
+    if: always()
+    needs: test_shards
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require successful shard jobs
+        env:
+          SHARD_RESULT: ${{ needs.test_shards.result }}
+        run: test "$SHARD_RESULT" = success
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tests-${{ matrix.os }}-*
+          path: ci-results
+      - name: Require complete disjoint coverage and matching provenance
+        run: python3 .github/ci/test_shards.py verify --os '${{ matrix.os }}' --source '${{ github.sha }}' --directory ci-results
 
   build:
     name: Build (release)

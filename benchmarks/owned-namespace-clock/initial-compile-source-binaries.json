@@ -1,0 +1,6 @@
+{
+  "sha256": {
+    "target/debug/recalld-schema": "6c5964a4e273038b8747279f02b87acc6ebd608d7bd85a1734bfe7c5ce7d8368"
+  },
+  "sourceCommit": "20edea756c23d18d531352cf27a2ad7d8159bdc5"
+}

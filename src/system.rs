@@ -24,8 +24,7 @@ use crate::graph::{self, RelationshipGraph, SharedGraph};
 use crate::model::{DecayPhase, DiskRecord, MemoryId, NamespaceId};
 use crate::rif::{RifConfig, RifEngine};
 use crate::search::{
-    EntityIndex, FlatVectorIndex, FtsIndex, QueryEngine, VectorError, VectorIndex as _,
-    VectorMetadata,
+    EntityIndex, FtsIndex, QueryEngine, VectorError, VectorIndexOwner, VectorMetadata,
 };
 use crate::storage::engine::RedbStorageEngine;
 // Import the StorageEngine trait so its methods are in scope.
@@ -79,7 +78,7 @@ impl VectorLoadStats {
 
 /// Fill `index` from the vectors already on disk.
 ///
-/// [`FlatVectorIndex`] is pure RAM. It is created empty, and until this
+/// [`VectorIndexOwner`] is pure RAM. It is created empty, and until this
 /// existed nothing but the store path ever put anything in it — so every
 /// restart began with an empty index and stayed empty until the process
 /// stored its first memory. `find_similar_memories` failed outright
@@ -101,7 +100,7 @@ impl VectorLoadStats {
 fn load_vector_index(
     storage: &RedbStorageEngine,
     records: &[(MemoryId, DiskRecord)],
-    index: &mut FlatVectorIndex,
+    index: &mut VectorIndexOwner,
 ) -> VectorLoadStats {
     let mut stats = VectorLoadStats::default();
 
@@ -112,7 +111,11 @@ fn load_vector_index(
         .iter()
         .filter(|(_, r)| r.phase != DecayPhase::Tombstone)
         .count();
-    index.reserve(live);
+    if let Err(error) = index.reserve(live) {
+        tracing::warn!(%error, "vector reservation rejected");
+        stats.unreadable = live;
+        return stats;
+    }
 
     for (memory_id, record) in records {
         if record.phase == DecayPhase::Tombstone {
@@ -197,6 +200,7 @@ pub enum SystemState {
 /// Only one `Recalld` instance should exist per process. The
 /// exclusive file locks on storage files enforce this at the OS level.
 pub struct Recalld {
+    clock: Arc<dyn crate::time::Clock>,
     // -- Configuration ------------------------------------------------
     config: Arc<RecalldConfig>,
 
@@ -225,7 +229,7 @@ pub struct Recalld {
 
     // -- Search -------------------------------------------------------
     /// Flat vector index for SIMD similarity search.
-    vector_index: Arc<RwLock<FlatVectorIndex>>,
+    vector_index: Arc<RwLock<VectorIndexOwner>>,
 
     /// FTS5 full-text search index (single SQLite database for all namespaces).
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -258,25 +262,82 @@ impl Recalld {
     /// Resources acquired before the failure are cleaned up by normal
     /// `Drop` behavior.
     pub async fn new(config: RecalldConfig) -> Result<Self> {
+        Self::with_clock(config, Arc::new(crate::time::SystemClock)).await
+    }
+
+    /// Construct an isolated instance with a shared lifecycle clock.
+    /// Search-pipeline exposure clock injection is a separate A2 handoff.
+    pub async fn with_clock(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+    ) -> Result<Self> {
+        Self::with_runtime_sources(config, clock, Box::new(crate::storage::ids::SystemIds)).await
+    }
+
+    pub(crate) async fn with_runtime_sources(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        ids: Box<dyn crate::storage::ids::IdSource>,
+    ) -> Result<Self> {
+        let engine = RedbStorageEngine::open_with_ids(&config.storage.data_dir, false, ids)
+            .map_err(|e| RecalldError::Init {
+                step: "open_storage",
+                message: format!("failed to open storage at {}: {e}", config.storage.data_dir),
+                source: Some(Box::new(e)),
+            })?;
+        Self::with_owned_storage(config, clock, engine).await
+    }
+
+    /// Internal construction over one already-owned engine. Selection and
+    /// bootstrap authority belong to the caller, never to an API version flag.
+    pub(crate) async fn with_owned_storage(
+        config: RecalldConfig,
+        clock: Arc<dyn crate::time::Clock>,
+        engine: RedbStorageEngine,
+    ) -> Result<Self> {
+        let validate = || -> anyhow::Result<bool> {
+            anyhow::ensure!(
+                std::path::Path::new(&config.storage.data_dir).canonicalize()? == engine.db_path(),
+                "owned engine/config root mismatch"
+            );
+            let native = engine.control_state()?.control_schema_version == 2;
+            if native {
+                anyhow::ensure!(
+                    config.decay.disable_sweep
+                        && !config.rif.enabled
+                        && !config.graph.autolink_enabled,
+                    "native prefix requires explicit disabled sweep, RIF and autolink"
+                );
+                let default = engine
+                    .get_namespace_by_name(crate::model::constants::DEFAULT_NAMESPACE_NAME)?;
+                anyhow::ensure!(
+                    default.is_some_and(|ns| ns.schema.is_some()),
+                    "native prefix requires an existing schema2 default namespace"
+                );
+            }
+            Ok(native)
+        };
+        let native_prefix = validate().map_err(|e| RecalldError::Init {
+            step: "owned_storage_preflight",
+            message: e.to_string(),
+            source: None,
+        })?;
         let config = Arc::new(config);
         let (shutdown_tx, _) = watch::channel(false);
         let drain_notify = Arc::new(Notify::new());
         let inflight_count = Arc::new(AtomicU32::new(0));
+        let storage = Arc::new(std::sync::RwLock::new(engine));
+        tracing::info!("starting Recalld with owned storage");
 
-        tracing::info!("starting Recalld");
-
-        // -- Step 1: Open storage engine ------------------------------
-        let storage = {
-            let data_dir = &config.storage.data_dir;
-            tracing::info!(data_dir = %data_dir, "opening storage engine");
-            let engine = RedbStorageEngine::open(data_dir).map_err(|e| RecalldError::Init {
-                step: "open_storage",
-                message: format!("failed to open storage at {}: {}", data_dir, e),
-                source: Some(Box::new(e)),
-            })?;
-            tracing::info!("storage engine opened");
-            Arc::new(std::sync::RwLock::new(engine))
-        };
+        let effects_rebuild = storage
+            .read()
+            .map_err(|e| RecalldError::Init {
+                step: "effects_rebuild",
+                message: e.to_string(),
+                source: None,
+            })?
+            .meta_store()
+            .needs_effects_rebuild();
 
         // -- Step 2: Scan all records once, reuse for graph / FTS / entity index
         let all_records = {
@@ -324,9 +385,17 @@ impl Recalld {
 
             // After CS-23, graph::PersistedEdge == storage::PersistedEdge
             // (with created_at: u64). Pass them directly -- no field mapping needed.
+            let expected_edges = persisted_edges.len();
             let edge_count =
                 graph::rebuild_from_storage(&mut rel_graph, persisted_edges.into_iter());
 
+            if effects_rebuild && edge_count != expected_edges {
+                return Err(RecalldError::Init {
+                    step: "effects_graph_rebuild",
+                    message: "graph did not accept all canonical edges".into(),
+                    source: None,
+                });
+            }
             let stats = rel_graph.stats();
             tracing::info!(
                 nodes = stats.node_count,
@@ -349,6 +418,7 @@ impl Recalld {
             };
             // No external eviction listener for now.
             let mgr = CacheManager::new(cache_cfg, None);
+            mgr.bind_storage(&storage);
             tracing::info!("cache manager initialized");
             Arc::new(mgr)
         };
@@ -396,6 +466,37 @@ impl Recalld {
             Arc::from(provider)
         };
 
+        if native_prefix {
+            let profile = embedding.profile().ok_or_else(|| RecalldError::Init {
+                step: "native_profile",
+                message: "provider profile missing".into(),
+                source: None,
+            })?;
+            let storage_r = storage.read().map_err(|e| RecalldError::Init {
+                step: "native_profile",
+                message: e.to_string(),
+                source: None,
+            })?;
+            for namespace in
+                storage_r
+                    .meta_store()
+                    .list_namespaces()
+                    .map_err(|e| RecalldError::Init {
+                        step: "native_profile",
+                        message: e.to_string(),
+                        source: Some(Box::new(e)),
+                    })?
+            {
+                crate::embedding::profile::require_compatible(&namespace, &profile).map_err(
+                    |e| RecalldError::Init {
+                        step: "native_profile",
+                        message: e.to_string(),
+                        source: None,
+                    },
+                )?;
+            }
+        }
+
         // -- Step 5: Create RIF engine --------------------------------
         let rif_engine = {
             let rif_cfg = RifConfig {
@@ -415,9 +516,27 @@ impl Recalld {
             Arc::new(engine)
         };
 
-        // -- Step 6: Create FlatVectorIndex and load persisted vectors -
+        // -- Step 6: Create VectorIndexOwner and load persisted vectors -
         let vector_index = {
-            let mut index = FlatVectorIndex::new(config.embedding.dimensions);
+            let mut index = if native_prefix {
+                let storage = storage.read().map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: None,
+                })?;
+                let namespaces = storage.list_namespaces().map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: Some(Box::new(e)),
+                })?;
+                VectorIndexOwner::from_namespaces(&namespaces).map_err(|e| RecalldError::Init {
+                    step: "vector_layout",
+                    message: e.to_string(),
+                    source: Some(Box::new(e)),
+                })?
+            } else {
+                VectorIndexOwner::uniform(config.embedding.dimensions)
+            };
 
             // The index lives in RAM only; without this the process
             // starts semantically blind and stays that way until it
@@ -434,6 +553,13 @@ impl Recalld {
                     VectorLoadStats::default()
                 }
             };
+            if effects_rebuild && (stats.dim_mismatch + stats.unreadable + stats.missing > 0) {
+                return Err(RecalldError::Init {
+                    step: "effects_vector_rebuild",
+                    message: "vector rebuild incomplete; effects remain pending".into(),
+                    source: None,
+                });
+            }
             let elapsed = started.elapsed();
 
             if stats.dim_mismatch > 0 {
@@ -494,7 +620,14 @@ impl Recalld {
             // fts.db file), populate it from all records in redb storage.
             // Also handles the case where fts.db exists but is empty
             // (e.g., previous crash during first migration).
-            if is_new || fts.is_empty().unwrap_or(true) {
+            if effects_rebuild {
+                fts.clear().map_err(|e| RecalldError::Init {
+                    step: "effects_fts_clear",
+                    message: e.to_string(),
+                    source: Some(Box::new(e)),
+                })?;
+            }
+            if effects_rebuild || is_new || fts.is_empty().unwrap_or(true) {
                 if !all_records.is_empty() {
                     let storage_r = storage.read().map_err(|e| RecalldError::Init {
                         step: "fts_migration",
@@ -506,6 +639,9 @@ impl Recalld {
                         "migrating records to FTS5 index"
                     );
                     for (memory_id, record) in &all_records {
+                        if record.phase == DecayPhase::Tombstone {
+                            continue;
+                        }
                         let namespace_id = crate::model::NamespaceId::new(record.namespace_id);
                         let tag_strings: Vec<String> =
                             record.tags.iter().map(|t| t.to_string()).collect();
@@ -515,23 +651,28 @@ impl Recalld {
                                 file_offset: record.text_offset,
                                 length: record.text_length,
                             };
-                            storage_r.get_text(text_ref).ok().flatten()
+                            storage_r
+                                .get_text(text_ref)
+                                .map_err(|e| RecalldError::Init {
+                                    step: "fts_text",
+                                    message: e.to_string(),
+                                    source: Some(Box::new(e)),
+                                })?
                         } else {
                             None
                         };
-                        if let Err(e) = fts.add(
+                        fts.add(
                             namespace_id,
                             *memory_id,
                             &record.summary,
                             full_text.as_deref(),
                             &tag_strings,
-                        ) {
-                            tracing::warn!(
-                                memory_id = %memory_id,
-                                %e,
-                                "failed to index record in FTS5 during migration"
-                            );
-                        }
+                        )
+                        .map_err(|e| RecalldError::Init {
+                            step: "fts_rebuild",
+                            message: e.to_string(),
+                            source: Some(Box::new(e)),
+                        })?;
                     }
                     drop(storage_r);
                     tracing::info!(indexed = all_records.len(), "FTS5 migration complete");
@@ -567,17 +708,10 @@ impl Recalld {
 
         // -- Step 6c: Build entity index from scanned records ----------
         let entity_index = {
-            let mut idx = EntityIndex::with_capacity(all_records.len());
-            for (memory_id, record) in &all_records {
-                let entities = crate::model::parse_structured_tags(&record.tags).entities;
-                if !entities.is_empty() {
-                    idx.add(*memory_id, &entities);
-                }
-            }
+            let idx = EntityIndex::from_records(&all_records);
             tracing::info!(memories = idx.len(), "entity index built");
             Arc::new(RwLock::new(idx))
         };
-
         // -- Step 7: Create QueryEngine -------------------------------
         let query_engine = {
             use crate::search::adapters::*;
@@ -600,8 +734,19 @@ impl Recalld {
                 Arc::new(SharedGraphReader::new(graph.clone()));
             let rif_proc: Arc<dyn crate::search::RifProcessor> =
                 Arc::new(RifProcessorAdapter::new(rif_engine.clone(), graph.clone()));
-            let access_rec: Arc<dyn crate::search::AccessRecorder> =
-                Arc::new(StorageAccessRecorder::new(storage.clone()));
+            let completion = crate::derived_completion::DerivedCompletion {
+                storage: storage.clone(),
+                cache: cache.clone(),
+                graph: graph.clone(),
+                vectors: vector_index.clone(),
+                fts: fts_index.clone(),
+                entities: entity_index.clone(),
+            };
+            let access_rec: Arc<dyn crate::search::AccessRecorder> = Arc::new(
+                StorageAccessRecorder::new(storage.clone(), cache.clone())
+                    .with_clock(clock.clone())
+                    .with_completion(completion.clone()),
+            );
 
             let engine = QueryEngine::new(
                 ns_resolver,
@@ -614,49 +759,23 @@ impl Recalld {
                 graph_reader,
                 rif_proc,
                 access_rec,
-            );
+            )
+            .with_lifecycle_inputs(
+                clock.clone(),
+                DecayConfig::default(),
+                config.decay.decay_rate_multiplier,
+            )
+            .with_coherent_owner(completion, rif_engine.clone());
+            let engine = if native_prefix {
+                engine.with_native_query_admission()
+            } else {
+                engine
+            };
             tracing::info!("query engine initialized");
             Arc::new(engine)
         };
 
-        // -- Step 8: Start decay sweep runner -------------------------
-        let (decay_runner, decay_handle) = if config.decay.disable_sweep {
-            tracing::info!("decay sweep disabled by config");
-            (None, None)
-        } else {
-            let sweep_cfg = SweepConfig {
-                interval: Duration::from_secs_f64(config.decay.sweep_interval_hours * 3600.0),
-                sweep_on_startup: true,
-                ..SweepConfig::default()
-            };
-            let decay_cfg = Arc::new(DecayConfig::default());
-            let activation_cfg = ActivationConfig::default();
-
-            match DecaySweepRunner::new(
-                sweep_cfg,
-                decay_cfg,
-                activation_cfg,
-                storage.clone(),
-                graph.clone(),
-                cache.clone(),
-                config.decay.decay_rate_multiplier,
-            ) {
-                Ok(runner) => {
-                    let handle = runner.start();
-                    tracing::info!("decay sweep runner started");
-                    (Some(runner), Some(handle))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        %e,
-                        "decay sweep runner failed to start, continuing without sweeps"
-                    );
-                    (None, None)
-                }
-            }
-        };
-
-        // -- Step 9: Ensure "default" namespace exists ----------------
+        // -- Step 8: Ensure "default" namespace exists ----------------
         {
             let storage_r = storage.read().map_err(|e| RecalldError::Init {
                 step: "check_default_namespace",
@@ -675,6 +794,7 @@ impl Recalld {
 
             if !has_default {
                 let ns_config = crate::model::NamespaceConfig {
+                    schema: None,
                     id: crate::model::NamespaceId::UNSET,
                     name: crate::model::constants::DEFAULT_NAMESPACE_NAME.to_string(),
                     embedding_dim: config.embedding.dimensions as u32,
@@ -682,7 +802,7 @@ impl Recalld {
                     default_difficulty: 5.0,
                     phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
                     permastore_threshold: 1500.0,
-                    created_at: chrono::Utc::now().timestamp_millis(),
+                    created_at: clock.now_millis(),
                     desired_retention: 0.9,
                     decay_rate_multiplier: None,
                 };
@@ -707,9 +827,76 @@ impl Recalld {
             }
         }
 
+        // A reopened FTS file has no durable generation certificate. Rebuild
+        // through the actual publisher before exposing this owner or starting
+        // background writers; never stamp an unchecked reused index as current.
+        crate::derived_completion::DerivedCompletion {
+            storage: storage.clone(),
+            cache: cache.clone(),
+            graph: graph.clone(),
+            vectors: vector_index.clone(),
+            fts: fts_index.clone(),
+            entities: entity_index.clone(),
+        }
+        .rebuild_all()
+        .await
+        .map_err(|e| RecalldError::Init {
+            step: "startup_view_publication",
+            message: e.to_string(),
+            source: Some(Box::new(e)),
+        })?;
+
+        // -- Step 9: Start decay sweep runner -------------------------
+        let (decay_runner, decay_handle) = if config.decay.disable_sweep {
+            tracing::info!("decay sweep disabled by config");
+            (None, None)
+        } else {
+            let sweep_cfg = SweepConfig {
+                interval: Duration::from_secs_f64(config.decay.sweep_interval_hours * 3600.0),
+                sweep_on_startup: true,
+                ..SweepConfig::default()
+            };
+            let decay_cfg = Arc::new(DecayConfig::default());
+            let activation_cfg = ActivationConfig::default();
+
+            match DecaySweepRunner::new(
+                sweep_cfg,
+                decay_cfg,
+                activation_cfg,
+                storage.clone(),
+                graph.clone(),
+                cache.clone(),
+                config.decay.decay_rate_multiplier,
+            ) {
+                Ok(runner) => {
+                    let runner = runner.with_clock(clock.clone());
+                    let runner =
+                        runner.with_completion(crate::derived_completion::DerivedCompletion {
+                            storage: storage.clone(),
+                            cache: cache.clone(),
+                            graph: graph.clone(),
+                            vectors: vector_index.clone(),
+                            fts: fts_index.clone(),
+                            entities: entity_index.clone(),
+                        });
+                    let handle = runner.start();
+                    tracing::info!("decay sweep runner started");
+                    (Some(runner), Some(handle))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        %e,
+                        "decay sweep runner failed to start, continuing without sweeps"
+                    );
+                    (None, None)
+                }
+            }
+        };
+
         tracing::info!("Recalld initialized");
 
         Ok(Self {
+            clock,
             config,
             storage,
             graph,
@@ -727,6 +914,11 @@ impl Recalld {
             inflight_count,
             state: SystemState::Ready,
         })
+    }
+
+    /// Shared clock for creation, feedback and sweeps in this instance.
+    pub fn clock(&self) -> &Arc<dyn crate::time::Clock> {
+        &self.clock
     }
 
     // -- Accessor methods ---------------------------------------------
@@ -762,8 +954,97 @@ impl Recalld {
     }
 
     /// Access the flat vector index.
-    pub fn vector_index(&self) -> &Arc<RwLock<FlatVectorIndex>> {
+    pub fn vector_index(&self) -> &Arc<RwLock<VectorIndexOwner>> {
         &self.vector_index
+    }
+
+    /// Retry publication of committed effects without restarting. Errors leave
+    /// query admission closed; canonical application failures require reopen.
+    pub async fn complete_pending_effects(
+        &self,
+    ) -> std::result::Result<(), crate::storage::StorageError> {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .complete()
+        .await
+    }
+
+    /// Internal Rust coherent read consumer. Requires explicitly false access;
+    /// stale/unpublished views fail closed rather than rebuilding during a read.
+    /// This does not enable public v2, snapshot/reset, or native serving.
+    pub async fn search_coherent_read_only(
+        &self,
+        query: crate::search::SearchQuery,
+        semantics: crate::search::RetrievalSemantics,
+        deadline: std::time::Instant,
+    ) -> crate::search::error::Result<crate::search::CoherentSearchResponse> {
+        let owner = crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        };
+        self.query_engine
+            .search_coherent_read_only(&owner, self.rif_engine.clone(), query, semantics, deadline)
+            .await
+    }
+
+    pub(crate) fn derived_owner(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+    }
+
+    /// Internal owned-core barrier. Returns a readiness observation, not a
+    /// retained freeze lease or snapshot/reset authorization. No public wire
+    /// capability is enabled by this entry point.
+    pub(crate) async fn readiness_barrier(
+        &self,
+        target: crate::storage::control::GenerationRef,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<crate::storage::Readiness, crate::storage::StorageError> {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .readiness_barrier(target, deadline)
+        .await
+    }
+
+    /// Actual canonical/component/work observation for a committed-error
+    /// envelope. This never drains the caller's root or claims barrier readiness.
+    pub async fn readiness_observation(
+        &self,
+        deadline: std::time::Instant,
+    ) -> std::result::Result<crate::storage::ReadinessObservation, crate::storage::StorageError>
+    {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+        .observe_readiness(deadline)
+        .await
     }
 
     /// Access the FTS5 full-text search index.
@@ -959,10 +1240,10 @@ mod tests {
 
     /// Run the startup load against a fixture's storage, into a fresh
     /// index of `dim` — which is what step 6 does, minus the logging.
-    fn load(fx: &Fixture, dim: usize) -> (FlatVectorIndex, VectorLoadStats) {
+    fn load(fx: &Fixture, dim: usize) -> (VectorIndexOwner, VectorLoadStats) {
         let storage_r = fx.storage.read().expect("storage lock");
         let records = storage_r.scan_all().expect("scan_all");
-        let mut index = FlatVectorIndex::new(dim);
+        let mut index = VectorIndexOwner::uniform(dim);
         let stats = load_vector_index(&storage_r, &records, &mut index);
         (index, stats)
     }
@@ -978,9 +1259,284 @@ mod tests {
         config
     }
 
+    #[tokio::test]
+    async fn effects_block_cached_queries_and_reopen_rebuilds_deleted_fts_rows() {
+        let fx = Fixture::new();
+        let live = fx.insert_memory().await;
+        let dead = fx.insert_memory().await;
+        let dir = fx.close();
+        let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+        let record = system
+            .storage
+            .read()
+            .unwrap()
+            .get_record(dead)
+            .unwrap()
+            .unwrap();
+        let ns = crate::model::NamespaceId::new(record.namespace_id);
+        system
+            .cache
+            .insert(dead, crate::model::CachedRecord::from(&record))
+            .await;
+        system.storage.write().unwrap().delete_memory(dead).unwrap();
+        assert!(
+            system.query_engine.get_memory(dead).await.is_err(),
+            "cached deleted record must not bypass admission"
+        );
+        assert!(system.query_engine.similar(dead, 5).await.is_err());
+        let query =
+            serde_json::from_value(serde_json::json!({"text":"fixture", "namespace":"default"}))
+                .unwrap();
+        assert!(system.query_engine.search(query).await.is_err());
+        assert!(
+            system
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .needs_effects_rebuild()
+        );
+        {
+            use crate::api::adapters::*;
+            let state = crate::api::AppState::new(
+                Arc::new(SearchPipelineAdapter::new(
+                    system.query_engine.clone(),
+                    system.embedding.clone(),
+                    system.vector_index.clone(),
+                    system.fts_index.clone(),
+                    system.entity_index.clone(),
+                )),
+                Arc::new(StorageEngineAdapter::new(
+                    system.storage.clone(),
+                    system.cache.clone(),
+                    system.vector_index.clone(),
+                    system.fts_index.clone(),
+                    system.entity_index.clone(),
+                    system.graph.clone(),
+                )),
+                Arc::new(RecordCacheAdapter::new(system.cache.clone())),
+                Arc::new(RelationshipGraphAdapter::new(
+                    system.graph.clone(),
+                    system.vector_index.clone(),
+                    system.entity_index.clone(),
+                    system.storage.clone(),
+                    system.cache.clone(),
+                    system.config.clone(),
+                )),
+                Arc::new(FsrsEngineAdapter::new(
+                    system.storage.clone(),
+                    system.cache.clone(),
+                    system.graph.clone(),
+                    system.config.clone(),
+                    false,
+                )),
+                Arc::new(NamespaceRegistryAdapter::new(
+                    system.storage.clone(),
+                    system.embedding.clone(),
+                )),
+                Arc::new(NoopMetricsCollector),
+            );
+            use tower::ServiceExt;
+            let response = crate::api::router(state, &crate::api::ApiConfig::default())
+                .oneshot(
+                    axum::http::Request::builder()
+                        .uri(format!("/memories/{dead}"))
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "HTTP cache must not return deleted content or a false 404"
+            );
+        }
+        drop(system);
+        let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+        assert!(
+            !system
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .needs_effects_rebuild()
+        );
+        assert!(
+            system
+                .query_engine
+                .get_memory(dead)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(system.vector_index.read().await.get_vector(dead).is_none());
+        assert!(!system.graph.read().await.contains(&dead));
+        let hits = system
+            .fts_index
+            .lock()
+            .await
+            .search(ns, "fixture", 10)
+            .unwrap();
+        assert!(hits.iter().all(|hit| hit.0 != dead));
+        assert!(hits.iter().any(|hit| hit.0 == live));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_mcp_cached_consumers_block_then_recover_online() {
+        use crate::mcp::bridge::{SearchPipeline, StorageEngine as McpStorage};
+        use crate::mcp::bridge_adapters::{McpSearchAdapter, McpStorageAdapter};
+        let fx = Fixture::new();
+        let live = fx
+            .insert_memory_with(crate::test_support::MemorySpec {
+                embedding: Some(&[1.0, 0.0, 0.0, 0.0]),
+                ..crate::test_support::MemorySpec::new(crate::model::NamespaceId::new(1))
+            })
+            .await;
+        let dead = fx.insert_memory().await;
+        let dir = fx.close();
+        let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+        let search = McpSearchAdapter::new(
+            system.query_engine.clone(),
+            system.embedding.clone(),
+            system.storage.clone(),
+            system.graph.clone(),
+            chrono_tz::UTC,
+        );
+        let adapter = McpStorageAdapter::new(
+            system.storage.clone(),
+            system.cache.clone(),
+            system.embedding.clone(),
+            system.vector_index.clone(),
+            system.fts_index.clone(),
+            system.entity_index.clone(),
+            system.graph.clone(),
+            system.config.clone(),
+            chrono_tz::UTC,
+        );
+        let stale = crate::model::CachedRecord::from(
+            &system
+                .storage
+                .read()
+                .unwrap()
+                .get_record(dead)
+                .unwrap()
+                .unwrap(),
+        );
+        system.cache.insert(dead, stale.clone()).await;
+        system.storage.write().unwrap().delete_memory(dead).unwrap();
+        assert!(
+            search
+                .find_similar(live, 5, None, true, true, None)
+                .await
+                .is_err()
+        );
+        assert!(adapter.get_memory(dead, false, None).await.is_err());
+        assert!(adapter.get_memory(live, false, None).await.is_err());
+        system.complete_pending_effects().await.unwrap();
+        system.cache.insert(dead, stale).await;
+        assert!(
+            system
+                .query_engine
+                .get_memory(dead)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            adapter
+                .get_memory(dead, false, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            adapter
+                .get_memory(live, false, None)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            search
+                .find_similar(live, 5, None, true, true, None)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn online_completion_crash_reopen_preserves_receipt_and_deleted_content() {
+        const CHILD: &str = "RECALLD_ONLINE_COMPLETION_CHILD";
+        if let Ok(path) = std::env::var(CHILD) {
+            let system = Recalld::new(offline_config(std::path::Path::new(&path)))
+                .await
+                .unwrap();
+            let dead = system.storage.read().unwrap().scan_all().unwrap()[0].0;
+            system.storage.write().unwrap().delete_memory(dead).unwrap();
+            system.complete_pending_effects().await.unwrap();
+            panic!("child did not exit at crash point");
+        }
+        let fx = Fixture::new();
+        let dead = fx.insert_memory().await;
+        let dir = fx.close();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("system::tests::online_completion_crash_reopen_preserves_receipt_and_deleted_content")
+            .arg("--exact").arg("--nocapture")
+            .env(CHILD, dir.path()).env("RECALLD_TEST_EFFECT_CRASH", "before_online_derived_ack")
+            .output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(91),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt = {
+            let storage = RedbStorageEngine::open(dir.path()).unwrap();
+            let pending = storage.meta_store().pending_effects().unwrap();
+            assert_eq!(pending.len(), 1);
+            assert!(pending[0].canonical_applied);
+            pending[0].receipt.clone()
+        };
+        let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+        assert!(
+            system
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .pending_effects()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            system
+                .query_engine
+                .get_memory(dead)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(system.fts_index.lock().await.is_empty().unwrap());
+        assert!(system.vector_index.read().await.get_vector(dead).is_none());
+        system.complete_pending_effects().await.unwrap();
+        assert_eq!(
+            system
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .control_state()
+                .unwrap()
+                .committed_generation,
+            receipt.committed_generation
+        );
+    }
+
     // ── the regression ───────────────────────────────────────────────
 
-    /// THE bug. `FlatVectorIndex` is RAM-only and was only ever filled
+    /// THE bug. `VectorIndexOwner` is RAM-only and was only ever filled
     /// by the store path, so every restart came up with an empty index:
     /// `find_similar_memories` failed with "no embedding found for
     /// memory <id>" and `recall_memories` quietly fell back to FTS and
@@ -1011,6 +1567,78 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn coherent_payload_restart_publishes_actual_views_before_first_read() {
+        let (dir, id) = {
+            let f = Fixture::new();
+            let id = f
+                .insert_memory_with(MemorySpec {
+                    embedding: Some(&[1., 0., 0., 0.]),
+                    ..MemorySpec::new(ns())
+                })
+                .await;
+            (f.close(), id)
+        };
+        for _ in 0..2 {
+            let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+            let state = system
+                .storage
+                .read()
+                .unwrap()
+                .meta_store()
+                .publication_state()
+                .unwrap();
+            assert!(state.matches_canonical());
+            let before = system
+                .storage
+                .read()
+                .unwrap()
+                .get_record(id)
+                .unwrap()
+                .unwrap()
+                .to_bytes();
+            let query = serde_json::from_value(serde_json::json!({
+                "queryEmbedding":[1.,0.,0.,0.], "recordAccess":false, "namespace":"default",
+                "graphDepth":0, "limit":10, "minScore":0.0
+            }))
+            .unwrap();
+            let result = system
+                .query_engine
+                .prepare_coherent_payload(query, true, false, None)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.read_generation, state.canonical);
+            let payload = result.payload.unwrap();
+            assert_eq!(payload.rows.len(), 1);
+            assert_eq!(payload.rows[0].record.id, *id.as_bytes());
+            assert_eq!(payload.rows[0].embedding, Some(vec![1., 0., 0., 0.]));
+            assert_eq!(
+                system
+                    .storage
+                    .read()
+                    .unwrap()
+                    .get_record(id)
+                    .unwrap()
+                    .unwrap()
+                    .to_bytes(),
+                before
+            );
+            assert_eq!(
+                system
+                    .storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .publication_state()
+                    .unwrap()
+                    .canonical,
+                state.canonical
+            );
+            drop(system);
+        }
+    }
+
     /// The same property one layer down, where the counts are visible.
     #[tokio::test]
     async fn the_load_reads_vectors_that_outlived_the_engine_that_wrote_them() {
@@ -1023,7 +1651,7 @@ mod tests {
 
         let engine = RedbStorageEngine::open(dir.path()).expect("reopen engine");
         let records = engine.scan_all().expect("scan_all");
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&engine, &records, &mut index);
 
         assert_eq!(stats.loaded, 2);
@@ -1073,7 +1701,7 @@ mod tests {
             .expect("two records");
         orphan.1.vector_slot = 9_999;
 
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&storage_r, &records, &mut index);
 
         assert_eq!(stats.missing, 1);
@@ -1094,7 +1722,7 @@ mod tests {
         let mut records = storage_r.scan_all().expect("scan_all");
         records[0].1.namespace_id = 4_242;
 
-        let mut index = FlatVectorIndex::new(DIM);
+        let mut index = VectorIndexOwner::uniform(DIM);
         let stats = load_vector_index(&storage_r, &records, &mut index);
 
         assert_eq!(stats.unreadable, 1);
@@ -1226,4 +1854,46 @@ mod tests {
             .expect("search");
         assert_eq!(hits.first().map(|h| h.id), Some(id));
     }
+    #[tokio::test]
+    async fn entity_rebuild_uses_each_records_namespace_and_only_retained_labels() {
+        let (dir, other, local_id, foreign_id) = {
+            let fx = Fixture::new();
+            let other = fx.create_namespace("other");
+            let local_id = fx.insert_memory_in(ns(), &["entity/alice"]).await;
+            let foreign_id = fx
+                .insert_memory_in(other, &["entity/alice", "entity/bob"])
+                .await;
+            (fx.close(), other, local_id, foreign_id)
+        };
+        for _ in 0..2 {
+            let system = Recalld::new(offline_config(dir.path())).await.unwrap();
+            let index = system.entity_index().read().await;
+            assert_eq!(index.len(), 2);
+            let query = vec!["Alice".into(), "Bob".into()];
+            assert_eq!(
+                index.find_by_entities(ns(), &query, MemoryId::new()),
+                vec![(local_id, 1)]
+            );
+            assert_eq!(
+                index.find_by_entities(other, &query, MemoryId::new()),
+                vec![(foreign_id, 2)]
+            );
+            // This fixture claims fidelity only for labels retained in legacy tags.
+            assert!(
+                index
+                    .find_by_entities(ns(), &["José".into()], MemoryId::new())
+                    .is_empty()
+            );
+            drop(index);
+            system.shutdown().await.unwrap();
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "system_inherited_policy_tests.rs"]
+mod inherited_policy_tests;
+
+#[cfg(test)]
+#[path = "system_heterogeneous_tests.rs"]
+mod heterogeneous_tests;

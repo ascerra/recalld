@@ -10,9 +10,11 @@ pub mod server;
 pub mod transport;
 
 pub mod args;
+pub(crate) mod batches;
 pub mod bridge;
 pub mod bridge_adapters;
 pub mod resources;
+mod tool_schema;
 pub mod tools;
 
 pub use http_transport::{McpHttpConfig, mcp_router};
@@ -45,3 +47,11 @@ pub enum McpError {
     #[error("Bridge error: {0}")]
     Bridge(String),
 }
+
+pub(crate) mod native_advisory;
+
+pub(crate) mod batch_budget;
+pub(crate) mod native_lifecycle_adapter;
+
+#[cfg(test)]
+mod legacy_lifecycle_tests;

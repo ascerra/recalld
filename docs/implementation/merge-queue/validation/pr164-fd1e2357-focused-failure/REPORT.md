@@ -1,0 +1,5 @@
+# PR164 composed native-single focused failure
+
+Exact `fd1e235744c5116882c6d112c8f4a0f435c258e3` normally joins main112 plus the owner-reviewed one-line ignored historical exporter adaptation. Formatting/threePython suites and legacy semantic/compound focused groups passed. Native-single group returned **24passed/1failed/1ignored**: `native_single_wire_actual_unknown_commit_keeps_original_operation_on_reopen` expected COMMIT_OUTCOME_UNKNOWN but received UNAVAILABLE at store_producer_tests.rs1781. There are 46 distinct passing focused tests across the executed groups. **Full suite, remaining focus, lint and public tail were not reached.** No cause or assertion adjustment is claimed.
+
+Actual pinned Rust1.94.1/aarch64, offline2CPU6GiB/privateHOME/data/singlecache. Source pins host-verified before/after; in-container after-hash stage not reached after failure. Executable hashes rechecked before any reuse. Peak6GiB/max4323/OOM0/kill0. Failed source/logs/executable remain protected, container retired. Curie owns source diagnosis and Feynman reviews unknown-outcome boundary. Earlier4c71 compilefailure retains zero Rust tests. No retry-only clearance/activation claim.

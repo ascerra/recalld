@@ -1,0 +1,19 @@
+{
+  "runtime": "82ad4d949a7b52ca414d2c54517574db28e8a92b",
+  "repo": "/tmp/recalld-implementation/legacy-store-selection",
+  "files": {
+    "docs/evidence/legacy-api2-semantic-boundary/REPORT.md": {
+      "destination": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-legacy-api2-semantic-boundary-82ad4d94/REPORT.md",
+      "sha256": "0f92007f4e5e215408c65f12de901ebfb7992b39dddec3bee779fc9831624015"
+    },
+    "docs/evidence/legacy-api2-semantic-boundary/VALIDATION.json": {
+      "destination": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-legacy-api2-semantic-boundary-82ad4d94/VALIDATION.json",
+      "sha256": "fbc0961690d14f1ed4f249f725d50a502324c57d281aa3269b1d6044d8acc930"
+    },
+    "docs/work-notes/2026-11-14-legacy-api2-semantic-boundary.md": {
+      "destination": "/Users/caleb.evans/work-notes/work/Experiments/Artifacts/recalld/2026-11-14-legacy-api2-semantic-boundary-82ad4d94/2026-11-14-legacy-api2-semantic-boundary.md",
+      "sha256": "4ae5c1e02f6eb64fd3d3019007940a727770cc9208c7026c68bc23f25565049a"
+    }
+  },
+  "raw_archive": false
+}

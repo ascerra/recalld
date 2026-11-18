@@ -1,0 +1,210 @@
+[
+  {
+    "run": "before",
+    "source": "277402be42ae5684c3aa0df735244f33f684408d",
+    "tree": "5f3cea35f73cb9fb40e5e08dad84e59392b5a530",
+    "source_manifest_sha256": "3544487a23d6fd613fc9c670fb473ad7ce1c2ebae678ea68a8ad992d8486611a",
+    "test_results": [],
+    "compiled_test_executed": false,
+    "artifact_sha256": {
+      "clean.log": "ef8be4cdaf8314db34b4b57887c1cce6b6b9fda9f28901ff302bde86c7165ba8",
+      "fixture.log": "e9d1a3136bcfa29f170d9ac4c56fc75ac7b11ae201b9e5690ecf650cc793f429",
+      "binaries.sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "before.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "before.log": "248f1ff88db2996850f44d0c1e223d7f109648ee35dbb44c68469d8d816dfb3a",
+      "fixture.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+    }
+  },
+  {
+    "run": "before-runtime",
+    "source": "beeced5678c71efdd8278d1615c9fc145ca9e282",
+    "tree": "a321ab1a40d481b65af996eef4ce7c37af5677cc",
+    "source_manifest_sha256": "fe6f858ca6d700b8aab0455053e13838cd0aaafafd26160deadba6bfd0fa1a21",
+    "test_results": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1307 filtered out; finished in 0.23s",
+      "test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1306 filtered out; finished in 0.15s"
+    ],
+    "compiled_test_executed": true,
+    "artifact_sha256": {
+      "fixture.log": "cf7fd608c3750fefb55c4518f82584d2b5b39d9e2431d5355c9104321fb4be09",
+      "binaries.sha256": "381acae2f4aaad32dab414eb36fc3e1b5a13ff0ed57048a803fb8f2ab589b2f2",
+      "before.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "before.log": "1cbbd7bb76420c3c2ee50c59eb13e89c9323338ab526c0a3054fd668e30948c6",
+      "fixture.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+    }
+  },
+  {
+    "run": "fixture",
+    "source": "26777d58b48c69d42a2781fef009ae30615f87b5",
+    "tree": "0f37319981c8682ef2663d48def86d584c56c76c",
+    "source_manifest_sha256": "978eb02ed6419cd02de5c9bf02b220bc70a8f207b9c2bcbb178e56784ca69dc4",
+    "test_results": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1307 filtered out; finished in 0.20s"
+    ],
+    "compiled_test_executed": true,
+    "artifact_sha256": {
+      "fixture.log": "40a0af2c5aa981a73a91fd0dd546d63cbb39b5b0d3f8938a1a7e25f7d04c1d39",
+      "binaries.sha256": "f61fe4e236333ad8bec34f54672268834f7ac4b4794bd474f954ea7fb1da8c1a",
+      "fixture.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+    }
+  },
+  {
+    "run": "fixture-final",
+    "source": "73f1254beb346a4f7017229a4b7f79f9030a6331",
+    "tree": "55b7a619c6de0f7bdec36612d0f84f6aba96870f",
+    "source_manifest_sha256": "fcdb7f4c23357c33337770b886212f01586c01851e45021aa17009c20405dc06",
+    "test_results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1307 filtered out; finished in 0.54s"
+    ],
+    "compiled_test_executed": true,
+    "artifact_sha256": {
+      "fixture.log": "9330a14d0925afb9fe0e8f8ed678d4cc819ddd2bdf4b3f9d4164d71fbd87ca98",
+      "binaries.sha256": "f15175e0acb88497dc91a34e8db74940dee83f12d204df7fdcefbbbefafff140",
+      "fixture.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    }
+  },
+  {
+    "run": "focused",
+    "source": "a30c39df2a5307a3b22a6d3452c5b569e5571d8f",
+    "tree": "36572d709f8669b8721cfd51b2c943b844c0413d",
+    "source_manifest_sha256": "c5e6f8eba6083d2084ade37c1a2b978d591799bf248b8d0ce316ff28d8a99e29",
+    "test_results": [
+      "test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 1305 filtered out; finished in 5.12s"
+    ],
+    "compiled_test_executed": true,
+    "artifact_sha256": {
+      "focused.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "binaries.sha256": "f113aa7b1f6b46e2f4169562b39d381590109c22979c3b76a68f8c6dd9253e1c",
+      "focused.log": "adf63ee01f81f0674b320ba320d62be840b9458972e45074b38c8ea64f8c2a28"
+    }
+  },
+  {
+    "run": "focused-complete",
+    "source": "7707b5ade084180f67bc045078a7c9f2669ffa45",
+    "tree": "7ba69089e13398f8dbf6bbb964841e6f19a2d06d",
+    "source_manifest_sha256": "4e50a84f4cd0c8a3ffd2cc7fc36c177cf9adc1de200ceef306791cf19b5c07e9",
+    "test_results": [],
+    "compiled_test_executed": false,
+    "artifact_sha256": {
+      "focused.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "binaries.sha256": "f113aa7b1f6b46e2f4169562b39d381590109c22979c3b76a68f8c6dd9253e1c",
+      "focused.log": "a75a5d5de2725ec53d54572bf21ef8b6dc46cbb36e62caf48968829745ace632"
+    }
+  },
+  {
+    "run": "focused-final",
+    "source": "92aea26cab844fb1ae3794c59609aacd4c8743ab",
+    "tree": "46eddb24ce13a32453ebd0c46b1d3dc5cee3868e",
+    "source_manifest_sha256": "7197591eb43c3b11c294e7d2eb44de66f9998928ef7acc52be8697af12c495c4",
+    "test_results": [],
+    "compiled_test_executed": false,
+    "artifact_sha256": {
+      "memory.events": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+      "memory.peak": "d77b4768008fee419038fc6ebdfea598a5b829e3bd60d3094d62af96108dc60b",
+      "focused.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "binaries.sha256": "f113aa7b1f6b46e2f4169562b39d381590109c22979c3b76a68f8c6dd9253e1c",
+      "focused.log": "5b4596e57485f3d517496eab7049233635ca4f5b484ea76608b23e81f92f21d4"
+    }
+  },
+  {
+    "run": "focused-receipts",
+    "source": "b31339d0e8a7613140eb5b7cb2b44accaf5f8ddc",
+    "tree": "816c6b80d488f10c3efbaee889873047bfde470a",
+    "source_manifest_sha256": "dd053d18dbaf37daa0e0a046d813c0652603a622f1a9b507b6170cd1741a7122",
+    "test_results": [
+      "test result: FAILED. 15 passed; 1 failed; 1 ignored; 0 measured; 1305 filtered out; finished in 7.58s"
+    ],
+    "compiled_test_executed": true,
+    "artifact_sha256": {
+      "memory.events": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+      "memory.peak": "b11db8f4cd7f79bc4e8a5b71b7464517e0903ad96d0c56cdfd89523690786cee",
+      "focused.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "binaries.sha256": "4e8172927995cd67e3b2e5a277f215613c4496205b204444e7daa5dce898f08d",
+      "focused.log": "93bdb972a78880654b965353b0af9a6ee4090f3b51dbd6d427e076491e7ae2ee"
+    }
+  },
+  {
+    "run": "final",
+    "source": "50ad0207e5fa8b0a27ca5c96bef05136677200fc",
+    "tree": "d734f7f6bf8e35f718e05b9cceb77ad60d5628ec",
+    "source_manifest_sha256": "5190a051633d64b047036f8ccaafb29cd1e140c1b935aa80795d5fcabcea2292",
+    "test_results": [
+      "test result: FAILED. 15 passed; 1 failed; 1 ignored; 0 measured; 1305 filtered out; finished in 8.91s"
+    ],
+    "compiled_test_executed": true,
+    "artifact_sha256": {
+      "memory.events": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+      "memory.peak": "aed3615e9faa2d12c675e7bff2fa264c85b0553649cf2a0c816cd94ef90b51b9",
+      "focused.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "binaries.sha256": "f78bfc667a82009663f89aa0cb207a0eb9bd846670e695fc837a924813b75f09",
+      "focused.log": "69bd2ff9595d2aadf34503aa8febfecd9ff6251d1ace3502687a7c2d7bdc488b"
+    }
+  },
+  {
+    "run": "full-af76d55",
+    "source": "af76d557cc74fc7e041c77e77526721184e8dde3",
+    "tree": "d7b3a8eaf63a1514bf93a0bd7f4903a9c7324afd",
+    "source_manifest_sha256": "9ed4380bd4577ccd24741f8a7e0060b98f5d0649e3d95bce6e3bcb18cb6af73e",
+    "test_results": [
+      "test result: FAILED. 1318 passed; 1 failed; 3 ignored; 0 measured; 0 filtered out; finished in 727.47s",
+      "test result: ok. 16 passed; 0 failed; 1 ignored; 0 measured; 1305 filtered out; finished in 15.60s"
+    ],
+    "compiled_test_executed": true,
+    "artifact_sha256": {
+      "memory.events": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+      "full.status": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "clippy.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source.json": "9ed4380bd4577ccd24741f8a7e0060b98f5d0649e3d95bce6e3bcb18cb6af73e",
+      "full.log": "1254e5f45471854de86f3a80438405622fb9a6cb05f9339971687ef3bb49ae63",
+      "memory.peak": "e13f514c0a972a9a19cba41912e25e902f279d47e85cc33e067111108ed3cf33",
+      "focused.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "container.json": "088150e82b522b27263679d62c50d38ba12a540071270f817f0ce512f8dbba70",
+      "binaries.sha256": "d3792179da61d320e49840e5ecd0dc7505ed5e647680f339fe8158f1be24e308",
+      "focused.log": "8f891fabaf333cc2a137eddbcd116450062c8769fcc0061f3faee236e340fa16",
+      "fmt.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "clippy-summary.log": "652dbe3906228c45fb41ce5ed1daae6266ded45180e77a5c2e35042823b2442b"
+    },
+    "raw_clippy_sha256": "274620ef554450e620551976daae39854f46c6448f4da669b925cbb0a9234c5c"
+  },
+  {
+    "run": "final-b6fcb6b7",
+    "source": "b6fcb6b75a71e8afc2fedd1eb16edf655771b533",
+    "tree": "a18973de87246cc1095f511975364f96d81a0a01",
+    "source_manifest_sha256": "96a0ff6d3ad8a7945e23fc7d73a8a7c708e47035d826123b74ebdfb4ca56d36b",
+    "test_results": [
+      "test result: ok. 16 passed; 0 failed; 1 ignored; 0 measured; 1305 filtered out; finished in 15.92s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.15s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s",
+      "test result: ok. 29 passed; 0 failed; 1 ignored; 0 measured; 1292 filtered out; finished in 103.86s",
+      "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ],
+    "compiled_test_executed": true,
+    "raw_clippy_sha256": "deafaf4c90f2198b4c061e591680109a3077e81535ad995e9f2f85e6a412227d",
+    "artifact_sha256": {
+      "compound.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "memory.events": "17a3009940fba9102fcd98b575555a3511fb3876914c07b544f3b2903397d08f",
+      "compound.log": "3cdb5acdd38060b096eaf3f6c55a7344bc38b6660c61b6276991249c06e50aae",
+      "bins.log": "2c2f79acf02f0f192146b128d4a5b1a7828ab3eca349ec6b3769d178c1a8d38f",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "clippy.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source.json": "96a0ff6d3ad8a7945e23fc7d73a8a7c708e47035d826123b74ebdfb4ca56d36b",
+      "memory.peak": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "clippy-summary.log": "2e320c637f4e7771cbfcc757768638bb687b4fc95ffdad60464653b05f7806a7",
+      "executed-binaries.json": "3d773964e217700f0dd9d340319a2379b30e9520a05ac85db1e3c844f837dae3",
+      "container.json": "088150e82b522b27263679d62c50d38ba12a540071270f817f0ce512f8dbba70",
+      "native-batch.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "doc.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "binaries.sha256": "1295b32f9a4a1eb2de51cdeb499f978fa74e10e26909f69339e70ede0def2da4",
+      "bins.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "cli.log": "95ee9071c0a7980a919376115842c7d3aed118bbabb7abf3801536c4c455e65b",
+      "native-batch.log": "32ecbb3f87aa13ae3bbc6d118237edcbcc064788584400baf80fac3efcef0b1d",
+      "cli.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "fmt.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "doc.log": "31c653259d1cf75783cd9382933ed0425105380fa034934ffaa146b076e71723"
+    }
+  }
+]

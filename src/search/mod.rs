@@ -14,6 +14,8 @@ mod simd;
 
 // Near-duplicate detection at store time.
 mod duplicates;
+pub(crate) mod exact_pairs;
+pub mod exact_scan;
 
 // CS-26: FTS5 full-text search (replaces custom BM25)
 mod fts;
@@ -27,17 +29,20 @@ pub mod adapters;
 pub mod error;
 mod pipeline;
 mod query;
+mod read_handle;
 mod response;
 
 // --- CS-14 re-exports ---
 pub use index::{FilterEntry, FlatVectorIndex, TagInterner};
+mod vector_owner;
 pub use simd::{dot_product_simd, is_normalized, normalize_l2};
+pub use vector_owner::VectorIndexOwner;
 
 // --- Near-duplicate detection ---
 pub use duplicates::find_near_duplicates;
 
 // --- CS-26 re-exports ---
-pub use fts::FtsIndex;
+pub use fts::{EligibleFtsResults, FtsCoverage, FtsIndex, MAX_FTS_EXAMINED};
 
 // --- CS-29 re-exports ---
 pub use entity_index::EntityIndex;
@@ -46,9 +51,21 @@ pub use entity_normalize::canonicalize_entity;
 // --- CS-16 re-exports ---
 pub use error::SearchError;
 pub use pipeline::{
-    AccessRecorder, EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult,
-    FtsIndexRegistry, FtsResult, GraphReader, MetadataStore, NamespaceResolver, QueryEngine,
-    RecordCache, RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
+    AccessRecorder, CanonicalEligibilityDiagnostics, ChannelDiagnostics, ChannelParticipation,
+    CoherentGetResponse, CoherentSearchResponse, CoherentSimilarResponse, DirectScoreEvidence,
+    EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult, ExaminationUnit,
+    FtsAvailability, FtsDiagnostics, FtsIndexRegistry, FtsResult, GraphReader, HardFilterRejection,
+    InheritedScoreExplanation, MAX_EXPLANATION_SOURCES, MAX_RIF_EXAMINED_EDGES, MAX_RIF_PAIRS,
+    MAX_RIF_TARGETS_PER_ANCHOR, MetadataStore, MinScoreDisposition, NamespaceResolver,
+    OwnScoreExplanation, QueryEngine, RecordCache, ResultProvenance, RetrievalChannel,
+    RetrievalSemantics, RifDiagnostics, RifMode, RifProcessor, RifSuppression, ScoreExplanation,
+    ScoreFormula, ScoredResult, SemanticsDiagnostics, SemanticsResponse, SourceCoverage,
+    SourceResults, StrengthDiagnostics, UnresolvedReason, VectorIndexRegistry, VersionMode,
+    VersionStatus,
+};
+pub(crate) use pipeline::{
+    SelectedSimilarity, SimilarityAlgorithm, SimilarityExclusion, SimilarityExplanation,
+    SimilarityOrigin, SimilarityOwnAdmission, SimilarityScope, SimilaritySelection,
 };
 pub use query::SearchFilter as PipelineSearchFilter;
 pub use query::{QueryMode, SearchQuery};
@@ -195,3 +212,5 @@ pub trait VectorIndex: Send + Sync {
         metadata: VectorMetadata,
     ) -> Result<bool, VectorError>;
 }
+
+pub(crate) use query::default_record_access;

@@ -1,0 +1,199 @@
+--- a/src/storage/metadata/native_records/feedback_consumer_tests.rs
++++ b/src/storage/metadata/native_records/feedback_consumer_tests.rs
+@@ -19,7 +19,7 @@
+     multiplier: f64,
+ ) -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let clock = Arc::new(CountingClock {
+         now: AtomicI64::new(5000),
+         calls: AtomicUsize::new(0),
+--- a/src/storage/metadata/native_records/exposure_consumer_tests.rs
++++ b/src/storage/metadata/native_records/exposure_consumer_tests.rs
+@@ -5,7 +5,7 @@
+ 
+ fn setup() -> (Fixture, Data, Arc<FixedClock>, MemoryId) {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+     let mut session = open(&d, clock.clone());
+     let intent = session.capture_insert(scope(&d), &input(&d)).unwrap();
+--- a/src/storage/metadata/native_records/forget_consumer_tests.rs
++++ b/src/storage/metadata/native_records/forget_consumer_tests.rs
+@@ -14,7 +14,7 @@
+ }
+ fn setup() -> (Fixture, Data, Arc<CountingClock>, MemoryId, MutationContext) {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let clock = Arc::new(CountingClock {
+         now: AtomicI64::new(5000),
+         calls: AtomicUsize::new(0),
+--- a/src/storage/metadata/native_records/sweep_tests.rs
++++ b/src/storage/metadata/native_records/sweep_tests.rs
+@@ -55,7 +55,7 @@
+ }
+ fn setup_with_multiplier(multiplier: f64) -> (Fixture, Data, MemoryId, Arc<CountingClock>) {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let c = Arc::new(CountingClock::new(3000));
+     let mut session =
+         NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone()).unwrap();
+@@ -317,7 +317,7 @@
+ async fn native_sweep_rechecks_donor_and_fan_after_capture_without_resampling_clock() {
+     for days in [2., 4.5] {
+         let root = tempfile::tempdir().unwrap();
+-        let d = fixture(root.path());
++        let d = certified_fixture(root.path());
+         let created = 10_000 * DAY;
+         let c = Arc::new(CountingClock::new(created));
+         let mut s = NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c.clone())
+--- a/src/storage/metadata/native_records/replay_consumer_tests.rs
++++ b/src/storage/metadata/native_records/replay_consumer_tests.rs
+@@ -28,7 +28,7 @@
+ 
+ async fn retired_replay(feedback: bool) {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let clock = Arc::new(FixedClock(AtomicUsize::new(0)));
+     let mut s = open(&d, clock.clone());
+     let intent = s.capture_insert(scope(&d), &input(&d)).unwrap();
+--- a/src/storage/metadata/native_records/phase_clock_tests.rs
++++ b/src/storage/metadata/native_records/phase_clock_tests.rs
+@@ -305,7 +305,11 @@
+         "insertion",
+     ] {
+         let root = tempfile::tempdir().unwrap();
+-        let d = fixture(root.path());
++        let d = if case == "insertion" {
++            certified_fixture(root.path())
++        } else {
++            fixture(root.path())
++        };
+         let clock = Arc::new(RegressedClock {
+             time: AtomicI64::new(500),
+             calls: AtomicUsize::new(0),
+--- a/src/storage/metadata/native_records/maintenance_tests.rs
++++ b/src/storage/metadata/native_records/maintenance_tests.rs
+@@ -65,7 +65,7 @@
+ #[test]
+ fn native_maintenance_one_phase_retains_ghost_vector_then_deletes_with_witness_peers_and_replay() {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let c = Arc::new(Clock::new(3000));
+     let mut s = session(&d, c.clone());
+     let id = create(&mut s, &d, "create", input(&d));
+@@ -211,7 +211,7 @@
+  {
+     for days in [2.0, 4.5] {
+         let root = tempfile::tempdir().unwrap();
+-        let d = fixture(root.path());
++        let d = certified_fixture(root.path());
+         let c = Arc::new(Clock::new(3000));
+         let mut s = session(&d, c.clone());
+         let mut target = input(&d);
+@@ -272,7 +272,7 @@
+ #[test]
+ fn native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_without_receipts() {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let c = Arc::new(Clock::new(3000));
+     let mut s = session(&d, c.clone());
+     let mut original = input(&d);
+@@ -373,7 +373,7 @@
+ fn native_harddelete_process_exit_recovers_exact_incident_edges_before_and_after_commit() {
+     for point in ["before_metadata_commit", "after_metadata_commit"] {
+         let root = tempfile::tempdir().unwrap();
+-        let d = fixture(root.path());
++        let d = certified_fixture(root.path());
+         let c = Arc::new(Clock::new(3000));
+         let mut s = session(&d, c.clone());
+         let id = create(&mut s, &d, "target", input(&d));
+@@ -447,7 +447,7 @@
+ fn native_maintenance_precommit_failure_and_unknown_commit_reconcile_real_transactions() {
+     for unknown in [false, true] {
+         let root = tempfile::tempdir().unwrap();
+-        let d = fixture(root.path());
++        let d = certified_fixture(root.path());
+         let c = Arc::new(Clock::new(3000));
+         let mut s = session(&d, c.clone());
+         let id = create(&mut s, &d, "target", input(&d));
+@@ -488,7 +488,7 @@
+ #[test]
+ fn native_maintenance_pass_pins_one_clock_and_never_advances_an_id_twice() {
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let c = Arc::new(Clock::new(3000));
+     let mut s = session(&d, c.clone());
+     let id = create(&mut s, &d, "target", input(&d));
+@@ -611,6 +611,18 @@
+         500 * DAY
+     );
+     immutable_lifecycle(&before, &after);
++    drop(s);
++    inspect_schema(&d.path).unwrap();
++}
++
++#[test]
++fn native_maintenance_certified_permastore_exemption_and_forget() {
++    // Only the fresh pinned insertion needs certification. The original
++    // missing-summary and unknown-marker checks remain uncertified above.
++    let root = tempfile::tempdir().unwrap();
++    let d = certified_fixture(root.path());
++    let c = Arc::new(Clock::new(500 * DAY));
++    let mut s = session(&d, c.clone());
+     let mut original = input(&d);
+     original.memory.parent_id = None;
+     original.memory.initial_stability = Some(2000.);
+@@ -681,7 +693,7 @@
+     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
+     use crate::storage::ownership::{StoreOwnership, lock_directory};
+     let root = tempfile::tempdir().unwrap();
+-    let mut d = fixture(root.path());
++    let mut d = certified_fixture(root.path());
+     let c = Arc::new(Clock::new(3000));
+     let mut s = session(&d, c.clone());
+     let id = create(&mut s, &d, "target", input(&d));
+@@ -787,7 +799,7 @@
+     use crate::backup::{RestoreOptions, restore_from_backup, run_backup};
+     use crate::storage::logical_export::{export_store, import_store};
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let c = Arc::new(Clock::new(3000));
+     let mut s = session(&d, c.clone());
+     let id = create(&mut s, &d, "target", input(&d));
+@@ -1010,7 +1022,7 @@
+ fn native_harddelete_pending_recovery_rejects_unproven_dangling_edges_without_source_writes() {
+     for changed_weight in [false, true] {
+         let root = tempfile::tempdir().unwrap();
+-        let d = fixture(root.path());
++        let d = certified_fixture(root.path());
+         let c = Arc::new(Clock::new(3000));
+         let mut s = session(&d, c.clone());
+         let id = create(&mut s, &d, "target", input(&d));
+@@ -1063,7 +1075,7 @@
+ #[test]
+ fn native_maintenance_actual_policy_migration_invalidates_plan_but_replays_old_receipt_first() {
+     let root = tempfile::tempdir().unwrap();
+-    let mut d = fixture(root.path());
++    let mut d = certified_fixture(root.path());
+     let c = Arc::new(Clock::new(3000));
+     let mut s = session(&d, c.clone());
+     let id = create(&mut s, &d, "target", input(&d));
+@@ -1112,7 +1124,7 @@
+     use crate::storage::native_maintenance::{NativeDecayEvidence, PlannedDecay, plan};
+     use crate::storage::native_records::NativeRecordState;
+     let root = tempfile::tempdir().unwrap();
+-    let d = fixture(root.path());
++    let d = certified_fixture(root.path());
+     let c = Arc::new(Clock::new(3000));
+     let mut s = session(&d, c);
+     let mut input = input(&d);

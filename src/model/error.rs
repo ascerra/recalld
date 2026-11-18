@@ -102,6 +102,16 @@ pub enum ValidationError {
         max_bytes: usize,
     },
 
+    /// One supplied raw tag would otherwise be silently discarded.
+    #[error("tags[{index}] is invalid: {source}")]
+    InvalidTagItem { index: usize, source: TagError },
+
+    /// Legacy storage has no lossless carrier for this structured label.
+    #[error(
+        "{field}[{index}] cannot be represented by legacy storage; use a nonempty label containing ASCII letters, digits, /, _, ., :, or -"
+    )]
+    UnrepresentableLegacyLabel { field: &'static str, index: usize },
+
     /// A tag failed validation.
     #[error("invalid tag: {source}")]
     InvalidTag {
@@ -172,8 +182,11 @@ impl ValidationError {
             ValidationError::SummaryEmpty => Some("summary"),
             ValidationError::FieldTooLong { field, .. }
             | ValidationError::TooManyItems { field, .. }
-            | ValidationError::ItemTooLong { field, .. } => Some(field),
-            ValidationError::InvalidTag { .. } => Some("tags"),
+            | ValidationError::ItemTooLong { field, .. }
+            | ValidationError::UnrepresentableLegacyLabel { field, .. } => Some(field),
+            ValidationError::InvalidTag { .. } | ValidationError::InvalidTagItem { .. } => {
+                Some("tags")
+            }
             ValidationError::DimensionMismatch { .. }
             | ValidationError::NonFiniteEmbedding { .. } => Some("embedding"),
             ValidationError::NamespaceNotFound { .. } => Some("namespace"),
@@ -196,6 +209,8 @@ impl ValidationError {
 /// Errors from `DiskRecord::from_bytes()` deserialization.
 #[derive(Debug, Error)]
 pub enum DecodeError {
+    #[error("invalid canonical record: {0}")]
+    InvalidSchema(String),
     /// Record data is shorter than the minimum expected size.
     #[error(
         "record is truncated: expected at least {expected} bytes, \

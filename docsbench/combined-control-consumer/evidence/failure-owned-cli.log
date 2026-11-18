@@ -1,0 +1,4 @@
+usage: test_owned_mcp_episode.py [-h] --source SOURCE --inputs INPUTS
+                                 --baseline BASELINE --binary BINARY
+                                 --scorer SCORER --out OUT
+test_owned_mcp_episode.py: error: the following arguments are required: --source, --inputs, --baseline, --binary, --scorer, --out

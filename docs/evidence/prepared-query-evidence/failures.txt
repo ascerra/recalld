@@ -1,0 +1,32 @@
+RUN 001-red
+source 42d30b304c734332a769461316947c885b3f9e2c
+error[E0603]: module `query_explanation` is private
+error[E0046]: not all trait items implemented, missing: `record_access_batch`
+error: could not compile `recalld` (lib test) due to 2 previous errors; 4 warnings emitted
+
+RUN 002-red
+source 4c9c8ca1194a18b5f3207476c80572d8453d6620
+thread 'search::pipeline::read_view::tests::prepared_evidence_actual_metadata_counts_units_and_first_rejection' (40) panicked at src/search/query_wire_tests.rs:226:5:
+assertion `left == right` failed
+  left: Null
+ right: "canonicalRecords"
+thread 'search::pipeline::read_view::tests::prepared_evidence_actual_operator_origin_rif_projection' (41) panicked at src/search/query_wire_tests.rs:294:5:
+assertion `left == right` failed
+  left: Null
+ right: Number(0.8706938624382019)
+thread 'search::pipeline::read_view::tests::prepared_evidence_rejects_operator_rif_before_work_on_actual_transports' (50) panicked at src/search/query_wire_tests.rs:70:17:
+assertion `left == right` failed
+  left: 400
+ right: 503
+thread 'search::pipeline::read_view::tests::prepared_evidence_similar_actual_mcp_rest_cosine_and_bounded_origins' (53) panicked at src/search/query_wire_tests.rs:133:9:
+  left: Some(true)
+ right: Some(false)
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 1133 filtered out; finished in 1.46s
+
+RUN 003-red
+source d7879564d14114c54c791aa4e3a58f4bbc4a2125
+thread 'search::pipeline::read_view::tests::prepared_evidence_rejects_operator_rif_before_work_on_actual_transports' (40) panicked at src/search/query_wire_tests.rs:60:17:
+  left: Some(false)
+ right: Some(true)
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1136 filtered out; finished in 0.12s
+

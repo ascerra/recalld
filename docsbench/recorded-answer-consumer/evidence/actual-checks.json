@@ -1,0 +1,65 @@
+[
+  {
+    "answers": 28,
+    "denominators": {
+      "scored": 9,
+      "unknownAnnotations": 13,
+      "zeroLabelUnscored": 6
+    },
+    "episodes": 7,
+    "name": "complete-cohort"
+  },
+  {
+    "actorNotDispatched": true,
+    "name": "actual-payload-forged-receipt-rejected"
+  },
+  {
+    "name": "actual-retained-role-trace",
+    "rejectedMutants": 5,
+    "valid": true
+  },
+  {
+    "failed": 1,
+    "name": "actual-middle-answer-miss",
+    "succeeded": 3,
+    "unattempted": 3
+  },
+  {
+    "name": "actual-refusal",
+    "reason": "recorded-refusal"
+  },
+  {
+    "name": "actual-parse",
+    "reason": "output-parse"
+  },
+  {
+    "name": "actual-utf8",
+    "reason": "output-parse"
+  },
+  {
+    "name": "actual-citation",
+    "reason": "citation outside actual packed public payload"
+  },
+  {
+    "name": "last-member",
+    "outputAbsent": true
+  },
+  {
+    "name": "old-track",
+    "outputAbsent": true
+  },
+  {
+    "name": "role-version",
+    "outputAbsent": true
+  },
+  {
+    "identityNormalizationUsed": false,
+    "name": "actual-gold-canary",
+    "rawActorBehaviorCompared": true
+  },
+  {
+    "identityNormalizationUsed": false,
+    "name": "actual-future-canary",
+    "rawActorBehaviorCompared": true
+  }
+]

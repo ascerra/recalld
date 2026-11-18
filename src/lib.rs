@@ -26,10 +26,13 @@ pub mod backup;
 #[cfg(feature = "bench")]
 pub mod bench;
 pub mod cache;
+pub mod canonical_list;
+pub mod catalog_page;
 pub mod cli;
 pub mod config;
 pub mod daemon;
 pub mod decay;
+pub(crate) mod derived_completion;
 pub mod embedding;
 pub mod error;
 pub mod graph;
@@ -37,6 +40,8 @@ pub mod health;
 pub(crate) mod index_cleanup;
 pub mod mcp;
 pub mod model;
+pub mod native_catalog_adapter;
+pub(crate) mod performance;
 pub mod rif;
 pub mod search;
 pub mod serialization;
@@ -57,3 +62,6 @@ pub use system::Recalld;
 
 // Re-export core types at the crate root for ergonomics.
 pub use model::{DecayPhase, EdgeType, Memory, MemoryId, NamespaceConfig, NamespaceId};
+
+#[cfg(test)]
+mod producer_work_tests;

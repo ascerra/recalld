@@ -1,0 +1,225 @@
+use super::*;
+use crate::storage::insertion::InsertMemory;
+
+impl RedbStorageEngine {
+    /// Optional pre-provider lookup. The final mutation repeats verification;
+    /// absence here never reserves a key or permits bypassing final checks.
+    pub fn lookup_insert_replay(
+        &self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+    ) -> Result<Option<WriteReceipt>, StorageError> {
+        self.meta_store.lookup_insert_replay(ctx, input)
+    }
+
+    /// Commit a canonical insertion and durable publication work. The receipt
+    /// acknowledges canonical state, not readiness; the caller completes all
+    /// derived views before returning a ready result. Replay never allocates.
+    pub fn insert_memory_with_receipt(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        sampled_at: i64,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved(ctx, input, generated_embedding, sampled_at, None)
+    }
+
+    pub(crate) fn insert_memory_reserved(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        sampled_at: i64,
+        child: Option<&crate::storage::batch::BatchChild>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            sampled_at,
+            child,
+            None,
+        )
+    }
+
+    pub(crate) fn insert_memory_with_work(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            sampled_at,
+            None,
+            parent,
+        )
+    }
+
+    pub(crate) fn insert_memory_reserved_with_work(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        sampled_at: i64,
+        child: Option<&crate::storage::batch::BatchChild>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_profile_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            None,
+            sampled_at,
+            child,
+            parent,
+        )
+    }
+
+    pub(crate) fn insert_memory_with_profile(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+        sampled_at: i64,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_with_profile_and_work(
+            ctx,
+            input,
+            generated_embedding,
+            profile,
+            sampled_at,
+            None,
+        )
+    }
+
+    pub(crate) fn insert_memory_with_profile_and_work(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.insert_memory_reserved_profile_with_work(
+            ctx,
+            input,
+            generated_embedding,
+            profile,
+            sampled_at,
+            None,
+            parent,
+        )
+    }
+
+    pub(crate) fn insert_memory_reserved_profile_with_work(
+        &mut self,
+        ctx: &MutationContext,
+        input: &InsertMemory,
+        generated_embedding: &[f32],
+        profile: Option<&crate::model::schema::EmbeddingProfile>,
+        sampled_at: i64,
+        child: Option<&crate::storage::batch::BatchChild>,
+        parent: Option<&crate::storage::work::WorkTicket>,
+    ) -> Result<WriteReceipt, StorageError> {
+        self.ensure_available()?;
+        let guard = self.meta_store.mutation_guard_with_work(parent)?;
+        let scan = crate::performance::Timer::new("insert.canonical_edges");
+        let edges = self.edge_store.load_all_edges()?;
+        scan.complete();
+        crate::performance::event!(kind = "insert_edges", loaded = edges.len());
+        let vectors = &mut self.vector_manager;
+        let text = &mut self.text_store;
+        let mut staging_started = false;
+        let embedding = input.embedding.as_deref().unwrap_or(generated_embedding);
+        let result = self.meta_store.insert_reserved_with_effects(
+            &guard,
+            ctx,
+            input,
+            sampled_at,
+            embedding,
+            profile,
+            &edges,
+            child,
+            |namespace, record, normalized| {
+                let store = vectors
+                    .get_mut(namespace.id)
+                    .ok_or(StorageError::NamespaceNotFound(namespace.id.get()))?;
+                staging_started = true;
+                let append = crate::performance::Timer::new("insert.vector_append");
+                crate::performance::event!(
+                    kind = "payload_append",
+                    resource = "vector",
+                    phase = "attempt",
+                    source_bytes = normalized.len() * std::mem::size_of::<f32>()
+                );
+                record.vector_slot = store.insert_vector(normalized)?;
+                append.complete();
+                crate::performance::event!(
+                    kind = "payload_append",
+                    resource = "vector",
+                    phase = "complete",
+                    source_bytes = normalized.len() * std::mem::size_of::<f32>()
+                );
+                if let Some(value) = &input.full_text {
+                    let append = crate::performance::Timer::new("insert.text_append");
+                    crate::performance::event!(
+                        kind = "payload_append",
+                        resource = "text",
+                        phase = "attempt",
+                        source_bytes = value.len()
+                    );
+                    let reference = text.append(value)?;
+                    append.complete();
+                    crate::performance::event!(
+                        kind = "payload_append",
+                        resource = "text",
+                        phase = "complete",
+                        source_bytes = value.len()
+                    );
+                    record.text_offset = reference.file_offset;
+                    record.text_length = reference.length;
+                }
+                store.sync()?;
+                text.sync_data()?;
+                crate::storage::metadata::effects::crash_point("after_insert_payload_sync");
+                Ok(())
+            },
+        );
+        if result.is_err() && staging_started {
+            // Never free a possibly committed slot on an I/O return. Recovery
+            // validates every canonical owner before reclaiming unowned bytes.
+            self.meta_store.mark_unavailable();
+        }
+        let receipt = result?;
+        crate::performance::event!(
+            kind = "insert_receipt",
+            replayed = receipt.replayed,
+            committed_generation = receipt.committed_generation.get()
+        );
+        if !receipt.replayed {
+            effects::apply_pending(
+                &self.meta_store,
+                &guard,
+                &self.edge_store,
+                Some(&mut self.vector_manager),
+            )
+            .map_err(|source| StorageError::CommittedMutation {
+                receipt: Box::new(receipt.clone()),
+                source: Box::new(source),
+            })?;
+        }
+        Ok(receipt)
+    }
+}
+
+#[cfg(test)]
+#[path = "insertion_tests.rs"]
+mod tests;

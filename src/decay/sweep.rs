@@ -16,8 +16,11 @@
 //!
 //! The sweep runs in a background tokio task with cooperative yielding.
 //! It does NOT hold a global lock -- individual record operations are
-//! serialized at the storage transaction level.
+//! serialized by the storage write lock. Planned snapshots are checked again
+//! under that lock before applying any mutation. Feedback and phase/content loss
+//! use one metadata transaction; hard deletion/edge effects remain a separate boundary.
 
+use crate::storage::work::{WorkTicket, accept_work, finish_work};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,7 +35,10 @@ use crate::cache::CacheManager;
 use crate::graph::SharedGraph;
 use crate::graph::activation::{ActivationConfig, connection_bonus};
 use crate::model::{DecayPhase, MemoryId};
+use crate::storage::maintenance::{DecayMutationResult, DecaySkip};
 use crate::storage::{RedbStorageEngine, StorageEngine as _};
+
+mod native;
 
 // ── Decay Metadata ──────────────────────────────────────────────────
 
@@ -42,19 +48,32 @@ use crate::storage::{RedbStorageEngine, StorageEngine as _};
 /// embedding) when the sweep only needs decay-related fields.
 #[derive(Debug, Clone)]
 pub struct DecayMetadata {
+    pub phase: DecayPhase,
+    pub created_at: i64,
     /// FSRS stability S in days.
     pub stability: f32,
     /// Milliseconds since Unix epoch.
     pub last_accessed_at: i64,
     /// Whether the memory is exempt from decay sweeps.
     pub is_permastore: bool,
-    /// Namespace-specific decay rate multiplier, if set.
-    /// None means inherit from global config.
-    pub decay_rate_multiplier: Option<f32>,
+    /// Namespace policy snapshot; concrete namespace values override global defaults.
+    pub namespace: crate::model::NamespaceConfig,
     /// Whether the record has a non-empty summary.
     /// Used by Full -> Summary transitions to skip the summary check
     /// without re-reading the record from storage.
     pub has_summary: bool,
+}
+
+impl DecayMetadata {
+    /// Compare lifecycle inputs, not materialized strengths written by this sweep.
+    fn matches(&self, record: &crate::model::DiskRecord) -> bool {
+        record.phase == self.phase
+            && record.created_at == self.created_at
+            && record.last_accessed_at == self.last_accessed_at
+            && record.stability.to_bits() == self.stability.to_bits()
+            && (record.is_permastore != 0) == self.is_permastore
+            && !record.summary.is_empty() == self.has_summary
+    }
 }
 
 // ── SweepConfig ─────────────────────────────────────────────────────
@@ -166,8 +185,25 @@ pub struct SweepResult {
     /// Memories where connection bonus prevented a phase transition
     /// that raw R alone would have triggered.
     pub saved_by_connection_bonus: u64,
-    /// Whether fulltext.dat compaction was triggered.
+    /// Whether text compaction succeeded, including an empty generation selection.
     pub compaction_triggered: bool,
+    /// Exact physical-maintenance commit; record/lifecycle tokens are unchanged.
+    pub compaction_receipt: Option<crate::storage::control::WriteReceipt>,
+    pub compaction_cleanup_pending: bool,
+    /// Final recheck found changed canonical inputs, policy, or saving graph evidence.
+    pub stale_skipped: u64,
+    /// Final phase/strength patch was byte-for-byte unchanged; no receipt committed.
+    pub unchanged_skipped: u64,
+    /// Final patch was exempt from materialization; no receipt committed.
+    pub exempt_skipped: u64,
+    /// Native Full records whose only retained text must not be destroyed.
+    pub missing_summary_skipped: u64,
+    /// Canonical changes may be committed even when derived publication fails.
+    pub publication_error: Option<String>,
+    /// First known committed mutation whose canonical application failed.
+    pub failed_commit: Option<(crate::storage::control::WriteReceipt, String)>,
+    /// First uncertain commit; reopening/reconciliation is required before retry.
+    pub uncertain_operation: Option<uuid::Uuid>,
     /// Wall-clock duration of the entire sweep.
     pub duration: Duration,
     /// All phase transitions emitted during this sweep.
@@ -175,6 +211,56 @@ pub struct SweepResult {
     /// Errors encountered during the sweep. The sweep continues
     /// past individual record failures; errors are collected here.
     pub errors: Vec<SweepRecordError>,
+}
+
+impl SweepResult {
+    fn retain_publication_failure(&mut self, error: &crate::storage::StorageError) {
+        use crate::storage::StorageError;
+        self.publication_error = Some(error.to_string());
+        match error {
+            StorageError::CommittedMutation { receipt, source } => {
+                self.failed_commit
+                    .get_or_insert(((**receipt).clone(), source.to_string()));
+            }
+            StorageError::CommitOutcomeUnknown { operation_id, .. } => {
+                self.uncertain_operation.get_or_insert(*operation_id);
+            }
+            _ => {}
+        }
+    }
+
+    fn retain_mutation_failure(&mut self, error: &SweepError) {
+        use crate::storage::StorageError;
+        match error {
+            SweepError::Mutation(StorageError::CommittedMutation { receipt, source }) => {
+                // Counts describe known canonical commits even when publication
+                // failed before the transition could return its ready event.
+                match receipt.outcome {
+                    crate::storage::control::MutationOutcome::LifecycleMaterialized {
+                        from_phase: DecayPhase::Full,
+                        to_phase: DecayPhase::Summary,
+                        ..
+                    } => self.full_to_summary += 1,
+                    crate::storage::control::MutationOutcome::LifecycleMaterialized {
+                        from_phase: DecayPhase::Summary,
+                        to_phase: DecayPhase::Ghost,
+                        ..
+                    } => self.summary_to_ghost += 1,
+                    crate::storage::control::MutationOutcome::GraphChanged {
+                        memories_removed,
+                        ..
+                    } => self.deletions += memories_removed as u64,
+                    _ => {}
+                }
+                self.failed_commit
+                    .get_or_insert(((**receipt).clone(), source.to_string()));
+            }
+            SweepError::Mutation(StorageError::CommitOutcomeUnknown { operation_id, .. }) => {
+                self.uncertain_operation.get_or_insert(*operation_id);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// An error encountered while processing a single record during sweep.
@@ -233,6 +319,9 @@ pub enum PhaseTransition {
 /// Errors that can occur during a decay sweep.
 #[derive(Debug, thiserror::Error)]
 pub enum SweepError {
+    /// Keep committed/unknown identity until the actual operator consumer handles it.
+    #[error("{0}")]
+    Mutation(#[source] crate::storage::StorageError),
     /// An I/O or storage-level error.
     #[error("storage error: {0}")]
     Storage(String),
@@ -260,22 +349,71 @@ pub enum SweepError {
 /// in batch to minimize storage round-trips.
 ///
 /// Carries the decay metadata snapshot from scan time so that transition
-/// methods do not need to re-read the record from storage.
-#[derive(Debug)]
+/// methods can reject stale plans under the final storage write lock.
+#[derive(Debug, Clone)]
 struct PendingTransition {
     memory_id: MemoryId,
     from_phase: DecayPhase,
-    /// Raw FSRS retrievability (without connection bonus).
-    raw_r: f32,
-    /// Effective retrievability (with connection bonus).
-    effective_r: f32,
-    /// FSRS stability from the scan-time metadata snapshot.
-    stability: f32,
-    /// Permastore flag from the scan-time metadata snapshot.
-    is_permastore: bool,
-    /// Whether the memory has a non-empty summary (only relevant for
-    /// Full -> Summary transitions; set to `true` for other phases).
-    has_summary: bool,
+    evaluation: SweepEvaluation,
+    expected: DecayMetadata,
+}
+
+/// Frozen clock/policy inputs travel with every evaluated record, including
+/// strength-only updates. Graph-derived strength is recomputed at publication.
+#[derive(Debug, Clone)]
+struct SweepEvaluation {
+    projection: super::lifecycle::LifecycleProjection,
+    policy: super::lifecycle::EffectiveLifecyclePolicy,
+    activation: ActivationConfig,
+}
+
+impl SweepEvaluation {
+    fn threshold(&self, phase: DecayPhase) -> Option<f32> {
+        match phase {
+            DecayPhase::Full => Some(self.policy.config.phase_1_threshold),
+            DecayPhase::Summary => Some(self.policy.config.phase_2_threshold),
+            DecayPhase::Ghost => Some(self.policy.config.phase_3_threshold),
+            DecayPhase::Tombstone => None,
+        }
+    }
+
+    /// Caller holds graph -> storage through the following canonical write.
+    /// No clock sampling or graph lock acquisition happens inside this method.
+    fn project_locked(
+        &self,
+        id: MemoryId,
+        expected: &DecayMetadata,
+        storage: &RedbStorageEngine,
+        graph: &crate::graph::RelationshipGraph,
+    ) -> Result<Option<super::lifecycle::LifecycleProjection>, SweepError> {
+        let namespace = storage
+            .get_namespace(expected.namespace.id)
+            .map_err(|e| SweepError::Storage(e.to_string()))?;
+        if namespace
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()
+            .map_err(|e| SweepError::Storage(e.to_string()))?
+            != Some(
+                serde_json::to_vec(&expected.namespace)
+                    .map_err(|e| SweepError::Storage(e.to_string()))?,
+            )
+            || expected.is_permastore
+            || self.policy.decay_rate_multiplier == 0.0
+        {
+            return Ok(None);
+        }
+        let bonus = connection_bonus(id, graph, &self.activation).clamp(0.0, MAX_CONNECTION_BONUS);
+        super::lifecycle::project(
+            expected.stability,
+            expected.last_accessed_at,
+            &self.policy,
+            self.projection.evaluated_at,
+            bonus,
+        )
+        .map(Some)
+        .map_err(|e| SweepError::Storage(e.to_string()))
+    }
 }
 
 // ── Maximum connection bonus constant ───────────────────────────────
@@ -299,6 +437,8 @@ const MAX_CONNECTION_BONUS: f32 = 0.15;
 /// The runner holds `Arc` references to shared subsystems. It does NOT
 /// own those subsystems -- it borrows them via Arc for the background task.
 pub struct DecaySweepRunner {
+    clock: Arc<dyn crate::time::Clock>,
+    completion: Option<crate::derived_completion::DerivedCompletion>,
     config: SweepConfig,
     decay_config: Arc<DecayConfig>,
     activation_config: ActivationConfig,
@@ -315,6 +455,8 @@ pub struct DecaySweepRunner {
 
     /// Notifies the background task to run an immediate sweep.
     trigger_notify: Arc<Notify>,
+    // Preserve Notify coalescing, but retain the accepted root before enqueue.
+    pending_trigger: Arc<std::sync::Mutex<Option<WorkTicket>>>,
 }
 
 impl DecaySweepRunner {
@@ -336,6 +478,7 @@ impl DecaySweepRunner {
         config.validate()?;
         let (shutdown_tx, _) = watch::channel(false);
         Ok(Self {
+            clock: Arc::new(crate::time::SystemClock),
             config,
             decay_config,
             activation_config,
@@ -345,7 +488,21 @@ impl DecaySweepRunner {
             global_decay_multiplier,
             shutdown_tx,
             trigger_notify: Arc::new(Notify::new()),
+            pending_trigger: Arc::new(std::sync::Mutex::new(None)),
+            completion: None,
         })
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn crate::time::Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+    pub(crate) fn with_completion(
+        mut self,
+        completion: crate::derived_completion::DerivedCompletion,
+    ) -> Self {
+        self.completion = Some(completion);
+        self
     }
 
     /// Spawn the background sweep task on the tokio runtime.
@@ -358,6 +515,8 @@ impl DecaySweepRunner {
     /// 2. Enters a loop: sleep for `interval`, then sweep
     /// 3. Exits when `shutdown()` is called
     pub fn start(&self) -> tokio::task::JoinHandle<()> {
+        let clock = self.clock.clone();
+        let completion = self.completion.clone();
         let config = self.config.clone();
         let decay_config = Arc::clone(&self.decay_config);
         let activation_config = self.activation_config.clone();
@@ -368,11 +527,20 @@ impl DecaySweepRunner {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         let trigger_notify = Arc::clone(&self.trigger_notify);
 
+        let pending_trigger = self.pending_trigger.clone();
+        // The startup task is accepted before spawning; an idle scheduler is not
+        // itself pending work. Scheduled ticks register only when they fire.
+        let startup = if config.sweep_on_startup && !*shutdown_rx.borrow() {
+            accept_work(&storage, None).ok()
+        } else {
+            None
+        };
         tokio::spawn(async move {
-            // Optional startup sweep
-            if config.sweep_on_startup {
-                info!("running startup decay sweep");
-                let result = Self::execute_sweep(
+            if *shutdown_rx.borrow() {
+                return;
+            }
+            if let Some(work) = startup {
+                let result = Self::execute_sweep_with_origin_work(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -380,45 +548,36 @@ impl DecaySweepRunner {
                     &graph,
                     &cache,
                     global_decay_multiplier,
+                    Some(clock.now_millis()),
+                    Some(&work),
+                    completion.as_ref(),
+                    2,
                 )
                 .await;
+                finish_work(&storage, work);
                 Self::log_result(&result);
             }
-
             let mut interval = time::interval(config.interval);
-            // The first tick fires immediately -- consume it since we
-            // may have already done the startup sweep.
             interval.tick().await;
-
             loop {
-                tokio::select! {
-                    // Regular interval tick
-                    _ = interval.tick() => {
-                        info!("starting scheduled decay sweep");
-                    }
-                    // Manual trigger
-                    _ = trigger_notify.notified() => {
-                        info!("starting manually triggered decay sweep");
-                        // Reset the interval so the next scheduled sweep
-                        // is a full interval from now.
+                let work = tokio::select! {
+                    _=interval.tick()=>accept_work(&storage,None).ok(),
+                    _=trigger_notify.notified()=>{
                         interval.reset();
+                        pending_trigger.lock().unwrap_or_else(|e|e.into_inner()).take()
                     }
-                    // Shutdown signal
-                    _ = shutdown_rx.changed() => {
-                        if *shutdown_rx.borrow() {
-                            info!("decay sweep runner shutting down");
-                            return;
-                        }
+                    _=shutdown_rx.changed()=>{
+                        if *shutdown_rx.borrow() { return; }
                         continue;
                     }
-                }
-
-                // Check shutdown before starting a potentially long sweep
+                };
                 if *shutdown_rx.borrow() {
                     return;
                 }
-
-                let result = Self::execute_sweep(
+                let Some(work) = work else {
+                    continue;
+                };
+                let result = Self::execute_sweep_with_origin_work(
                     &config,
                     &decay_config,
                     &activation_config,
@@ -426,8 +585,13 @@ impl DecaySweepRunner {
                     &graph,
                     &cache,
                     global_decay_multiplier,
+                    Some(clock.now_millis()),
+                    Some(&work),
+                    completion.as_ref(),
+                    2,
                 )
                 .await;
+                finish_work(&storage, work);
                 Self::log_result(&result);
             }
         })
@@ -437,15 +601,40 @@ impl DecaySweepRunner {
     ///
     /// The current sweep (if running) will complete before the task exits.
     pub fn shutdown(&self) {
-        let _ = self.shutdown_tx.send(true);
+        self.shutdown_tx.send_replace(true);
+        // Accepted but unexecuted work is abandoned, not successfully drained.
+        drop(
+            self.pending_trigger
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(),
+        );
     }
 
-    /// Trigger an immediate sweep outside the regular interval.
+    /// Internal autonomous notification, explicitly in the contract2 domain.
+    /// It carries no public request origin or key; request-owned manual sweeps
+    /// use execute_sweep_with_origin_work instead of this coalescing queue.
     ///
     /// Non-blocking -- the sweep runs asynchronously in the background task.
     /// If a sweep is already in progress, the trigger is consumed and a
     /// new sweep starts immediately after the current one finishes.
     pub fn trigger(&self) {
+        let mut pending = self
+            .pending_trigger
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if *self.shutdown_tx.borrow() {
+            return;
+        }
+        if pending.is_none() {
+            match accept_work(&self.storage, None) {
+                Ok(work) => *pending = Some(work),
+                Err(error) => {
+                    tracing::warn!(%error,"decay trigger admission rejected");
+                    return;
+                }
+            }
+        }
         self.trigger_notify.notify_one();
     }
 
@@ -453,6 +642,11 @@ impl DecaySweepRunner {
     fn log_result(result: &SweepResult) {
         info!(
             scanned = result.memories_scanned,
+            stale_skipped = result.stale_skipped,
+            unchanged_skipped = result.unchanged_skipped,
+            exempt_skipped = result.exempt_skipped,
+            missing_summary_skipped = result.missing_summary_skipped,
+            publication_error = ?result.publication_error,
             permastore_skipped = result.permastore_skipped,
             decay_disabled_skipped = result.decay_disabled_skipped,
             full_to_summary = result.full_to_summary,
@@ -488,29 +682,6 @@ impl DecaySweepRunner {
     ///    in the same sweep.
     /// 2. The cheapest operations (phase 3 records are smallest) run first.
     #[instrument(skip_all)]
-    pub(crate) async fn execute_sweep(
-        config: &SweepConfig,
-        decay_config: &DecayConfig,
-        activation_config: &ActivationConfig,
-        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
-        graph: &SharedGraph,
-        cache: &Arc<CacheManager>,
-        global_decay_multiplier: f64,
-    ) -> SweepResult {
-        Self::execute_sweep_at(
-            config,
-            decay_config,
-            activation_config,
-            storage,
-            graph,
-            cache,
-            global_decay_multiplier,
-            None,
-        )
-        .await
-    }
-
-    #[instrument(skip_all)]
     pub(crate) async fn execute_sweep_at(
         config: &SweepConfig,
         decay_config: &DecayConfig,
@@ -521,8 +692,156 @@ impl DecaySweepRunner {
         global_decay_multiplier: f64,
         as_of_millis: Option<i64>,
     ) -> SweepResult {
+        Self::execute_sweep_with_work(
+            config,
+            decay_config,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            global_decay_multiplier,
+            as_of_millis,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_sweep_with_work(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        parent: Option<&WorkTicket>,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+    ) -> SweepResult {
+        // Rust compatibility/manual entry is application1.
+        Self::execute_sweep_with_origin_work(
+            config,
+            decay_config,
+            activation_config,
+            storage,
+            graph,
+            cache,
+            global_decay_multiplier,
+            as_of_millis,
+            parent,
+            completion,
+            1,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_sweep_with_origin_work(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        parent: Option<&WorkTicket>,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+        original_contract_version: u32,
+    ) -> SweepResult {
+        if !matches!(original_contract_version, 1 | 2) {
+            return SweepResult {
+                publication_error: Some("unsupported original application contract".into()),
+                ..Default::default()
+            };
+        }
+        let work = match accept_work(storage, parent) {
+            Ok(work) => work,
+            Err(error) => {
+                return SweepResult {
+                    publication_error: Some(error.to_string()),
+                    ..Default::default()
+                };
+            }
+        };
+        let native = storage
+            .read()
+            .map(|s| s.meta_store().uses_native_lifecycle())
+            .map_err(|e| e.to_string());
+        let mut result = match native {
+            Ok(true) => {
+                Self::execute_native_sweep_accepted(
+                    config,
+                    decay_config,
+                    storage,
+                    global_decay_multiplier,
+                    as_of_millis,
+                    &work,
+                    completion,
+                    original_contract_version,
+                )
+                .await
+            }
+            Ok(false) => {
+                Self::execute_sweep_accepted(
+                    config,
+                    decay_config,
+                    activation_config,
+                    storage,
+                    graph,
+                    cache,
+                    global_decay_multiplier,
+                    as_of_millis,
+                    &work,
+                    completion,
+                    original_contract_version,
+                )
+                .await
+            }
+            Err(error) => SweepResult {
+                publication_error: Some(error.to_string()),
+                ..Default::default()
+            },
+        };
+        // Keep the original canonical failure identity; completion may only add
+        // publication evidence, never replace a failed receipt or unknown ID.
+        if let Some(completion) = completion {
+            if let Err(error) = completion.complete_with_work(Some(&work)).await {
+                result.retain_publication_failure(&error);
+            }
+        } else if storage
+            .read()
+            .map_or(true, |s| s.meta_store().needs_effects_rebuild())
+        {
+            result.publication_error =
+                Some("derived completion handles missing; reopen required".into());
+        }
+        // A known returned failure is not cancellation: durable effects still
+        // block capture and can be retried by completion on this owner. Do not
+        // strand an abandoned ticket for recoverable outbox work. Unknown
+        // commits and unavailable handles retain unresolved work instead.
+        if result.uncertain_operation.is_none() {
+            finish_work(storage, work);
+        }
+        result
+    }
+
+    pub(crate) async fn execute_sweep_accepted(
+        config: &SweepConfig,
+        decay_config: &DecayConfig,
+        activation_config: &ActivationConfig,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        cache: &Arc<CacheManager>,
+        global_decay_multiplier: f64,
+        as_of_millis: Option<i64>,
+        work: &WorkTicket,
+        completion: Option<&crate::derived_completion::DerivedCompletion>,
+        original_contract_version: u32,
+    ) -> SweepResult {
         let start = Instant::now();
-        let now_millis = as_of_millis.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        let now_millis = as_of_millis
+            .unwrap_or_else(|| crate::time::Clock::now_millis(&crate::time::SystemClock));
         let engine = FsrsEngine::new(decay_config);
         let mut result = SweepResult::default();
 
@@ -538,6 +857,8 @@ impl DecaySweepRunner {
             now_millis,
             global_decay_multiplier,
             &mut result,
+            work,
+            original_contract_version,
         )
         .await;
 
@@ -553,6 +874,8 @@ impl DecaySweepRunner {
             now_millis,
             global_decay_multiplier,
             &mut result,
+            work,
+            original_contract_version,
         )
         .await;
 
@@ -568,6 +891,8 @@ impl DecaySweepRunner {
             now_millis,
             global_decay_multiplier,
             &mut result,
+            work,
+            original_contract_version,
         )
         .await;
 
@@ -579,26 +904,35 @@ impl DecaySweepRunner {
         // If neither occurred, there is no new fragmentation to compact
         // and we skip the expensive write-lock + I/O entirely.
         if result.deletions > 0 || result.full_to_summary > 0 {
-            let storage_clone = Arc::clone(storage);
-            let compaction_result = tokio::task::spawn_blocking(move || {
-                let mut storage_w = storage_clone.write().unwrap_or_else(|e| {
-                    error!("storage lock poisoned during compaction check: {e}");
-                    e.into_inner()
-                });
-                storage_w.compact_text_log()
-            })
-            .await;
+            let compaction_result = if let Some(completion) = completion {
+                completion.compact_text_with_work(Some(work)).await
+            } else {
+                let storage_clone = Arc::clone(storage);
+                let worker = work.child().expect("live sweep ticket");
+                tokio::task::spawn_blocking(move || {
+                    let outcome = storage_clone
+                        .write()
+                        .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+                        .compact_text_log_with_work(Some(&worker));
+                    finish_work(&storage_clone, worker);
+                    outcome
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    Err(crate::storage::StorageError::RecoveryRequired(format!(
+                        "compaction worker outcome unknown: {e}"
+                    )))
+                })
+            };
             match compaction_result {
-                Ok(Ok(cr)) => {
-                    if cr.entries_removed > 0 {
-                        result.compaction_triggered = true;
-                    }
-                }
-                Ok(Err(e)) => {
-                    error!(error = %e, "fulltext.dat compaction failed");
+                Ok(result_compaction) => {
+                    result.compaction_triggered = true;
+                    result.compaction_receipt = Some(result_compaction.receipt);
+                    result.compaction_cleanup_pending = result_compaction.cleanup_pending;
                 }
                 Err(e) => {
-                    error!(error = %e, "compaction task panicked");
+                    result.retain_publication_failure(&e);
+                    error!(error = %e, "fulltext.dat compaction failed");
                 }
             }
         }
@@ -606,19 +940,28 @@ impl DecaySweepRunner {
         // -- Persist updated phase bitmaps ------------------------
         {
             let storage_clone = Arc::clone(storage);
+            let worker = work.child().expect("live sweep ticket");
             let persist_result = tokio::task::spawn_blocking(move || {
-                let storage_r = storage_clone.read().unwrap_or_else(|e| {
-                    error!("storage lock poisoned during phase index persist: {e}");
-                    e.into_inner()
-                });
-                storage_r.persist_phase_index()
+                let outcome = (|| {
+                    let storage_r = storage_clone.read().unwrap_or_else(|e| {
+                        error!("storage lock poisoned during phase index persist: {e}");
+                        e.into_inner()
+                    });
+                    storage_r
+                        .meta_store()
+                        .persist_phase_index_with_work(Some(&worker))
+                })();
+                finish_work(&storage_clone, worker);
+                outcome
             })
             .await;
             match persist_result {
                 Ok(Err(e)) => {
+                    result.retain_publication_failure(&e);
                     error!(error = %e, "failed to persist phase bitmap index");
                 }
                 Err(e) => {
+                    result.publication_error = Some(e.to_string());
                     error!(error = %e, "phase index persist task panicked");
                 }
                 _ => {}
@@ -652,6 +995,8 @@ impl DecaySweepRunner {
         now_millis: i64,
         global_decay_multiplier: f64,
         result: &mut SweepResult,
+        work: &WorkTicket,
+        original_contract_version: u32,
     ) {
         // Get all memory IDs in this phase from the PhaseIndex.
         let memory_ids = Self::load_phase_ids(phase, storage).await;
@@ -708,8 +1053,9 @@ impl DecaySweepRunner {
                 let meta = match meta_batch.get(memory_id) {
                     Some(m) => m.clone(),
                     None => {
-                        // Memory was deleted between bitmap load and now,
-                        // or had a load error (already recorded above).
+                        // Memory was deleted or forgotten between bitmap
+                        // load and now, or had a load error (already
+                        // recorded above).
                         debug!(id = %memory_id, "memory not found in batch, skipping");
                         continue;
                     }
@@ -730,21 +1076,40 @@ impl DecaySweepRunner {
                 )
                 .await;
 
-                // Flush write batch if full.
-                if pending_transitions.len() >= config.write_batch_size {
-                    Self::flush_transitions(&pending_transitions, storage, graph, cache, result)
-                        .await;
-                    pending_transitions.clear();
-                }
-
-                // Update strength and decay_strength in storage and sync
-                // graph state. Skip if the record was not evaluated
-                // (permastore/decay-disabled).
-                if let Some((raw_r, eff_r)) = retrievability {
-                    Self::update_record_state(
-                        *memory_id, phase, raw_r, eff_r, &meta, storage, graph, result,
+                // A planned transition commits strength with phase/content.
+                // Otherwise materialize strength and sync graph state, unless
+                // evaluation skipped this permastore/decay-disabled record.
+                let has_transition = pending_transitions
+                    .last()
+                    .is_some_and(|t| t.memory_id == *memory_id);
+                if let Some(evaluation) = retrievability.filter(|_| !has_transition) {
+                    Self::update_record_state_with_work(
+                        *memory_id,
+                        phase,
+                        &evaluation,
+                        &meta,
+                        storage,
+                        graph,
+                        result,
+                        Some(work),
+                        original_contract_version,
                     )
                     .await;
+                }
+
+                // Flush write batch if full.
+                if pending_transitions.len() >= config.write_batch_size {
+                    Self::flush_transitions(
+                        &pending_transitions,
+                        storage,
+                        graph,
+                        cache,
+                        result,
+                        work,
+                        original_contract_version,
+                    )
+                    .await;
+                    pending_transitions.clear();
                 }
 
                 let _ = i; // suppress unused warning
@@ -753,7 +1118,16 @@ impl DecaySweepRunner {
 
         // Flush remaining transitions.
         if !pending_transitions.is_empty() {
-            Self::flush_transitions(&pending_transitions, storage, graph, cache, result).await;
+            Self::flush_transitions(
+                &pending_transitions,
+                storage,
+                graph,
+                cache,
+                result,
+                work,
+                original_contract_version,
+            )
+            .await;
         }
     }
 
@@ -812,20 +1186,27 @@ impl DecaySweepRunner {
     /// happens under the caller's already-acquired storage lock, so the
     /// lock is held once per batch rather than once per record.
     ///
-    /// Missing records (deleted between bitmap load and now) are silently
-    /// omitted. Errors are collected in the returned vector.
+    /// Missing and tombstoned records (deleted or forgotten between
+    /// bitmap load and now) are silently omitted. Errors are collected
+    /// in the returned vector.
     fn load_metadata_batch(
         storage: &RedbStorageEngine,
         ids: &[MemoryId],
     ) -> (HashMap<MemoryId, DecayMetadata>, Vec<(MemoryId, String)>) {
         // Pre-load namespace configs to avoid repeated lookups.
         // There are typically very few namespaces (< 10).
-        let ns_cache: HashMap<u32, Option<f32>> = storage
-            .list_namespaces()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|ns| (ns.id.get(), ns.decay_rate_multiplier))
-            .collect();
+        let namespaces = match storage.list_namespaces() {
+            Ok(namespaces) => namespaces,
+            Err(e) => {
+                return (
+                    HashMap::new(),
+                    ids.iter()
+                        .map(|&id| (id, format!("failed to load namespace policy: {e}")))
+                        .collect(),
+                );
+            }
+        };
+        let ns_cache: HashMap<_, _> = namespaces.into_iter().map(|ns| (ns.id.get(), ns)).collect();
 
         let mut results = HashMap::with_capacity(ids.len());
         let mut errors = Vec::new();
@@ -833,16 +1214,29 @@ impl DecaySweepRunner {
         for &id in ids {
             match storage.get_record(id) {
                 Ok(Some(record)) => {
-                    let decay_rate_multiplier =
-                        ns_cache.get(&record.namespace_id).copied().flatten();
+                    // Forgotten between bitmap load and now -- skip.
+                    // `forget_memory` keeps the row, so unlike a deleted
+                    // record this one is still here to load, and the
+                    // sweep would evaluate it against the phase it was
+                    // in when the snapshot was taken.
+                    if record.phase == DecayPhase::Tombstone {
+                        continue;
+                    }
+
+                    let Some(namespace) = ns_cache.get(&record.namespace_id).cloned() else {
+                        errors.push((id, "namespace policy not found".to_string()));
+                        continue;
+                    };
 
                     results.insert(
                         id,
                         DecayMetadata {
+                            phase: record.phase,
+                            created_at: record.created_at,
                             stability: record.stability,
                             last_accessed_at: record.last_accessed_at,
                             is_permastore: record.is_permastore != 0,
-                            decay_rate_multiplier,
+                            namespace,
                             has_summary: !record.summary.is_empty(),
                         },
                     );
@@ -865,7 +1259,7 @@ impl DecaySweepRunner {
     /// retrievability, and pushes a `PendingTransition` if the
     /// effective R falls below the phase threshold.
     ///
-    /// Returns `Some((raw_r, effective_r))` if the record was evaluated
+    /// Returns frozen clock/policy inputs and the scan-time projection if evaluated
     /// (not skipped), or `None` if the record was skipped (permastore
     /// or decay disabled).
     #[allow(clippy::too_many_arguments)]
@@ -880,19 +1274,42 @@ impl DecaySweepRunner {
         global_decay_multiplier: f64,
         pending_transitions: &mut Vec<PendingTransition>,
         result: &mut SweepResult,
-    ) -> Option<(f32, f32)> {
+    ) -> Option<SweepEvaluation> {
+        if meta.phase != phase {
+            return None;
+        }
+
         // -- Permastore exemption ---------------------------------
         if meta.is_permastore {
             result.permastore_skipped += 1;
             return None;
         }
 
-        // -- Get effective decay rate multiplier -------------------
-        // Namespace override > global default
-        let multiplier = meta
-            .decay_rate_multiplier
-            .map(|m| m as f64)
-            .unwrap_or(global_decay_multiplier);
+        let policy = match super::lifecycle::resolve_policy(
+            &meta.namespace,
+            engine.config,
+            global_decay_multiplier,
+        ) {
+            Ok(policy) => policy,
+            Err(e) => {
+                result.errors.push(SweepRecordError {
+                    memory_id,
+                    phase,
+                    error: e.to_string(),
+                });
+                return None;
+            }
+        };
+        if !meta.stability.is_finite() || meta.stability <= 0.0 {
+            result.errors.push(SweepRecordError {
+                memory_id,
+                phase,
+                error: "invalid record stability".to_string(),
+            });
+            return None;
+        }
+        let engine = FsrsEngine::new(&policy.config);
+        let multiplier = policy.decay_rate_multiplier;
 
         // -- Decay disabled check ---------------------------------
         if multiplier == 0.0 {
@@ -900,15 +1317,27 @@ impl DecaySweepRunner {
             return None;
         }
 
-        // -- Calculate raw retrievability -------------------------
-        let elapsed_millis = (now_millis - meta.last_accessed_at).max(0) as f64;
-        let elapsed_days = (elapsed_millis / 86_400_000.0) as f32;
-        let raw_r = engine.retrievability(elapsed_days, meta.stability, multiplier as f32);
-
-        // -- Calculate connection bonus ---------------------------
         let connection_bonus =
             Self::calculate_connection_bonus(memory_id, graph, activation_config).await;
-        let effective_r = engine.effective_retrievability(raw_r, connection_bonus);
+        let projection = match super::lifecycle::project(
+            meta.stability,
+            meta.last_accessed_at,
+            &policy,
+            now_millis,
+            connection_bonus,
+        ) {
+            Ok(projection) => projection,
+            Err(e) => {
+                result.errors.push(SweepRecordError {
+                    memory_id,
+                    phase,
+                    error: e.to_string(),
+                });
+                return None;
+            }
+        };
+        let raw_r = projection.strength;
+        let effective_r = projection.decay_strength;
 
         // -- Determine transition ---------------------------------
         let threshold = match phase {
@@ -920,15 +1349,24 @@ impl DecaySweepRunner {
             DecayPhase::Tombstone => return None,
         };
 
-        if effective_r <= threshold {
+        let evaluation = SweepEvaluation {
+            projection,
+            policy,
+            activation: activation_config.clone(),
+        };
+
+        if effective_r <= threshold && phase == DecayPhase::Full && !meta.has_summary {
+            result.errors.push(SweepRecordError {
+                memory_id,
+                phase,
+                error: "missing_summary: retaining full text".to_string(),
+            });
+        } else if effective_r <= threshold {
             pending_transitions.push(PendingTransition {
                 memory_id,
                 from_phase: phase,
-                raw_r,
-                effective_r,
-                stability: meta.stability,
-                is_permastore: meta.is_permastore,
-                has_summary: meta.has_summary,
+                evaluation: evaluation.clone(),
+                expected: meta.clone(),
             });
         } else if raw_r <= threshold && effective_r > threshold {
             // Raw R crossed the threshold, but connection bonus
@@ -936,71 +1374,126 @@ impl DecaySweepRunner {
             result.saved_by_connection_bonus += 1;
         }
 
-        Some((raw_r, effective_r))
+        Some(evaluation)
     }
 
-    /// Update a record's strength and decay_strength in storage and
-    /// sync the graph node state after evaluation.
-    ///
-    /// `raw_r` is the FSRS retrievability without connection bonus
-    /// (written to `record.strength`).
-    /// `effective_r` is the retrievability with connection bonus
-    /// (written to `record.decay_strength` and synced to graph).
+    /// Reproject strength from the current locked graph using the original
+    /// sampled clock and policy, then update metadata and graph together.
     async fn update_record_state(
         memory_id: MemoryId,
         phase: DecayPhase,
-        raw_r: f32,
-        effective_r: f32,
+        evaluation: &SweepEvaluation,
         meta: &DecayMetadata,
         storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
         graph: &SharedGraph,
         result: &mut SweepResult,
     ) {
-        // Update strength and decay_strength in metadata regardless of transition.
-        {
-            let storage_clone = Arc::clone(storage);
-            let stability = meta.stability;
-            let is_permastore = meta.is_permastore;
-            let update_result = tokio::task::spawn_blocking(move || {
-                let storage_r = storage_clone.read().unwrap_or_else(|e| {
-                    error!("storage lock poisoned: {e}");
-                    e.into_inner()
-                });
-                storage_r.update_decay_state(
-                    memory_id,
-                    phase,
-                    raw_r,
-                    effective_r,
-                    stability,
-                    is_permastore,
-                )
-            })
-            .await;
-            match update_result {
-                Ok(Err(e)) => {
-                    result.errors.push(SweepRecordError {
-                        memory_id,
-                        phase,
-                        error: format!("failed to update decay state: {e}"),
-                    });
-                }
-                Err(e) => {
-                    result.errors.push(SweepRecordError {
-                        memory_id,
-                        phase,
-                        error: format!("update decay state task panicked: {e}"),
-                    });
-                }
-                _ => {}
-            }
-        }
+        Self::update_record_state_with_work(
+            memory_id, phase, evaluation, meta, storage, graph, result, None, 1,
+        )
+        .await
+    }
 
-        // Sync graph node state so next phase's connection bonus
-        // calculations use current values.
-        {
-            let mut graph_w = graph.write().await;
-            let _ = graph_w.update_node_state(memory_id, phase, effective_r);
+    async fn update_record_state_with_work(
+        memory_id: MemoryId,
+        phase: DecayPhase,
+        evaluation: &SweepEvaluation,
+        meta: &DecayMetadata,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        result: &mut SweepResult,
+        parent: Option<&WorkTicket>,
+        original_contract_version: u32,
+    ) {
+        let work = match accept_work(storage, parent) {
+            Ok(work) => work,
+            Err(error) => {
+                result.publication_error = Some(error.to_string());
+                return;
+            }
+        };
+        let worker = work.child().expect("live sweep ticket");
+        let root_storage = Arc::clone(storage);
+
+        let storage = Arc::clone(storage);
+        let expected = meta.clone();
+        let evaluation = evaluation.clone();
+        // Always graph -> storage: never await a graph lock holding a storage lock.
+        let mut graph = Arc::clone(graph).write_owned().await;
+        let outcome = tokio::task::spawn_blocking(move || {
+            let outcome = (|| {
+                let storage = storage
+                    .write()
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                let current = storage
+                    .get_record(memory_id)
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                if !current.as_ref().is_some_and(|r| expected.matches(r)) {
+                    return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
+                }
+                let current = current.expect("snapshot match requires a record");
+                let Some(projection) = evaluation
+                    .project_locked(memory_id, &expected, &storage, &graph)
+                    .map_err(|e| SweepError::Storage(e.to_string()))?
+                else {
+                    return Ok(DecayMutationResult::Skipped(DecaySkip::Stale));
+                };
+                let raw_r = projection.strength;
+                let effective_r = projection.decay_strength;
+                let outcome = storage
+                    .apply_legacy_decay_with_work(
+                        &crate::storage::control::MutationContext {
+                            contract_version: original_contract_version,
+                            ..crate::storage::control::MutationContext::unkeyed(
+                                expected.namespace.id,
+                            )
+                        },
+                        memory_id,
+                        &current,
+                        &expected.namespace,
+                        phase,
+                        raw_r,
+                        effective_r,
+                        Some(&worker),
+                    )
+                    .map_err(SweepError::Mutation)?;
+                if matches!(
+                    outcome,
+                    DecayMutationResult::Skipped(DecaySkip::Stale | DecaySkip::Exempt)
+                ) {
+                    return Ok(outcome);
+                }
+                let _ = graph.update_node_state(memory_id, phase, effective_r);
+                Ok::<_, SweepError>(outcome)
+            })();
+            finish_work(&storage, worker);
+            outcome
+        })
+        .await;
+        let error = match outcome {
+            Ok(Ok(DecayMutationResult::Committed(_))) => None,
+            Ok(Ok(DecayMutationResult::Skipped(reason))) => {
+                match reason {
+                    DecaySkip::Stale => result.stale_skipped += 1,
+                    DecaySkip::Unchanged => result.unchanged_skipped += 1,
+                    DecaySkip::Exempt => result.exempt_skipped += 1,
+                }
+                None
+            }
+            Ok(Err(e)) => {
+                result.retain_mutation_failure(&e);
+                Some(e.to_string())
+            }
+            Err(e) => Some(e.to_string()),
+        };
+        if let Some(error) = error {
+            result.errors.push(SweepRecordError {
+                memory_id,
+                phase,
+                error,
+            });
         }
+        finish_work(&root_storage, work);
     }
 
     /// Calculate the connection bonus for a memory based on spreading
@@ -1030,42 +1523,26 @@ impl DecaySweepRunner {
         graph: &SharedGraph,
         cache: &Arc<CacheManager>,
         result: &mut SweepResult,
+        work: &WorkTicket,
+        original_contract_version: u32,
     ) {
         for t in transitions {
-            let outcome = match t.from_phase {
-                DecayPhase::Full => {
-                    Self::transition_full_to_summary(
-                        t.memory_id,
-                        t.raw_r,
-                        t.effective_r,
-                        t.stability,
-                        t.is_permastore,
-                        t.has_summary,
-                        storage,
-                    )
-                    .await
-                }
-                DecayPhase::Summary => {
-                    Self::transition_summary_to_ghost(
-                        t.memory_id,
-                        t.raw_r,
-                        t.effective_r,
-                        t.stability,
-                        t.is_permastore,
-                        storage,
-                    )
-                    .await
-                }
-                DecayPhase::Ghost => {
-                    Self::transition_ghost_to_deleted(t.memory_id, t.effective_r, storage, graph)
-                        .await
-                }
-                // Tombstone is a terminal phase; no transitions from it.
-                DecayPhase::Tombstone => continue,
-            };
-
+            let outcome = Self::apply_transition_with_work(
+                t.clone(),
+                storage,
+                graph,
+                Some(work),
+                original_contract_version,
+            )
+            .await;
+            // Even a partial storage failure may have changed the canonical phase.
+            cache.invalidate(t.memory_id).await;
             match outcome {
-                Ok(transition) => {
+                Ok(None) => {
+                    result.stale_skipped += 1;
+                    continue;
+                } // Final plan no longer applies.
+                Ok(Some(transition)) => {
                     // Update stats
                     match t.from_phase {
                         DecayPhase::Full => result.full_to_summary += 1,
@@ -1074,12 +1551,10 @@ impl DecaySweepRunner {
                         DecayPhase::Tombstone => {} // unreachable, handled above
                     }
 
-                    // Invalidate cache entry
-                    cache.invalidate(t.memory_id).await;
-
                     result.transitions.push(transition);
                 }
                 Err(e) => {
+                    result.retain_mutation_failure(&e);
                     result.errors.push(SweepRecordError {
                         memory_id: t.memory_id,
                         phase: t.from_phase,
@@ -1094,259 +1569,1122 @@ impl DecaySweepRunner {
 // ── Transition Methods ──────────────────────────────────────────────
 
 impl DecaySweepRunner {
-    /// Phase 1 -> Phase 2: Full -> Summary.
-    ///
-    /// 1. Verify summary exists (it should -- summaries are created at
-    ///    memory creation time). If missing, log a warning; the memory
-    ///    transitions anyway but will have no summary text.
-    /// 2. Delete full_text from fulltext.dat (zero the pointer in meta.db,
-    ///    mark the space as dead -- no physical deletion until compaction).
-    /// 3. Update decay_phase = Summary in meta.db.
-    /// 4. Update PhaseIndex bitmap (clear Full bit, set Summary bit).
-    ///
-    /// `stability`, `is_permastore`, and `has_summary` are carried from
-    /// the scan-time metadata snapshot so we avoid re-reading the record.
-    async fn transition_full_to_summary(
-        memory_id: MemoryId,
-        raw_r: f32,
-        effective_r: f32,
-        stability: f32,
-        is_permastore: bool,
-        has_summary: bool,
-        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
-    ) -> Result<PhaseTransition, SweepError> {
-        if !has_summary {
-            warn!(
-                id = %memory_id,
-                "memory has no summary at Full->Summary transition; \
-                 proceeding anyway -- summary was expected at creation time"
-            );
-        }
-
-        let storage_clone = Arc::clone(storage);
-        tokio::task::spawn_blocking(move || {
-            let storage_r = storage_clone
-                .read()
-                .map_err(|e| SweepError::Storage(format!("storage lock poisoned: {e}")))?;
-
-            // Update decay state: phase -> Summary, with raw and effective R.
-            storage_r
-                .update_decay_state(
-                    memory_id,
-                    DecayPhase::Summary,
-                    raw_r,
-                    effective_r,
-                    stability,
-                    is_permastore,
-                )
-                .map_err(|e| SweepError::Storage(e.to_string()))?;
-
-            // Zero the full_text pointer so the text data becomes dead
-            // space reclaimable by compaction.
-            storage_r
-                .strip_full_text(memory_id)
-                .map_err(|e| SweepError::Storage(e.to_string()))
-        })
-        .await
-        .map_err(|e| SweepError::Storage(format!("transition task panicked: {e}")))??;
-
-        Ok(PhaseTransition::Summarized {
-            id: memory_id,
-            old_phase: DecayPhase::Full,
-            new_phase: DecayPhase::Summary,
-            retrievability: effective_r,
-        })
-    }
-
-    /// Phase 2 -> Phase 3: Summary -> Ghost.
-    ///
-    /// 1. Delete summary text from the record.
-    /// 2. Update decay_phase = Ghost in meta.db.
-    /// 3. Update PhaseIndex bitmap.
-    ///
-    /// After this, only the embedding and relationship edges remain.
-    ///
-    /// `stability` and `is_permastore` are carried from the scan-time
-    /// metadata snapshot so we avoid re-reading the record.
-    async fn transition_summary_to_ghost(
-        memory_id: MemoryId,
-        raw_r: f32,
-        effective_r: f32,
-        stability: f32,
-        is_permastore: bool,
-        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
-    ) -> Result<PhaseTransition, SweepError> {
-        let storage_clone = Arc::clone(storage);
-        tokio::task::spawn_blocking(move || {
-            let storage_r = storage_clone
-                .read()
-                .map_err(|e| SweepError::Storage(format!("storage lock poisoned: {e}")))?;
-
-            // Update decay state: phase -> Ghost, with raw and effective R.
-            storage_r
-                .update_decay_state(
-                    memory_id,
-                    DecayPhase::Ghost,
-                    raw_r,
-                    effective_r,
-                    stability,
-                    is_permastore,
-                )
-                .map_err(|e| SweepError::Storage(e.to_string()))?;
-
-            // Clear the summary field -- Ghost phase retains only
-            // the embedding and relationship edges.
-            storage_r
-                .strip_summary(memory_id)
-                .map_err(|e| SweepError::Storage(e.to_string()))
-        })
-        .await
-        .map_err(|e| SweepError::Storage(format!("transition task panicked: {e}")))??;
-
-        Ok(PhaseTransition::Ghosted {
-            id: memory_id,
-            old_phase: DecayPhase::Summary,
-            new_phase: DecayPhase::Ghost,
-            retrievability: effective_r,
-        })
-    }
-
-    /// Phase 3 -> Deleted: Ghost -> complete removal.
-    ///
-    /// Removes the memory from all storage in a specific order:
-    /// 1. Zero out embedding slot in vectors.dat (add to free list).
-    /// 2. Remove edges via graph's bridging-aware deletion.
-    /// 3. Remove from all secondary indexes (tags, namespace, PhaseIndex).
-    /// 4. Remove metadata record from meta.db.
-    ///
-    /// The order matters: edges and indexes are cleaned up BEFORE the
-    /// metadata record is removed, so that any concurrent query that
-    /// finds the metadata can still resolve edges. If the metadata were
-    /// removed first, a concurrent edge scan could find dangling references.
-    async fn transition_ghost_to_deleted(
-        memory_id: MemoryId,
-        effective_r: f32,
+    async fn apply_transition(
+        t: PendingTransition,
         storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
         graph: &SharedGraph,
-    ) -> Result<PhaseTransition, SweepError> {
-        // 1. Remove all edges via the graph's bridging-aware deletion.
-        //    Acquires a WRITE lock on the graph. If a bridge edge is
-        //    created, resolve its NodeKey endpoints to MemoryIds while
-        //    the lock is held (NodeKeys are not valid after release).
-        let bridge_to_persist: Option<crate::storage::edges::PersistedEdge>;
-        {
-            let mut graph_w = graph.write().await;
-            let removal_result = graph_w.remove_memory_with_bridging(memory_id);
-            debug!(
-                id = %memory_id,
-                edges_removed = removal_result.removed_edges.len(),
-                bridge_created = removal_result.bridge_created.is_some(),
-                "removed edges with bridging"
-            );
+    ) -> Result<Option<PhaseTransition>, SweepError> {
+        Self::apply_transition_with_work(t, storage, graph, None, 1).await
+    }
 
-            // Resolve the bridge's NodeKey endpoints to MemoryIds
-            // while the graph lock is still held.
-            bridge_to_persist = removal_result.bridge_created.and_then(|bridge| {
-                let source_id = graph_w.get_node_by_key(bridge.source).map(|n| n.memory_id);
-                let target_id = graph_w.get_node_by_key(bridge.target).map(|n| n.memory_id);
-                match (source_id, target_id) {
-                    (Some(src), Some(tgt)) => Some(crate::storage::edges::PersistedEdge {
-                        source: src,
-                        target: tgt,
-                        edge_type: bridge.edge_type,
-                        weight: bridge.weight,
-                        auto_created: bridge.auto_created,
-                        created_at: bridge.created_at as u64,
-                    }),
-                    _ => {
-                        warn!(
-                            id = %memory_id,
-                            "bridge edge created but source/target nodes \
-                             not found in graph; skipping persistence"
-                        );
-                        None
+    async fn apply_transition_with_work(
+        t: PendingTransition,
+        storage: &Arc<std::sync::RwLock<RedbStorageEngine>>,
+        graph: &SharedGraph,
+        parent: Option<&WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Option<PhaseTransition>, SweepError> {
+        let work = accept_work(storage, parent).map_err(SweepError::Mutation)?;
+        let worker = work
+            .child()
+            .map_err(|e| SweepError::Storage(e.to_string()))?;
+        let root_storage = Arc::clone(storage);
+
+        let storage = Arc::clone(storage);
+        let mut graph = Arc::clone(graph).write_owned().await;
+        let outcome = tokio::task::spawn_blocking(move || {
+            let outcome = (|| {
+                let mut storage = storage
+                    .write()
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                let current = storage
+                    .get_record(t.memory_id)
+                    .map_err(|e| SweepError::Storage(e.to_string()))?;
+                if !current.as_ref().is_some_and(|r| t.expected.matches(r)) {
+                    return Ok(None);
+                }
+                let current = current.expect("snapshot match requires a record");
+                let Some(projection) =
+                    t.evaluation
+                        .project_locked(t.memory_id, &t.expected, &storage, &graph)?
+                else {
+                    return Ok(None);
+                };
+                let Some(threshold) = t.evaluation.threshold(t.from_phase) else {
+                    return Ok(None);
+                };
+                if projection.decay_strength > threshold {
+                    return Ok(None);
+                }
+                let map_error = SweepError::Mutation;
+                let new_phase = match t.from_phase {
+                    DecayPhase::Full => DecayPhase::Summary,
+                    DecayPhase::Summary => DecayPhase::Ghost,
+                    DecayPhase::Ghost => {
+                        let namespace = storage
+                            .get_namespace(crate::model::NamespaceId::new(current.namespace_id))
+                            .map_err(map_error)?;
+                        if namespace
+                            .as_ref()
+                            .map(serde_json::to_vec)
+                            .transpose()
+                            .map_err(|e| SweepError::Storage(e.to_string()))?
+                            != Some(
+                                serde_json::to_vec(&t.expected.namespace)
+                                    .map_err(|e| SweepError::Storage(e.to_string()))?,
+                            )
+                        {
+                            return Ok(None);
+                        }
+                        // Plan privately under the final expected-state and policy guards.
+                        let mut planned = (*graph).clone();
+                        let removal = planned.remove_memory_with_bridging(t.memory_id);
+                        let bridges = removal
+                            .bridge_created
+                            .into_iter()
+                            .map(|bridge| {
+                                let source = planned
+                                    .get_node_by_key(bridge.source)
+                                    .ok_or_else(|| {
+                                        SweepError::Storage("bridge source missing".into())
+                                    })?
+                                    .memory_id;
+                                let target = planned
+                                    .get_node_by_key(bridge.target)
+                                    .ok_or_else(|| {
+                                        SweepError::Storage("bridge target missing".into())
+                                    })?
+                                    .memory_id;
+                                Ok(crate::storage::PersistedEdge {
+                                    source,
+                                    target,
+                                    edge_type: bridge.edge_type,
+                                    weight: bridge.weight,
+                                    auto_created: bridge.auto_created,
+                                    created_at: bridge.created_at as u64,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, SweepError>>()?;
+                        let Some(_) = storage
+                            .delete_memory_with_edges_with_origin_work(
+                                t.memory_id,
+                                &bridges,
+                                Some(&worker),
+                                original_contract_version,
+                            )
+                            .map_err(map_error)?
+                        else {
+                            return Ok(None);
+                        };
+                        *graph = planned;
+                        // Derived invalidations remain pending until complete publication.
+                        return Ok(Some(PhaseTransition::Deleted {
+                            id: t.memory_id,
+                            old_phase: t.from_phase,
+                            retrievability: projection.decay_strength,
+                        }));
                     }
+                    DecayPhase::Tombstone => return Ok(None),
+                };
+                if t.from_phase == DecayPhase::Full && !t.expected.has_summary {
+                    return Err(SweepError::Storage(
+                        "missing_summary: retaining full text".into(),
+                    ));
                 }
-            });
-        } // write lock released
-
-        // 2. Remove old edge records, persist bridge, and delete
-        //    metadata via spawn_blocking.
-        {
-            let storage_clone = Arc::clone(storage);
-            tokio::task::spawn_blocking(move || {
-                // Remove edges for the deleted memory.
-                {
-                    let storage_r = storage_clone
-                        .read()
-                        .map_err(|e| SweepError::Storage(format!("storage lock poisoned: {e}")))?;
-                    storage_r
-                        .remove_all_edges(memory_id)
-                        .map_err(|e| SweepError::Storage(e.to_string()))?;
-
-                    // Persist the bridge edge if one was created.
-                    if let Some(ref bridge) = bridge_to_persist {
-                        storage_r
-                            .batch_add_edges(&[bridge.clone()])
-                            .map_err(|e| SweepError::Storage(e.to_string()))?;
-                        tracing::debug!(
-                            source = %bridge.source,
-                            target = %bridge.target,
-                            edge_type = ?bridge.edge_type,
-                            weight = bridge.weight,
-                            "persisted bridge edge to edges.db"
-                        );
+                let outcome = storage
+                    .apply_legacy_decay_with_work(
+                        &crate::storage::control::MutationContext {
+                            contract_version: original_contract_version,
+                            ..crate::storage::control::MutationContext::unkeyed(
+                                t.expected.namespace.id,
+                            )
+                        },
+                        t.memory_id,
+                        &current,
+                        &t.expected.namespace,
+                        new_phase,
+                        projection.strength,
+                        projection.decay_strength,
+                        Some(&worker),
+                    )
+                    .map_err(map_error)?;
+                if !matches!(outcome, DecayMutationResult::Committed(_)) {
+                    return Ok(None);
+                }
+                // Publish only after the atomic metadata phase/content commit.
+                let _ = graph.update_node_state(t.memory_id, new_phase, projection.decay_strength);
+                let transition = if new_phase == DecayPhase::Summary {
+                    PhaseTransition::Summarized {
+                        id: t.memory_id,
+                        old_phase: t.from_phase,
+                        new_phase,
+                        retrievability: projection.decay_strength,
                     }
-                }
-                // Delete metadata record (requires write lock).
-                //
-                // KNOWN LEAK — documented, not yet fixed.
-                //
-                // This is the system's only hard delete, and it cleans
-                // only what storage owns: the meta.db row, the vector
-                // slot and the edge rows. The four indexes that live
-                // outside storage are untouched, because
-                // `DecaySweepRunner` holds handles to none of them:
-                //
-                // - the FTS5 row survives, and survives *restart* —
-                //   system startup only rebuilds the FTS index when it
-                //   is empty, so the row is permanent;
-                // - the `FlatVectorIndex` entry survives until the
-                //   process exits;
-                // - the entity-index entry survives until restart.
-                //
-                // The damage is degraded recall, not wrong answers:
-                // search hydrates its candidates from meta.db, and an id
-                // with no record hydrates to nothing and is dropped. So
-                // an orphan row spends a top-k slot and returns no
-                // result.
-                //
-                // Fixing it means threading vector_index, fts_index and
-                // entity_index through `DecaySweepRunner::new`, the
-                // `start()` clone block, `execute_sweep` and into this
-                // path — a change to code that runs unattended on a
-                // background timer, which wants its own review rather
-                // than a ride along with a delete-path change.
-                // `FtsIndex::remove_namespace` is the manual remedy in
-                // the meantime.
-                {
-                    let mut storage_w = storage_clone
-                        .write()
-                        .map_err(|e| SweepError::Storage(format!("storage lock poisoned: {e}")))?;
-                    storage_w
-                        .delete_memory(memory_id)
-                        .map_err(|e| SweepError::Storage(e.to_string()))?;
-                }
-                Ok::<_, SweepError>(())
-            })
-            .await
-            .map_err(|e| SweepError::Storage(format!("deletion task panicked: {e}")))??;
-        }
-
-        Ok(PhaseTransition::Deleted {
-            id: memory_id,
-            old_phase: DecayPhase::Ghost,
-            retrievability: effective_r,
+                } else {
+                    PhaseTransition::Ghosted {
+                        id: t.memory_id,
+                        old_phase: t.from_phase,
+                        new_phase,
+                        retrievability: projection.decay_strength,
+                    }
+                };
+                Ok(Some(transition))
+            })();
+            finish_work(&storage, worker);
+            outcome
         })
+        .await
+        .map_err(|e| SweepError::Storage(format!("transition task panicked: {e}")))?;
+        finish_work(&root_storage, work);
+        outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{DiskRecord, NamespaceConfig};
+
+    const DIM: usize = 4;
+
+    #[tokio::test]
+    async fn fixed_time_sweep_obeys_namespace_thresholds_and_preserves_content_phases() {
+        use crate::api::StorageEngine as _;
+        use crate::test_support::{Fixture, MemorySpec};
+        let f = Fixture::new();
+        let mut ns = NamespaceConfig::default_namespace(0);
+        ns.name = "threshold".into();
+        ns.embedding_dim = DIM as u32;
+        ns.phase_thresholds.full_to_summary = 0.95;
+        let namespace = f.storage.write().unwrap().create_namespace(&ns).unwrap();
+        let full = f.insert_memory_in(namespace, &[]).await;
+        let storage = crate::api::adapters::StorageEngineAdapter::new(
+            f.storage.clone(),
+            f.cache.clone(),
+            f.vector_index.clone(),
+            f.fts_index.clone(),
+            f.entity_index.clone(),
+            f.graph.clone(),
+        )
+        .with_clock(Arc::new(crate::time::ManualClock::new(0)));
+        let missing = storage
+            .create_memory(
+                namespace,
+                "initial valid summary",
+                Some("only retained text"),
+                &[],
+                &[1., 0., 0., 0.],
+                Some(1.0),
+                None,
+            )
+            .await
+            .unwrap()
+            .id;
+        // Model pre-existing content loss through the legacy storage patch;
+        // public insertion now rejects empty summaries at its own boundary.
+        f.storage.read().unwrap().strip_summary(missing).unwrap();
+        assert_eq!(f.record(missing).unwrap().created_at, 0);
+        let summary = f
+            .insert_memory_with(MemorySpec {
+                phase: DecayPhase::Summary,
+                ..MemorySpec::new(namespace)
+            })
+            .await;
+        // At day one R=0.9 for S=1: custom threshold degrades Full;
+        // the default 0.7 does not. A batch size of one covers flush ordering.
+        let config = SweepConfig {
+            write_batch_size: 1,
+            ..SweepConfig::default()
+        };
+        let decay = DecayConfig::default();
+        let activation = ActivationConfig::default();
+        let run = |now| {
+            DecaySweepRunner::execute_sweep_at(
+                &config,
+                &decay,
+                &activation,
+                &f.storage,
+                &f.graph,
+                &f.cache,
+                1.0,
+                Some(now),
+            )
+        };
+        let result = run(86_400_000).await;
+        assert_eq!(f.record(full).unwrap().phase, DecayPhase::Summary);
+        assert_eq!(f.record(summary).unwrap().phase, DecayPhase::Summary);
+        assert_eq!(f.record(missing).unwrap().phase, DecayPhase::Full);
+        assert_eq!(
+            storage.get_full_text(missing).await.unwrap().as_deref(),
+            Some("only retained text")
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.memory_id == missing && e.error.contains("missing_summary"))
+        );
+        run(i64::MAX).await;
+        assert_eq!(
+            f.record(full).unwrap().phase,
+            DecayPhase::Ghost,
+            "one destructive phase per sweep"
+        );
+        assert!(f.record(full).unwrap().summary.is_empty());
+        assert_eq!(f.record(missing).unwrap().phase, DecayPhase::Full);
+    }
+
+    #[tokio::test]
+    async fn manual_sweep_uses_injected_clock_and_zero_multiplier_skips_degradation() {
+        use crate::api::FsrsEngine as _;
+        use crate::test_support::Fixture;
+        let f = Fixture::new();
+        let clock = Arc::new(crate::time::ManualClock::new(0));
+        let adapter = crate::api::adapters::FsrsEngineAdapter::new(
+            f.storage.clone(),
+            f.cache.clone(),
+            f.graph.clone(),
+            Arc::new(crate::config::RecalldConfig::default()),
+            false,
+        )
+        .with_indexes(
+            f.vector_index.clone(),
+            f.fts_index.clone(),
+            f.entity_index.clone(),
+        )
+        .with_clock(clock.clone());
+        let full = f.insert_memory().await;
+        let mut ns = NamespaceConfig::default_namespace(0);
+        ns.name = "disabled".into();
+        ns.embedding_dim = DIM as u32;
+        ns.decay_rate_multiplier = Some(0.0);
+        let namespace = f.storage.write().unwrap().create_namespace(&ns).unwrap();
+        let disabled = f.insert_memory_in(namespace, &[]).await;
+        adapter.trigger_sweep(None).await.unwrap();
+        assert_eq!(f.record(full).unwrap().phase, DecayPhase::Full);
+        clock.advance_to(i64::MAX).unwrap();
+        adapter.trigger_sweep(None).await.unwrap();
+        assert_eq!(f.record(full).unwrap().phase, DecayPhase::Summary);
+        assert_eq!(f.record(disabled).unwrap().phase, DecayPhase::Full);
+        assert_eq!(f.record(disabled).unwrap().last_accessed_at, 0);
+    }
+
+    #[tokio::test]
+    async fn empty_successful_compaction_is_reported() {
+        let fixture = crate::test_support::Fixture::new();
+        let id = fixture
+            .insert_memory_with(crate::test_support::MemorySpec {
+                phase: DecayPhase::Ghost,
+                summary: "",
+                ..crate::test_support::MemorySpec::new(crate::model::NamespaceId::new(1))
+            })
+            .await;
+        let before = fixture
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .text_selection()
+            .unwrap()
+            .unwrap();
+
+        // No text was ever appended. Deleting the expired ghost still selects
+        // a fresh empty generation and must report that maintenance commit.
+        let result = DecaySweepRunner::execute_sweep_at(
+            &SweepConfig::default(),
+            &DecayConfig::default(),
+            &ActivationConfig::default(),
+            &fixture.storage,
+            &fixture.graph,
+            &fixture.cache,
+            1.0,
+            Some(1_000_000 * 86_400_000),
+        )
+        .await;
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.deletions, 1);
+        assert!(fixture.record(id).is_none());
+        let after = fixture
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .text_selection()
+            .unwrap()
+            .unwrap();
+        assert_ne!(before.id, after.id);
+        assert_eq!(before.sealed_length, after.sealed_length);
+        assert!(result.compaction_triggered);
+    }
+
+    /// An engine holding one live, Full-phase memory.
+    fn engine_with_one_memory() -> (tempfile::TempDir, RedbStorageEngine, MemoryId) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut engine = RedbStorageEngine::open(dir.path()).expect("open engine");
+
+        let mut config = NamespaceConfig::default_namespace(0);
+        config.name = "sweep".to_string();
+        config.embedding_dim = DIM as u32;
+        let namespace_id = engine.create_namespace(&config).expect("create namespace");
+
+        let id = MemoryId::new();
+        let mut record = DiskRecord {
+            schema: None,
+            version: DiskRecord::CURRENT_VERSION,
+            id: *id.as_bytes(),
+            namespace_id: namespace_id.get(),
+            created_at: 0,
+            last_accessed_at: 0,
+            phase: DecayPhase::Full,
+            strength: 1.0,
+            decay_strength: 1.0,
+            stability: 1.0,
+            difficulty: 5.0,
+            is_permastore: 0,
+            vector_slot: 0,
+            edge_count: 0,
+            summary: "fixture".into(),
+            tags: Vec::new(),
+            access_history: Vec::new(),
+            text_offset: 0,
+            text_length: 0,
+        };
+        engine
+            .insert_memory(id, namespace_id, &mut record, &[0.0; DIM], None)
+            .expect("insert memory");
+
+        (dir, engine, id)
+    }
+
+    /// `sweep_phase` takes its list of ids once, up front, and loads each
+    /// chunk later. A memory forgotten in between is still on that list,
+    /// and `forget_memory` keeps the row, so nothing told the sweep it
+    /// was looking at a tombstone: it evaluated the record against the
+    /// phase it was sweeping and wrote that phase back.
+    #[test]
+    fn a_memory_tombstoned_after_the_phase_snapshot_is_not_swept() {
+        let (_dir, engine, id) = engine_with_one_memory();
+        let snapshot = engine.ids_in_phase(DecayPhase::Full).expect("ids in phase");
+        assert_eq!(snapshot, vec![id]);
+
+        engine.tombstone_memory(id).expect("tombstone");
+
+        let (batch, errors) = DecaySweepRunner::load_metadata_batch(&engine, &snapshot);
+
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(
+            !batch.contains_key(&id),
+            "a tombstone was handed to the sweep as a Full-phase memory"
+        );
+    }
+}
+
+#[cfg(test)]
+mod independent_review_regressions {
+    use super::*;
+    use crate::api::FsrsEngine as _;
+    use crate::model::{AccessKind, NamespaceConfig};
+    use crate::test_support::Fixture;
+    const DAY: i64 = 86_400_000;
+
+    fn test_evaluation(meta: &DecayMetadata) -> SweepEvaluation {
+        let policy =
+            super::super::lifecycle::resolve_policy(&meta.namespace, &DecayConfig::default(), 1.0)
+                .unwrap();
+        let projection = super::super::lifecycle::project(
+            meta.stability,
+            meta.last_accessed_at,
+            &policy,
+            i64::MAX,
+            0.0,
+        )
+        .unwrap();
+        SweepEvaluation {
+            projection,
+            policy,
+            activation: ActivationConfig::default(),
+        }
+    }
+
+    fn adapter(f: &Fixture, now: i64) -> crate::api::adapters::FsrsEngineAdapter {
+        crate::api::adapters::FsrsEngineAdapter::new(
+            f.storage.clone(),
+            f.cache.clone(),
+            f.graph.clone(),
+            Arc::new(crate::config::RecalldConfig::default()),
+            false,
+        )
+        .with_indexes(
+            f.vector_index.clone(),
+            f.fts_index.clone(),
+            f.entity_index.clone(),
+        )
+        .with_clock(Arc::new(crate::time::ManualClock::new(now)))
+    }
+
+    #[tokio::test]
+    async fn review_stale_sweep_must_not_overwrite_committed_feedback() {
+        let f = Fixture::new();
+        let mut ns = NamespaceConfig::default_namespace(0);
+        ns.name = "review-feedback".into();
+        ns.embedding_dim = crate::test_support::DIM as u32;
+        ns.permastore_threshold = 2.0;
+        let namespace = f.storage.write().unwrap().create_namespace(&ns).unwrap();
+        let id = f.insert_memory_in(namespace, &[]).await;
+        let (snapshot, errors) =
+            DecaySweepRunner::load_metadata_batch(&f.storage.read().unwrap(), &[id]);
+        assert!(errors.is_empty());
+        let meta = snapshot.get(&id).unwrap();
+        let decay = DecayConfig::default();
+        let engine = FsrsEngine::new(&decay);
+        let mut transitions = Vec::new();
+        let mut result = SweepResult::default();
+        let evaluation = DecaySweepRunner::evaluate_record(
+            id,
+            DecayPhase::Full,
+            meta,
+            &engine,
+            &ActivationConfig::default(),
+            &f.graph,
+            8 * DAY,
+            1.0,
+            &mut transitions,
+            &mut result,
+        )
+        .await
+        .unwrap();
+        assert_eq!(transitions.len(), 1);
+        // Deterministically insert feedback exactly between scan/plan and apply.
+        let generation = f
+            .storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation
+            .get();
+        let feedback = adapter(&f, 8 * DAY).reinforce(id, 3, None).await.unwrap();
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get(),
+            generation + 1
+        );
+        assert!(feedback.is_permastore);
+        assert_eq!(
+            f.record(id).unwrap().access_history.last().unwrap().kind,
+            AccessKind::ManualReinforcement
+        );
+        let committed = f.record(id).unwrap();
+        DecaySweepRunner::update_record_state(
+            id,
+            DecayPhase::Full,
+            &evaluation,
+            meta,
+            &f.storage,
+            &f.graph,
+            &mut result,
+        )
+        .await;
+        let work = accept_work(&f.storage, None).unwrap();
+        DecaySweepRunner::flush_transitions(
+            &transitions,
+            &f.storage,
+            &f.graph,
+            &f.cache,
+            &mut result,
+            &work,
+            1,
+        )
+        .await;
+        finish_work(&f.storage, work);
+        let after = f.record(id).unwrap();
+        assert_eq!(
+            (after.stability, after.is_permastore, after.phase),
+            (
+                committed.stability,
+                committed.is_permastore,
+                committed.phase
+            )
+        );
+        assert!(
+            result.stale_skipped > 0,
+            "final stale recheck must be counted"
+        );
+    }
+
+    #[tokio::test]
+    async fn review_successful_sweep_must_publish_final_graph_phase() {
+        let f = Fixture::new();
+        let id = f.insert_memory().await;
+        let sweep = adapter(&f, i64::MAX);
+        for _ in 0..2 {
+            let generation = f
+                .storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get();
+            let result = sweep.trigger_sweep(None).await.unwrap();
+            assert!(result.errors.is_empty());
+            assert_eq!(
+                f.storage
+                    .read()
+                    .unwrap()
+                    .control_state()
+                    .unwrap()
+                    .committed_generation
+                    .get(),
+                generation + 1 + u64::from(result.compaction_triggered),
+                "one lifecycle commit plus any separate text-compaction commit"
+            );
+        }
+        assert_eq!(f.record(id).unwrap().phase, DecayPhase::Ghost);
+        assert_eq!(
+            f.graph.read().await.get_node(&id).unwrap().decay_phase,
+            DecayPhase::Ghost
+        );
+    }
+
+    #[tokio::test]
+    async fn atomic_sweep_strips_real_payload_references_and_retains_v1_tags_after_reopen() {
+        use crate::api::StorageEngine as _;
+        let f = Fixture::new();
+        let storage = crate::api::adapters::StorageEngineAdapter::new(
+            f.storage.clone(),
+            f.cache.clone(),
+            f.vector_index.clone(),
+            f.fts_index.clone(),
+            f.entity_index.clone(),
+            f.graph.clone(),
+        )
+        .with_clock(Arc::new(crate::time::ManualClock::new(0)));
+        let id = storage
+            .create_memory(
+                crate::model::NamespaceId::new(1),
+                "retained summary",
+                Some("retained full text"),
+                &["retained".into()],
+                &[1., 0., 0., 0.],
+                Some(1.),
+                None,
+            )
+            .await
+            .unwrap()
+            .id;
+        assert_eq!(
+            storage.get_full_text(id).await.unwrap().as_deref(),
+            Some("retained full text")
+        );
+        // Actual insertion now completes graph/index publication itself.
+        assert!(f.graph.read().await.get_node(&id).is_some());
+        let sweep = adapter(&f, i64::MAX);
+        for phase in [DecayPhase::Summary, DecayPhase::Ghost] {
+            let generation = f
+                .storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation
+                .get();
+            let result = sweep.trigger_sweep(None).await.unwrap();
+            assert!(result.errors.is_empty());
+            let record = f.record(id).unwrap();
+            assert_eq!(record.phase, phase);
+            assert_eq!((record.text_offset, record.text_length), (0, 0));
+            assert_eq!(record.summary.is_empty(), phase == DecayPhase::Ghost);
+            assert!(storage.get_full_text(id).await.unwrap().is_none());
+            assert_eq!(
+                f.storage
+                    .read()
+                    .unwrap()
+                    .control_state()
+                    .unwrap()
+                    .committed_generation
+                    .get(),
+                generation + 1 + u64::from(result.compaction_triggered)
+            );
+            assert_eq!(
+                f.graph.read().await.get_node(&id).unwrap().decay_phase,
+                phase
+            );
+        }
+        let expected = f.record(id).unwrap();
+        drop((storage, sweep));
+        let dir = f.close();
+        let reopened = crate::storage::RedbStorageEngine::open(dir.path()).unwrap();
+        assert_eq!(
+            reopened.get_record(id).unwrap().unwrap().to_bytes(),
+            expected.to_bytes()
+        );
+        assert_eq!(reopened.ids_in_phase(DecayPhase::Ghost).unwrap(), vec![id]);
+        assert_eq!(reopened.memories_with_tag("retained").unwrap(), vec![id]);
+    }
+
+    #[tokio::test]
+    async fn review_access_must_not_move_feedback_anchor_backward() {
+        let f = Fixture::new();
+        let id = f.insert_memory().await;
+        adapter(&f, 8 * DAY).reinforce(id, 3, None).await.unwrap();
+        assert_eq!(f.record(id).unwrap().last_accessed_at, 8 * DAY);
+        adapter(&f, DAY)
+            .record_access(id, AccessKind::DirectRetrieval)
+            .await
+            .unwrap();
+        assert_eq!(f.record(id).unwrap().last_accessed_at, 8 * DAY);
+    }
+    #[tokio::test]
+    async fn stale_transition_checks_each_expected_field_before_storage_or_graph_mutation() {
+        use crate::test_support::MemorySpec;
+        for phase in [DecayPhase::Full, DecayPhase::Summary, DecayPhase::Ghost] {
+            for field in ["timestamp", "stability", "phase", "permastore"] {
+                let f = Fixture::new();
+                let id = f
+                    .insert_memory_with(MemorySpec {
+                        phase,
+                        ..MemorySpec::new(crate::model::NamespaceId::new(1))
+                    })
+                    .await;
+                let (snapshot, errors) =
+                    DecaySweepRunner::load_metadata_batch(&f.storage.read().unwrap(), &[id]);
+                assert!(errors.is_empty());
+                let expected = snapshot[&id].clone();
+                {
+                    let storage = f.storage.write().unwrap();
+                    if field == "timestamp" {
+                        storage
+                            .update_access(id, DAY, AccessKind::DirectRetrieval)
+                            .unwrap();
+                    } else if field == "phase" {
+                        // Reach terminal state through the actual removal writer,
+                        // so its content and removal evidence agree.
+                        storage.tombstone_memory(id).unwrap();
+                    } else {
+                        storage
+                            .update_decay_state(
+                                id,
+                                phase,
+                                1.0,
+                                1.0,
+                                if field == "stability" { 2.0 } else { 1.0 },
+                                field == "permastore",
+                            )
+                            .unwrap();
+                    }
+                }
+                let before = f.record(id).unwrap();
+                let graph_before = f.graph.read().await.get_node(&id).unwrap().decay_phase;
+                let outcome = DecaySweepRunner::apply_transition(
+                    PendingTransition {
+                        memory_id: id,
+                        from_phase: phase,
+                        evaluation: test_evaluation(&expected),
+                        expected,
+                    },
+                    &f.storage,
+                    &f.graph,
+                )
+                .await
+                .unwrap();
+                assert!(outcome.is_none(), "{phase:?} {field}");
+                let after = f.record(id).unwrap();
+                assert_eq!(
+                    (
+                        after.phase,
+                        after.stability,
+                        after.is_permastore,
+                        after.last_accessed_at,
+                        after.summary
+                    ),
+                    (
+                        before.phase,
+                        before.stability,
+                        before.is_permastore,
+                        before.last_accessed_at,
+                        before.summary
+                    )
+                );
+                assert_eq!(
+                    f.graph.read().await.get_node(&id).unwrap().decay_phase,
+                    graph_before
+                );
+            }
+        }
+    }
+    /// Hold graph publication back while purge commits and feedback completes.
+    /// Predicates and task completion establish the interleaving; no sleeps.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn purge_releases_storage_before_graph_publication_and_stale_sweep_skips() {
+        use crate::mcp::bridge::{DeleteNamespaceInput, NamespaceRegistry as _};
+        let f = Fixture::new();
+        let namespace = f.create_namespace("lock-order");
+        let id = f.insert_memory_in(namespace, &[]).await;
+        let live = f.insert_memory().await;
+        let (snapshot, _) =
+            DecaySweepRunner::load_metadata_batch(&f.storage.read().unwrap(), &[id]);
+        let planned = PendingTransition {
+            memory_id: id,
+            from_phase: DecayPhase::Full,
+            evaluation: test_evaluation(&snapshot[&id]),
+            expected: snapshot[&id].clone(),
+        };
+        let graph_guard = f.graph.clone().write_owned().await;
+        let namespaces = f.namespace_adapter();
+        let purge = tokio::spawn(async move {
+            namespaces
+                .delete_namespace(DeleteNamespaceInput {
+                    name: "lock-order".into(),
+                    force: true,
+                })
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let committed_and_unlocked = f
+                    .storage
+                    .try_read()
+                    .is_ok_and(|storage| storage.get_namespace(namespace).unwrap().is_none());
+                if committed_and_unlocked {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("purge must release storage before awaiting graph");
+        let feedback_adapter = adapter(&f, DAY);
+        let history_before = f.record(live).unwrap().access_history.len();
+        let feedback = tokio::spawn(async move { feedback_adapter.reinforce(live, 3, None).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let committed_and_unlocked = f.storage.try_read().is_ok_and(|storage| {
+                    storage
+                        .get_record(live)
+                        .unwrap()
+                        .unwrap()
+                        .access_history
+                        .len()
+                        == history_before + 1
+                });
+                if committed_and_unlocked {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("feedback must release storage before awaiting graph publication");
+        assert!(
+            !feedback.is_finished(),
+            "ready feedback must await actual derived publication"
+        );
+        assert!(
+            !purge.is_finished(),
+            "purge publication must wait for graph"
+        );
+        let storage = f.storage.clone();
+        let graph = f.graph.clone();
+        let sweep = tokio::spawn(async move {
+            DecaySweepRunner::apply_transition(planned, &storage, &graph).await
+        });
+        drop(graph_guard);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            purge.await.unwrap().unwrap();
+            feedback.await.unwrap().unwrap();
+            assert!(sweep.await.unwrap().unwrap().is_none());
+        })
+        .await
+        .expect("graph and storage users must finish after publication is released");
+        assert!(f.record(id).is_none());
+        assert!(!f.graph.read().await.contains(&id));
+        assert_eq!(
+            f.record(live).unwrap().access_history.len(),
+            history_before + 1
+        );
+    }
+}
+
+#[cfg(test)]
+mod storage_independent_review {
+    use super::*;
+    use crate::test_support::Fixture;
+    #[tokio::test]
+    async fn review_graph_change_must_revalidate_destructive_sweep_plan() {
+        let f = Fixture::new();
+        let id = f.insert_memory().await;
+        let neighbor = f.insert_memory().await;
+        let (snapshot, errors) =
+            DecaySweepRunner::load_metadata_batch(&f.storage.read().unwrap(), &[id]);
+        assert!(errors.is_empty());
+        let meta = snapshot.get(&id).unwrap();
+        let decay = DecayConfig::default();
+        let engine = FsrsEngine::new(&decay);
+        let activation = ActivationConfig::default();
+        let mut transitions = Vec::new();
+        let mut result = SweepResult::default();
+        let evaluation = DecaySweepRunner::evaluate_record(
+            id,
+            DecayPhase::Full,
+            meta,
+            &engine,
+            &activation,
+            &f.graph,
+            9 * 86_400_000 / 2,
+            1.0,
+            &mut transitions,
+            &mut result,
+        )
+        .await
+        .unwrap();
+        let raw = evaluation.projection.strength;
+        let old_effective = evaluation.projection.decay_strength;
+        assert_eq!(
+            transitions.len(),
+            1,
+            "fixture must plan destructive phase loss"
+        );
+        // A real canonical edge and graph publication win between plan and apply.
+        {
+            let mut graph = f.graph.write().await;
+            let storage = f.storage.write().unwrap();
+            storage
+                .add_edge(
+                    id,
+                    neighbor,
+                    crate::model::EdgeType::Associative,
+                    1.,
+                    false,
+                    1,
+                )
+                .unwrap();
+            storage.update_edge_count(id, 1).unwrap();
+            graph
+                .add_edge(id, neighbor, crate::model::EdgeType::Associative, 1., false)
+                .unwrap();
+        }
+        let bonus = DecaySweepRunner::calculate_connection_bonus(id, &f.graph, &activation).await;
+        let new_effective = engine.effective_retrievability(raw, bonus);
+        eprintln!(
+            "old={old_effective}, new={new_effective}, threshold={}",
+            meta.namespace.phase_thresholds.full_to_summary
+        );
+        assert!(new_effective > meta.namespace.phase_thresholds.full_to_summary);
+        let outcome =
+            DecaySweepRunner::apply_transition(transitions.remove(0), &f.storage, &f.graph)
+                .await
+                .unwrap();
+        assert!(
+            outcome.is_none(),
+            "stale graph-derived plan destroyed content despite a saving committed edge"
+        );
+        assert_eq!(f.record(id).unwrap().phase, DecayPhase::Full);
+    }
+    async fn publish_edge(f: &Fixture, id: MemoryId, neighbor: MemoryId) {
+        let mut graph = f.graph.write().await;
+        let storage = f.storage.write().unwrap();
+        // A retained ghost may gain a live child; new associative ghost links are forbidden.
+        let kind = if storage.get_record(id).unwrap().unwrap().phase == DecayPhase::Ghost {
+            crate::model::EdgeType::ParentChild
+        } else {
+            crate::model::EdgeType::Associative
+        };
+        storage.add_edge(id, neighbor, kind, 1., false, 1).unwrap();
+        storage.update_edge_count(id, 1).unwrap();
+        graph.add_edge(id, neighbor, kind, 1., false).unwrap();
+    }
+
+    async fn publish_neighbor_strength(f: &Fixture, neighbor: MemoryId, strength: f32) {
+        let mut graph = f.graph.write().await;
+        let storage = f.storage.write().unwrap();
+        storage
+            .update_decay_state(neighbor, DecayPhase::Full, strength, strength, 1., false)
+            .unwrap();
+        graph
+            .update_node_state(neighbor, DecayPhase::Full, strength)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn summary_and_ghost_plans_recheck_graph_before_removal_and_can_still_commit() {
+        use crate::test_support::MemorySpec;
+        for phase in [DecayPhase::Summary, DecayPhase::Ghost] {
+            let f = Fixture::new();
+            let id = f
+                .insert_memory_with(MemorySpec {
+                    phase,
+                    summary: if phase == DecayPhase::Ghost {
+                        ""
+                    } else {
+                        "retained summary"
+                    },
+                    ..MemorySpec::new(crate::model::NamespaceId::new(1))
+                })
+                .await;
+            let neighbor = f.insert_memory().await;
+            let (snapshot, errors) =
+                DecaySweepRunner::load_metadata_batch(&f.storage.read().unwrap(), &[id]);
+            assert!(errors.is_empty());
+            let meta = &snapshot[&id];
+            let decay = DecayConfig::default();
+            let engine = FsrsEngine::new(&decay);
+            let threshold = if phase == DecayPhase::Ghost {
+                0.05
+            } else {
+                0.3
+            };
+            let days = (1..10000)
+                .find(|days| engine.retrievability(*days as f32, 1., 1.) <= threshold)
+                .unwrap();
+            let mut pending = Vec::new();
+            let mut result = SweepResult::default();
+            let evaluation = DecaySweepRunner::evaluate_record(
+                id,
+                phase,
+                meta,
+                &engine,
+                &ActivationConfig::default(),
+                &f.graph,
+                days * 86_400_000,
+                1.,
+                &mut pending,
+                &mut result,
+            )
+            .await
+            .unwrap();
+            assert_eq!(pending.len(), 1);
+            publish_edge(&f, id, neighbor).await;
+            let bonus = DecaySweepRunner::calculate_connection_bonus(
+                id,
+                &f.graph,
+                &ActivationConfig::default(),
+            )
+            .await;
+            assert!(
+                engine.effective_retrievability(evaluation.projection.strength, bonus) > threshold
+            );
+            let before = f.record(id).unwrap().to_bytes();
+            assert!(
+                DecaySweepRunner::apply_transition(pending[0].clone(), &f.storage, &f.graph)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(f.record(id).unwrap().to_bytes(), before);
+            assert_eq!(
+                f.graph.read().await.get_node(&id).unwrap().decay_phase,
+                phase
+            );
+            // The same sampled time/policy is still valid. A later neighbor
+            // strength publication removes the saving bonus before final apply.
+            publish_neighbor_strength(&f, neighbor, 0.).await;
+            assert!(
+                DecaySweepRunner::apply_transition(pending.remove(0), &f.storage, &f.graph)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            if phase == DecayPhase::Ghost {
+                assert!(f.record(id).is_none());
+            } else {
+                let after = f.record(id).unwrap();
+                assert_eq!(after.phase, DecayPhase::Ghost);
+                assert!(after.summary.is_empty());
+                assert_eq!(after.decay_strength, evaluation.projection.strength);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn strength_only_patch_reprojects_growing_and_shrinking_bonus_at_original_clock() {
+        for shrink in [false, true] {
+            let f = Fixture::new();
+            let id = f.insert_memory().await;
+            let neighbor = f.insert_memory().await;
+            if shrink {
+                publish_edge(&f, id, neighbor).await;
+            }
+            let (snapshot, _) =
+                DecaySweepRunner::load_metadata_batch(&f.storage.read().unwrap(), &[id]);
+            let meta = &snapshot[&id];
+            // A nondefault cap and multiplier ensure the locked calculation
+            // retains the operation's policy rather than constructing defaults.
+            let decay = DecayConfig {
+                max_connection_bonus: 0.01,
+                ..DecayConfig::default()
+            };
+            let engine = FsrsEngine::new(&decay);
+            let activation = ActivationConfig {
+                scale: 0.1,
+                ..ActivationConfig::default()
+            };
+            let mut pending = Vec::new();
+            let mut result = SweepResult::default();
+            let evaluation = DecaySweepRunner::evaluate_record(
+                id,
+                DecayPhase::Full,
+                meta,
+                &engine,
+                &activation,
+                &f.graph,
+                86_400_000,
+                0.5,
+                &mut pending,
+                &mut result,
+            )
+            .await
+            .unwrap();
+            assert!(
+                pending.is_empty(),
+                "this must exercise the no-transition path"
+            );
+            if shrink {
+                publish_neighbor_strength(&f, neighbor, 0.).await;
+            } else {
+                publish_edge(&f, id, neighbor).await;
+            }
+            let bonus =
+                DecaySweepRunner::calculate_connection_bonus(id, &f.graph, &activation).await;
+            let expected = super::super::lifecycle::project(
+                meta.stability,
+                meta.last_accessed_at,
+                &evaluation.policy,
+                86_400_000,
+                bonus,
+            )
+            .unwrap();
+            assert_ne!(
+                expected.decay_strength,
+                evaluation.projection.decay_strength
+            );
+            DecaySweepRunner::update_record_state(
+                id,
+                DecayPhase::Full,
+                &evaluation,
+                meta,
+                &f.storage,
+                &f.graph,
+                &mut result,
+            )
+            .await;
+            assert!(result.errors.is_empty());
+            let after = f.record(id).unwrap();
+            assert_eq!(
+                (after.strength, after.decay_strength),
+                (expected.strength, expected.decay_strength)
+            );
+            assert_eq!(after.last_accessed_at, 0);
+            assert_eq!(after.phase, DecayPhase::Full);
+            assert_eq!(
+                f.graph.read().await.get_node(&id).unwrap().strength,
+                expected.decay_strength
+            );
+        }
     }
 }

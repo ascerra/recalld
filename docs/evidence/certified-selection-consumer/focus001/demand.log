@@ -1,0 +1,81 @@
+   Compiling recalld v1.0.0 (/work)
+warning: unused import: `checkpoint::StagedCanonical`
+  --> src/storage/engine.rs:13:16
+   |
+13 | pub(crate) use checkpoint::StagedCanonical;
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::storage::StorageEngine as _`
+   --> src/storage/vector_certification/tests.rs:565:9
+    |
+565 |     use crate::storage::StorageEngine as _;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `StorageEngine as _`
+    --> src/storage/vector_certification/tests.rs:1074:9
+     |
+1074 |         StorageEngine as _,
+     |         ^^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1908:19
+     |
+1908 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0277]: the trait bound `tag::Tag: From<&str>` is not satisfied
+  --> src/storage/metadata/native_records/selection_demand_tests.rs:53:47
+   |
+53 |         input.insert.memory.tags = vec!["raw".into()];
+   |                                               ^^^^ unsatisfied trait bound
+   |
+help: the trait `From<&str>` is not implemented for `tag::Tag`
+  --> src/model/tag.rs:22:1
+   |
+22 | pub struct Tag(String);
+   | ^^^^^^^^^^^^^^
+   = note: required for `&str` to implement `Into<tag::Tag>`
+
+warning: unused import: `crate::storage::StorageEngine`
+ --> src/system_inherited_policy_tests.rs:6:5
+  |
+6 | use crate::storage::StorageEngine as _;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `redb::ReadableTable`
+ --> src/storage/vector_certification/pending.rs:4:5
+  |
+4 | use redb::ReadableTable;
+  |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `StorageEngine`
+ --> src/search/origin_tests.rs:5:5
+  |
+5 |     StorageEngine as _,
+  |     ^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1497:9
+     |
+1497 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src/storage/metadata/native_catalog.rs:63:17
+   |
+63 |             let mut namespaces = tx.open_table(NAMESPACE_TABLE)?;
+   |                 ----^^^^^^^^^^
+   |                 |
+   |                 help: remove this `mut`
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `recalld` (lib test) generated 9 warnings
+error: could not compile `recalld` (lib test) due to 1 previous error; 9 warnings emitted

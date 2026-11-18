@@ -1,0 +1,57 @@
+[
+  {
+    "path": "clean.log",
+    "sha256": "8ea923512a238a749b0b971a1c7953477454296cf0bfc21cf39b7709313209ad",
+    "bytes": 39
+  },
+  {
+    "path": "command.json",
+    "sha256": "533ba1317e9102c2065eecd0bbf71b36fa8e099c434bfe996c08d51fbfc3db66",
+    "bytes": 1870
+  },
+  {
+    "path": "driver.exit",
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c",
+    "bytes": 4
+  },
+  {
+    "path": "executables.sha256",
+    "sha256": "30491a0e46168cd536e7b6dec091b0cf674cf2c846cfb2768b9ef150d993f700",
+    "bytes": 115
+  },
+  {
+    "path": "focused.log",
+    "sha256": "ce8592de5f3296e14d9c4d1eb5f72212a9124cdd6ea4e40d3ec58a83dc5011c1",
+    "bytes": 37806
+  },
+  {
+    "path": "memory-events.txt",
+    "sha256": "d326ef84ff95a95030ed70027c22346db5f40a2252655e514db3a892210f8dcc",
+    "bytes": 73
+  },
+  {
+    "path": "memory-peak.txt",
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+    "bytes": 11
+  },
+  {
+    "path": "rustc.txt",
+    "sha256": "05ab2838f795d30dee11b3a4078deded9525e5158abc7ec591be1f8a5bc8f2ce",
+    "bytes": 197
+  },
+  {
+    "path": "source-after.txt",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "source.json",
+    "sha256": "22e710592eff499a9eddb37cbacc72808322714e3a9396b4866b89260f34678d",
+    "bytes": 57385
+  },
+  {
+    "path": "source.sha256",
+    "sha256": "dcb5f01edf5d0e488d61f0b8ed137562937ae0fb1d9fe5e8e06a0d464edcb904",
+    "bytes": 38073
+  }
+]

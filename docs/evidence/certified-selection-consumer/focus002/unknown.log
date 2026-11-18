@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized] target(s) in 0.15s
+     Running unittests src/lib.rs (/target/debug/deps/recalld-212d4a4f320696fe)
+
+running 5 tests
+test daemon::server::tests::actual_batch_rpc_keeps_reservation_and_current_unknown_child_separate ... ok
+test storage::metadata::native_records::tests::batches::native_batch_unknown_child_reconciles_original_id_after_strict_reopen ... ok
+test storage::metadata::native_records::tests::store_producers::linked_producer_unknown_child_reopens_exact_reserved_operation_without_provider ... ok
+test storage::purge_tests::purge_unknown_child_reconciles_reserved_id_and_never_repeats_removal ... ok
+test storage::native_purge_tests::native_purge_accepted_unknown_child_preserves_reserved_id_and_reopens ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1417 filtered out; finished in 4.65s

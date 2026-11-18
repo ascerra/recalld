@@ -1,0 +1,38 @@
+{
+  "EXECUTABLES.json": {
+    "sha256": "8be2aaf53b638a10be34326c26d703cd0e3190c8441fcabd761007dc0051dba2",
+    "bytes": 2272
+  },
+  "NOTEBOOK.json": {
+    "sha256": "eec861facb60f93cae816b1c81572f03b8ef54e6e20659d77610cdbeec6bc896",
+    "bytes": 328
+  },
+  "REPORT.md": {
+    "sha256": "61258de461017b0bffc7753435531c55d2e5ec532a02a1de32929a009b2bb25c",
+    "bytes": 7770
+  },
+  "RESULTS.json": {
+    "sha256": "3d0c968a6490ed5280dfa4477e35039d8d50418ece4692fc5e05728d37f30987",
+    "bytes": 2941
+  },
+  "SOURCE.json": {
+    "sha256": "3a16f853d54f91f07da244156ae82785051855472d8b8384f4e94adef37b6e0c",
+    "bytes": 49672
+  },
+  "VERIFICATION.json": {
+    "sha256": "20c9caabf394e9a401104b41413226f6b5e7bab6bbcd844c0bb906278e64dd5f",
+    "bytes": 299
+  },
+  "development-runs.json": {
+    "sha256": "3b1935adfd8b3207029f9c41cb75763011095339ed1fe40741b9a939c9f87003",
+    "bytes": 9723
+  },
+  "full-run.sh": {
+    "sha256": "69a2acd06aa88a0c2f7928de6d666905db7582b1aa234752cd9fe89717715016",
+    "bytes": 794
+  },
+  "full-schema-inputs.json": {
+    "sha256": "1f5e8b00a50f2264917d3a4e465e02d9af4f546b1833f8b309d45fd3adf26f40",
+    "bytes": 1706
+  }
+}

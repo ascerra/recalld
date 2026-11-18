@@ -1,0 +1,23 @@
+{
+  "source_commit": "4a39fc49e4a09dcdc10f4f58cc7c910486fe396b",
+  "source_files": 233,
+  "manifest_sha256": "e802b86140a32d9b6fd8c3bc1b926715912e6f30a6e87f135f1079d793d92ff8",
+  "inside_precompile_postrun_match": true,
+  "host_snapshot_worktree_commit_match": true,
+  "library_executable_sha256": null,
+  "log_sha256": "5055fc8ce13e4102baeb336d573dca254e94c92b47465341a7e826f28149e398",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 101,
+    "Error": "",
+    "StartedAt": "2026-11-15T01:59:21.609853389Z",
+    "FinishedAt": "2026-11-15T01:59:35.733579435Z"
+  },
+  "result": "compile failed: missing EdgeType import in new fixtures; no test execution"
+}

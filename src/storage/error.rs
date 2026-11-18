@@ -8,6 +8,78 @@ use crate::model::error::DecodeError;
 /// Errors from storage operations (metadata, vectors, text, edges).
 #[derive(Debug, Error)]
 pub enum StorageError {
+    /// Existing item receipts remain retained. This is reservation evidence only,
+    /// never an assertion that the batch committed atomically or became ready.
+    /// Known fresh admission failure; no canonical operation was attempted.
+    #[error("unsupported mutation: {0}")]
+    UnsupportedMutation(String),
+
+    #[error("RESPONSE_TOO_LARGE: complete native batch result exceeds transport budget")]
+    BatchResponseTooLarge {
+        reservation_receipt: Option<Box<crate::storage::control::WriteReceipt>>,
+    },
+    #[error("LIFECYCLE_CONFLICT: {0}")]
+    LifecycleConflict(String),
+    #[error("CONTENT_UNAVAILABLE")]
+    LifecycleContentUnavailable,
+    #[error(transparent)]
+    Work(#[from] crate::storage::work::WorkError),
+
+    /// Canonical mutation exists; retry publication, never retry as a new write.
+    #[error("INDEX_NOT_READY commitState=committed ready=false receipt={} cause={source}", serde_json::to_string(receipt).unwrap_or_default())]
+    CommittedMutation {
+        receipt: Box<crate::storage::control::WriteReceipt>,
+        #[source]
+        source: Box<StorageError>,
+    },
+
+    /// Invalid lineage, key, version, or generation encoding.
+    #[error("invalid mutation context: {0}")]
+    InvalidMutationContext(String),
+
+    #[error("STORE_LINEAGE_MISMATCH")]
+    StoreLineageMismatch,
+
+    #[error("GENERATION_CONFLICT: expected {expected}, actual {actual}")]
+    GenerationConflict { expected: String, actual: String },
+
+    #[error("IDEMPOTENCY_CONFLICT")]
+    IdempotencyConflict,
+
+    /// A well-formed caller selector conflicts with the canonical binding.
+    #[error("EMBEDDING_PROFILE_MISMATCH")]
+    EmbeddingProfileMismatch,
+
+    #[error("NAMESPACE_MISMATCH")]
+    MutationNamespaceMismatch,
+
+    #[error("canonical generation exhausted")]
+    GenerationExhausted,
+
+    #[error("unsupported or corrupt canonical control: {0}")]
+    InvalidControl(String),
+
+    /// The database may have committed; reconcile by operation ID after reopen.
+    #[error("commit outcome unknown for operation {operation_id}: {source}")]
+    CommitOutcomeUnknown {
+        operation_id: Uuid,
+        #[source]
+        source: redb::CommitError,
+    },
+
+    /// A worker was lost without returning its canonical outcome. No operation
+    /// ID or receipt can be invented; recover and reconcile the original intent.
+    #[error("worker outcome unknown: {0}")]
+    WorkerOutcomeUnknown(String),
+
+    /// Canonical metadata is durable; materialization must resume after reopen.
+    #[error("operation {operation_id} committed; canonical effects unavailable: {source}")]
+    CommittedEffectsPending {
+        operation_id: Uuid,
+        #[source]
+        source: Box<StorageError>,
+    },
+
     // ── redb errors (from metadata.rs and edges.rs) ──────────────────
     /// A generic redb error.
     #[error("redb error: {0}")]
@@ -32,6 +104,42 @@ pub enum StorageError {
     /// A redb commit error.
     #[error("redb commit error: {0}")]
     RedbCommit(#[from] redb::CommitError),
+
+    /// Provider output failed vector validation; the store remains usable.
+    #[error("EMBEDDING_UNAVAILABLE: invalid provider vector: {0}")]
+    ProviderVectorUnavailable(String),
+
+    #[error("active embedding provider configuration is unavailable or invalid")]
+    ProviderConfigurationUnavailable,
+
+    #[error("active embedding profile does not match {field}")]
+    NamespaceEmbeddingProfileMismatch { field: &'static str },
+    /// Exact owned canonical state proves the namespace has no certificate.
+    /// This is a known precommit admission failure, never a commit outcome.
+    #[error("namespace {namespace_id} vectors require explicit offline re-embedding certification")]
+    VectorCertificationRequired { namespace_id: u32 },
+
+    /// Caller-supplied vector failed the shared numeric boundary. Keep the
+    /// legacy diagnostic text while allowing typed transport classification.
+    #[error("invalid storage mutation: {0}")]
+    CallerVectorInvalid(String),
+
+    #[error("EDGE_CONFLICT: {0}")]
+    EdgeConflict(String),
+
+    #[error("invalid storage mutation: {0}")]
+    InvalidMutation(String),
+
+    #[error(
+        "operation too large for this response transport or its bounded admission scan; no new purge was started"
+    )]
+    PurgeResponseTooLarge,
+
+    #[error("storage recovery required: {0}")]
+    RecoveryRequired(String),
+
+    #[error("vector ownership mismatch: {0}")]
+    OwnershipMismatch(String),
 
     // ── Metadata errors ──────────────────────────────────────────────
     /// A record with this ID already exists.
@@ -58,6 +166,18 @@ pub enum StorageError {
     /// No namespace exists for the given ID.
     #[error("namespace not found: {0}")]
     NamespaceNotFound(u32),
+
+    #[error("namespace not found: {0}")]
+    NamespaceNameNotFound(String),
+
+    /// An explicit namespace assertion does not match the record's immutable scope.
+    #[error("NAMESPACE_MISMATCH: memory {id} does not belong to namespace '{namespace}'")]
+    NamespaceMismatch {
+        /// Memory being addressed.
+        id: Uuid,
+        /// Caller asserted namespace.
+        namespace: String,
+    },
 
     /// A secondary index is corrupt or inconsistent.
     #[error("corrupt index: {0}")]

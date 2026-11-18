@@ -1,0 +1,42 @@
+{
+  "base.txt": {
+    "bytes": 41,
+    "sha256": "c0caa6c04b7e4cc2864a64ee22b0e8f0d908861ee3c21a26e561de6e7b260495"
+  },
+  "clean.log": {
+    "bytes": 37,
+    "sha256": "58e9e80bbdeafbd61e6093c8995e9f4b1d73010e39a1765afaec101b345245df"
+  },
+  "corrected.exit": {
+    "bytes": 4,
+    "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+  },
+  "corrected.log": {
+    "bytes": 3610,
+    "sha256": "d94cf2fe94eaa2078af786baf49ca5f034f0107dc6c493aebb68086121f5afd1"
+  },
+  "memory.events.final": {
+    "bytes": 70,
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380"
+  },
+  "memory.peak.final": {
+    "bytes": 11,
+    "sha256": "493414f6a65d9fc2a6d53423c4062c5801e1a6b81c8a547cd62f3a102eb17e5d"
+  },
+  "rustc.txt": {
+    "bytes": 36,
+    "sha256": "7fc9b9708715204ec50ebe62619084b002bd1ba3ae68cd4d5d586a74797d4f7b"
+  },
+  "source-executables-final.json": {
+    "bytes": 3,
+    "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+  },
+  "source-manifest-after.json": {
+    "bytes": 38066,
+    "sha256": "fcf6db1366e35cee1a21b783ca7ee8988a0ce968a09bdde4eda6eddbdd910bbf"
+  },
+  "source-manifest.json": {
+    "bytes": 38066,
+    "sha256": "fcf6db1366e35cee1a21b783ca7ee8988a0ce968a09bdde4eda6eddbdd910bbf"
+  }
+}

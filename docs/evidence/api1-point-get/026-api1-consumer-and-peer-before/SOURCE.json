@@ -1,0 +1,27 @@
+{
+  "head": "452e09328f9a4e23d777f3455115561956914d1c",
+  "worktree": "/tmp/recalld-implementation/api1-point-get",
+  "files": {
+    "src/daemon/api1_get.rs": "5913a7380293000ce88b0388d677e59bbb2ddc3dd910d2bbe5c2771e6c413ecd",
+    "src/daemon/api1_get_before_tests.rs": "7c3c19a1cb82e3133e204c5f9f72770dd3cdc155f9bdfb927f6b7e6cbf54024a",
+    "src/daemon/api1_get_tests.rs": "7d56831c6353c655ea62e63d45bef407b823b8937d426dca2ab3c3897b61fcb8",
+    "src/daemon/bridge_adapters.rs": "5fa45395b80e7ec84e75478d64d53c29e7e788db8d6efb77406275be76c4a268",
+    "src/daemon/client.rs": "8b7e6df85abd171dc57ec10d6b8fd1db1250974d1243f2eb47e7b73b0a6385b6",
+    "src/daemon/mod.rs": "a33da2ede7ced5af0ae395ddd7119aeb7fb1a08ca66cef0090c0c2f7cd964059",
+    "src/daemon/prepared_get.rs": "9ac74e40f5153f1aec8a14fac2c6d8607d2fcb53022b37dc134fe0bb73f26ff7",
+    "src/daemon/server.rs": "ec5576598fe98512fdda7970ea48595020a9130637c74ce334502d3c13958937",
+    "src/mcp/bridge.rs": "108499513e85ffd3c2757364e37c3eac6de491707600909e23d4295681c9bc17",
+    "src/mcp/bridge_adapters.rs": "037b25602c0a37a3cc3a20dbaf7797277f5a30be331fa13c35cba07c15485688",
+    "src/mcp/tools.rs": "339abee9b8ff57607d435ef7bbe29cfd2aa6c9ed44e6e3609263f5fda295852e",
+    "src/search/api1_point_get_before_tests.rs": "72b0cd057d0632aa758b342f1f48f536ef16d2d7afbb556f59cbd955b49605d0",
+    "src/search/api1_point_get_tests.rs": "cbff6e3fcc38ffb12ddd917637ed9752520dff090d8ea50ddb2c492de8c3a7ad",
+    "src/search/get_wire.rs": "333e3da2fce4d3e9ae21f2dfba731fd5b76999b3b33dc6a9b200eb31733bab01",
+    "src/search/get_wire_tests.rs": "f6cadf09653ac3df206181affb091e3c2b661116a4c6eef3733df673c450638f",
+    "src/serialization/api1_get_budget_probe.rs": "9aa334cb36f5ae270fbad32c71b25dd88de79f9a35c42cae4d00ffef579da361",
+    "src/serialization/api1_raw_get_budget_probe.rs": "4f905a0cfa6e6fc586d25912b4d6b2d49bdaf370993a97fdd7181536b618db07",
+    "src/serialization/get_api1.rs": "5cc83058cbbddcbf93d2fbeda62d44ad668d2099c2856b17aa3bceef14d20191",
+    "src/serialization/get_rpc_budget_probe.rs": "37f84ac219c12c2865c9af1d9e56b6cdad7723c3240d7db02ccfa6e52849a5ce",
+    "src/serialization/get_tests.rs": "51dad8999e4aaf799a6a32cf5441ad2221a8790784f9945a053125ace7ebda7a",
+    "src/serialization/mod.rs": "8f0fb15badf0cbc71ac7967bbf4c89cb5d3bcb2c99d514cdeb21fb5db8251f34"
+  }
+}

@@ -1,0 +1,570 @@
+{
+  "sourceCommit": "249ff40e8149743efcddcbe2dfcd100bb5171c4e",
+  "sourcePinsVerified": 536,
+  "unchangedExecutedBinaryHashes": true,
+  "runtime": {
+    "exitCode": 0,
+    "elapsedSeconds": 48.19597204204183,
+    "retired": true,
+    "oomKilled": false
+  },
+  "runtimeMemoryPeak": 526741504,
+  "runtimeMemoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+  "episodeAttempts": 17,
+  "totals": {
+    "planned": 68,
+    "accepted": 47,
+    "rejected": 6,
+    "unknown": 0,
+    "unattempted": 15,
+    "successfulPublicQueries": 53,
+    "attempts": 53,
+    "actualAnswerActorInvocations": 51
+  },
+  "episodes": [
+    {
+      "path": "canary-future",
+      "accepted": 3,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "rejected"
+        }
+      ],
+      "rejected": 1,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 3,
+      "processExits": [
+        -15
+      ]
+    },
+    {
+      "path": "canary-gold",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "citation",
+      "accepted": 0,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "rejected"
+        },
+        {
+          "queryId": "q1",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q2",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q3",
+          "status": "unattempted"
+        }
+      ],
+      "rejected": 1,
+      "unattempted": 3,
+      "unknown": 0,
+      "successfulPublicQueries": 1,
+      "attempts": 1,
+      "actualAnswerActorInvocations": 1,
+      "processExits": [
+        -15
+      ]
+    },
+    {
+      "path": "default/episodes/episode-0",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "default/episodes/episode-1",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "default/episodes/episode-2",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "default/episodes/episode-3",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "default/episodes/episode-4",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "default/episodes/episode-5",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "default/episodes/episode-6",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "middle-miss/episodes/episode-0",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "middle-miss/episodes/episode-1",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "middle-miss/episodes/episode-2",
+      "accepted": 4,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q1",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q2",
+          "status": "accepted"
+        },
+        {
+          "queryId": "q3",
+          "status": "accepted"
+        }
+      ],
+      "rejected": 0,
+      "unattempted": 0,
+      "unknown": 0,
+      "successfulPublicQueries": 4,
+      "attempts": 4,
+      "actualAnswerActorInvocations": 4,
+      "processExits": [
+        0
+      ]
+    },
+    {
+      "path": "middle-miss/episodes/episode-3",
+      "accepted": 0,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "rejected"
+        },
+        {
+          "queryId": "q1",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q2",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q3",
+          "status": "unattempted"
+        }
+      ],
+      "rejected": 1,
+      "unattempted": 3,
+      "unknown": 0,
+      "successfulPublicQueries": 1,
+      "attempts": 1,
+      "actualAnswerActorInvocations": 0,
+      "processExits": [
+        -15
+      ]
+    },
+    {
+      "path": "parse",
+      "accepted": 0,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "rejected"
+        },
+        {
+          "queryId": "q1",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q2",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q3",
+          "status": "unattempted"
+        }
+      ],
+      "rejected": 1,
+      "unattempted": 3,
+      "unknown": 0,
+      "successfulPublicQueries": 1,
+      "attempts": 1,
+      "actualAnswerActorInvocations": 1,
+      "processExits": [
+        -15
+      ]
+    },
+    {
+      "path": "refusal",
+      "accepted": 0,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "rejected"
+        },
+        {
+          "queryId": "q1",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q2",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q3",
+          "status": "unattempted"
+        }
+      ],
+      "rejected": 1,
+      "unattempted": 3,
+      "unknown": 0,
+      "successfulPublicQueries": 1,
+      "attempts": 1,
+      "actualAnswerActorInvocations": 1,
+      "processExits": [
+        -15
+      ]
+    },
+    {
+      "path": "utf8",
+      "accepted": 0,
+      "planned": 4,
+      "queries": [
+        {
+          "queryId": "q0",
+          "status": "rejected"
+        },
+        {
+          "queryId": "q1",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q2",
+          "status": "unattempted"
+        },
+        {
+          "queryId": "q3",
+          "status": "unattempted"
+        }
+      ],
+      "rejected": 1,
+      "unattempted": 3,
+      "unknown": 0,
+      "successfulPublicQueries": 1,
+      "attempts": 1,
+      "actualAnswerActorInvocations": 1,
+      "processExits": [
+        -15
+      ]
+    }
+  ]
+}

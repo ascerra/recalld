@@ -1,0 +1,41 @@
+.......FFFF...
+======================================================================
+FAIL: test_trace2_foreign_identity_is_rejected_by_actual_reconciler (__main__.Combined.test_trace2_foreign_identity_is_rejected_by_actual_reconciler) (field='runId')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/test_combined_mcp_evaluation.py", line 118, in test_trace2_foreign_identity_is_rejected_by_actual_reconciler
+    with self.subTest(field=field),self.assertRaisesRegex(ValueError,'identity'):
+                                   ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_trace2_foreign_identity_is_rejected_by_actual_reconciler (__main__.Combined.test_trace2_foreign_identity_is_rejected_by_actual_reconciler) (field='environmentHash')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/test_combined_mcp_evaluation.py", line 118, in test_trace2_foreign_identity_is_rejected_by_actual_reconciler
+    with self.subTest(field=field),self.assertRaisesRegex(ValueError,'identity'):
+                                   ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_trace2_foreign_identity_is_rejected_by_actual_reconciler (__main__.Combined.test_trace2_foreign_identity_is_rejected_by_actual_reconciler) (field='episodeId')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/test_combined_mcp_evaluation.py", line 118, in test_trace2_foreign_identity_is_rejected_by_actual_reconciler
+    with self.subTest(field=field),self.assertRaisesRegex(ValueError,'identity'):
+                                   ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_trace2_foreign_identity_is_rejected_by_actual_reconciler (__main__.Combined.test_trace2_foreign_identity_is_rejected_by_actual_reconciler) (field='groupId')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/test_combined_mcp_evaluation.py", line 118, in test_trace2_foreign_identity_is_rejected_by_actual_reconciler
+    with self.subTest(field=field),self.assertRaisesRegex(ValueError,'identity'):
+                                   ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.063s
+
+FAILED (failures=4)

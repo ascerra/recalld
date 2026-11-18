@@ -1,0 +1,275 @@
+{
+  "runtime": "6cbb2e53d05239c2bc68f34940666243178afbf1",
+  "full_suite": "NOT_RUN: inherited default-stack failure; final combined PR181 full suite required",
+  "runs": {
+    "batch-receipt-001-red": {
+      "source_commit": "09900e49588fdca40b9816a2b73cb862703efa38",
+      "source_files": 434,
+      "source_pre_post_verified": true,
+      "executable": {
+        "/target/debug/deps/recalld-c97179ea71eeb431": {
+          "sha256": "6e93244349c84c07dea73b6ca948165983f347bbfec26639706a35a0870b2554",
+          "bytes": 147555464
+        }
+      },
+      "logs": {
+        "clean.log": {
+          "sha256": "f3a514696c602b17640de144a3027b8dd700c7a5a663bd5b360ef26b21aa8649",
+          "bytes": 37,
+          "summaries": [],
+          "tests": []
+        },
+        "focused.log": {
+          "sha256": "bbbabbbfa1ec735c03e1d08bdc908bcd6c8ad2c712a927893b7ff335e3954ded",
+          "bytes": 34116,
+          "summaries": [
+            "test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 1599 filtered out; finished in 10.03s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_first_rejection",
+              "status": "FAILED"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_later_rejection",
+              "status": "FAILED"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_local",
+              "status": "FAILED"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_rejection_keeps_success_and_pending",
+              "status": "FAILED"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_real_remote",
+              "status": "FAILED"
+            }
+          ]
+        }
+      },
+      "memory_events": "low 0\nhigh 0\nmax 2379\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+      "memory_peak": 4294967296
+    },
+    "batch-receipt-002-green": {
+      "source_commit": "6cbb2e53d05239c2bc68f34940666243178afbf1",
+      "source_files": 434,
+      "source_pre_post_verified": true,
+      "executable": {
+        "/target/debug/deps/recalld-c97179ea71eeb431": {
+          "sha256": "978d03f460a94d9768c66b318e16c50c272572fc74c47621028d33f827b29d6b",
+          "bytes": 147694320
+        }
+      },
+      "logs": {
+        "affected-api1_batch_actual_rpc_prework_frames_mode_and_remote.log": {
+          "sha256": "572dcf807a19f0d67268419a65fa7082335e3f594dd6f65806c48304dfe40cab",
+          "bytes": 25773,
+          "summaries": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1605 filtered out; finished in 2.90s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_actual_rpc_prework_frames_mode_and_remote",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-api1_batch_derived_compatibility.log": {
+          "sha256": "e84cb85f547e24308e3f9163c6d4d6fc1f887a37084cc49142ae09ca51222347",
+          "bytes": 25783,
+          "summaries": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1605 filtered out; finished in 0.00s"
+          ],
+          "tests": [
+            {
+              "name": "serialization::batch_api1::tests::api1_batch_derived_compatibility_bound_counts_all_shape_fields",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-api1_batch_final_barrier_failure.log": {
+          "sha256": "87cbf1f436d90cf84ed58311369eaa969900d91abcf1ee4f291dc728dbdf7fa5",
+          "bytes": 25787,
+          "summaries": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1605 filtered out; finished in 2.94s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_final_barrier_failure_keeps_receipts_and_repair_replays",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-api1_batch_fresh_budget.log": {
+          "sha256": "40a7bd0682a3fe531adc11e627ee9c1355f13f5dc38016e064d2e271f9e76308",
+          "bytes": 25855,
+          "summaries": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1605 filtered out; finished in 2.96s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_fresh_budget_precedes_reservation_and_whole_projection_frames",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-api1_batch_malformed.log": {
+          "sha256": "4c935e1f4da94c49e474921de2bc591b4700bdd250c8bcab082b11f7240e370f",
+          "bytes": 25955,
+          "summaries": [
+            "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1604 filtered out; finished in 3.05s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_malformed_remote_evidence_never_claims_commit_or_counts",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_malformed_known_reply_preserves_receipts_and_unknown_ids",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-api1_batch_projection_enforces.log": {
+          "sha256": "0e2cb98eed2f77f7f6b4ac7a27a906bde3a431f330385c9db982e5e3b13a2825",
+          "bytes": 25785,
+          "summaries": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1605 filtered out; finished in 3.00s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_projection_enforces_display_limits_keeps_full_receipt",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-batch_wire_.log": {
+          "sha256": "d0a53156f81b28e9bea991843203b6291aab7b85b47f6744f09a23b4a8130ef1",
+          "bytes": 26753,
+          "summaries": [
+            "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1599 filtered out; finished in 87.70s"
+          ],
+          "tests": [
+            {
+              "name": "serialization::native_batch::tests::batch_wire_strict_selectors_keys_schema_and_legacy_gate",
+              "status": "ok"
+            },
+            {
+              "name": "mcp::batch_budget::tests::batch_wire_budget_exact_boundaries_and_complete_transport_framing",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::batch_wire_actual_unavailable_all_failed_and_committed_publication_failure",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::batch_wire_fresh_budget_rejects_before_reservation_provider_and_clock",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::batch_wire_final_barrier_failure_after_children_preserves_receipts_and_repairs_same_key",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::batch_wire_native_partial_full_receipts_replay_and_cas",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::batch_wire_historical_oversize_completed_pending_retained_bytes_and_settings",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-native_batch_mcp_daemon_parity.log": {
+          "sha256": "f0328ef3ed31aa26e2f07041e64a53e0e6ada304471242d1d070da89f37fb6c1",
+          "bytes": 25768,
+          "summaries": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1605 filtered out; finished in 6.27s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::batches::native_batch_mcp_daemon_parity_invalid_items_replay_and_current_publication_receipt",
+              "status": "ok"
+            }
+          ]
+        },
+        "affected-native_batch_unknown_child.log": {
+          "sha256": "51bcc177e5bbc91b1b7c1db24af37338cdd1ca2b219195005b731b3c63d8a16d",
+          "bytes": 25754,
+          "summaries": [
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1605 filtered out; finished in 3.20s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::batches::native_batch_unknown_child_reconciles_original_id_after_strict_reopen",
+              "status": "ok"
+            }
+          ]
+        },
+        "clean.log": {
+          "sha256": "19cfaed616b5b4d48dab50131aac38b6e15d506bcd9968b1d80c145ca348752d",
+          "bytes": 37,
+          "summaries": [],
+          "tests": []
+        },
+        "clippy.log": {
+          "sha256": "5aa8b3a700fb763524ed4bb6902c3656659318b92940024c0207eec24452ac1b",
+          "bytes": 1152342,
+          "summaries": [],
+          "tests": []
+        },
+        "fmt.log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0,
+          "summaries": [],
+          "tests": []
+        },
+        "focused.log": {
+          "sha256": "a73b2d79b6647edc74a2bfa8f9a77402056e3e8f2d0d88d111bb984ce5a6801c",
+          "bytes": 27078,
+          "summaries": [
+            "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1599 filtered out; finished in 16.99s"
+          ],
+          "tests": [
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_first_rejection",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_genuine_unknown_stays_unknown",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_later_rejection",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_rejection_keeps_success_and_pending",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_prepared_api2_mcp_rest_full_receipts",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_local",
+              "status": "ok"
+            },
+            {
+              "name": "storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_real_remote",
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "memory_events": "low 0\nhigh 0\nmax 1393\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+      "memory_peak": 4294967296,
+      "affected_exit_codes": "api1_batch_malformed 0\napi1_batch_actual_rpc_prework_frames_mode_and_remote 0\napi1_batch_final_barrier_failure 0\napi1_batch_fresh_budget 0\napi1_batch_projection_enforces 0\napi1_batch_derived_compatibility 0\nbatch_wire_ 0\nnative_batch_unknown_child 0\nnative_batch_mcp_daemon_parity 0\nfmt 0\nclippy 0\n",
+      "affected_memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+      "affected_memory_peak": 3859435520
+    }
+  },
+  "unique_green_tests": 23
+}

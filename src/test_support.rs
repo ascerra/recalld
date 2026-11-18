@@ -23,6 +23,57 @@ use crate::model::{DecayPhase, MemoryId, NamespaceId};
 use crate::storage::engine::RedbStorageEngine;
 use crate::storage::{PersistedEdge, StorageEngine as StorageEngineTrait};
 
+/// Optional artifact sink for the existing real record-emitter regressions.
+/// This records outputs, not a replacement backend or a receipt verifier.
+pub(crate) fn record_schema_value(
+    label: &str,
+    tool: &str,
+    value: &serde_json::Value,
+    provenance: &str,
+) {
+    let Some(dir) = std::env::var_os("RECALLD_LIVE_RECORD_SCHEMA_FIXTURES") else {
+        return;
+    };
+    let schema = crate::mcp::tools::tool_definitions()
+        .into_iter()
+        .find(|t| t.name == tool)
+        .unwrap()
+        .output_schema
+        .expect("actual registered output schema");
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("{label}-{tool}.json")),
+        serde_json::to_vec(&serde_json::json!({
+            "tool":tool,"schema":schema,"value":value,"fixtureProvenance":provenance
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+pub(crate) fn record_schema_result(
+    label: &str,
+    tool: &str,
+    result: &crate::mcp::protocol::ToolCallResult,
+    provenance: &str,
+) {
+    if std::env::var_os("RECALLD_LIVE_RECORD_SCHEMA_FIXTURES").is_none() {
+        return;
+    }
+    let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
+    let value = serde_json::from_str(text).expect("selected structured emitter");
+    record_schema_value(&format!("{label}-text"), tool, &value, provenance);
+    if let Some(value) = &result.structured_content {
+        record_schema_value(
+            &format!("{label}-structured"),
+            tool,
+            &serde_json::Value::Object(value.clone()),
+            provenance,
+        );
+    }
+}
+
 /// Embedding width used by the fixture namespace. Small on purpose:
 /// these tests are about bookkeeping, not vectors.
 pub(crate) const DIM: usize = 4;
@@ -79,7 +130,7 @@ pub(crate) struct Fixture {
     pub(crate) cache: Arc<crate::cache::CacheManager>,
     /// Held on the fixture, not built per adapter call, so a test can
     /// assert on the same index the adapter under test just wrote to.
-    pub(crate) vector_index: Arc<tokio::sync::RwLock<crate::search::FlatVectorIndex>>,
+    pub(crate) vector_index: Arc<tokio::sync::RwLock<crate::search::VectorIndexOwner>>,
     /// See [`vector_index`](Self::vector_index).
     pub(crate) fts_index: Arc<tokio::sync::Mutex<crate::search::FtsIndex>>,
     /// See [`vector_index`](Self::vector_index).
@@ -101,6 +152,12 @@ impl Fixture {
             engine.create_namespace(&config).expect("create namespace");
         }
 
+        Self::from_open_engine(dir, engine)
+    }
+
+    /// The caller supplies the actual owned engine, including its explicit native
+    /// entry mode. This constructs empty views, never publishes or acknowledges.
+    pub(crate) fn from_open_engine(dir: tempfile::TempDir, engine: RedbStorageEngine) -> Self {
         let fts_index = crate::search::FtsIndex::new(dir.path()).expect("open fts index");
 
         Self {
@@ -116,7 +173,7 @@ impl Fixture {
                 None,
             )),
             vector_index: Arc::new(tokio::sync::RwLock::new(
-                crate::search::FlatVectorIndex::new(DIM),
+                crate::search::VectorIndexOwner::uniform(DIM),
             )),
             fts_index: Arc::new(tokio::sync::Mutex::new(fts_index)),
             entity_index: Arc::new(tokio::sync::RwLock::new(crate::search::EntityIndex::new())),
@@ -220,6 +277,7 @@ impl Fixture {
     pub(crate) async fn insert_memory_with(&self, spec: MemorySpec<'_>) -> MemoryId {
         let id = MemoryId::new();
         let mut record = crate::model::DiskRecord {
+            schema: None,
             version: crate::model::DiskRecord::CURRENT_VERSION,
             id: *id.as_bytes(),
             namespace_id: spec.namespace.get(),
@@ -276,10 +334,53 @@ impl Fixture {
             .expect("tombstone memory");
     }
 
+    /// Real read/search adapter over the isolated fixture, with no external provider.
+    pub(crate) fn search_adapter(&self) -> crate::mcp::bridge_adapters::McpSearchAdapter {
+        use crate::search::adapters::*;
+        let embedding = Arc::new(crate::embedding::PassthroughProvider::new(DIM));
+        let engine = Arc::new(crate::search::QueryEngine::new(
+            Arc::new(StorageNamespaceResolver::new(self.storage.clone())),
+            Arc::new(SingleEmbeddingRegistry::new(embedding.clone())),
+            Arc::new(SharedVectorIndexRegistry::new(self.vector_index.clone())),
+            Arc::new(SharedFtsIndexRegistry::new(self.fts_index.clone())),
+            Arc::new(SharedEntityIndexReader::new(self.entity_index.clone())),
+            Arc::new(CacheManagerAdapter::new(self.cache.clone())),
+            Arc::new(StorageMetadataAdapter::new(self.storage.clone())),
+            Arc::new(SharedGraphReader::new(self.graph.clone())),
+            Arc::new(RifProcessorAdapter::new(
+                Arc::new(crate::rif::RifEngine::new(Default::default())),
+                self.graph.clone(),
+            )),
+            Arc::new(StorageAccessRecorder::new(
+                self.storage.clone(),
+                self.cache.clone(),
+            )),
+        ));
+        crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            engine,
+            embedding,
+            self.storage.clone(),
+            self.graph.clone(),
+            chrono_tz::UTC,
+        )
+    }
+
+    pub(crate) fn completion(&self) -> crate::derived_completion::DerivedCompletion {
+        crate::derived_completion::DerivedCompletion {
+            storage: self.storage.clone(),
+            cache: self.cache.clone(),
+            graph: self.graph.clone(),
+            vectors: self.vector_index.clone(),
+            fts: self.fts_index.clone(),
+            entities: self.entity_index.clone(),
+        }
+    }
+
     /// The MCP namespace adapter over this fixture's storage.
     pub(crate) fn namespace_adapter(&self) -> crate::mcp::bridge_adapters::McpNamespaceAdapter {
         crate::mcp::bridge_adapters::McpNamespaceAdapter::new(
             self.storage.clone(),
+            Arc::new(crate::embedding::PassthroughProvider::new(DIM)),
             self.cache.clone(),
             self.vector_index.clone(),
             self.fts_index.clone(),
@@ -381,6 +482,8 @@ impl crate::mcp::bridge::SearchPipeline for StubBridge {
         _: usize,
         _: Option<f32>,
         _: bool,
+        _record_access: bool,
+        _namespace: Option<&str>,
     ) -> Result<Vec<crate::mcp::bridge::SearchHit>, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before searching")
     }
@@ -405,10 +508,16 @@ impl crate::mcp::bridge::StorageEngine for StubBridge {
     async fn get_memory(
         &self,
         _: MemoryId,
+        _record_access: bool,
+        _namespace: Option<&str>,
     ) -> Result<Option<crate::mcp::bridge::MemoryRecord>, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before reading")
     }
-    async fn delete_memory(&self, _: MemoryId) -> Result<bool, crate::mcp::bridge::BridgeError> {
+    async fn delete_memory(
+        &self,
+        _: MemoryId,
+        _namespace: Option<&str>,
+    ) -> Result<bool, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before deleting")
     }
     async fn delete_memories(
@@ -426,6 +535,7 @@ impl crate::mcp::bridge::StorageEngine for StubBridge {
         &self,
         _: MemoryId,
         _: u8,
+        _namespace: Option<&str>,
     ) -> Result<crate::mcp::bridge::ReinforceResult, crate::mcp::bridge::BridgeError> {
         unreachable!("the handler was expected to reject its arguments before reinforcing")
     }
@@ -486,12 +596,58 @@ impl crate::mcp::bridge::HealthChecker for StubBridge {
 fn clone_bridge_error(e: &crate::mcp::bridge::BridgeError) -> crate::mcp::bridge::BridgeError {
     use crate::mcp::bridge::BridgeError as E;
     match e {
+        E::NamespaceMismatch(m) => E::NamespaceMismatch(m.clone()),
         E::NotFound(m) => E::NotFound(m.clone()),
         E::InvalidInput(m) => E::InvalidInput(m.clone()),
         E::Storage(m) => E::Storage(m.clone()),
+        E::Unavailable(m) => E::Unavailable(m.clone()),
         E::Search(m) => E::Search(m.clone()),
         E::Internal(m) => E::Internal(m.clone()),
         E::TooLarge(m) => E::TooLarge(m.clone()),
         E::PartiallyApplied(m) => E::PartiallyApplied(m.clone()),
     }
+}
+
+/// Explicit present-day adoption for a test that exercises dependent native work.
+/// This calls the real read-only preview and canonical writer; migration itself
+/// still leaves unknown inputs absent. No raw schema or provenance mutation.
+pub(crate) fn explicitly_adopt_inherited_policy(
+    path: &Path,
+    namespace: NamespaceId,
+    multiplier: f64,
+    sampled_at: i64,
+) -> crate::storage::control::WriteReceipt {
+    use crate::storage::control::{MutationContext, MutationScope};
+    use crate::storage::inherited_policy::{
+        AdoptInheritedDecay, adopt_inherited_decay, preview_inherited_decay,
+    };
+    let source = crate::storage::schema_migration::inspect_schema(path)
+        .unwrap()
+        .control
+        .generation_ref();
+    let preview = preview_inherited_decay(
+        path,
+        namespace,
+        multiplier,
+        source,
+        &crate::time::ManualClock::new(sampled_at),
+    )
+    .unwrap();
+    adopt_inherited_decay(
+        path,
+        &AdoptInheritedDecay {
+            context: MutationContext {
+                store_id: Some(source.store_id),
+                scope: MutationScope::Namespace(namespace),
+                idempotency_key: Some(format!(
+                    "explicit-fixture-adoption-{}",
+                    source.generation.get()
+                )),
+                expected_generation: Some(source.generation),
+                contract_version: 1,
+            },
+            preview,
+        },
+    )
+    .unwrap()
 }

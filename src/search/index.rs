@@ -1,7 +1,7 @@
 //! FlatVectorIndex — brute-force SIMD scan over RAM-resident vectors.
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::io::Read;
 use std::path::Path;
 
@@ -236,6 +236,124 @@ impl FlatVectorIndex {
     }
 }
 
+impl FlatVectorIndex {
+    /// Exact top-k over canonical eligible IDs, filtered before scoring/heap admission.
+    pub fn search_eligible(
+        &self,
+        query: &[f32],
+        k: usize,
+        filter: &SearchFilter,
+        eligible_ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<Vec<VectorSearchResult>, VectorError> {
+        Ok(self
+            .search_eligible_measured(query, k, filter, eligible_ids)?
+            .results)
+    }
+
+    /// Measure the existing exact scan; no second traversal or early work cap.
+    pub fn search_eligible_measured(
+        &self,
+        query: &[f32],
+        k: usize,
+        filter: &SearchFilter,
+        eligible_ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<super::SourceResults<VectorSearchResult>, VectorError> {
+        if query.len() != self.dim {
+            return Err(VectorError::DimensionMismatch {
+                expected: self.dim,
+                got: query.len(),
+            });
+        }
+
+        let mut coverage = super::SourceCoverage {
+            examined_unit: super::ExaminationUnit::VectorEntries,
+            examined: 0,
+            eligible: 0,
+            exhausted: true,
+            candidate_limited: false,
+            budget_exhausted: false,
+        };
+        if k == 0 || self.entries.is_empty() {
+            return Ok(super::SourceResults {
+                results: Vec::new(),
+                coverage: self.entries.is_empty().then_some(coverage),
+            });
+        }
+
+        let instrumented = crate::performance::enabled();
+        let mut dots = 0usize;
+        let min_score = filter.min_score.unwrap_or(f32::NEG_INFINITY);
+
+        // Min-heap of size K via reversed Ord on ScoredEntry.
+        let mut heap: BinaryHeap<ScoredEntry> = BinaryHeap::with_capacity(k + 1);
+
+        for (i, entry) in self.entries.iter().enumerate() {
+            coverage.examined += 1;
+            if eligible_ids.is_some_and(|ids| !ids.contains(&entry.id))
+                || !Self::passes_filter(entry, filter, &self.tags)
+            {
+                continue;
+            }
+
+            let offset = i * self.dim;
+            let candidate = &self.vectors[offset..offset + self.dim];
+            dots += usize::from(instrumented);
+            let score = dot_product_simd(query, candidate);
+            if !score.is_finite() {
+                return Err(VectorError::CorruptIndex("nonfinite vector score".into()));
+            }
+            let score = if score == 0.0 { 0.0 } else { score };
+
+            if score < min_score {
+                continue;
+            }
+
+            coverage.eligible += 1;
+            if heap.len() < k {
+                heap.push(ScoredEntry {
+                    score,
+                    index: i,
+                    id: entry.id,
+                });
+            } else if let Some(worst) = heap.peek() {
+                if score > worst.score || (score == worst.score && entry.id < worst.id) {
+                    heap.pop();
+                    heap.push(ScoredEntry {
+                        score,
+                        index: i,
+                        id: entry.id,
+                    });
+                }
+            }
+        }
+
+        // Extract results sorted by descending score.
+        // `into_sorted_vec()` returns ascending order by the reversed Ord,
+        // which is already descending by actual score — no additional sort needed.
+        let results: Vec<VectorSearchResult> = heap
+            .into_sorted_vec()
+            .into_iter()
+            .map(|se| VectorSearchResult {
+                id: self.entries[se.index].id,
+                score: se.score,
+                decay_phase: self.entries[se.index].decay_phase,
+            })
+            .collect();
+
+        crate::performance::event!(
+            kind = "vector_scan",
+            examined = self.entries.len(),
+            dot_products = dots,
+            admitted = results.len()
+        );
+        coverage.candidate_limited = coverage.eligible > k;
+        Ok(super::SourceResults {
+            results,
+            coverage: Some(coverage),
+        })
+    }
+}
+
 impl VectorIndex for FlatVectorIndex {
     fn add(
         &mut self,
@@ -312,59 +430,7 @@ impl VectorIndex for FlatVectorIndex {
         k: usize,
         filter: &SearchFilter,
     ) -> Result<Vec<VectorSearchResult>, VectorError> {
-        if query.len() != self.dim {
-            return Err(VectorError::DimensionMismatch {
-                expected: self.dim,
-                got: query.len(),
-            });
-        }
-
-        if k == 0 || self.entries.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let min_score = filter.min_score.unwrap_or(f32::NEG_INFINITY);
-
-        // Min-heap of size K via reversed Ord on ScoredEntry.
-        let mut heap: BinaryHeap<ScoredEntry> = BinaryHeap::with_capacity(k + 1);
-
-        for (i, entry) in self.entries.iter().enumerate() {
-            if !Self::passes_filter(entry, filter, &self.tags) {
-                continue;
-            }
-
-            let offset = i * self.dim;
-            let candidate = &self.vectors[offset..offset + self.dim];
-            let score = dot_product_simd(query, candidate);
-
-            if score < min_score {
-                continue;
-            }
-
-            if heap.len() < k {
-                heap.push(ScoredEntry { score, index: i });
-            } else if let Some(worst) = heap.peek() {
-                if score > worst.score {
-                    heap.pop();
-                    heap.push(ScoredEntry { score, index: i });
-                }
-            }
-        }
-
-        // Extract results sorted by descending score.
-        // `into_sorted_vec()` returns ascending order by the reversed Ord,
-        // which is already descending by actual score — no additional sort needed.
-        let results: Vec<VectorSearchResult> = heap
-            .into_sorted_vec()
-            .into_iter()
-            .map(|se| VectorSearchResult {
-                id: self.entries[se.index].id,
-                score: se.score,
-                decay_phase: self.entries[se.index].decay_phase,
-            })
-            .collect();
-
-        Ok(results)
+        self.search_eligible(query, k, filter, None)
     }
 
     fn len(&self) -> usize {
@@ -441,13 +507,14 @@ impl VectorIndex for FlatVectorIndex {
 /// Internal scored entry for the top-K min-heap.
 #[derive(Debug, Clone)]
 struct ScoredEntry {
+    id: MemoryId,
     score: f32,
     index: usize,
 }
 
 impl PartialEq for ScoredEntry {
     fn eq(&self, other: &Self) -> bool {
-        self.score == other.score && self.index == other.index
+        self.score == other.score && self.id == other.id
     }
 }
 
@@ -467,6 +534,144 @@ impl Ord for ScoredEntry {
             .score
             .partial_cmp(&self.score)
             .unwrap_or(Ordering::Equal)
-            .then_with(|| self.index.cmp(&other.index))
+            .then_with(|| self.id.cmp(&other.id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn measured_source_vector_preserves_exact_score_bits_and_errors() {
+        let id = |n: u128| MemoryId::from_bytes(n.to_be_bytes());
+        let eligible: HashSet<_> = [id(1), id(2), id(3), id(4)].into_iter().collect();
+        for reverse in [false, true] {
+            let mut index = FlatVectorIndex::new(2);
+            let mut rows = vec![(1, 0.75f32), (2, 0.5), (3, 0.5), (4, 1.0), (5, 1.0)];
+            if reverse {
+                rows.reverse();
+            }
+            for (n, score) in rows {
+                index
+                    .add(
+                        id(n),
+                        &[score, (1.0 - score * score).sqrt()],
+                        VectorMetadata {
+                            namespace_id: NamespaceId::new(if n == 4 { 2 } else { 1 }),
+                            decay_phase: 1,
+                            tags: vec![],
+                        },
+                    )
+                    .unwrap();
+            }
+            let filter = SearchFilter {
+                namespace_id: Some(NamespaceId::new(1)),
+                ..Default::default()
+            };
+            for k in [2, 3, 4] {
+                let source = index
+                    .search_eligible_measured(&[1.0, 0.0], k, &filter, Some(&eligible))
+                    .unwrap();
+                let plain = index
+                    .search_eligible(&[1.0, 0.0], k, &filter, Some(&eligible))
+                    .unwrap();
+                let bits = |r: &[VectorSearchResult]| {
+                    r.iter()
+                        .map(|r| (r.id, r.score.to_bits()))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(bits(&source.results), bits(&plain));
+                assert_eq!(
+                    bits(&source.results),
+                    [
+                        (id(1), 0.75f32.to_bits()),
+                        (id(2), 0.5f32.to_bits()),
+                        (id(3), 0.5f32.to_bits())
+                    ]
+                    .into_iter()
+                    .take(k)
+                    .collect::<Vec<_>>()
+                );
+                let c = source.coverage.unwrap();
+                assert_eq!((c.examined, c.eligible), (5, 3));
+                assert!(c.exhausted);
+                assert_eq!(c.candidate_limited, k < 3);
+                assert!(!c.budget_exhausted);
+            }
+            let zero = index
+                .search_eligible_measured(&[1.0, 0.0], 0, &filter, Some(&eligible))
+                .unwrap();
+            assert!(zero.results.is_empty());
+            assert_eq!(zero.coverage, None); // No traversal of a nonempty source.
+            assert!(
+                index
+                    .search_eligible_measured(&[1.0], 2, &filter, Some(&eligible))
+                    .is_err()
+            );
+            let offset = index.id_to_slot[&id(1)] * 2;
+            index.vectors[offset] = f32::NAN;
+            assert!(
+                index
+                    .search_eligible_measured(&[1.0, 0.0], 2, &filter, Some(&eligible))
+                    .is_err()
+            );
+            assert!(
+                index
+                    .search_eligible(&[1.0, 0.0], 2, &filter, Some(&eligible))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn eligible_top_k_uses_uuid_ties_at_heap_boundary_in_any_insertion_order() {
+        let ids: Vec<_> = (1u128..=20)
+            .map(|n| MemoryId::from_bytes(n.to_be_bytes()))
+            .collect();
+        let eligible: HashSet<_> = ids
+            .iter()
+            .copied()
+            .filter(|id| id.as_bytes()[15] % 2 == 0)
+            .collect();
+        for reverse in [false, true] {
+            let mut insertion = ids.clone();
+            if reverse {
+                insertion.reverse();
+            }
+            let mut index = FlatVectorIndex::new(2);
+            for id in insertion {
+                index
+                    .add(
+                        id,
+                        &[1.0, 0.0],
+                        VectorMetadata {
+                            namespace_id: NamespaceId::new(1),
+                            decay_phase: 1,
+                            tags: Vec::new(),
+                        },
+                    )
+                    .unwrap();
+            }
+            let results = index
+                .search_eligible(&[1.0, 0.0], 3, &SearchFilter::default(), Some(&eligible))
+                .unwrap();
+            assert_eq!(
+                results.iter().map(|r| r.id).collect::<Vec<_>>(),
+                vec![ids[1], ids[3], ids[5]]
+            );
+            assert!(results.iter().all(|r| r.score == 1.0));
+            assert!(
+                index
+                    .search_eligible(
+                        &[1.0, 0.0],
+                        3,
+                        &SearchFilter::default(),
+                        Some(&HashSet::new())
+                    )
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 }

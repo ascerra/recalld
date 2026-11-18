@@ -24,42 +24,297 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    fn supports_prepared_get(&self) -> bool {
+        false
+    }
+    async fn get_contract(
+        &self,
+        _request: crate::serialization::get::GetRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        crate::serialization::get::GetReply::failure(crate::search::SearchError::Unavailable(
+            "prepared get requires the actual coherent owner".into(),
+        ))
+    }
+    /// Private transport support requires the actual pre-observation bound.
+    /// An implementation of the unbounded methods alone cannot advertise it.
+    fn supports_prepared_queries(&self) -> bool {
+        false
+    }
+    async fn query_contract_bounded(
+        &self,
+        _request: crate::serialization::query::QueryRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn similar_contract_bounded(
+        &self,
+        _request: crate::serialization::query::SimilarRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn similar_contract(
+        &self,
+        _request: crate::serialization::query::SimilarRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn query_contract(
+        &self,
+        _request: crate::serialization::query::QueryRequest,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    /// Exact canonical/vector page. Public application v2 remains gated.
+    async fn scan_duplicate_pairs(
+        &self,
+        _request: crate::serialization::scan::ExactScanRequest,
+    ) -> Result<crate::search::exact_scan::ExactScanPage, crate::search::exact_scan::ExactScanError>
+    {
+        Err(crate::search::exact_scan::ExactScanError::Unavailable)
+    }
+
     /// Execute a semantic search query.
     async fn search(&self, query: SearchInput) -> Result<SearchResponse, BridgeError>;
 
     /// Find memories similar to an existing memory by its ID.
+    /// `namespace`, when supplied, asserts canonical source scope before effects.
     async fn find_similar(
         &self,
         id: MemoryId,
         limit: usize,
         min_score: Option<f32>,
         same_namespace: bool,
+        record_access: bool,
+        namespace: Option<&str>,
     ) -> Result<Vec<SearchHit>, BridgeError>;
 
     /// Scan a namespace for clusters of near-duplicate memories.
     ///
-    /// Samples up to `max_memories` from the namespace, runs pairwise
-    /// similarity checks, and groups memories whose similarity exceeds
-    /// `threshold` into clusters.
+    /// Samples up to `max_memories` and groups threshold-connected memories
+    /// found by bounded nearest-neighbor searches; not an exhaustive pair scan.
     async fn scan_duplicates(
         &self,
         namespace: &str,
         threshold: f32,
         max_memories: usize,
     ) -> Result<Vec<DuplicateCluster>, BridgeError>;
+
+    /// Same scan with observed coverage. Legacy implementations cannot report counts.
+    async fn scan_duplicates_with_coverage(
+        &self,
+        namespace: &str,
+        threshold: f32,
+        max_memories: usize,
+    ) -> Result<DuplicateScanReport, BridgeError> {
+        Ok(DuplicateScanReport {
+            clusters: self
+                .scan_duplicates(namespace, threshold, max_memories)
+                .await?,
+            coverage: None,
+        })
+    }
 }
 
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Ordinary point routing must be implemented by the actual serving owner.
+    fn supports_api1_get(&self) -> bool {
+        false
+    }
+    async fn get_api1(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        _response_limit: usize,
+    ) -> crate::serialization::get_api1::Reply {
+        crate::serialization::get_api1::Reply::compatibility(
+            self.get_memory(
+                request.id,
+                request.record_access,
+                request.namespace.as_deref(),
+            )
+            .await,
+        )
+    }
+    /// Private canonical metadata pages require an actual owning implementation.
+    fn supports_canonical_pages(&self) -> bool {
+        false
+    }
+
+    /// Optional identity captured from the configured provider when this adapter
+    /// was constructed. Metadata calls never invoke a provider to obtain it.
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        None
+    }
+    /// Canonical catalogs; older/remote adapters fail closed without v1 fallback.
+    async fn list_catalog_page(
+        &self,
+        _request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        Err(crate::catalog_page::CatalogError::Unavailable)
+    }
+
+    /// Canonical metadata page; unsupported/remote adapters fail closed.
+    async fn list_canonical_page(
+        &self,
+        _request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        Err(crate::canonical_list::ListError::Unavailable)
+    }
+
+    fn supports_api1_store(&self) -> bool {
+        false
+    }
+    async fn store_api1(
+        &self,
+        request: crate::serialization::store_api1::Request,
+    ) -> crate::serialization::store_api1::Reply {
+        use crate::serialization::store_api1::Reply;
+        if request.require_native {
+            return Reply::unavailable();
+        }
+        if let Err(error) = request.validate_legacy() {
+            return Reply::Legacy(Err(error.to_string()));
+        }
+        Reply::Legacy(
+            self.store_memory(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+    async fn store_native_wire(
+        &self,
+        _request: crate::serialization::native_single::Request,
+    ) -> crate::serialization::native_single::Reply {
+        crate::serialization::native_single::Reply::failure(
+            crate::storage::StorageError::RecoveryRequired(
+                "native single consumer unavailable".into(),
+            ),
+        )
+    }
+    fn supports_api1_store_batch(&self) -> bool {
+        false
+    }
+    async fn store_batch_api1(
+        &self,
+        request: crate::serialization::batch_api1::Request,
+    ) -> crate::serialization::batch_api1::Reply {
+        use crate::serialization::batch_api1::Reply;
+        if let Err(e) = request.legacy() {
+            return Reply::invalid(e);
+        }
+        Reply::Legacy(
+            self.mutate_batch(request.input)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+    async fn mutate_native_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<
+        crate::serialization::native_batch::NativeBatchOutcome,
+        crate::serialization::native_batch::BatchFailure,
+    > {
+        Err(crate::serialization::native_batch::BatchFailure::unavailable())
+    }
+    fn supports_api1_lifecycle(&self) -> bool {
+        false
+    }
+    async fn api1_lifecycle(
+        &self,
+        request: crate::serialization::native_lifecycle::Request,
+        operation: crate::serialization::native_lifecycle::Operation,
+    ) -> crate::serialization::lifecycle_api1::Reply {
+        use crate::serialization::{
+            lifecycle_api1::{Reply, Value},
+            native_lifecycle::{self, Operation},
+        };
+        if let Err(error) =
+            crate::serialization::lifecycle_api1::parse(&request.wire(operation), operation)
+        {
+            return Reply::failure(native_lifecycle::Reply::input(error));
+        }
+        // Old Rust implementations retain their API1 entry, selected before work.
+        let result = match operation {
+            Operation::Feedback => self
+                .reinforce_memory(request.id, request.quality, request.namespace.as_deref())
+                .await
+                .map(|result| Value::Feedback { result }),
+            Operation::Forget => self
+                .delete_memory(request.id, request.namespace.as_deref())
+                .await
+                .map(|deleted| Value::Forget { deleted }),
+        };
+        match result {
+            Ok(value) => Reply::compatibility(value),
+            Err(e) => Reply::bridge_error(e),
+        }
+    }
+
+    async fn forget_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    async fn feedback_native(
+        &self,
+        _request: crate::serialization::native_lifecycle::Request,
+    ) -> crate::serialization::native_lifecycle::Reply {
+        crate::serialization::native_lifecycle::Reply::unavailable(
+            "native lifecycle adapter unavailable",
+        )
+    }
+
+    /// Old implementations cannot manufacture durable receipts. The actual
+    /// direct and daemon adapters opt in; callers never fall back after a write.
+    fn supports_durable_batches(&self) -> bool {
+        false
+    }
+
+    async fn mutate_batch(
+        &self,
+        _input: crate::storage::batch::BatchInput,
+    ) -> Result<crate::storage::batch::BatchOutcome, BridgeError> {
+        Err(BridgeError::InvalidInput(
+            "durable batch protocol is not supported by this storage adapter".into(),
+        ))
+    }
+
+    /// Optional resolved backend context; old adapters must not invent identity.
+    async fn backend_context(
+        &self,
+    ) -> Result<crate::serialization::session::BackendContext, BridgeError> {
+        Err(BridgeError::Unavailable(
+            "backend context unavailable".into(),
+        ))
+    }
     /// Store a new memory and return a summary of the stored record.
     async fn store_memory(&self, input: StoreInput) -> Result<StoredMemory, BridgeError>;
 
     /// Retrieve a full memory record by ID, or `None` if not found.
-    async fn get_memory(&self, id: MemoryId) -> Result<Option<MemoryRecord>, BridgeError>;
+    /// `namespace`, when supplied, asserts canonical scope; unknown IDs are errors.
+    async fn get_memory(
+        &self,
+        id: MemoryId,
+        record_access: bool,
+        namespace: Option<&str>,
+    ) -> Result<Option<MemoryRecord>, BridgeError>;
 
     /// Delete a memory by ID. Returns `true` if the memory existed and was deleted.
-    async fn delete_memory(&self, id: MemoryId) -> Result<bool, BridgeError>;
+    /// `namespace`, when supplied, must match canonical scope before mutation.
+    async fn delete_memory(
+        &self,
+        id: MemoryId,
+        namespace: Option<&str>,
+    ) -> Result<bool, BridgeError>;
 
     /// Delete many memories in one pass.
     ///
@@ -71,10 +326,12 @@ pub trait StorageEngine: Send + Sync {
     async fn delete_memories(&self, ids: &[MemoryId]) -> Result<Vec<bool>, BridgeError>;
 
     /// Reinforce a memory with the given FSRS quality rating (1-4).
+    /// `namespace`, when supplied, must match canonical scope before mutation.
     async fn reinforce_memory(
         &self,
         id: MemoryId,
         quality: u8,
+        namespace: Option<&str>,
     ) -> Result<ReinforceResult, BridgeError>;
 
     /// List memories in a namespace with pagination and optional filters.
@@ -94,6 +351,25 @@ pub trait StorageEngine: Send + Sync {
 /// Namespace registry interface.
 #[async_trait]
 pub trait NamespaceRegistry: Send + Sync {
+    async fn update_native_policy(
+        &self,
+        _request: crate::serialization::policy::PolicyRequest,
+    ) -> Result<
+        crate::native_catalog_adapter::PolicyOutcome,
+        crate::native_catalog_adapter::CatalogError,
+    > {
+        Err(crate::native_catalog_adapter::CatalogError::Unavailable)
+    }
+
+    /// Native catalog entry remains behind the unconditional public v2 gate.
+    async fn create_native_namespace(
+        &self,
+        _request: crate::serialization::catalog::CreateNamespaceRequest,
+    ) -> Result<crate::storage::control::WriteReceipt, crate::native_catalog_adapter::CatalogError>
+    {
+        Err(crate::native_catalog_adapter::CatalogError::Unavailable)
+    }
+
     /// List all namespaces.
     async fn list_namespaces(&self) -> Result<Vec<NamespaceInfo>, BridgeError>;
 
@@ -116,6 +392,17 @@ pub trait NamespaceRegistry: Send + Sync {
         &self,
         input: DeleteNamespaceInput,
     ) -> Result<DeleteNamespaceResult, BridgeError>;
+
+    /// Transport-owned bound, never a field trusted from request JSON. The
+    /// default preserves existing implementors; native implementations must
+    /// override this to admit their complete commit evidence before work.
+    async fn delete_namespace_bounded(
+        &self,
+        input: DeleteNamespaceInput,
+        _frame_limit: usize,
+    ) -> Result<DeleteNamespaceResult, BridgeError> {
+        self.delete_namespace(input).await
+    }
 }
 
 /// Health check interface.
@@ -133,6 +420,16 @@ pub trait HealthChecker: Send + Sync {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchInput {
+    /// Internal response shaping: compact tools do not expose graph neighbors.
+    /// Defaults true for existing direct/daemon search clients.
+    #[serde(default = "crate::search::default_record_access")]
+    pub include_neighbors: bool,
+    /// False forbids retrieval-attributable writes; omission preserves v1 behavior.
+    #[serde(
+        rename = "recordAccess",
+        default = "crate::search::default_record_access"
+    )]
+    pub record_access: bool,
     /// Natural language search query.
     pub query: String,
     /// Namespace to search within.
@@ -173,6 +470,9 @@ pub struct RelatedMemory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NeighborMemory {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID of the neighbor.
     pub id: String,
     /// Short summary of the neighbor memory.
@@ -208,6 +508,9 @@ pub struct SearchResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Short summary of the memory.
@@ -241,6 +544,38 @@ pub struct SearchHit {
     /// Related memories connected by graph edges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<RelatedMemory>,
+}
+
+/// Public MCP sample cap and per-source vector candidate cap (including self).
+pub const DUPLICATE_SAMPLE_CAP: usize = 200;
+pub const DUPLICATE_NEIGHBOR_CAP: usize = 11;
+
+/// Legacy clusters plus optional coverage; None means an older bridge/daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanReport {
+    pub clusters: Vec<DuplicateCluster>,
+    pub coverage: Option<DuplicateScanCoverage>,
+}
+
+/// Observed scan counts, not a generation-consistent namespace snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanCoverage {
+    pub algorithm: String,
+    /// Live records before sampling; includes ghosts and records with missing vectors.
+    pub eligible_count: usize,
+    pub sampled_count: usize,
+    /// Sampled records whose vectors were absent at vector loading time.
+    pub skipped_vector_count: usize,
+    pub sample_cap: usize,
+    /// Vector candidates per source, including self when returned.
+    pub neighbor_cap: usize,
+    /// Whether the record sample was truncated; separate from neighbor limiting.
+    pub truncated: bool,
+    pub counts_available: bool,
+    /// Always false for this bounded, unpinned scan.
+    pub complete: bool,
 }
 
 /// A cluster of near-duplicate memories found during namespace scan.
@@ -354,6 +689,9 @@ pub struct StoredMemory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryRecord {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Namespace the memory belongs to.
@@ -482,6 +820,9 @@ pub struct ListTagsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMemoryEntry {
+    /// Exact persisted structured labels and provenance; omitted for legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
     /// Short summary of the memory.
@@ -675,6 +1016,13 @@ pub enum BridgeError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// A provider or required service cannot satisfy the operation.
+    #[error("Unavailable: {0}")]
+    Unavailable(String),
+    /// An explicit by-ID namespace assertion failed.
+    #[error("{0}")]
+    NamespaceMismatch(String),
+
     /// A storage subsystem error occurred.
     #[error("Storage error: {0}")]
     Storage(String),
@@ -702,6 +1050,18 @@ pub enum BridgeError {
     /// destroyed records are still there.
     #[error("Partially applied: {0}")]
     PartiallyApplied(String),
+}
+
+impl From<crate::storage::StorageError> for BridgeError {
+    fn from(error: crate::storage::StorageError) -> Self {
+        use crate::storage::StorageError;
+        match error {
+            StorageError::NamespaceMismatch { .. } => Self::NamespaceMismatch(error.to_string()),
+            StorageError::NotFound(_) => Self::NotFound(error.to_string()),
+            StorageError::InvalidNamespaceName { .. } => Self::InvalidInput(error.to_string()),
+            _ => Self::Storage(error.to_string()),
+        }
+    }
 }
 
 impl BridgeError {

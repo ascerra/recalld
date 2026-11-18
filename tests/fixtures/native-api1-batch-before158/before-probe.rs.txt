@@ -1,0 +1,71 @@
+//! Public-route regressions and separately labeled private-history evidence.
+use super::*;
+
+async fn batch_http(api: &axum::Router, body: Value) -> (u16, Value) {
+    use tower::ServiceExt;
+    let response = api.clone().oneshot(axum::http::Request::post("/memories/batch")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(serde_json::to_vec(&body).unwrap())).unwrap()).await.unwrap();
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(response.into_body(), crate::daemon::protocol::MAX_MESSAGE_SIZE).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[tokio::test]
+async fn api1_batch_public_mcp_native_unicode() {
+    let (_d, f, a, provider, _clock) = setup().await;
+    let result = crate::mcp::tools::dispatch_tool(&bridge(a), "store_memories",
+        json!({"memories":[{"summary":"batch Unicode", "entities":["John Smith","José","Alice's"],"checkDuplicates":false}]})).await;
+    let crate::mcp::protocol::ContentBlock::Text {text} = &result.content[0];
+    let value: Value = serde_json::from_str(text).unwrap_or(json!({"error":text}));
+    assert_eq!(value["stored"], 1, "{result:?}");
+    assert_ne!(result.is_error, Some(true));
+    let id: MemoryId = serde_json::from_value(value["results"][0]["id"].clone()).unwrap();
+    assert_eq!(f.storage.read().unwrap().get_record(id).unwrap().unwrap().schema.unwrap().labels.entities,["John Smith","José","Alice's"]);
+    assert_eq!(provider.calls.load(Ordering::SeqCst),1);
+}
+
+#[tokio::test]
+async fn api1_batch_public_rest_native_unicode_timestamp() {
+    let (d,f,a,provider,_clock)=setup().await;
+    let api=router(&f,a,provider.clone());
+    let (status,value)=batch_http(&api,json!({"memories":[{"namespace":"native","summary":"batch HTTP", "entities":["José"],"embedding":[2.,-0.,0.,0.],"embeddingProfileId":d.profile.profile_id().unwrap(),"createdAt":500,"initialStability":12.,"checkDuplicates":false}]})).await;
+    assert_eq!(status,201,"{value}");
+    assert_eq!(value["data"]["total"],1,"{value}");
+    let id:MemoryId=serde_json::from_value(value["data"]["created"][0]["id"].clone()).unwrap();
+    let record=f.storage.read().unwrap().get_record(id).unwrap().unwrap();
+    assert_eq!(record.created_at,500);
+    assert_eq!(record.stability,12.);
+    assert_eq!(record.schema.unwrap().labels.entities,["José"]);
+    assert_eq!(provider.calls.load(Ordering::SeqCst),0);
+}
+
+// This exporter runs ONLY on the recorded158 production source. It is private
+// original1 history, not evidence that the prior public API1 route accepted it.
+#[tokio::test]
+#[ignore = "historical fixture generator: run only on recorded158 source"]
+async fn api1_batch_private_before_timestamp_rejection_export() {
+    let output=PathBuf::from(std::env::var("RECALLD_BATCH_API1_BEFORE").unwrap());
+    std::fs::create_dir_all(&output).unwrap();
+    let root=tempfile::tempdir_in(&output).unwrap();
+    let d=fixture(root.path());
+    let clock=Arc::new(FixedClock(AtomicUsize::new(0)));
+    let session=open(&d,clock.clone());
+    let f=Fixture::from_open_engine(root,session.engine);
+    readers::completion(&f).complete().await.unwrap();
+    let provider=Arc::new(RecoveringProvider{profile:d.profile.clone(),unavailable:false.into(),calls:AtomicUsize::new(0),profiles:AtomicUsize::new(0),corrupt:Default::default()});
+    let a=adapter(&f,provider.clone(),clock,Default::default());
+    let r=crate::storage::batch::BatchInput {
+        request_context:crate::storage::request_context::RetainedRequestContext::from_contract(1).unwrap(),
+        expected_generation:None,result_version:1,mutation_version:3,kind:crate::storage::batch::BatchKind::Insert,
+        items:vec![json!({"summary":"old private timestamp", "createdAt":500,"initialStability":12.,"checkDuplicates":false})],
+        default_namespace:"native".into(),store_id:Some(f.storage.read().unwrap().control_state().unwrap().store_id),idempotency_key:Some("before-timestamp".into()),batch_operation_id:None,
+    };
+    let outcome=a.mutate_native_batch(r.clone()).await.unwrap();
+    assert_eq!(outcome.outcome.failed,1);assert_eq!(outcome.outcome.succeeded,0);assert_eq!(provider.calls.load(Ordering::SeqCst),0);
+    let p=f.storage.read().unwrap().meta_store().lookup_batch(r.store_id.unwrap(),outcome.outcome.batch_operation_id).unwrap().unwrap();
+    assert_eq!(p.original_contract().unwrap(),1);
+    let manifest=json!({"path":d.path,"namespace":d.ns,"parent":d.parent,"profile":d.profile,"request":r,"outcome":outcome,"progress":p});
+    std::fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    drop(a);let _kept=f.close().keep();
+}

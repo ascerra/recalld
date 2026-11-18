@@ -1,0 +1,28 @@
+f32bits=7f7fffff initial=3.4028235e+38
+iteration=0 raw=3.4028235e+38 next=3.4028235e+38 stable=true f32bits=7f7fffff
+iteration=1 raw=3.4028235e+38 next=3.4028235e+38 stable=true f32bits=7f7fffff
+iteration=2 raw=3.4028235e+38 next=3.4028235e+38 stable=true f32bits=7f7fffff
+iteration=3 raw=3.4028235e+38 next=3.4028235e+38 stable=true f32bits=7f7fffff
+iteration=4 raw=3.4028235e+38 next=3.4028235e+38 stable=true f32bits=7f7fffff
+iteration=5 raw=3.4028235e+38 next=3.4028235e+38 stable=true f32bits=7f7fffff
+f32bits=00000001 initial=1e-45
+iteration=0 raw=1e-45 next=1.0000000000000001e-45 stable=false f32bits=00000001
+iteration=1 raw=1.0000000000000001e-45 next=1e-45 stable=false f32bits=00000001
+iteration=2 raw=1e-45 next=1.0000000000000001e-45 stable=false f32bits=00000001
+iteration=3 raw=1.0000000000000001e-45 next=1e-45 stable=false f32bits=00000001
+iteration=4 raw=1e-45 next=1.0000000000000001e-45 stable=false f32bits=00000001
+iteration=5 raw=1.0000000000000001e-45 next=1e-45 stable=false f32bits=00000001
+f32bits=3f7fffff initial=0.99999994
+iteration=0 raw=0.99999994 next=0.99999994 stable=true f32bits=3f7fffff
+iteration=1 raw=0.99999994 next=0.99999994 stable=true f32bits=3f7fffff
+iteration=2 raw=0.99999994 next=0.99999994 stable=true f32bits=3f7fffff
+iteration=3 raw=0.99999994 next=0.99999994 stable=true f32bits=3f7fffff
+iteration=4 raw=0.99999994 next=0.99999994 stable=true f32bits=3f7fffff
+iteration=5 raw=0.99999994 next=0.99999994 stable=true f32bits=3f7fffff
+f32bits=411fffff initial=9.999999
+iteration=0 raw=9.999999 next=9.999999 stable=true f32bits=411fffff
+iteration=1 raw=9.999999 next=9.999999 stable=true f32bits=411fffff
+iteration=2 raw=9.999999 next=9.999999 stable=true f32bits=411fffff
+iteration=3 raw=9.999999 next=9.999999 stable=true f32bits=411fffff
+iteration=4 raw=9.999999 next=9.999999 stable=true f32bits=411fffff
+iteration=5 raw=9.999999 next=9.999999 stable=true f32bits=411fffff

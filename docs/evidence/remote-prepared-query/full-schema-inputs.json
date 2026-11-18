@@ -1,0 +1,21 @@
+{
+  "runnerSha256": "2daa62f7bd37e12b430e2486b649d2b65e8bf0b25bd16ce2a28c801f47ade6b3",
+  "fixtures": {
+    "input-cases.json": "09b2b705265f4c1dd4363ba017c1d0c2aeab1339c5a65dd21c5e086342862b4d",
+    "maximal-valid-receipts.json": "9c4eb7ce4efe7bd1f2c94d9334e4985188a6820ebb151816cb40f0552a88e830",
+    "recall-canonical-evidence.json": "87e7a8c851f2aef9635f23cb01f2b97b46d228826921882f6e9be38fd7a83ce3",
+    "recall-explained.json": "253879e3a3605c13372fb387a3bdc21e3140e6c7d7860f2f55375363b1eedb49",
+    "recall-known-failure.json": "1ff0667129a21492114d8353053180ba29dbf53a6a45cd2ec8964c57ec909692",
+    "recall-legacy-observed.json": "3667f3f12e426afd30127de3dc48ac061baf7c80503b6ec33ba03e58e4da6f82",
+    "recall-plain.json": "c9ae6388f834b6a6b67a7dc04f8661e7f8bee7c78f9db31cc893efa6e3ce324e",
+    "recall-supplemental.json": "b17c7dca7ca4ab076375a72ba56d7d250651db23f23091b42ca54c8a6649db6b",
+    "remote-parent-false.json": "ad6c2bdf606df530f7b77af6e735500a80e373e4f9356386c9135da20c38db84",
+    "remote-parent-true.json": "0da934eaf2f65f2ca16966269a8d2a87195d66ca2b9cbf21c1a98b972a31e949",
+    "similar-evidence-dense.json": "3c0efd911a3f47241a4b0cd143d77aa92e92ff69e1d54c39d2fb6ef3a019aa0c",
+    "similar-evidence.json": "9e85e735875c928259ad3538ac2a9d6c50b582a52dff2288aef94a3cd3322b71",
+    "similar-false-rejected.json": "6a7c2b0a69fb1bb68b01b25a9243a0661e5294eb8cf28d10df10e56f89c435e0",
+    "similar-native-observed.json": "beebee14d02be8db5f461fcf5c7e3ee0a593f274ddd3d99a1322e5a6e1ec5dbd",
+    "similar-plain.json": "0f184dfc037d4d2064c020c68590ffa621d72bc0beffbef740536a8e7c2938d0",
+    "similar-true-rejected.json": "6a7c2b0a69fb1bb68b01b25a9243a0661e5294eb8cf28d10df10e56f89c435e0"
+  }
+}

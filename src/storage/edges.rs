@@ -21,12 +21,13 @@ use crate::storage::error::StorageError;
 /// Forward edge index.
 /// Key:   (source_uuid, edge_type, target_uuid) = 33 bytes
 /// Value: EdgeMetadata (weight, auto_created, created_at) = 13 bytes
-const FORWARD_EDGES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("edges_forward");
+pub(crate) const FORWARD_EDGES: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("edges_forward");
 
 /// Reverse edge index for efficient incoming-edge lookups.
 /// Key:   (target_uuid, edge_type, source_uuid) = 33 bytes
 /// Value: () -- metadata lives only in the forward index.
-const REVERSE_EDGES: TableDefinition<&[u8], ()> = TableDefinition::new("edges_reverse");
+pub(crate) const REVERSE_EDGES: TableDefinition<&[u8], ()> = TableDefinition::new("edges_reverse");
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -129,7 +130,7 @@ fn decode_edge_value(value: &[u8]) -> Result<(f32, bool, u64), StorageError> {
 
 /// An edge record as stored in edges.db.
 /// Used for disk I/O -- the in-memory graph uses `GraphEdge` (CS-10).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedEdge {
     /// Source memory ID (edge origin).
     pub source: MemoryId,
@@ -147,7 +148,7 @@ pub struct PersistedEdge {
 
 impl PersistedEdge {
     /// Construct from a decoded forward key and value.
-    fn from_forward(key: &[u8], value: &[u8]) -> Result<Self, StorageError> {
+    pub(crate) fn from_forward(key: &[u8], value: &[u8]) -> Result<Self, StorageError> {
         let (source, edge_type, target) = decode_forward_key(key)?;
         let (weight, auto_created, created_at) = decode_edge_value(value)?;
         Ok(PersistedEdge {
@@ -176,8 +177,12 @@ pub struct EdgeStore {
 }
 
 impl EdgeStore {
+    pub(crate) fn read_transaction(&self) -> Result<redb::ReadTransaction, StorageError> {
+        Ok(self.db.begin_read()?)
+    }
+
     /// Open or create the edge store at the given path.
-    pub fn open(path: &Path) -> Result<Self, StorageError> {
+    pub(crate) fn open(path: &Path) -> Result<Self, StorageError> {
         let db = Database::create(path)?;
 
         // Ensure tables exist.
@@ -196,11 +201,56 @@ impl EdgeStore {
         })
     }
 
+    pub(crate) fn apply_effects(
+        &self,
+        puts: &[PersistedEdge],
+        deletes: &[PersistedEdge],
+    ) -> Result<(), StorageError> {
+        let tx = self.db.begin_write()?;
+        {
+            let mut fwd = tx.open_table(FORWARD_EDGES)?;
+            let mut rev = tx.open_table(REVERSE_EDGES)?;
+            for e in deletes {
+                fwd.remove(encode_forward_key(&e.source, e.edge_type, &e.target).as_slice())?;
+                rev.remove(encode_reverse_key(&e.target, e.edge_type, &e.source).as_slice())?;
+            }
+            for e in puts {
+                fwd.insert(
+                    encode_forward_key(&e.source, e.edge_type, &e.target).as_slice(),
+                    encode_edge_value(e.weight, e.auto_created, e.created_at).as_slice(),
+                )?;
+                rev.insert(
+                    encode_reverse_key(&e.target, e.edge_type, &e.source).as_slice(),
+                    &(),
+                )?;
+            }
+        }
+        crate::storage::metadata::effects::crash_point("before_edge_commit");
+        crate::performance::event!(
+            kind = "commit_call",
+            resource = "edge_effects",
+            phase = "attempt",
+            sync_coverage = "opaque_backend"
+        );
+        let timer = crate::performance::Timer::new("edge.effects_commit");
+        let result = tx.commit();
+        crate::performance::event!(
+            kind = "commit_call",
+            resource = "edge_effects",
+            phase = "return",
+            success = result.is_ok(),
+            sync_coverage = "opaque_backend"
+        );
+        timer.outcome(result.is_ok());
+        result?;
+        Ok(())
+    }
+
     /// Persist a single edge to both forward and reverse indexes.
     ///
     /// If an edge with the same (source, edge_type, target) already
     /// exists, it is silently overwritten (upsert semantics).
-    pub fn add_edge(
+    pub(super) fn add_edge(
         &self,
         source: MemoryId,
         target: MemoryId,
@@ -285,7 +335,7 @@ impl EdgeStore {
     /// Remove all edges where `memory_id` appears as source or target.
     ///
     /// Returns the total number of edges removed.
-    pub fn remove_all_edges(&self, memory_id: MemoryId) -> Result<usize, StorageError> {
+    pub(super) fn remove_all_edges(&self, memory_id: MemoryId) -> Result<usize, StorageError> {
         let outgoing = self.get_outgoing_full(memory_id)?;
         let incoming = self.get_incoming_full(memory_id)?;
 
@@ -334,7 +384,7 @@ impl EdgeStore {
     }
 
     /// Persist multiple edges atomically in a single transaction.
-    pub fn batch_add_edges(&self, edges: &[PersistedEdge]) -> Result<(), StorageError> {
+    pub(super) fn batch_add_edges(&self, edges: &[PersistedEdge]) -> Result<(), StorageError> {
         if edges.is_empty() {
             return Ok(());
         }
@@ -361,7 +411,7 @@ impl EdgeStore {
     }
 
     /// Remove multiple edges atomically in a single transaction.
-    pub fn batch_remove_edges(&self, edges: &[PersistedEdge]) -> Result<(), StorageError> {
+    pub(super) fn batch_remove_edges(&self, edges: &[PersistedEdge]) -> Result<(), StorageError> {
         if edges.is_empty() {
             return Ok(());
         }

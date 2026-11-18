@@ -1,0 +1,21 @@
+{
+  "image": "recalld-ci:1.94",
+  "imageId": "sha256:daefdc9cbe9b0f39b1fc29d975148b3b10adc1bd4309f9ca1be8abd36ed811ef",
+  "RUSTUP_TOOLCHAIN": "1.94.1",
+  "rustc": {
+    "release": "1.94.1",
+    "commit": "e408947bfd200af42db322daf0fadfe7e26d3bd1",
+    "host": "aarch64-unknown-linux-gnu",
+    "llvm": "21.1.8"
+  },
+  "cargo": {
+    "release": "1.94.1",
+    "commit": "29ea6fb6a5db279426f4cc4e17aa385f05a0cfbc",
+    "host": "aarch64-unknown-linux-gnu"
+  },
+  "network": "none",
+  "cpus": 2,
+  "memoryBytes": 4294967296,
+  "CARGO_BUILD_JOBS": 1,
+  "mounts": "source/runner read-only; one private cargo/target and evidence writable; no home/credentials/daemon sockets"
+}

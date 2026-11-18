@@ -1,0 +1,6 @@
+{
+  "size": 36761,
+  "mtime_ns": 1794685881530822590,
+  "sha256": "5e747418194a58186646d8e52eb3a21edabf1fa7b346241481bda77a6916672c",
+  "note": "Docker rustfmt read reported source truncated at line950/asse; host file is complete. Formatter failed; no tests executed. Next Docker run must verify full source hashes before formatting/build."
+}
