@@ -32,6 +32,7 @@ pub mod inherited_policy;
 mod inherited_policy_tests;
 pub mod insertion;
 pub mod lifecycle_migration;
+pub mod legacy_vector_repair;
 pub(crate) mod lineage;
 pub mod logical_export;
 pub mod maintenance;
