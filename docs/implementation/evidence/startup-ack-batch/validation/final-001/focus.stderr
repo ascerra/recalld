@@ -1,5 +1,0 @@
-STARTUP_ACK_WORK backlog=32 AckWork { validation_calls: 1, effect_rows: 32, commit_attempts: 1, commit_successes: 1 }
-STARTUP_ACK_WORK backlog=0 AckWork { validation_calls: 1, effect_rows: 0, commit_attempts: 0, commit_successes: 0 }
-STARTUP_ACK_WORK backlog=1 AckWork { validation_calls: 1, effect_rows: 1, commit_attempts: 1, commit_successes: 1 }
-STARTUP_ACK_WORK backlog=256 AckWork { validation_calls: 1, effect_rows: 256, commit_attempts: 1, commit_successes: 1 }
-STARTUP_ACK_NATIVE backlog=2 AckWork { validation_calls: 1, effect_rows: 2, commit_attempts: 1, commit_successes: 1 }

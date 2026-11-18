@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "/work/source/scripts/check_paired_mcp_evaluation.py", line 126, in <module>
-    if __name__=='__main__':main()
-                            ^^^^^^
-  File "/work/source/scripts/check_paired_mcp_evaluation.py", line 61, in main
-    assert all(v for k,v in comparison.items() if k!='episodeId'),comparison
-AssertionError: {'episodeId': 'episode-0', 'actorCodeEqual': True, 'actorInputsEqual': True, 'onlyDeclaredRequestLimitDiffers': False, 'providerInputsVectorsEqual': True}

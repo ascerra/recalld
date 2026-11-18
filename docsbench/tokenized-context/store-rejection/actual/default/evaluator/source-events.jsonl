@@ -1,6 +1,0 @@
-{"sourceId": "turn-0", "status": "seen", "reason": "public-mcp-raw-synthetic"}
-{"sourceId": "turn-0", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
-{"sourceId": "turn-0", "status": "accepted", "reason": "public-success-no-readiness-claim", "memoryId": "01a1e120-56c7-73b0-9faa-d63f2632240f"}
-{"sourceId": "turn-1", "status": "seen", "reason": "public-mcp-raw-synthetic"}
-{"sourceId": "turn-1", "status": "attempted", "reason": "public-mcp-raw-synthetic"}
-{"sourceId": "turn-1", "status": "rejected", "reason": "public-tool-error"}

@@ -1,5 +1,0 @@
-# First response-bound focus: retained unequal-parse-stage assertion failure
-
-Source31db9cea00800afe5a6a95865a02387fda48e92f; exe764248fd75016e6faab3c84c9536e3ff2f7e4ea2393a6a4808211b4202127a0e. Compile passed46.35s; focused19PASS/1FAIL/1historical ignored72.81s. The sole failure compares parsed text JSON to the pre-parse structured Value at src/serialization/get_tests.rs:264. With the existing serde_json configuration f32::MAX promoted to f64 serializes as3.4028234663852886e38 and reparses as3.402823466385289e38. These were unequal parse stages. No runtime mismatch between serialized branches was established.
-
-All actual engine/direct transport, cancellation/close/outbox, typed receipt-bound, and bounded-input rejection checks passed on this exact source. The next delta changes only this assertion: require identical serialized text/structured JSON bytes, then compare both at the actual wire parse boundary. No runtime float normalization, dependency feature, receipt/hash rewrite or relaxed size threshold. This failed run is retained; no final pass/full-suite claim.

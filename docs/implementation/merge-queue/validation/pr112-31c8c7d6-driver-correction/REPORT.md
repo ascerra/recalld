@@ -1,5 +1,0 @@
-# PR11231c driver attachment correction
-
-The original31c evidence attachment accidentally copied the older `validate112-a7b53ee0.py` template as `driver.py` (SHA256 `2fd2608d9ba9430476012a9b693067936a7c995d25c8a46d82382a051f7c2131`). This is an evidence-packaging error, not the driver executed by session38304. Preserve that original attachment and its manifest unchanged.
-
-The actual executed31c driver is attached here as `executed-driver.py`, SHA256 `4db6c92f1e9f4fd906e75e4e9226c469568da0e46c45ea93fd43a2c435d1dc21`. Its exact31c HEAD assertion,18commands, captured container command, source-before/after pins and runtime output agree with the recorded build/commands/steps in the original evidence directory. No runtime/source/test command was changed or rerun for this correction. Full1665library+10CLI+15examples/3ignored and128focused/public9 attribution remains31c. Use this actual driver alongside the original captured commands/build, not the stale template attachment, to reproduce the run.

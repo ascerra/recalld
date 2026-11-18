@@ -1,6 +1,0 @@
-{
-  "binary_sha256": "0ad87195e89955bb13aba723f568345a493ea8a5affe22c4327390b2370bdbe2",
-  "mtime_ns": 1794685733224072182,
-  "size": 403082768,
-  "result": "3 pass,2 fail: missing deferred native capability and incorrect fixture expected unclamped time"
-}

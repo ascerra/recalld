@@ -1,2 +1,0 @@
-error: target `owned_evaluator` in package `recalld` requires the features: `bench`
-Consider enabling them by passing, e.g., `--features="bench"`

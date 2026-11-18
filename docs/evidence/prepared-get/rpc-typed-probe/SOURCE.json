@@ -1,7 +1,0 @@
-{
-  "head": "070fa8a19b4be2a421db5dca943b4482535b8459",
-  "source": "/private/tmp/recalld-implementation/prepared-get-rpc",
-  "status": "",
-  "runtime": "ecfe45643cee9205428912d00e12f2eabd051e49",
-  "purpose": "actual typed GetReply and tagged receipt exact-byte/bit probe only"
-}

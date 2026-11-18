@@ -8,9 +8,8 @@ use crate::model::MemoryId;
 use crate::storage::control::{GenerationRef, WriteReceipt};
 use serde::Serialize;
 
-// Source-derived singleton receipt/completion algebra and actual emitter proof:
-// docs/implementation/api1-point-get-runtime-handoff.md. Not an arbitrary error
-// string bound or an arbitrary outer MCP request-ID allowance.
+// Bound derived from singleton receipt/completion algebra and actual emitters,
+// not an arbitrary error string bound or outer MCP request-ID allowance.
 pub(crate) const COMPLETION_RESERVE: usize = 80 * 1024;
 pub(crate) const MAX_FRAGMENTS: usize = 128;
 

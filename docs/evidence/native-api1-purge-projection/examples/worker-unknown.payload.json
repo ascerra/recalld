@@ -1,6 +1,0 @@
-{
-  "commitState": "unknown",
-  "error": "COMMIT_OUTCOME_UNKNOWN",
-  "message": "Purge worker outcome is unknown; no receipt is available. Reconcile before further deletion.",
-  "operationId": null
-}

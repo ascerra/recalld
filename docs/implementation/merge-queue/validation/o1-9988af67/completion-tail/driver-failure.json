@@ -1,7 +1,0 @@
-{
-  "exitCode": 1,
-  "assertion": "page fixture count>=22",
-  "actualPageFiles": 8,
-  "completedTests": "4canonical_list+5catalog_page passed on same executable; these legacy/direct module tests were insufficient to emit planned native transport/schema fixtures",
-  "scope": "Driver filter selection failure, no runtime failure; original log retained. Run actual native list/catalog transport modules on same executable next."
-}

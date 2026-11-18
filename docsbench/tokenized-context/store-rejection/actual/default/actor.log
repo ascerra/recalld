@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/tmp/a6-public-runtime-nmhc0glh/actor.py", line 100, in <module>
-    run(parser.parse_args())
-  File "/tmp/a6-public-runtime-nmhc0glh/actor.py", line 85, in run
-    call("store_memory", dict(summary=entry["summary"], namespace=entry["namespace"], checkDuplicates=False), "store:" + entry["sourceId"])
-  File "/tmp/a6-public-runtime-nmhc0glh/actor.py", line 64, in call
-    assert not result.get("isError", False)
-AssertionError

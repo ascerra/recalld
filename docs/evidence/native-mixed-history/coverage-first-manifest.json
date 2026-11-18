@@ -1,8 +1,0 @@
-{
-  "source": "eced00a48b29be6e31daf238675693a2f03d4173",
-  "tree": "90e997cf305396bd490b1fd0823b827d1e4bee2d",
-  "exit_code": 101,
-  "result": "4 passed; 1 failed; 996 filtered; 16.94s; fixture expected original coverage flag but restoration capture deliberately degrades unproven old coverage to Unknown",
-  "log_sha256": "2789774bc273684b4337d47277ec664fe27a449e7cd3ba769c9c5bcccf10732a",
-  "binary_sha256": "2b238d03f30f3d81d4962768b309fabb208f744a7efb56857cb9fd55f80d44a2"
-}

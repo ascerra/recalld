@@ -1,8 +1,0 @@
-{
-  "actorCodeEqual": true,
-  "actorInputsEqual": true,
-  "actorRequestsEqual": true,
-  "cacheKeysChanged": true,
-  "environmentChanged": true,
-  "providerRequestsVectorsEqual": true
-}
