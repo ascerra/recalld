@@ -9,6 +9,8 @@
 - Migration preserves existing memory IDs, namespaces, text, vectors and relationships. Older vectors retain unknown model provenance; migration neither guesses their model nor re-embeds them. Keep the existing embedding configuration.
 - Schema conversion preserves the existing lifecycle policy. Retrieval, reinforcement and decay metadata are represented separately in the new schema.
 
+- Docker startup relocates existing volume-root databases into a reserved child directory with persistent recovery state, keeping schema-upgrade backups inside the mounted volume.
+
 ### Correctness and interoperability
 
 - Improved durable write receipts, retry handling, namespace operations, deletion and recovery across local MCP and HTTP adapters.

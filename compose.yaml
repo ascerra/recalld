@@ -23,6 +23,8 @@ services:
     volumes:
       - recalld-data:/data
     environment:
+      RECALLD_CONTAINER_DATA_ROOT: /data
+      RECALLD_STORAGE_DATA_DIR: /data/.recalld-store
       RECALLD_EMBEDDING_BASE_URL: http://ollama:11434
       RECALLD_EMBEDDING_PROVIDER: ollama
       RECALLD_EMBEDDING_MODEL_NAME: embeddinggemma:300m

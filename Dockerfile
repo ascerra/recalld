@@ -20,7 +20,8 @@ COPY --from=builder /build/target/release/recalld-cli /usr/local/bin/
 RUN mkdir -p /data
 
 ENV RECALLD_BIND=0.0.0.0:7680
-ENV RECALLD_STORAGE_DATA_DIR=/data
+ENV RECALLD_CONTAINER_DATA_ROOT=/data
+ENV RECALLD_STORAGE_DATA_DIR=/data/.recalld-store
 
 EXPOSE 7680
 VOLUME /data

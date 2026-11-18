@@ -182,7 +182,7 @@ Configure per-project namespace defaults in a `.recalld.toml` file (see above), 
 
 ## Database upgrades
 
-The 2.0 runtime upgrades supported older databases before serving memory operations. Stop old processes before restarting with the new binary, and allow time and disk space for backup, migration, and runtime initialization. A startup or recovery error must be resolved by the operator; the server does not silently continue on the old schema. See the [upgrade guide](guide.md#upgrading-to-20) for backup locations, crash recovery, downgrade requirements, and Docker volume restrictions.
+The 2.0 runtime upgrades supported older databases before serving memory operations. Stop old processes before restarting with the new binary, and allow time and disk space for backup, migration, and runtime initialization. A startup or recovery error must be resolved by the operator; the server does not silently continue on the old schema. See the [upgrade guide](guide.md#upgrading-to-20) for backup locations, crash recovery, downgrade requirements, and Docker volume layout.
 
 Migrated namespaces retain `UnknownLegacy` embedding provenance. Compatibility operations do not prove which model produced existing vectors, and startup does not probe the model or re-embed those vectors. Keep the existing embedding configuration. This storage change is independent of MCP protocol negotiation and lifecycle policy.
 
