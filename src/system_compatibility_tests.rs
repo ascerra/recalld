@@ -301,6 +301,37 @@ async fn released_v1_new_schema_query_write_restart_preserves_unknown_provenance
         mock.requests.lock().unwrap()[1]["input"][0],
         format!("doc: {document}")
     );
+    // Canonical import validators must not accept invented producer evidence on
+    // migrated rows, even when the descriptor itself is a valid current model.
+    {
+        let storage = system.storage.read().unwrap();
+        let mut invented = storage.get_record(first).unwrap().unwrap();
+        let namespace = storage.get_namespace_by_name("default").unwrap().unwrap();
+        invented.schema.as_mut().unwrap().embedding_origin = new_schema.embedding_origin.clone();
+        assert!(
+            invented
+                .schema
+                .as_ref()
+                .unwrap()
+                .validate(&invented)
+                .is_err()
+        );
+        assert!(
+            crate::storage::native_records::validate_retained_creation(
+                &invented, &namespace, None, None
+            )
+            .is_err()
+        );
+        // Claiming a native timestamp must not bypass the creation-proof check.
+        invented.schema.as_mut().unwrap().lifecycle.timestamp_origin =
+            crate::model::schema::TimestampOrigin::Native;
+        assert!(
+            crate::storage::native_records::validate_retained_creation(
+                &invented, &namespace, None, None
+            )
+            .is_err()
+        );
+    }
     assert_old_data(&system, &expected);
     system.shutdown().await.unwrap();
     // Unknown old vectors are not proof that two known generators are compatible.
