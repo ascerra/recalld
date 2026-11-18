@@ -214,7 +214,7 @@ async fn catalog_completion_public_empty_create_then_false_read() {
         let bytes = files(h.fixture.path());
         let fts_before = h.fixture.fts_index.lock().await.rebuild_statistics();
         assert_eq!(
-            fts_before["sqlite"], "3.49.1",
+            fts_before["sqlite"], "3.54.1",
             "review WAL read-mark offsets if SQLite changes"
         );
         let query =
@@ -244,7 +244,7 @@ async fn catalog_completion_public_empty_create_then_false_read() {
         for (name, before) in &bytes {
             let after = &after_bytes[name];
             if name == "fts.db-shm" {
-                // Bundled SQLite3.49.1: two48-byte WalIndexHdrs + nBackfill
+                // Bundled SQLite3.54.1: two48-byte WalIndexHdrs + nBackfill
                 // + aReadMark[0] place reader mark1 at104..108. A read may
                 // select mxFrame here; no database/WAL or other SHM byte changes.
                 assert_eq!(before.len(), after.len());
