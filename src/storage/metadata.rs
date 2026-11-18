@@ -211,7 +211,11 @@ impl MetadataStore {
         native_lifecycle_only: bool,
         ids: Box<dyn super::ids::IdSource>,
     ) -> Result<Self, StorageError> {
-        if native_lifecycle_only && (!path.is_file() || path.metadata()?.len() == 0) {
+        let fresh_native = native_lifecycle_only && !path.try_exists()?;
+        if native_lifecycle_only
+            && !fresh_native
+            && (!path.is_file() || path.metadata()?.len() == 0)
+        {
             return Err(StorageError::InvalidPath);
         }
         if let Some(parent) = path.parent() {
@@ -280,8 +284,10 @@ impl MetadataStore {
             effects::validate_existing(&read)?;
         }
 
-        // Native entry never initializes tables or rewrites checkpoints.
-        let store_id = if native_lifecycle_only {
+        // Existing native entry never initializes tables or rewrites checkpoints.
+        // A missing metadata file is admitted only after the engine has checked
+        // that the owned directory is fresh; its first commit is already v2.
+        let store_id = if native_lifecycle_only && !fresh_native {
             let read = db.begin_read()?;
             let table = read.open_table(control::CONTROL)?;
             ControlState::decode(
@@ -302,6 +308,26 @@ impl MetadataStore {
             let _ = write_txn.open_multimap_table(TAG_INDEX)?;
             let _ = write_txn.open_multimap_table(NAMESPACE_INDEX)?;
             removal_ledger::initialize(&write_txn, pristine)?;
+            if fresh_native {
+                let mut state = control::read_control(&write_txn)?;
+                state.control_schema_version = 2;
+                write_txn
+                    .open_table(control::CONTROL)?
+                    .insert("state", control::encode(&state)?.as_slice())?;
+                let schema = super::canonical_schema::CanonicalSchemaState {
+                    canonical_schema_version: 2,
+                    migration_id: ids.uuid(super::ids::IdKind::Operation)?,
+                    receipt_operation_id: None,
+                    // Genesis has no migrated records or timestamp evidence.
+                    migration_now: 0,
+                    source: state.generation_ref(),
+                    publication_generation: state.committed_generation,
+                    serving_mode: super::canonical_schema::ServingMode::Offline,
+                };
+                write_txn
+                    .open_table(super::canonical_schema::SCHEMA)?
+                    .insert("state", control::encode(&schema)?.as_slice())?;
+            }
             let store_id = control::read_control(&write_txn)?.store_id;
             write_txn.commit()?;
             store_id

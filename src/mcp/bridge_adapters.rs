@@ -1559,7 +1559,10 @@ impl McpStorageAdapter {
     }
 
     /// Reuse the configured observer and lifecycle inputs of this system.
+    /// An explicitly supplied lifecycle policy retains precedence.
     pub fn with_query_engine(mut self, engine: Arc<crate::search::QueryEngine>) -> Self {
+        self.native_policy
+            .get_or_insert_with(|| engine.native_policy_inputs());
         self.query_engine = Some(engine);
         self
     }
@@ -3557,6 +3560,28 @@ mod tests {
 
     fn default_ns() -> NamespaceId {
         NamespaceId::new(1)
+    }
+
+    #[test]
+    fn native_lifecycle_policy_uses_runtime_unless_explicitly_supplied() {
+        let fixture = Fixture::new();
+        let engine = fixture.search_adapter().query_engine;
+        let runtime = engine.native_policy_inputs();
+        let inherited = fixture.storage_adapter().with_query_engine(engine.clone());
+        assert_eq!(
+            inherited.native_policy.unwrap().multiplier,
+            runtime.multiplier
+        );
+        let mut explicit = runtime.clone();
+        explicit.multiplier += 1.;
+        let overridden = fixture
+            .storage_adapter()
+            .with_native_lifecycle_policy(explicit.clone())
+            .with_query_engine(engine);
+        assert_eq!(
+            overridden.native_policy.unwrap().multiplier,
+            explicit.multiplier
+        );
     }
 
     /// Find one namespace in a `list_namespaces` result by name.

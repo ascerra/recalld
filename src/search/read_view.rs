@@ -410,6 +410,11 @@ impl QueryEngine {
             .map_err(unavailable)??
             .ok_or(SearchError::MemoryNotFound(id))?;
             let namespace = source.0;
+            if canonical.is_native_owned() {
+                canonical
+                    .check_native_vector_namespace(&namespace)
+                    .map_err(unavailable)?;
+            }
             let results = engine
                 .similar_with_access_admitted(id, k, min_score, requested_access, true, None, 1)
                 .await?

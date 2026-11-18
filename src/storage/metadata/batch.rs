@@ -805,7 +805,10 @@ impl MetadataStore {
                                 field: Some("embeddingProfileId".into()),
                             }));
                         }
-                        Err(StorageError::InvalidMutation(_)) => {
+                        Err(
+                            StorageError::InvalidMutation(_)
+                            | StorageError::EmbeddingProfileRequired,
+                        ) => {
                             return Ok(Err(BatchError::new("INVALID_INPUT")));
                         }
                         Err(error) => return Err(error),

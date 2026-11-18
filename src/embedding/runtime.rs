@@ -178,7 +178,7 @@ pub(crate) async fn generate_native(
     let profile = provider
         .profile()
         .ok_or_else(|| EmbeddingError::Unavailable("provider identity missing".into()))?;
-    super::profile::require_compatible(namespace, &profile)
+    super::profile::native_binding(namespace, Some(&profile))
         .map_err(|e| EmbeddingError::Unavailable(e.to_string()))?;
     generate_checked(provider, namespace, text, Some(profile)).await
 }

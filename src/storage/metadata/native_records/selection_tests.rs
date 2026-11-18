@@ -93,7 +93,7 @@ fn native_selection_canonical_scope_phase_labels_and_deterministic_caps() {
     let captured = capture(&s.engine, &intent, &generated()).unwrap();
     assert_eq!(captured.generation, before.generation_ref());
     assert_eq!(captured.namespace_id, d.ns);
-    assert_eq!(captured.profile_id, d.profile.profile_id().unwrap());
+    assert_eq!(captured.profile_id, Some(d.profile.profile_id().unwrap()));
     assert!(
         !captured
             .candidates
@@ -335,7 +335,7 @@ fn native_selection_frozen_core_plan_preserves_settings_scope_and_requested_advi
     intent.check_duplicates = false;
     assert!(candidates.frozen_plan(&intent).unwrap().advisory.is_none());
     let mut wrong = candidates.clone();
-    wrong.profile_id = "wrong".into();
+    wrong.profile_id = Some("wrong".into());
     assert!(wrong.frozen_plan(&intent).is_err());
     wrong = candidates.clone();
     wrong.namespace_id = NamespaceId::new(d.ns.get() + 1);

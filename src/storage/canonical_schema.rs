@@ -182,6 +182,24 @@ pub(crate) fn validate_record_namespace(
     match (state, &record.schema, &namespace.schema) {
         (None, None, None) if record.version == 1 => Ok(()),
         (Some(_), Some(record_schema), Some(namespace_schema)) if record.version == 2 => {
+            if let Some(origin) = &record_schema.embedding_origin {
+                if !matches!(
+                    namespace_schema.embedding_binding,
+                    crate::model::schema::EmbeddingBinding::UnknownLegacy
+                ) {
+                    return Err(StorageError::InvalidControl(
+                        "compatibility origin in bound namespace".into(),
+                    ));
+                }
+                if let crate::model::schema::EmbeddingOrigin::Generated { descriptor, .. } = origin
+                {
+                    if descriptor.dimension != namespace.embedding_dim {
+                        return Err(StorageError::InvalidControl(
+                            "record generator dimension mismatch".into(),
+                        ));
+                    }
+                }
+            }
             namespace_schema
                 .validate(namespace)
                 .map_err(StorageError::InvalidControl)?;

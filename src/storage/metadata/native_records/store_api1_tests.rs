@@ -244,7 +244,7 @@ async fn native_api1_store_actual_http_supplied_profile_and_atomic_links() {
                 primary.lifecycle.stability.get(),
                 primary.lifecycle.difficulty.get(),
                 transition.embedding_dim,
-                primary.content.profile_id.as_deref().unwrap(),
+                primary.content.profile_id.as_deref(),
                 &transition.settings,
                 request.profile_id.as_deref(),
             )

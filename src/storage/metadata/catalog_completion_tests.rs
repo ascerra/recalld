@@ -1,7 +1,6 @@
 //! Actual public legacy catalog writes, receipts and owned publication.
 use super::*;
 use crate::api::adapters::*;
-use crate::mcp::bridge_adapters::direct_bridge;
 use axum::{
     body::{Body, to_bytes},
     http::Request,
@@ -15,10 +14,10 @@ use std::time::Duration;
 use tower::ServiceExt;
 
 struct Harness {
-    system: crate::Recalld,
+    fixture: crate::test_support::Fixture,
+    embedding: Arc<dyn crate::embedding::EmbeddingProvider>,
     calls: Arc<AtomicUsize>,
     provider: tokio::task::JoinHandle<()>,
-    dir: tempfile::TempDir,
 }
 impl Harness {
     async fn new() -> Self {
@@ -39,65 +38,32 @@ impl Harness {
         let provider = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        let dir = tempfile::tempdir().unwrap();
-        let mut config = crate::config::RecalldConfig::default();
-        config.storage.data_dir = dir.path().to_string_lossy().into_owned();
-        config.embedding.provider = crate::config::EmbeddingProvider::Ollama;
-        config.embedding.base_url = format!("http://{addr}");
-        config.embedding.model_name = "isolated-catalog-test".into();
-        config.embedding.dimensions = 4;
-        config.decay.disable_sweep = true;
+        // This suite tests retained legacy catalog receipts, not startup migration.
+        let fixture = crate::test_support::Fixture::new();
+        fixture.completion().rebuild_all().await.unwrap();
+        let embedding = Arc::new(
+            crate::embedding::OllamaProvider::new("isolated-catalog-test".into(), 4)
+                .with_base_url(format!("http://{addr}")),
+        );
         Self {
-            system: crate::Recalld::new(config).await.unwrap(),
+            fixture,
+            embedding,
             calls,
             provider,
-            dir,
         }
     }
     fn app(&self) -> axum::Router {
-        let s = &self.system;
-        let config = Arc::new(s.config().clone());
-        let state = crate::api::AppState::new(
-            Arc::new(SearchPipelineAdapter::new(
-                s.query_engine().clone(),
-                s.embedding().clone(),
-                s.vector_index().clone(),
-                s.fts_index().clone(),
-                s.entity_index().clone(),
-            )),
-            Arc::new(StorageEngineAdapter::new(
-                s.storage().clone(),
-                s.cache().clone(),
-                s.vector_index().clone(),
-                s.fts_index().clone(),
-                s.entity_index().clone(),
-                s.graph().clone(),
-            )),
-            Arc::new(RecordCacheAdapter::new(s.cache().clone())),
-            Arc::new(RelationshipGraphAdapter::new(
-                s.graph().clone(),
-                s.vector_index().clone(),
-                s.entity_index().clone(),
-                s.storage().clone(),
-                s.cache().clone(),
-                config.clone(),
-            )),
-            Arc::new(FsrsEngineAdapter::new(
-                s.storage().clone(),
-                s.cache().clone(),
-                s.graph().clone(),
-                config,
-                false,
-            )),
-            Arc::new(NamespaceRegistryAdapter::from_system(s)),
-            Arc::new(NoopMetricsCollector),
-        );
+        let (state, _) =
+            crate::api::fixture_state_with_embedding(&self.fixture, self.embedding.clone());
         crate::api::router(state, &Default::default())
+    }
+    fn bridge(&self) -> crate::mcp::bridge::McpBridge {
+        crate::api::fixture_state_with_embedding(&self.fixture, self.embedding.clone()).1
     }
     fn raw(&self) -> Value {
         let e = self
-            .system
-            .storage()
+            .fixture
+            .storage
             .read()
             .unwrap_or_else(|p| p.into_inner());
         let m = e.meta_store();
@@ -119,8 +85,8 @@ impl Harness {
         json!({"canonical":canonical,"receipts":receipts})
     }
     fn publication(&self) -> crate::storage::publication::PublicationState {
-        self.system
-            .storage()
+        self.fixture
+            .storage
             .read()
             .unwrap()
             .meta_store()
@@ -130,8 +96,8 @@ impl Harness {
     fn receipt(&self, name: &str) -> WriteReceipt {
         use crate::storage::StorageEngine as _;
         let e = self
-            .system
-            .storage()
+            .fixture
+            .storage
             .read()
             .unwrap_or_else(|p| p.into_inner());
         let id = e.get_namespace_by_name(name).unwrap().unwrap().id;
@@ -147,8 +113,8 @@ impl Harness {
         panic!("missing actual receipt")
     }
     fn fault(&self, mode: u8) {
-        self.system
-            .storage()
+        self.fixture
+            .storage
             .read()
             .unwrap()
             .meta_store()
@@ -156,8 +122,8 @@ impl Harness {
             .store(mode, Ordering::SeqCst);
     }
     fn tracker(&self) -> crate::storage::work::WorkTracker {
-        self.system
-            .storage()
+        self.fixture
+            .storage
             .read()
             .unwrap()
             .meta_store()
@@ -222,7 +188,7 @@ fn files(path: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> 
 async fn catalog_completion_public_empty_create_then_false_read() {
     for http in [false, true] {
         let h = Harness::new().await;
-        let bridge = direct_bridge(&h.system, "default".into());
+        let bridge = h.bridge();
         let before = h.publication();
         assert!(before.matches_canonical());
         let args = json!({"name":"foreign","embeddingDim":4});
@@ -245,8 +211,8 @@ async fn catalog_completion_public_empty_create_then_false_read() {
         assert_eq!(h.tracker().status().pending, 0);
         assert_eq!(h.calls.load(Ordering::SeqCst), 0);
         let raw = h.raw();
-        let bytes = files(h.dir.path());
-        let fts_before = h.system.fts_index().lock().await.rebuild_statistics();
+        let bytes = files(h.fixture.path());
+        let fts_before = h.fixture.fts_index.lock().await.rebuild_statistics();
         assert_eq!(
             fts_before["sqlite"], "3.49.1",
             "review WAL read-mark offsets if SQLite changes"
@@ -267,10 +233,10 @@ async fn catalog_completion_public_empty_create_then_false_read() {
         assert_eq!(h.raw(), raw);
         assert_eq!(h.publication(), after);
         assert_eq!(
-            h.system.fts_index().lock().await.rebuild_statistics(),
+            h.fixture.fts_index.lock().await.rebuild_statistics(),
             fts_before
         );
-        let after_bytes = files(h.dir.path());
+        let after_bytes = files(h.fixture.path());
         assert_eq!(
             after_bytes.keys().collect::<Vec<_>>(),
             bytes.keys().collect::<Vec<_>>()
@@ -304,12 +270,12 @@ async fn catalog_completion_public_full_receipt_survives_failure_and_daemon() {
         let h = Harness::new().await;
         let before = h.publication();
         h.fault(1);
-        let mut bridge = direct_bridge(&h.system, "default".into());
+        let mut bridge = h.bridge();
         let mut server = None;
         if surface == 2 {
             let (remote, task) = crate::daemon::server::catalog_test_remote(
                 bridge.namespaces.clone(),
-                &h.dir.path().join("probe.sock"),
+                &h.fixture.path().join("probe.sock"),
             )
             .await;
             bridge.namespaces = remote;
@@ -355,7 +321,7 @@ async fn catalog_completion_actual_lost_ack_has_identity_without_fabricated_rece
     for http in [false, true] {
         let h = Harness::new().await;
         h.fault(2);
-        let bridge = direct_bridge(&h.system, "default".into());
+        let bridge = h.bridge();
         let args = json!({"name":"unknown","embeddingDim":4});
         let body = if http {
             let (s, v) = post(h.app(), "/namespaces", args).await;
@@ -386,8 +352,7 @@ async fn catalog_completion_invalid_duplicate_unbound_finish_only_known_work() {
     let h = Harness::new().await;
     let before = h.raw();
     let published = h.publication();
-    let unbound =
-        NamespaceRegistryAdapter::new(h.system.storage().clone(), h.system.embedding().clone());
+    let unbound = NamespaceRegistryAdapter::new(h.fixture.storage.clone(), h.embedding.clone());
     let error = unbound
         .create("unbound", Some(4), 1., 0.9, None)
         .await
@@ -399,7 +364,7 @@ async fn catalog_completion_invalid_duplicate_unbound_finish_only_known_work() {
     assert_eq!(s, 400);
     let (s, _) = post(h.app(), "/namespaces", json!({"name":"default"})).await;
     assert_eq!(s, 409);
-    let bridge = direct_bridge(&h.system, "default".into());
+    let bridge = h.bridge();
     for name in ["bad/name", "default"] {
         let r = crate::mcp::tools::dispatch_tool(&bridge, "create_namespace", json!({"name":name}))
             .await;
@@ -417,8 +382,8 @@ async fn catalog_completion_cancelled_queued_worker_keeps_unknown_root_and_lease
         let tracker = h.tracker();
         let before = h.publication();
         let gate = h
-            .system
-            .storage()
+            .fixture
+            .storage
             .read()
             .unwrap()
             .meta_store()
@@ -426,7 +391,7 @@ async fn catalog_completion_cancelled_queued_worker_keeps_unknown_root_and_lease
             .clone();
         let (held_tx, held_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let storage = h.system.storage().clone();
+        let storage = h.fixture.storage.clone();
         let holder = std::thread::spawn(move || {
             let _read = storage.read().unwrap();
             held_tx.send(()).unwrap();
@@ -434,7 +399,7 @@ async fn catalog_completion_cancelled_queued_worker_keeps_unknown_root_and_lease
         });
         held_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         let app = h.app();
-        let bridge = direct_bridge(&h.system, "default".into());
+        let bridge = h.bridge();
         let task = tokio::spawn(async move {
             let args = json!({"name":"cancelled","embeddingDim":4});
             if http {
@@ -487,7 +452,7 @@ async fn catalog_completion_worker_panic_is_unknown_without_invented_identity() 
         let before = h.raw();
         let tracker = h.tracker();
         h.fault(3);
-        let bridge = direct_bridge(&h.system, "default".into());
+        let bridge = h.bridge();
         let args = json!({"name":"panic","embeddingDim":4});
         let body = if http {
             let (s, v) = post(h.app(), "/namespaces", args).await;

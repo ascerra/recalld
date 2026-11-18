@@ -28,17 +28,13 @@ impl NativeBatchDefaults {
         self.embedding_binding
             .validate(dimension)
             .map_err(StorageError::InvalidControl)?;
-        if kind == BatchKind::Insert {
-            self.profile_id()?;
-        }
+        let _ = kind;
         Ok(())
     }
-    pub(crate) fn profile_id(&self) -> Result<&str, StorageError> {
+    pub(crate) fn profile_id(&self) -> Result<Option<&str>, StorageError> {
         match &self.embedding_binding {
-            EmbeddingBinding::Bound { profile_id, .. } => Ok(profile_id),
-            EmbeddingBinding::UnknownLegacy => Err(StorageError::InvalidMutation(
-                "native batch needs a bound profile".into(),
-            )),
+            EmbeddingBinding::Bound { profile_id, .. } => Ok(Some(profile_id)),
+            EmbeddingBinding::UnknownLegacy => Ok(None),
         }
     }
 }
@@ -122,7 +118,7 @@ pub(crate) fn validate_outcome(
             || native.store_settings.as_ref() != Some(&transition.settings)
             || after.lifecycle.stability.get().to_bits() != defaults.initial_stability_bits
             || after.lifecycle.difficulty.get().to_bits() != native.default_difficulty_bits
-            || after.content.profile_id.as_deref() != Some(native.profile_id()?)
+            || after.content.profile_id.as_deref() != native.profile_id()?
         {
             return Err(StorageError::InvalidControl(
                 "linked child disagrees with frozen defaults".into(),
@@ -152,7 +148,7 @@ pub(crate) fn validate_outcome(
         || inserted
             && (after.lifecycle.stability.get().to_bits() != defaults.initial_stability_bits
                 || after.lifecycle.difficulty.get().to_bits() != native.default_difficulty_bits
-                || after.content.profile_id.as_deref() != Some(native.profile_id()?))
+                || after.content.profile_id.as_deref() != native.profile_id()?)
     {
         return Err(StorageError::InvalidControl(
             "native child disagrees with frozen defaults".into(),
@@ -193,6 +189,16 @@ pub(crate) fn resolve_store_profile(
     defaults: &BatchDefaults,
 ) -> Result<crate::storage::native_store::NativeStoreInput, StorageError> {
     let mut resolved = input.clone();
+    if input.insert.memory.embedding.is_some()
+        && supplied_profile_id.is_none()
+        && input.insert.embedding_profile.is_none()
+        && defaults
+            .native
+            .as_ref()
+            .is_none_or(|n| !matches!(n.embedding_binding, EmbeddingBinding::UnknownLegacy))
+    {
+        return Err(StorageError::EmbeddingProfileRequired);
+    }
     if let Some(requested) = supplied_profile_id {
         if input.insert.embedding_profile.is_some()
             || input.insert.memory.embedding.is_none()

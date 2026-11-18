@@ -822,6 +822,49 @@ impl QueryEngine {
         parent: Option<&crate::storage::work::WorkTicket>,
         original_contract_version: u32,
     ) -> Result<SemanticsResponse> {
+        if self.coherent_owner.is_some() {
+            let work = self.accept_work(parent)?;
+            let result = async {
+                let stamp = self.meta_store.effects_stamp().await?;
+                let record_access = query.record_access && !defer_recording;
+                let namespace = query.namespace.clone();
+                let prepared = self
+                    .prepare_coherent_payload_with_semantics(
+                        query,
+                        semantics,
+                        false,
+                        false,
+                        work.as_ref(),
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        SearchError::Unavailable("canonical query owner missing".into())
+                    })?;
+                let receipts = if record_access {
+                    self.record_exposures_at_with_origin_work(
+                        &prepared.exposures(false)?,
+                        crate::storage::control::ExposureScope {
+                            namespace,
+                            source: None,
+                        },
+                        prepared.evaluated_at,
+                        work.as_ref(),
+                        original_contract_version,
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+                Observed {
+                    value: prepared.response,
+                    receipts,
+                }
+                .finish(self.check_effects_stamp(stamp).await)
+            }
+            .await;
+            self.finish_work(work);
+            return result;
+        }
         self.search_checked_with_selection(
             query,
             semantics,

@@ -15,6 +15,8 @@
 pub mod adapters;
 mod errors;
 mod handlers;
+#[cfg(test)]
+pub(crate) use handlers::validation_tests::fixture_state_with_embedding;
 mod store_api1;
 #[cfg(test)]
 pub(crate) use handlers::prepared_get;

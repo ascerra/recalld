@@ -258,6 +258,30 @@ impl MetadataStore {
 }
 
 impl CanonicalReadView {
+    fn check_compatibility_generators(
+        &self,
+        namespace: &NamespaceConfig,
+        active: Option<&crate::model::schema::EmbeddingProfile>,
+    ) -> Result<(), StorageError> {
+        if namespace.schema.as_ref().is_some_and(|s| {
+            matches!(
+                s.embedding_binding,
+                crate::model::schema::EmbeddingBinding::UnknownLegacy
+            )
+        }) {
+            let mut records = Vec::new();
+            for row in self.read.open_table(META_TABLE)?.iter()? {
+                let (_, value) = row?;
+                let record = DiskRecord::from_bytes(value.value())?;
+                if record.namespace_id == namespace.id.get() {
+                    records.push(record);
+                }
+            }
+            crate::embedding::profile::check_record_generators(&records, active)
+                .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+        }
+        Ok(())
+    }
     /// Constructor-validated owner format, never a request or profile inference.
     pub(crate) fn is_native_owned(&self) -> bool {
         self.native_owned
@@ -285,6 +309,7 @@ impl CanonicalReadView {
                 "native query canonical scope mismatch".into(),
             ));
         }
+        self.check_compatibility_generators(&actual, None)?;
         self.vector_validation
             .read()
             .map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))?
@@ -306,8 +331,9 @@ impl CanonicalReadView {
         let active = active.ok_or_else(|| {
             StorageError::RecoveryRequired("native query provider identity missing".into())
         })?;
-        crate::embedding::profile::require_compatible(namespace, active)
+        crate::embedding::profile::native_binding(namespace, Some(active))
             .map_err(|e| StorageError::RecoveryRequired(e.to_string()))?;
+        self.check_compatibility_generators(namespace, Some(active))?;
         Ok(())
     }
 

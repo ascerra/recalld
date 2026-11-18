@@ -139,7 +139,7 @@ impl Request {
             )?;
             store.embedding = Some(vector); // Original bits, not the validation copy.
         }
-        if store.embedding.is_some() != profile_id.is_some() {
+        if store.embedding.is_none() && profile_id.is_some() {
             return Err(invalid(
                 "/embeddingProfileId",
                 "embedding and embeddingProfileId must be supplied together",
@@ -224,6 +224,12 @@ impl Reply {
             other => other,
         };
         let specific = match source {
+            crate::storage::StorageError::EmbeddingProfileRequired => Some((
+                ErrorCategory::InvalidInput,
+                "EMBEDDING_PROFILE_REQUIRED",
+                "/embeddingProfileId",
+                "native supplied embeddings require the canonical Bound profile ID",
+            )),
             crate::storage::StorageError::CallerVectorInvalid(_) => Some((
                 ErrorCategory::InvalidInput,
                 "OUT_OF_RANGE",
