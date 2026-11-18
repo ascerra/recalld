@@ -1,0 +1,64 @@
+{
+  "actualInput": {
+    "context": {
+      "emptyEvidenceOverheadTokenCount": 30,
+      "evidenceTokenCount": 1051,
+      "fullTokenCount": 1081,
+      "includedMemoryIds": [
+        "019b76da-a800-7cbf-aa23-03b88d1bbdca",
+        "019b76da-a800-7b9e-a771-be384e4faf04",
+        "019b76da-a800-78f9-83a3-533bf6ed1b40",
+        "019b76da-a800-7a14-b37b-8c7154e910dc",
+        "019b76da-a800-7ed9-bee4-1a55a9339d1e",
+        "019b76da-a800-7290-9b8d-5c62f60b3ed3",
+        "019b76da-a800-7ec7-a29e-eef1b53a4f85",
+        "019b76da-a800-733e-9951-c9bd9fe15484",
+        "019b76da-a800-7099-825f-216d4bcc590b",
+        "019b76da-a800-7196-a9b8-0363f8baf756",
+        "019b76da-a800-737b-ae93-ad1a2e59223c",
+        "019b76da-a800-752c-9eb1-82535a8bf93c",
+        "019b76da-a800-7690-8390-e9856bd38785",
+        "019b76da-a800-7bcc-b263-8ac308389aba",
+        "019b76da-a800-7545-907f-aa35c0017a0f",
+        "019b76da-a800-790a-8ce9-c7041ff896df",
+        "019b76da-a800-7dea-a81a-23e9712453c2",
+        "019b76da-a800-780c-9779-d2e1e8396c4e",
+        "019b76da-a800-7cfb-b0dc-049b02183cda",
+        "019b76da-a800-7267-9a9d-05310259cb4e"
+      ],
+      "policy": {
+        "contextVersion": 1,
+        "evidenceTokenCap": 4096,
+        "profile": "default",
+        "promptSha256": "7d08ec1d536bbdf84968dd9eb68da1a449977f7139ee0e2e19efb53e419a0be9",
+        "renderedContextTokenCap": 4608,
+        "renderer": "ranked-whole-prefix-v1",
+        "specialTokens": "ordinary-text",
+        "tokenizer": {
+          "configSha256": "b9b32d2f562688ec43d7a8066f807cbfb9f7675f0c25e2c93735091a2ffbd5c9",
+          "encoding": "cl100k_base",
+          "library": "tiktoken",
+          "lockSha256": "8ba60a27fc57e6fe692e328f071330ad9741b1f28f29bd443ead4e0034253342",
+          "rankSha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+          "upstreamRevision": "97e49cbadd500b5cc9dbb51a486f0b42e6701bee",
+          "version": "0.12.0"
+        },
+        "utf8": "strict"
+      },
+      "renderedSha256": "13a5631fe724b450468d7624ff4dffc3eba013fb1d277a0c47c0d45259278df9",
+      "renderedText": "Use only the following evidence. If it is insufficient, abstain.\nQuestion: \"amber FUTURE_QUESTION_CANARY CHANGED\"\nEvidence:\n{\"id\":\"019b76da-a800-7cbf-aa23-03b88d1bbdca\",\"rank\":1,\"summary\":\"amber oak record 0 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7b9e-a771-be384e4faf04\",\"rank\":2,\"summary\":\"amber oak record 1 r\u00e9sum\u00e9 \ud83c\udf32 cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river cedar river\"}\n{\"id\":\"019b76da-a800-78f9-83a3-533bf6ed1b40\",\"rank\":3,\"summary\":\"amber oak record 2 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7a14-b37b-8c7154e910dc\",\"rank\":4,\"summary\":\"amber oak record 3 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7ed9-bee4-1a55a9339d1e\",\"rank\":5,\"summary\":\"amber oak record 4 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7290-9b8d-5c62f60b3ed3\",\"rank\":6,\"summary\":\"amber oak record 5 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7ec7-a29e-eef1b53a4f85\",\"rank\":7,\"summary\":\"amber oak record 6 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-733e-9951-c9bd9fe15484\",\"rank\":8,\"summary\":\"amber oak record 7 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7099-825f-216d4bcc590b\",\"rank\":9,\"summary\":\"amber oak record 8 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7196-a9b8-0363f8baf756\",\"rank\":10,\"summary\":\"amber oak record 9 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-737b-ae93-ad1a2e59223c\",\"rank\":11,\"summary\":\"amber oak record 10 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-752c-9eb1-82535a8bf93c\",\"rank\":12,\"summary\":\"amber oak record 11 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7690-8390-e9856bd38785\",\"rank\":13,\"summary\":\"amber oak record 12 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7bcc-b263-8ac308389aba\",\"rank\":14,\"summary\":\"amber oak record 13 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7545-907f-aa35c0017a0f\",\"rank\":15,\"summary\":\"amber oak record 14 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-790a-8ce9-c7041ff896df\",\"rank\":16,\"summary\":\"amber oak record 15 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7dea-a81a-23e9712453c2\",\"rank\":17,\"summary\":\"amber oak record 16 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-780c-9779-d2e1e8396c4e\",\"rank\":18,\"summary\":\"amber oak record 17 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7cfb-b0dc-049b02183cda\",\"rank\":19,\"summary\":\"amber oak record 18 r\u00e9sum\u00e9 \ud83c\udf32\"}\n{\"id\":\"019b76da-a800-7267-9a9d-05310259cb4e\",\"rank\":20,\"summary\":\"amber oak record 19 r\u00e9sum\u00e9 \ud83c\udf32\"}\nAnswer:\n",
+      "tokenIdsSha256": "81b95d2790696ff89fe813e0242ed0f39c12f8efc5a76c1c605efc2c867a2613"
+    },
+    "currentQuestion": {
+      "queryId": "q3",
+      "text": "amber FUTURE_QUESTION_CANARY CHANGED"
+    }
+  },
+  "expectedKeys": [
+    "0f03c74a437bcda0b78847d3f9fbd6be06569af6634626d5982b362a2a5afd45",
+    "0c4c2130f85c6a90680c753dde20151583e28428f55495c6a0525ba95bec4cd0",
+    "466d87c4fe3f923e085b3d55c2e82b53d316918ee88fab4f5b2388817c283d7f",
+    "a99178131d65c7c844dbf40ff6d9de266466abb5344e813985b0a88c53c02ee9"
+  ],
+  "key": "3c5302824855d43059b3b66546dea8c5ad7ce4d40ba214734a36aaa76755698a"
+}

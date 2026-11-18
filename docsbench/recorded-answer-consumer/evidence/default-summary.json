@@ -1,0 +1,11 @@
+{
+  "answerQuality": null,
+  "answers": 28,
+  "episodes": 7,
+  "modelTokenIdentity": null,
+  "productionCost": null,
+  "roleTraceSchemaVersion": 1,
+  "scope": "synthetic-recorded-quotation-provenance-only",
+  "status": "passed",
+  "traceSchemaVersion": 2
+}
