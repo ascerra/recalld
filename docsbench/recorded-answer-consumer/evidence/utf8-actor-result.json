@@ -1,1 +1,0 @@
-{"event": "recorded-answer", "isolation": {"inheritedDescriptorsClosed": true, "checked": 4}, "result": {"status": "rejected", "reason": "output-parse", "detail": "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte", "outputSha256": "a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89"}}

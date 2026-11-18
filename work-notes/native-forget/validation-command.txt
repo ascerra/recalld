@@ -1,6 +1,0 @@
-docker run --rm --network none --cpus 2 --memory 4g
-ENV RUSTUP_TOOLCHAIN=1.94.1 CARGO_BUILD_JOBS=2 CARGO_HOME=/cargo CARGO_TARGET_DIR=/target
-Only mounts: assigned native-forget worktree:/work and its private .test-scratch/cargo:/cargo + .test-scratch/target:/target. Workdir /work; image recalld-ci:1.94.
-After private cache clone from completed native-sweep-readiness: cargo clean -p recalld.
-Focused: cargo test --offline --lib storage::metadata::native_records::tests::readers::forget_consumer -- --nocapture
-Final: cargo fmt --all --check && cargo test --offline && cargo clippy --offline --all-targets

@@ -1,1 +1,0 @@
-{"command": ["cargo", "test", "--offline", "--lib", "--no-run", "--message-format=json"], "exit": 101, "seconds": 16.62053976301104}

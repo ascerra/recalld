@@ -1,5 +1,0 @@
-[
-  "coherent_by_id_actual_postcommit_failure_preserves_receipt_and_hides_payload",
-  "native_forget_failed_publication_stays_blocked_until_real_retry_without_resurrection",
-  "native_exposure_deferred_selection_never_writes_and_unsupported_recorder_stays_closed"
-]

@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/output/generation-conformance-negative.py", line 38, in <module>
-    assert not validator.is_valid(bad), (path.name, generation)
-AssertionError: ('recall-explained.json', '1\n')

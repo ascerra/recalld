@@ -1,5 +1,0 @@
-# PR164 actual-main compilation failure
-
-Exact frozen source `4c71cdf477eecfd25c7c9b8c0f47c10d11a51d11` failed the first focused cargo test compilation with one E0308 at `src/mcp/legacy_semantic_admission_tests.rs:252`: the ignored genuine157 exporter assigns FlatVectorIndex to the current VectorIndexOwner field. **Zero Rust tests ran; no full result.** Formatting and three Python runner suites passed before compilation. Assertions, historical fixtures and ignore status remain unchanged in this source.
-
-Pinned offline Docker Rust1.94.1/aarch64 (actual verbose toolchain captured), 2CPU,6GiB,one private serial cache, privateHOME/data, no network/personal mounts. Host-verified source pins match before/after; the in-container after-hash stage was not reached because compilation stopped the driver. The failed run and logs remain protected; container retired. A narrow test-only uniform-owner adaptation requires owner review and fresh corrected-source validation; this report does not claim that correction ran. The first report-copy attempt expected the absent in-container after file and stopped; this corrected report accurately distinguishes the available host check.

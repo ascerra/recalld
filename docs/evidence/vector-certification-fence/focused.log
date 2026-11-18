@@ -1,8 +1,0 @@
-
-running 1 test
-OLD159 feature=vector-recipe-certification-v1 attempt=0 exit101 exactfeatureerror=true sourcebytesunchanged=true
-OLD159 feature=vector-recipe-certification-v1 attempt=1 exit101 exactfeatureerror=true sourcebytesunchanged=true
-test storage::metadata::native_records::tests::vector_certification_fence::certification_required_feature_old_native_binary_refuses_before_writable_open ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1243 filtered out; finished in 2.95s
-

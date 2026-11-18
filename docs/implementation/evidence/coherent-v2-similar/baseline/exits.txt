@@ -1,3 +1,0 @@
-similar_baseline_phase_before_cap 101
-similar_baseline_current_terminal 101
-similar_baseline_explicit_cross_scope_is_ignored 101

@@ -1,7 +1,0 @@
-{
-  "source": "3cc26658d9b98d0f138e1fecb784b93fbbf0e170",
-  "main": "5d0015d581a7cdc642034dfa5ce2809b03ff7f36",
-  "productionAndCargoIdentical": true,
-  "historicalEvidenceUnchangedFrom": "37b4bf744e35422b7acc9d2de66d895d1d7d2513",
-  "validation": "ExactGitbyteidentity only; no localRust/newbenchmark or prooftransfer. FreshheadCI mandatory."
-}

@@ -1,8 +1,0 @@
-{
-  "head": "a2374ddf0bf0d1369b72ca1ce9bf9ea8e5735a39",
-  "source": "/private/tmp/recalld-implementation/prepared-get-rpc",
-  "status": "",
-  "target": "/tmp/recalld-curie-o1-build/target",
-  "purpose": "actual owner versus missing daemon get",
-  "package_clean_before_join_build": true
-}

@@ -1,8 +1,0 @@
-{
-  "head": "1316bced1ce6fab1e854074076a671cfd5bb4205",
-  "runtimeParent": "2925a7289055b27ffda2583a81b656442f347632",
-  "statusBeforeEvidence": "",
-  "executableSha256": "cd4fc189f8ff1d38b492309ce08bea93f8ae35588e0ff741132a884e20ba2705",
-  "sameExecutableReverified": true,
-  "preservedBinary": "/tmp/recalld-curie-o1-build/runs/017-api1-before/recalld-before-cd4fc189"
-}

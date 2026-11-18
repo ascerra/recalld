@@ -1,7 +1,0 @@
-ACTUAL_RECEIPT_INEQUALITY scope=start max_frame=4663 envelope=3868 projected_receipt=861 upper_bound=5590
-ACTUAL_RECEIPT_INEQUALITY scope=child max_frame=13809 envelope=3868 projected_receipt=9452 upper_bound=22772
-ACTUAL_RECEIPT_INEQUALITY scope=final max_frame=4136 envelope=3868 projected_receipt=377 upper_bound=4622
-ACTUAL_RECEIPT_INEQUALITY scope=unknown_without_receipt frame=236 envelope=3868
-ACTUAL_HIGH_PEER_FRAME target_rows=1 peers=400 history=32 bytes=1302161
-ACTUAL_MAX_CHUNK_FRAME rows=1000 canonical=Complete full_receipt_bytes=1464530 response_bytes=1572891 response_code=Some(-32006)
-test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 1357 filtered out; finished in 40.64s

@@ -1,9 +1,0 @@
-{
-  "head": "13e1d0c72fc250e29233df3e12f225b992de4e3f",
-  "conflicts": [],
-  "runtimeFiles": [
-    "src/derived_completion.rs",
-    "src/search/fts.rs"
-  ],
-  "reason": "Fresh-owner construction rebuilds FTS; known unchanged96 aggregate-statistics drift breaks general exact score/rank replay. Join the validated minimal owner fix, no observer/maintenance/control extras."
-}

@@ -1,5 +1,0 @@
-bits=3f333333 wire=0.699999988079071 parsed=0.699999988079071 reconstructed=0.699999988079071 value_equal=true bits_equal=true
-bits=3e99999a wire=0.30000001192092896 parsed=0.30000001192092896 reconstructed=0.30000001192092896 value_equal=true bits_equal=true
-bits=3d4ccccd wire=0.05000000074505806 parsed=0.05000000074505806 reconstructed=0.05000000074505806 value_equal=true bits_equal=true
-bits=3f666666 wire=0.8999999761581421 parsed=0.8999999761581421 reconstructed=0.8999999761581421 value_equal=true bits_equal=true
-bits=406dba5e wire=3.7144999504089355 parsed=3.714499950408935 reconstructed=3.7144999504089355 value_equal=false bits_equal=true

@@ -1,4 +1,0 @@
-# Extreme scalar private-frame failure
-Runtime/source ecfe45643cee9205428912d00e12f2eabd051e49:33PASS/1FAIL/1historical ignored in49.39s. Actual native RPC/projection/origin/scope/terminal/publication/unknown, ping/reconnect/no-retry and cancellation passed. Extreme numeric encoding specimen failed raw canonical-number preflight. It is not a persisted canonical history or a published-store failure.
-
-Exact existing serde_json dependency diagnostic: f32bits00000001 typed serializer emits1e-45; Value normalization alternates1e-45 and1.0000000000000001e-45 indefinitely for the sampled6iterations, preserving f32 bits. Both fail the shared scalar byte-equality predicate. MAX/near-one/normal controls stable. Standalone probe is an encoding experiment, not another library test. Source/executable/log hashes retained. No runtime relaxation, global serde feature or history rewrite applied here.

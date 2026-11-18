@@ -1,1 +1,0 @@
-{"event": "recorded-answer", "isolation": {"inheritedDescriptorsClosed": true, "checked": 4}, "result": {"status": "rejected", "reason": "output-parse", "detail": "Expecting value: line 1 column 22 (char 21)", "outputSha256": "1c97b312ca8740beaa95bd7c6e033c24e52053cba3940786f6debeb1de58771b"}}

@@ -1,9 +1,0 @@
-{
-  "source": "73f1254beb346a4f7017229a4b7f79f9030a6331",
-  "test": "legacy_compound_origin_export_genuine_old_one",
-  "scope": "actual private legacy runner; API1 absent/supplied CAS x success/all-invalid; explicit no-autolink fixture",
-  "files": {
-    "src/mcp/fixtures/legacy-compound-before.zip": "c061ca0dfb1548ff4cdf5476696c8cffd40c43ab2fd75b0581124065621b3034",
-    "src/mcp/fixtures/legacy-compound-before.zip.json": "869397212dcd446d437417070d2cd2bad1d19b227da8964996b43c852151d644"
-  }
-}

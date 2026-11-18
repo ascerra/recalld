@@ -1,8 +1,0 @@
-{
-  "usage": "CARGO_BIN_EXE applications invoked by the four passing CLI integration targets; distinct from their harness executables",
-  "sha256": {
-    "recalld": "2bac22aebf2e47835f22f1b5446f5fb092b7ff1952088ae402a36e30d0daf7c8",
-    "recalld-cli": "29b408a7b5cfbcbd30a2c8840592a0eea1276bf4e52ccf96ce3c719c2ab0b6d3",
-    "recalld-text-migrate": "b58cf863b7f7c1e75af44dee6a34f2508ac1504b767ed62ee5dcbf9046e4e3cd"
-  }
-}

@@ -1,1 +1,0 @@
-{"command": ["rustfmt", "--edition", "2024", "--check", "src/search/get_wire_tests.rs", "src/serialization/get_tests.rs", "src/serialization/get_rpc_budget_probe.rs"], "exitCode": 0, "finished": 1794937072.46811}

@@ -1,2 +1,0 @@
-{"path": ["receipt", "outcome", "transition", "records", 0, "after", "difficulty"], "validator": "minimum", "bound": -3.4028234663852886e+38, "emitted": -3.4028235e+38}
-{"path": ["receipt", "outcome", "transition", "records", 0, "before", "stability"], "validator": "maximum", "bound": 3.4028234663852886e+38, "emitted": 3.4028235e+38}

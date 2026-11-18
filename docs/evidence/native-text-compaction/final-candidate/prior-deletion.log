@@ -1,6 +1,0 @@
-
-running 1 test
-test producer_work_tests::sweep_publication_failure_preserves_receipt_and_can_repair_without_reopen ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1187 filtered out; finished in 0.12s
-

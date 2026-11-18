@@ -1,8 +1,0 @@
-{
-  "base": "387c7118864040c68d7d28c44fb2600ade520a45",
-  "binary": ".test-scratch/target/debug/deps/recalld-e423ca3d07310388",
-  "sha256": "eaaadc009914336478d33a0eca267ac40839ee5523fdc221c82f9ddf53e7def1",
-  "size": 399293024,
-  "mtime_ns": 1794683187212007018,
-  "result": "3 passed 1 failed: fixture incorrectly expected old phase marker3000 rather than max(oldmarker,effective_now5000). Runtime matches existing monotonic rule."
-}

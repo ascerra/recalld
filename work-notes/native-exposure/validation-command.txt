@@ -1,5 +1,0 @@
-Docker recalld-ci:1.94 --rm --network none --cpus 2 --memory 4g; RUSTUP_TOOLCHAIN=1.94.1 CARGO_BUILD_JOBS=2 CARGO_HOME=/cargo CARGO_TARGET_DIR=/target. Mount assigned native-exposure worktree:/work and private .test-scratch/cargo:/cargo,target:/target only.
-Own target: cargo clean -p recalld
-Focused: cargo fmt --all && cargo test --offline native_exposure_ -- --nocapture
-Full: sha256sum -c .test-scratch/source-check.sha256 && cargo fmt --all -- --check && cargo test --offline && cargo clippy --offline --all-targets
-Exact legacy regressions: for each of27 full-before/failed-tests.txt names, cargo test --offline --lib NAME -- --exact; then cargo test --offline native_exposure_ -- --nocapture. All passed before final full run.

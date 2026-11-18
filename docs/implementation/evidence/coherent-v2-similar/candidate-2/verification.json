@@ -1,9 +1,0 @@
-{
-  "exit": 0,
-  "focused_pass": 6,
-  "source_pre_post_identical": true,
-  "source_manifest_sha256": "093af0296eef23c7b43fa77a15a8381625e443494340fd7df14bcc56aa42cc3a",
-  "executable_sha256": "db9b921ebe5827f4e1a1f4be6e993de1dacb691edc6ab6baaf75c10cdaac0432",
-  "executable": "recalld-test-executable",
-  "storage_action": "same-filesystem rename from finished private target; no extra binary copy during pressure hold"
-}

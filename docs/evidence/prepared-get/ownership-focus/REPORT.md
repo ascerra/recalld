@@ -1,7 +1,0 @@
-# Actual point worker ownership and pending-outbox proof
-
-Frozen source85b12773e0c258b14bfe8bb7878998c6e72082f5, executable683397dab3be216d70c056962933c78dbc8c8e651930014e329464b7f7f617d5. All-feature library compile passed56.63s; focused16PASS/0FAIL/1intentional historical BEFORE ignored70.27s. No final full/CLI/Clippy/CI claim.
-
-New actual tests: caller cancellation retains publication/graph/engine leases in the blocking copier until release; its known child finishes while the cancelled root stays unresolved, barrier refuses readiness, and strict reopen retains unchanged record/G. A separate real close barrier rejects new roots but accepts exposure descendants of the existing get root; exact known receipt/event/sample survive either successful readiness or the truthful committed-not-ready barrier race. A real canonical insertion with canonical_applied outbox and dirty derived state permits a false materialized point copy without acknowledging the outbox or claiming readiness; actual owner completion then drains it.
-
-The copy pause is per-request cfg(test), with RAII release and a five-second failure fallback; no serving authority/global hook. These are process/task cancellation and reopen tests, not power-loss experiments. Existing unknown-commit, policy conflict, graph-required projection and direct MCP/REST proofs stayed green. Response bound and actual RPC integration remain open; no READY/public2 activation.
