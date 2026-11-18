@@ -2,7 +2,6 @@
 //! The mock below is loopback-only; no real provider, credential or personal data.
 use super::*;
 use crate::mcp::bridge::{StorageEngine as McpStorage, StoreInput};
-use crate::mcp::bridge_adapters::McpStorageAdapter;
 use crate::model::{
     MemoryId, NamespaceId,
     schema::{EmbeddingBinding, EmbeddingOrigin},
@@ -108,19 +107,11 @@ fn config(path: &std::path::Path, mock: &MockProvider) -> RecalldConfig {
     config.graph.autolink_enabled = false;
     config
 }
-fn adapter(system: &Recalld) -> McpStorageAdapter {
-    McpStorageAdapter::new(
-        system.storage.clone(),
-        system.cache.clone(),
-        system.embedding.clone(),
-        system.vector_index.clone(),
-        system.fts_index.clone(),
-        system.entity_index.clone(),
-        system.graph.clone(),
-        system.config.clone(),
-        chrono_tz::UTC,
-    )
+fn adapter(system: &Recalld) -> Arc<dyn McpStorage> {
+    // Use the public constructor so missing runtime policy wiring fails here.
+    crate::mcp::bridge_adapters::direct_bridge(system, "default".into()).storage
 }
+
 fn assert_old_data(system: &Recalld, expected: &Value) {
     let storage = system.storage.read().unwrap();
     assert_eq!(storage.control_state().unwrap().control_schema_version, 2);
