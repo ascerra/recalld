@@ -23,6 +23,8 @@ mod native_records;
 mod purge;
 mod read_payload;
 pub use read_payload::HydratedRecord;
+#[cfg(test)]
+mod format_open_tests;
 mod text_compaction;
 mod tombstone;
 
@@ -354,6 +356,13 @@ pub struct RedbStorageEngine {
     pub(crate) fixture_owners: Vec<crate::storage::ownership::OwnedFileLock>,
 }
 
+#[derive(Clone, Copy)]
+enum OpenMode {
+    Legacy,
+    Native,
+    Detect,
+}
+
 impl RedbStorageEngine {
     /// Fail closed after an uncertain commit or failed derived publication.
     /// Lock order for graph writers: graph -> storage -> metadata -> redb.
@@ -453,17 +462,54 @@ impl RedbStorageEngine {
         native: bool,
         ids: Box<dyn super::ids::IdSource>,
     ) -> Result<Self, StorageError> {
+        Self::open_owned_with_mode(
+            ownership,
+            if native {
+                OpenMode::Native
+            } else {
+                OpenMode::Legacy
+            },
+            ids,
+        )
+    }
+
+    /// Format selection for the ordinary constructor's eventual native route.
+    /// This does not select an API contract or bypass either format's preflight.
+    pub(crate) fn open_detected_with_ids(
+        path: &Path,
+        ids: Box<dyn super::ids::IdSource>,
+    ) -> Result<Self, StorageError> {
+        let ownership = crate::storage::ownership::StoreOwnership::acquire_recovering(path)?;
+        Self::open_owned_with_mode(ownership, OpenMode::Detect, ids)
+    }
+
+    fn open_owned_with_mode(
+        ownership: crate::storage::ownership::StoreOwnership,
+        mode: OpenMode,
+        ids: Box<dyn super::ids::IdSource>,
+    ) -> Result<Self, StorageError> {
         let db_path = ownership.path.clone();
         std::fs::create_dir_all(&db_path)?;
         let lock_file = crate::storage::ownership::lock_directory(&db_path)?;
 
-        // Existing stores must not silently initialize absent canonical files.
-        recover_text_compaction(&db_path)?;
         let existing = std::fs::read_dir(&db_path)?.any(|entry| {
             entry
                 .map(|e| e.file_name() != "recalld.lock")
                 .unwrap_or(true)
         });
+        // Both the stable sibling owner and the directory lock remain held
+        // through disposable inspection, strict preflight, and canonical open.
+        let native = match mode {
+            OpenMode::Legacy => false,
+            OpenMode::Native => true,
+            OpenMode::Detect if existing => {
+                crate::storage::validation::startup_native_format(&db_path)?
+            }
+            OpenMode::Detect => false,
+        };
+        // This compatibility check only rejects legacy compaction artifacts;
+        // it must not initialize missing canonical files or infer a format.
+        recover_text_compaction(&db_path)?;
         if existing {
             for name in ["meta.db", "edges.db", "fulltext.dat"] {
                 crate::storage::validation::require_file(&db_path.join(name))?;

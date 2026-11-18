@@ -1968,6 +1968,19 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         desired_retention: f32,
         decay_rate_multiplier: Option<f32>,
     ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
+        if self
+            .storage
+            .read()
+            .map_err(|_| {
+                crate::storage::StorageError::RecoveryRequired("storage lock poisoned".into())
+            })?
+            .meta_store()
+            .uses_native_lifecycle()
+        {
+            return Err(Box::new(crate::storage::StorageError::InvalidMutation(
+                "native namespace creation requires local response admission".into(),
+            )));
+        }
         let completion = self.completion.as_ref().ok_or_else(|| {
             crate::storage::StorageError::InvalidMutation("namespace creation requires an owner-bound registry; use NamespaceRegistryAdapter::from_system".into())
         })?;
@@ -1996,6 +2009,45 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
         Ok(completion
             .create_legacy_namespace(config, Some(dim), self.clock.clone())
             .await?)
+    }
+
+    async fn create_bounded(
+        &self,
+        input: crate::mcp::bridge::CreateNamespaceInput,
+        admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
+    ) -> Result<NamespaceConfig, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::serialization::catalog_api1;
+        let native = self
+            .storage
+            .read()
+            .map_err(|_| {
+                crate::storage::StorageError::RecoveryRequired("storage lock poisoned".into())
+            })?
+            .meta_store()
+            .uses_native_lifecycle();
+        if !native {
+            return self
+                .create(
+                    &input.name,
+                    input.embedding_dim.map(u32::from),
+                    input
+                        .initial_stability
+                        .unwrap_or(crate::model::constants::DEFAULT_INITIAL_STABILITY),
+                    input
+                        .desired_retention
+                        .unwrap_or(crate::model::constants::DEFAULT_DESIRED_RETENTION),
+                    input.decay_rate_multiplier,
+                )
+                .await;
+        }
+        let adapter = self
+            .native_catalog
+            .as_ref()
+            .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?;
+        let receipt = adapter
+            .create_api1_bounded(catalog_api1::input(input), admission)
+            .await?;
+        Ok(catalog_api1::committed_namespace(receipt)?)
     }
 }
 

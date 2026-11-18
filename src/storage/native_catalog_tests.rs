@@ -97,6 +97,203 @@ fn bytes(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
     out
 }
 
+#[test]
+fn native_catalog_candidate_admission_rolls_back_before_file_preparation() {
+    use crate::storage::ids::{IdKind, IdSource, SeededIds};
+    use crate::storage::maintenance::ReceiptAdmission;
+    for version in [1, 2] {
+        for reject_in_callback in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let (path, clock, session) = fixture(root.path());
+            let mut ctx = context(&session, "bounded-refusal");
+            ctx.contract_version = version;
+            drop(session);
+            let mut engine =
+                RedbStorageEngine::open_with_ids(&path, true, Box::new(SeededIds::new([37; 32])))
+                    .unwrap();
+            let before = engine.control_state().unwrap();
+            let oracle = SeededIds::from_state(
+                engine
+                    .meta_store()
+                    .id_source()
+                    .checkpoint()
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            let candidate_id = oracle.uuid(IdKind::Operation).unwrap();
+            let admission = ReceiptAdmission::new(if reject_in_callback {
+                1024 * 1024
+            } else {
+                2048
+            })
+            .unwrap();
+            let called = std::cell::Cell::new(false);
+            let error = engine
+                .create_native_namespace_with_provider_bounded(
+                    &ctx,
+                    &input(),
+                    &Provider(true),
+                    &NativePolicyInputs::default(),
+                    clock.as_ref(),
+                    None,
+                    Some(&admission),
+                    |receipt| {
+                        called.set(true);
+                        assert_eq!(receipt.operation_id, candidate_id);
+                        assert_eq!(
+                            receipt.committed_generation,
+                            before.committed_generation.next().unwrap()
+                        );
+                        assert!(!path.join("created").exists());
+                        assert!(
+                            admission.snapshot().unwrap().1.is_empty(),
+                            "candidate is not committed evidence"
+                        );
+                        Err(StorageError::ReceiptBudgetExceeded)
+                    },
+                )
+                .unwrap_err();
+            assert!(matches!(error, StorageError::ReceiptBudgetExceeded));
+            assert_eq!(called.get(), reject_in_callback);
+            assert_eq!(engine.control_state().unwrap(), before);
+            assert!(engine.get_namespace_by_name("created").unwrap().is_none());
+            assert!(!path.join("created").exists());
+            assert!(std::fs::read_dir(&path).unwrap().all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".recalld-catalog-")
+            }));
+            assert!(
+                engine
+                    .lookup_operation(before.store_id, MutationScope::Catalog, candidate_id)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(admission.snapshot().unwrap().1.is_empty());
+            assert_eq!(
+                clock.0.load(Ordering::SeqCst),
+                1,
+                "candidate construction samples time"
+            );
+            assert_eq!(
+                engine.meta_store().id_source().checkpoint().unwrap(),
+                oracle.checkpoint().unwrap(),
+                "exactly one operation ID consumed, not zero"
+            );
+            // The rejected key, namespace counter and generation were not committed.
+            let receipt = engine
+                .create_native_namespace_with_provider(
+                    &ctx,
+                    &input(),
+                    &Provider(true),
+                    &NativePolicyInputs::default(),
+                    clock.as_ref(),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                receipt.committed_generation,
+                before.committed_generation.next().unwrap()
+            );
+            let MutationOutcome::NativeNamespaceCreated { transition } = receipt.outcome else {
+                panic!("creation receipt")
+            };
+            assert_eq!(transition.namespace_id, NamespaceId::new(2));
+            assert!(path.join("created/vectors.dat").is_file());
+        }
+    }
+}
+
+#[test]
+fn native_catalog_bounded_replay_keeps_original_contract_and_skips_fresh_budget() {
+    use crate::storage::ids::SeededIds;
+    use crate::storage::maintenance::ReceiptAdmission;
+    for version in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let (path, clock, session) = fixture(root.path());
+        let mut ctx = context(&session, "bounded-replay");
+        ctx.contract_version = version;
+        drop(session);
+        let mut engine =
+            RedbStorageEngine::open_with_ids(&path, true, Box::new(SeededIds::new([38; 32])))
+                .unwrap();
+        let admission = ReceiptAdmission::new(1024 * 1024).unwrap();
+        let receipt = engine
+            .create_native_namespace_with_provider_bounded(
+                &ctx,
+                &input(),
+                &Provider(true),
+                &NativePolicyInputs::default(),
+                clock.as_ref(),
+                None,
+                Some(&admission),
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(
+            admission.snapshot().unwrap().1.is_empty(),
+            "producer must not record private candidates"
+        );
+        admission.record(&receipt).unwrap();
+        assert_eq!(admission.snapshot().unwrap().1, vec![receipt.clone()]);
+        let before = engine.control_state().unwrap();
+        let ids = engine.meta_store().id_source().checkpoint().unwrap();
+        let too_small = ReceiptAdmission::new(2048).unwrap();
+        let replay = engine
+            .create_native_namespace_with_provider_bounded(
+                &ctx,
+                &input(),
+                &Provider(false),
+                &NativePolicyInputs::default(),
+                clock.as_ref(),
+                None,
+                Some(&too_small),
+                |_| panic!("fresh response budget cannot rewrite historical replay"),
+            )
+            .unwrap();
+        let mut expected = receipt.clone();
+        expected.replayed = true;
+        assert_eq!(replay, expected);
+        assert!(too_small.snapshot().unwrap().1.is_empty());
+        assert!(
+            admission.check_receipt(&replay).is_err(),
+            "replay decoration is not outbox authority"
+        );
+        ctx.contract_version = if version == 1 { 2 } else { 1 };
+        assert!(matches!(
+            engine.create_native_namespace_with_provider_bounded(
+                &ctx,
+                &input(),
+                &Provider(false),
+                &NativePolicyInputs::default(),
+                clock.as_ref(),
+                None,
+                Some(&too_small),
+                |_| panic!("different contract cannot reach fresh admission"),
+            ),
+            Err(StorageError::IdempotencyConflict)
+        ));
+        assert_eq!(engine.control_state().unwrap(), before);
+        assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
+        assert_eq!(clock.0.load(Ordering::SeqCst), 1);
+        drop(engine);
+        let reopened = RedbStorageEngine::open_native(&path).unwrap();
+        assert_eq!(
+            reopened
+                .lookup_operation(
+                    receipt.store_id,
+                    MutationScope::Catalog,
+                    receipt.operation_id
+                )
+                .unwrap(),
+            Some(receipt)
+        );
+    }
+}
+
 #[tokio::test]
 async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
     let root = tempfile::tempdir().unwrap();

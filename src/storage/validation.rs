@@ -53,6 +53,62 @@ pub(crate) fn inspect_database_copy(
     Ok((temp, db))
 }
 
+/// Choose the existing startup preflight under the caller's two ownership locks.
+/// Header inspection is not admission: the selected full validator must run
+/// before any writable canonical open. Do not add another lifetime history scan.
+pub(crate) fn startup_native_format(path: &Path) -> Result<bool, StorageError> {
+    use redb::{MultimapTableHandle, TableHandle};
+
+    let (_copy, metadata) = inspect_database_copy(&path.join("meta.db"), true)?;
+    let read = metadata.begin_read()?;
+    let reserved = [
+        super::control::CONTROL.name(),
+        super::control::RECEIPTS.name(),
+        super::control::KEYS.name(),
+    ];
+    if read.list_multimap_tables()?.any(|table| {
+        reserved.contains(&table.name()) || table.name() == super::canonical_schema::SCHEMA.name()
+    }) {
+        return Err(StorageError::InvalidControl(
+            "control table is a multimap".into(),
+        ));
+    }
+    let mut present = [false; 3];
+    let mut schema = false;
+    for table in read.list_tables()? {
+        for (index, name) in reserved.iter().enumerate() {
+            present[index] |= table.name() == *name;
+        }
+        schema |= table.name() == super::canonical_schema::SCHEMA.name();
+    }
+    if !present.iter().any(|v| *v) {
+        if schema {
+            return Err(StorageError::InvalidControl(
+                "schema without control lineage".into(),
+            ));
+        }
+        return Ok(false);
+    }
+    if !present.iter().all(|v| *v) {
+        return Err(StorageError::InvalidControl(
+            "incomplete control tables".into(),
+        ));
+    }
+    let control = read.open_table(super::control::CONTROL)?;
+    if control.len()? != 1 {
+        return Err(StorageError::InvalidControl(
+            "control must contain exactly one state row".into(),
+        ));
+    }
+    let state = super::control::ControlState::decode(
+        control
+            .get("state")?
+            .ok_or_else(|| StorageError::InvalidControl("missing control state".into()))?
+            .value(),
+    )?;
+    Ok(state.control_schema_version == 2)
+}
+
 /// Canonical text preflight on a disposable metadata copy. This precedes any
 /// writable canonical open; pending plans are checked without applying effects.
 pub(crate) fn preflight_text(path: &Path) -> Result<(), StorageError> {

@@ -29,6 +29,105 @@ pub struct NativeCatalogAdapter {
     pub(crate) failure: Option<&'static str>,
 }
 impl NativeCatalogAdapter {
+    /// Fresh, unkeyed API1 only. Keyed V2 replay retains its existing entry.
+    pub(crate) async fn create_api1_bounded(
+        &self,
+        input: crate::storage::native_catalog::NativeNamespaceInput,
+        surface: crate::serialization::catalog_api1::CatalogReplyAdmission,
+    ) -> Result<WriteReceipt, CatalogError> {
+        // The owning adapter has selected native format. Reject an impossible
+        // local envelope before accepting work or sampling provider/clock/IDs.
+        let admission = surface.admit_native()?;
+        let root = self.completion.accept_work(None)?;
+        let result = self
+            .create_api1_accepted(input, surface, &admission, &root)
+            .await;
+        if !result
+            .as_ref()
+            .err()
+            .is_some_and(crate::serialization::catalog_api1::outcome_unknown)
+        {
+            self.completion.finish_known_work(root);
+        }
+        result
+    }
+
+    async fn create_api1_accepted(
+        &self,
+        input: crate::storage::native_catalog::NativeNamespaceInput,
+        surface: crate::serialization::catalog_api1::CatalogReplyAdmission,
+        admission: &crate::storage::maintenance::ReceiptAdmission,
+        root: &crate::storage::work::WorkTicket,
+    ) -> Result<WriteReceipt, CatalogError> {
+        let lease = crate::derived_completion::publication_gate(&self.storage)
+            .await?
+            .read_owned()
+            .await;
+        let child = root.child().map_err(StorageError::from)?;
+        let this = self.clone();
+        let worker_admission = admission.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let _lease = lease;
+            #[cfg(test)]
+            let _fault = tests::Fault::enter_api1(this.failure);
+            let mut storage = this
+                .storage
+                .write()
+                .map_err(|_| CatalogError::WorkerUnknown)?;
+            #[cfg(test)]
+            tests::api1_before_result(this.failure);
+            let ctx = crate::serialization::contract::WriteOptions::default()
+                .context(MutationScope::Catalog, ContractVersion::V1);
+            let result = storage.create_native_namespace_with_provider_bounded(
+                &ctx,
+                &input,
+                this.provider.as_ref(),
+                &this.policy,
+                this.clock.as_ref(),
+                Some(&child),
+                Some(&worker_admission),
+                |receipt| surface.check_candidate(receipt),
+            );
+            // Record only actual returned evidence, before the worker's
+            // fallible tail. The private transaction candidate is not authority.
+            let result = result.and_then(|receipt| {
+                worker_admission.record(&receipt).map_err(|source| {
+                    StorageError::CommittedMutation {
+                        receipt: Box::new(receipt.clone()),
+                        source: Box::new(source),
+                    }
+                })?;
+                Ok(receipt)
+            });
+            if let Err(error) = &result {
+                worker_admission.fail(error);
+            }
+            #[cfg(test)]
+            tests::api1_after_result(this.failure, &result, &worker_admission);
+            storage.meta_store().finish_work(child);
+            result.map_err(CatalogError::Storage)
+        })
+        .await
+        .map_err(|_| {
+            CatalogError::Api1WorkerUnknown(Box::new(
+                crate::serialization::catalog_api1::CatalogWorkerEvidence::capture(admission),
+            ))
+        })?;
+        let receipt = result?;
+        // The actual worker has dropped storage/publication locks. This pass
+        // admits only the receipt returned above, never foreign pending work.
+        self.completion
+            .complete_with_admission(Some(root), Some(admission))
+            .await
+            .map_err(|source| {
+                CatalogError::Storage(StorageError::CommittedMutation {
+                    receipt: Box::new(receipt.clone()),
+                    source: Box::new(source),
+                })
+            })?;
+        Ok(receipt)
+    }
+
     pub(crate) fn new(
         completion: crate::derived_completion::DerivedCompletion,
         provider: Arc<dyn EmbeddingProvider>,
@@ -284,6 +383,8 @@ pub(crate) fn policy_response(
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
+    #[error("catalog worker outcome unknown; reconcile retained evidence")]
+    Api1WorkerUnknown(#[source] Box<crate::serialization::catalog_api1::CatalogWorkerEvidence>),
     #[error("{0}")]
     Input(#[from] InputError),
     #[error("{0}")]
@@ -332,6 +433,30 @@ pub(crate) fn response(result: Result<WriteReceipt, CatalogError>) -> (u16, Cata
 
 fn failure(error: CatalogError) -> (u16, CatalogEnvelope) {
     use ErrorCategory::*;
+    // API1 uses its own projector. Defensively reject invalid evidence here
+    // too, rather than silently dropping it if this shared error is misrouted.
+    let worker_evidence = if let CatalogError::Api1WorkerUnknown(evidence) = &error {
+        match evidence.checked() {
+            Ok((operation, receipt)) => Some((operation, receipt.cloned())),
+            Err(invalid) => {
+                tracing::error!(evidence = ?invalid, "catalog worker evidence invariant violated");
+                return (500, Envelope::failure(
+                    Some(Scope::Catalog { kind: CatalogKind::Catalog }),
+                    ExecutionError {
+                        category: Internal,
+                        code: "INTERNAL_ERROR".into(),
+                        message: "Catalog evidence invariant violated; outcome unknown. Reconcile before retry.".into(),
+                        field: None,
+                        retryable: false,
+                        commit_state: CommitState::Unknown,
+                        operation_id: None,
+                    },
+                ));
+            }
+        }
+    } else {
+        None
+    };
     let (status, category, code, field, state, operation_id, retryable) = match &error {
         CatalogError::Input(e) => (
             400,
@@ -472,10 +597,22 @@ fn failure(error: CatalogError) -> (u16, CatalogEnvelope) {
             None,
             false,
         ),
+        CatalogError::Api1WorkerUnknown(_) => (
+            503,
+            Unavailable,
+            "STORAGE_UNAVAILABLE",
+            None,
+            CommitState::Unknown,
+            worker_evidence
+                .as_ref()
+                .and_then(|(operation, _)| *operation),
+            false,
+        ),
     };
     let message = error.to_string();
     let receipt = match error {
         CatalogError::Storage(StorageError::CommittedMutation { receipt, .. }) => Some(*receipt),
+        CatalogError::Api1WorkerUnknown(_) => worker_evidence.and_then(|(_, receipt)| receipt),
         _ => None,
     };
     let mut out = Envelope::failure(
@@ -498,4 +635,4 @@ fn failure(error: CatalogError) -> (u16, CatalogEnvelope) {
 
 #[cfg(test)]
 #[path = "native_catalog_adapter_tests.rs"]
-mod tests;
+pub(crate) mod tests;

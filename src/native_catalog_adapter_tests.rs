@@ -11,7 +11,10 @@ use crate::{
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-struct Provider {
+#[path = "native_catalog_invalid_tests.rs"]
+mod invalid_tests;
+
+pub(crate) struct Provider {
     available: AtomicBool,
     calls: AtomicUsize,
 }
@@ -39,7 +42,7 @@ impl EmbeddingProvider for Provider {
         Some(crate::embedding::runtime::tests::profile())
     }
 }
-struct FixedClock;
+pub(crate) struct FixedClock;
 struct UnknownProvider;
 #[async_trait::async_trait]
 impl EmbeddingProvider for UnknownProvider {
@@ -58,6 +61,88 @@ impl Fault {
     pub(super) fn enter(point: Option<&'static str>) -> Self {
         Self(crate::storage::catalog::FAILURE.with(|f| f.replace(point)))
     }
+
+    pub(super) fn enter_api1(point: Option<&'static str>) -> Self {
+        Self::enter(match point {
+            Some("api1_after_known_error") => Some("before_handle_publish"),
+            Some("api1_after_unknown_error") => Some("commit_unknown"),
+            point => point,
+        })
+    }
+}
+
+pub(super) fn api1_before_result(point: Option<&str>) {
+    if point == Some("api1_before_result") {
+        panic!("injected API1 worker loss before producer result");
+    }
+}
+
+pub(super) fn api1_after_result(
+    point: Option<&str>,
+    result: &Result<WriteReceipt, StorageError>,
+    admission: &crate::storage::maintenance::ReceiptAdmission,
+) {
+    match point {
+        Some("api1_invalid_multiple" | "api1_invalid_conflict" | "api1_invalid_unadmitted") => {
+            // Deliberately corrupt only the private test collector after a real
+            // returned receipt. These are impossible fresh-collector states,
+            // not additional canonical writes or attacker-authored history.
+            let mut extra = result.as_ref().expect("actual catalog receipt").clone();
+            match point.unwrap() {
+                "api1_invalid_multiple" => {
+                    extra.operation_id = uuid::Uuid::from_u128(7);
+                    admission.record(&extra).unwrap();
+                }
+                "api1_invalid_conflict" => {
+                    extra.replayed = true;
+                    assert!(matches!(
+                        admission.record(&extra),
+                        Err(StorageError::ReceiptEvidenceConflict)
+                    ));
+                }
+                _ => {
+                    let MutationOutcome::NativeNamespaceCreated { transition } = &mut extra.outcome
+                    else {
+                        unreachable!()
+                    };
+                    transition.name = "x".repeat(8_388_609);
+                    admission.fail(&StorageError::CommittedMutation {
+                        receipt: Box::new(extra),
+                        source: Box::new(StorageError::RecoveryRequired(
+                            "synthetic collector invariant".into(),
+                        )),
+                    });
+                }
+            }
+            panic!("injected invalid private catalog evidence");
+        }
+        Some("api1_after_result") => {
+            let receipt = result.as_ref().expect("actual successful producer result");
+            eprintln!(
+                "API1 actual returned receipt before lost worker: {}",
+                serde_json::to_string(receipt).unwrap()
+            );
+            panic!("injected API1 worker loss after successful producer result");
+        }
+        Some("api1_after_known_error") => {
+            let Err(StorageError::CommittedMutation { receipt, .. }) = result else {
+                panic!("expected actual committed error, got {result:?}");
+            };
+            eprintln!(
+                "API1 actual error receipt before lost worker: {}",
+                serde_json::to_string(receipt).unwrap()
+            );
+            panic!("injected API1 worker loss after committed producer error");
+        }
+        Some("api1_after_unknown_error") => {
+            let Err(StorageError::CommitOutcomeUnknown { operation_id, .. }) = result else {
+                panic!("expected actual allocated unknown, got {result:?}");
+            };
+            eprintln!("API1 actual allocated unknown ID before lost worker: {operation_id}");
+            panic!("injected API1 worker loss after actual unknown producer result");
+        }
+        _ => {}
+    }
 }
 impl Drop for Fault {
     fn drop(&mut self) {
@@ -69,7 +154,7 @@ impl Clock for FixedClock {
         2000
     }
 }
-fn fixture() -> (Fixture, std::path::PathBuf, Arc<Provider>) {
+pub(crate) fn fixture() -> (Fixture, std::path::PathBuf, Arc<Provider>) {
     fixture_with_record(false)
 }
 fn fixture_with_record(seed: bool) -> (Fixture, std::path::PathBuf, Arc<Provider>) {
@@ -513,6 +598,656 @@ fn completion(f: &Fixture) -> crate::derived_completion::DerivedCompletion {
         fts: f.fts_index.clone(),
         entities: f.entity_index.clone(),
     }
+}
+
+async fn api1_dispatch(
+    bridge: crate::mcp::bridge::McpBridge,
+    name: &str,
+    id: Value,
+    era: crate::mcp::protocol::Era,
+) -> Value {
+    use crate::mcp::{
+        protocol::JsonRpcMessage,
+        server::{McpDispatcher, RequestContext},
+    };
+    let dispatcher = McpDispatcher::new(Arc::new(bridge));
+    let context = RequestContext {
+        era,
+        meta: None,
+        legacy_version: None,
+    };
+    let request: JsonRpcMessage = serde_json::from_value(json!({
+        "jsonrpc":"2.0", "id":id, "method":"tools/call",
+        "params":{"name":"create_namespace", "arguments":{"name":name,"initialStability":3.7145}}
+    }))
+    .unwrap();
+    let response = dispatcher.dispatch(&context, request).await.unwrap();
+    serde_json::to_value(response).unwrap()
+}
+
+fn api1_bridge(
+    f: &Fixture,
+    provider: Arc<Provider>,
+    fault: Option<&'static str>,
+) -> crate::mcp::bridge::McpBridge {
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    let mut adapter = f.namespace_adapter().with_native_catalog(
+        provider,
+        NativePolicyInputs::default(),
+        Arc::new(FixedClock),
+    );
+    if let Some(fault) = fault {
+        adapter = adapter.with_catalog_fault(fault);
+    }
+    bridge.namespaces = Arc::new(adapter);
+    bridge
+}
+
+pub(crate) fn api1_seeded_fixture() -> (Fixture, std::path::PathBuf, Arc<Provider>) {
+    let (f, path, provider) = fixture();
+    let dir = f.close();
+    let engine = RedbStorageEngine::open_with_ids(
+        &path,
+        true,
+        Box::new(crate::storage::ids::SeededIds::new([81; 32])),
+    )
+    .unwrap();
+    (Fixture::from_open_engine(dir, engine), path, provider)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_real_dispatcher_eras_original_context_and_alias_guard() {
+    use crate::mcp::{bridge::NamespaceRegistry, protocol::Era};
+    for era in [Era::Legacy, Era::Modern] {
+        let (f, path, provider) = fixture();
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let adapter = f.namespace_adapter().with_native_catalog(
+            provider.clone(),
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+        );
+        let input = crate::mcp::bridge::CreateNamespaceInput {
+            name: "unbounded".into(),
+            embedding_dim: None,
+            initial_stability: None,
+            desired_retention: None,
+            decay_rate_multiplier: None,
+        };
+        let original = bytes(&path);
+        assert!(adapter.create_namespace(input).await.is_err());
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(bytes(&path), original);
+        drop(adapter);
+        let out = api1_dispatch(
+            api1_bridge(&f, provider.clone(), None),
+            "local",
+            json!("id\n\"\\"),
+            era,
+        )
+        .await;
+        assert_eq!(out["id"], "id\n\"\\");
+        assert!(out["result"].get("isError").is_none(), "{out}");
+        let content: Value =
+            serde_json::from_str(out["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(content["name"], "local");
+        assert_eq!(content["embeddingDim"], 4);
+        if era == Era::Modern {
+            assert_eq!(out["result"]["structuredContent"], content);
+        } else {
+            assert!(out["result"].get("structuredContent").is_none());
+        }
+        assert!(serde_json::to_vec(&out).unwrap().len() + 1 <= 8_388_608);
+        assert_eq!(
+            f.storage
+                .read()
+                .unwrap()
+                .control_state()
+                .unwrap()
+                .committed_generation,
+            before.committed_generation.next().unwrap()
+        );
+        let (_copy, db) =
+            crate::storage::validation::inspect_database_copy(&path.join("meta.db"), true).unwrap();
+        use redb::ReadableTable;
+        let tx = db.begin_read().unwrap();
+        let table = tx.open_table(crate::storage::control::RECEIPTS).unwrap();
+        let found = table
+            .iter()
+            .unwrap()
+            .filter_map(|row| {
+                let (_, value) = row.unwrap();
+                let stored = crate::storage::control::validate_receipt(value.value()).unwrap();
+                (stored.receipt.committed_generation == before.committed_generation.next().unwrap())
+                    .then_some(stored)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(found.len(), 1);
+        let input = crate::storage::native_catalog::NativeNamespaceInput {
+            name: "local".into(),
+            embedding_dim: None,
+            embedding_profile_id: None,
+            initial_stability: Some(3.7145),
+            desired_retention: None,
+            decay_rate_multiplier: None,
+        };
+        let options = crate::serialization::contract::WriteOptions::default();
+        assert_eq!(
+            found[0].request_hash,
+            input
+                .hash(&options.context(MutationScope::Catalog, ContractVersion::V1))
+                .unwrap()
+        );
+        assert_ne!(
+            found[0].request_hash,
+            input
+                .hash(&options.context(MutationScope::Catalog, ContractVersion::V2))
+                .unwrap()
+        );
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_actual_known_and_unknown_frames_reopen() {
+    use crate::mcp::protocol::Era;
+    for point in [
+        "after_metadata_commit",
+        "before_handle_publish",
+        "after_handle_publish",
+        "commit_unknown",
+    ] {
+        let (f, path, provider) = fixture();
+        let before = f.storage.read().unwrap().control_state().unwrap();
+        let out = api1_dispatch(
+            api1_bridge(&f, provider, Some(point)),
+            "faulted",
+            json!(17),
+            Era::Modern,
+        )
+        .await;
+        assert_eq!(out["result"]["isError"], true, "{point}: {out}");
+        let content: Value =
+            serde_json::from_str(out["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(content, out["result"]["structuredContent"]);
+        assert_eq!(content["error"], "SERVICE_UNAVAILABLE");
+        assert!(content.get("ready").is_none());
+        assert_eq!(
+            content["commitState"],
+            if point == "commit_unknown" {
+                "unknown"
+            } else {
+                "committed"
+            }
+        );
+        let operation = uuid::Uuid::parse_str(content["operationId"].as_str().unwrap()).unwrap();
+        if point == "commit_unknown" {
+            assert!(content.get("receipt").is_none());
+        } else {
+            assert_eq!(content["receipt"]["operationId"], content["operationId"]);
+        }
+        assert!(serde_json::to_vec(&out).unwrap().len() + 1 <= 8_388_608);
+        let dir = f.close();
+        let reopened = NativeLifecycleSession::open(
+            &path,
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+        )
+        .unwrap();
+        let receipt = reopened
+            .engine
+            .meta_store()
+            .lookup_operation(before.store_id, MutationScope::Catalog, operation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            receipt.committed_generation,
+            before.committed_generation.next().unwrap()
+        );
+        if point != "commit_unknown" {
+            // Preserve f32 bits independently of the Value decimal parses in
+            // the actual PartiallyApplied -> tool -> structured-content path.
+            let decoded: WriteReceipt = serde_json::from_value(content["receipt"].clone()).unwrap();
+            assert_eq!(
+                crate::storage::control::encode(&decoded).unwrap(),
+                crate::storage::control::encode(&receipt).unwrap()
+            );
+            let mut original = content.clone();
+            original["receipt"] = serde_json::to_value(&receipt).unwrap();
+            let admission = crate::serialization::catalog_api1::CatalogReplyAdmission::mcp(
+                crate::mcp::protocol::JsonRpcId::Number(17),
+                Era::Modern,
+            );
+            let expected = admission.encoded_for_test(&original, true);
+            let mut actual = serde_json::to_vec(&out).unwrap();
+            actual.push(b'\n');
+            assert_eq!(expected, actual, "actual 3.7145 receipt full MCP emission");
+        }
+        drop(reopened);
+        drop(dir);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_oversized_outer_id_refuses_before_provider_legacy_unchanged() {
+    use crate::mcp::protocol::Era;
+    let (f, path, provider) = api1_seeded_fixture();
+    let before = bytes(&path);
+    let ids = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .id_source()
+        .checkpoint()
+        .unwrap();
+    assert!(ids.is_some());
+    let out = api1_dispatch(
+        api1_bridge(&f, provider.clone(), None),
+        "refused",
+        json!("x".repeat(8_388_608)),
+        Era::Legacy,
+    )
+    .await;
+    assert_eq!(out["result"]["isError"], true);
+    let error: Value =
+        serde_json::from_str(out["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(error["error"], "RESPONSE_TOO_LARGE");
+    assert_eq!(error["commitState"], "notCommitted");
+    assert!(error.get("receipt").is_none());
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(bytes(&path), before);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .id_source()
+            .checkpoint()
+            .unwrap(),
+        ids
+    );
+    // The already supplied outer ID cannot itself be made to fit the native
+    // policy. The proof is refusal before canonical work, not a small echo.
+    let legacy = Fixture::new();
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.namespaces = Arc::new(legacy.namespace_adapter());
+    let out = api1_dispatch(bridge, "legacy", json!("x".repeat(8_388_608)), Era::Legacy).await;
+    assert!(out["result"].get("isError").is_none());
+    assert!(serde_json::to_vec(&out).unwrap().len() > 8_388_608);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_foreign_pending_receipt_is_not_drained_or_returned() {
+    use crate::serialization::catalog_api1::{self, CatalogReplyAdmission};
+    let (f, path, provider) = api1_seeded_fixture();
+    let adapter = NativeCatalogAdapter::new(
+        f.completion(),
+        provider.clone(),
+        Default::default(),
+        Arc::new(FixedClock),
+    );
+    let input = |name: &str| crate::storage::native_catalog::NativeNamespaceInput {
+        name: name.into(),
+        embedding_dim: None,
+        embedding_profile_id: None,
+        initial_stability: None,
+        desired_retention: None,
+        decay_rate_multiplier: None,
+    };
+    let first = adapter
+        .create_api1_bounded(input("prior"), CatalogReplyAdmission::http())
+        .await
+        .unwrap();
+    let ns = catalog_api1::namespace(&first).unwrap();
+    let prior = {
+        let mut engine = f.storage.write().unwrap();
+        let supplied = crate::storage::native_records::NativeInsert {
+            memory: crate::storage::insertion::InsertMemory {
+                id: None,
+                summary: "retained foreign outbox witness".into(),
+                full_text: None,
+                tags: vec![],
+                initial_stability: None,
+                created_at: None,
+                embedding: Some(vec![1., 0., 0., 0.]),
+                parent_id: None,
+                supersedes: None,
+            },
+            observed_at: None,
+            entities: vec![],
+            topics: vec![],
+            emotions: vec![],
+            embedding_profile: Some(crate::embedding::runtime::tests::profile()),
+        };
+        let policy = NativePolicyInputs::default();
+        let intent = engine
+            .meta_store()
+            .capture_native_insert(
+                crate::storage::native_lifecycle::LifecycleScope {
+                    namespace_id: ns.id,
+                    namespace_name: ns.name,
+                    source: None,
+                },
+                &supplied,
+                &policy,
+            )
+            .unwrap();
+        let ctx = crate::storage::control::MutationContext::unkeyed(ns.id);
+        engine
+            .insert_native_record(
+                &ctx,
+                &intent,
+                &crate::embedding::runtime::GeneratedEmbedding::unverified(
+                    vec![],
+                    Some(crate::embedding::runtime::tests::profile()),
+                ),
+                &policy,
+                &FixedClock,
+                None,
+            )
+            .unwrap()
+    };
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let original = bytes(&path);
+    let ids = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .id_source()
+        .checkpoint()
+        .unwrap();
+    assert!(ids.is_some());
+    let error = adapter
+        .create_api1_bounded(input("blocked"), CatalogReplyAdmission::http())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        &error,
+        CatalogError::Storage(StorageError::MaintenanceDependencyUnavailable)
+    ));
+    let (_, value) = catalog_api1::failure(&error);
+    assert_eq!(value["commitState"], "notCommitted");
+    assert!(value.get("receipt").is_none());
+    assert!(value.get("ready").is_none());
+    assert_eq!(bytes(&path), original);
+    let engine = f.storage.read().unwrap();
+    assert_eq!(engine.control_state().unwrap(), before);
+    assert_eq!(engine.meta_store().id_source().checkpoint().unwrap(), ids);
+    assert_eq!(
+        engine
+            .meta_store()
+            .lookup_operation(
+                prior.store_id,
+                MutationScope::Namespace(ns.id),
+                prior.operation_id
+            )
+            .unwrap()
+            .unwrap(),
+        prior
+    );
+    assert!(
+        !engine
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
+}
+
+struct PausedCatalogClock {
+    entered: tokio::sync::Notify,
+    released: std::sync::Mutex<bool>,
+    wake: std::sync::Condvar,
+}
+impl Clock for PausedCatalogClock {
+    fn now_millis(&self) -> i64 {
+        self.entered.notify_one();
+        let mut released = self.released.lock().unwrap();
+        while !*released {
+            released = self.wake.wait(released).unwrap();
+        }
+        2000
+    }
+}
+impl PausedCatalogClock {
+    fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.wake.notify_all();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_cancel_keeps_worker_publication_lease() {
+    use crate::serialization::catalog_api1::CatalogReplyAdmission;
+    let (f, path, provider) = fixture();
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let owner_count = Arc::strong_count(&f.storage);
+    let gate = crate::derived_completion::publication_gate(&f.storage)
+        .await
+        .unwrap();
+    let clock = Arc::new(PausedCatalogClock {
+        entered: tokio::sync::Notify::new(),
+        released: std::sync::Mutex::new(false),
+        wake: std::sync::Condvar::new(),
+    });
+    let adapter =
+        NativeCatalogAdapter::new(f.completion(), provider, Default::default(), clock.clone());
+    let worker = tokio::spawn(async move {
+        adapter
+            .create_api1_bounded(
+                crate::storage::native_catalog::NativeNamespaceInput {
+                    name: "cancelled".into(),
+                    embedding_dim: None,
+                    embedding_profile_id: None,
+                    initial_stability: None,
+                    desired_retention: None,
+                    decay_rate_multiplier: None,
+                },
+                CatalogReplyAdmission::http(),
+            )
+            .await
+    });
+    // Always release the deterministic pause before asserting, so a failed
+    // oracle cannot strand the runtime's blocking worker during test shutdown.
+    let entered =
+        tokio::time::timeout(std::time::Duration::from_secs(10), clock.entered.notified()).await;
+    if entered.is_err() {
+        clock.release();
+        panic!("catalog worker did not reach sampled clock");
+    }
+    worker.abort();
+    let cancelled = worker.await;
+    let held = gate.try_write().is_err();
+    clock.release();
+    assert!(cancelled.unwrap_err().is_cancelled());
+    assert!(
+        held,
+        "caller cancellation released the worker's publication lease"
+    );
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(10), gate.write())
+        .await
+        .unwrap();
+    {
+        let engine = f.storage.read().unwrap();
+        assert!(engine.get_namespace_by_name("cancelled").unwrap().is_some());
+        assert_eq!(
+            engine.control_state().unwrap().committed_generation,
+            before.committed_generation.next().unwrap()
+        );
+        assert!(
+            !engine
+                .meta_store()
+                .publication_state()
+                .unwrap()
+                .matches_canonical()
+        );
+    }
+    drop(completed);
+    drop(gate);
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while Arc::strong_count(&f.storage) != owner_count {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    assert_eq!(tracker.status().pending, 1);
+    assert_eq!(tracker.status().unresolved, 1);
+    assert!(matches!(
+        tracker.close_and_drain(std::time::Instant::now() + std::time::Duration::from_millis(10)),
+        Err(crate::storage::work::WorkError::Deadline {
+            pending: 1,
+            unresolved: 1
+        })
+    ));
+    let dir = f.close();
+    let reopened =
+        NativeLifecycleSession::open(&path, NativePolicyInputs::default(), Arc::new(FixedClock))
+            .unwrap();
+    assert!(
+        reopened
+            .engine
+            .get_namespace_by_name("cancelled")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        reopened
+            .engine
+            .control_state()
+            .unwrap()
+            .committed_generation,
+        before.committed_generation.next().unwrap()
+    );
+    assert_eq!(
+        reopened.engine.meta_store().work_tracker().status().pending,
+        0
+    );
+    drop(reopened);
+    drop(dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_catalog_api1_post_result_join_loss_preserves_actual_collected_evidence() {
+    use crate::serialization::catalog_api1::{self, CatalogReplyAdmission};
+    use crate::storage::ids::{IdKind, IdSource, SeededIds};
+    let mut lost = Vec::new();
+    for point in [
+        "api1_before_result",
+        "api1_after_result",
+        "api1_after_known_error",
+        "api1_after_unknown_error",
+    ] {
+        let (f, path, provider) = api1_seeded_fixture();
+        let (before, tracker, expected_id) = {
+            let engine = f.storage.read().unwrap();
+            let oracle = SeededIds::from_state(
+                engine
+                    .meta_store()
+                    .id_source()
+                    .checkpoint()
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            (
+                engine.control_state().unwrap(),
+                engine.meta_store().work_tracker(),
+                oracle.uuid(IdKind::Operation).unwrap(),
+            )
+        };
+        let mut adapter = NativeCatalogAdapter::new(
+            f.completion(),
+            provider,
+            Default::default(),
+            Arc::new(FixedClock),
+        );
+        adapter.failure = Some(point);
+        let error = adapter
+            .create_api1_bounded(
+                crate::storage::native_catalog::NativeNamespaceInput {
+                    name: "lost_worker".into(),
+                    embedding_dim: None,
+                    embedding_profile_id: None,
+                    initial_stability: Some(3.7145),
+                    desired_retention: None,
+                    decay_rate_multiplier: None,
+                },
+                CatalogReplyAdmission::http(),
+            )
+            .await
+            .unwrap_err();
+        assert!(catalog_api1::outcome_unknown(&error));
+        let (_, value) = catalog_api1::failure(&error);
+        assert_eq!(value["commitState"], "unknown", "{point}: {value}");
+        assert!(value.get("ready").is_none());
+        let expected_pending =
+            if point == "api1_after_known_error" || point == "api1_after_unknown_error" {
+                3
+            } else {
+                2
+            };
+        assert_eq!(tracker.status().pending, expected_pending);
+        assert_eq!(tracker.status().unresolved, expected_pending);
+        drop(adapter);
+        let dir = f.close();
+        let reopened = NativeLifecycleSession::open(
+            &path,
+            NativePolicyInputs::default(),
+            Arc::new(FixedClock),
+        )
+        .unwrap();
+        if point == "api1_before_result" {
+            assert_eq!(reopened.engine.control_state().unwrap(), before);
+            assert!(value.get("receipt").is_none());
+            assert_eq!(value["operationId"], Value::Null);
+        } else {
+            let canonical = reopened
+                .engine
+                .meta_store()
+                .lookup_operation(before.store_id, MutationScope::Catalog, expected_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                canonical.committed_generation,
+                before.committed_generation.next().unwrap()
+            );
+            if point == "api1_after_unknown_error" {
+                assert!(
+                    value.get("receipt").is_none(),
+                    "unknown result never returned a receipt"
+                );
+                if value["operationId"] != json!(expected_id) {
+                    lost.push((point, value.clone()));
+                }
+            } else {
+                assert_eq!(
+                    value["operationId"],
+                    Value::Null,
+                    "receipt ID is not an invented unknown-operation ID"
+                );
+                if value.get("receipt").is_none() {
+                    lost.push((point, value.clone()));
+                } else {
+                    let retained: WriteReceipt =
+                        serde_json::from_value(value["receipt"].clone()).unwrap();
+                    assert_eq!(
+                        crate::storage::control::encode(&retained).unwrap(),
+                        crate::storage::control::encode(&canonical).unwrap()
+                    );
+                }
+            }
+        }
+        eprintln!("post-result case {point}: {value}");
+        drop(reopened);
+        drop(dir);
+    }
+    assert!(
+        lost.is_empty(),
+        "actual returned worker evidence lost: {lost:?}"
+    );
 }
 fn rest_adapter(
     f: &Fixture,
