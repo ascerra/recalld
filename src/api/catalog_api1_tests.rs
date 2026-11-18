@@ -18,7 +18,7 @@ async fn native_catalog_api1_http_invalid_snapshot_is_bounded_unknown_error() {
         let (mut state, bridge) = fixture_state(&f);
         drop(bridge);
         state.namespaces = Arc::new(
-            NamespaceRegistryAdapter::new(f.storage.clone())
+            NamespaceRegistryAdapter::new(f.storage.clone(), provider.clone())
                 .with_native_catalog(
                     provider,
                     NativePolicyInputs::default(),
@@ -62,16 +62,17 @@ async fn native_catalog_api1_http_success_known_unknown_full_bodies() {
         let initial = f.storage.read().unwrap().control_state().unwrap();
         let (mut state, bridge) = fixture_state(&f);
         drop(bridge);
-        let mut adapter = NamespaceRegistryAdapter::new(f.storage.clone()).with_native_catalog(
-            provider,
-            NativePolicyInputs::default(),
-            Arc::new(FixedClock),
-            f.cache.clone(),
-            f.graph.clone(),
-            f.vector_index.clone(),
-            f.fts_index.clone(),
-            f.entity_index.clone(),
-        );
+        let mut adapter = NamespaceRegistryAdapter::new(f.storage.clone(), provider.clone())
+            .with_native_catalog(
+                provider,
+                NativePolicyInputs::default(),
+                Arc::new(FixedClock),
+                f.cache.clone(),
+                f.graph.clone(),
+                f.vector_index.clone(),
+                f.fts_index.clone(),
+                f.entity_index.clone(),
+            );
         if let Some(point) = point {
             adapter = adapter.with_catalog_fault(point);
         }
