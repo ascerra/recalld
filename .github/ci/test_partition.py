@@ -1,6 +1,7 @@
-"""Small fail-closed tests for CI collection, independent of Rust compilation."""
+"""Fail-closed collection checks and a small isolated synthetic Cargo smoke test."""
 import copy
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -14,27 +15,32 @@ shards = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(shards)
 
 
-def reports():
+def reports(names=None):
     inventory = {
-        "lib:recalld": {"kind": "lib", "names": ["a", "ab", "c", "d", "ignored"], "ignored": ["ignored"]},
+        "lib:recalld": {
+            "kind": "lib",
+            "names": sorted(names if names is not None else [
+                "storage::a", "storage::ab", "api::test", "search::test", "new_module::test", "ignored"]),
+            "ignored": ["ignored"] if names is None else [],
+        },
         "bin:recalld": {"kind": "bin", "names": [], "ignored": []},
         "test:cli": {"kind": "test", "names": ["cli"], "ignored": []},
     }
     output = []
-    for index in range(shards.SHARDS):
+    for group in shards.GROUPS:
         evidence = {}
-        for ordinal, (key, harness) in enumerate(sorted(inventory.items())):
-            selected = shards.selection(harness, index, ordinal)
+        for key, harness in sorted(inventory.items()):
+            selected = shards.selection(harness, group)
             evidence[key] = {"selected": selected,
                              "results": {n: "ignored" if n in harness["ignored"] else "ok" for n in selected},
-                             "executed": harness["kind"] == "lib" or ordinal % shards.SHARDS == index,
-                             "binary_sha256": "a" * 64 if harness["kind"] == "lib" or ordinal % shards.SHARDS == index else None}
+                             "executed": bool(selected),
+                             "binary_sha256": "a" * 64 if selected else None}
         output.append({"source": "source", "os": "os", "compiler": "rustc", "cargo": "cargo",
-                       "shard": index, "shards": shards.SHARDS, "success": True,
+                       "group": group, "groups": list(shards.GROUPS), "success": True,
                        "inventory": copy.deepcopy(inventory), "evidence": evidence,
                        "compiled_examples": ["offline_eval"],
                        "docs": {"names": ["doc"], "ignored": ["doc"], "results": {"doc": "ignored"}}
-                       if index == 0 else None})
+                       if group == shards.DEFAULT_GROUP else None})
     return output
 
 
@@ -49,8 +55,16 @@ class PartitionTests(unittest.TestCase):
                 "src/lib.rs": '''//! ```ignore
 //! // Ignored docs stay ignored.
 //! ```
-#[test] fn a() {}
-#[test] fn ab() {}
+//! ```
+//! assert_eq!(2 + 2, 4);
+//! ```
+mod storage {
+    #[test] fn a() {}
+    #[test] fn ab() {}
+}
+mod api { #[test] fn protocol() {} }
+mod search { #[test] fn embedding() {} }
+mod new_module { #[test] fn future() {} }
 #[test] #[should_panic] fn panic_expected() { panic!("expected"); }
 #[test] #[ignore = "fixture generator"] fn fixture() { panic!("must not run"); }
 #[test] fn z() {}
@@ -74,12 +88,28 @@ class PartitionTests(unittest.TestCase):
             invoke(["git", "add", "."])
             invoke(["git", "-c", "user.name=CI fixture", "-c", "user.email=ci@example.invalid",
                     "commit", "-qm", "Synthetic runner fixture"])
-            for index in range(shards.SHARDS):
-                invoke([sys.executable, str(runner), "run", "--shard", str(index),
-                        "--os", "smoke", "--directory", str(root / "results" / str(index))])
-            invoke([sys.executable, str(runner), "verify", "--os", "smoke",
-                    "--source", invoke(["git", "rev-parse", "HEAD"]).strip(),
-                    "--directory", str(root / "results")])
+            for case in ("semantic", "empty-groups"):
+                if case == "empty-groups":
+                    (root / "src/lib.rs").write_text("#[test] fn new_root_test() {}\n")
+                    invoke(["git", "add", "src/lib.rs"])
+                    invoke(["git", "-c", "user.name=CI fixture", "-c", "user.email=ci@example.invalid",
+                            "commit", "-qm", "Empty semantic groups fixture"])
+                directory = root / "results" / case
+                for group in shards.GROUPS:
+                    invoke([sys.executable, str(runner), "run", "--group", group,
+                            "--os", "smoke", "--directory", str(directory / group)])
+                    report = json.loads((directory / group / "report.json").read_text())
+                    library = report["evidence"]["lib:ci_shard_smoke"]
+                    if case == "semantic" and group == "storage":
+                        self.assertEqual(library["selected"], ["storage::a", "storage::ab"])
+                    if case == "empty-groups" and group != "runtime":
+                        self.assertEqual(library["selected"], [])
+                        self.assertFalse(library["executed"])
+                        self.assertFalse(list((directory / group).glob("*.run.log")))
+                    self.assertFalse(report["evidence"]["bin:ci-shard-smoke"]["executed"])
+                invoke([sys.executable, str(runner), "verify", "--os", "smoke",
+                        "--source", invoke(["git", "rev-parse", "HEAD"]).strip(),
+                        "--directory", str(directory)])
 
     def test_complete_collection(self):
         shards.verify(reports(), "source", "os")
@@ -88,7 +118,7 @@ class PartitionTests(unittest.TestCase):
         mutations = [
             lambda r: r.pop(),
             lambda r: r.append(r[0]),
-            lambda r: r[1].update(shard=0),
+            lambda r: r[1].update(group="storage"),
             lambda r: r[0].update(source="foreign"),
             lambda r: r[0].update(os="foreign"),
             lambda r: r[0].update(success=False),
@@ -98,11 +128,11 @@ class PartitionTests(unittest.TestCase):
             lambda r: r[0]["evidence"].pop("test:cli"),
             lambda r: r[0]["evidence"]["lib:recalld"]["results"].clear(),
             lambda r: r[0]["evidence"]["lib:recalld"]["selected"].append("ab"),
-            lambda r: r[0]["evidence"]["lib:recalld"]["results"].update(a="FAILED"),
+            lambda r: r[0]["evidence"]["lib:recalld"]["results"].update({"storage::a": "FAILED"}),
             lambda r: r[0]["evidence"]["lib:recalld"].update(binary_sha256=""),
-            lambda r: r[0].update(docs=None),
-            lambda r: r[1].update(docs=r[0]["docs"]),
-            lambda r: r[0]["docs"].update(results={}),
+            lambda r: r[3].update(docs=None),
+            lambda r: r[1].update(docs=r[3]["docs"]),
+            lambda r: r[3]["docs"].update(results={}),
         ]
         for mutate in mutations:
             with self.subTest(mutation=mutations.index(mutate)):
@@ -133,13 +163,51 @@ class PartitionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 shards.results(text, ["a", "ignored"], ["ignored"])
 
-    def test_partition_exactness_for_platform_specific_inventory_and_new_tests(self):
-        for size in [4, 5, 1768, 1769, 1809]:
-            names = [f"module::test_{i:05}" for i in range(size)]
-            harness = {"kind": "lib", "names": names, "ignored": []}
-            partitions = [shards.selection(harness, i, 0) for i in range(4)]
-            self.assertEqual(sorted(n for part in partitions for n in part), names)
-            self.assertLessEqual(max(map(len, partitions)) - min(map(len, partitions)), 1)
+    def test_semantic_ownership_is_stable_and_nonlib_targets_belong_to_runtime(self):
+        expected = {
+            "storage": ["backup::restore", "serialization::format", "storage::unix::test"],
+            "api": ["api::http", "canonical_list::page", "catalog_page::cursor",
+                    "mcp::tool", "native_catalog_adapter::page"],
+            "search": ["cache::test", "decay::test", "embedding::test", "graph::test",
+                       "rif::test", "search::test"],
+            "runtime": ["cli::test", "daemon::test", "new_module::test", "root_test",
+                        "storage_similar::test", "system::shutdown"],
+        }
+        names = sorted(n for group in expected.values() for n in group)
+        for extra in ([], ["api::windows::test", "unknown::new_test"]):
+            harness = {"kind": "lib", "names": sorted(names + extra)}
+            partitions = {g: shards.selection(harness, g) for g in shards.GROUPS}
+            self.assertEqual(sorted(n for part in partitions.values() for n in part), harness["names"])
+            for group, owned in expected.items():
+                self.assertEqual([n for n in partitions[group] if n not in extra], owned)
+        for kind in ("bin", "test"):
+            harness = {"kind": kind, "names": names}
+            for group in shards.GROUPS:
+                self.assertEqual(shards.selection(harness, group), names if group == "runtime" else [])
+
+    def test_empty_groups_never_execute_unfiltered_harnesses(self):
+        for names in ([], ["new_module::test"]):
+            data = reports(names)
+            shards.verify(data, "source", "os")
+            for report in data:
+                evidence = report["evidence"]["lib:recalld"]
+                self.assertEqual(evidence["executed"], bool(evidence["selected"]))
+            data[0]["evidence"]["lib:recalld"].update(executed=True, binary_sha256="a" * 64)
+            with self.assertRaises(ValueError):
+                shards.verify(data, "source", "os")
+
+    def test_rejects_reassigned_and_duplicate_coverage(self):
+        for duplicate in (False, True):
+            data = reports()
+            origin = data[0]["evidence"]["lib:recalld"]
+            other = data[1]["evidence"]["lib:recalld"]
+            other["selected"].append("storage::a")
+            other["results"]["storage::a"] = "ok"
+            if not duplicate:
+                origin["selected"].remove("storage::a")
+                del origin["results"]["storage::a"]
+            with self.assertRaises(ValueError):
+                shards.verify(data, "source", "os")
 
 
 if __name__ == "__main__":

@@ -33,14 +33,19 @@ jobs:
       - run: cargo clippy --all-targets --all-features
 
   test_shards:
-    name: Tests — ${{ matrix.os == 'ubuntu-latest' && 'Ubuntu' || 'macOS' }} — group ${{ fromJSON('[1, 2, 3, 4]')[matrix.shard] }} of 4
+    name: Tests — ${{ matrix.os == 'ubuntu-latest' && 'Ubuntu' || 'macOS' }} — ${{ matrix.group.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        shard: [0, 1, 2, 3]
+        group:
+          - {id: storage, name: 'Storage & recovery'}
+          - {id: api, name: 'API & protocols'}
+          - {id: search, name: 'Search & embeddings'}
+          # Includes CLI/binary/integration targets, doctests and new modules.
+          - {id: runtime, name: 'Runtime & lifecycle'}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -48,14 +53,14 @@ jobs:
           toolchain: "1.94"
       - uses: Swatinem/rust-cache@v2
       - name: Validate test partition runner
-        if: matrix.shard == 0
+        if: matrix.group.id == 'runtime'
         run: python3 -m unittest discover -s .github/ci -p 'test_*.py'
       - name: Run assigned tests with ordinary Cargo/libtest
-        run: python3 .github/ci/test_shards.py run --shard '${{ matrix.shard }}' --os '${{ matrix.os }}' --directory ci-results
+        run: python3 .github/ci/test_shards.py run --group '${{ matrix.group.id }}' --os '${{ matrix.os }}' --directory ci-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: tests-${{ matrix.os }}-${{ matrix.shard }}
+          name: tests-${{ matrix.os }}-${{ matrix.group.id }}
           path: ci-results/
           if-no-files-found: error
           retention-days: 7
