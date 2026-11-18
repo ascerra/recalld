@@ -1368,7 +1368,21 @@ mod tests {
         );
         assert_erased_reads(&system, dead).await;
         assert!(system.vector_index.read().await.get_vector(dead).is_none());
-        assert!(!system.graph.read().await.contains(&dead));
+        assert_eq!(
+            system
+                .graph
+                .read()
+                .await
+                .get_node(&dead)
+                .unwrap()
+                .decay_phase,
+            crate::model::DecayPhase::Tombstone
+        );
+        let recalled = system.query_engine.search(serde_json::from_value(serde_json::json!({
+            "namespace":"default", "queryMode":"metadata_only", "recordAccess":false, "limit":10
+        })).unwrap()).await.unwrap();
+        assert!(recalled.results.iter().all(|hit| hit.memory_id != dead));
+        assert!(recalled.results.iter().any(|hit| hit.memory_id == live));
         let hits = system
             .fts_index
             .lock()
