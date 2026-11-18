@@ -460,6 +460,25 @@ async fn released_v1_new_schema_query_write_restart_preserves_unknown_provenance
         ),
         "native API1 forget failed: {forgotten:?}"
     );
+    let lifecycle = forgotten
+        .lifecycle
+        .as_ref()
+        .expect("native lifecycle evidence");
+    assert!(lifecycle.error.is_none(), "{lifecycle:?}");
+    let receipt = lifecycle.receipt.as_ref().expect("native forget receipt");
+    assert!(matches!(&receipt.outcome,
+        crate::storage::control::MutationOutcome::NativeMemoryTombstoned { transition }
+        if transition.memory_id == inserted));
+    assert_eq!(
+        receipt.committed_generation,
+        system
+            .storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation
+    );
     assert_old_data(&system, &expected);
     system.shutdown().await.unwrap();
     let system = Recalld::new(cfg).await.unwrap();
