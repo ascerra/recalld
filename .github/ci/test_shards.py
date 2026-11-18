@@ -15,7 +15,8 @@ MODULE_GROUPS = {
     **dict.fromkeys(("storage", "backup", "serialization"), "storage"),
     **dict.fromkeys(("api", "mcp", "canonical_list", "catalog_page",
                      "native_catalog_adapter"), "api"),
-    **dict.fromkeys(("search", "embedding", "cache", "graph", "decay", "rif"), "search"),
+    "decay": "runtime",  # Memory lifecycle/sweeps; RIF remains retrieval-owned.
+    **dict.fromkeys(("search", "embedding", "cache", "graph", "rif"), "search"),
 }
 # Runtime & lifecycle also owns CLI/binary/integration targets and doctests.
 # New library modules default here so additions cannot silently lose coverage.

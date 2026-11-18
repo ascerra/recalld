@@ -168,9 +168,9 @@ mod new_module { #[test] fn future() {} }
             "storage": ["backup::restore", "serialization::format", "storage::unix::test"],
             "api": ["api::http", "canonical_list::page", "catalog_page::cursor",
                     "mcp::tool", "native_catalog_adapter::page"],
-            "search": ["cache::test", "decay::test", "embedding::test", "graph::test",
+            "search": ["cache::test", "embedding::test", "graph::test",
                        "rif::test", "search::test"],
-            "runtime": ["cli::test", "daemon::test", "new_module::test", "root_test",
+            "runtime": ["cli::test", "daemon::test", "decay::test", "new_module::test", "root_test",
                         "storage_similar::test", "system::shutdown"],
         }
         names = sorted(n for group in expected.values() for n in group)
