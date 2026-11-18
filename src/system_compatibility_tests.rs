@@ -590,6 +590,43 @@ async fn mixed_unknown_receipts_replay_after_restart_without_reembedding() {
         let receipt = reply.receipt.unwrap();
         retained.push((request, receipt));
     }
+    let batch = crate::storage::batch::BatchInput {
+        request_context: None,
+        expected_generation: None,
+        mutation_version: 3,
+        result_version: 1,
+        kind: crate::storage::batch::BatchKind::Insert,
+        items: vec![json!({"summary":"Unclaimed supplied batch vector",
+            "embedding":[0.,0.,0.,1.], "checkDuplicates":false})],
+        default_namespace: "default".into(),
+        store_id: Some(store_id),
+        idempotency_key: Some("unknown-supplied-batch".into()),
+        batch_operation_id: None,
+    };
+    let batch_result = adapter(&system)
+        .mutate_native_batch(batch.clone())
+        .await
+        .unwrap();
+    assert!(batch_result.outcome.all_ready(), "{batch_result:?}");
+    let batch_receipt = batch_result.outcome.items[0].receipt.clone().unwrap();
+    let crate::storage::control::MutationOutcome::NativeMemoryInsertedWithLinks { transition } =
+        &batch_receipt.outcome
+    else {
+        panic!("not a native batch insertion")
+    };
+    assert_eq!(
+        system
+            .storage
+            .read()
+            .unwrap()
+            .get_record(transition.memory_id)
+            .unwrap()
+            .unwrap()
+            .schema
+            .unwrap()
+            .embedding_origin,
+        Some(EmbeddingOrigin::Supplied { profile_id: None })
+    );
     assert_eq!(mock.calls(), 1);
     assert_old_data(&system, &expected);
     system.shutdown().await.unwrap();
@@ -598,6 +635,11 @@ async fn mixed_unknown_receipts_replay_after_restart_without_reembedding() {
     changed.embedding.model_name = "different-model-for-replay".into();
     let system = Recalld::new(changed).await.unwrap();
     let before = system.storage.read().unwrap().control_state().unwrap();
+    let replay = adapter(&system).mutate_native_batch(batch).await.unwrap();
+    assert!(replay.outcome.all_ready(), "{replay:?}");
+    let replay_receipt = replay.outcome.items[0].receipt.as_ref().unwrap();
+    assert_eq!(replay_receipt.operation_id, batch_receipt.operation_id);
+    assert_eq!(replay_receipt.outcome, batch_receipt.outcome);
     for (request, original) in retained {
         let replay = adapter(&system).store_native_wire(request).await;
         assert!(replay.error.is_none(), "{replay:?}");
