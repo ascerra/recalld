@@ -148,6 +148,10 @@ Add to your `~/.claude/settings.json`:
 
 This hook is suggestive, not mandatory -- the model decides whether memories are relevant on each turn. It nudges recall before responding without adding another model pass after the task is finished.
 
+## Upgrading to 2.0
+
+Recalld 2.0 creates new databases in the native schema and automatically upgrades supported older databases at startup. It backs up the stopped database, migrates a separate copy, and commits only after runtime initialization succeeds. Allow extra disk space and retain the pre-upgrade backup for rollback to an older binary. See [upgrade and recovery requirements](docs/guide.md#upgrading-to-20), including automatic layout conversion for existing Docker volumes.
+
 ## Features
 
 - **Spaced repetition decay** -- FSRS v4.5 governs retrievability over time; memories transition through full, summary, and ghost phases based on retrievability thresholds. Explicit deletion moves memories to tombstone.

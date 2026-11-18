@@ -19,6 +19,7 @@ pub mod batch;
 pub mod canonical_schema;
 pub(crate) mod canonical_vector_snapshot;
 pub mod catalog;
+pub mod container_layout;
 pub mod control;
 pub mod edges;
 pub mod engine;

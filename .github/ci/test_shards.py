@@ -9,7 +9,18 @@ import re
 import subprocess
 import sys
 
-SHARDS = 4
+GROUPS = ("storage", "api", "search", "runtime")
+# Exact top-level Rust module ownership, independent of test order and platform.
+MODULE_GROUPS = {
+    **dict.fromkeys(("storage", "backup", "serialization"), "storage"),
+    **dict.fromkeys(("api", "mcp", "canonical_list", "catalog_page",
+                     "native_catalog_adapter"), "api"),
+    "decay": "runtime",  # Memory lifecycle/sweeps; RIF remains retrieval-owned.
+    **dict.fromkeys(("search", "embedding", "cache", "graph", "rif"), "search"),
+}
+# Runtime & lifecycle also owns CLI/binary/integration targets and doctests.
+# New library modules default here so additions cannot silently lose coverage.
+DEFAULT_GROUP = "runtime"
 CARGO = ["cargo", "test", "--all-features"]
 
 
@@ -71,10 +82,11 @@ def results(text, selected, ignored):
     return found
 
 
-def selection(harness, shard, ordinal):
-    if harness["kind"] == "lib":
-        return harness["names"][shard::SHARDS]
-    return harness["names"] if ordinal % SHARDS == shard else []
+def selection(harness, group):
+    check(group in GROUPS, "unknown test group")
+    return [name for name in harness["names"]
+            if (MODULE_GROUPS.get(name.split("::", 1)[0], DEFAULT_GROUP)
+                if harness["kind"] == "lib" else DEFAULT_GROUP) == group]
 
 
 def fingerprint(path):
@@ -85,7 +97,7 @@ def fingerprint(path):
     return digest.hexdigest()
 
 
-def run(shard, directory, os_name):
+def run(group, directory, os_name):
     directory.mkdir(parents=True, exist_ok=False)
     check(not os.environ.get("RUST_MIN_STACK"), "CI must retain the default test stack")
     provenance = {
@@ -128,7 +140,7 @@ def run(shard, directory, os_name):
     check(examples == expected_examples, "baseline example compilation incomplete")
     inventory = {}
     evidence = {}
-    for ordinal, (key, artifact) in enumerate(sorted(artifacts.items())):
+    for key, artifact in sorted(artifacts.items()):
         kind, name = key.split(":", 1)
         selector = ["--lib"] if kind == "lib" else ["--" + kind, name]
         prefix = directory / key.replace(":", "-")
@@ -142,13 +154,13 @@ def run(shard, directory, os_name):
         check(set(ignored) <= set(names), "ignored tests missing from inventory")
         harness = {"kind": kind, "names": names, "ignored": ignored}
         inventory[key] = harness
-        selected = selection(harness, shard, ordinal)
-        assigned = kind == "lib" or ordinal % SHARDS == shard
+        selected = selection(harness, group)
+        assigned = bool(selected)
         status = {}
         binary_hash = None
         if assigned:
             binary_hash = fingerprint(executable)
-            check(selected or not names, "empty shard would execute an unfiltered harness")
+            check(selected, "empty group would execute an unfiltered harness")
             args = CARGO + selector + ["--", "--color", "never", "--format", "pretty", "--exact"] + selected
             check(sum(len(a.encode()) + 1 for a in args) < 120_000, "exact filters exceed bounded argv")
             status = results(command(args, prefix.with_suffix(".run.log")), selected, ignored)
@@ -156,7 +168,7 @@ def run(shard, directory, os_name):
         evidence[key] = {"selected": selected, "results": status,
                          "executed": assigned, "binary_sha256": binary_hash}
     docs = None
-    if shard == 0:
+    if group == DEFAULT_GROUP:
         names = listing(command(CARGO + ["--doc", "--", "--list", "--format", "pretty"],
                                 directory / "docs.list.log"))
         ignored = listing(command(CARGO + ["--doc", "--", "--ignored", "--list", "--format", "pretty"],
@@ -164,30 +176,30 @@ def run(shard, directory, os_name):
         status = results(command(CARGO + ["--doc", "--", "--color", "never", "--format", "pretty"],
                                  directory / "docs.run.log"), names, ignored)
         docs = {"names": names, "ignored": ignored, "results": status}
-    report = dict(provenance, shard=shard, shards=SHARDS, inventory=inventory,
+    report = dict(provenance, group=group, groups=list(GROUPS), inventory=inventory,
                   evidence=evidence, compiled_examples=sorted(examples), docs=docs, success=True)
     subprocess.run(["git", "diff", "--exit-code", "HEAD", "--"], check=True)
     (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
 def verify(reports, source, os_name):
-    check(len(reports) == SHARDS, "missing or extra shard reports")
-    check(sorted(r["shard"] for r in reports) == list(range(SHARDS)), "duplicate/wrong shard")
+    check(len(reports) == len(GROUPS), "missing or extra group reports")
+    check(sorted(r["group"] for r in reports) == sorted(GROUPS), "duplicate/wrong group")
     baseline = reports[0]
     for report in reports:
-        check(report["success"] is True and report["shards"] == SHARDS, "unsuccessful shard")
+        check(report["success"] is True and report["groups"] == list(GROUPS), "unsuccessful group")
         check(report["source"] == source and report["os"] == os_name, "foreign source/OS report")
         for field in ["compiler", "cargo", "inventory", "compiled_examples"]:
-            check(report[field] == baseline[field], "shard inventory/provenance drift: " + field)
+            check(report[field] == baseline[field], "group inventory/provenance drift: " + field)
         check(set(report["evidence"]) == set(baseline["inventory"]), "missing harness evidence")
-    for ordinal, (key, harness) in enumerate(sorted(baseline["inventory"].items())):
+    for key, harness in sorted(baseline["inventory"].items()):
         found = []
         for report in reports:
-            shard = report["shard"]
+            group = report["group"]
             evidence = report["evidence"][key]
-            selected = selection(harness, shard, ordinal)
-            check(evidence["selected"] == selected, "wrong shard partition")
-            check(evidence["executed"] == (harness["kind"] == "lib" or ordinal % SHARDS == shard),
+            selected = selection(harness, group)
+            check(evidence["selected"] == selected, "wrong group partition")
+            check(evidence["executed"] == bool(selected),
                   "harness execution missing")
             check(bool(re.fullmatch(r"[0-9a-f]{64}", evidence["binary_sha256"] or ""))
                   if evidence["executed"] else evidence["binary_sha256"] is None,
@@ -199,7 +211,7 @@ def verify(reports, source, os_name):
         check(len(found) == len(set(found)), "duplicate test execution")
     for report in reports:
         doc = report["docs"]
-        if report["shard"] != 0:
+        if report["group"] != DEFAULT_GROUP:
             check(doc is None, "duplicate docs run")
         else:
             check(doc is not None and len(doc["names"]) == len(set(doc["names"])), "missing docs inventory")
@@ -207,21 +219,21 @@ def verify(reports, source, os_name):
             check(doc["results"] == {n: "ignored" if n in doc["ignored"] else "ok" for n in doc["names"]},
                   "incomplete docs results")
     print(f"Verified {os_name}: {sum(len(h['names']) for h in baseline['inventory'].values())} "
-          f"tests inventoried across {SHARDS} shards; docs and example compilation retained.")
+          f"tests inventoried across {len(GROUPS)} semantic groups; docs and example compilation retained.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["run", "verify"])
-    parser.add_argument("--shard", type=int, choices=range(SHARDS))
+    parser.add_argument("--group", choices=GROUPS)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--os", required=True)
     parser.add_argument("--source")
     args = parser.parse_args()
     try:
         if args.mode == "run":
-            check(args.shard is not None, "shard required")
-            run(args.shard, args.directory, args.os)
+            check(args.group is not None, "group required")
+            run(args.group, args.directory, args.os)
         else:
             check(args.source, "source required")
             verify([json.loads(p.read_text()) for p in args.directory.rglob("report.json")],

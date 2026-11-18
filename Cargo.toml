@@ -1,6 +1,6 @@
 [package]
 name = "recalld"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.94"
 description = "AI memory system"
@@ -92,7 +92,7 @@ chrono-tz   = "0.10"
 async-trait = "0.1"
 
 # ── Full-text search ─────────────────────────────────────────────
-rusqlite    = { version = "0.35", features = ["bundled"] }
+rusqlite    = { version = "0.41.1", features = ["bundled"] }
 
 # ── AWS (Bedrock embedding provider) ─────────────────────────────
 aws-config  = { version = "1.1", features = ["behavior-version-latest"] }
@@ -121,7 +121,7 @@ colored     = "2"
 dirs        = "5"
 tempfile    = "3"
 hostname    = "0.4"
-zip         = { version = "2", features = ["deflate-zlib"] }
+zip         = { version = "9.7.0", features = ["deflate-flate2-zlib"] }
 
 [dev-dependencies]
 rand_chacha = "=0.3.1"

@@ -224,6 +224,55 @@ fn read_journal(target: &Path) -> Result<Option<Journal>, StorageError> {
     j.validate_paths(target)?;
     Ok(Some(j))
 }
+
+/// A committed container layout is not evidence that a missing child is fresh.
+/// Reconcile only an existing target-bound downstream journal, under the same
+/// stable owner used by ordinary startup, without classification/bootstrap.
+pub(super) fn recover_missing_container_child(path: &Path) -> Result<(), StorageError> {
+    let owner = StoreOwnership::acquire_for_upgrade(path, false)?;
+    if owner.path.try_exists()? {
+        return Err(invalid(
+            "container child appeared during recovery admission; retry startup",
+        ));
+    }
+    if let Some(j) = read_journal(&owner.path)? {
+        if j.phase == Phase::Committed {
+            return Err(invalid(
+                "committed upgrade child is missing; refusing rollback or bootstrap",
+            ));
+        }
+        return recover(&owner);
+    }
+    if owner.pending.is_symlink() || !owner.pending.try_exists()? {
+        return Err(invalid(
+            "container child missing without a recoverable journal",
+        ));
+    }
+    // This validates target, lineage and file seals before restoring/publishing.
+    super::restore_journal::recover(&owner)?;
+    if !owner.path.is_dir() {
+        return Err(invalid("recovery did not restore container child"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn container_cutover_crash(path: &Path) {
+    let _ = prepare_at(
+        path,
+        1_800_000_000_000,
+        Box::new(SystemIds),
+        |_| Ok(()),
+        |phase| {
+            if phase == Phase::OldRenameSynced {
+                std::process::exit(77);
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    panic!("cutover boundary not reached");
+}
 /// Only uncommitted work can roll back. A committed store may have new user writes;
 /// never compare it with the pre-write candidate seal or replace it with the backup.
 fn recover(owner: &StoreOwnership) -> Result<(), StorageError> {

@@ -371,8 +371,8 @@ fn extract_backup(
     let mut seen = HashSet::new();
     for index in 0..archive.len() {
         let file = archive.by_index(index)?;
-        let name = file.name();
-        if !seen.insert(name.to_owned())
+        let name = file.name()?;
+        if !seen.insert(name.to_string())
             || file.is_dir()
             || file
                 .unix_mode()
@@ -384,7 +384,7 @@ fn extract_backup(
             continue;
         }
         let entry = declared
-            .get(name)
+            .get(name.as_ref())
             .ok_or_else(|| invalid("undeclared archive entry"))?;
         if file.size() != entry.size_bytes {
             return Err(invalid("archive size disagrees with manifest"));

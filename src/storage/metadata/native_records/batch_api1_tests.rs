@@ -167,11 +167,12 @@ async fn api1_batch_genuine_private_timestamp_history_replay() {
             for n in 0..zip.len() {
                 let file = zip.by_index(n).unwrap();
                 assert!(file.enclosed_name().is_some());
-                assert!(file.name().len() <= 256);
+                let name = file.name().unwrap();
+                assert!(name.len() <= 256);
                 assert!(!file.is_dir());
                 assert!(file.unix_mode().is_none_or(|m| m & 0o170000 != 0o120000));
-                assert!(expected.contains_key(file.name()));
-                assert!(seen.insert(file.name().to_owned()));
+                assert!(expected.contains_key(name.as_ref()));
+                assert!(seen.insert(name.into_owned()));
                 total = total.checked_add(file.size()).unwrap();
                 assert!(total <= 8 * 1024 * 1024);
             }

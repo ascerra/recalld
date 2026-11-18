@@ -180,6 +180,12 @@ Request bodies over `server.max_body_bytes` (10 MB by default) are rejected with
 
 Configure per-project namespace defaults in a `.recalld.toml` file (see above), not CLI flags.
 
+## Database upgrades
+
+The 2.0 runtime upgrades supported older databases before serving memory operations. Stop old processes before restarting with the new binary, and allow time and disk space for backup, migration, and runtime initialization. A startup or recovery error must be resolved by the operator; the server does not silently continue on the old schema. See the [upgrade guide](guide.md#upgrading-to-20) for backup locations, crash recovery, downgrade requirements, and Docker volume layout.
+
+Migrated namespaces retain `UnknownLegacy` embedding provenance. Compatibility operations do not prove which model produced existing vectors, and startup does not probe the model or re-embed those vectors. Keep the existing embedding configuration. This storage change is independent of MCP protocol negotiation and lifecycle policy.
+
 ## Available tools
 
 ### A note on deletion
@@ -194,9 +200,9 @@ Array fields (`tags`, `entities`, `topics`, `emotions`) carry two limits: a plai
 
 Before this limit existed there was no per-element bound at all: an over-long entity was accepted, merged into an over-long tag, and then dropped by the storage layer while the call still reported success.
 
-Legacy writes require nonempty structured labels that the prefixed tag codec can retain: ASCII letters/digits and `/ _ . : -`, within the limits above. Unrepresentable labels and invalid raw tags are rejected with field/index errors before embedding or allocation; they are not silently dropped. Native UTF-8 write admission remains a separate, gated feature.
+Application contract 1 writes require nonempty structured labels that the prefixed tag codec can retain: ASCII letters/digits and `/ _ . : -`, within the limits above. Unrepresentable labels and invalid raw tags are rejected with field/index errors before embedding or allocation; they are not silently dropped. Native storage does not change these public API1 input limits.
 
-Canonical reader results preserve already-persisted structured metadata. Existing `entities`, `topics`, and `emotions` arrays retain their types. An optional `labels` object carries exact canonical arrays and their persisted `provenance` (`native_v2` or `legacy_retained_only`); it is omitted for legacy physical records. Empty canonical arrays are authoritative and do not fall back to retained tags. This additive read representation does not advertise native serving readiness or recover labels already lost by legacy writes.
+Canonical reader results preserve already-persisted structured metadata. Existing `entities`, `topics`, and `emotions` arrays retain their types. An optional `labels` object carries exact canonical arrays and their persisted `provenance` (`native_v2` or `legacy_retained_only`); it is omitted for legacy physical records. Empty canonical arrays are authoritative and do not fall back to retained tags. This additive read representation does not recover labels already lost by legacy writes.
 
 > **Known limitation:** `entities`, `topics`, and `emotions` are converted into `entity/…`, `topic/…`, and `emotion/…` tags *after* validation runs, and the `tags` limit of 64 is checked against the tags you supplied. A memory that supplies 64 tags plus 32 entities, 32 topics, and 32 emotions can therefore end up with up to 160 tags stored. This is accepted today and is not treated as an error.
 
@@ -924,9 +930,10 @@ MCP coverage counts and `truncated` are unknown (`null`) because the legacy brid
 
 Create a new memory namespace. Namespaces organize data; they are not access controls. Each namespace has its own embedding space and decay configuration. Embedding dimensions are fixed after creation.
 
-Creation uses the single active provider's dimension. Existing v1 namespaces remain
-legacy-unverified: checking the active configuration does not attest stored vectors
-or persist a profile binding. Schema-v2 serving remains gated.
+Creation uses the single active provider's dimension and binds a fresh namespace
+to its profile. Automatically migrated namespaces retain `UnknownLegacy`: checking
+the active configuration does not attest existing vectors or persist a binding
+for them.
 
 #### Parameters
 

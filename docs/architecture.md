@@ -45,7 +45,7 @@ graph TD
     subgraph STORE["Storage Engine"]
         META["meta.db"]
         VEC["&lt;ns&gt;/vectors.dat"]
-        TXT["fulltext.dat"]
+        TXT["Selected text generation"]
         EDGES["edges.db"]
     end
 
@@ -67,20 +67,15 @@ graph TD
     CACHE_S --> TXT
 ```
 
-### Startup sequence (system.rs)
+### Startup sequence (system.rs and system_startup.rs)
 
-The `Recalld::new()` constructor executes an ordered 10-step startup:
+The `Recalld::new()` constructor builds the configured embedding provider, then admits storage under exclusive ownership. An empty database is bootstrapped directly into native schema v2 with a provider-bound default namespace. Supported older formats enter automatic migration; unknown, mixed, or future formats are rejected.
 
-1. **Open storage** -- acquires exclusive file lock, opens all four storage backends.
-2. **Scan all records** -- single full-table scan of meta.db, reused by steps 2b-6c.
-3. **Build relationship graph** -- inserts nodes from scanned records, loads edges from edges.db.
-4. **Initialize cache** -- creates `CacheManager` with moka configuration.
-5. **Create embedding provider** -- selects OpenAI, Ollama, or Passthrough based on config.
-6. **Create RIF engine** -- initializes with configured thresholds and parameters.
-7. **Create indexes** -- `FlatVectorIndex`, `FtsIndex` (SQLite FTS5), `EntityIndex`.
-8. **Create QueryEngine** -- wires all subsystems via dependency-injection trait objects.
-9. **Start decay sweep** -- spawns background tokio task for periodic decay sweeps.
-10. **Ensure default namespace** -- creates the "default" namespace if it does not exist.
+Automatic migration copies and verifies the stopped directory, converts a separate working copy (including text migration when needed), validates a native candidate, and installs it at the final path. It then builds the runtime there: record scan, graph, cache, RIF engine, vector/FTS/entity indexes, query engine, and required startup reconciliation. Only successful initialization permits durable commit; background sweeps and request serving begin afterward. Provider construction and profile validation are not a live model probe.
+
+The upgrade journal distinguishes an installed candidate from a committed runtime. Before commit, failures restore the verified original or stop for recovery if file identity cannot be established. Startup after an interrupted uncommitted upgrade rolls back and reports an error. After commit, recovery preserves the database and any later writes; cleanup failure cannot trigger rollback. Backups and migration copies remain in a sibling `.recalld-upgrade-<UUID>/` directory. See the [operator guide](guide.md#upgrading-to-20) for space, retention, and directory-layout requirements.
+
+Schema v2 records namespace embedding bindings and lifecycle state separately. Migrated vectors remain `UnknownLegacy` unless provenance was explicitly established; automatic migration supplies no attestation. Fresh namespaces bind the configured provider profile. Compatibility access to migrated vectors does not invent their model identity. Schema version does not select lifecycle policy.
 
 Shutdown is the reverse: signal background tasks, drain in-flight requests (5s timeout), join the sweep task, flush and sync storage, persist phase index.
 
@@ -90,13 +85,14 @@ Shutdown is the reverse: signal background tasks, drain in-flight requests (5s t
 
 ### Core storage files
 
-All data lives in a single directory (default: `~/.recalld/data/`). An exclusive file lock (`recalld.lock`) prevents multi-process access. There are four primary data stores (meta.db, `<namespace>/vectors.dat`, fulltext.dat, edges.db) plus the FTS5 index (fts.db) and the lock file.
+The active database lives in a single directory (default: `~/.recalld/data/`); upgrade backups and journals live alongside it. An exclusive file lock (`recalld.lock`) prevents multi-process access. There are four primary data stores (meta.db, `<namespace>/vectors.dat`, selected text generation, edges.db) plus the FTS5 index (fts.db) and the lock file.
 
 ```
 ~/.recalld/data/
   recalld.lock        # flock() exclusive lock
   meta.db             # redb B+tree -- memory records + secondary indexes
-  fulltext.dat            # append-only CRC32 log -- full_text payloads
+  fulltext.dat        # legacy-reader rejection gate in native stores
+  fulltext.<UUID>.dat # selected text-generation payloads
   edges.db            # redb B+tree -- graph edge persistence
   default/vectors.dat # mmap'd vector file for "default" namespace
   work/vectors.dat    # mmap'd vector file for "work" namespace (example)
@@ -141,7 +137,9 @@ Offset  Size    Field
 - **Slot reuse**: a free list (embedded as a linked list within freed slots) tracks available slots for reuse. Without it, the file would grow monotonically on delete-heavy workloads.
 - Dimensionality is fixed at namespace creation time and validated on every open.
 
-#### fulltext.dat (append-only, CRC32)
+#### Text payloads (append-only, CRC32)
+
+Native stores select a text generation through metadata in `meta.db`; `fulltext.dat` acts as a gate that rejects old readers. The payload format below describes the text log, not a file to replace independently of its selection metadata.
 
 Stores `full_text` payloads for memories in the Full phase. Each entry is:
 
@@ -152,18 +150,20 @@ Offset  Size    Field
 8       N       UTF-8 payload bytes (N = length)
 ```
 
-**File header (16 bytes):**
+**Native generation header (48 bytes):**
 
 ```
 Offset  Size    Field
 0       4       Magic: "MEMT"
-4       2       Version: 1
+4       2       Version: 2
 6       10      Reserved
+16      16      Store UUID
+32      16      Generation UUID
 ```
 
 - Maximum entry size: 1 MB.
-- Text is never modified in place. When a memory transitions Full -> Summary, the text pointer in meta.db is zeroed and the fulltext.dat space becomes dead.
-- **Compaction**: when dead-space ratio exceeds 20% (configurable), the sweep runner copies live entries to a new file, atomically swaps it in, and updates text pointers in meta.db. Interrupted compactions are recovered on startup.
+- Text is never modified in place. When a memory transitions Full -> Summary, the text pointer in meta.db is zeroed and the text-generation space becomes dead.
+- **Compaction**: when dead-space ratio exceeds 20% (configurable), the sweep runner copies live entries to a new generation and atomically selects it with the updated text pointers in meta.db. Interrupted compactions are recovered on startup.
 
 #### edges.db (redb)
 
@@ -178,7 +178,7 @@ Both directions are stored for O(1) neighbor lookups in either direction. Orphan
 
 - **meta.db**: needs transactions, range scans, secondary indexes -> embedded B+tree (redb).
 - **`<ns>/vectors.dat`**: needs zero-copy reads of large float arrays, O(1) slot access -> mmap (one file per namespace).
-- **fulltext.dat**: large variable-length blobs, append-only pattern -> log-structured file.
+- **Selected text generation**: large variable-length blobs, append-only pattern -> log-structured file.
 - **edges.db**: could live in meta.db, but separated to avoid write amplification -- edges are written frequently (auto-linking) while metadata records are written infrequently after creation.
 
 ---
