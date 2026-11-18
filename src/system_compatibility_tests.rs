@@ -509,3 +509,59 @@ async fn unknown_fixture_never_enables_cross_space_or_wrong_dimension_queries() 
     assert_old_data(&system, &expected);
     system.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mixed_unknown_receipts_replay_after_restart_without_reembedding() {
+    let (_root, path, expected) = released_fixture();
+    let mock = MockProvider::start().await;
+    let cfg = config(&path, &mock);
+    let system = Recalld::new(cfg.clone()).await.unwrap();
+    let store_id = system
+        .storage
+        .read()
+        .unwrap()
+        .control_state()
+        .unwrap()
+        .store_id;
+    let mut retained = Vec::new();
+    for (key, vector) in [
+        ("generated", None),
+        ("supplied", Some(vec![0., 1., 0., 0.])),
+    ] {
+        let mut body = json!({"namespace":"default", "storeId":store_id,
+            "idempotencyKey":key,"summary":"Summary only, no invented full text", "checkDuplicates":false});
+        if let Some(vector) = vector {
+            body["embedding"] = json!(vector);
+        }
+        let request =
+            crate::serialization::native_single::Request::parse(&body, true, None, "default")
+                .unwrap();
+        let reply = adapter(&system).store_native_wire(request.clone()).await;
+        assert!(reply.error.is_none(), "{reply:?}");
+        let receipt = reply.receipt.unwrap();
+        retained.push((request, receipt));
+    }
+    assert_eq!(mock.calls(), 1);
+    assert_old_data(&system, &expected);
+    system.shutdown().await.unwrap();
+    // Replay uses the original receipt even when today's configured model differs.
+    let mut changed = cfg;
+    changed.embedding.model_name = "different-model-for-replay".into();
+    let system = Recalld::new(changed).await.unwrap();
+    let before = system.storage.read().unwrap().control_state().unwrap();
+    for (request, original) in retained {
+        let replay = adapter(&system).store_native_wire(request).await;
+        assert!(replay.error.is_none(), "{replay:?}");
+        let receipt = replay.receipt.unwrap();
+        assert!(receipt.replayed);
+        assert_eq!(receipt.outcome, original.outcome);
+        assert_eq!(receipt.committed_generation, original.committed_generation);
+    }
+    assert_eq!(mock.calls(), 1);
+    assert_eq!(
+        system.storage.read().unwrap().control_state().unwrap(),
+        before
+    );
+    assert_old_data(&system, &expected);
+    system.shutdown().await.unwrap();
+}
