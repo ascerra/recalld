@@ -96,3 +96,40 @@ pub(super) fn certify_positive(root: &Path, mut data: Data) -> Data {
     data.path = target;
     data
 }
+
+/// Positive metadata-page setup: certify retained Full text before real phase loss.
+/// The common uncertified/old-Ghost fixtures remain unchanged.
+pub(super) fn certified_ghost_fixture(root: &Path) -> Data {
+    let data = certified_fixture(root);
+    let mut session = NativeLifecycleSession::open(
+        &data.path,
+        NativePolicyInputs::default(),
+        Arc::new(crate::time::ManualClock::new(10_000 * 86_400_000)),
+    )
+    .unwrap();
+    let before = session.engine.get_record(data.parent).unwrap().unwrap();
+    assert_eq!(before.phase, DecayPhase::Full);
+    let vector = before.schema.as_ref().unwrap().vector.clone();
+    assert!(vector.is_some());
+    for (key, phase) in [
+        ("page-parent-summary", DecayPhase::Summary),
+        ("page-parent-ghost", DecayPhase::Ghost),
+    ] {
+        let result = session
+            .maintain(&ctx(&session, &data, key), data.parent)
+            .unwrap();
+        let crate::storage::native_maintenance::NativeDecayResult::Committed(receipt) = result
+        else {
+            panic!("parent phase loss did not commit");
+        };
+        assert!(matches!(
+            receipt.outcome,
+            MutationOutcome::NativePhaseMaterialized { .. }
+        ));
+        let row = session.engine.get_record(data.parent).unwrap().unwrap();
+        assert_eq!(row.phase, phase);
+        assert_eq!(row.schema.as_ref().unwrap().vector, vector);
+    }
+    drop(session);
+    data
+}

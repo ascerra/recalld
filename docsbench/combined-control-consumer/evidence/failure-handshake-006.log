@@ -1,0 +1,25 @@
+Traceback (most recent call last):
+  File "/source/scripts/test_combined_mcp_episode.py", line 98, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/source/scripts/test_combined_mcp_episode.py", line 27, in main
+    a=inputs(name,profile);run(a);baselines.append(a)
+                           ^^^^^^
+  File "/source/scripts/test_combined_mcp_episode.py", line 24, in run
+    def run(a):h['run_episode'](a)
+               ^^^^^^^^^^^^^^^^^^^
+  File "/source/scripts/public-mcp-evaluation.py", line 535, in run_episode
+    return COMBINED["run"](args, globals())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/source/scripts/combined-mcp-evaluation.py", line 229, in run
+    h["GROUPED"]["run"](args, h, prepared=prepared)
+  File "/source/scripts/grouped-mcp-evaluation.py", line 200, in run
+    h["run_episode"](child, prepared=bundle)
+  File "/source/scripts/public-mcp-evaluation.py", line 647, in run_episode
+    process = launch()
+              ^^^^^^^^
+  File "/source/scripts/public-mcp-evaluation.py", line 627, in launch
+    control.handshake()
+  File "/source/scripts/owned-mcp-supervisor.py", line 118, in handshake
+    raise ValueError("unsupported private control capabilities")
+ValueError: unsupported private control capabilities

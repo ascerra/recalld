@@ -22,7 +22,7 @@ use super::error::{Result, SearchError};
 use super::pipeline::{
     AccessRecorder, EmbeddingProviderRegistry, EntityIndexReader, EntityRecallResult,
     FtsIndexRegistry, FtsResult, GraphReader, MetadataStore, NamespaceResolver, RecordCache,
-    RifProcessor, RifSuppression, ScoredResult, VectorIndexRegistry,
+    RifProcessor, RifSuppression, ScoredResult, SourceResults, VectorIndexRegistry,
 };
 use super::read_handle::{FtsHandle, ReadHandle};
 use super::{EntityIndex, FtsIndex, SearchFilter, VectorIndexOwner};
@@ -207,6 +207,18 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
         k: usize,
         eligible_ids: Option<&HashSet<MemoryId>>,
     ) -> Result<Vec<ScoredResult>> {
+        Ok(self
+            .search_measured(namespace_id, query_vec, k, eligible_ids)?
+            .results)
+    }
+
+    fn search_measured(
+        &self,
+        namespace_id: NamespaceId,
+        query_vec: &[f32],
+        k: usize,
+        eligible_ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<SourceResults<ScoredResult>> {
         let wait = crate::performance::Timer::new("vector.lock_wait");
         let index = self.index.read();
         wait.complete();
@@ -216,15 +228,19 @@ impl VectorIndexRegistry for SharedVectorIndexRegistry {
             ..Default::default()
         };
         let results = index
-            .search_scoped(namespace_id, query_vec, k, &filter, eligible_ids)
+            .search_scoped_measured(namespace_id, query_vec, k, &filter, eligible_ids)
             .map_err(|e| SearchError::VectorIndexError(e.to_string()))?;
-        Ok(results
-            .into_iter()
-            .map(|r| ScoredResult {
-                memory_id: r.id,
-                score: r.score,
-            })
-            .collect())
+        Ok(SourceResults {
+            coverage: results.coverage,
+            results: results
+                .results
+                .into_iter()
+                .map(|r| ScoredResult {
+                    memory_id: r.id,
+                    score: r.score,
+                })
+                .collect(),
+        })
     }
 
     fn get_vector(&self, id: MemoryId) -> Option<Vec<f32>> {
@@ -667,6 +683,74 @@ impl AccessRecorder for StorageAccessRecorder {
                 .is_ok_and(|s| s.meta_store().uses_native_lifecycle())
     }
 
+    async fn record_point_for_publication(
+        &self,
+        id: MemoryId,
+        scope: &crate::storage::control::ExposureScope,
+        intent: Option<crate::storage::native_lifecycle::ExposureIntent>,
+        sampled_at: i64,
+        parent: Option<&crate::storage::work::WorkTicket>,
+        policy: &crate::storage::native_lifecycle::NativePolicyInputs,
+        original_contract_version: u32,
+    ) -> Result<crate::decay::observation::AccessObservation> {
+        if !matches!(original_contract_version, 1 | 2) || scope.source != Some(id) {
+            return Err(SearchError::Unavailable(
+                "invalid point exposure origin/scope".into(),
+            ));
+        }
+        let native = self
+            .storage
+            .read()
+            .map_err(|e| SearchError::Unavailable(e.to_string()))?
+            .meta_store()
+            .uses_native_lifecycle();
+        if !native {
+            if intent.is_some() {
+                return Err(SearchError::Unavailable(
+                    "native witness on legacy owner".into(),
+                ));
+            }
+            // Existing legacy live identity/name checks, timestamp clamp and
+            // hash shape; no native captured policy/token parity is asserted.
+            return self
+                .record_with_scopes(
+                    &[(id, AccessKind::DirectRetrieval)],
+                    crate::decay::similarity_scope::ExposureScopes::Existing(Some(scope.clone())),
+                    Some(sampled_at),
+                    parent,
+                    Some(policy),
+                    original_contract_version,
+                )
+                .await;
+        }
+        let intent = intent.ok_or_else(|| {
+            SearchError::Unavailable("native point exposure requires captured intent".into())
+        })?;
+        if intent.original != [(id, AccessKind::DirectRetrieval)]
+            || intent.scope.source != scope.source
+            || intent.scope.namespace_name != scope.namespace
+        {
+            return Err(SearchError::Unavailable(
+                "point exposure intent mismatch".into(),
+            ));
+        }
+        let completion = self.completion.as_ref().ok_or_else(|| {
+            SearchError::Unavailable("native point exposure requires publication owner".into())
+        })?;
+        let receipts = completion
+            .record_native_point_exposure_with_work(
+                intent,
+                sampled_at,
+                policy.clone(),
+                parent,
+                original_contract_version,
+            )
+            .await?;
+        Ok(crate::decay::observation::AccessObservation::from_receipts(
+            receipts,
+        ))
+    }
+
     async fn record_access_batch_for_publication(
         &self,
         accesses: &[(MemoryId, AccessKind)],
@@ -851,6 +935,17 @@ impl GraphReader for SharedGraphReader {
             .map_err(|e| SearchError::Internal(e.into()))
     }
 
+    fn rif_edges(
+        &self,
+        anchor: MemoryId,
+        namespace: NamespaceId,
+        allowance: usize,
+    ) -> Result<crate::graph::query::RifAdjacency> {
+        let graph = self.graph.read();
+        crate::graph::query::rif_edges(&graph, anchor, namespace, allowance)
+            .map_err(|error| SearchError::Unavailable(error.into()))
+    }
+
     fn neighbors(&self, id: &MemoryId) -> Vec<MemoryId> {
         let graph = self.graph.read();
         graph
@@ -920,21 +1015,39 @@ impl EntityIndexReader for SharedEntityIndexReader {
         k: usize,
         eligible_ids: &HashSet<MemoryId>,
     ) -> Result<Vec<EntityRecallResult>> {
-        if entities.is_empty() {
-            return Ok(Vec::new());
-        }
+        Ok(self
+            .find_by_entities_measured(namespace_id, entities, exclude_id, k, eligible_ids)?
+            .results)
+    }
+
+    fn find_by_entities_measured(
+        &self,
+        namespace_id: NamespaceId,
+        entities: &[String],
+        exclude_id: MemoryId,
+        k: usize,
+        eligible_ids: &HashSet<MemoryId>,
+    ) -> Result<SourceResults<EntityRecallResult>> {
         let index = self.entity_index.read();
-        let results = index.find_by_entities_filtered(namespace_id, entities, exclude_id, |id| {
-            eligible_ids.contains(&id)
-        });
-        Ok(results
-            .into_iter()
-            .take(k)
-            .map(|(memory_id, shared_count)| EntityRecallResult {
-                memory_id,
-                shared_count,
-            })
-            .collect())
+        let mut source =
+            index.find_by_entities_measured(namespace_id, entities, exclude_id, |id| {
+                eligible_ids.contains(&id)
+            });
+        if let Some(coverage) = &mut source.coverage {
+            coverage.candidate_limited = source.results.len() > k;
+        }
+        Ok(SourceResults {
+            coverage: source.coverage,
+            results: source
+                .results
+                .into_iter()
+                .take(k)
+                .map(|(memory_id, shared_count)| EntityRecallResult {
+                    memory_id,
+                    shared_count,
+                })
+                .collect(),
+        })
     }
 }
 

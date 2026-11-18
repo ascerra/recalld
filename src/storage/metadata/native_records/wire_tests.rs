@@ -73,7 +73,16 @@ fn configured_public_adapters(
     clock: Arc<dyn Clock>,
     policy: NativePolicyInputs,
 ) -> (McpBridge, crate::api::AppState) {
-    let (_, mut bridge, engine) = readers(f, clock.clone());
+    public_adapters_with_query(f, clock, policy, false)
+}
+fn public_adapters_with_query(
+    f: &Fixture,
+    clock: Arc<dyn Clock>,
+    policy: NativePolicyInputs,
+    native_exposure: bool,
+) -> (McpBridge, crate::api::AppState) {
+    let (_, mut bridge, engine) =
+        readers_with_policy(f, clock.clone(), native_exposure, policy.clone(), true);
     let mut config = crate::config::RecalldConfig::default();
     config.decay.decay_rate_multiplier = policy.multiplier;
     let config = Arc::new(config);
@@ -90,7 +99,8 @@ fn configured_public_adapters(
             chrono_tz::UTC,
         )
         .with_clock(clock.clone())
-        .with_native_lifecycle_policy(policy.clone()),
+        .with_native_lifecycle_policy(policy.clone())
+        .with_query_engine(engine.clone()),
     );
     bridge.default_namespace = "deliberately-wrong".into();
     let state = crate::api::AppState::new(
@@ -138,7 +148,12 @@ fn configured_public_adapters(
             .with_clock(clock.clone())
             .with_native_lifecycle_policy(policy),
         ),
-        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+        Arc::new(NamespaceRegistryAdapter::new(
+            f.storage.clone(),
+            std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                crate::test_support::DIM,
+            )),
+        )),
         Arc::new(NoopMetricsCollector),
     );
     (bridge, state)
@@ -767,8 +782,14 @@ async fn decoder_native_committed_requires_receipt_but_unknown_can_keep_allocate
 #[path = "public_api1_tests.rs"]
 mod public_api1;
 
+#[path = "live_lifecycle_schema_tests.rs"]
+mod live_lifecycle_schemas;
+
 #[path = "public_matrix_tests.rs"]
 mod public_matrix;
 
 #[path = "adopted_public_tests.rs"]
 mod adopted_public;
+
+#[path = "query_feedback_chronology_tests.rs"]
+mod query_feedback_chronology;

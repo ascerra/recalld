@@ -96,7 +96,7 @@ pub const CATALOG_TTL_MS: u64 = 3_600_000;
 pub const RESOURCE_READ_TTL_MS: u64 = 0;
 
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
-pub const SERVER_INSTRUCTIONS: &str = "Recalld is an AI memory system. Namespaces organize data; they are not access controls. \
+pub const SERVER_INSTRUCTIONS: &str = "Read recalld://session first. Recalld is an AI memory system. Namespaces organize data; they are not access controls. \
      Store/search use the resolved session default when namespace is omitted; by-ID operations \
      use the record namespace. Supply namespace explicitly for reproducible workflows. \
      Use recordAccess:false for evaluation or inspection. Reinforce only deliberate usefulness \
@@ -334,6 +334,9 @@ pub struct ToolInfo {
     pub description: String,
     /// JSON Schema for the tool's input parameters.
     pub input_schema: serde_json::Value,
+    /// Schema of structured output, advertised only in the supported modern era.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
     /// Behavioral hints for tool UIs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<ToolAnnotations>,

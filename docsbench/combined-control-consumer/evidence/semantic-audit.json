@@ -1,0 +1,303 @@
+{
+  "sourceCommit": "6f8e4713c16004d0fee6c428ea5171288cc3f3b0",
+  "sourceTreeSha256": "442074a4e817f1deac9cdd180a889dda6103a606b6617fefa73d7c8cfaac9a3c",
+  "sourceFiles": 531,
+  "sourceAndExecutedBinariesUnchanged": true,
+  "cohorts": [
+    {
+      "name": "default",
+      "episodes": 7,
+      "queries": 28,
+      "denominators": {
+        "scored": 9,
+        "zeroLabelUnscored": 6,
+        "unknownAnnotations": 13
+      },
+      "totals": {
+        "actorRpcAttempts": 252,
+        "contextObservations": 28,
+        "barriers": 49,
+        "providerRequests": 210,
+        "privateControlAttempts": 196,
+        "privateControlErrorAcks": 42
+      },
+      "fullTokenCountMin": 1077,
+      "fullTokenCountMax": 1079,
+      "omittedEntriesMin": 0,
+      "omittedEntriesMax": 0
+    },
+    {
+      "name": "boundary",
+      "episodes": 7,
+      "queries": 28,
+      "denominators": {
+        "scored": 9,
+        "zeroLabelUnscored": 6,
+        "unknownAnnotations": 13
+      },
+      "totals": {
+        "actorRpcAttempts": 252,
+        "contextObservations": 28,
+        "barriers": 49,
+        "providerRequests": 210,
+        "privateControlAttempts": 196,
+        "privateControlErrorAcks": 42
+      },
+      "fullTokenCountMin": 26,
+      "fullTokenCountMax": 114,
+      "omittedEntriesMin": 18,
+      "omittedEntriesMax": 20
+    },
+    {
+      "name": "boundary-repeat",
+      "episodes": 7,
+      "queries": 28,
+      "denominators": {
+        "scored": 9,
+        "zeroLabelUnscored": 6,
+        "unknownAnnotations": 13
+      },
+      "totals": {
+        "actorRpcAttempts": 252,
+        "contextObservations": 28,
+        "barriers": 49,
+        "providerRequests": 210,
+        "privateControlAttempts": 196,
+        "privateControlErrorAcks": 42
+      },
+      "fullTokenCountMin": 26,
+      "fullTokenCountMax": 114,
+      "omittedEntriesMin": 18,
+      "omittedEntriesMax": 20
+    }
+  ],
+  "actualRun": {
+    "exitCode": 0,
+    "elapsedSeconds": 82.89711920899572,
+    "retired": true,
+    "oomKilled": false
+  },
+  "memoryPeakBytes": 1003008000,
+  "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+  "actualChecks": [
+    {
+      "episodes": 7,
+      "fullRawPackedPopulation": true,
+      "name": "default",
+      "queries": 28
+    },
+    {
+      "episodes": 7,
+      "fullRawPackedPopulation": true,
+      "name": "boundary",
+      "queries": 28
+    },
+    {
+      "episodes": 7,
+      "fullRawPackedPopulation": true,
+      "name": "boundary-repeat",
+      "queries": 28
+    },
+    {
+      "aggregatesAbsent": true,
+      "failed": 1,
+      "name": "actual-midcohort-cache-miss",
+      "planned": 7,
+      "succeeded": 3,
+      "unattempted": 3
+    },
+    {
+      "name": "last-member",
+      "outputAbsent": true
+    },
+    {
+      "name": "trace-version",
+      "outputAbsent": true
+    },
+    {
+      "name": "old-profile-v2",
+      "outputAbsent": true
+    },
+    {
+      "name": "bad-binary",
+      "outputAbsent": true
+    },
+    {
+      "actorBoundaryPassed": true,
+      "actualContexts": [
+        {
+          "q0": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "9b85749f4c63a5ff028ca3011e682d05388c7395f7634c2cff5263e0f74432cc",
+            "tokens": 70
+          },
+          "q1": {
+            "includedSources": [],
+            "renderedSha256": "cb7b498d8217fbf1de066b33483d2909f53b53395b19f5af339e36392d6feb20",
+            "tokens": 26
+          },
+          "q2": {
+            "includedSources": [
+              [
+                "turn-2"
+              ],
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "f853578d90d85014066ea4050dae220ec30cf8a44d7f76b9118497a424049263",
+            "tokens": 114
+          },
+          "q3": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "d57940e849677c5baf457fb00cdfcbce9e6d2168612e64054619ba2e581c5c4f",
+            "tokens": 72
+          }
+        },
+        {
+          "q0": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "9b85749f4c63a5ff028ca3011e682d05388c7395f7634c2cff5263e0f74432cc",
+            "tokens": 70
+          },
+          "q1": {
+            "includedSources": [],
+            "renderedSha256": "cb7b498d8217fbf1de066b33483d2909f53b53395b19f5af339e36392d6feb20",
+            "tokens": 26
+          },
+          "q2": {
+            "includedSources": [
+              [
+                "turn-2"
+              ],
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "f853578d90d85014066ea4050dae220ec30cf8a44d7f76b9118497a424049263",
+            "tokens": 114
+          },
+          "q3": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "d57940e849677c5baf457fb00cdfcbce9e6d2168612e64054619ba2e581c5c4f",
+            "tokens": 72
+          }
+        }
+      ],
+      "identityNormalizationUsed": false,
+      "name": "actual-gold-canary"
+    },
+    {
+      "actorBoundaryPassed": true,
+      "actualContexts": [
+        {
+          "q0": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "9b85749f4c63a5ff028ca3011e682d05388c7395f7634c2cff5263e0f74432cc",
+            "tokens": 70
+          },
+          "q1": {
+            "includedSources": [],
+            "renderedSha256": "cb7b498d8217fbf1de066b33483d2909f53b53395b19f5af339e36392d6feb20",
+            "tokens": 26
+          },
+          "q2": {
+            "includedSources": [
+              [
+                "turn-2"
+              ],
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "f853578d90d85014066ea4050dae220ec30cf8a44d7f76b9118497a424049263",
+            "tokens": 114
+          },
+          "q3": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "d57940e849677c5baf457fb00cdfcbce9e6d2168612e64054619ba2e581c5c4f",
+            "tokens": 72
+          }
+        },
+        {
+          "q0": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "9b85749f4c63a5ff028ca3011e682d05388c7395f7634c2cff5263e0f74432cc",
+            "tokens": 70
+          },
+          "q1": {
+            "includedSources": [],
+            "renderedSha256": "cb7b498d8217fbf1de066b33483d2909f53b53395b19f5af339e36392d6feb20",
+            "tokens": 26
+          },
+          "q2": {
+            "includedSources": [
+              [
+                "turn-2"
+              ],
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "f853578d90d85014066ea4050dae220ec30cf8a44d7f76b9118497a424049263",
+            "tokens": 114
+          },
+          "q3": {
+            "includedSources": [
+              [
+                "turn-0"
+              ]
+            ],
+            "renderedSha256": "fc0b732e60ae84979ad74ecdb0bd2b1c3bbe5bc2562b72e3121961008ce09fa0",
+            "tokens": 74
+          }
+        }
+      ],
+      "identityNormalizationUsed": false,
+      "name": "actual-future-canary"
+    },
+    {
+      "name": "legacy-accounting",
+      "status": "passed"
+    },
+    {
+      "name": "legacy-owned",
+      "oldProfileUnchanged": true,
+      "reason": "unsupported private control capabilities",
+      "status": "expected-incompatibility"
+    },
+    {
+      "name": "legacy-context",
+      "status": "passed"
+    }
+  ],
+  "rawRoot": "/private/tmp/recalld-a6-combined-control-validation"
+}

@@ -1,0 +1,9 @@
+{
+  "inspection": "build container retired before inspection; no captured build container ID",
+  "requestedImage": "recalld-ci:1.94",
+  "requestedNetwork": "none",
+  "requestedCpus": 2,
+  "requestedMemoryBytes": 4294967296,
+  "requestedJobs": 1,
+  "note": "Test container will be inspected before start; not substituted as build inspection."
+}

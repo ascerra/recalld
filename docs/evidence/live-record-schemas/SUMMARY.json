@@ -1,0 +1,21 @@
+{
+  "source": "cde04db8f8806fb59c7298dc2fb23592b67276f1",
+  "sourceFiles": 516,
+  "focusedTests": 19,
+  "filters": 18,
+  "formalOutputCases": 50,
+  "executable": {
+    "path": "/target/debug/deps/recalld-8b31964f64b2cfc4",
+    "sha256": "bde0824806a446eaa26c2364ac02e2cba7b0699ae7a380d4a62ee0bae1346f12",
+    "bytes": 653369648
+  },
+  "buildPeak": 4294967296,
+  "checksPeak": 4294967296,
+  "exits": {
+    "build": 0,
+    "focused": 0,
+    "formal": 0,
+    "fmt": 0,
+    "clippy": 0
+  }
+}

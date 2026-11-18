@@ -1,0 +1,19 @@
+{
+  "head": "1316bced1ce6fab1e854074076a671cfd5bb4205",
+  "parent": "2925a7289055b27ffda2583a81b656442f347632",
+  "status": "",
+  "source": "/tmp/recalld-implementation/api1-point-get",
+  "files": {
+    "Cargo.toml": "8c6aa5c4148563d23fe3f5b0a0fc31a3e1dfe7ae90c1962f77d6ee6b82617b63",
+    "Cargo.lock": "a6f73ed9223bb1d6a7a02f893067d8c537c77aa515b5837d33a041271400669e",
+    "src/search/get_wire_tests.rs": "82f3a930c509f0837bbd4db3b3ea6a2fa03a5e619ea628ad0a9121d901599d2b",
+    "src/search/api1_point_get_before_tests.rs": "72b0cd057d0632aa758b342f1f48f536ef16d2d7afbb556f59cbd955b49605d0",
+    "src/daemon/client.rs": "f7a23d6b5b14d2febc500e0140d136144132a02513b387398ec987316e8d6b85",
+    "src/daemon/api1_get_before_tests.rs": "7c3c19a1cb82e3133e204c5f9f72770dd3cdc155f9bdfb927f6b7e6cbf54024a"
+  },
+  "preservedPreviousExecutable": {
+    "path": "/tmp/recalld-curie-o1-build/runs/016-final/recalld-frozen-5dad71e7",
+    "sha256": "5dad71e7b6b1dbcbda5bb1aecabe9e88a603ffabc3e088f545f1351e9fc65415",
+    "method": "same-filesystem hardlink, no cache clone"
+  }
+}

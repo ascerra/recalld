@@ -1,0 +1,14 @@
+......F..
+======================================================================
+FAIL: test_refusal_parse_utf8_are_distinct_not_success (__main__.Recorded.test_refusal_parse_utf8_are_distinct_not_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/recalld-implementation/a6-recorded-answer-consumer/scripts/test_recorded_answer.py", line 45, in test_refusal_parse_utf8_are_distinct_not_success
+    with self.assertRaises((ValueError,UnicodeError)):R['decode'](raw)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: (<class 'ValueError'>, <class 'UnicodeError'>) not raised
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.179s
+
+FAILED (failures=1)

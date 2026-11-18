@@ -1,0 +1,47 @@
+[
+  {
+    "filter": "native_api1_purge_success_counts_actual_orphan_fts_rows_and_directory",
+    "exit": 0,
+    "seconds": 1.2999043239979073
+  },
+  {
+    "filter": "native_api1_purge_race_actual_mcp_eras_remote_and_legacy_frames",
+    "exit": 0,
+    "seconds": 5.239301010966301
+  },
+  {
+    "filter": "native_api1_purge_full_start_and_child_errors_survive_actual_frames",
+    "exit": 0,
+    "seconds": 2.6363743050023913
+  },
+  {
+    "filter": "native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejects_extras",
+    "exit": 0,
+    "seconds": 1.3663047270383686
+  },
+  {
+    "filter": "native_api1_purge_unknown_outcomes_survive_actual_bounded_frames",
+    "exit": 0,
+    "seconds": 4.9102586369845085
+  },
+  {
+    "filter": "w31_a_forced_delete_removes_the_records_indexes_and_directory",
+    "exit": 0,
+    "seconds": 0.3393972220364958
+  },
+  {
+    "filter": "live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation",
+    "exit": 0,
+    "seconds": 0.37772659701295197
+  },
+  {
+    "filter": "w52_a_partial_purge_says_partially_destroyed_not_failed",
+    "exit": 0,
+    "seconds": 0.0027713479939848185
+  },
+  {
+    "filter": "w53_an_ordinary_delete_failure_keeps_the_failed_prefix",
+    "exit": 0,
+    "seconds": 0.0022767619811929762
+  }
+]

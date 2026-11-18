@@ -15,6 +15,10 @@ mod native_store_batch;
 #[path = "native_store_single.rs"]
 mod native_store_single;
 
+#[cfg(test)]
+#[path = "legacy_compound_origin_tests.rs"]
+mod legacy_compound_origin_tests;
+
 use crate::decay::observation::Observed;
 use std::sync::Arc;
 
@@ -42,6 +46,7 @@ fn map_mutation_error(error: crate::storage::StorageError) -> bridge::BridgeErro
             bridge::BridgeError::PartiallyApplied(error.to_string())
         }
         crate::storage::StorageError::ProviderVectorUnavailable(_)
+        | crate::storage::StorageError::UnsupportedMutation(_)
         | crate::storage::StorageError::VectorCertificationRequired { .. } => {
             bridge::BridgeError::Unavailable(error.to_string())
         }
@@ -203,6 +208,39 @@ impl McpSearchAdapter {
 
 #[async_trait]
 impl bridge::SearchPipeline for McpSearchAdapter {
+    fn supports_prepared_get(&self) -> bool {
+        self.query_engine.supports_prepared_get()
+    }
+    async fn get_contract(
+        &self,
+        request: crate::serialization::get::GetRequest,
+        response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        self.query_engine
+            .get_contract(request, response_limit)
+            .await
+    }
+    fn supports_prepared_queries(&self) -> bool {
+        self.query_engine.supports_prepared_queries()
+    }
+    async fn query_contract_bounded(
+        &self,
+        request: crate::serialization::query::QueryRequest,
+        response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine
+            .query_contract_bounded(request, response_limit)
+            .await
+    }
+    async fn similar_contract_bounded(
+        &self,
+        request: crate::serialization::query::SimilarRequest,
+        response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        self.query_engine
+            .similar_contract_bounded(request, response_limit)
+            .await
+    }
     async fn similar_contract(
         &self,
         request: crate::serialization::query::SimilarRequest,
@@ -1117,6 +1155,9 @@ impl bridge::SearchPipeline for McpSearchAdapter {
 
 /// Adapts `RedbStorageEngine` + subsystems to the MCP `StorageEngine` trait.
 pub struct McpStorageAdapter {
+    #[cfg(test)]
+    pub(crate) api1_before_barrier: Option<fn(&crate::derived_completion::DerivedCompletion)>,
+    catalog_profile: Option<crate::serialization::session::ActiveEmbedding>,
     /// Test-only, per-instance fault after completed children and known root
     /// finish: 1 invalidates FTS publication; 2 withdraws the canonical handle.
     #[cfg(test)]
@@ -1135,7 +1176,329 @@ pub struct McpStorageAdapter {
     query_engine: Option<Arc<crate::search::QueryEngine>>,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum PointError {
+    #[error(transparent)]
+    Bridge(#[from] bridge::BridgeError),
+    #[error(transparent)]
+    Search(#[from] crate::search::SearchError),
+    #[error(transparent)]
+    Observation(#[from] crate::decay::observation::ObservationError),
+}
+impl PointError {
+    fn unknown(&self) -> bool {
+        match self {
+            Self::Search(crate::search::SearchError::Observation(error))
+            | Self::Observation(error) => error.commit_state == "unknown",
+            _ => false,
+        }
+    }
+    fn into_bridge(self) -> bridge::BridgeError {
+        match self {
+            Self::Bridge(error) => error,
+            Self::Search(error) => map_search_error(error),
+            Self::Observation(error) => error.into(),
+        }
+    }
+}
+struct LegacyPointFailure {
+    cause: PointError,
+    captured: Option<(
+        Option<crate::serialization::contract::Scope>,
+        crate::storage::control::GenerationRef,
+    )>,
+}
+impl LegacyPointFailure {
+    fn into_reply(self) -> crate::serialization::get::GetReply {
+        use crate::serialization::{contract::ErrorCategory, get::GetReply};
+        let mut reply = match self.cause {
+            PointError::Search(error) => GetReply::failure(error),
+            PointError::Observation(error) => {
+                GetReply::failure(crate::search::SearchError::Observation(error))
+            }
+            PointError::Bridge(error) => {
+                let mut reply =
+                    GetReply::failure(crate::search::SearchError::Unavailable(String::new()));
+                let (category, code, status) = match error {
+                    bridge::BridgeError::NotFound(_) => {
+                        (ErrorCategory::NotFound, "MEMORY_NOT_FOUND", 404)
+                    }
+                    bridge::BridgeError::NamespaceMismatch(_) => {
+                        (ErrorCategory::Conflict, "NAMESPACE_MISMATCH", 409)
+                    }
+                    bridge::BridgeError::InvalidInput(_) => {
+                        (ErrorCategory::InvalidInput, "INVALID_INPUT", 400)
+                    }
+                    _ => (ErrorCategory::Unavailable, "INDEX_NOT_READY", 503),
+                };
+                let error = reply.envelope.error.as_mut().unwrap();
+                error.category = category;
+                error.code = code.into();
+                reply.http_status = status;
+                reply
+            }
+        };
+        if let Some((scope, at)) = self.captured {
+            reply.envelope.scope = scope;
+            reply.envelope.read_generation = Some(at);
+        }
+        reply
+    }
+}
 impl McpStorageAdapter {
+    async fn legacy_point(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        budget: Option<usize>,
+    ) -> Result<crate::serialization::get::GetReply, LegacyPointFailure> {
+        let id = request.id;
+        let record_access = request.record_access;
+        let namespace = request.namespace.as_deref();
+        let mut captured = None;
+        let accepted = crate::storage::work::accept_work(&self.storage, None).map_err(|error| {
+            LegacyPointFailure {
+                cause: PointError::Bridge(map_mutation_error(error)),
+                captured: None,
+            }
+        })?;
+        let result = async {
+            let stamp = effects_stamp(&self.storage).await?;
+            let namespace = namespace.map(str::to_owned);
+            let storage = self.storage.clone();
+            let clock = self.clock.clone();
+            let child = accepted.child().map_err(|e| map_mutation_error(e.into()))?;
+            let (value, sampled_at, at, scope) = tokio::task::spawn_blocking(move || {
+                let storage = storage
+                    .read()
+                    .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
+                let result = (|| {
+                    // Canonical point payload does not read derived indexes.
+                    // hydrate_get_at rechecks this G under metadata ownership and
+                    // rejects pending effects before copying any row/text.
+                    let at = storage
+                        .control_state()
+                        .map_err(map_canonical_read_error)?
+                        .generation_ref();
+                    let sampled_at = clock.now_millis();
+                    let payload = storage
+                        .hydrate_get_at(at, id, namespace.as_deref())
+                        .map_err(map_canonical_read_error)?;
+                    let scope = payload.as_ref().map(|(namespace, _)| {
+                        crate::serialization::contract::Scope::Namespace {
+                            namespace_id: namespace.id,
+                            namespace: namespace.name.clone(),
+                        }
+                    });
+                    let value = payload.map(|(namespace, payload)| {
+                        let record = payload.record;
+                        let marker = record.phase == DecayPhase::Tombstone;
+                        crate::search::MemoryResponse {
+                            labels: record.schema.as_ref().map(|s| s.labels.clone()),
+                            id,
+                            namespace: namespace.name,
+                            summary: Some(if marker {
+                                String::new()
+                            } else {
+                                record.summary
+                            }),
+                            full_text: payload.full_text,
+                            tags: if marker { Vec::new() } else { record.tags },
+                            phase: record.phase,
+                            strength: if marker { 0.0 } else { record.strength },
+                            decay_strength: record.decay_strength,
+                            stability: record.stability,
+                            created_at: record.created_at,
+                            last_accessed_at: record.last_accessed_at,
+                            is_permastore: !marker && record.is_permastore != 0,
+                            edge_count: record.edge_count,
+                            access_count: record.access_history.len(),
+                        }
+                    });
+                    Ok::<_, bridge::BridgeError>((value, sampled_at, at, scope))
+                })();
+                storage.meta_store().finish_work(child);
+                result
+            })
+            .await
+            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
+            captured = Some((scope.clone(), at));
+            check_read_admission(&self.storage, stamp).await?;
+            let observe = record_access
+                && value
+                    .as_ref()
+                    .is_some_and(|r| r.phase != DecayPhase::Tombstone);
+            let mut reply = match value {
+                Some(memory) => crate::serialization::get::GetReply::success(
+                    scope.expect("present record has scope"),
+                    at,
+                    crate::serialization::get::GetData {
+                        evaluated_at: sampled_at,
+                        record_access,
+                        memory,
+                    },
+                ),
+                None => {
+                    let mut missing = crate::serialization::get::GetReply::failure(
+                        crate::search::SearchError::MemoryNotFound(id),
+                    );
+                    missing.envelope.read_generation = Some(at);
+                    check_read_admission(&self.storage, stamp).await?;
+                    return Ok(missing);
+                }
+            };
+            if let Some(limit) = budget
+                && !crate::serialization::get_api1::fits(
+                    &reply,
+                    self.timezone,
+                    crate::serialization::get_api1::Mode::Legacy,
+                    limit,
+                    observe,
+                )
+            {
+                return Ok(reply.oversize());
+            }
+            let receipts = if observe {
+                let scope = crate::storage::control::ExposureScope {
+                    namespace: reply
+                        .envelope
+                        .data
+                        .as_ref()
+                        .unwrap()
+                        .memory
+                        .namespace
+                        .clone(),
+                    source: Some(id),
+                };
+                if let Some(engine) = &self.query_engine {
+                    engine
+                        .record_exposures_at_with_work(
+                            &[(id, crate::model::AccessKind::DirectRetrieval)],
+                            scope,
+                            sampled_at,
+                            Some(&accepted),
+                        )
+                        .await
+                        .map_err(PointError::Search)?
+                } else {
+                    // Constructor-only legacy users retain their existing path.
+                    // Native mode needs the actual configured policy/owner; never
+                    // substitute a second default policy or a legacy mutation.
+                    if self
+                        .storage
+                        .read()
+                        .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
+                        .meta_store()
+                        .uses_native_lifecycle()
+                    {
+                        return Err(PointError::Bridge(bridge::BridgeError::Storage(
+                            "native exposure requires the configured query observer".into(),
+                        )));
+                    }
+                    crate::decay::observation::record_exposures_scoped_with_work(
+                        self.storage.clone(),
+                        self.cache.clone(),
+                        vec![(id, crate::model::AccessKind::DirectRetrieval)],
+                        sampled_at,
+                        Some(scope),
+                        Some(&accepted),
+                    )
+                    .await?
+                }
+            } else {
+                Vec::new()
+            };
+            reply.observation_receipts = receipts.clone();
+            reply.envelope.receipt = (receipts.len() == 1).then(|| receipts[0].clone());
+            let observed = Observed {
+                value: reply,
+                receipts,
+            };
+            // QueryEngine has already awaited publication using this accepted root.
+            let observed = if observe && self.query_engine.is_none() {
+                observed
+                    .publish_derived(Some(&self.completion()), Some(&accepted))
+                    .await?
+            } else {
+                observed
+            };
+            let admission = check_read_admission(&self.storage, stamp).await;
+            if budget.is_some() {
+                observed.finish(admission.map_err(PointError::Bridge))
+            } else {
+                // Preserve the old alias's exact leaf Debug diagnostic. Only
+                // the capable route retains typed failures beyond this point.
+                observed.finish(admission).map_err(PointError::Bridge)
+            }
+        }
+        .await;
+        if budget.is_some() && result.as_ref().err().is_some_and(PointError::unknown) {
+            drop(accepted); // unresolved until recovery; never invent known completion
+        } else {
+            crate::storage::work::finish_work(&self.storage, accepted);
+        }
+        let mut reply = result.map_err(|cause| LegacyPointFailure {
+            cause,
+            captured: captured.clone(),
+        })?;
+        if budget.is_some()
+            && reply.http_status == 200
+            && let Some(receipt) = reply.observation_receipts.last()
+        {
+            #[cfg(test)]
+            if let Some(hook) = self.api1_before_barrier {
+                hook(&self.completion());
+            }
+            let target = crate::storage::control::GenerationRef {
+                store_id: receipt.store_id,
+                generation: receipt.committed_generation,
+            };
+            match self
+                .completion()
+                .readiness_barrier(
+                    target,
+                    std::time::Instant::now() + std::time::Duration::from_secs(30),
+                )
+                .await
+            {
+                Ok(ready) => reply.envelope.readiness = Some(ready.into()),
+                Err(error) => {
+                    return Err(LegacyPointFailure {
+                        cause: PointError::Observation(
+                            crate::decay::observation::ObservationError::not_ready(
+                                reply.observation_receipts,
+                                error,
+                            ),
+                        ),
+                        captured,
+                    });
+                }
+            }
+        }
+        if let Some(limit) = budget
+            && reply.http_status == 200
+            && !crate::serialization::get_api1::fits(
+                &reply,
+                self.timezone,
+                crate::serialization::get_api1::Mode::Legacy,
+                limit,
+                false,
+            )
+        {
+            return Ok(reply.oversize());
+        }
+        Ok(reply)
+    }
+}
+
+impl McpStorageAdapter {
+    /// Capture actual configuration identity once; this is not provider
+    /// availability, namespace attestation, or a readiness guarantee.
+    pub fn with_catalog_profile_context(mut self, provider: &dyn EmbeddingProvider) -> Self {
+        self.catalog_profile =
+            crate::serialization::session::ActiveEmbedding::from_provider(provider).ok();
+        self
+    }
+
     pub(crate) fn with_native_lifecycle_policy(
         mut self,
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
@@ -1169,6 +1532,9 @@ impl McpStorageAdapter {
     ) -> Self {
         cache.bind_storage(&storage);
         Self {
+            catalog_profile: None,
+            #[cfg(test)]
+            api1_before_barrier: None,
             native_policy: None,
             clock: Arc::new(crate::time::SystemClock),
             #[cfg(test)]
@@ -1373,6 +1739,15 @@ impl McpStorageAdapter {
                             receipt,
                         ));
                     }
+                }
+
+                if child.as_ref().is_some_and(|c| c.is_legacy_api2()) {
+                    // Existing child lookup above keeps the original receipt/kind.
+                    // A blocked pending child is never finalized or reallocated.
+                    return Err(bridge::BridgeError::Unavailable(
+                        crate::storage::insertion::LEGACY_API2_SEMANTIC_UNSUPPORTED.into(),
+                    )
+                    .into());
                 }
 
                 effects_stamp(&self.storage).await?;
@@ -1762,6 +2137,28 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    fn supports_canonical_pages(&self) -> bool {
+        true
+    }
+
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        self.catalog_profile.clone()
+    }
+
+    async fn list_catalog_page(
+        &self,
+        request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        crate::catalog_page::read(self.storage.clone(), request).await
+    }
+
+    async fn list_canonical_page(
+        &self,
+        request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        crate::canonical_list::list_page(self.storage.clone(), request).await
+    }
+
     fn supports_api1_store(&self) -> bool {
         true
     }
@@ -1995,7 +2392,9 @@ impl bridge::StorageEngine for McpStorageAdapter {
         {
             return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreBatchV1/store_batch_api1_v1 before inserting a batch".into()));
         }
-        if input.mutation_version == 3 || input.expected_generation.is_some() {
+        if input.mutation_version == 3
+            || input.expected_generation.is_some() && input.mutation_version != 4
+        {
             return Err(bridge::BridgeError::Unavailable(
                 "linked native batch consumer remains gated pending transport validation".into(),
             ));
@@ -2026,130 +2425,83 @@ impl bridge::StorageEngine for McpStorageAdapter {
             .map_err(StoreWriteError::into_bridge)
     }
 
+    fn supports_api1_get(&self) -> bool {
+        true
+    }
+
+    async fn get_api1(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        response_limit: usize,
+    ) -> crate::serialization::get_api1::Reply {
+        use crate::serialization::get_api1::{Mode, Reply};
+        let native = match self.storage.read() {
+            Ok(storage) => match storage.control_state() {
+                Ok(control) => control.control_schema_version == 2,
+                Err(_) => return Reply::unavailable(request.record_access, false),
+            },
+            Err(_) => return Reply::unavailable(request.record_access, false),
+        };
+        if native {
+            let Some(engine) = &self.query_engine else {
+                return Reply::unavailable(request.record_access, false);
+            };
+            return Reply::point(
+                engine
+                    .get_api1_point(
+                        request,
+                        response_limit,
+                        self.timezone,
+                        #[cfg(test)]
+                        self.api1_before_barrier,
+                    )
+                    .await,
+                self.timezone,
+                Mode::Native,
+            );
+        }
+        let reply = match self.legacy_point(request, Some(response_limit)).await {
+            Ok(reply) => reply,
+            Err(error) => error.into_reply(),
+        };
+        Reply::point(reply, self.timezone, Mode::Legacy)
+    }
+
     async fn get_memory(
         &self,
         id: MemoryId,
         record_access: bool,
         namespace: Option<&str>,
     ) -> Result<Option<bridge::MemoryRecord>, bridge::BridgeError> {
-        let accepted =
-            crate::storage::work::accept_work(&self.storage, None).map_err(map_mutation_error)?;
-        let result = async {
-            let stamp = effects_stamp(&self.storage).await?;
-            let namespace = namespace.map(str::to_owned);
-            let storage = self.storage.clone();
-            let clock = self.clock.clone();
-            let tz = self.timezone;
-            let child = accepted.child().map_err(|e| map_mutation_error(e.into()))?;
-            let (value, sampled_at) = tokio::task::spawn_blocking(move || {
-                let storage = storage
-                    .read()
-                    .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
-                let result = (|| {
-                    // Canonical point payload does not read derived indexes.
-                    // hydrate_get_at rechecks this G under metadata ownership and
-                    // rejects pending effects before copying any row/text.
-                    let at = storage
-                        .control_state()
-                        .map_err(map_canonical_read_error)?
-                        .generation_ref();
-                    let sampled_at = clock.now_millis();
-                    let payload = storage
-                        .hydrate_get_at(at, id, namespace.as_deref())
-                        .map_err(map_canonical_read_error)?;
-                    let value = payload.map(|(namespace, payload)| {
-                        let record = payload.record;
-                        let marker = record.phase == DecayPhase::Tombstone;
-                        bridge::MemoryRecord {
-                            labels: record.schema.as_ref().map(|s| s.labels.clone()),
-                            id: id.to_string(),
-                            namespace: namespace.name,
-                            summary: if marker {
-                                String::new()
-                            } else {
-                                record.summary
-                            },
-                            full_text: payload.full_text,
-                            tags: if marker {
-                                Vec::new()
-                            } else {
-                                record.tags.iter().map(|t| t.to_string()).collect()
-                            },
-                            phase: format!("{:?}", record.phase),
-                            strength: if marker { 0.0 } else { record.strength },
-                            stability: record.stability,
-                            created_at: format_timestamp(record.created_at, tz),
-                            last_accessed_at: format_timestamp(record.last_accessed_at, tz),
-                            is_permastore: !marker && record.is_permastore != 0,
-                            edge_count: record.edge_count,
-                        }
-                    });
-                    Ok::<_, bridge::BridgeError>((value, sampled_at))
-                })();
-                storage.meta_store().finish_work(child);
-                result
-            })
-            .await
-            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))??;
-            check_read_admission(&self.storage, stamp).await?;
-            let observe = record_access && value.as_ref().is_some_and(|r| r.phase != "Tombstone");
-            let receipts = if observe {
-                let scope = crate::storage::control::ExposureScope {
-                    namespace: value.as_ref().unwrap().namespace.clone(),
-                    source: Some(id),
-                };
-                if let Some(engine) = &self.query_engine {
-                    engine
-                        .record_exposures_at_with_work(
-                            &[(id, crate::model::AccessKind::DirectRetrieval)],
-                            scope,
-                            sampled_at,
-                            Some(&accepted),
-                        )
-                        .await
-                        .map_err(map_search_error)?
-                } else {
-                    // Constructor-only legacy users retain their existing path.
-                    // Native mode needs the actual configured policy/owner; never
-                    // substitute a second default policy or a legacy mutation.
-                    if self
-                        .storage
-                        .read()
-                        .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
-                        .meta_store()
-                        .uses_native_lifecycle()
-                    {
-                        return Err(bridge::BridgeError::Storage(
-                            "native exposure requires the configured query observer".into(),
-                        ));
-                    }
-                    crate::decay::observation::record_exposures_scoped_with_work(
-                        self.storage.clone(),
-                        self.cache.clone(),
-                        vec![(id, crate::model::AccessKind::DirectRetrieval)],
-                        sampled_at,
-                        Some(scope),
-                        Some(&accepted),
-                    )
-                    .await?
-                }
-            } else {
-                Vec::new()
-            };
-            let observed = Observed { value, receipts };
-            // QueryEngine has already awaited publication using this accepted root.
-            let observed = if observe && self.query_engine.is_none() {
-                observed
-                    .publish_derived(Some(&self.completion()), Some(&accepted))
-                    .await?
-            } else {
-                observed
-            };
-            observed.finish(check_read_admission(&self.storage, stamp).await)
+        if self
+            .storage
+            .read()
+            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?
+            .control_state()
+            .map_err(map_canonical_read_error)?
+            .control_schema_version
+            == 2
+        {
+            return Err(bridge::BridgeError::Unavailable(
+                "native storage requires negotiated api1GetV1/get_api1_v1".into(),
+            ));
         }
-        .await;
-        crate::storage::work::finish_work(&self.storage, accepted);
-        result
+        self.legacy_point(
+            crate::serialization::get_api1::Request {
+                id,
+                record_access,
+                namespace: namespace.map(str::to_owned),
+            },
+            None,
+        )
+        .await
+        .map(|reply| {
+            reply
+                .envelope
+                .data
+                .map(|data| crate::serialization::get_api1::memory(&data.memory, self.timezone))
+        })
+        .map_err(|error| error.cause.into_bridge())
     }
 
     async fn delete_memory(
@@ -2503,6 +2855,7 @@ fn build_list_tags_response(
 pub struct McpNamespaceAdapter {
     native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    embedding: Arc<dyn EmbeddingProvider>,
     cache: Arc<CacheManager>,
     vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
     fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -2546,6 +2899,7 @@ impl McpNamespaceAdapter {
     /// the indexes a namespace deletion has to clean.
     pub fn new(
         storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+        embedding: Arc<dyn EmbeddingProvider>,
         cache: Arc<CacheManager>,
         vector_index: Arc<tokio::sync::RwLock<VectorIndexOwner>>,
         fts_index: Arc<tokio::sync::Mutex<FtsIndex>>,
@@ -2557,6 +2911,7 @@ impl McpNamespaceAdapter {
         Self {
             native_catalog: None,
             storage,
+            embedding,
             cache,
             vector_index,
             fts_index,
@@ -2755,11 +3110,21 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         crate::model::validation::validate_namespace_name(&input.name)
             .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
 
+        let dim = crate::embedding::runtime::creation_dimension(
+            self.embedding.as_ref(),
+            input.embedding_dim.map(u32::from),
+        )
+        .map_err(|error| match error {
+            crate::embedding::runtime::NamespaceProfileError::Unavailable(_) => {
+                bridge::BridgeError::Unavailable(error.to_string())
+            }
+            _ => bridge::BridgeError::InvalidInput(error.to_string()),
+        })?;
         let config = NamespaceConfig {
             schema: None,
             id: NamespaceId::UNSET,
             name: input.name,
-            embedding_dim: 1536,
+            embedding_dim: dim,
             initial_stability: input.initial_stability.unwrap_or(3.7145),
             default_difficulty: 5.0,
             phase_thresholds: crate::model::namespace::PhaseThresholds::default(),
@@ -2776,11 +3141,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             fts: self.fts_index.clone(),
             entities: self.entity_index.clone(),
         }
-        .create_legacy_namespace(
-            config,
-            input.embedding_dim.map(u32::from),
-            self.clock.clone(),
-        )
+        .create_legacy_namespace(config, Some(dim), self.clock.clone())
         .await
         .map_err(map_catalog_create_error)?;
         Ok(bridge::NamespaceInfo {
@@ -4316,6 +4677,12 @@ mod tests {
             .await
             .expect("forced delete");
 
+        crate::test_support::record_schema_result(
+            "delete-legacy-success",
+            "delete_namespace",
+            &crate::mcp::protocol::ToolCallResult::json(&result).unwrap(),
+            "actual legacy forced purge adapter through the production typed MCP emitter; retained record/index/directory assertions, not a separate public invocation",
+        );
         assert!(result.deleted);
         assert_eq!(result.memories_deleted, 1);
         assert_eq!(result.fts_rows_removed, 1);
@@ -4802,11 +5169,13 @@ pub fn direct_bridge(
             tz,
         )
         .with_clock(system.clock().clone())
+        .with_catalog_profile_context(system.embedding().as_ref())
         .with_query_engine(system.query_engine().clone()),
     );
     let namespaces: Arc<dyn crate::mcp::bridge::NamespaceRegistry> = Arc::new(
         McpNamespaceAdapter::new(
             system.storage().clone(),
+            system.embedding().clone(),
             system.cache().clone(),
             system.vector_index().clone(),
             system.fts_index().clone(),

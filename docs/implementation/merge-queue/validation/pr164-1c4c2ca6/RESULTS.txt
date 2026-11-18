@@ -1,0 +1,326 @@
+0 ["cargo", "fmt", "--all", "--check"]
+
+
+1 ["python3", "scripts/test_public_conformance.py"]
+Ran 7 tests in 0.060s
+OK
+
+2 ["python3", "scripts/test_offline_evaluation.py"]
+Ran 12 tests in 0.057s
+OK
+
+3 ["python3", "scripts/test_public_mcp_evaluation.py"]
+Ran 16 tests in 0.106s
+OK
+
+4 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "legacy_semantic_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 16s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 11 tests
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_core_fresh_rejects_before_payload ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_export_genuine157 ... ignored, genuine157 exporter; execute only on recorded pre-admission source
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_export_genuine157_faults ... ignored, genuine157 fault exporter; pre-admission source only
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_core_generated_and_reserved_bypass_are_final_guarded ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_genuine_completed_rpc_replays_all_receipts_no_work ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_genuine_single_replay_precedes_profile_clock_and_cas ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_completion ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_historical_fault_rpc_keeps_exact_current_child ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_rpc_generated_fresh_rejects_before_provider ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_rpc_supplied_fresh_rejects_before_reservation ... ok
+test result: ok. 9 passed; 0 failed; 2 ignored; 0 measured; 1755 filtered out; finished in 1.44s
+
+5 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "legacy_compound_origin_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 25 tests
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_export_genuine_old_one ... ignored, genuine BEFORE exporter; only run on recorded pre-extension source
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_fresh_selection_gate_no_mutation ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_genuine_old_one_replay_preserves_bytes ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_exact_hash_conflicts_and_forget_rpc ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_invalid_only_records_parent_and_fixed_default_hashes ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_pending_selection_gate_keeps_exact_parent_rpc ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_core_fresh_rejects_before_payload ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_core_generated_and_reserved_bypass_are_final_guarded ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_export_genuine157 ... ignored, genuine157 exporter; execute only on recorded pre-admission source
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_export_genuine157_faults ... ignored, genuine157 fault exporter; pre-admission source only
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_genuine_completed_rpc_replays_all_receipts_no_work ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_genuine_pending_rpc_keeps_parent_child_and_no_fake_completion ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_genuine_single_replay_precedes_profile_clock_and_cas ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_historical_fault_rpc_keeps_exact_current_child ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_rpc_generated_fresh_rejects_before_provider ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_rpc_supplied_fresh_rejects_before_reservation ... ok
+test storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_anchor_precedes_children_and_rejects_stripping ... ok
+test storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_api1_explicit_endpoints_rechecked_after_reservation ... ok
+test storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_child_context_policy_and_cas_are_final_guarded ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::legacy_compound_origin_offline_transfer_and_fork_preserve_genuine_api2_history ... ok
+test storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_final_transaction_rechecks_parent_anchor ... ok
+test storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_process_child ... ok
+test storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_required_nullable_codec ... ok
+test storage::metadata::batch::legacy_origin_tests::legacy_compound_origin_genuine_process_exit_preserves_replay_or_pending ... ok
+test result: ok. 22 passed; 0 failed; 3 ignored; 0 measured; 1741 filtered out; finished in 9.75s
+
+6 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "native_single_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 26 tests
+test serialization::native_single::tests::native_single_incomplete_reply_keeps_receipt_readiness_and_warnings ... ok
+test serialization::native_single::tests::native_single_prework_unsupported_never_reclassifies_recovery_uncertainty ... ok
+test serialization::native_single::tests::native_single_strict_fields_and_original_vector_bits ... ok
+test mcp::batch_budget::tests::native_single_receipt_framing_size_probe ... ok
+test storage::metadata::native_records::tests::store_batches::wire::native_single_and_batch_rpc_require_full_frame_before_any_work ... ok
+test storage::metadata::native_records::tests::store_batches::wire::native_single_wire_actual_mcp_http_rpc_profile_cas_and_canonical_labels ... ok
+test storage::metadata::native_records::tests::store_batches::wire::native_single_wire_genuine_before_dense_full_receipt_fits_all_transports ... ignored, requires immutable BEFORE123 producer artifacts via RECALLD_SINGLE_BEFORE_ARTIFACTS
+test storage::metadata::native_records::tests::store_batches::wire::native_single_wire_fresh_budget_scope_and_profile_fail_before_provider_or_allocation ... ok
+test storage::metadata::native_records::tests::store_batches::wire::native_single_wire_known_publication_failure_retains_full_receipt_and_repairs_key ... ok
+test storage::metadata::native_records::tests::store_batches::wire::native_single_wire_retired_namespace_id_replays_original_binding_after_recreation ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_close_waits_provider_then_graph_without_storage_inversion ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_process_child ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_original_vector_bits_and_checked_empty_identity ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_before_fixture ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_fresh_binding_replay_and_original_bits ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_invalid_pair_or_binding_has_no_provider_or_mutation ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_publication_error_preserves_exact_committed_receipt ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_profile_id_replays_genuine_before_fixture_bytes ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_provider_race_rejects_stale_plan_before_clock_or_allocation ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_process_exit_reopens_one_receipt_and_frozen_links ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_publication_failure_carries_exact_receipt_and_reopens_without_provider ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_replay_preserves_receipt_without_provider_settings_clock_or_batch ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_scope_lineage_controls_do_not_replay_other_namespace_or_call_provider ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_unknown_commit_retains_identity_and_unresolved_work_until_reopen ... ok
+test storage::metadata::native_records::tests::store_producers::native_single_wire_actual_unknown_commit_keeps_original_operation_on_reopen ... ok
+test storage::metadata::native_records::tests::store_producers::owned_ids::owned_native_single_generates_one_sampled_identity_and_receipt_then_replays_without_allocation ... ok
+test result: ok. 25 passed; 0 failed; 1 ignored; 0 measured; 1740 filtered out; finished in 33.34s
+
+7 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "batch_postcommit_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 7 tests
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_first_rejection ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_genuine_unknown_stays_unknown ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_later_rejection ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_rejection_keeps_success_and_pending ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_prepared_api2_mcp_rest_full_receipts ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_local ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_real_remote ... ok
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1759 filtered out; finished in 16.26s
+
+8 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "store_api1", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 29 tests
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_actual_rpc_prework_frames_mode_and_remote ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_final_barrier_failure_keeps_receipts_and_repair_replays ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_generated_recipe_profile_errors_and_rest_null_controls ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_fresh_budget_precedes_reservation_and_whole_projection_frames ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_genuine_private_timestamp_history_replay ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_legacy_positive_shapes_and_explicit_profile_rejection ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_malformed_known_reply_preserves_receipts_and_unknown_ids ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_malformed_remote_evidence_never_claims_commit_or_counts ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_private_before_timestamp_rejection_export ... ignored, historical fixture generator: run only on recorded158 source
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_mixed_and_all_invalid_keep_every_index_and_no_false_rollback ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_projection_enforces_display_limits_keeps_full_receipt ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_public_mcp_native_unicode ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_public_rest_native_unicode_timestamp ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_real_remote_public_mcp_unicode_reopen ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_remote_request_binding_keeps_only_matching_reservation_committed ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_first_rejection ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_later_rejection ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_genuine_unknown_stays_unknown ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_rejection_keeps_success_and_pending ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_prepared_api2_mcp_rest_full_receipts ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_local ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_reservation_real_remote ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::native_api1_store_actual_generated_document_and_wrong_binding ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::native_api1_store_actual_http_supplied_profile_and_atomic_links ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::native_api1_store_actual_mcp_unicode_and_ignored_single_vector ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::native_api1_store_fresh_invalid_profile_and_vector_no_work ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::native_api1_store_legacy_shapes_and_explicit_profile_constraint ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::native_api1_store_publication_failure_keeps_full_receipt_and_projection_evidence ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::native_api1_store_remote_negotiation_small_peer_and_native_reopen ... ok
+test result: ok. 28 passed; 0 failed; 1 ignored; 0 measured; 1737 filtered out; finished in 46.96s
+
+9 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "namespace_profile_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 3 tests
+test api::handlers::validation_tests::namespace_profile_invalid_runtime_is_unavailable_without_catalog_mutation ... ok
+test api::handlers::validation_tests::namespace_profile_http_mcp_use_active_width_before_catalog_allocation ... ok
+test daemon::server::tests::namespace_profile_real_daemon_frames_enforce_active_width_before_catalog ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1763 filtered out; finished in 0.33s
+
+10 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "owned_namespace_clock_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 1 test
+test storage::metadata::catalog::owned_clock_tests::owned_namespace_clock_samples_once_for_response_canonical_row_and_receipt ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1765 filtered out; finished in 0.16s
+
+11 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "catalog_completion_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 6 tests
+test storage::metadata::catalog_completion_tests::catalog_completion_actual_lost_ack_has_identity_without_fabricated_receipt ... ok
+test storage::metadata::catalog_completion_tests::catalog_completion_cancelled_queued_worker_keeps_unknown_root_and_lease ... ok
+test storage::metadata::catalog_completion_tests::catalog_completion_invalid_duplicate_unbound_finish_only_known_work ... ok
+test storage::metadata::catalog_completion_tests::catalog_completion_public_empty_create_then_false_read ... ok
+test storage::metadata::catalog_completion_tests::catalog_completion_public_full_receipt_survives_failure_and_daemon ... ok
+test storage::metadata::catalog_completion_tests::catalog_completion_worker_panic_is_unknown_without_invented_identity ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1760 filtered out; finished in 0.99s
+
+12 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "prepared_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 37 tests
+test daemon::prepared_query::shape::tests::prepared_raw_admission_precedes_owned_values_and_preserves_encoding_bound ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_old_and_limited_peers_refuse_without_page_send ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_actual_mcp_http_catalog_errors_have_kind_schemas ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_remote_catalogs_match_actual_owner_before ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_remote_list_matches_actual_owner_before ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_remote_continuation_filters_and_stale_generation ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_remote_rejects_total_omitting_prior_or_future_entries ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_remote_strict_peer_fields_identity_and_context ... ok
+test daemon::server::prepared_query_tests::prepared_remote_actual_query_matches_owned_false_read ... ok
+test daemon::server::prepared_query_tests::prepared_remote_capability_refusal_and_lost_reply_never_fallback_or_replay ... ok
+test daemon::server::prepared_pages_tests::prepared_pages_whole_size_error_smaller_retry_actual_transport_frames ... ok
+test daemon::server::prepared_query_tests::prepared_remote_exact_bits_capability_refuses_old_peer_before_send ... ok
+test daemon::server::prepared_query_tests::prepared_remote_decoder_binds_actual_success_scope_and_exposure_coverage ... ok
+test daemon::server::prepared_query_tests::prepared_remote_whole_budget_and_unnegotiated_alias_precede_exposure ... ok
+test mcp::bridge_adapters::legacy_compound_origin_tests::semantic_admission::legacy_semantic_prepared_mcp_http_single_never_fall_back_to_legacy ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_feedback_reaches_actual_legacy_writer ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_forget_reaches_actual_legacy_writer ... ok
+test daemon::server::prepared_query_tests::prepared_remote_malformed_wrapper_keeps_genuine_parent_only_as_unverified_evidence ... ok
+test mcp::legacy_lifecycle_tests::legacy_api2_prepared_mcp_tool_text_structured_http_parity_and_public_gate ... ok
+test search::pipeline::read_view::tests::prepared_evidence_actual_metadata_counts_units_and_first_rejection ... ok
+test search::pipeline::read_view::tests::prepared_evidence_actual_operator_origin_rif_projection ... ok
+test search::pipeline::read_view::tests::prepared_evidence_rejects_operator_rif_before_work_on_actual_transports ... ok
+test search::pipeline::read_view::tests::prepared_remote_exact_threshold_bits_and_continuation ... ok
+test search::pipeline::read_view::tests::prepared_remote_native_query_similar_exact_and_known_publication_failure ... ok
+test search::pipeline::read_view::tests::strict_query_actual_prepared_mcp_rest_current_history_and_false_bytes ... ok
+test search::pipeline::strength_tests::by_id_prepared_selection_preserves_original_true_intent_and_false_thresholds ... ok
+test serialization::query::rpc::tests::prepared_rpc_query_and_similar_preserve_all_selectors ... ok
+test serialization::query::rpc::tests::prepared_rpc_rejects_internal_only_filters_instead_of_ignoring_them ... ok
+test serialization::query_schema::tests::strict_query_prepared_schema_documents ... ok
+test serialization::scan::private_scalar_tests::prepared_exact_private_threshold_bits_are_strict_and_lossless ... ok
+test storage::metadata::native_records::tests::readers::exposure_consumer::postcommit::native_exposure_postcommit_prepared_query_returns_only_failure_and_full_receipt ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_mcp_v1 ... ok
+test search::pipeline::read_view::tests::prepared_evidence_similar_actual_mcp_rest_cosine_and_bounded_origins ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_mcp_v2 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_rest_v1 ... ok
+test storage::metadata::native_records::tests::readers::native_lifecycle_wire::query_feedback_chronology::query_feedback_chronology_prepared_rest_v2 ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::postcommit::batch_postcommit_prepared_api2_mcp_rest_full_receipts ... ok
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 1729 filtered out; finished in 40.54s
+
+13 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "catalog_page_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 9 tests
+test catalog_page::tests::catalog_page_captured_unknown_configuration_cannot_be_overwritten ... ok
+test catalog_page::tests::catalog_page_response_budget_whole_error_and_serialized_transport_retry ... ok
+test catalog_page::tests::catalog_page_strict_inputs_and_cursor_schema ... ok
+test catalog_page::tests::catalog_page_namespace_totals_order_empty_and_reopen ... ok
+test storage::metadata::native_records::tests::catalog_pages::catalog_page_authored_legacy_width_inventory_does_not_widen_creation ... ok
+test catalog_page::tests::catalog_page_tag_counts_all_buckets_ties_continuation_and_mutation ... ok
+test storage::metadata::native_records::tests::catalog_pages::catalog_page_native_unknown_profile_preserves_retained_only_without_provider ... ok
+test storage::metadata::native_records::tests::catalog_pages::catalog_page_profile_compatibility_uses_supplied_configuration_not_equal_dimensions ... ok
+test storage::metadata::native_records::tests::catalog_pages::catalog_page_native_unicode_empty_provenance_actual_transports_and_reopen ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 1757 filtered out; finished in 4.43s
+
+14 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "canonical_list_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 6 tests
+test canonical_list::tests::canonical_list_cursor_scope_filter_anchor_and_empty_exhaustion ... ok
+test canonical_list::tests::canonical_list_legacy_unknown_profile_filters_before_page_and_stales_without_writes ... ok
+test canonical_list::tests::canonical_list_strict_parser_schema_and_cursor_bindings ... ok
+test canonical_list::tests::canonical_list_oversize_whole_error_smaller_retry_transport_budget_and_closed_admission ... ok
+test storage::metadata::native_records::tests::canonical_list::canonical_list_native_unknown_binding_is_readable_without_provider_or_vector_profile ... ok
+test storage::metadata::native_records::tests::canonical_list::canonical_list_native_unicode_authority_transport_reopen_and_stale ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1760 filtered out; finished in 5.44s
+
+15 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "strict_query_", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 14 tests
+test search::pipeline::read_view::tests::strict_query_actual_final_barrier_failure_keeps_full_receipt_and_identity ... ok
+test search::pipeline::read_view::tests::strict_query_actual_original2_observer_and_current_barrier ... ok
+test search::pipeline::read_view::tests::strict_query_actual_prepared_mcp_rest_current_history_and_false_bytes ... ok
+test search::pipeline::read_view::tests::strict_query_actual_native_bound_supplied_priority_unknown_and_metadata_only ... ok
+test search::pipeline::read_view::tests::strict_query_actual_similar_original2_true_preserves_all_namespace_receipts ... ok
+test search::pipeline::read_view::tests::strict_query_actual_supplemental_coverage_after_filter_and_cap ... ok
+test search::pipeline::read_view::tests::strict_query_actual_whole_response_budget_before_false_and_true_observation ... ok
+test search::pipeline::read_view::tests::strict_query_explanation_preserves_actual_exposure_classification ... ok
+test serialization::query::tests::strict_query_selectors_reject_before_work_and_preserve_defaults ... ok
+test serialization::query::tests::strict_query_single_schema_rejects_scan_and_conflicting_legacy_scope_selectors ... ok
+test serialization::query::tests::strict_query_vectors_require_pair_and_keep_original_f32_bits ... ok
+test serialization::query_response::tests::strict_query_valid_lifecycle_receipt_groups_fit_full_error_projection_reservation ... ok
+test serialization::query_schema::tests::strict_query_prepared_schema_documents ... ok
+test search::pipeline::read_view::tests::strict_query_actual_similar_scope_current_history_empty_identity_and_parity ... ok
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 1752 filtered out; finished in 12.76s
+
+16 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "exact_pair", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 5 tests
+test search::exact_pairs::tests::exact_pair_cosine_preserves_bits_and_handles_rounding_scaling_and_extremes ... ok
+test search::exact_pairs::tests::exact_pair_empty_singleton_nonmatching_progress_invalid_positions_and_bounds ... ok
+test search::exact_pairs::tests::exact_pair_dense_response_overflow_errors_without_losing_pairs_on_smaller_retry ... ok
+test serialization::pair_cursor::tests::exact_pair_cursor_strict_codec_roundtrip_and_bindings ... ok
+test search::exact_pairs::tests::exact_pair_pages_match_independent_dense_tied_disconnected_cross_200_oracle ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1761 filtered out; finished in 0.43s
+
+17 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "exact_scan_response_budget_covers_real_mcp_text_structured_daemon_and_rest_serializers", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 1 test
+test search::exact_scan::tests::exact_scan_response_budget_covers_real_mcp_text_structured_daemon_and_rest_serializers ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1765 filtered out; finished in 0.80s
+
+18 ["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "producer_work_tests", "--", "--nocapture"]
+warning: `recalld` (lib test) generated 59 warnings (run `cargo fix --lib -p recalld --tests` to apply 8 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (/work/target/debug/deps/recalld-8b31964f64b2cfc4)
+running 8 tests
+test producer_work_tests::cancelled_sweep_keeps_accepted_work_unresolved ... ok
+test producer_work_tests::cancelled_graph_discovery_retains_unresolved_root_without_mutation ... ok
+test producer_work_tests::queued_catalog_adapters_keep_children_admitted_until_handle_publication ... ok
+test producer_work_tests::queued_manual_and_startup_sweeps_drain_transitive_delete_compaction_and_views ... ok
+test producer_work_tests::shutdown_abandons_queued_trigger_instead_of_claiming_completion ... ok
+test producer_work_tests::standalone_graph_node_publication_is_registered_before_lock_wait ... ok
+test producer_work_tests::standalone_graph_discovery_and_explicit_edges_finish_after_close ... ok
+test producer_work_tests::sweep_publication_failure_preserves_receipt_and_can_repair_without_reopen ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 1758 filtered out; finished in 0.98s
+
+19 ["cargo", "clippy", "--offline", "--locked", "-j1", "--all-features", "--all-targets"]
+warning: `recalld` (lib) generated 1266 warnings (run `cargo clippy --fix --lib -p recalld` to apply 135 suggestions)
+warning: `recalld` (bin "recalld" test) generated 1 warning
+warning: `recalld` (lib test) generated 1370 warnings (1198 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 20 suggestions)
+warning: `recalld` (example "native_prefix_fixture") generated 1 warning
+warning: `recalld` (test "vector_certification_cli") generated 1 warning
+warning: `recalld` (bin "recalld") generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.81s
+
+20 ["cargo", "build", "--offline", "--locked", "-j1", "--features", "bench", "--bin", "recalld"]
+warning: `recalld` (lib) generated 116 warnings (run `cargo fix --lib -p recalld` to apply 6 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 44.38s
+
+21 ["python3", "scripts/public-conformance.py", "--inside", "--fixture-version", "3"]
+
+
+22 ["python3", "/work/output/check-public.py"]
+PASS: nine episodes; 54 true-mode cases; preserved output hashes and restart state

@@ -245,6 +245,19 @@ impl FlatVectorIndex {
         filter: &SearchFilter,
         eligible_ids: Option<&HashSet<MemoryId>>,
     ) -> Result<Vec<VectorSearchResult>, VectorError> {
+        Ok(self
+            .search_eligible_measured(query, k, filter, eligible_ids)?
+            .results)
+    }
+
+    /// Measure the existing exact scan; no second traversal or early work cap.
+    pub fn search_eligible_measured(
+        &self,
+        query: &[f32],
+        k: usize,
+        filter: &SearchFilter,
+        eligible_ids: Option<&HashSet<MemoryId>>,
+    ) -> Result<super::SourceResults<VectorSearchResult>, VectorError> {
         if query.len() != self.dim {
             return Err(VectorError::DimensionMismatch {
                 expected: self.dim,
@@ -252,8 +265,19 @@ impl FlatVectorIndex {
             });
         }
 
+        let mut coverage = super::SourceCoverage {
+            examined_unit: super::ExaminationUnit::VectorEntries,
+            examined: 0,
+            eligible: 0,
+            exhausted: true,
+            candidate_limited: false,
+            budget_exhausted: false,
+        };
         if k == 0 || self.entries.is_empty() {
-            return Ok(Vec::new());
+            return Ok(super::SourceResults {
+                results: Vec::new(),
+                coverage: self.entries.is_empty().then_some(coverage),
+            });
         }
 
         let instrumented = crate::performance::enabled();
@@ -264,6 +288,7 @@ impl FlatVectorIndex {
         let mut heap: BinaryHeap<ScoredEntry> = BinaryHeap::with_capacity(k + 1);
 
         for (i, entry) in self.entries.iter().enumerate() {
+            coverage.examined += 1;
             if eligible_ids.is_some_and(|ids| !ids.contains(&entry.id))
                 || !Self::passes_filter(entry, filter, &self.tags)
             {
@@ -283,6 +308,7 @@ impl FlatVectorIndex {
                 continue;
             }
 
+            coverage.eligible += 1;
             if heap.len() < k {
                 heap.push(ScoredEntry {
                     score,
@@ -320,7 +346,11 @@ impl FlatVectorIndex {
             dot_products = dots,
             admitted = results.len()
         );
-        Ok(results)
+        coverage.candidate_limited = coverage.eligible > k;
+        Ok(super::SourceResults {
+            results,
+            coverage: Some(coverage),
+        })
     }
 }
 
@@ -511,6 +541,88 @@ impl Ord for ScoredEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measured_source_vector_preserves_exact_score_bits_and_errors() {
+        let id = |n: u128| MemoryId::from_bytes(n.to_be_bytes());
+        let eligible: HashSet<_> = [id(1), id(2), id(3), id(4)].into_iter().collect();
+        for reverse in [false, true] {
+            let mut index = FlatVectorIndex::new(2);
+            let mut rows = vec![(1, 0.75f32), (2, 0.5), (3, 0.5), (4, 1.0), (5, 1.0)];
+            if reverse {
+                rows.reverse();
+            }
+            for (n, score) in rows {
+                index
+                    .add(
+                        id(n),
+                        &[score, (1.0 - score * score).sqrt()],
+                        VectorMetadata {
+                            namespace_id: NamespaceId::new(if n == 4 { 2 } else { 1 }),
+                            decay_phase: 1,
+                            tags: vec![],
+                        },
+                    )
+                    .unwrap();
+            }
+            let filter = SearchFilter {
+                namespace_id: Some(NamespaceId::new(1)),
+                ..Default::default()
+            };
+            for k in [2, 3, 4] {
+                let source = index
+                    .search_eligible_measured(&[1.0, 0.0], k, &filter, Some(&eligible))
+                    .unwrap();
+                let plain = index
+                    .search_eligible(&[1.0, 0.0], k, &filter, Some(&eligible))
+                    .unwrap();
+                let bits = |r: &[VectorSearchResult]| {
+                    r.iter()
+                        .map(|r| (r.id, r.score.to_bits()))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(bits(&source.results), bits(&plain));
+                assert_eq!(
+                    bits(&source.results),
+                    [
+                        (id(1), 0.75f32.to_bits()),
+                        (id(2), 0.5f32.to_bits()),
+                        (id(3), 0.5f32.to_bits())
+                    ]
+                    .into_iter()
+                    .take(k)
+                    .collect::<Vec<_>>()
+                );
+                let c = source.coverage.unwrap();
+                assert_eq!((c.examined, c.eligible), (5, 3));
+                assert!(c.exhausted);
+                assert_eq!(c.candidate_limited, k < 3);
+                assert!(!c.budget_exhausted);
+            }
+            let zero = index
+                .search_eligible_measured(&[1.0, 0.0], 0, &filter, Some(&eligible))
+                .unwrap();
+            assert!(zero.results.is_empty());
+            assert_eq!(zero.coverage, None); // No traversal of a nonempty source.
+            assert!(
+                index
+                    .search_eligible_measured(&[1.0], 2, &filter, Some(&eligible))
+                    .is_err()
+            );
+            let offset = index.id_to_slot[&id(1)] * 2;
+            index.vectors[offset] = f32::NAN;
+            assert!(
+                index
+                    .search_eligible_measured(&[1.0, 0.0], 2, &filter, Some(&eligible))
+                    .is_err()
+            );
+            assert!(
+                index
+                    .search_eligible(&[1.0, 0.0], 2, &filter, Some(&eligible))
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn eligible_top_k_uses_uuid_ties_at_heap_boundary_in_any_insertion_order() {

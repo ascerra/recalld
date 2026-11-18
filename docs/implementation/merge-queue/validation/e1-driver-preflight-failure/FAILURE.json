@@ -1,0 +1,7 @@
+{
+  "utc": "2026-11-16T20:20:15.945693+00:00",
+  "error": "HEAD assertion before source snapshot/cache/Docker; copied driver root still pointed to .queue/pr112",
+  "stage": "line4 assertion; no build or tests/container",
+  "driverSha256": "d955cf75d5c1f4b177282d2a8cfd62e6419f5f115ddaf5b53c807ab508799c97",
+  "expectedSource": "ce61cf9921d7d2ce9a073817d03326edfd8b9de3"
+}

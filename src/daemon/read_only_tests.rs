@@ -232,7 +232,12 @@ impl Harness {
                         f.entity_index.clone(),
                     ),
                 ),
-                Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+                Arc::new(NamespaceRegistryAdapter::new(
+                    f.storage.clone(),
+                    std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                        crate::test_support::DIM,
+                    )),
+                )),
                 Arc::new(NoopMetricsCollector),
             ),
             &crate::api::ApiConfig::default(),
@@ -1046,6 +1051,22 @@ async fn scoped_read_only_controls_survive_http_mcp_and_framed_daemon() {
     let handlers = h.bridge();
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
+        // A valid old-peer capability absence selects the original aliases.
+        // Malformed or advertised-capability failures must not use this lane.
+        let ping = read_framed_message(&mut socket, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(ping.method, "ping");
+        write_framed_message(
+            &mut socket,
+            &DaemonResponse::success(
+                ping.id,
+                json!({"protocolVersion": 2, "maxMessageSize": MAX_MESSAGE_SIZE}),
+            ),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
         for i in 0..7 {
             let req = read_framed_message(&mut socket, MAX_MESSAGE_SIZE)
                 .await

@@ -1,0 +1,1 @@
+["cargo", "test", "--offline", "--locked", "-j1", "--all-features", "--lib", "--no-run", "--message-format=json"]

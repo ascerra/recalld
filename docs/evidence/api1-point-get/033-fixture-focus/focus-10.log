@@ -1,0 +1,6 @@
+
+running 1 test
+test storage::metadata::native_records::tests::readers::exposure_consumer::native_exposure_invalid_configured_policy_fails_without_writes_and_empty_has_no_work ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1845 filtered out; finished in 3.93s
+

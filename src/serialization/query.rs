@@ -21,7 +21,13 @@ pub struct SimilarRequest {
     pub(crate) id: crate::model::MemoryId,
     pub(crate) namespace: Option<String>,
     pub(crate) options: crate::search::SimilaritySelection,
+    pub(crate) explain: bool,
 }
+
+// Only the existing prepared selectors cross the private RPC boundary. Keep
+// conversion next to their parser so internal-only filters cannot disappear.
+#[path = "query_rpc.rs"]
+mod rpc;
 impl SimilarRequest {
     pub(crate) fn from_mcp(value: &Value) -> Result<Self, InputError> {
         if ContractVersion::from_mcp(value)? != ContractVersion::V2 {
@@ -117,16 +123,10 @@ impl SimilarRequest {
                 ));
             }
         };
-        if boolean(m, "explain", false)? {
-            return Err(invalid(
-                "UNSUPPORTED_FEATURE",
-                "explain",
-                "similarity score explanation is not available yet",
-            ));
-        }
         Ok(Self {
             id,
             namespace,
+            explain: boolean(m, "explain", false)?,
             options: crate::search::SimilaritySelection {
                 semantics: crate::search::RetrievalSemantics::V2(mode),
                 scope,
@@ -564,7 +564,7 @@ pub(crate) fn similar_input_schema(mcp: bool) -> Value {
     ] {
         properties.insert(field.into(), common["properties"][field].clone());
     }
-    properties.insert("explain".into(), json!({"const":false,"default":false,"description":"Cosine-specific explanations are not supported by this producer."}));
+    properties.insert("explain".into(), json!({"type":"boolean","default":false,"description":"Actual cosine-max selection evidence for returned rows, with bounded eligible origins and exact omitted count. Does not change selection or exposure."}));
     properties.insert(
         "namespaceScope".into(),
         json!({"enum":["sameNamespace","allCompatible"],"default":"sameNamespace"}),

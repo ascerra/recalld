@@ -1,0 +1,66 @@
+{
+  "source": "58be203fb479e240f732e829a05742a2edd11984",
+  "files": {
+    "focus.status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "memory.events": {
+      "sha256": "f09223eaaceabcab8ef91f8e168eb04b4ef807716bc357315bc97faffe30b72b",
+      "bytes": 73
+    },
+    "full.status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "clippy.status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "full.log": {
+      "sha256": "028efcf5abe52690b4c1691ebeaf8d071b5203b9eb63c40459b46d187a9ed5b5",
+      "bytes": 183818
+    },
+    "nonsemantic.status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "memory.peak": {
+      "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+      "bytes": 11
+    },
+    "clippy.log": {
+      "sha256": "2ae7ea60d99010bac750e98cac016b2a94edecb6d66ca0c9f5cd6dd6ace4eb46",
+      "bytes": 965794,
+      "stored_excerpt": "clippy.log.excerpt"
+    },
+    "nonsemantic.log": {
+      "sha256": "bd420e1c982b33e9114ba300fadbeb793e716b0d8227e0da27df00a83bf51e00",
+      "bytes": 18189
+    },
+    "source.sha256": {
+      "sha256": "b1b8040c9b0c90b3a827229a87a5476ff06f0bd96aac832374a33ee0c8910aad",
+      "bytes": 109
+    },
+    "binaries.sha256": {
+      "sha256": "17ef1524927b10a916b435e83bd27a538ffb7ec30643e4d21fe29faa1e862914",
+      "bytes": 330
+    },
+    "focus.log": {
+      "sha256": "f3bf73c74bfbd4b68b3732a4f5cd876bbd2549c27d9c94dc189984bb9e5c527e",
+      "bytes": 20163
+    },
+    "container.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "fmt.status": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    }
+  }
+}

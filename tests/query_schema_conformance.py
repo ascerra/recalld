@@ -40,14 +40,76 @@ for path in sorted(root.glob("*.json")):
                 good = copy.deepcopy(value)
                 good["readGeneration"]["generation"] = generation
                 validator.validate(good)
-        if "similar" in path.name and "data" in value:
+        if "similar" in path.name and value.get("data", {}).get("results"):
             for field in ["rankingProfile", "explanation"]:
                 bad = copy.deepcopy(value)
                 bad["data"]["results"][0][field] = "baseline-v1"
+                assert not validator.is_valid(bad), (path.name, field)
+        # Actual evidence is strictly typed at every nested boundary. These
+        # shape checks do not replace the producer's score/count invariants.
+        data = value.get("data") or {}
+        for index, row in enumerate(data.get("results", [])):
+            explanation = row.get("explanation")
+            if not explanation:
+                continue
+            bad = copy.deepcopy(value)
+            bad["data"]["results"][index]["explanation"]["undeclared"] = True
+            assert not validator.is_valid(bad), (path.name, "nested explanation")
+            if explanation.get("algorithm") == "cosineMax":
+                for field, invalid in [
+                    ("algorithm", "baseline-v1"), ("ownAdmission", "unknown"),
+                    ("ownCosine", "0.5"), ("minScore", 2),
+                    ("omittedOrigins", -1), ("finalSimilarity", None),
+                    ("origins", [dict(originId="bad", cosine=0.5)]),
+                    ("origins", [dict(originId=row["memoryId"], cosine=0.5)] * 65),
+                ]:
+                    bad = copy.deepcopy(value)
+                    bad["data"]["results"][index]["explanation"][field] = invalid
+                    assert not validator.is_valid(bad), (path.name, field)
+            elif explanation.get("own"):
+                for multiplier in [None, "1", 0.9]:
+                    bad = copy.deepcopy(value)
+                    bad["data"]["results"][index]["explanation"]["own"]["rifMultiplier"] = multiplier
+                    assert not validator.is_valid(bad), (path.name, "prepared Off multiplier")
+        coverage = data.get("coverage", {})
+        for name, channel in coverage.get("channels", {}).items():
+            for field, invalid in [("examinedUnit", "records"), ("examined", -1), ("eligible", "0")]:
+                bad = copy.deepcopy(value)
+                bad["data"]["coverage"]["channels"][name][field] = invalid
+                assert not validator.is_valid(bad), (path.name, name, field)
+        if coverage.get("canonicalEligibility"):
+            for field, invalid in [("examinedUnit", "vectorEntries"), ("passed", -1), ("firstRejections", {"other": 1}), ("firstRejections", {"requiredTag": "1"})]:
+                bad = copy.deepcopy(value)
+                bad["data"]["coverage"]["canonicalEligibility"][field] = invalid
                 assert not validator.is_valid(bad), (path.name, field)
         if "error" in value:
             bad = copy.deepcopy(value)
             del bad["error"]["commitState"]
             assert not validator.is_valid(bad), path.name
+        if "receivedEvidence" in value:
+            evidence = value["receivedEvidence"]["receipts"][0]
+            headers = {"storeId", "operationId", "committedGeneration", "receiptVersion", "outcome", "replayed"}
+            assert set(evidence) == headers
+            for field in headers:
+                bad = copy.deepcopy(value)
+                del bad["receivedEvidence"]["receipts"][0][field]
+                assert not validator.is_valid(bad), (path.name, "missing evidence header", field)
+            for field, invalid in [("storeId", 1), ("operationId", 1), ("committedGeneration", 1),
+                                   ("receiptVersion", 2), ("replayed", 1), ("extra", True),
+                                   ("outcome", []), ("outcome", {}), ("outcome", {"kind": 1})]:
+                bad = copy.deepcopy(value)
+                bad["receivedEvidence"]["receipts"][0][field] = invalid
+                assert not validator.is_valid(bad), (path.name, "evidence header", field)
+            bad = copy.deepcopy(value)
+            bad["error"]["commitState"] = "committed"
+            assert not validator.is_valid(bad), (path.name, "unverified evidence is not commitment")
+            bad = copy.deepcopy(value)
+            bad["warnings"] = []
+            assert not validator.is_valid(bad), (path.name, "unverified warning required")
+            # Deliberately opaque in this HEADER schema. The separate Rust peer
+            # regression rejects this unknown kind before evidence acquisition.
+            opaque = copy.deepcopy(value)
+            opaque["receivedEvidence"]["receipts"][0]["outcome"] = {"kind": "futureUnknownKind", "opaque": [1, None]}
+            validator.validate(opaque)
 assert checked >= 40, f"missing actual fixtures: {checked}"
 print(f"PASS {checked} actual output/input cases plus output mutation negatives")

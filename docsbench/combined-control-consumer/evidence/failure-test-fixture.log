@@ -1,0 +1,27 @@
+.<frozen linecache>:265: DeprecationWarning: Module globals is missing a __spec__.loader
+E/opt/homebrew/Cellar/python@3.15/3.15.0_1/Frameworks/Python.framework/Versions/3.15/lib/python3.15/unittest/case.py:690: ResourceWarning: unclosed file <_io.TextIOWrapper name='/var/folders/lg/pd7snpz15137ng972h102kqc0000gp/T/tmpl_5jarj_/trace.jsonl' mode='x' encoding='utf-8'>
+  with outcome.testPartExecutor(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..........
+======================================================================
+ERROR: test_context_must_follow_actual_successful_query_not_other_outcome (__main__.Combined.test_context_must_follow_actual_successful_query_not_other_outcome)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/test_combined_mcp_evaluation.py", line 131, in test_context_must_follow_actual_successful_query_not_other_outcome
+    t.consume(dict(event='outcome',tag='query:q0',stepId='1',deliveryOrdinal=1,request=request,response=response,accounting=fact))
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/combined-mcp-evaluation.py", line 141, in consume
+    super().consume(row)
+    ~~~~~~~~~~~~~~~^^^^^
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/public-mcp-evaluation.py", line 165, in consume
+    self.append(kind, row, row["accounting"]["category"] if kind == "error" else None)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/recalld-implementation/a6-combined-control-consumer/scripts/public-mcp-evaluation.py", line 139, in append
+    payload = json.loads(row["response"]["result"]["content"][0]["text"])
+                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+IndexError: list index out of range
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.084s
+
+FAILED (errors=1)

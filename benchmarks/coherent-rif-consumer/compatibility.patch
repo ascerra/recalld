@@ -1,0 +1,27 @@
+diff --git a/src/search/adapters.rs b/src/search/adapters.rs
+index 25b2556..fd9682f 100644
+--- a/src/search/adapters.rs
++++ b/src/search/adapters.rs
+@@ -675,9 +675,7 @@ impl GraphReader for SharedGraphReader {
+         namespace: NamespaceId,
+         allowance: usize,
+     ) -> Result<crate::graph::query::RifAdjacency> {
+-        let graph = tokio::task::block_in_place(|| {
+-            tokio::runtime::Handle::current().block_on(self.graph.read())
+-        });
++        let graph = self.graph.read();
+         crate::graph::query::rif_edges(&graph, anchor, namespace, allowance)
+             .map_err(|error| SearchError::Unavailable(error.into()))
+     }
+diff --git a/src/search/read_view.rs b/src/search/read_view.rs
+index aa7a487..e721b91 100644
+--- a/src/search/read_view.rs
++++ b/src/search/read_view.rs
+@@ -220,6 +220,7 @@ impl QueryEngine {
+             let evaluated_at = self.clock.now_millis();
+             let namespace = canonical.resolve(&query.namespace).await?;
+             let engine = Self {
++                rif_mode: self.rif_mode,
+                 coherent_owner: None,
+                 clock: Arc::new(crate::time::ManualClock::new(evaluated_at)),
+                 decay_policy: self.decay_policy.clone(),

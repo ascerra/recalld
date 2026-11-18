@@ -204,6 +204,27 @@ impl VectorIndexOwner {
             }
         }
     }
+    /// Forward measured work from exactly the selected namespace's flat scan.
+    pub(crate) fn search_scoped_measured(
+        &self,
+        namespace: NamespaceId,
+        query: &[f32],
+        k: usize,
+        filter: &SearchFilter,
+        eligible: Option<&HashSet<MemoryId>>,
+    ) -> Result<super::SourceResults<VectorSearchResult>, VectorError> {
+        if filter.namespace_id != Some(namespace) {
+            return Err(invalid("vector search scope/filter mismatch"));
+        }
+        match &self.layout {
+            Layout::Uniform(index) => index.search_eligible_measured(query, k, filter, eligible),
+            Layout::Namespaces { indexes, .. } => indexes
+                .get(&namespace)
+                .ok_or_else(|| invalid("unknown vector namespace"))?
+                .search_eligible_measured(query, k, filter, eligible),
+        }
+    }
+
     pub(crate) fn search_scoped(
         &self,
         namespace: NamespaceId,
@@ -239,6 +260,102 @@ mod tests {
         rows.into_iter()
             .map(|r| (r.id, r.score.to_bits(), r.decay_phase))
             .collect()
+    }
+    #[test]
+    fn vector_owner_measured_scope_forwards_actual_selected_scan_and_errors() {
+        let mut partitioned = VectorIndexOwner::from_namespaces(&[
+            config(1, 4),
+            config(2, 4),
+            config(3, 5),
+            config(4, 4),
+        ])
+        .unwrap();
+        let mut uniform = VectorIndexOwner::uniform(4);
+        for (n, ns, vector) in [
+            (1, 1, [1., 0., 0., 0.]),
+            (2, 1, [1., 0., 0., 0.]),
+            (3, 1, [0., 1., 0., 0.]),
+            (4, 2, [1., 0., 0., 0.]),
+        ] {
+            let id = MemoryId::from_uuid(uuid::Uuid::from_u128(n));
+            partitioned.add(id, &vector, metadata(ns)).unwrap();
+            uniform.add(id, &vector, metadata(ns)).unwrap();
+        }
+        let filter = SearchFilter {
+            namespace_id: Some(NamespaceId::new(1)),
+            min_score: Some(0.5),
+            ..Default::default()
+        };
+        for (owner, examined) in [(&partitioned, 3), (&uniform, 4)] {
+            for k in [0, 1, 2, 3] {
+                let measured = owner
+                    .search_scoped_measured(
+                        NamespaceId::new(1),
+                        &[1., 0., 0., 0.],
+                        k,
+                        &filter,
+                        None,
+                    )
+                    .unwrap();
+                assert_eq!(scores(measured.results), scores(owner.search_scoped(
+                    NamespaceId::new(1), &[1., 0., 0., 0.], k, &filter, None,
+                ).unwrap()));
+                if k == 0 {
+                    assert_eq!(measured.coverage, None);
+                } else {
+                    let coverage = measured.coverage.unwrap();
+                    assert_eq!(
+                        coverage.examined_unit,
+                        super::super::ExaminationUnit::VectorEntries
+                    );
+                    assert_eq!(coverage.examined, examined);
+                    assert_eq!(coverage.eligible, 2);
+                    assert_eq!(coverage.candidate_limited, k < 2);
+                    assert!(coverage.exhausted);
+                    assert!(!coverage.budget_exhausted);
+                }
+                assert!(
+                    owner
+                        .search_scoped_measured(
+                            NamespaceId::new(2),
+                            &[1., 0., 0., 0.],
+                            k,
+                            &filter,
+                            None,
+                        )
+                        .is_err()
+                );
+            }
+        }
+        for ns in [3, 99] {
+            let filter = SearchFilter {
+                namespace_id: Some(NamespaceId::new(ns)),
+                ..Default::default()
+            };
+            for k in [0, 2] {
+                assert!(
+                    partitioned
+                        .search_scoped_measured(
+                            NamespaceId::new(ns),
+                            &[1., 0., 0., 0.],
+                            k,
+                            &filter,
+                            None,
+                        )
+                        .is_err()
+                );
+            }
+        }
+        let filter = SearchFilter {
+            namespace_id: Some(NamespaceId::new(4)),
+            ..Default::default()
+        };
+        let empty = partitioned
+            .search_scoped_measured(NamespaceId::new(4), &[1., 0., 0., 0.], 0, &filter, None)
+            .unwrap();
+        let coverage = empty.coverage.unwrap();
+        assert!(empty.results.is_empty() && coverage.exhausted);
+        assert_eq!((coverage.examined, coverage.eligible), (0, 0));
     }
     #[tokio::test]
     async fn vector_owner_legacy_autolink_rejects_partitioned_even_at_zero_cap() {

@@ -1,0 +1,91 @@
+{
+  "base": "19bd383a75cdb15283b4c15a865dfcb2a4b6e0a1",
+  "status": "source only; no execution",
+  "files": [
+    {
+      "path": "src/api/adapters.rs",
+      "sha256": "05442b93d69c352fd51eeb3fd27df456130c3ec4d2be253db9120bc68758cfae"
+    },
+    {
+      "path": "src/api/handlers.rs",
+      "sha256": "e81fe03e1971fa5325efe13c6965a6fac1583104769777822cce29b8fa0cfff2"
+    },
+    {
+      "path": "src/api/mod.rs",
+      "sha256": "ac4040a7dbec9f2445473a3fc8f69443ea2a6d5d007af2be750d8197df2e1453"
+    },
+    {
+      "path": "src/api/state.rs",
+      "sha256": "643364ead7cfafdccbfc24940cd42175af807412964462c2684f273775e873a2"
+    },
+    {
+      "path": "src/derived_completion/native_exposure.rs",
+      "sha256": "cb8db8361978b12a590d678b4a3f35ef0f28fc53ca970ab9043780c7a2cc9187"
+    },
+    {
+      "path": "src/mcp/bridge.rs",
+      "sha256": "da89bb5a06d71994564ab51d4a045c50cd6d23ca43145c007e0ebcf6e7e4d859"
+    },
+    {
+      "path": "src/mcp/bridge_adapters.rs",
+      "sha256": "4438e94a34694b43154ca54fb7379a2b38e43f69ea11b3b44174d18453b85c4d"
+    },
+    {
+      "path": "src/mcp/tools.rs",
+      "sha256": "d63702e7e188de5c6ae824951a91cff10328f382b8f9c1ea37b8521c7ed4bec4"
+    },
+    {
+      "path": "src/search/adapters.rs",
+      "sha256": "d60d97755036bb78ecb4b149e0f934828c1ea1b55b67dbfb45ee605864915b7e"
+    },
+    {
+      "path": "src/search/get_wire.rs",
+      "sha256": "7120f33369e6f32fef390cbc113c42c4dddcb5a75f7af93e5f902d9d1cd1ab2d"
+    },
+    {
+      "path": "src/search/get_wire_tests.rs",
+      "sha256": "1e8b1a6b11d8f65d3ed4d8f97958010d90c86c184e54f966bcad5ccd7687054e"
+    },
+    {
+      "path": "src/search/pipeline.rs",
+      "sha256": "5aa97cccfe9b04e80c464390f3f9c008098ea4e960a7d86cd7aa0b85d763a0a3"
+    },
+    {
+      "path": "src/search/read_view.rs",
+      "sha256": "1987817b0dd550750a92428a56f7bbfb32a18e7425c38292821185abda232530"
+    },
+    {
+      "path": "src/search/strength.rs",
+      "sha256": "2532d8931756715f1f39772e47fc304e868361416b131b417515b23aa20f77d5"
+    },
+    {
+      "path": "src/serialization/get.rs",
+      "sha256": "91af8aa1aa9ed4aa936e851f57cf138c97758c2749b108f30f765fa3e6f54e55"
+    },
+    {
+      "path": "src/serialization/mod.rs",
+      "sha256": "08ac8f709eb68d3c483190fd5ecb078bd3d5ca8712d0a23bd601fa2f418f41cf"
+    },
+    {
+      "path": "src/storage/engine/read_payload.rs",
+      "sha256": "2dc78a6398118598201ecc4a7cec83a729959ac3d4c1c480f930e66bad067e52"
+    },
+    {
+      "path": "src/storage/metadata.rs",
+      "sha256": "ef907697248d467c2c27d8c22944e028efb81a157ad93ebd9a15ca936ce5882c"
+    },
+    {
+      "path": "src/storage/metadata/publication.rs",
+      "sha256": "ac8a8a964a23d997a7a7378ded4d7a475bd1e68536f44270639024c7c80a95ad"
+    }
+  ],
+  "format": "cargo fmt --all, recalld-ci:1.94, RUSTUP_TOOLCHAIN=1.94.1, network none; exit0",
+  "head": "702c212793e6e220f206a6c44c2889b4a08bc538",
+  "resource": {
+    "cpus": 2,
+    "memory": "4g",
+    "jobs": 1,
+    "network": "none",
+    "toolchain": "1.94.1"
+  }
+}

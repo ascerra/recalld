@@ -1,0 +1,61 @@
+# Compact excerpt; complete original hash/path in RAW-MANIFEST.json.
+    Checking recalld v1.0.0 (/work)
+warning: unused import: `SimilarityOrigin`
+  --> src/search/mod.rs:68:5
+   |
+68 |     SimilarityOrigin, SimilarityOwnAdmission, SimilarityScope, SimilaritySelection,
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `checkpoint::StagedCanonical`
+  --> src/storage/engine.rs:13:16
+   |
+13 | pub(crate) use checkpoint::StagedCanonical;
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+# Warning summaries
+warning: `recalld` (lib) generated 1271 warnings (run `cargo clippy --fix --lib -p recalld` to apply 133 suggestions)
+warning: `recalld` (test "vector_certification_cli") generated 1 warning
+warning: `recalld` (example "native_prefix_fixture") generated 1 warning
+warning: `recalld` (bin "recalld" test) generated 1 warning
+warning: `recalld` (lib test) generated 1374 warnings (1207 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 22 suggestions)
+warning: `recalld` (bin "recalld") generated 1 warning (1 duplicate)
+
+# Final tail
+...
+ 94 |       RedbTransaction(#[from] redb::TransactionError),
+    |       ----------------------------------------------- the variant `RedbTransaction` contains at least 160 bytes
+    |
+    = help: try reducing the size of `storage::error::StorageError`, for example by boxing large elements or replacing it with `Box<storage::error::StorageError>`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#result_large_err
+
+warning: this `MutexGuard` is held across an await point
+   --> src/system_heterogeneous_tests.rs:265:9
+    |
+265 |     let engine = owner.storage.read().unwrap();
+    |         ^^^^^^
+    |
+    = help: consider using an async-aware `Mutex` type or ensuring the `MutexGuard` is dropped before calling `await`
+note: these are all the await points this lock is held through
+   --> src/system_heterogeneous_tests.rs:279:44
+    |
+279 |         let vectors = owner.vectors.read().await;
+    |                                            ^^^^^
+...
+296 |         .await
+    |          ^^^^^
+...
+301 |     assert_eq!(owner.vectors.read().await.len(), 4);
+    |                                     ^^^^^
+...
+312 |     owner.rebuild_all().await.unwrap();
+    |                         ^^^^^
+313 |     assert_eq!(owner.vectors.read().await.len(), 4);
+    |                                     ^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#await_holding_lock
+
+warning: `recalld` (lib test) generated 1374 warnings (1207 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 22 suggestions)
+warning: `recalld` (bin "recalld") generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 55.30s

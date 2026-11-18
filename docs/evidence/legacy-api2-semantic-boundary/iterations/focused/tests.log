@@ -1,0 +1,36 @@
+   Compiling recalld v1.0.0 (/work)
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1908:19
+     |
+1908 |         if let Ok(mut storage_w) = harness.system.storage().write() {
+     |                   ----^^^^^^^^^
+     |                   |
+     |                   help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0599]: no method named `legacy_api2_selection_blocker` found for reference `&mcp::bridge_adapters::McpStorageAdapter` in the current scope
+   --> src/mcp/batch_adapters.rs:403:58
+    |
+403 | ...                   self.legacy_api2_selection_blocker(p)
+    |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mcp::bridge_adapters::McpStorageAdapter`
+
+warning: unused import: `StorageEngine`
+ --> src/search/origin_tests.rs:5:5
+  |
+5 |     StorageEngine as _,
+  |     ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/bench/locomo.rs:1497:9
+     |
+1497 |     let mut storage_w = harness
+     |         ----^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `recalld` (lib test) generated 3 warnings
+error: could not compile `recalld` (lib test) due to 1 previous error; 3 warnings emitted

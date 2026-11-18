@@ -31,18 +31,20 @@ pub struct ExactScanPage {
     pub data: ExactScanData,
     pub warnings: Vec<String>,
     #[serde(skip)]
-    pub(crate) diagnostics: ScanDiagnostics,
+    pub(crate) diagnostics: Option<ScanDiagnostics>,
 }
 impl ExactScanPage {
     pub fn into_envelope(self) -> crate::serialization::contract::Envelope<ExactScanData> {
-        tracing::debug!(rows=self.diagnostics.rows,
-            record_encoded_bytes=self.diagnostics.record_encoded_bytes,
-            vector_examined_bytes=self.diagnostics.vector_examined_bytes,
-            vector_copied_bytes=self.diagnostics.vector_copied_bytes,
-            capture_us=%self.diagnostics.capture_time.as_micros(),
-            comparison_us=%self.diagnostics.comparison_time.as_micros(),
+        if let Some(diagnostics) = &self.diagnostics {
+            tracing::debug!(rows=diagnostics.rows,
+            record_encoded_bytes=diagnostics.record_encoded_bytes,
+            vector_examined_bytes=diagnostics.vector_examined_bytes,
+            vector_copied_bytes=diagnostics.vector_copied_bytes,
+            capture_us=%diagnostics.capture_time.as_micros(),
+            comparison_us=%diagnostics.comparison_time.as_micros(),
             compared=self.data.coverage.compared_this_page,
             "canonical exact scan page");
+        }
         let at = self.data.coverage.read_generation;
         let mut envelope = crate::serialization::contract::Envelope::success(
             crate::serialization::contract::Scope::Namespace {
@@ -322,7 +324,7 @@ where
                 next_cursor,
             },
             warnings,
-            diagnostics,
+            diagnostics: Some(diagnostics),
         };
         // Discard the entire computed page if actual generation or binding changed.
         storage.read().map_err(|_| ExactScanError::Unavailable)?
@@ -371,8 +373,20 @@ mod tests {
                 next_cursor: Some("c".repeat(MAX_CURSOR_BYTES)),
             },
             warnings: vec!["Some live namespace records lack comparable vectors; terminal coverage cannot be complete.".into()],
-            diagnostics: ScanDiagnostics {rows:0,record_encoded_bytes:0,vector_examined_bytes:0,vector_copied_bytes:0,capture_time:Duration::ZERO,comparison_time:Duration::ZERO},
+            diagnostics: Some(ScanDiagnostics {rows:0,record_encoded_bytes:0,vector_examined_bytes:0,vector_copied_bytes:0,capture_time:Duration::ZERO,comparison_time:Duration::ZERO}),
         };
+        let private = crate::daemon::prepared_query::pair_reply(&page).unwrap();
+        let private_bytes =
+            serde_json::to_vec(&crate::daemon::DaemonResponse::success(u64::MAX, private)).unwrap();
+        eprintln!(
+            "R1_EXACT_BITS_MAX_PAIRS count={MAX_RESPONSE_PAIRS} frame={} limit={}",
+            private_bytes.len(),
+            crate::daemon::prepared_query::response_limit()
+        );
+        assert!(private_bytes.len() <= crate::daemon::prepared_query::response_limit());
+        assert!(crate::daemon::prepared_query::admitted_frame(
+            &private_bytes
+        ));
         let envelope = page.into_envelope();
         assert!(serde_json::to_vec(&envelope).unwrap().len() <= MAX_SCAN_RESPONSE_BYTES);
         let result = crate::mcp::protocol::ToolCallResult::json(&envelope).unwrap();

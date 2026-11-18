@@ -4,22 +4,77 @@ use crate::search::{
     ChannelParticipation, CoherentSearchResponse, FtsAvailability, RetrievalChannel,
     RetrievalSemantics, SearchError, UnresolvedReason, VersionMode,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryReply {
     #[serde(flatten)]
     pub envelope: Envelope<Value>,
     /// Every retained exposure receipt, including a failed multi-step observer.
     /// A single-namespace successful recall also exposes its one `receipt`.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observation_receipts: Vec<crate::storage::control::WriteReceipt>,
+    /// Separately decoded remote evidence is never current-query commitment.
+    /// Preserve its original validated JSON representation, including numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) received_evidence: Option<ReceivedQueryEvidence>,
     #[serde(skip)]
     pub http_status: u16,
 }
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReceivedQueryEvidence {
+    pub(crate) receipts: Vec<Value>,
+}
 impl QueryReply {
+    pub(crate) fn remote_failure(record_access: bool, sent: bool, evidence: Vec<Value>) -> Self {
+        let unknown = record_access && sent;
+        let mut envelope = Envelope::failure(
+            None,
+            ExecutionError {
+                category: ErrorCategory::Unavailable,
+                code: if unknown {
+                    "COMMIT_OUTCOME_UNKNOWN"
+                } else {
+                    "REMOTE_UNAVAILABLE"
+                }
+                .into(),
+                message: if unknown {
+                    "Remote observation outcome is unknown; reconcile before retry."
+                } else {
+                    "Prepared remote response is unavailable."
+                }
+                .into(),
+                field: None,
+                retryable: false,
+                commit_state: if unknown {
+                    CommitState::Unknown
+                } else {
+                    CommitState::NotCommitted
+                },
+                operation_id: None,
+            },
+        );
+        if unknown {
+            envelope.warnings.push("READINESS_UNKNOWN".into());
+        }
+        let received_evidence = if evidence.is_empty() {
+            None
+        } else {
+            envelope
+                .warnings
+                .push("UNVERIFIED_RECEIVED_EVIDENCE".into());
+            Some(ReceivedQueryEvidence { receipts: evidence })
+        };
+        Self {
+            envelope,
+            observation_receipts: vec![],
+            received_evidence,
+            http_status: 503,
+        }
+    }
     pub(crate) fn unavailable() -> Self {
         Self::failure(SearchError::Unavailable(
             "prepared coherent query unavailable".into(),
@@ -47,6 +102,7 @@ impl QueryReply {
                 },
             ),
             observation_receipts: vec![],
+            received_evidence: None,
             http_status,
         }
     }
@@ -103,6 +159,7 @@ impl QueryReply {
         Self {
             envelope,
             observation_receipts: receipts,
+            received_evidence: None,
             http_status: status,
         }
     }
@@ -121,6 +178,16 @@ impl QueryReply {
         self.fits_before_observation(0)
     }
     pub(crate) fn fits_before_observation(&self, exposures: usize) -> bool {
+        self.fits_before_observation_with_limit(
+            exposures,
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+    }
+    pub(crate) fn fits_before_observation_with_limit(
+        &self,
+        exposures: usize,
+        limit: usize,
+    ) -> bool {
         // Count the actual typed JSON twice: structured bytes and the exact
         // escaping of those same bytes in compact MCP text. No pretty estimate.
         struct Count {
@@ -163,7 +230,7 @@ impl QueryReply {
                 .and_then(|n| n.checked_add(64 * 1024))
                 .and_then(|n| n.checked_add(c.raw))
                 .and_then(|n| n.checked_add(c.escaped))
-                .is_some_and(|n| n <= crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                .is_some_and(|n| n <= limit)
     }
     pub(crate) fn oversize(mut self) -> Self {
         self.envelope.data = None;
@@ -190,6 +257,7 @@ impl QueryReply {
 pub(crate) fn project_similarity(
     selected: &crate::search::SelectedSimilarity,
     all_compatible: bool,
+    explain: bool,
 ) -> Result<QueryReply, SearchError> {
     let d = &selected.diagnostics;
     let RetrievalSemantics::V2(mode) = d.semantics else {
@@ -212,6 +280,12 @@ pub(crate) fn project_similarity(
         let mut value = serde_json::to_value(result)
             .map_err(|_| SearchError::Unavailable("similarity serialization failed".into()))?;
         value["namespaceId"] = json!(row.namespace.id);
+        if explain {
+            let evidence = row.explanation.as_ref().ok_or_else(|| {
+                SearchError::Unavailable("similarity explanation unavailable".into())
+            })?;
+            value["explanation"] = super::query_explanation::similarity(evidence);
+        }
         if let Some(embedding) = &row.payload.embedding {
             value["embedding"] = json!(embedding);
         }
@@ -253,6 +327,7 @@ pub(crate) fn project_similarity(
     Ok(QueryReply {
         envelope,
         observation_receipts: vec![],
+        received_evidence: None,
         http_status: 200,
     })
 }
@@ -287,6 +362,40 @@ fn counts(values: &std::collections::BTreeMap<UnresolvedReason, usize>) -> Value
     )
 }
 
+fn examination_unit(unit: crate::search::ExaminationUnit) -> &'static str {
+    use crate::search::ExaminationUnit::*;
+    match unit {
+        VectorEntries => "vectorEntries",
+        EntityPostings => "entityPostings",
+        FtsRows => "ftsRows",
+        ScoredVectors => "scoredVectors",
+        CanonicalRecords => "canonicalRecords",
+    }
+}
+
+fn eligibility(e: &crate::search::CanonicalEligibilityDiagnostics) -> Value {
+    use crate::search::HardFilterRejection::*;
+    let rejections: serde_json::Map<String, Value> = e
+        .first_rejections
+        .iter()
+        .map(|(reason, count)| {
+            let name = match reason {
+                Namespace => "namespace",
+                Tombstone => "tombstone",
+                Ghost => "ghost",
+                Phase => "phase",
+                Strength => "strength",
+                Permastore => "permastore",
+                Labels => "labels",
+                RequiredTag => "requiredTag",
+                ExcludedTag => "excludedTag",
+            };
+            (name.into(), json!(count))
+        })
+        .collect();
+    json!({"examinedUnit":examination_unit(e.examined_unit),"examined":e.examined,"passed":e.passed,"firstRejections":rejections})
+}
+
 pub(crate) fn project(
     prepared: &CoherentSearchResponse,
     explain: bool,
@@ -308,7 +417,7 @@ pub(crate) fn project(
             RetrievalChannel::Metadata => "metadata",
             RetrievalChannel::Graph => "graph",
         };
-        channel_values.insert(name.into(),json!({"participation":match c.participation {ChannelParticipation::NotRequested=>"notRequested",ChannelParticipation::Completed=>"completed"},"offered":c.offered,"admitted":c.admitted,"examined":c.examined,"eligible":c.eligible,"exhausted":c.exhausted,"candidateLimited":c.candidate_limited,"budgetExhausted":c.budget_exhausted,"returnedOwn":c.returned_own,"returnedInherited":c.returned_inherited}));
+        channel_values.insert(name.into(),json!({"participation":match c.participation {ChannelParticipation::NotRequested=>"notRequested",ChannelParticipation::Completed=>"completed"},"offered":c.offered,"admitted":c.admitted,"examinedUnit":c.examined_unit.map(examination_unit),"examined":c.examined,"eligible":c.eligible,"exhausted":c.exhausted,"candidateLimited":c.candidate_limited,"budgetExhausted":c.budget_exhausted,"returnedOwn":c.returned_own,"returnedInherited":c.returned_inherited}));
     }
     if payload.rows.len() != prepared.response.response.results.len() {
         return Err(unavailable());
@@ -363,6 +472,7 @@ pub(crate) fn project(
     let coverage = json!({
         "semanticsVersion":2,"versionMode":match mode{VersionMode::Current=>"current",VersionMode::History=>"history"},
         "budgetProfile":"retrieval-v2-default","channels":channel_values,
+        "canonicalEligibility":d.canonical_eligibility.as_ref().map(eligibility),
         "ftsAvailability":match d.fts.availability{FtsAvailability::NotRequested=>"notRequested",FtsAvailability::Available=>"available",FtsAvailability::Unavailable=>"unavailable"},
         "graph":{"expandedStates":d.graph.expanded_states,"examinedEdges":d.graph.examined_edges,"stateLimited":d.graph.state_limit,"edgeLimited":d.graph.edge_limit},
         "supersession":{"examinedEdges":d.supersession_edges_examined,"unresolved":counts(&d.unresolved),"workLimited":d.unresolved.contains_key(&UnresolvedReason::WorkLimit)||supplemental.supersession_work_limited},
@@ -380,6 +490,7 @@ pub(crate) fn project(
     Ok(QueryReply {
         envelope,
         observation_receipts: vec![],
+        received_evidence: None,
         http_status: 200,
     })
 }

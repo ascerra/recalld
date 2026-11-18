@@ -79,7 +79,12 @@ fn state(f: &Fixture, provider: Arc<dyn EmbeddingProvider>) -> AppState {
             config,
             false,
         )),
-        Arc::new(NamespaceRegistryAdapter::new(f.storage.clone())),
+        Arc::new(NamespaceRegistryAdapter::new(
+            f.storage.clone(),
+            std::sync::Arc::new(crate::embedding::PassthroughProvider::new(
+                crate::test_support::DIM,
+            )),
+        )),
         Arc::new(NoopMetricsCollector),
     )
 }

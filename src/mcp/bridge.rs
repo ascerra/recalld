@@ -24,6 +24,37 @@ use crate::model::MemoryId;
 /// Search pipeline interface.
 #[async_trait]
 pub trait SearchPipeline: Send + Sync {
+    fn supports_prepared_get(&self) -> bool {
+        false
+    }
+    async fn get_contract(
+        &self,
+        _request: crate::serialization::get::GetRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::get::GetReply {
+        crate::serialization::get::GetReply::failure(crate::search::SearchError::Unavailable(
+            "prepared get requires the actual coherent owner".into(),
+        ))
+    }
+    /// Private transport support requires the actual pre-observation bound.
+    /// An implementation of the unbounded methods alone cannot advertise it.
+    fn supports_prepared_queries(&self) -> bool {
+        false
+    }
+    async fn query_contract_bounded(
+        &self,
+        _request: crate::serialization::query::QueryRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
+    async fn similar_contract_bounded(
+        &self,
+        _request: crate::serialization::query::SimilarRequest,
+        _response_limit: usize,
+    ) -> crate::serialization::query_response::QueryReply {
+        crate::serialization::query_response::QueryReply::unavailable()
+    }
     async fn similar_contract(
         &self,
         _request: crate::serialization::query::SimilarRequest,
@@ -90,6 +121,50 @@ pub trait SearchPipeline: Send + Sync {
 /// Storage engine interface.
 #[async_trait]
 pub trait StorageEngine: Send + Sync {
+    /// Ordinary point routing must be implemented by the actual serving owner.
+    fn supports_api1_get(&self) -> bool {
+        false
+    }
+    async fn get_api1(
+        &self,
+        request: crate::serialization::get_api1::Request,
+        _response_limit: usize,
+    ) -> crate::serialization::get_api1::Reply {
+        crate::serialization::get_api1::Reply::compatibility(
+            self.get_memory(
+                request.id,
+                request.record_access,
+                request.namespace.as_deref(),
+            )
+            .await,
+        )
+    }
+    /// Private canonical metadata pages require an actual owning implementation.
+    fn supports_canonical_pages(&self) -> bool {
+        false
+    }
+
+    /// Optional identity captured from the configured provider when this adapter
+    /// was constructed. Metadata calls never invoke a provider to obtain it.
+    fn catalog_profile_context(&self) -> Option<crate::serialization::session::ActiveEmbedding> {
+        None
+    }
+    /// Canonical catalogs; older/remote adapters fail closed without v1 fallback.
+    async fn list_catalog_page(
+        &self,
+        _request: crate::serialization::catalog_page::CatalogPageRequest,
+    ) -> Result<crate::catalog_page::CatalogPage, crate::catalog_page::CatalogError> {
+        Err(crate::catalog_page::CatalogError::Unavailable)
+    }
+
+    /// Canonical metadata page; unsupported/remote adapters fail closed.
+    async fn list_canonical_page(
+        &self,
+        _request: crate::serialization::list::ListPageRequest,
+    ) -> Result<crate::canonical_list::ListPage, crate::canonical_list::ListError> {
+        Err(crate::canonical_list::ListError::Unavailable)
+    }
+
     fn supports_api1_store(&self) -> bool {
         false
     }

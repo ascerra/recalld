@@ -1,0 +1,217 @@
+{
+  "actual-checks.json": {
+    "sha256": "e80598e2d28e4d40d4a3d8f8d60673697f398eace225657130280c19d8ff9545",
+    "bytes": 1215,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/checks.json"
+  },
+  "actual-command.json": {
+    "sha256": "84829d0856c22287b39fa4ee698a873a97200885d5fe50cc38964a891e975461",
+    "bytes": 1682,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/command.json"
+  },
+  "actual-memory.events": {
+    "sha256": "0a2d4e7982066cc7dc914627e7b195ccba88b82a5a996201809e529142d2f380",
+    "bytes": 70,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/memory.events"
+  },
+  "actual-memory.peak": {
+    "sha256": "8195a902bd12b53f72b2315d476ee9bd353d92fd520caa3b1b09d5d44c6cbf54",
+    "bytes": 10,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/memory.peak"
+  },
+  "actual-result.json": {
+    "sha256": "7d8a783c72b9bf454591d7d14b4eb7efa2908711b20f40986fb6e8def79e97c1",
+    "bytes": 100,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/driver-result.json"
+  },
+  "build-command.json": {
+    "sha256": "96a66e2695b079f9de9137106bc6bba3720be28b923ed3d72e922b31c549d2e7",
+    "bytes": 1741,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/command.json"
+  },
+  "build-memory.events": {
+    "sha256": "980ac26a6c8c6a8c747e3a4d0a367f5ffbc4cb5e73479acfe04e354f449198f4",
+    "bytes": 73,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/memory.events"
+  },
+  "build-memory.peak": {
+    "sha256": "3cc45f6daaf2b588a75a515785fe5815d135630d4cccbe7c923bbcb6bc2b87cb",
+    "bytes": 11,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/memory.peak"
+  },
+  "build-result.json": {
+    "sha256": "f2e27b62d136431891ba2e41e162956fdd73629bfe2e45afec7745ed2f75b525",
+    "bytes": 100,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/driver-result.json"
+  },
+  "build.json": {
+    "sha256": "3f4bfde6dd94887da2a8f3486edaac3b1543ad55f985619ed457c2caa2cfc96f",
+    "bytes": 59594,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/build.json"
+  },
+  "citation-actor-result.json": {
+    "sha256": "3ca0035b63df6c8547bd1952bb5bee796128547d3ca07707dabc296c5f4a5ebd",
+    "bytes": 489,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/citation/answer-1-actor.json"
+  },
+  "citation-role-trace.jsonl": {
+    "sha256": "f9a632f5882a7c063b32730efba4048e52fb39394cdc071ebc64eeff6ddd8f42",
+    "bytes": 2209,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/citation/evaluator/role-trace.jsonl"
+  },
+  "citation-status.json": {
+    "sha256": "d5fa887adadee87f339ae0863eee078daed251829054bf4a09e701a18c4b9756",
+    "bytes": 369,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/citation/evaluator/role-status.json"
+  },
+  "default-grouped-scores.json": {
+    "sha256": "bf959dc98476db4ed1b6672bbe675a6a7f870885d7196c3a6db15209c4fbdcb1",
+    "bytes": 6887,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/grouped-scores.json"
+  },
+  "default-packed-grouped-scores.json": {
+    "sha256": "bf959dc98476db4ed1b6672bbe675a6a7f870885d7196c3a6db15209c4fbdcb1",
+    "bytes": 6887,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/packed-grouped-scores.json"
+  },
+  "default-roster.json": {
+    "sha256": "821dbd8922633123eaa6617fe02fa6ccc4d43d17a11a3b04167ff8da9a39ed73",
+    "bytes": 2073,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/episode-status.json"
+  },
+  "default-summary.json": {
+    "sha256": "3e1241e6529906faa1993ad4759f14f96b7f89be8746bdc862c49eefa9b34081",
+    "bytes": 257,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/recorded-answer-summary.json"
+  },
+  "example-actor-result.json": {
+    "sha256": "98cfb2a801b6870129d2355a070211978574b39c18474788871d90415bf4f7b8",
+    "bytes": 489,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/episodes/episode-0/answer-1-actor.json"
+  },
+  "example-current-envelope.json": {
+    "sha256": "974c77814d1b7042f60148bb1863a365a29396e9e6d1f1e3674c7f33f4af95d7",
+    "bytes": 9007,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/episodes/episode-0/actor-inputs/answer-1.json"
+  },
+  "example-role-proof.json": {
+    "sha256": "ab907d57c7e8cbeebcf482a1f6558a50627d47956def272d10cc6ec2e63e578f",
+    "bytes": 463,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/episodes/episode-0/evaluator/recorded-answer-proof.json"
+  },
+  "example-role-trace.jsonl": {
+    "sha256": "4a7b620b437fd1938b42940b4faf40f35f5097405a23d5f0def8b9d7148bc81f",
+    "bytes": 11388,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/default/episodes/episode-0/evaluator/role-trace.jsonl"
+  },
+  "executables-after.sha256": {
+    "sha256": "cb655523c6978c40db2195cfaa232f834dfa1b4ec8ec31e1551deb69d448ac1c",
+    "bytes": 212,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/executables-after.sha256"
+  },
+  "executables-before.sha256": {
+    "sha256": "cb655523c6978c40db2195cfaa232f834dfa1b4ec8ec31e1551deb69d448ac1c",
+    "bytes": 212,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/executables-before.sha256"
+  },
+  "failure-exported-test-fixture.log": {
+    "sha256": "790d4e30aa541ea0f6fcd656db9fb2a153b57361a003a4f83a32278171fa42ef",
+    "bytes": 5724,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/002-57d5bb59-build/output/focused.log"
+  },
+  "failure-exported-test-result.json": {
+    "sha256": "a032763c0c24f673e59f0f34ef003d2ec9b69718bdb7baa6427d105cd43d33fd",
+    "bytes": 101,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/002-57d5bb59-build/output/driver-result.json"
+  },
+  "failure-surrogate-parser.log": {
+    "sha256": "1a6f3c8cfc41882d46d3de61727409082dba8f5441c676154856020c77248ba1",
+    "bytes": 792,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/001-source/focused-001.log"
+  },
+  "focused.log": {
+    "sha256": "b75b53d16636d5beadf0ee33f1cb896b32162fb6f422062cb97e66c008128054",
+    "bytes": 107,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/focused.log"
+  },
+  "future-miss.json": {
+    "sha256": "46718bff71340058edc1e87f4517bd808cc3cf241f58195060ca5355193c347a",
+    "bytes": 6613,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/canary-future/evaluator/answer-4-miss.json"
+  },
+  "future-role-status.json": {
+    "sha256": "82691fff46aed0099727b91f42d043740a56590357ae8dc5c8efcbecd9ed4d0c",
+    "bytes": 360,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/canary-future/evaluator/role-status.json"
+  },
+  "inherited-combined.log": {
+    "sha256": "353aaba837b341526775d2f99527db8cfdef034f2a85d4c5d541bd024c0875bd",
+    "bytes": 111,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/combined.log"
+  },
+  "middle-miss-roster.json": {
+    "sha256": "bbbc779c65452e6e8f7eb27675562b77c7fb3c95b994ad5da36a0a513dfffe0e",
+    "bytes": 2129,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/middle-miss/episode-status.json"
+  },
+  "parse-actor-result.json": {
+    "sha256": "570874d24e8fdd3bb50e8d981ba74af7c0a13f813f43481628509c008a9a1a6a",
+    "bytes": 295,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/parse/answer-1-actor.json"
+  },
+  "parse-role-trace.jsonl": {
+    "sha256": "97954fc5166671f11a02adce7a1be07319ac914cf7ba45d2d08285e98ce98122",
+    "bytes": 1981,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/parse/evaluator/role-trace.jsonl"
+  },
+  "parse-status.json": {
+    "sha256": "d5fa887adadee87f339ae0863eee078daed251829054bf4a09e701a18c4b9756",
+    "bytes": 369,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/parse/evaluator/role-status.json"
+  },
+  "refusal-actor-result.json": {
+    "sha256": "a7edf8c05d320a6694937f002ac7a71c4d3bf9b066554504eee03c607e36340f",
+    "bytes": 358,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/refusal/answer-1-actor.json"
+  },
+  "refusal-role-trace.jsonl": {
+    "sha256": "1ab687e2665f8f7b861dae6d2ec61a0c34a2389e8f915f686b40bcec8e8e6dfa",
+    "bytes": 2049,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/refusal/evaluator/role-trace.jsonl"
+  },
+  "refusal-status.json": {
+    "sha256": "d5fa887adadee87f339ae0863eee078daed251829054bf4a09e701a18c4b9756",
+    "bytes": 369,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/refusal/evaluator/role-status.json"
+  },
+  "scorer-profile.json": {
+    "sha256": "26a78b7c189bac0b1c2546227dc27af03eb5f79f6ce7c32c642119626f7c173e",
+    "bytes": 383,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/output/profile.json"
+  },
+  "semantic-audit.json": {
+    "sha256": "0ccaa65da91a6c1db1e8f2ac3271b6d9dd6ac56ef3b28a1b1e4dd05c594f04e2",
+    "bytes": 11603,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/semantic-audit.json"
+  },
+  "source-files.json": {
+    "sha256": "cec33878b881c46a90aae1c60bb4f9f1801ec70be234b49687c44a98d263b639",
+    "bytes": 58305,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/003-249ff40e-build/source-lock.json"
+  },
+  "utf8-actor-result.json": {
+    "sha256": "cdfda4a0a6b26f5d0c16dd98ae4d423cf72e1a956e21b8c5b920dbde562b08cb",
+    "bytes": 322,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/utf8/answer-1-actor.json"
+  },
+  "utf8-role-trace.jsonl": {
+    "sha256": "fa6e85009337c56470ee69b23b33807b543a8c6b7fe6a29889d157e5e9fe0bac",
+    "bytes": 2009,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/utf8/evaluator/role-trace.jsonl"
+  },
+  "utf8-status.json": {
+    "sha256": "d5fa887adadee87f339ae0863eee078daed251829054bf4a09e701a18c4b9756",
+    "bytes": 369,
+    "source": "/private/tmp/recalld-a6-recorded-answer-validation/004-249ff40e-episodes/output/episodes/utf8/evaluator/role-status.json"
+  }
+}

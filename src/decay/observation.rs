@@ -72,12 +72,21 @@ impl<T> Observed<T> {
     }
 }
 
+/// Internal typed cause; no new serialized observation vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ObservationCause {
+    LifecycleConflict,
+}
+
 /// Payload-free failure, including preceding namespace commits. Never present
 /// a failed multi-namespace observation as an ordinary safely retryable write.
 #[derive(Debug, Clone, serde::Serialize, thiserror::Error)]
 #[serde(rename_all = "camelCase")]
 #[error("observation failed: {}", serde_json::to_string(self).unwrap_or_default())]
 pub struct ObservationError {
+    /// Internal classification only; existing observation wire bytes stay intact.
+    #[serde(skip)]
+    pub(crate) cause: Option<ObservationCause>,
     pub commit_state: &'static str,
     pub ready: bool,
     pub receipts: Vec<WriteReceipt>,
@@ -94,6 +103,7 @@ impl ObservationError {
 
     pub(crate) fn worker_failed(error: impl std::fmt::Display) -> Self {
         Self {
+            cause: None,
             commit_state: "unknown",
             ready: false,
             receipts: vec![],
@@ -104,6 +114,7 @@ impl ObservationError {
 
     fn failed(error: impl std::fmt::Display, receipts: Vec<WriteReceipt>) -> Self {
         Self {
+            cause: None,
             commit_state: if receipts.is_empty() {
                 "notCommitted"
             } else {
@@ -129,6 +140,9 @@ impl ObservationError {
         // Receipts belong in their typed field, not duplicated in the message.
         let mut result = Self::failed(cause, receipts);
         match cause {
+            StorageError::LifecycleConflict(_) => {
+                result.cause = Some(ObservationCause::LifecycleConflict);
+            }
             StorageError::CommitOutcomeUnknown { operation_id, .. } => {
                 result.commit_state = "unknown";
                 result.unknown_operation_id = Some(*operation_id);

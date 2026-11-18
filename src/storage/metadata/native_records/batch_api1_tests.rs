@@ -31,6 +31,12 @@ async fn api1_batch_public_mcp_native_unicode() {
     let (_d, f, a, provider, _clock) = setup().await;
     let result = crate::mcp::tools::dispatch_tool(&bridge(a), "store_memories",
         json!({"memories":[{"summary":"batch Unicode", "entities":["John Smith","José","Alice's"],"checkDuplicates":false}]})).await;
+    crate::test_support::record_schema_result(
+        "batch-native-unicode",
+        "store_memories",
+        &result,
+        "actual API1 native insertion batch through public MCP dispatch; canonical Unicode and provider assertions unchanged",
+    );
     let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
     let value: Value = serde_json::from_str(text).unwrap_or(json!({"error":text}));
     assert_eq!(value["stored"], 1, "{result:?}");
@@ -469,6 +475,12 @@ async fn api1_batch_final_barrier_failure_keeps_receipts_and_repair_replays() {
     assert_eq!(value["batch"]["items"][0]["receipt"], canonical(&receipt));
     let mcp = Reply::Owned(Ok(out)).mcp();
     assert_eq!(mcp.is_error, Some(true));
+    crate::test_support::record_schema_result(
+        "batch-final-barrier",
+        "store_memories",
+        &mcp,
+        "actual API1 final barrier failure after successful children, full retained receipts and same-key repair assertions unchanged",
+    );
     readers::completion(&f).complete().await.unwrap();
     let base = bytes(&d.path);
     let time = clock.0.load(Ordering::SeqCst);
@@ -547,7 +559,14 @@ async fn api1_batch_mixed_and_all_invalid_keep_every_index_and_no_false_rollback
         value["batch"]["items"][2]["receipt"],
         canonical(out.outcome.items[2].receipt.as_ref().unwrap())
     );
-    assert_eq!(Reply::Owned(Ok(out)).mcp().is_error, Some(true));
+    let mcp = Reply::Owned(Ok(out)).mcp();
+    assert_eq!(mcp.is_error, Some(true));
+    crate::test_support::record_schema_result(
+        "batch-mixed",
+        "store_memories",
+        &mcp,
+        "actual API1 mixed batch projection with complete successful and bookkeeping receipts",
+    );
     r.input.idempotency_key = Some("all-invalid".into());
     r.input.items = vec![
         json!({"summary":false}),
@@ -681,6 +700,12 @@ async fn api1_batch_legacy_positive_shapes_and_explicit_profile_rejection() {
     b.default_namespace = "default".into();
     let result=crate::mcp::tools::dispatch_tool(&b,"store_memories",json!({"memories":[{"summary":"legacy MCP supplied","embedding":[1.,0.,0.,0.],"checkDuplicates":false}]})).await;
     assert_ne!(result.is_error, Some(true), "{result:?}");
+    crate::test_support::record_schema_result(
+        "batch-legacy-success",
+        "store_memories",
+        &result,
+        "actual public MCP durable legacy insertion batch with full receipts and no provider calls",
+    );
     let crate::mcp::protocol::ContentBlock::Text { text } = &result.content[0];
     let value: Value = serde_json::from_str(text).unwrap();
     assert_eq!(value["stored"], 1);
@@ -940,6 +965,12 @@ async fn api1_batch_malformed_remote_evidence_never_claims_commit_or_counts() {
         let (status, error) = Reply::decode(value, &r).response(Surface::Rest);
         assert_eq!(status, 503, "case {case}: {error}");
         assert_eq!(error["error"]["commitState"], "unknown", "case {case}");
+        crate::test_support::record_schema_value(
+            &format!("batch-unverified-{case}"),
+            "store_memories",
+            &error,
+            "actual decoder plus shared API1 failure projection (REST invocation) of authored malformed copies of genuine batch receipts; no canonical mutation",
+        );
         assert_eq!(
             error["receivedEvidence"]["items"][0]["receipt"], expected,
             "case {case}"
@@ -1000,6 +1031,12 @@ async fn api1_batch_remote_request_binding_keeps_only_matching_reservation_commi
     assert_eq!(status, 503);
     assert_eq!(valid["error"]["commitState"], "committed");
     assert_eq!(valid["commitEvidenceScope"], "reservation");
+    crate::test_support::record_schema_value(
+        "batch-reservation-known",
+        "store_memories",
+        &valid,
+        "actual API1 decoder/shared failure projection binds genuine parent caller hash; reservation evidence only",
+    );
     assert!(valid.get("batch").is_none());
     let receipt = failure.reservation_receipt.as_mut().unwrap();
     receipt.receipt_version = 999;
@@ -1008,5 +1045,11 @@ async fn api1_batch_remote_request_binding_keeps_only_matching_reservation_commi
         Reply::decode(canonical(&Reply::Owned(Err(failure))), &r).response(Surface::Rest);
     assert_eq!(invalid["error"]["commitState"], "unknown");
     assert_eq!(invalid["reservationReceipt"], expected);
+    crate::test_support::record_schema_value(
+        "batch-reservation-unverified",
+        "store_memories",
+        &invalid,
+        "actual API1 decoder/shared failure projection retains authored invalid-header receipt in original top-level field with unknown state and unverified warning",
+    );
     assert!(invalid.get("readiness").is_none());
 }

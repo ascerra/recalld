@@ -49,7 +49,7 @@ fn closed(
     inspect_schema(&d.path).unwrap();
     root
 }
-fn receipts(f: &Fixture) -> BTreeMap<Vec<u8>, Vec<u8>> {
+pub(super) fn receipts(f: &Fixture) -> BTreeMap<Vec<u8>, Vec<u8>> {
     let store = f.storage.read().unwrap();
     let read = store.meta_store().db.begin_read().unwrap();
     read.open_table(control::RECEIPTS)
@@ -73,7 +73,7 @@ fn snapshot(f: &Fixture, d: &Data) -> Vec<u8> {
     ))
     .unwrap()
 }
-fn no_pending(f: &Fixture) {
+pub(super) fn no_pending(f: &Fixture) {
     let status = f
         .storage
         .read()

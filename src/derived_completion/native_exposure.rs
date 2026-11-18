@@ -4,7 +4,7 @@ use super::*;
 use crate::decay::observation::{ObservationError, exposure_groups};
 use crate::model::{AccessKind, MemoryId};
 use crate::storage::control::{ExposureScope, MutationContext, WriteReceipt};
-use crate::storage::native_lifecycle::{LifecycleScope, NativePolicyInputs};
+use crate::storage::native_lifecycle::{ExposureIntent, LifecycleScope, NativePolicyInputs};
 
 impl DerivedCompletion {
     pub(crate) async fn record_native_exposures_with_work(
@@ -50,6 +50,49 @@ impl DerivedCompletion {
                 policy,
                 &work,
                 original_contract_version,
+                None,
+            )
+            .await;
+        self.finish_known_work(work);
+        result
+    }
+
+    /// Consume the original point-capture witness; never recapture policy or
+    /// record tokens at the later observation boundary.
+    pub(crate) async fn record_native_point_exposure_with_work(
+        &self,
+        intent: ExposureIntent,
+        sampled_at: i64,
+        policy: NativePolicyInputs,
+        parent: Option<&WorkTicket>,
+        original_contract_version: u32,
+    ) -> Result<Vec<WriteReceipt>, ObservationError> {
+        if !matches!(original_contract_version, 1 | 2)
+            || intent.original.len() != 1
+            || intent.original[0].1 != AccessKind::DirectRetrieval
+            || intent.scope.source != Some(intent.original[0].0)
+        {
+            return Err(ObservationError::storage(
+                StorageError::InvalidMutation("invalid captured point exposure".into()),
+                vec![],
+            ));
+        }
+        let scope = ExposureScope {
+            namespace: intent.scope.namespace_name.clone(),
+            source: intent.scope.source,
+        };
+        let work = self
+            .accept_work(parent)
+            .map_err(|e| ObservationError::storage(e, vec![]))?;
+        let result = self
+            .native_exposures_accepted(
+                intent.original.clone(),
+                crate::decay::similarity_scope::ExposureScopes::Existing(Some(scope)),
+                sampled_at,
+                policy,
+                &work,
+                original_contract_version,
+                Some(intent),
             )
             .await;
         self.finish_known_work(work);
@@ -64,6 +107,7 @@ impl DerivedCompletion {
         policy: NativePolicyInputs,
         work: &WorkTicket,
         original_contract_version: u32,
+        mut captured: Option<ExposureIntent>,
     ) -> Result<Vec<WriteReceipt>, ObservationError> {
         let gate = publication_gate(&self.storage)
             .await
@@ -88,6 +132,7 @@ impl DerivedCompletion {
                 // This is the already-sampled query time, not another time source.
                 let clock = crate::time::ManualClock::new(sampled_at);
                 let mut receipts = Vec::new();
+                let captured_point = captured.is_some();
                 for (namespace, batch) in groups {
                     let scope = scopes.get(&namespace).expect("validated group").as_ref();
                     let namespace = NamespaceId::new(namespace);
@@ -110,21 +155,35 @@ impl DerivedCompletion {
                                 "injected later exposure group failure".into(),
                             ));
                         }
-                        let config = storage
-                            .get_namespace(namespace)?
-                            .ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
-                        let scope = LifecycleScope {
-                            namespace_id: namespace,
-                            namespace_name: scope
-                                .as_ref()
-                                .map_or(config.name, |s| s.namespace.clone()),
-                            source: scope.as_ref().and_then(|s| s.source),
+                        let intent = if let Some(intent) = captured.take() {
+                            if intent.scope.namespace_id != namespace || intent.original != batch {
+                                return Err(StorageError::InvalidMutation(
+                                    "captured point exposure scope changed".into(),
+                                ));
+                            }
+                            intent
+                        } else {
+                            if captured_point {
+                                return Err(StorageError::InvalidMutation(
+                                    "captured point exposure cannot recapture".into(),
+                                ));
+                            }
+                            let config = storage
+                                .get_namespace(namespace)?
+                                .ok_or(StorageError::NamespaceNotFound(namespace.get()))?;
+                            let scope = LifecycleScope {
+                                namespace_id: namespace,
+                                namespace_name: scope
+                                    .as_ref()
+                                    .map_or(config.name, |s| s.namespace.clone()),
+                                source: scope.as_ref().and_then(|s| s.source),
+                            };
+                            // This fresh capture's G is truthful. It is NOT the earlier
+                            // selection/readGeneration; no whole-query CAS is claimed.
+                            storage
+                                .meta_store()
+                                .capture_exposure(scope, &batch, &policy)?
                         };
-                        // This fresh capture's G is truthful. It is NOT the earlier
-                        // selection/readGeneration; no whole-query CAS is claimed.
-                        let intent = storage
-                            .meta_store()
-                            .capture_exposure(scope, &batch, &policy)?;
                         let mut ctx = MutationContext::unkeyed(namespace);
                         ctx.contract_version = original_contract_version;
                         storage.meta_store().record_native_exposure_with_work(

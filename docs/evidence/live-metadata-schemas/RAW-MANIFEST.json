@@ -1,0 +1,37 @@
+{
+  "full.log": {
+    "sha256": "f5d572be3e12878c6ad3ef9c2785d0d7fc3be7dc80d71ff965f5c6f16e81f2ce",
+    "bytes": 264937,
+    "original": "/tmp/recalld-huygens-active-validation/live-schemas-003-13ff718d/output/full.log"
+  },
+  "focus.log": {
+    "sha256": "5d0ff6eddf70e57959d2e76ee63aba7439466c62c567bf19263e88b76026b864",
+    "bytes": 26332,
+    "original": "/tmp/recalld-huygens-active-validation/live-schemas-003-13ff718d/output/focus.log"
+  },
+  "session.log": {
+    "sha256": "95b181c16d0a18a2af4fab2b1625d7a93d2548ff94359bbff49c4d4a9f236444",
+    "bytes": 26102,
+    "original": "/tmp/recalld-huygens-active-validation/live-schemas-003-13ff718d/output/session.log"
+  },
+  "fmt.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0,
+    "original": "/tmp/recalld-huygens-active-validation/live-schemas-003-13ff718d/output/fmt.log"
+  },
+  "clippy.log": {
+    "sha256": "32ebedaa9e5c011bedb04b3fea1c12348960b86f184ce1c3a4eef612ee4e5ed7",
+    "bytes": 1189844,
+    "original": "/tmp/recalld-huygens-active-validation/live-schemas-003-13ff718d/output/clippy.log"
+  },
+  "formal.log": {
+    "sha256": "eed317118395beb92ab7ffd12499a2b0c5f091b51cc25b12fda1b47a7ac9fff7",
+    "bytes": 65,
+    "original": "/tmp/recalld-huygens-active-validation/live-schemas-003-13ff718d/output/formal.log"
+  },
+  "formal-final.log": {
+    "sha256": "eed317118395beb92ab7ffd12499a2b0c5f091b51cc25b12fda1b47a7ac9fff7",
+    "bytes": 65,
+    "original": "/tmp/recalld-huygens-active-validation/live-schemas-003-13ff718d/output/formal-final.log"
+  }
+}

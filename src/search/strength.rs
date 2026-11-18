@@ -24,6 +24,24 @@ pub(super) struct StrengthContext {
 
 impl StrengthContext {
     pub fn pin(engine: &QueryEngine, ns: &NamespaceConfig, record_access: bool) -> Result<Self> {
+        Self::pin_with_sample(engine, ns, record_access, || engine.clock.now_millis())
+    }
+
+    pub(super) fn pin_at(
+        engine: &QueryEngine,
+        ns: &NamespaceConfig,
+        record_access: bool,
+        evaluated_at: i64,
+    ) -> Result<Self> {
+        Self::pin_with_sample(engine, ns, record_access, || evaluated_at)
+    }
+
+    fn pin_with_sample(
+        engine: &QueryEngine,
+        ns: &NamespaceConfig,
+        record_access: bool,
+        sample: impl FnOnce() -> i64,
+    ) -> Result<Self> {
         if let Some(schema) = &ns.schema {
             schema.validate(ns).map_err(SearchError::MetadataError)?;
         }
@@ -55,7 +73,7 @@ impl StrengthContext {
             diagnostics: StrengthDiagnostics {
                 lifecycle_version,
                 policy_revision: ns.schema.as_ref().map(|s| s.policy_revision),
-                evaluated_at: engine.clock.now_millis(),
+                evaluated_at: sample(),
             },
             bonuses: HashMap::new(),
         })

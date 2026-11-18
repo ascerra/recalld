@@ -1,0 +1,54 @@
+{
+  "false-default-false-list_tags.json": {
+    "sha256": "bedef8dce95f2234df1515f1a734c71eb9d00003bbe0e6a98e8bf22d6bda0680",
+    "matchesParent190": true
+  },
+  "true-default-true-list_tags.json": {
+    "sha256": "239d29a9d276793b26927d28fe1a5b4af9781db0248b21699b4bb8dabfccc4f2",
+    "matchesParent190": true
+  },
+  "false-Project-false-list_tags.json": {
+    "sha256": "786f1e141d78e3ba502b6834ea518610c2864d0f34f8c4a71079a5d75c50097e",
+    "matchesParent190": true
+  },
+  "true-Project-false-namespace_stats.json": {
+    "sha256": "c92054f351e0436fb381fcc5e261cde3db73f35aa133d00389e50a18667c7416",
+    "matchesParent190": true
+  },
+  "false-default-false-namespace_stats.json": {
+    "sha256": "09c4552b3732b109c59856a27faa07f1f40a7ced967298254e1a0b455032fd67",
+    "matchesParent190": true
+  },
+  "false-Project-false-namespace_stats.json": {
+    "sha256": "c92054f351e0436fb381fcc5e261cde3db73f35aa133d00389e50a18667c7416",
+    "matchesParent190": true
+  },
+  "true-default-false-namespace_stats.json": {
+    "sha256": "09c4552b3732b109c59856a27faa07f1f40a7ced967298254e1a0b455032fd67",
+    "matchesParent190": true
+  },
+  "false-default-true-list_tags.json": {
+    "sha256": "239d29a9d276793b26927d28fe1a5b4af9781db0248b21699b4bb8dabfccc4f2",
+    "matchesParent190": true
+  },
+  "http-empty-namespace_stats.json": {
+    "sha256": "76eafda8e2d608bec38cdeaa3ac6af0a144777beac75d9e2e5d17c37115e9cdc",
+    "matchesParent190": true
+  },
+  "true-Project-true-list_tags.json": {
+    "sha256": "239d29a9d276793b26927d28fe1a5b4af9781db0248b21699b4bb8dabfccc4f2",
+    "matchesParent190": true
+  },
+  "true-default-false-list_tags.json": {
+    "sha256": "bedef8dce95f2234df1515f1a734c71eb9d00003bbe0e6a98e8bf22d6bda0680",
+    "matchesParent190": true
+  },
+  "true-Project-false-list_tags.json": {
+    "sha256": "786f1e141d78e3ba502b6834ea518610c2864d0f34f8c4a71079a5d75c50097e",
+    "matchesParent190": true
+  },
+  "false-Project-true-list_tags.json": {
+    "sha256": "239d29a9d276793b26927d28fe1a5b4af9781db0248b21699b4bb8dabfccc4f2",
+    "matchesParent190": true
+  }
+}
