@@ -1190,6 +1190,28 @@ mod tests {
         config
     }
 
+    // Commit canonical deletion only: callers deliberately test the dirty derived window.
+    fn tombstone_without_completion(system: &Recalld, id: crate::model::MemoryId) {
+        use crate::storage::control::{MutationContext, MutationScope};
+        let policy = system.query_engine.native_policy_inputs();
+        let mut engine = system.storage.write().unwrap();
+        let namespace = NamespaceId::new(engine.get_record(id).unwrap().unwrap().namespace_id);
+        let intent = engine
+            .meta_store()
+            .capture_native_tombstone(id, Some(namespace), &policy)
+            .unwrap();
+        let context = MutationContext {
+            store_id: Some(engine.control_state().unwrap().store_id),
+            scope: MutationScope::Namespace(namespace),
+            idempotency_key: Some(format!("completion-test-{id}")),
+            expected_generation: None,
+            contract_version: 2,
+        };
+        engine
+            .tombstone_native_record(&context, &intent, &policy, system.clock.as_ref(), None)
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn effects_block_cached_queries_and_reopen_rebuilds_deleted_fts_rows() {
         let fx = Fixture::new();
@@ -1209,7 +1231,7 @@ mod tests {
             .cache
             .insert(dead, crate::model::CachedRecord::from(&record))
             .await;
-        system.storage.write().unwrap().delete_memory(dead).unwrap();
+        tombstone_without_completion(&system, dead);
         assert!(
             system.query_engine.get_memory(dead).await.is_err(),
             "cached deleted record must not bypass admission"
@@ -1315,8 +1337,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_mcp_cached_consumers_block_then_recover_online() {
-        use crate::mcp::bridge::{SearchPipeline, StorageEngine as McpStorage};
-        use crate::mcp::bridge_adapters::{McpSearchAdapter, McpStorageAdapter};
+        use crate::mcp::bridge::SearchPipeline;
+        use crate::mcp::bridge_adapters::McpSearchAdapter;
         let fx = Fixture::new();
         let live = fx
             .insert_memory_with(crate::test_support::MemorySpec {
@@ -1334,17 +1356,31 @@ mod tests {
             system.graph.clone(),
             chrono_tz::UTC,
         );
-        let adapter = McpStorageAdapter::new(
-            system.storage.clone(),
-            system.cache.clone(),
-            system.embedding.clone(),
-            system.vector_index.clone(),
-            system.fts_index.clone(),
-            system.entity_index.clone(),
-            system.graph.clone(),
-            system.config.clone(),
-            chrono_tz::UTC,
-        );
+        let adapter = crate::mcp::bridge_adapters::direct_bridge(&system, "default".into()).storage;
+        async fn get_status(
+            adapter: &dyn crate::mcp::bridge::StorageEngine,
+            id: crate::model::MemoryId,
+        ) -> u16 {
+            let result = adapter
+                .get_api1(
+                    crate::serialization::get_api1::Request {
+                        id,
+                        namespace: Some("default".into()),
+                        record_access: false,
+                    },
+                    crate::daemon::protocol::MAX_MESSAGE_SIZE,
+                )
+                .await;
+            let crate::serialization::get_api1::Content::Point {
+                reply,
+                native: true,
+                ..
+            } = result.inner
+            else {
+                panic!("production bridge must admit native point reads");
+            };
+            reply.http_status
+        }
         let stale = crate::model::CachedRecord::from(
             &system
                 .storage
@@ -1355,15 +1391,15 @@ mod tests {
                 .unwrap(),
         );
         system.cache.insert(dead, stale.clone()).await;
-        system.storage.write().unwrap().delete_memory(dead).unwrap();
+        tombstone_without_completion(&system, dead);
         assert!(
             search
                 .find_similar(live, 5, None, true, true, None)
                 .await
                 .is_err()
         );
-        assert!(adapter.get_memory(dead, false, None).await.is_err());
-        assert!(adapter.get_memory(live, false, None).await.is_err());
+        assert_eq!(get_status(adapter.as_ref(), dead).await, 503);
+        assert_eq!(get_status(adapter.as_ref(), live).await, 503);
         system.complete_pending_effects().await.unwrap();
         system.cache.insert(dead, stale).await;
         assert!(
@@ -1374,20 +1410,8 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(
-            adapter
-                .get_memory(dead, false, None)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            adapter
-                .get_memory(live, false, None)
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert_eq!(get_status(adapter.as_ref(), dead).await, 404);
+        assert_eq!(get_status(adapter.as_ref(), live).await, 200);
         assert!(
             search
                 .find_similar(live, 5, None, true, true, None)
@@ -1404,7 +1428,7 @@ mod tests {
                 .await
                 .unwrap();
             let dead = system.storage.read().unwrap().scan_all().unwrap()[0].0;
-            system.storage.write().unwrap().delete_memory(dead).unwrap();
+            tombstone_without_completion(&system, dead);
             system.complete_pending_effects().await.unwrap();
             panic!("child did not exit at crash point");
         }
@@ -1424,12 +1448,17 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let receipt = {
-            let storage = RedbStorageEngine::open(dir.path()).unwrap();
+            let storage = RedbStorageEngine::open_native(dir.path()).unwrap();
             let pending = storage.meta_store().pending_effects().unwrap();
             assert_eq!(pending.len(), 1);
             assert!(pending[0].canonical_applied);
             pending[0].receipt.clone()
         };
+        assert!(matches!(
+            &receipt.outcome,
+            crate::storage::control::MutationOutcome::NativeMemoryTombstoned { transition }
+                if transition.memory_id == dead
+        ));
         let system = Recalld::new(offline_config(dir.path())).await.unwrap();
         assert!(
             system
@@ -1781,7 +1810,14 @@ mod tests {
              memory <id>' error the user saw"
         );
         let hits = index
-            .search(&[1.0, 0.0, 0.0, 0.0], 5, &SearchFilter::default())
+            .search(
+                &[1.0, 0.0, 0.0, 0.0],
+                5,
+                &SearchFilter {
+                    namespace_id: Some(ns()),
+                    ..Default::default()
+                },
+            )
             .expect("search");
         assert_eq!(hits.first().map(|h| h.id), Some(id));
     }

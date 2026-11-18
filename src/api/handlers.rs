@@ -2669,7 +2669,7 @@ mod lifecycle_error_tests {
 
 #[cfg(test)]
 #[path = "validation_tests.rs"]
-mod validation_tests;
+pub(crate) mod validation_tests;
 
 async fn check_read_admission(state: &AppState, stamp: u64) -> Result<(), AppError> {
     if state.storage.effects_stamp().await? != stamp {

@@ -32,6 +32,18 @@ fn fixture_with_phase(
     peer: bool,
     ghost: bool,
 ) -> (std::path::PathBuf, NamespaceId, MemoryId, Option<MemoryId>) {
+    fixture_with_binding(root, peer, ghost, false)
+}
+fn bound_fixture(root: &Path) -> (std::path::PathBuf, NamespaceId, MemoryId) {
+    let (path, ns, id, _) = fixture_with_binding(root, false, false, true);
+    (path, ns, id)
+}
+fn fixture_with_binding(
+    root: &Path,
+    peer: bool,
+    ghost: bool,
+    bound: bool,
+) -> (std::path::PathBuf, NamespaceId, MemoryId, Option<MemoryId>) {
     let old = root.join("old");
     let new = root.join("native");
     let mut engine = RedbStorageEngine::open(&old).unwrap();
@@ -114,7 +126,19 @@ fn fixture_with_phase(
         &MigrationOptions {
             migration_now: 2000,
             expected_source: inspect_schema(&old).unwrap().control.generation_ref(),
-            attestations: vec![],
+            attestations: if bound {
+                vec![super::schema_migration::ProfileAttestationInput {
+                    namespace_id: id,
+                    namespace_name: "default".into(),
+                    descriptor: crate::embedding::runtime::native_profile(
+                        crate::model::schema::ProviderKind::Ollama,
+                        "inherited-policy-fixture",
+                        4,
+                    ),
+                }]
+            } else {
+                vec![]
+            },
         },
     )
     .unwrap();
@@ -148,7 +172,7 @@ fn session(path: &Path, multiplier: f64) -> NativeLifecycleSession {
 #[test]
 fn inherited_policy_unknown_requires_real_adoption_replay_before_cas_and_restart() {
     let root = tempfile::tempdir().unwrap();
-    let (path, ns, id) = fixture(root.path());
+    let (path, ns, id) = bound_fixture(root.path());
     let owner = session(&path, 1.);
     let before = owner.engine.get_record(id).unwrap().unwrap();
     assert!(
@@ -204,7 +228,7 @@ fn inherited_policy_unknown_requires_real_adoption_replay_before_cas_and_restart
 #[test]
 fn inherited_policy_keyed_noop_no_row_churn_and_some_to_none_requires_new_adoption() {
     let root = tempfile::tempdir().unwrap();
-    let (path, ns, id) = fixture(root.path());
+    let (path, ns, id) = bound_fixture(root.path());
     adopt_inherited_decay(&path, &request(&path, ns, 1., "initial")).unwrap();
     let snapshot = OfflineSnapshot::open(&path).unwrap();
     let before = snapshot.record(id).unwrap().unwrap().record;
@@ -539,12 +563,25 @@ fn inherited_policy_unknown_structural_edge_preserves_strength_and_final_guards(
         owner.put_graph_prepared(&ctx, &intent).is_err(),
         "stale policy must fail"
     );
-    assert!(
-        owner
-            .metadata()
-            .capture_feedback(a, Some(ns), 3, &NativePolicyInputs::default())
-            .is_err()
-    );
+    // UnknownLegacy keeps runtime-compatible feedback without inventing adoption.
+    let before_capture = owner.metadata().control_state().unwrap();
+    owner
+        .metadata()
+        .capture_feedback(a, Some(ns), 3, &NativePolicyInputs::default())
+        .unwrap();
+    assert_eq!(owner.metadata().control_state().unwrap(), before_capture);
+    let schema = owner
+        .engine
+        .get_namespace(ns)
+        .unwrap()
+        .unwrap()
+        .schema
+        .unwrap();
+    assert!(schema.inherited_decay.is_none());
+    assert!(matches!(
+        schema.embedding_binding,
+        crate::model::schema::EmbeddingBinding::UnknownLegacy
+    ));
     drop(owner);
     inspect_schema(&path).unwrap();
 }

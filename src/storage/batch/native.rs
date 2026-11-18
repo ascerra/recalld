@@ -191,6 +191,7 @@ pub(crate) fn resolve_store_profile(
     let mut resolved = input.clone();
     if input.insert.memory.embedding.is_some()
         && supplied_profile_id.is_none()
+        && input.insert.embedding_profile.is_none()
         && defaults
             .native
             .as_ref()

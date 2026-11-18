@@ -89,6 +89,18 @@ fn logical_bytes(engine: &RedbStorageEngine) -> std::collections::BTreeMap<Memor
 #[test]
 fn certified_compaction_mixed_namespaces_preserve_bits_documents_and_exact_owner_without_query_scans()
  {
+    fn assert_unknown_snapshot(engine: &RedbStorageEngine) {
+        let snapshot = engine
+            .canonical_vector_snapshot("uncertified", None, limits())
+            .unwrap();
+        assert_eq!(snapshot.rows.len(), 1);
+        let schema = snapshot.namespace.schema.unwrap();
+        assert!(matches!(
+            schema.embedding_binding,
+            crate::model::schema::EmbeddingBinding::UnknownLegacy
+        ));
+        assert!(schema.vector_certification.is_none());
+    }
     let root = tempfile::tempdir().unwrap();
     let d = certified_fixture_with_seed(root.path(), |engine| {
         let mut ns = NamespaceConfig::default_namespace(0);
@@ -142,11 +154,7 @@ fn certified_compaction_mixed_namespaces_preserve_bits_documents_and_exact_owner
             control::ValidationWork::default()
         );
         // Physical relocation cannot certify an unrelated old namespace.
-        assert!(
-            engine
-                .canonical_vector_snapshot("uncertified", None, limits())
-                .is_err()
-        );
+        assert_unknown_snapshot(&engine);
     }
     drop(engine);
     let old_receipts = mixed_history::receipts(&d.path);
@@ -163,11 +171,7 @@ fn certified_compaction_mixed_namespaces_preserve_bits_documents_and_exact_owner
     engine
         .canonical_vector_snapshot("native", None, limits())
         .unwrap();
-    assert!(
-        engine
-            .canonical_vector_snapshot("uncertified", None, limits())
-            .is_err()
-    );
+    assert_unknown_snapshot(&engine);
 }
 
 #[test]
