@@ -1,7 +1,0 @@
-{
-  "before": "3ec4ff51289e23bf217afbd1efa40a067d74e4fd",
-  "after": "0f329f836033a23aa09cd9ea514d2652a3645983",
-  "only_changed_path": "tests/vector_certification_cli.rs",
-  "patch_sha256": "a5064196401845195acb3487e404ffcbf280acc66dfec02c8ef047f9d31e76eb",
-  "production_cargo_examples_benches_unchanged": true
-}

@@ -1,1 +1,0 @@
-Compile failure only; no new test executable ran. Fixture is_permastore field used u8 where shared planner requires bool. Also removing unused mut on outer storage guard.

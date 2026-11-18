@@ -1,9 +1,0 @@
-{
-  "base": "441e7b939de4c45e940c9ffdb99d042eeb831bf3",
-  "binary": ".test-scratch/target/debug/deps/recalld-e423ca3d07310388",
-  "sha256": "e2ec66c47a2f8dc01f398c2e18f96f8521534fa82bec3f6f34d322462f3f7d90",
-  "size": 371112120,
-  "mtime_ns": 1794681715030926929,
-  "result": "0 passed 1 failed 940 filtered: revision forged historical peer accepted",
-  "source_files": 212
-}

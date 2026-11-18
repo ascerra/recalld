@@ -1,8 +1,0 @@
-{
-  "base": "821e991a9f459a45fa2d000e066b8bbe73288cc3",
-  "source_manifest_sha256": "9f525548a615b35596570d0a1e2ae86725f6bab7aff27902a488ce2048176c07",
-  "source_pre_post_identical": true,
-  "binary_sha256": "851f82d0e4840ac6d2a667a5101a0006cedcd0d2779b749a3740cd4db85895eb",
-  "container_exit": 0,
-  "probe_exit_codes": "similar_baseline_phase_before_cap 101\nsimilar_baseline_current_terminal 101\nsimilar_baseline_explicit_cross_scope_is_ignored 101\n"
-}

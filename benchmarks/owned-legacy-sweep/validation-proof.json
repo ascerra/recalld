@@ -1,9 +1,0 @@
-{
-  "sourceCommit": "42d39a4e80996706fdd1c74a24b2cb8df7b17382",
-  "sourceFilesReverified": 232,
-  "sameSourceNoSwitch": true,
-  "publicBinarySha256": "bb927a1ade2489994712ce411029777203bcb6b31530bc2bfdf4737169e90fcc",
-  "privateExecutedBinarySha256": "7494ae0802f74de85eba5dd1df5bfce4daacc6ede4bc735ec5f4397f66045f81",
-  "privateControlsBinarySha256": "7494ae0802f74de85eba5dd1df5bfce4daacc6ede4bc735ec5f4397f66045f81",
-  "sourceParent": "0b50168b64ad353e4f7a53c6459c270fe8500070"
-}

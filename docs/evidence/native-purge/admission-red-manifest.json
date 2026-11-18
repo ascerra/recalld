@@ -1,8 +1,0 @@
-{
-  "source": "8e7d99018af04a1731d6d9fb9c49433f602a1972",
-  "tree": "25dc02ee063ea7ece97fc287339223c8ecc6ef29",
-  "result": "8 passed; 3 failed; 19.26s",
-  "exit_code": 101,
-  "log_sha256": "3d0e76a9730f8641986d8bbe5ba1e1c52288828a0ab305840b338aeee1858613",
-  "binary_sha256": "036a1d006d4fee2c2ce89c818dbed370ba943b5efe2025dcb031e978fc83118b"
-}

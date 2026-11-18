@@ -1,4 +1,0 @@
-Successful clippy summary; raw log SHA256 274620ef554450e620551976daae39854f46c6448f4da669b925cbb0a9234c5c
-
-warning: `recalld` (lib test) generated 1114 warnings (995 duplicates) (run `cargo clippy --fix --lib -p recalld --tests` to apply 11 suggestions)
-    Finished `dev` profile [unoptimized] target(s) in 42.04s

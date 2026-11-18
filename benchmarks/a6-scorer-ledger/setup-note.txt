@@ -1,1 +1,0 @@
-Host cargo fmt invocation: zsh: command not found: cargo. No host compilation occurred. Formatting subsequently succeeded in the pinned offline Docker image. Initial host Python checks: 11 passed; exact log retained.

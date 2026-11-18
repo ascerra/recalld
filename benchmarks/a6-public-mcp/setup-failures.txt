@@ -1,3 +1,0 @@
-First frozen6377a88: example compilation failed at profile.profile_id()? because String does not implement StdError; complete compiler output is in failed-6377a88.tgz. No episode ran.
-Targeted retry invocation initially mistyped prior target path as /var/folders/lg/pd7snpz15137ng972hqc0000gp/T/recalld-public-mcp-zwoern3z/target; validation rejected it before scratch/build/store creation: ValueError: build cache must be a prior private recalld target. Correct path was used without code changes.
-Join diff --check reported inherited raw-log/patch whitespace; those artifacts remain byte-for-byte unchanged. Runtime-source whitespace checks passed.

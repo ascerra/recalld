@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/work/source/scripts/public-mcp-evaluation.py", line 427, in <module>
-    main()
-  File "/work/source/scripts/public-mcp-evaluation.py", line 423, in main
-    {"prepare": prepare, "run": run_episode, "host": host}[args.mode](args)
-  File "/work/source/scripts/public-mcp-evaluation.py", line 310, in run_episode
-    raise RuntimeError(runtime_failure)
-RuntimeError: actor exited 1 at delivery 0

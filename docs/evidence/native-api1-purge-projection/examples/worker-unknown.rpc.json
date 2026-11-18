@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 17,
-  "error": {
-    "code": -32006,
-    "message": "{\"commitState\":\"unknown\",\"error\":\"COMMIT_OUTCOME_UNKNOWN\",\"message\":\"Purge worker outcome is unknown; no receipt is available. Reconcile before further deletion.\",\"operationId\":null}"
-  }
-}

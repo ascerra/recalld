@@ -1,8 +1,0 @@
-{
-  "sha256": {
-    "target/debug/deps/recalld-7025a4141187b374": "590e9a2dcabfdf25b5208677f0b174ad67a1df161deaeb2f41e7990c4c3c9828",
-    "target/debug/examples/owned_evaluator": "651150d31f244eeded2bad2221d33d30114479644dc71d47d05b182e4bf6af7a",
-    "target/debug/recalld-schema": "6c5964a4e273038b8747279f02b87acc6ebd608d7bd85a1734bfe7c5ce7d8368"
-  },
-  "sourceCommit": "535605d3c1ecc38f915dbe8daccbae9d5a0f0d0b"
-}

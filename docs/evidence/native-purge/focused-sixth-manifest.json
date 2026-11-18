@@ -1,9 +1,0 @@
-{
-  "source": "d3bc833ab1840b34c09f6714239926cb8c3bac0e",
-  "tree": "cf314f2ef06708799be1c1dc293f2c5fe076ad7d",
-  "run": "focused-sixth.log",
-  "result": "8 passed; 0 failed; 952 filtered; 17.18s",
-  "log_sha256": "3d123f57af0fdbb6d193c56cbb5b7ba7255caad814780b294834c109e8a95824",
-  "binary": "/tmp/recalld-native-purge-validation/target/debug/deps/recalld-b2844bb1c4a63074",
-  "binary_sha256": "2c083e0a582559f05e75268cc10859d509516faa3d256be7774f11c0b1ddb47b"
-}

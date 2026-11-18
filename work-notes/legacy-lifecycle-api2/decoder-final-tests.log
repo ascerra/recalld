@@ -1,8 +1,0 @@
-
-running 3 tests
-test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_committed_requires_receipt_but_unknown_can_keep_allocated_id ... ok
-test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_feedback_quality_binds_success_error_and_malformed_receipts ... ok
-test storage::metadata::native_records::tests::readers::native_lifecycle_wire::decoder_native_namespace_binds_success_error_and_malformed_receipts ... ok
-
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 2.54s
-

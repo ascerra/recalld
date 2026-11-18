@@ -1,7 +1,0 @@
-{
-  "source": "37f260457d63ed27c41fcafce1e9b3af06c57f99",
-  "tree": "89f5298e2b0f330640eab9a511723e5aa67055a9",
-  "exit_code": 101,
-  "result": "test compile failed: missing GenerationRef import; no test executable produced",
-  "log_sha256": "f4b0599190a18de0f3542756b6eefd0833cdb163e094b1e8554bb70465d3d671"
-}

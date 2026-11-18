@@ -1,1 +1,0 @@
-Compilation-only failure: existing read-view fixture constructed the old unit RejectExposure rather than new capability-bearing struct. No new test executable ran. Corrected fixture explicitly retains native_writer_available=false.

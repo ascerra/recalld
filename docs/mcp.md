@@ -34,13 +34,13 @@ from current-operation commitment: point-get retains original JSON strings;
 single/batch error carriers retain their actual typed evidence fields. Generic
 retained receipts describe all supported typed outcomes, without asserting that
 canonical proof validation ran. Declared compatibility `Value` fields remain
-extensible. See [record output boundaries](implementation/live-record-schemas.md).
+extensible.
 
 Delete-namespace structured failures retain full start/step/final purge evidence.
 An unknown operation remains unknown even when earlier progress has a receipt;
 missing physical metrics and readiness are never invented. Create-namespace still
 has no output schema because its legacy partial-error path accepts arbitrary JSON
-objects. See [catalog boundaries](implementation/live-delete-schema.md).
+objects.
 
 ## Setup
 
@@ -196,7 +196,7 @@ Before this limit existed there was no per-element bound at all: an over-long en
 
 Legacy writes require nonempty structured labels that the prefixed tag codec can retain: ASCII letters/digits and `/ _ . : -`, within the limits above. Unrepresentable labels and invalid raw tags are rejected with field/index errors before embedding or allocation; they are not silently dropped. Native UTF-8 write admission remains a separate, gated feature.
 
-Canonical reader results preserve already-persisted structured metadata. Existing `entities`, `topics`, and `emotions` arrays retain their types. An optional `labels` object carries exact canonical arrays and their persisted `provenance` (`native_v2` or `legacy_retained_only`); it is omitted for legacy physical records. Empty canonical arrays are authoritative and do not fall back to retained tags. This additive read representation does not advertise native serving readiness or recover labels already lost by legacy writes. See [consumer scope and fixture provenance](implementation/canonical-label-consumers.md).
+Canonical reader results preserve already-persisted structured metadata. Existing `entities`, `topics`, and `emotions` arrays retain their types. An optional `labels` object carries exact canonical arrays and their persisted `provenance` (`native_v2` or `legacy_retained_only`); it is omitted for legacy physical records. Empty canonical arrays are authoritative and do not fall back to retained tags. This additive read representation does not advertise native serving readiness or recover labels already lost by legacy writes.
 
 > **Known limitation:** `entities`, `topics`, and `emotions` are converted into `entity/…`, `topic/…`, and `emotion/…` tags *after* validation runs, and the `tags` limit of 64 is checked against the tags you supplied. A memory that supplies 64 tags plus 32 entities, 32 topics, and 32 emotions can therefore end up with up to 160 tags stored. This is accepted today and is not treated as an error.
 
@@ -1414,5 +1414,4 @@ same JSON in `structuredContent`; legacy-era results and array/scalar payloads
 retain text-only encoding. No v2 readiness or public retry/CAS support is advertised.
 
 REST uses `Recalld-Contract-Version: 1` or omission; other values and duplicate
-version headers fail before handler work. See
-[wire preparation and remaining prerequisites](implementation/contract-wire-prep.md).
+version headers fail before handler work.

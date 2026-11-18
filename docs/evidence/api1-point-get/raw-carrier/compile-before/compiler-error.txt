@@ -1,8 +1,0 @@
-error: invalid format string: unmatched `}` found
-   --> src/serialization/api1_raw_get_budget_probe.rs:210:62
-    |
-210 |         format!("{{\"receivedEvidence\":{{\"receipt\":{raw}}}}"),
-    |                                                              ^ unmatched `}` in format string
-    |
-    = note: if you intended to print `}`, you can escape it using `}}`
-

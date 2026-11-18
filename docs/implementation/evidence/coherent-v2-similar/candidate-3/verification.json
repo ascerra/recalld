@@ -1,9 +1,0 @@
-{
-  "manifest_sha256": "fbb89f6ab18fcbd81b30071253532e9b267a5e0bfbbee640492005e870bed314",
-  "binary_sha256": "d531c7294e2c3024e1184ba8b6d2e090a8e01c3509074a44ef373f6d48a74532",
-  "source_pre_post_identical": true,
-  "focused_passed": 9,
-  "focused_failed": 1,
-  "failure": "chain65 examination expected64 actual65; HopLimit behavior passed",
-  "exit_code": 101
-}
