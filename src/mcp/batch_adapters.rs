@@ -128,9 +128,9 @@ impl McpStorageAdapter {
     ) -> impl std::future::Future<Output = Result<BatchOutcome, StoreWriteError>> + '_ {
         let legacy_trace = input.mutation_version == 1;
         async move {
-            // Construct the large body in its pinned slot instead of capturing
-            // an already-constructed copy in the outer future.
-            let mut run = std::pin::pin!(async move {
+            // Keep the large batch state off the nested transport futures' stack.
+            // Pinning alone leaves it inline and can overflow a default test stack.
+            let mut run = Box::pin(async move {
                 performance::event!(legacy_trace;
                     kind = "batch_input",
                     operation = match input.kind {
