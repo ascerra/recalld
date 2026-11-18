@@ -300,11 +300,54 @@ async fn maintenance_unknown_commit_recovers_same_receipt() {
     );
 }
 
+fn full_sweep_failure_receipt(
+    error: Box<dyn std::error::Error + Send + Sync>,
+) -> Box<crate::storage::control::WriteReceipt> {
+    let failure = error
+        .downcast::<crate::decay::sweep::evidence::SweepFailure>()
+        .expect("public bounded sweep returns typed failure evidence");
+    let body: serde_json::Value =
+        serde_json::from_slice(&serde_json::to_vec(&failure).unwrap()).unwrap();
+    assert_eq!(body["commitState"], "committed");
+    assert_eq!(body["error"], "INDEX_NOT_READY");
+    assert_eq!(body["ready"], false);
+    assert_eq!(body["complete"], false);
+    assert!(body["operationId"].is_null());
+    let receipt: crate::storage::control::WriteReceipt =
+        serde_json::from_value(body["receipt"].clone()).unwrap();
+    let receipts: Vec<crate::storage::control::WriteReceipt> =
+        serde_json::from_value(body["receipts"].clone()).unwrap();
+    assert_eq!(receipts, vec![receipt.clone()]);
+    Box::new(receipt)
+}
+
 #[tokio::test]
 async fn actual_manual_sweep_awaits_publication_and_keeps_receipt_on_failure() {
     use crate::api::FsrsEngine as _;
     let f = Fixture::new();
     let id = f.insert_memory().await;
+    // Exercise postcommit failure, not refusal of the initial unpublished views.
+    let baseline = f.storage.read().unwrap().control_state().unwrap();
+    f.completion().rebuild_all().await.unwrap();
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), baseline);
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
     *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM + 1);
     let adapter = crate::api::adapters::FsrsEngineAdapter::new(
         f.storage.clone(),
@@ -320,10 +363,20 @@ async fn actual_manual_sweep_awaits_publication_and_keeps_receipt_on_failure() {
     )
     .with_clock(std::sync::Arc::new(crate::time::ManualClock::new(i64::MAX)));
     let error = adapter.trigger_sweep(None).await.unwrap_err();
-    let error = error.downcast::<StorageError>().unwrap();
-    let StorageError::CommittedMutation { receipt, .. } = *error else {
-        panic!("{error}")
-    };
+    let receipt = full_sweep_failure_receipt(error);
+    assert_eq!(
+        receipt.committed_generation,
+        baseline.committed_generation.next().unwrap()
+    );
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+        receipt.committed_generation
+    );
     assert!(
         matches!(receipt.outcome, MutationOutcome::LifecycleMaterialized { memory_id, .. } if memory_id == id)
     );
@@ -336,6 +389,16 @@ async fn actual_manual_sweep_awaits_publication_and_keeps_receipt_on_failure() {
             .pending_effects()
             .unwrap()
             .is_empty()
+    );
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()[0]
+            .receipt,
+        *receipt
     );
     *f.vector_index.write().await = crate::search::VectorIndexOwner::uniform(DIM);
     let completion = crate::derived_completion::DerivedCompletion {
@@ -593,15 +656,8 @@ async fn actual_manual_sweep_preserves_canonical_application_failure_receipt() {
             f.fts_index.clone(),
             f.entity_index.clone(),
         );
-        let error = adapter
-            .trigger_sweep(Some(i64::MAX))
-            .await
-            .unwrap_err()
-            .downcast::<StorageError>()
-            .unwrap();
-        let StorageError::CommittedMutation { receipt, .. } = *error else {
-            panic!("{error}")
-        };
+        let error = adapter.trigger_sweep(Some(i64::MAX)).await.unwrap_err();
+        let receipt = full_sweep_failure_receipt(error);
         if phase == DecayPhase::Full {
             assert!(
                 matches!(receipt.outcome, MutationOutcome::LifecycleMaterialized { memory_id, .. } if memory_id == id)

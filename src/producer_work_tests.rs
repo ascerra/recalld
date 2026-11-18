@@ -392,6 +392,28 @@ async fn sweep_publication_failure_preserves_receipt_and_can_repair_without_reop
             ..MemorySpec::new(NamespaceId::new(1))
         })
         .await;
+    // Establish the healthy baseline before injecting the later publication fault.
+    let baseline = f.storage.read().unwrap().control_state().unwrap();
+    completion(&f).rebuild_all().await.unwrap();
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), baseline);
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .publication_state()
+            .unwrap()
+            .matches_canonical()
+    );
     *f.vector_index.write().await =
         crate::search::VectorIndexOwner::uniform(crate::test_support::DIM + 1);
     let adapter = crate::api::adapters::FsrsEngineAdapter::new(
@@ -415,8 +437,36 @@ async fn sweep_publication_failure_preserves_receipt_and_can_repair_without_reop
         .pending_effects()
         .unwrap();
     assert_eq!(pending.len(), 1);
-    assert!(
-        matches!(error.downcast_ref::<crate::storage::StorageError>(),Some(crate::storage::StorageError::CommittedMutation{receipt,..}) if receipt.operation_id==pending[0].receipt.operation_id)
+    let failure = error
+        .downcast_ref::<crate::decay::sweep::evidence::SweepFailure>()
+        .expect("public bounded sweep returns typed failure evidence");
+    let body: serde_json::Value =
+        serde_json::from_slice(&serde_json::to_vec(failure).unwrap()).unwrap();
+    assert_eq!(body["commitState"], "committed");
+    assert_eq!(body["error"], "INDEX_NOT_READY");
+    assert_eq!(body["ready"], false);
+    assert_eq!(body["complete"], false);
+    assert!(body["operationId"].is_null(), "no uncertain operation");
+    let receipts: Vec<crate::storage::control::WriteReceipt> =
+        serde_json::from_value(body["receipts"].clone()).unwrap();
+    assert_eq!(receipts, vec![pending[0].receipt.clone()]);
+    assert_eq!(
+        pending[0].receipt.committed_generation,
+        baseline.committed_generation.next().unwrap()
+    );
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .committed_generation,
+        pending[0].receipt.committed_generation
+    );
+    assert_eq!(
+        serde_json::from_value::<crate::storage::control::WriteReceipt>(body["receipt"].clone())
+            .unwrap(),
+        pending[0].receipt
     );
     assert!(f.record(dead).is_none());
     assert!(f.record(live).is_some());

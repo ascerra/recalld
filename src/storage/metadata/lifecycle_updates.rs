@@ -234,7 +234,35 @@ impl MetadataStore {
         decay_strength: f32,
         edges: &[crate::storage::PersistedEdge],
     ) -> Result<DecayMutationResult, StorageError> {
+        self.decay_with_effects_bounded(
+            guard,
+            ctx,
+            id,
+            expected,
+            namespace,
+            phase,
+            strength,
+            decay_strength,
+            edges,
+            None,
+        )
+    }
+
+    pub(crate) fn decay_with_effects_bounded(
+        &self,
+        guard: &MutationGuard<'_>,
+        ctx: &MutationContext,
+        id: MemoryId,
+        expected: &DiskRecord,
+        namespace: &NamespaceConfig,
+        phase: DecayPhase,
+        strength: f32,
+        decay_strength: f32,
+        edges: &[crate::storage::PersistedEdge],
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<DecayMutationResult, StorageError> {
         guard.check(self)?;
+        self.check_receipt_admission(admission)?;
         ctx.validate()?;
         if ctx.scope != MutationScope::Namespace(namespace.id) {
             return Err(StorageError::InvalidMutationContext(
@@ -274,7 +302,7 @@ impl MetadataStore {
             };
             return Ok(DecayMutationResult::Skipped(reason));
         };
-        self.finish_record_effects(
+        self.finish_record_effects_bounded(
             guard,
             tx,
             ctx,
@@ -289,6 +317,9 @@ impl MetadataStore {
                 after: &after,
             },
             None,
+            admission
+                .map(crate::storage::maintenance::ReceiptAdmission::limit)
+                .transpose()?,
         )
         .map(|result| DecayMutationResult::Committed(result.receipt))
     }

@@ -1,0 +1,90 @@
+
+BEFORE
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 44s
+running 1 test
+thread 'performance::tests::writes::batch::legacy_batch_actual_partial_stdio_requires_parent_and_child_facts' (1651) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--lib`
+
+AFTER
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 55s
+running 1 test
+test performance::tests::writes::batch::legacy_batch_actual_partial_stdio_requires_parent_and_child_facts ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1880 filtered out; finished in 0.54s
+
+RELATED
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.50s
+running 72 tests
+test daemon::client::store_capability_tests::api1_batch_lost_reply_reconnect_clears_independent_capability ... ok
+test daemon::client::store_capability_tests::api1_batch_capability_independent_selection_and_no_fallback ... ok
+test derived_completion::tests::accepted_insertion_and_transitive_publication_finish_after_admission_closes ... ok
+test derived_completion::tests::actual_background_ghost_sweep_completes_without_reopen ... ok
+test derived_completion::tests::actual_manual_sweep_completes_ghost_deletion ... ok
+test derived_completion::tests::actual_namespace_purge_returns_with_admission_open ... ok
+test derived_completion::tests::cancelled_accepted_action_leaves_unresolved_admission_without_mutation ... ok
+test derived_completion::tests::actual_rebuild_publishes_exact_views_after_effect_free_catalog_commit ... ok
+test derived_completion::tests::insertion_completion_returns_receipt_on_failure_then_retries_all_views ... ok
+test derived_completion::tests::entity_rebuild_online_completion_replaces_stale_namespace_postings ... ok
+test derived_completion::tests::online_completion_drains_store_publication_before_graph_lock ... ok
+test derived_completion::tests::online_completion_retries_failure_and_rejects_late_stale_cache_refill ... ok
+test derived_completion::tests::repeated_same_generation_rebuild_preserves_exact_fts_scores ... ok
+test derived_completion::tests::queued_purge_completion_resumes_children_and_acks_while_closing ... ok
+test mcp::bridge_adapters::batch_adapters::tests::actual_batch_concurrent_identical_requests_share_children_and_mutations ... ok
+test mcp::bridge_adapters::batch_adapters::tests::actual_batch_mixed_results_and_changed_default_or_original_bits_conflict ... ok
+test mcp::bridge_adapters::batch_adapters::tests::actual_mcp_retains_every_index_and_sets_error_on_committed_not_ready ... ok
+test mcp::bridge_adapters::batch_adapters::tests::batch_labels_historical_receipt_replays_but_old_pending_input_cannot_bypass_admission ... ok
+test mcp::bridge_adapters::batch_adapters::tests::actual_adapter_distinguishes_unknown_reservation_child_and_error_bookkeeping ... ok
+test mcp::bridge_adapters::batch_adapters::tests::batch_work_accepted_provider_and_graph_descendants_finish_during_close ... ok
+test mcp::bridge_adapters::batch_adapters::tests::batch_work_close_before_entry_rejects_before_reservation_or_provider ... ok
+test mcp::bridge_adapters::batch_adapters::tests::batch_work_cancelled_provider_stays_unresolved_and_reopen_keeps_payload_pending ... ok
+test mcp::bridge_adapters::batch_adapters::tests::batch_work_reserved_forget_finishes_with_accepted_parent_during_close ... ok
+test mcp::bridge_adapters::batch_adapters::tests::batch_work_terminal_errors_freeze_and_lifetime_scan_checks_each_manifest ... ok
+test mcp::bridge_adapters::batch_adapters::tests::committed_unready_child_keeps_current_receipt_and_replays_after_online_repair ... ok
+test mcp::bridge_adapters::batch_adapters::tests::provider_failure_stays_pending_and_committed_replay_skips_provider ... ok
+test mcp::bridge_adapters::batch_adapters::tests::single_provider_root_finishes_its_descendants_while_closing ... ok
+test mcp::bridge_adapters::batch_adapters::tests::supplied_batch_semantic_fields_validate_before_provider_or_payload_staging ... ok
+test performance::tests::writes::batch::legacy_batch_aborted_root_does_not_drain_queued_reservation ... ok
+test performance::tests::writes::batch::legacy_batch_actual_partial_stdio_requires_parent_and_child_facts ... ok
+test performance::tests::writes::batch::legacy_batch_all_invalid_is_parent_commit_not_child_work ... ok
+test performance::tests::writes::batch::legacy_batch_committed_unready_keeps_receipt_and_repairs_on_replay ... ok
+test performance::tests::writes::batch::legacy_batch_flush_failure_replays_inventory_without_fresh_work ... ok
+test performance::tests::writes::batch::legacy_batch_disabled_unsampled_and_selected_inherit_single_decision ... ok
+test performance::tests::writes::batch::legacy_batch_rejection_bookkeeping_and_resume_count_actual_attempts ... ok
+test serialization::batch_api1::tests::api1_batch_derived_compatibility_bound_counts_all_shape_fields ... ok
+test performance::tests::writes::batch::legacy_batch_raw_commit_success_and_caller_unknown_reconcile_only_after_reopen ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_actual_rpc_prework_frames_mode_and_remote ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_final_barrier_failure_keeps_receipts_and_repair_replays ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_fresh_budget_precedes_reservation_and_whole_projection_frames ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_generated_recipe_profile_errors_and_rest_null_controls ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_genuine_private_timestamp_history_replay ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_legacy_positive_shapes_and_explicit_profile_rejection ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_malformed_known_reply_preserves_receipts_and_unknown_ids ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_malformed_remote_evidence_never_claims_commit_or_counts ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_private_before_timestamp_rejection_export ... ignored, historical fixture generator: run only on recorded158 source
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_mixed_and_all_invalid_keep_every_index_and_no_false_rollback ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_projection_enforces_display_limits_keeps_full_receipt ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_public_mcp_native_unicode ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_public_rest_native_unicode_timestamp ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_real_remote_public_mcp_unicode_reopen ... ok
+test storage::metadata::native_records::tests::store_batches::wire::store_api1::batch_api1::api1_batch_remote_request_binding_keeps_only_matching_reservation_committed ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_actual_receipt_frames_obey_streamed_wire_bound ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_admission_survives_blocked_writers_and_competing_one_row_chunks ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_bounded_cancelled_completion_retains_worker_publication_lease ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_cancelled_completion_retains_worker_publication_lease ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_empty_cleanup_reports_observed_zero_and_directory_absence ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_foreign_pending_first_preserves_known_start_without_readback ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_full_start_and_child_errors_survive_actual_frames ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_historical_oversized_start_stays_private_and_name_reuse_is_fresh ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_lost_begin_has_no_invented_identity_or_receipt ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_lost_completion_preserves_start_without_invented_final ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_other_completion_wins_without_inventing_physical_metrics ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_oversized_profile_and_late_unrelated_namespace_refuse_immutably ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_race_actual_mcp_eras_remote_and_legacy_frames ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_retains_known_receipt_on_publication_failure ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_max_chunk_refuses_legacy_before_work_and_preserves_negotiated_receipt ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_single_target_high_peer_and_max_history_full_frame ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_structured_remote_validation_keeps_f32_bits_and_rejects_extras ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_success_counts_actual_orphan_fts_rows_and_directory ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_unknown_child_keeps_actual_reserved_id_and_known_start ... ok
+test storage::native_purge_tests::api1_consumer::native_api1_purge_unknown_outcomes_survive_actual_bounded_frames ... ok
+test result: ok. 71 passed; 0 failed; 1 ignored; 0 measured; 1809 filtered out; finished in 98.66s

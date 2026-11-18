@@ -1,0 +1,53 @@
+{
+  "base": "33865ca0d19599a13ba999d31a1ec736c89db233",
+  "runs": [
+    {
+      "run": "red",
+      "source": "3fe971870b930cbe50cb4122a9cb99e45f0778cd",
+      "source_file_count": 441,
+      "source_manifest_sha256": "f559a717d36b06ec27be4905e8acf92c165cdbe8626f03792c8b04bd9a15293b",
+      "source_verified_unchanged": true,
+      "status": [
+        "fmt 1",
+        "clean 0",
+        "compile 101"
+      ],
+      "logs": {
+        "clean.log": "c2448e605949d657ad08fa5b9aee3cfbb1b047dd030fdb6dbff78ffad370e547",
+        "compile.log": "be509ecf5622b9c6934ab04b8d0da65b2eebb87fde6de7c1000ee46b1d588477",
+        "fmt.log": "8dc115bc36255ce26be2e7f12946e8d25803d96c5e0a617d9d2d9b4df1385f43"
+      }
+    },
+    {
+      "run": "red2",
+      "source": "2e3cdc25a8b26014b3e3b320a0340912872def15",
+      "source_file_count": 441,
+      "source_manifest_sha256": "1aa5a0dccb002934e73b86ef5bb2c512b88a7415679f720f087b5c9c9faa90d0",
+      "source_verified_unchanged": true,
+      "status": [
+        "fmt 0",
+        "clean 0",
+        "compile 0",
+        "http_sweep_first_lost_ack_retains_typed_unknown 101",
+        "http_sweep_later_lost_ack_retains_prior_receipt_and_typed_unknown 101",
+        "http_sweep_known_publication_failure_retains_full_receipt 0",
+        "http_sweep_override_rejects_before_armed_commit_hook 0"
+      ],
+      "logs": {
+        "clean.log": "92a997771c531fbbd424c2f39dc4524e98c642997ac0835352ca4ecc90ed4fc6",
+        "compile.log": "e6cac54cbd6bb4dc168d7969a22e15f455d891a17f9adc307de97f1782aa8aac",
+        "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "http_sweep_first_lost_ack_retains_typed_unknown.log": "55454417abe3addd7396f03e174328a96a703958e68a7fce1fea613f5f8fbe31",
+        "http_sweep_known_publication_failure_retains_full_receipt.log": "f1889b380b2a3a9a85dae2a7a5c43d1df9adc2b7bf831409607a8091847c31a1",
+        "http_sweep_later_lost_ack_retains_prior_receipt_and_typed_unknown.log": "f8d908d7d6050348c9ee8c36fa286c4f2d4d614091d58cc36b915c41c56f14e2",
+        "http_sweep_override_rejects_before_armed_commit_hook.log": "511c26a1982a0d3102ec4df6e81c91592c939e4e66a5b5030266b47f83d3e6a4"
+      },
+      "executable": {
+        "sha256": "901ca7c0a5aec929b0a83dd55dfc075d636f3a6a5cb10613cc9a5c91f9ffb31c",
+        "size": 570874384,
+        "mtime_ns": 1794853136580390645,
+        "original_stat": "570874384 1794853135 /target/debug/deps/recalld-a6cc1f284a79d699\n570874384 1794853136 /evidence/recalld-test\n"
+      }
+    }
+  ]
+}

@@ -1079,6 +1079,8 @@ async fn scope_assertions_similarity_uses_canonical_source_scope_with_stale_cach
 
 #[path = "sweep_clock_tests.rs"]
 mod sweep_clock;
+#[path = "sweep_failure_tests.rs"]
+mod sweep_failure;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn performance_sampling_actual_http_and_mcp_share_root_decision_and_keep_bytes() {
     use crate::search::VectorIndex;

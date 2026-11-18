@@ -336,22 +336,58 @@ impl DerivedCompletion {
         parent: Option<&WorkTicket>,
         rebuild_all: bool,
     ) -> Result<(), StorageError> {
-        self.complete_observing(parent, rebuild_all, None)
+        self.complete_observing_bounded(parent, rebuild_all, None, None)
             .await
             .map(|_| ())
             .map_err(CompletionFailure::into_storage)
     }
 
-    async fn complete_observing(
+    pub(crate) async fn complete_with_admission(
+        &self,
+        parent: Option<&WorkTicket>,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+    ) -> Result<(), StorageError> {
+        self.complete_observing_bounded(parent, false, None, admission.cloned())
+            .await
+            .map(|_| ())
+            .map_err(|failure| match failure {
+                CompletionFailure::WorkerUnknown if admission.is_some() => {
+                    StorageError::WorkerOutcomeUnknown("maintenance completion worker lost".into())
+                }
+                failure => failure.into_storage(),
+            })
+    }
+
+    async fn complete_observing_bounded(
         &self,
         parent: Option<&WorkTicket>,
         rebuild_all: bool,
         mut purge: Option<crate::storage::purge::PurgeCleanupObservation>,
+        admission: Option<crate::storage::maintenance::ReceiptAdmission>,
     ) -> Result<PurgePhysicalObservation, CompletionFailure> {
         crate::performance::measure("derived.complete", true, async {
             let work = self.accept_work(parent)?;
             self.cache.bind_storage(&self.storage);
             let gate = publication_gate(&self.storage).await?;
+            #[cfg(test)]
+            if admission
+                .as_ref()
+                .is_some_and(|a| a.snapshot().is_ok_and(|s| !s.1.is_empty()))
+            {
+                let pause = self
+                    .storage
+                    .read()
+                    .unwrap()
+                    .meta_store()
+                    .bounded_completion_pause
+                    .lock()
+                    .unwrap()
+                    .take();
+                if let Some((entered, release)) = pause {
+                    entered.send(()).unwrap();
+                    release.await.unwrap();
+                }
+            }
             let wait = crate::performance::Timer::new("derived.publication.wait");
             let _publication = gate.write_owned().await;
             wait.complete();
@@ -387,8 +423,33 @@ impl DerivedCompletion {
                     wait.complete();
                     let mut storage =
                         crate::performance::Hold::new("derived.storage.write.hold", storage);
+                    #[cfg(test)]
+                    if admission.is_some()
+                        && storage
+                            .meta_store()
+                            .bounded_completion_failure_nth
+                            .fetch_update(
+                                std::sync::atomic::Ordering::SeqCst,
+                                std::sync::atomic::Ordering::SeqCst,
+                                |n| n.checked_sub(1),
+                            )
+                            == Ok(1)
+                    {
+                        panic!("injected bounded completion worker loss");
+                    }
                     let mut observations = PurgePhysicalObservation::default();
                     let result = (|| {
+                        // Bounded sweeps never consume another producer's work.
+                        // This is after the exclusive publication AND engine guards,
+                        // before FTS removal, purge resume, early noop or ACK.
+                        if admission.is_some() {
+                            if purge.is_some() {
+                                return Err(StorageError::MaintenanceDependencyUnavailable);
+                            }
+                            storage
+                                .meta_store()
+                                .check_receipt_admission(admission.as_ref())?;
+                        }
                         if let Some(target) = &purge {
                             let current = storage.lookup_namespace_purge(
                                 target.store_id,
@@ -408,7 +469,9 @@ impl DerivedCompletion {
                                 );
                             }
                         }
-                        storage.resume_pending_purges_observed(Some(&child), purge.as_mut())?;
+                        if admission.is_none() {
+                            storage.resume_pending_purges_observed(Some(&child), purge.as_mut())?;
+                        }
                         #[cfg(test)]
                         if purge.is_some()
                             && storage
@@ -595,10 +658,12 @@ impl DerivedCompletion {
                                 );
                             }
                             let ack = crate::performance::Timer::new("derived.effects_ack");
-                            let result = storage.meta_store().acknowledge_rebuilt_effects_at(
-                                publication.canonical,
-                                Some(&child),
-                            );
+                            let result =
+                                storage.meta_store().acknowledge_rebuilt_effects_at_bounded(
+                                    publication.canonical,
+                                    Some(&child),
+                                    admission.as_ref(),
+                                );
                             crate::performance::event!(
                                 kind = "derived_ack",
                                 success = result.is_ok(),
