@@ -53,6 +53,31 @@ impl Drop for MockProvider {
     }
 }
 
+fn directory_bytes(
+    root: &std::path::Path,
+) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    fn visit(
+        root: &std::path::Path,
+        path: &std::path::Path,
+        out: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) {
+        for item in std::fs::read_dir(path).unwrap() {
+            let path = item.unwrap().path();
+            if path.is_dir() {
+                visit(root, &path, out);
+            } else {
+                out.insert(
+                    path.strip_prefix(root).unwrap().into(),
+                    std::fs::read(path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut out = Default::default();
+    visit(root, root, &mut out);
+    out
+}
+
 fn released_fixture() -> (tempfile::TempDir, std::path::PathBuf, Value) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("released-db");
@@ -203,8 +228,15 @@ async fn released_v1_new_schema_query_write_restart_preserves_unknown_provenance
     let (_root, path, expected) = released_fixture();
     let mock = MockProvider::start().await;
     let cfg = config(&path, &mock);
+    let original_bytes = directory_bytes(&path);
     let system = Recalld::new(cfg.clone()).await.unwrap();
     assert_eq!(mock.calls(), 0, "upgrade must not reembed existing records");
+    let backup = std::fs::read_dir(_root.path())
+        .unwrap()
+        .map(|e| e.unwrap().path().join("backup"))
+        .find(|p| p.is_dir())
+        .unwrap();
+    assert_eq!(directory_bytes(&backup), original_bytes);
     assert_old_data(&system, &expected);
     let first: MemoryId =
         serde_json::from_value(expected["created"][0]["data"]["id"].clone()).unwrap();
@@ -332,6 +364,55 @@ async fn released_v1_new_schema_query_write_restart_preserves_unknown_provenance
         Some(EmbeddingOrigin::Supplied { profile_id: None }),
         "caller vector gained generator evidence"
     );
+    system.shutdown().await.unwrap();
+    let stream = _root.path().join("mixed.jsonl");
+    let imported = _root.path().join("imported");
+    let exported = crate::storage::logical_export::export_store(&path, &stream).unwrap();
+    assert_eq!(
+        crate::storage::logical_export::import_store(&stream, &imported).unwrap(),
+        exported
+    );
+    let archive = crate::backup::run_backup(
+        &cfg,
+        &_root.path().join("mixed.zip"),
+        Some(&imported),
+        false,
+    )
+    .await
+    .unwrap();
+    crate::backup::restore_from_backup(crate::backup::RestoreOptions {
+        backup_path: archive,
+        data_dir: imported.clone(),
+        force: true,
+        no_stop_daemon: true,
+        historical: false,
+    })
+    .await
+    .unwrap();
+    let restored = Recalld::new(config(&imported, &mock)).await.unwrap();
+    assert_old_data(&restored, &expected);
+    for (id, origin) in [
+        (inserted, new_schema.embedding_origin.clone()),
+        (supplied_id, supplied_schema.embedding_origin.clone()),
+    ] {
+        assert_eq!(
+            restored
+                .storage
+                .read()
+                .unwrap()
+                .get_record(id)
+                .unwrap()
+                .unwrap()
+                .schema
+                .unwrap()
+                .embedding_origin,
+            origin
+        );
+    }
+    assert_eq!(mock.calls(), 2);
+    restored.shutdown().await.unwrap();
+    assert_eq!(directory_bytes(&backup), original_bytes);
+    let system = Recalld::new(cfg.clone()).await.unwrap();
     // Actual generation evidence must survive proof validation and not
     // make the newly created record impossible to forget.
     assert!(
@@ -366,6 +447,7 @@ async fn released_v1_new_schema_query_write_restart_preserves_unknown_provenance
             .is_some()
     );
     system.shutdown().await.unwrap();
+    assert_eq!(directory_bytes(&backup), original_bytes);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
