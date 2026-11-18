@@ -96,6 +96,29 @@ pub(crate) fn prepare_native_store(
                     },
                 },
             };
+        } else if input.items[index].get("embeddingProfile").is_none()
+            && item
+                .store
+                .as_ref()
+                .is_some_and(|store| store.embedding.is_some())
+        {
+            // Preserve the historical v2 invalid-item hash above. Current
+            // execution may admit an unclaimed supplied vector only after
+            // canonical namespace resolution proves UnknownLegacy.
+            let store = item.store.as_ref().unwrap();
+            if let Ok(native) = native_fields(store, &input.items[index]) {
+                if native.validate().is_ok() {
+                    item.plan = BatchItemPlan::NativeStore {
+                        request_hash: hash,
+                        namespace: store.namespace.clone(),
+                        supplied_profile_id: None,
+                        input: crate::storage::native_store::NativeStoreInput {
+                            insert: native,
+                            check_duplicates: store.check_duplicates.unwrap_or(true),
+                        },
+                    };
+                }
+            }
         }
     }
     Ok(items)
@@ -719,6 +742,13 @@ fn native_input(
     value: &Value,
 ) -> Result<crate::storage::native_records::NativeInsert, bridge::BridgeError> {
     let native = native_fields(store, value)?;
+    // Version 2 caller identity includes its original rejection behavior.
+    // Do not reinterpret old malformed inputs when deriving version 3 hashes.
+    if native.memory.embedding.is_some() != native.embedding_profile.is_some() {
+        return Err(bridge::BridgeError::InvalidInput(
+            "supplied vector and explicit profile must be provided together".into(),
+        ));
+    }
     native
         .validate()
         .map_err(|e| bridge::BridgeError::InvalidInput(e.to_string()))?;
