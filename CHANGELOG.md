@@ -17,6 +17,12 @@
 - Tightened validation for embedding profiles, structured labels, protocol fields and bounded responses.
 - Improved coordination between canonical storage and derived search indexes, including startup recovery and concurrent operations.
 
+### Dependencies and build checks
+
+- Updated ZIP, bundled SQLite/zlib, and selected runtime/network dependencies to address known security advisories. ZIP archive validation and existing backup fixtures remain covered by compatibility tests.
+- CI tests are grouped by function: Storage & recovery, API & protocols, Search & embeddings, and Runtime & lifecycle, on both Linux and macOS. Aggregate checks verify complete, non-overlapping coverage.
+- Release and container builds use the committed dependency lockfile.
+
 ### Upgrade notes
 
 - Stop all processes using the database before upgrading. Allow additional disk space for backup, staging and recovery, and keep the automatic backup until the downgrade window has closed.

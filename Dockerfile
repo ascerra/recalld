@@ -2,7 +2,7 @@ FROM rust:1-bookworm AS builder
 
 WORKDIR /build
 COPY . .
-RUN cargo build --release --bin recalld --bin recalld-cli
+RUN cargo build --locked --release --bin recalld --bin recalld-cli
 
 FROM debian:bookworm-slim
 
