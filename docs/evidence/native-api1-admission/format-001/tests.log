@@ -1,9 +1,0 @@
-
-running 4 tests
-test storage::engine::format_open_tests::detected_format_keeps_fresh_and_existing_legacy_defaults ... ok
-test storage::engine::format_open_tests::detected_format_rejects_unknown_partial_and_malformed_schema_without_source_changes ... ok
-test storage::engine::format_open_tests::detected_native_runs_strict_preflight_with_same_owners_without_opening_ordinary_gate ... ok
-test storage::engine::format_open_tests::detected_nonempty_root_cannot_reinitialize_missing_metadata ... ok
-
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1669 filtered out; finished in 3.41s
-

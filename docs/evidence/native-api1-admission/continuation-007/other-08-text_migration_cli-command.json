@@ -1,8 +1,0 @@
-[
-  "timeout",
-  "--signal=TERM",
-  "--kill-after=10s",
-  "596s",
-  "/work/target/debug/deps/text_migration_cli-e16fc30b2e2762cc",
-  "--test-threads=1"
-]

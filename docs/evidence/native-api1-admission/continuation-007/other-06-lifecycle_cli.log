@@ -1,6 +1,0 @@
-
-running 1 test
-test cli_preview_migrate_retry_and_rollback_use_real_offline_writer ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.35s
-

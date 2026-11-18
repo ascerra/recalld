@@ -1,1 +1,0 @@
-cli_inherited_preview_adopt_replay_and_rejects_are_real_and_offline: test

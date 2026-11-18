@@ -1,8 +1,0 @@
-[
-  "timeout",
-  "--signal=TERM",
-  "--kill-after=10s",
-  "599s",
-  "/work/target/debug/examples/score_mcp_episode-517ceb333430512e",
-  "--test-threads=1"
-]

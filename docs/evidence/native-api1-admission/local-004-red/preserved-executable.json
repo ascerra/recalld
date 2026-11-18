@@ -1,6 +1,0 @@
-{
-  "path": "/private/tmp/recalld-native-api1-admission-validation/004/output/failed-lib-test",
-  "sha256": "8a091e417d2632124d772c041db2c83938bb94f8b7060bf173634851dbc403dd",
-  "bytes": 149296888,
-  "method": "hard link; preserve before owned-package clean"
-}

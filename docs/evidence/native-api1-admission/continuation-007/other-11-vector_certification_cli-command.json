@@ -1,8 +1,0 @@
-[
-  "timeout",
-  "--signal=TERM",
-  "--kill-after=10s",
-  "588s",
-  "/work/target/debug/deps/vector_certification_cli-e06a33b774dfdd84",
-  "--test-threads=1"
-]

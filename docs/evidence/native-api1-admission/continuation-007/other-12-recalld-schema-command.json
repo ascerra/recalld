@@ -1,8 +1,0 @@
-[
-  "timeout",
-  "--signal=TERM",
-  "--kill-after=10s",
-  "585s",
-  "/work/target/debug/deps/recalld_schema-b43bd4387cad09a0",
-  "--test-threads=1"
-]

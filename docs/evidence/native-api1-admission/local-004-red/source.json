@@ -1,7 +1,0 @@
-{
-  "commit": "96f29f2aea7a3e6712ff6c199cdd642be5f887dd",
-  "files": 448,
-  "bytes": 17045134,
-  "scope": "cfg(test) post-result worker loss RED; default lib single test",
-  "RUST_MIN_STACK": "unset"
-}

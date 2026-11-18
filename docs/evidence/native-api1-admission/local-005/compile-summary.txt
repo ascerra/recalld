@@ -1,2 +1,0 @@
-warning: `recalld` (lib test) generated 72 warnings (run `cargo fix --lib -p recalld --tests` to apply 7 suggestions)
-    Finished `test` profile [unoptimized] target(s) in 47.46s

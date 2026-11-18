@@ -1,1 +1,0 @@
-offline_text_migration_cli_publishes_only_fresh_gated_destination: test

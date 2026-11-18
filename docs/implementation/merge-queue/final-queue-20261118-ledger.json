@@ -12,14 +12,10 @@
       "frozen_head": "23965332a72ca9f527f4bb97f48b41a7270fa33f",
       "handoff": "READY FROZEN from main assistant; pushes stopped",
       "ci": 44350712087,
-      "status": "MERGED",
+      "status": "corrected integrated source: exact1/related71 PASS; awaiting fresh head CI",
       "validation_report": "docs/research/2026-11-recalld/evidence/pr186-forwarder-validation-2026-11-18.md",
       "failed_job": 134965251516,
-      "correction_report": "docs/implementation/merge-queue/validation/final-pr186/REPORT.md",
-      "merge_sha": "0800e432b95a4c21530f8aaec437536da5570f99",
-      "main_ci": 44362821613,
-      "main_checks": "14 success",
-      "final_head": "4755fd0a0274baa72c598e2b22f7feba8d7a1e99"
+      "correction_report": "docs/implementation/merge-queue/validation/final-pr186/REPORT.md"
     },
     {
       "pr": 189,
@@ -29,7 +25,7 @@
       "source": "22bc5f0c598aa0c78bb95926cbd418769b8dd7b6",
       "source_parent_join": "5e6f163bd104112f5a1b3d2573a8567383d0ecac",
       "dependency": 186,
-      "status": "normal integration complete; focused71 PASS; awaiting current-head CI",
+      "status": "draft; no source changes yet; requires normal current-main integration, relevant validation, exact-head CI",
       "prior_validation": "38 focused; combined 006 timeout and 007 continuation:1683 library passes/3 ignores,10 CLI+15 examples; not an uninterrupted full pass; aarch64 does not clear x86 failure",
       "scope": "local admitted API1 catalog creation on already-owned native engine; no ordinary startup/Remote/public2 activation",
       "prerequisites": [
@@ -40,18 +36,13 @@
         "pr": 103,
         "merged": true,
         "sha": "b374f07efb2da994d3a82e85d4814e642d2864b2"
-      },
-      "validated_source": "e7514f165611f4238ed49c17e1aa84c369b3c50c",
-      "integration_report": "docs/implementation/merge-queue/validation/final-pr189/REPORT.md",
-      "conflict": "server dispatch: preserve ctx tools/list and &id tools/call",
-      "fixture_fix": "two tests pass existing provider to current constructor"
+      }
     }
   ],
   "cache_ownership": {
     "target": "/private/tmp/recalld-implementation/e1-default-stack/.validation/x86-target",
     "owner": "sole integration queue per user transfer 2026-11-18; idle cache reused, no old run modified",
     "cargo": "/private/tmp/recalld-implementation/final-queue-20261118-cargo",
-    "cargo_owner": "sole integration queue; new bounded registry for integrated lockfile",
-    "owner_after_validation": "Feynman migration worker; explicit exclusive transfer; queue stops use until fresh handoff"
+    "cargo_owner": "sole integration queue; new bounded registry for integrated lockfile"
   }
 }
