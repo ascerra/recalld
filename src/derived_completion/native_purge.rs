@@ -224,10 +224,11 @@ impl DerivedCompletion {
         }
         let known_start = || Some(Box::new(start.last_receipt.clone()));
         let completion = self
-            .complete_observing(
+            .complete_observing_bounded(
                 Some(work),
                 false,
                 observe.then(|| PurgeCleanupObservation::for_progress(&start)),
+                None,
             )
             .await;
         let observed = match completion {

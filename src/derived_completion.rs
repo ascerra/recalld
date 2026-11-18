@@ -336,20 +336,10 @@ impl DerivedCompletion {
         parent: Option<&WorkTicket>,
         rebuild_all: bool,
     ) -> Result<(), StorageError> {
-        self.complete_observing(parent, rebuild_all, None)
+        self.complete_observing_bounded(parent, rebuild_all, None, None)
             .await
             .map(|_| ())
             .map_err(CompletionFailure::into_storage)
-    }
-
-    async fn complete_observing(
-        &self,
-        parent: Option<&WorkTicket>,
-        rebuild_all: bool,
-        purge: Option<crate::storage::purge::PurgeCleanupObservation>,
-    ) -> Result<PurgePhysicalObservation, CompletionFailure> {
-        self.complete_observing_bounded(parent, rebuild_all, purge, None)
-            .await
     }
 
     pub(crate) async fn complete_with_admission(
