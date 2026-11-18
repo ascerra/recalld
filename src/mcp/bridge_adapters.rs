@@ -1560,6 +1560,7 @@ impl McpStorageAdapter {
 
     /// Reuse the configured observer and lifecycle inputs of this system.
     pub fn with_query_engine(mut self, engine: Arc<crate::search::QueryEngine>) -> Self {
+        self.native_policy = Some(engine.native_policy_inputs());
         self.query_engine = Some(engine);
         self
     }

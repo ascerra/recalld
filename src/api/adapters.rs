@@ -447,7 +447,7 @@ impl StorageEngineAdapter {
         self
     }
 
-    pub(crate) fn with_native_lifecycle_policy(
+    pub fn with_native_lifecycle_policy(
         mut self,
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
     ) -> Self {
@@ -1572,7 +1572,7 @@ impl FsrsEngineAdapter {
         Ok(result)
     }
 
-    pub(crate) fn with_native_lifecycle_policy(
+    pub fn with_native_lifecycle_policy(
         mut self,
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
     ) -> Self {

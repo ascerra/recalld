@@ -511,6 +511,7 @@ async fn run_serve(
                 system.graph().clone(),
             )
             .with_clock(system.clock().clone())
+            .with_native_lifecycle_policy(system.query_engine().native_policy_inputs())
             .with_catalog_profile_context(system.embedding().as_ref()),
         );
         let cache: Arc<dyn recalld::api::RecordCache> =
@@ -542,6 +543,7 @@ async fn run_serve(
                 true,
             )
             .with_clock(system.clock().clone())
+            .with_native_lifecycle_policy(system.query_engine().native_policy_inputs())
             .with_indexes(
                 system.vector_index().clone(),
                 system.fts_index().clone(),
