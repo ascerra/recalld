@@ -31,6 +31,22 @@ curl -fsSL https://raw.githubusercontent.com/calebevans/recalld/main/install.sh 
 
 This downloads the latest release binary for your platform and places it on your PATH.
 
+### Upgrading to 2.0
+
+The installer replaces the binaries and preserves an existing config file; database migration happens when the new runtime starts. Stop every process using the data directory first, including a foreground HTTP server or direct MCP process. The installer attempts to stop the daemon only.
+
+New databases use the native schema immediately. For a supported older database, startup takes exclusive ownership, copies and verifies the entire stopped data directory, migrates a separate working copy, and validates the candidate. After installing the candidate at the configured path, it initializes the runtime before committing the upgrade. Background tasks and request serving begin only after commit. There is no fallback to serving the old schema.
+
+If preparation or runtime initialization fails before commit, startup leaves the original unchanged or restores it from the verified backup and reports an error. If recovery cannot establish that the files are safe, it stops with a recovery-required error instead of overwriting unknown data. After a crash, the next startup rolls back an uncommitted upgrade and stops; inspect the error and correct its cause before retrying. A committed upgrade is retained, including later writes, even if journal cleanup was interrupted.
+
+**Storage layout and space.** The data directory must be renameable, with a writable parent on the same filesystem. Upgrade artifacts are siblings of the data directory, under `.recalld-upgrade-<UUID>/`; the original backup is its `backup/` subdirectory. A pending journal is named `<data-directory>.recalld-upgrade-pending`. A database mounted directly at `/data` does not meet the rename requirement; do not assume the Docker examples below support upgrading an existing database at that mount root. Sibling backups must also be on persistent storage.
+
+Budget for the original database plus a full backup, a full working copy, and a migrated candidate. Older text formats additionally require a text-migration copy and newly written text payloads. Validation uses temporary metadata-database copies in the system temporary directory; runtime index rebuilding and failure recovery can require further space, including a rollback copy. There is no fixed free-space multiplier or preflight capacity guarantee. Check capacity on both the data filesystem and the temporary filesystem.
+
+**Retention and downgrade.** Upgrade backups, working copies, and the displaced original (`previous/`) are retained automatically; there is no automatic expiry or cleanup. Keep them until startup is verified and the downgrade window is closed. Never delete a pending journal or its referenced artifacts while recovery is unresolved. To return to an older binary, stop all users of the database, preserve the upgraded directory separately, and restore a copy of the complete pre-upgrade `backup/` directory at the configured data path. Do not point an older binary at the upgraded database. The automatic backup is a directory, not a zip for `recalld restore`; reverting to it loses writes made after the upgrade.
+
+Migration retains existing vectors as `UnknownLegacy`: their original embedding model is not inferred from dimensions or current configuration. Supported compatibility operations remain available without inventing model provenance. Keep the embedding configuration that produced those vectors. Startup does not run an optional model probe, re-embed old memories, or certify that the configured model matches old vectors. Fresh namespaces bind to the configured provider profile. Storage schema version and lifecycle policy are separate; schema conversion does not by itself select a new decay policy.
+
 ### Build from source
 
 Requires Rust 1.94 or later. For local embeddings (no API key needed), you will also need [Ollama](https://ollama.com) -- see [Section 2](#2-embedding-setup).
@@ -199,9 +215,9 @@ Disk storage paths and compaction.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `data_dir` | string | `"~/.recalld/data"` | Root directory for all storage files (meta.db, ns_\<name\>.dat per namespace, fulltext.dat, edges.db). |
+| `data_dir` | string | `"~/.recalld/data"` | Root directory for database files; automatic upgrades also require space and write access in its parent (see [Upgrading to 2.0](#upgrading-to-20)). |
 | `max_vector_file_size` | u64 | `2147483648` | Warning threshold for vectors.dat size (2 GB). |
-| `compaction_threshold` | f64 | `0.20` | Fraction of dead space in fulltext.dat that triggers compaction (0.0-1.0). |
+| `compaction_threshold` | f64 | `0.20` | Fraction of dead space in the selected text generation that triggers compaction (0.0-1.0). |
 | `fsync_interval_ms` | u64 | `5000` | Batch fsync interval in milliseconds. |
 
 Env vars: `RECALLD_STORAGE_DATA_DIR`, `RECALLD_STORAGE_MAX_VECTOR_FILE_SIZE`, `RECALLD_STORAGE_COMPACTION_THRESHOLD`, `RECALLD_STORAGE_FSYNC_INTERVAL_MS`
@@ -1149,11 +1165,11 @@ recalld backup --destination /path/to/backup.zip
 # Back up a custom data directory
 recalld backup --destination ./backup.zip --source-data-dir /custom/data
 
-# Force backup even if files are locked (not recommended)
+# Compatibility flag; does not bypass storage locks
 recalld backup --destination ./backup.zip --force
 ```
 
-Stop the daemon before backing up for a clean snapshot:
+Stop all processes using the target data directory before backing up; `--force` does not bypass ownership or file locks. For a daemon-managed database:
 
 ```bash
 recalld daemon stop
@@ -1163,14 +1179,19 @@ recalld daemon start
 
 ### What's backed up
 
-The backup archive (zip) contains all files from the data directory:
+The backup archive (zip) contains validated canonical database files and a manifest, rather than every file in the data directory:
 
-- `meta.db` -- memory metadata (redb)
-- `ns_<name>.dat` -- embedding vectors (one file per namespace, e.g. `ns_default.dat`)
-- `fulltext.dat` -- full text content (append-only)
-- `edges.db` -- relationship graph (redb)
+- `meta.db` -- metadata, schema, lineage, and retained operation/removal evidence
+- `<namespace>/vectors.dat` -- embedding vectors per namespace
+- `fulltext.dat` and the selected text generation -- text-format gate and payloads
+- `edges.db` -- relationship graph
+- `backup_manifest.json` -- archive inventory and validation metadata
+
+Derived indexes are rebuilt. This archive is separate from the complete directory backup retained by automatic upgrade.
 
 ### Restore
+
+Stop all processes using the target before restoring. Ordinary restore requires an existing compatible target and reconciles retained removal evidence; it is not a blind replacement with an older snapshot. The archive and binary must have matching major/minor versions: Recalld 2.0 cannot restore a ZIP created by 1.0, even with `--force` or `--historical`. `recalld-cli import` accepts JSON/JSONL memory exports, not backup ZIPs, and is not a database-restore bridge. `--force` skips confirmation only. `--historical` restores to a fresh destination for historical inspection, excluded from ordinary serving; it is not a downgrade switch. See [Upgrading to 2.0](#upgrading-to-20) for restoring the pre-upgrade directory with an older binary.
 
 ```bash
 # Restore from backup (prompts for confirmation)
@@ -1179,7 +1200,7 @@ recalld restore --from /path/to/backup.zip
 # Skip confirmation
 recalld restore --from /path/to/backup.zip --force
 
-# Don't try to stop the daemon (if managing it yourself)
+# Compatibility flag; the target must already be stopped
 recalld restore --from /path/to/backup.zip --no-stop-daemon
 ```
 
