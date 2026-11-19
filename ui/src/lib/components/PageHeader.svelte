@@ -1,0 +1,65 @@
+<script lang="ts">
+  import type { Snippet } from 'svelte';
+  import { palette } from '$lib/palette.svelte';
+  let { title, meta, children }: { title: string; meta?: string; children?: Snippet } = $props();
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+</script>
+
+<svelte:head><title>recalld · {title}</title></svelte:head>
+
+<header class="header">
+  <div class="title">
+    <h1>{title}</h1>
+    {#if meta}<span class="mono meta">{meta}</span>{/if}
+    {@render children?.()}
+  </div>
+  <button
+    type="button"
+    class="search"
+    aria-label="Search ({mac ? '⌘K' : 'Ctrl+K'})"
+    aria-keyshortcuts="Meta+K Control+K /"
+    onclick={() => palette.show()}
+  >
+    <span>Search</span><kbd>{mac ? '⌘K' : 'Ctrl K'}</kbd>
+  </button>
+</header>
+
+<style>
+  .header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+  .title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+  }
+  h1 {
+    margin: 0;
+    font: var(--weight-regular) var(--text-page) / 1.15 var(--font-serif);
+    letter-spacing: -0.01em;
+  }
+  .meta {
+    font-size: var(--text-value);
+    color: var(--color-text-muted);
+  }
+  .search {
+    flex: 0 1 var(--search-w);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    height: var(--button-h);
+    padding: 0 calc(var(--space-1) / 2);
+    border: 0;
+    border-bottom: var(--rule) solid var(--color-text-2);
+    background: transparent;
+    color: var(--color-text-muted);
+    font: var(--text-input) var(--font-sans);
+    cursor: text;
+    text-align: left;
+  }
+</style>

@@ -42,6 +42,7 @@
   --color-suppressed-text: #4C5A68;
   --color-contradicts: #5A6B7D;   /* dashed 3 3 */
   --color-permastore: #9C8A4E;    /* 1px halo ring, r + 3.2 */
+  --color-mark-glass: #F3EEDC;    /* cream glass of the bulb mark (DESIGN §9a) */
   --color-label-halo: #F9F9F6;    /* 4px text stroke behind map labels */
 
   /* ── Agents (pulse + activity dot colors, assigned in order) ─ */
@@ -71,7 +72,9 @@
   --text-small: 12px;      /* sans · legends, tooltip meta in sans */
   --text-value: 12px;      /* mono · numbers, timestamps, IDs */
   --text-status: 11px;     /* mono · status lines, kbd, tooltip meta */
+  --text-explain: 11.5px;  /* mono · palette explain line */
   --text-label: 10.5px;    /* mono · uppercase labels, letter-spacing 0.06em */
+  --text-chart: 9px;       /* mono · chart axis and threshold labels */
 
   --weight-regular: 400;
   --weight-medium: 500;    /* controls, wordmark */
@@ -107,6 +110,32 @@
   --icon-btn: 36px;
   --button-h: 44px;        /* primary actions, inputs */
   --row-h: 44px;           /* Explore table rows */
+
+  /* ── Layout details (from the reference screens) ─────────── */
+  --hairline: 1px;          /* borders, dividers */
+  --text-button: 13px;      /* sans · primary / secondary buttons */
+  --card-pad: 22px;
+  --tile-pad: 14px 16px;
+  --rule: 1.5px;            /* header search field bottom rule */
+  --text-wordmark: 25px;    /* serif · "recalld" in the sidebar */
+  --sidebar-min: 180px;
+  --main-min: 560px;        /* flex basis of the main column */
+  --nav-item-h: 40px;       /* sidebar view links; rail buttons are this square */
+  --ns-row-h: 32px;         /* sidebar namespace rows */
+  --search-w: 320px;        /* header search field */
+  --mark: 26px;             /* bulb mark beside the wordmark (24 on the rail) */
+  --mark-rail: 24px;
+  --icon-sm: 14px;          /* chevrons in chips */
+  --icon-md: 18px;          /* nav and toolbar icons */
+  --icon-lg: 24px;
+  --dot: 6px;               /* status / live dots */
+  --swatch: 8px;            /* legend swatches */
+  --palette-w: 680px;
+  --palette-top: 104px;
+  --palette-row: 60px;
+  --strength-bar-w: 56px;   /* Explore strength cell bar (4px tall) */
+  --score-bar-w: 44px;      /* palette result score bar */
+  --bar-h: 4px;
 
   /* ── Motion ───────────────────────────────────────────────── */
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
