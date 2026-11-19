@@ -1,6 +1,21 @@
 # Changelog
 
-## 2.0.2 — unreleased
+## 2.0.3 — unreleased
+
+### Namespaces and memory moves
+
+- Fixed namespace creation through daemon-backed MCP on native storage. The daemon now uses the existing bounded creation handler, checks response capacity before mutation, and preserves commit evidence on failure.
+- Added `move_memories` for atomic moves of 1–100 Full or Summary memories between existing namespaces. Moves preserve IDs, retained text, labels, timestamps, lifecycle/access history, and graph edges. Embeddings are regenerated with the destination's configured provider and profile; compatible lifecycle revisions are required.
+- Moves use an explicit store ID and stable idempotency key. Retrying the identical ordered request reconciles the original operation without copying/deleting records or repeating the move. Ghost/Tombstone memories and batches exceeding 16 MiB of retained full text are rejected.
+- Added move-aware recovery, vector certification, history validation, and backup/restore handling. Preserved cross-namespace edges do not make namespace-scoped searches global.
+
+### Upgrade notes
+
+- Restart both the daemon and MCP server processes after upgrading, then refresh the client's tool list. Older daemons reject the new operations rather than falling back to unsafe behavior.
+- Existing 2.0 databases need no additional startup schema migration. However, **after a move commits, older binaries cannot read its new durable move history**. Keep a compatible backup before using moves; downgrade requires restoring that backup and loses subsequent writes.
+- Upgrading does not automatically move memories or create project namespaces. See the [move tool guide](docs/guide.md#move_memories) for requirements and retry behavior.
+
+## 2.0.2 — 2026-11-18
 
 ### MCP usability and namespace guidance
 
