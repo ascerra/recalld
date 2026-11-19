@@ -375,10 +375,14 @@ impl CacheManager {
         // Fast path: direct cache lookup.
         if let Some(record) = self.get(id).await {
             metrics::counter!("cache.hits").increment(1);
+            #[cfg(feature = "ui")]
+            crate::ui::events::CACHE_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return Ok(Some(record));
         }
 
         metrics::counter!("cache.misses").increment(1);
+        #[cfg(feature = "ui")]
+        crate::ui::events::CACHE_MISSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // Slow path: load from disk.
         match loader().await {

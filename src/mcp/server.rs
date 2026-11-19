@@ -79,6 +79,10 @@ pub struct RequestContext {
 impl RequestContext {
     /// Context for a validated modern (2026-07-28) request.
     pub fn modern(meta: RequestMeta) -> Self {
+        #[cfg(feature = "ui")]
+        if let Some(info) = &meta.client_info {
+            crate::ui::agent::set(&info.name, "mcp");
+        }
         Self {
             era: Era::Modern,
             meta: Some(meta),
@@ -262,6 +266,8 @@ impl McpDispatcher {
                 },
             });
 
+        #[cfg(feature = "ui")]
+        crate::ui::agent::set(&params.client_info.name, "mcp");
         tracing::info!(
             client = %params.client_info.name,
             version = %params.client_info.version,

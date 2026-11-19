@@ -31,6 +31,9 @@ path = "src/lib.rs"
 [features]
 default = []
 bench = []
+# Optional local web UI (`recalld ui`). Off by default: a build without it is
+# unchanged in behavior and dependencies.
+ui = ["dep:rust-embed", "dep:ts-rs", "dep:futures-core", "tower-http/compression-gzip"]
 
 [dependencies]
 # ── Async runtime & networking ────────────────────────────────────
@@ -122,6 +125,11 @@ dirs        = "5"
 tempfile    = "3"
 hostname    = "0.4"
 zip         = { version = "9.7.0", features = ["deflate-flate2-zlib"] }
+
+# ── Local web UI (feature `ui` only) ─────────────────────────────
+rust-embed  = { version = "8.14", optional = true, features = ["mime-guess"] }
+ts-rs       = { version = "12", optional = true }
+futures-core = { version = "0.3", optional = true }
 
 [dev-dependencies]
 rand_chacha = "=0.3.1"

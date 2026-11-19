@@ -563,6 +563,17 @@ pub async fn write_framed_message<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
+/// Writes any serializable frame (the UI's server-initiated notifications).
+#[cfg(feature = "ui")]
+pub(crate) async fn write_framed_value<W: AsyncWrite + Unpin, T: Serialize>(
+    writer: &mut W,
+    value: &T,
+    limit: usize,
+) -> Result<(), FrameError> {
+    let payload = encode_frame(value, limit)?;
+    write_frame(writer, &payload).await
+}
+
 /// Writes a length-prefixed JSON-RPC request to the stream.
 ///
 /// Returns [`FrameError::TooLarge`] without writing anything if the request

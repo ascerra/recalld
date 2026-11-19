@@ -935,6 +935,7 @@ pub struct DeleteNamespaceResult {
 /// Namespace information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct NamespaceInfo {
     /// Namespace numeric ID.
     pub id: u32,
@@ -951,6 +952,7 @@ pub struct NamespaceInfo {
 /// Namespace statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct NamespaceStats {
     /// Namespace name.
     pub name: String,
@@ -988,6 +990,7 @@ pub struct NamespaceStats {
 /// Memory counts by decay phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct PhaseCounts {
     /// Memories in the Full phase.
     pub full: u64,
@@ -1000,6 +1003,7 @@ pub struct PhaseCounts {
 /// System health status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct HealthStatus {
     /// Overall system status (e.g. "ok" or "degraded").
     pub status: String,
@@ -1011,6 +1015,7 @@ pub struct HealthStatus {
 
 /// Health of a single subsystem.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct SubsystemHealth {
     /// Subsystem name.
     pub name: String,

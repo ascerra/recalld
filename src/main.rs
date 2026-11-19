@@ -122,6 +122,22 @@ enum Command {
         preview_at: Option<i64>,
     },
 
+    /// Open the local web UI (starts the daemon if needed)
+    #[cfg(feature = "ui")]
+    Ui {
+        /// Port on 127.0.0.1 (default: a free port)
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// Print the link without opening a browser
+        #[arg(long)]
+        no_open: bool,
+
+        /// Log level filter
+        #[arg(short, long, env = "RECALLD_LOG_LEVEL")]
+        log_level: Option<String>,
+    },
+
     /// Run external benchmarks (LoCoMo, etc.)
     #[cfg(feature = "bench")]
     Bench {
@@ -279,6 +295,14 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+        #[cfg(feature = "ui")]
+        Command::Ui { log_level, .. } => {
+            let level = log_level.as_deref().unwrap_or("warn");
+            if let Err(e) = init_tracing(level, false, true) {
+                eprintln!("fatal: failed to initialize tracing: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
         #[cfg(feature = "bench")]
         Command::Bench { .. } => {}
     }
@@ -364,8 +388,50 @@ async fn async_main(cli: Cli) -> ExitCode {
                 }
             }
         }
+        #[cfg(feature = "ui")]
+        Command::Ui { port, no_open, .. } => run_ui(loaded.config, port, !no_open).await,
         #[cfg(feature = "bench")]
         Command::Bench { target, format } => run_bench(loaded.config, target, &format).await,
+    }
+}
+
+#[cfg(feature = "ui")]
+async fn run_ui(config: RecalldConfig, port: Option<u16>, open_browser: bool) -> ExitCode {
+    let socket = recalld::daemon::socket_path();
+    let reachable = async |socket: &Path| match recalld::daemon::DaemonClient::connect(socket).await
+    {
+        Ok(client) => client.ping().await.is_ok(),
+        Err(_) => false,
+    };
+    let starter: recalld::ui::Starter = {
+        let (config, socket) = (config.clone(), socket.clone());
+        Arc::new(move || {
+            let (config, socket) = (config.clone(), socket.clone());
+            Box::pin(async move {
+                spawn_daemon(&config, &socket)
+                    .await
+                    .map(drop)
+                    .map_err(|e| e.to_string())
+            })
+        })
+    };
+    if !reachable(&socket).await {
+        if let Err(e) = starter().await {
+            eprintln!("warning: could not start the daemon ({e}); the UI will offer to retry");
+        }
+    }
+    let options = recalld::ui::UiOptions {
+        port,
+        open_browser,
+        socket,
+        starter: Some(starter),
+    };
+    match recalld::ui::run(options).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("recalld ui failed: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -757,6 +823,17 @@ async fn auto_start_daemon(
     default_namespace: &str,
     tz: chrono_tz::Tz,
 ) -> Result<recalld::mcp::bridge::McpBridge, Box<dyn std::error::Error>> {
+    let client = spawn_daemon(config, socket)
+        .await
+        .map_err(|e| e as Box<dyn std::error::Error>)?;
+    Ok(create_remote_mcp_bridge(client, default_namespace, tz))
+}
+
+/// Start a detached daemon (same binary) and wait until it answers `ping`.
+async fn spawn_daemon(
+    config: &RecalldConfig,
+    socket: &Path,
+) -> Result<Arc<recalld::daemon::DaemonClient>, Box<dyn std::error::Error + Send + Sync>> {
     use std::process::Command as StdCommand;
 
     let exe = std::env::current_exe()?;
@@ -805,7 +882,7 @@ async fn auto_start_daemon(
         if let Ok(client) = recalld::daemon::DaemonClient::connect(socket).await {
             let client = Arc::new(client);
             if client.ping().await.is_ok() {
-                return Ok(create_remote_mcp_bridge(client, default_namespace, tz));
+                return Ok(client);
             }
         }
     }

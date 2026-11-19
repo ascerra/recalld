@@ -60,10 +60,14 @@ impl CachedProvider {
         if let Some(embedding) = cached {
             return Ok(embedding);
         }
+        #[cfg(feature = "ui")]
+        let started = std::time::Instant::now();
         let embedding = match task {
             Task::Document => self.inner.embed(text).await?,
             Task::Query => self.inner.embed_query(text).await?,
         };
+        #[cfg(feature = "ui")]
+        crate::ui::events::embedding_latency(started.elapsed());
         self.validate(&embedding)?;
         self.cache.insert(key, embedding.clone()).await;
         Ok(embedding)
