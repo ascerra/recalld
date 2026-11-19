@@ -121,7 +121,8 @@ jobs:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - name: Compare default-feature dependency trees with the merge base
         run: |
-          tree() { cargo tree --locked -e normal,build --prefix none --format '{p} {f}' | sort -u; }
+          # Paths differ between the two checkouts; compare names, versions, features.
+          tree() { cargo tree --locked -e normal,build --prefix none --format '{p} {f}' | sed -E 's# \(/[^)]*\)##' | sort -u; }
           tree > head.txt
           git worktree add ../base "$(git merge-base HEAD origin/${{ github.base_ref }})"
           (cd ../base && tree) > base.txt
