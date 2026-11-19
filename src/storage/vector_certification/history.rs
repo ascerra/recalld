@@ -4,6 +4,73 @@ use crate::storage::metadata::{META_TABLE, NAMESPACE_TABLE, removal_ledger};
 use redb::ReadableTable;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+fn retained_matches(
+    record: &DiskRecord,
+    namespace: &crate::storage::native_purge::NativeNamespaceProof,
+    state: &NativeRecordState,
+) -> bool {
+    namespace.namespace().ok().is_some_and(|ns| {
+        crate::storage::native_records::matches_retained_vector(
+            record,
+            &ns,
+            namespace.namespace_id.get(),
+            state,
+        )
+    })
+}
+
+/// Follow exact owned vector identities, not receipt order or numerical
+/// generations from incomparable restore origins. Forks may retain alternatives.
+fn reachable_move_record(
+    namespace: u32,
+    root: &NativeRecordState,
+    id: MemoryId,
+    record: &DiskRecord,
+    moves: &[crate::storage::native_move::NativeMoveWrite],
+    allow_removed_vector: bool,
+) -> bool {
+    let mut states = vec![(namespace, root)];
+    let mut used = HashSet::new();
+    loop {
+        let mut added = false;
+        for (index, movement) in moves.iter().enumerate() {
+            if used.contains(&index) {
+                continue;
+            }
+            let Some(row) = movement.records.iter().find(|r| r.change.memory_id == id) else {
+                continue;
+            };
+            let Some(before) = &row.change.before else {
+                continue;
+            };
+            if !states.iter().any(|(ns, state)| {
+                *ns == movement.source_namespace_id.get()
+                    && state.content.vector == before.content.vector
+                    && state.content.profile_id == before.content.profile_id
+                    && state.content.embedding_origin == before.content.embedding_origin
+                    && state.lifecycle.lifecycle.record_generation
+                        <= before.lifecycle.lifecycle.record_generation
+            }) {
+                continue;
+            }
+            let mut selected = record.clone();
+            if allow_removed_vector && selected.schema.as_ref().is_some_and(|s| s.vector.is_none())
+            {
+                selected.schema.as_mut().unwrap().vector = row.change.after.content.vector.clone();
+            }
+            if retained_matches(&selected, &movement.destination, &row.change.after) {
+                return true;
+            }
+            states.push((movement.destination_namespace_id.get(), &row.change.after));
+            used.insert(index);
+            added = true;
+        }
+        if !added {
+            return false;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CertificationSummary {
@@ -55,6 +122,7 @@ fn validate_current_inner(
     let mut cutovers = BTreeMap::new();
     let mut empty_creations = BTreeMap::new();
     let mut has_execution = false;
+    let mut moves = Vec::new();
     for row in read.open_table(control::RECEIPTS)?.iter()? {
         let (key, value) = row?;
         examined += 1;
@@ -63,6 +131,27 @@ fn validate_current_inner(
             .ok_or_else(|| invalid("certification history size overflow"))?;
         let receipt = control::validate_receipt(value.value())?.receipt;
         match &receipt.outcome {
+            MutationOutcome::NativeMemoriesMoved { transition } => {
+                if key.value()
+                    != control::scoped_key(
+                        receipt.store_id,
+                        MutationScope::Catalog,
+                        receipt.operation_id.as_bytes(),
+                    )
+                    || !control::permits_generation_origin(
+                        read,
+                        control,
+                        GenerationRef {
+                            store_id: receipt.store_id,
+                            generation: receipt.committed_generation,
+                        },
+                    )?
+                {
+                    return Err(invalid("move certification origin/scope mismatch"));
+                }
+                has_execution = true;
+                moves.push(transition.clone());
+            }
             MutationOutcome::NativeNamespaceCreated { transition } => {
                 if let Some(certification) = &transition.vector_certification {
                     if empty_creations
@@ -174,6 +263,29 @@ fn validate_current_inner(
             "vector cutover lacks live or terminal namespace witness",
         ));
     }
+    for movement in &moves {
+        for proof in [&movement.source, &movement.destination] {
+            let namespace = namespaces
+                .get(&proof.namespace_id.get())
+                .ok_or_else(|| invalid("move historical namespace missing"))?;
+            if namespace.name != proof.name
+                || namespace.embedding_dim != proof.embedding_dim
+                || namespace.schema.as_ref().map(|s| &s.embedding_binding)
+                    != Some(&proof.schema.embedding_binding)
+            {
+                return Err(invalid("move historical namespace binding differs"));
+            }
+        }
+        if movement.destination.schema.vector_certification.as_ref()
+            != summary
+                .selected
+                .get(&movement.destination_namespace_id.get())
+        {
+            return Err(invalid(
+                "move vector execution lacks destination certification",
+            ));
+        }
+    }
     // Absent certification retains the old supported limits and does not
     // accumulate every historical creation in a new in-memory index.
     if summary.selected.is_empty() {
@@ -234,13 +346,8 @@ fn validate_current_inner(
         }
     }
     let ledger = removal_ledger::read_export(read, Some(control))?;
-    let mut loss = HashMap::<(u32, Uuid), u8>::new();
-    for entry in ledger.iter().flat_map(|l| &l.entries) {
-        *loss
-            .entry((entry.namespace_id, entry.memory_uuid))
-            .or_default() |= entry.removed_fields_mask;
-    }
     let mut current = HashMap::new();
+    let mut retained = HashMap::new();
     let mut count = 0_u64;
     let mut row_bytes = 0_u64;
     for row in read.open_table(META_TABLE)?.iter()? {
@@ -277,8 +384,60 @@ fn validate_current_inner(
         let id = MemoryId::from_bytes(record.id);
         if summary.selected.contains_key(&record.namespace_id) {
             let vector = record.schema.as_ref().and_then(|s| s.vector.as_ref());
+            // Legacy sources have no native creation receipt. The move itself
+            // must therefore bind their retained non-vector fields too; merely
+            // finding a matching regenerated vector would admit label/text edits.
+            for movement in &moves {
+                for moved in movement.records.iter().filter(|m| m.change.memory_id == id) {
+                    let after = &moved.change.after;
+                    if !retained_matches(&record, &movement.destination, after) {
+                        continue;
+                    }
+                    let namespace = namespaces
+                        .get(&record.namespace_id)
+                        .ok_or_else(|| invalid("move retained namespace missing"))?;
+                    let actual =
+                        NativeRecordState::capture(&record, namespace, after.content.text_sha256)?;
+                    let mask = ledger
+                        .iter()
+                        .flat_map(|l| &l.entries)
+                        .filter(|e| e.memory_uuid == id.into_inner())
+                        .fold(0u8, |mask, e| mask | e.removed_fields_mask);
+                    if actual.lifecycle.created_at != after.lifecycle.created_at
+                        || actual.lifecycle.lifecycle.observed_at
+                            != after.lifecycle.lifecycle.observed_at
+                        || actual.lifecycle.lifecycle.timestamp_origin
+                            != after.lifecycle.lifecycle.timestamp_origin
+                        || actual.lifecycle.difficulty != after.lifecycle.difficulty
+                        || actual.content.extensions_sha256 != after.content.extensions_sha256
+                        || actual.content.label_provenance != after.content.label_provenance
+                        || (mask & removal_ledger::SUMMARY == 0
+                            && actual.content.summary_sha256 != after.content.summary_sha256)
+                        || (mask & removal_ledger::TAGS == 0
+                            && (actual.content.tags_sha256 != after.content.tags_sha256
+                                || actual.content.labels_sha256 != after.content.labels_sha256))
+                        || (mask & removal_ledger::FULL_TEXT == 0
+                            && actual.lifecycle.has_text != after.lifecycle.has_text)
+                    {
+                        return Err(invalid(
+                            "retained moved record differs without validated loss",
+                        ));
+                    }
+                }
+            }
             if vector.is_some()
                 && !certified_creations.contains(&id)
+                && !moves.iter().any(|movement| {
+                    movement.destination_namespace_id.get() == record.namespace_id
+                        && movement.records.iter().any(|row| {
+                            row.change.memory_id == id
+                                && retained_matches(
+                                    &record,
+                                    &movement.destination,
+                                    &row.change.after,
+                                )
+                        })
+                })
                 && !cutovers.get(&record.namespace_id).is_some_and(|cutover| {
                     cutover
                         .records
@@ -303,10 +462,11 @@ fn validate_current_inner(
                         &record, namespace, None,
                     )?;
                     let original = &expected.record.after.content;
-                    let mask = loss
-                        .get(&(record.namespace_id, id.into_inner()))
-                        .copied()
-                        .unwrap_or(0);
+                    let mask = ledger
+                        .iter()
+                        .flat_map(|l| &l.entries)
+                        .filter(|e| e.memory_uuid == id.into_inner())
+                        .fold(0u8, |mask, e| mask | e.removed_fields_mask);
                     use removal_ledger::{FULL_TEXT, SUMMARY, TAGS};
                     if actual.profile_id != original.profile_id
                         || actual.extensions_sha256 != original.extensions_sha256
@@ -326,23 +486,73 @@ fn validate_current_inner(
                 }
             }
             current.insert(id, (record.namespace_id, vector.cloned()));
+            retained.insert(id, record);
         }
     }
     for (namespace, cutover) in &cutovers {
         for row in &cutover.records {
             let id = row.record.memory_id;
+            if let Some(record) = retained.get(&id) {
+                let ns = namespaces
+                    .get(&record.namespace_id)
+                    .ok_or_else(|| invalid("moved cutover namespace missing"))?;
+                let actual = super::super::native_records::ContentProof::capture(record, ns, None)?;
+                let original = &row.record.after.content;
+                // read_export has already validated every per-ID removal scope,
+                // including historical scopes connected by typed moves.
+                let mask = ledger
+                    .iter()
+                    .flat_map(|l| &l.entries)
+                    .filter(|e| e.memory_uuid == id.into_inner())
+                    .fold(0u8, |mask, e| mask | e.removed_fields_mask);
+                if actual.extensions_sha256 != original.extensions_sha256
+                    || actual.label_provenance != original.label_provenance
+                    || (mask & removal_ledger::SUMMARY == 0
+                        && actual.summary_sha256 != original.summary_sha256)
+                    || (mask & removal_ledger::TAGS == 0
+                        && (actual.tags_sha256 != original.tags_sha256
+                            || actual.labels_sha256 != original.labels_sha256))
+                    || (mask & removal_ledger::FULL_TEXT == 0
+                        && (record.text_length != 0) != row.record.after.lifecycle.has_text)
+                {
+                    return Err(invalid(
+                        "moved cutover document differs without validated removal",
+                    ));
+                }
+            }
             match current.get(&id) {
                 Some((ns, Some(vector)))
                     if ns == namespace
                         && Some(vector) == row.record.after.content.vector.as_ref() => {}
+                Some((_, Some(_)))
+                    if retained.get(&id).is_some_and(|record| {
+                        reachable_move_record(
+                            *namespace,
+                            &row.record.after,
+                            id,
+                            record,
+                            &moves,
+                            false,
+                        )
+                    }) => {}
                 Some((ns, None))
-                    if ns == namespace
-                        && loss
-                            .get(&(*namespace, id.into_inner()))
-                            .is_some_and(|m| m & removal_ledger::EMBEDDING != 0) => {}
-                None if loss
-                    .get(&(*namespace, id.into_inner()))
-                    .is_some_and(|m| *m == removal_ledger::ALL) => {}
+                    if ledger.iter().flat_map(|l| &l.entries).any(|e| {
+                        e.memory_uuid == id.into_inner()
+                            && e.removed_fields_mask & removal_ledger::EMBEDDING != 0
+                    }) && (ns == namespace
+                        || retained.get(&id).is_some_and(|record| {
+                            reachable_move_record(
+                                *namespace,
+                                &row.record.after,
+                                id,
+                                record,
+                                &moves,
+                                true,
+                            )
+                        })) => {}
+                None if ledger.iter().flat_map(|l| &l.entries).any(|e| {
+                    e.memory_uuid == id.into_inner() && e.removed_fields_mask == removal_ledger::ALL
+                }) => {}
                 _ => {
                     return Err(invalid(
                         "certified inventory row/reference omitted without validated loss",
@@ -375,6 +585,28 @@ pub(crate) fn retained_text_proofs(
                     .is_some()
                 {
                     return Err(invalid("duplicate cutover text commitment"));
+                }
+            }
+        }
+    }
+    // A legacy source has no creation text hash. Its first regenerated move
+    // commits the actual retained text, and subsequent moves must preserve it.
+    // A later Summary witness must not erase an earlier Present commitment.
+    for row in read.open_table(control::RECEIPTS)?.iter()? {
+        let (_, value) = row?;
+        if let MutationOutcome::NativeMemoriesMoved { transition } =
+            control::validate_receipt(value.value())?.receipt.outcome
+        {
+            for moved in transition.records {
+                let id = moved.change.memory_id;
+                if let RetainedTextInput::Present { sha256 } = moved.document.full_text {
+                    if result.get(&id).is_some_and(|old| {
+                        matches!(old,
+                        RetainedTextInput::Present { sha256: previous } if *previous != sha256)
+                    }) {
+                        return Err(invalid("move retained text commitments disagree"));
+                    }
+                    result.insert(id, RetainedTextInput::Present { sha256 });
                 }
             }
         }

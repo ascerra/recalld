@@ -297,6 +297,26 @@ impl MetadataStore {
                     transition.vector_execution.as_ref(),
                 )?;
             }
+            MutationOutcome::NativeMemoriesMoved { transition } => {
+                transition.validate(receipt)?;
+                if transition.capture != owned.at {
+                    return Err(StorageError::RecoveryRequired(
+                        "move differs from owned vector generation".into(),
+                    ));
+                }
+                let namespace = transition.destination.namespace()?;
+                owned.require_namespace(owned.at, &namespace)?;
+                if transition.destination.schema.vector_certification.as_ref()
+                    != owned.namespaces.get(&namespace.id.get())
+                {
+                    return Err(StorageError::RecoveryRequired(
+                        "move destination certification changed".into(),
+                    ));
+                }
+                // The move validator binds each generated retained-document
+                // witness to its exact before/after record and destination.
+                // Provider seals were verified before staging in this writer.
+            }
             MutationOutcome::NativeMemoryInsertedWithLinks { transition } => {
                 transition.validate(receipt)?;
                 owned.require_insert(

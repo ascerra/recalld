@@ -26,6 +26,7 @@ mod native_catalog;
 pub(crate) mod native_graph;
 mod native_lifecycle;
 mod native_maintenance;
+mod native_move;
 mod native_namespace_binding;
 mod native_policy;
 pub(crate) mod native_records;

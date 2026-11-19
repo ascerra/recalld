@@ -574,6 +574,25 @@ async fn dispatch_bounded(
             serde_json::to_value(reply).map_err(|e| BridgeError::Internal(e.to_string()))
         }
 
+        "move_memories_v1" => {
+            use crate::serialization::move_memories::{Admission, Caller, Reply};
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Params {
+                input: crate::storage::native_move::NativeMoveInput,
+                caller: Caller,
+            }
+            let p: Params = serde_json::from_value(params)
+                .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
+            let admission =
+                Admission::daemon(p.caller, frame_limit.unwrap_or(LEGACY_MAX_MESSAGE_SIZE));
+            let reply = match p.input.validate().and_then(|()| admission.check()) {
+                Err(error) => Reply::from_result(Err(error)),
+                Ok(()) => storage.move_memories(p.input, admission).await,
+            };
+            serde_json::to_value(reply).map_err(|e| BridgeError::Internal(e.to_string()))
+        }
+
         "shutdown" => Ok(serde_json::json!({})),
 
         "session_context_v1" => {
@@ -1867,6 +1886,10 @@ pub(crate) async fn catalog_test_remote(
         task,
     )
 }
+
+#[cfg(test)]
+#[path = "move_tests.rs"]
+mod move_tests;
 
 #[cfg(test)]
 #[path = "catalog_tests.rs"]

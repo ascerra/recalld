@@ -93,6 +93,57 @@ fn decode_entry(bytes: &[u8]) -> Result<RemovalEntry, StorageError> {
     Ok(entry)
 }
 
+/// Per-ID namespace reachability from typed, validated move receipts. Historical
+/// receipts may describe a later branch than the selected snapshot, so this is
+/// deliberately bidirectional: losses follow identity, not its latest owner.
+#[derive(Default)]
+pub(crate) struct MoveNamespaces(std::collections::HashMap<Uuid, Vec<(u32, u32)>>);
+impl MoveNamespaces {
+    pub(crate) fn include(&mut self, receipt: &control::WriteReceipt) -> Result<(), StorageError> {
+        if let control::MutationOutcome::NativeMemoriesMoved { transition } = &receipt.outcome {
+            transition.validate(receipt)?;
+            for id in &transition.ids {
+                self.0.entry(id.into_inner()).or_default().push((
+                    transition.source_namespace_id.get(),
+                    transition.destination_namespace_id.get(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn connects(&self, id: Uuid, source: u32, destination: u32) -> bool {
+        let mut reached = std::collections::HashSet::from([source]);
+        let Some(edges) = self.0.get(&id) else {
+            return source == destination;
+        };
+        loop {
+            let previous = reached.len();
+            for &(a, b) in edges {
+                if reached.contains(&a) || reached.contains(&b) {
+                    reached.insert(a);
+                    reached.insert(b);
+                }
+            }
+            if reached.contains(&destination) {
+                return true;
+            }
+            if reached.len() == previous {
+                return false;
+            }
+        }
+    }
+
+    fn read(tx: &ReadTransaction) -> Result<Self, StorageError> {
+        let mut moves = Self::default();
+        for row in tx.open_table(control::RECEIPTS)?.iter()? {
+            let (_, value) = row?;
+            moves.include(&control::validate_receipt(value.value())?.receipt)?;
+        }
+        Ok(moves)
+    }
+}
+
 /// Validate without creating/repairing anything, and export every retained entry.
 /// None identifies a genuine pre-ledger store; callers must preserve unknown coverage.
 pub(crate) fn read_export(
@@ -131,6 +182,11 @@ pub(crate) fn read_export(
         return Err(invalid("invalid coverage boundary/version"));
     }
     let records = tx.open_table(META_TABLE)?;
+    let moves = if names.iter().any(|name| name == control::RECEIPTS.name()) {
+        MoveNamespaces::read(tx)?
+    } else {
+        MoveNamespaces::default()
+    };
     let mut entries = Vec::new();
     for row in tx.open_table(LEDGER)?.iter()? {
         let (k, value) = row?;
@@ -149,7 +205,10 @@ pub(crate) fn read_export(
         }
         if let Some(value) = records.get(entry.memory_uuid.as_bytes().as_slice())? {
             let record = DiskRecord::from_bytes(value.value())?;
-            validate_retained_record(&entry, &record)?;
+            if !moves.connects(entry.memory_uuid, entry.namespace_id, record.namespace_id) {
+                return Err(invalid("record namespace lacks move evidence"));
+            }
+            validate_retained_fields(&entry, &record)?;
         }
         entries.push(entry);
     }
@@ -157,10 +216,16 @@ pub(crate) fn read_export(
 }
 
 fn validate_retained_record(entry: &RemovalEntry, record: &DiskRecord) -> Result<(), StorageError> {
+    if record.namespace_id != entry.namespace_id {
+        return Err(invalid("record namespace differs from removal evidence"));
+    }
+    validate_retained_fields(entry, record)
+}
+
+fn validate_retained_fields(entry: &RemovalEntry, record: &DiskRecord) -> Result<(), StorageError> {
     if entry.terminal_kind == Some(TerminalKind::HardDelete)
         || (entry.terminal_kind == Some(TerminalKind::Tombstone)
             && record.phase != DecayPhase::Tombstone)
-        || record.namespace_id != entry.namespace_id
         || (entry.removed_fields_mask & FULL_TEXT != 0
             && (record.text_offset != 0 || record.text_length != 0))
         || (entry.removed_fields_mask & SUMMARY != 0 && !record.summary.is_empty())
@@ -370,6 +435,85 @@ mod tests {
     use super::*;
     use crate::model::{NamespaceConfig, NamespaceId, Tag};
     use crate::storage::{RedbStorageEngine, StorageEngine};
+
+    #[test]
+    fn move_history_loss_scope_is_bidirectional_transitive_and_uuid_specific() {
+        let id = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        let moves = MoveNamespaces(std::collections::HashMap::from([
+            (id, vec![(1, 2), (2, 3), (3, 1), (3, 4)]),
+            (other, vec![(4, 5)]),
+        ]));
+        assert!(moves.connects(id, 1, 4));
+        // A future destination's deletion must affect an older source snapshot.
+        assert!(moves.connects(id, 4, 1));
+        assert!(!moves.connects(id, 1, 5));
+        assert!(!moves.connects(other, 1, 4));
+        assert!(!moves.connects(Uuid::nil(), 1, 4));
+        assert!(moves.connects(Uuid::nil(), 1, 1));
+    }
+
+    #[test]
+    fn move_history_retained_owner_uses_snapshot_vector_and_token() {
+        use crate::model::schema::{NamespaceSchemaV2, RecordSchemaV2, VectorReference};
+        use crate::storage::native_records::{NativeRecordState, matches_retained_vector};
+        let mut retained = record(1);
+        let mut namespace = NamespaceConfig::default_namespace(0);
+        namespace.id = NamespaceId::new(1);
+        namespace.schema = Some(NamespaceSchemaV2::from_legacy());
+        retained.schema = Some(RecordSchemaV2::from_legacy(
+            &retained,
+            0,
+            Some(VectorReference {
+                slot: 0,
+                allocation_epoch: Generation::default().next().unwrap(),
+                sha256: [1; 32],
+            }),
+        ));
+        let original = NativeRecordState::capture(&retained, &namespace, None).unwrap();
+        let mut future = original.clone();
+        future.lifecycle.lifecycle.record_generation =
+            future.lifecycle.lifecycle.record_generation.next().unwrap();
+        future.content.vector.as_mut().unwrap().sha256 = [2; 32];
+        assert!(matches_retained_vector(&retained, &namespace, 1, &original));
+        assert!(!matches_retained_vector(
+            &retained, &namespace, 2, &original
+        ));
+        assert!(!matches_retained_vector(&retained, &namespace, 1, &future));
+        // Even identical bytes cannot claim a transition after the retained token.
+        future.content.vector = original.content.vector.clone();
+        assert!(!matches_retained_vector(&retained, &namespace, 1, &future));
+        retained
+            .schema
+            .as_mut()
+            .unwrap()
+            .lifecycle
+            .record_generation = future.lifecycle.lifecycle.record_generation;
+        assert!(matches_retained_vector(&retained, &namespace, 1, &original));
+    }
+
+    #[test]
+    fn move_history_does_not_relax_removal_fields_or_ordinary_namespace_checks() {
+        let mut retained = record(2);
+        let entry = RemovalEntry {
+            origin_lineage: Uuid::from_u128(1),
+            namespace_id: 1,
+            memory_uuid: Uuid::from_bytes(retained.id),
+            terminal_kind: None,
+            removed_fields_mask: FULL_TEXT,
+            operation_id: Uuid::from_u128(2),
+            generation: Generation::default().next().unwrap(),
+        };
+        assert!(validate_retained_fields(&entry, &retained).is_ok());
+        assert!(validate_retained_record(&entry, &retained).is_err());
+        retained.text_length = 1;
+        assert!(validate_retained_fields(&entry, &retained).is_err());
+        retained.text_length = 0;
+        let mut terminal = entry;
+        terminal.terminal_kind = Some(TerminalKind::HardDelete);
+        terminal.removed_fields_mask = ALL;
+        assert!(validate_retained_fields(&terminal, &retained).is_err());
+    }
 
     fn record(ns: u32) -> DiskRecord {
         DiskRecord {

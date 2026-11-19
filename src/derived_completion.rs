@@ -5,6 +5,7 @@ mod native_decay;
 pub(crate) mod native_graph;
 mod native_purge;
 pub(crate) use native_purge::PurgeApi1Failure;
+mod native_move;
 mod native_store;
 mod text_compaction;
 

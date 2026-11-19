@@ -165,6 +165,14 @@ pub trait StorageEngine: Send + Sync {
         Err(crate::canonical_list::ListError::Unavailable)
     }
 
+    async fn move_memories(
+        &self,
+        _input: crate::storage::native_move::NativeMoveInput,
+        _admission: crate::serialization::move_memories::Admission,
+    ) -> crate::serialization::move_memories::Reply {
+        crate::serialization::move_memories::Reply::unavailable()
+    }
+
     fn supports_api1_store(&self) -> bool {
         false
     }
@@ -1151,6 +1159,14 @@ impl McpBridge {
 
 #[async_trait]
 impl crate::mcp::server::McpHandler for McpBridge {
+    async fn call_move_tool(
+        &self,
+        arguments: serde_json::Value,
+        admission: crate::serialization::move_memories::Admission,
+    ) -> crate::mcp::protocol::ToolCallResult {
+        crate::mcp::tools::handle_move_memories(self, arguments, Some(admission)).await
+    }
+
     async fn call_catalog_tool(
         &self,
         arguments: serde_json::Value,

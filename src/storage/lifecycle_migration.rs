@@ -167,6 +167,8 @@ pub(crate) fn validate_policy_history(
     let mut inherited_noops = Vec::new();
     let mut native_history = Vec::new();
     let mut namespace_creations = HashMap::new();
+    let mut prior_vector_bindings =
+        HashMap::<u32, Vec<super::native_purge::NativeNamespaceProof>>::new();
     for row in read.open_table(control::RECEIPTS)?.iter()? {
         let (key, value) = row?;
         let receipt = control::validate_receipt(value.value())?.receipt;
@@ -180,7 +182,39 @@ pub(crate) fn validate_policy_history(
             return Err(invalid("duplicate lifecycle generation"));
         }
         let namespace = match &receipt.outcome {
+            MutationOutcome::NativeMemoriesMoved { transition: t } => {
+                if key.value()
+                    != control::scoped_key(
+                        receipt.store_id,
+                        MutationScope::Catalog,
+                        receipt.operation_id.as_bytes(),
+                    )
+                    || !control::permits_generation_origin(
+                        read,
+                        control,
+                        GenerationRef {
+                            store_id: receipt.store_id,
+                            generation: receipt.committed_generation,
+                        },
+                    )?
+                {
+                    return Err(invalid("invalid move receipt origin/scope"));
+                }
+                for proof in [&t.source, &t.destination] {
+                    native_history.push((
+                        receipt.clone(),
+                        proof.namespace_id,
+                        proof.schema.lifecycle_version,
+                        proof.schema.policy_revision,
+                    ));
+                }
+                None
+            }
             MutationOutcome::VectorsReembedded { transition: t } => {
+                prior_vector_bindings
+                    .entry(t.before_namespace.namespace_id.get())
+                    .or_default()
+                    .push(t.before_namespace.clone());
                 native_history.push((
                     receipt.clone(),
                     t.before_namespace.namespace_id,
@@ -697,6 +731,71 @@ pub(crate) fn validate_policy_history(
                 }
             }
         }
+        if let MutationOutcome::NativeMemoriesMoved { transition } = &receipt.outcome {
+            for proof in [&transition.source, &transition.destination] {
+                let id = proof.namespace_id.get();
+                let mut ns = configs
+                    .get(&id)
+                    .ok_or_else(|| invalid("move namespace missing"))?
+                    .clone();
+                if let Some(history) = numeric_policies.get(&id) {
+                    for (_, update) in history
+                        .range((
+                            std::ops::Bound::Excluded(proof.schema.policy_revision),
+                            std::ops::Bound::Unbounded,
+                        ))
+                        .rev()
+                    {
+                        update.before.apply(&mut ns);
+                    }
+                }
+                let schema = ns
+                    .schema
+                    .as_mut()
+                    .ok_or_else(|| invalid("move namespace schema missing"))?;
+                if let Some(history) = binding_changes.get(&id) {
+                    for (_, (before, _)) in history
+                        .range((
+                            std::ops::Bound::Excluded(proof.schema.policy_revision),
+                            std::ops::Bound::Unbounded,
+                        ))
+                        .rev()
+                    {
+                        schema.inherited_decay = before.clone();
+                    }
+                }
+                schema.lifecycle_version = proof.schema.lifecycle_version;
+                schema.policy_revision = proof.schema.policy_revision;
+                // A later cutover may be retained alongside an earlier move.
+                // Its exact prior certification is an alternative historical
+                // binding, not permission to accept arbitrary namespace schemas.
+                let mut bindings = vec![(
+                    schema.vector_certification.clone(),
+                    schema.required_features.clone(),
+                )];
+                for prior in prior_vector_bindings.get(&id).into_iter().flatten() {
+                    bindings.push((
+                        prior.schema.vector_certification.clone(),
+                        prior.schema.required_features.clone(),
+                    ));
+                }
+                let mut matched = false;
+                for (certification, features) in bindings {
+                    let schema = ns.schema.as_mut().unwrap();
+                    schema.vector_certification = certification;
+                    schema.required_features = features;
+                    if super::native_purge::NativeNamespaceProof::capture(&ns)? == *proof {
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    return Err(invalid(
+                        "move namespace differs from retained binding history",
+                    ));
+                }
+            }
+        }
         super::native_purge::validate_evidence(&receipt, &configs, ledger.as_ref())?;
         super::native_maintenance::validate_ledger(&receipt, ledger.as_ref())?;
         super::native_maintenance::validate_namespace_profiles(&receipt, &configs)?;
@@ -798,6 +897,46 @@ pub(crate) fn validate_policy_history(
     // assumption that every token increment was a namespace policy migration.
     for receipt in suffix.values().rev() {
         match &receipt.outcome {
+            MutationOutcome::NativeMemoriesMoved { transition: t } => {
+                for proof in [&t.source, &t.destination] {
+                    let ns = configs
+                        .get(&proof.namespace_id.get())
+                        .ok_or_else(|| invalid("move reverse namespace missing"))?;
+                    let mut actual = super::native_purge::NativeNamespaceProof::capture(ns)?;
+                    let (version, revision) = current_policy
+                        .get(&proof.namespace_id.get())
+                        .ok_or_else(|| invalid("move reverse policy missing"))?;
+                    actual.schema.lifecycle_version = *version;
+                    actual.schema.policy_revision = *revision;
+                    if actual != *proof {
+                        return Err(invalid("move reverse namespace differs"));
+                    }
+                }
+                for moved in &t.records {
+                    let rows = records.entry(t.destination_namespace_id.get()).or_default();
+                    let index = rows
+                        .iter()
+                        .position(|r| r.id == moved.change.memory_id)
+                        .ok_or_else(|| invalid("move reverse destination record missing"))?;
+                    if rows[index].namespace != t.destination_namespace_id.get()
+                        || rows[index].state != moved.change.after
+                    {
+                        return Err(invalid("move reverse destination record differs"));
+                    }
+                    let mut row = rows.remove(index);
+                    row.namespace = t.source_namespace_id.get();
+                    row.state = moved
+                        .change
+                        .before
+                        .clone()
+                        .ok_or_else(|| invalid("move reverse source missing"))?;
+                    let source = records.entry(t.source_namespace_id.get()).or_default();
+                    if source.iter().any(|r| r.id == row.id) {
+                        return Err(invalid("move reverse duplicates source identity"));
+                    }
+                    source.push(row);
+                }
+            }
             MutationOutcome::VectorsReembedded { transition: t } => {
                 let namespace = configs
                     .get_mut(&t.before_namespace.namespace_id.get())

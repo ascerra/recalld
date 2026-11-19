@@ -669,10 +669,9 @@ impl NativeRecordWrite {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CreationCommitment {
-    pub namespace_id: crate::model::NamespaceId,
     pub primary: NativeRecordChange,
-    /// Validated typed replacement, not a rewrite of the original receipt.
-    pub reembedded_vector: Option<VectorReference>,
+    /// Reachable historical owners, including states retained by older snapshots.
+    pub vector_states: Vec<(crate::model::NamespaceId, NativeRecordState)>,
 }
 impl CreationCommitment {
     pub(crate) fn primary(&self) -> Result<&NativeRecordChange, StorageError> {
@@ -687,63 +686,126 @@ pub(crate) fn creation_proofs(
 ) -> Result<HashMap<MemoryId, CreationCommitment>, StorageError> {
     use redb::ReadableTable;
     let mut result = HashMap::new();
-    let mut replacements = HashMap::new();
+    let mut replacements = Vec::new();
     for row in read.open_table(super::control::RECEIPTS)?.iter()? {
         let (_, value) = row?;
         let receipt = super::control::validate_receipt(value.value())?.receipt;
         let creation = match &receipt.outcome {
             MutationOutcome::NativeMemoryInserted { transition } => Some((
                 transition.memory_id,
-                CreationCommitment {
-                    namespace_id: transition.namespace_id,
-                    primary: transition.primary()?.clone(),
-                    reembedded_vector: None,
-                },
+                transition.namespace_id,
+                transition.primary()?.clone(),
             )),
             MutationOutcome::NativeMemoryInsertedWithLinks { transition } => Some((
                 transition.memory_id,
-                CreationCommitment {
-                    namespace_id: transition.namespace_id,
-                    primary: transition.primary()?.clone(),
-                    reembedded_vector: None,
-                },
+                transition.namespace_id,
+                transition.primary()?.clone(),
             )),
             MutationOutcome::VectorsReembedded { transition } => {
-                for replacement in &transition.records {
-                    if replacements
-                        .insert(replacement.record.memory_id, replacement.record.clone())
-                        .is_some()
-                    {
-                        return Err(invalid("ambiguous vector replacement history"));
-                    }
-                }
+                let ns = transition.before_namespace.namespace_id;
+                replacements.extend(
+                    transition
+                        .records
+                        .iter()
+                        .map(|r| (ns, ns, r.record.clone())),
+                );
+                None
+            }
+            MutationOutcome::NativeMemoriesMoved { transition } => {
+                replacements.extend(transition.records.iter().map(|r| {
+                    (
+                        transition.source_namespace_id,
+                        transition.destination_namespace_id,
+                        r.change.clone(),
+                    )
+                }));
                 None
             }
             _ => None,
         };
-        if let Some((id, proof)) = creation {
+        if let Some((id, namespace_id, primary)) = creation {
+            let proof = CreationCommitment {
+                vector_states: vec![(namespace_id, primary.after.clone())],
+                primary,
+            };
             if result.insert(id, proof).is_some() {
                 return Err(invalid("duplicate native creation identity"));
             }
         }
     }
-    for (id, replacement) in replacements {
-        if let Some(creation) = result.get_mut(&id) {
-            let before = replacement
+    // Receipt keys and origin-local generations do not order a restored history.
+    // Resolve its branches from exact source ownership, retaining every reachable
+    // state rather than treating a future receipt as the snapshot's current owner.
+    replacements.retain(|(_, _, change)| result.contains_key(&change.memory_id));
+    while !replacements.is_empty() {
+        let previous = replacements.len();
+        let mut pending = Vec::new();
+        for (source, destination, change) in replacements {
+            let before = change
                 .before
                 .as_ref()
                 .ok_or_else(|| invalid("replacement source missing"))?;
-            if before.content.vector != creation.primary.after.content.vector
-                || before.content.profile_id != creation.primary.after.content.profile_id
+            let creation = result.get_mut(&change.memory_id).unwrap();
+            let original = &creation.primary.after;
+            if before.lifecycle.created_at != original.lifecycle.created_at
+                || before.lifecycle.lifecycle.observed_at
+                    != original.lifecycle.lifecycle.observed_at
+                || before.lifecycle.lifecycle.timestamp_origin
+                    != original.lifecycle.lifecycle.timestamp_origin
+                || before.lifecycle.difficulty != original.lifecycle.difficulty
+                || before.content.summary_sha256 != original.content.summary_sha256
+                || before.content.tags_sha256 != original.content.tags_sha256
+                || before.content.labels_sha256 != original.content.labels_sha256
+                || before.content.label_provenance != original.content.label_provenance
+                || before.content.extensions_sha256 != original.content.extensions_sha256
+                || (before.lifecycle.has_text
+                    && before.content.text_sha256 != original.content.text_sha256)
             {
                 return Err(invalid(
-                    "replacement differs from original creation vector/profile",
+                    "replacement source differs from immutable creation state",
                 ));
             }
-            creation.reembedded_vector = replacement.after.content.vector;
+            if creation.vector_states.iter().any(|(ns, state)| {
+                *ns == source
+                    && same_vector_owner(&state.content, &before.content)
+                    && state.lifecycle.lifecycle.record_generation
+                        <= before.lifecycle.lifecycle.record_generation
+            }) {
+                creation.vector_states.push((destination, change.after));
+            } else {
+                pending.push((source, destination, change));
+            }
         }
+        if pending.len() == previous {
+            return Err(invalid("disconnected native vector replacement history"));
+        }
+        replacements = pending;
     }
     Ok(result)
+}
+
+fn same_vector_owner(left: &ContentProof, right: &ContentProof) -> bool {
+    left.vector == right.vector
+        && left.profile_id == right.profile_id
+        && left.embedding_origin == right.embedding_origin
+}
+
+/// Select by the actual snapshot, never by the latest retained receipt. A fork
+/// can retain future history while serving an earlier record and vector owner.
+pub(crate) fn matches_retained_vector(
+    record: &DiskRecord,
+    namespace: &NamespaceConfig,
+    candidate_namespace: u32,
+    candidate: &NativeRecordState,
+) -> bool {
+    record.namespace_id == candidate_namespace
+        && profile_id(namespace) == candidate.content.profile_id
+        && record.schema.as_ref().is_some_and(|schema| {
+            schema.vector == candidate.content.vector
+                && schema.embedding_origin == candidate.content.embedding_origin
+                && schema.lifecycle.record_generation
+                    >= candidate.lifecycle.lifecycle.record_generation
+        })
 }
 
 pub(crate) fn validate_retained_creation(
@@ -770,32 +832,36 @@ pub(crate) fn validate_retained_creation(
         .into_iter()
         .flat_map(|l| &l.entries)
         .filter(|e| {
-            e.namespace_id == record.namespace_id
+            creation
+                .vector_states
+                .iter()
+                .any(|(ns, _)| ns.get() == e.namespace_id)
                 && e.memory_uuid == MemoryId::from_bytes(record.id).into_inner()
         })
         .fold(0_u8, |mask, e| mask | e.removed_fields_mask);
     use super::metadata::removal_ledger::{EMBEDDING, FULL_TEXT, SUMMARY, TAGS};
     let current = ContentProof::capture(record, namespace, expected.text_sha256)?;
-    if record.namespace_id != creation.namespace_id.get()
+    let owner_matches = creation.vector_states.iter().any(|(ns, state)| {
+        if mask & EMBEDDING == 0 {
+            matches_retained_vector(record, namespace, ns.get(), state)
+        } else {
+            record.namespace_id == ns.get()
+                && current.profile_id == state.content.profile_id
+                && schema.lifecycle.record_generation >= state.lifecycle.lifecycle.record_generation
+        }
+    });
+    if !owner_matches
         || record.created_at != original.lifecycle.created_at
         || schema.lifecycle.observed_at != original.lifecycle.lifecycle.observed_at
         || schema.lifecycle.timestamp_origin != TimestampOrigin::Native
         || record.difficulty != original.lifecycle.difficulty.get()
         || current.label_provenance != LabelProvenance::NativeV2
-        || current.profile_id != expected.profile_id
         || current.extensions_sha256 != expected.extensions_sha256
-        || (mask & EMBEDDING == 0 && current.embedding_origin != expected.embedding_origin)
         || (mask & SUMMARY == 0 && current.summary_sha256 != expected.summary_sha256)
         || (mask & TAGS == 0
             && (current.tags_sha256 != expected.tags_sha256
                 || current.labels_sha256 != expected.labels_sha256))
         || (mask & FULL_TEXT == 0 && (record.text_length != 0) != original.lifecycle.has_text)
-        || (mask & EMBEDDING == 0
-            && current.vector.as_ref()
-                != creation
-                    .reembedded_vector
-                    .as_ref()
-                    .or(expected.vector.as_ref()))
     {
         return Err(invalid(
             "retained native record disagrees with its creation commitment",

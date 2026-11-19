@@ -134,11 +134,15 @@ pub(crate) fn append_recovery_guidance(tool: &str, context: &Value, result: &mut
     let Some(cause) = cause else { return };
     let can_resume_batch = matches!(tool, "store_memories" | "forget_memories")
         && context.get("hasRetryIdentity").and_then(Value::as_bool) == Some(true);
-    let hint = match cause {
+    let hint = if tool == "move_memories" {
+        "Preserve the original storeId, idempotencyKey, both namespace names, embeddingMode and full ordered IDs, plus any returned operationId or receipt. Reconcile using only that identical request and key; never invent a fresh key or retry a subset. A replay describes the original move, not current locations. If the daemon lacks move support, update and restart it before retrying the same request.".to_owned()
+    } else {
+        match cause {
         Cause::Capability => REFRESH.to_owned(),
         Cause::TransientRead if read_only(tool, context) => "This read was blocked by pending maintenance or a changing read view. Wait briefly, then retry the same read at most three times with backoff. If it remains blocked, stop and check daemon health. This error is not evidence that the namespace or memory is absent.".to_owned(),
         Cause::Committed => format!("The mutation committed, but readiness or its response is incomplete. {}", if can_resume_batch { BATCH } else { RECONCILE }),
         Cause::Unknown | Cause::TransientRead => format!("This failure does not establish that a mutation or access observation was unapplied. {}", if can_resume_batch { BATCH } else { RECONCILE }),
+    }
     };
     result.content.push(ContentBlock::Text {
         text: format!("{MARKER}{hint}"),

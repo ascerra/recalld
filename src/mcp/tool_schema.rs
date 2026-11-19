@@ -80,6 +80,7 @@ pub(super) fn output(tool: &str) -> Option<Value> {
             }
         }),
         "delete_namespace" => catalog::delete_output(),
+        "move_memories" => crate::serialization::move_memories::output_schema(),
         "get_memory" | "store_memory" | "store_memories" | "forget_memories" => {
             record::output(tool)
         }

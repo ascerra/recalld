@@ -10,6 +10,7 @@ pub mod get;
 pub mod get_api1;
 mod json;
 pub mod list;
+pub mod move_memories;
 pub mod native_batch;
 pub mod native_single;
 pub(crate) mod page_schema;

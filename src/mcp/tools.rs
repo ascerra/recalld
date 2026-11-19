@@ -1,9 +1,9 @@
 //! MCP tool definitions and handlers for Recalld memory operations.
 //!
-//! Defines 15 tools: get_session, store_memory, store_memories, recall_memories, get_memory,
+//! Defines 16 tools: get_session, store_memory, store_memories, recall_memories, get_memory,
 //! reinforce_memory, forget_memory, forget_memories, find_similar_memories,
 //! create_namespace, delete_namespace, namespace_stats, list_memories,
-//! list_namespaces, list_tags.
+//! list_namespaces, list_tags, move_memories.
 
 use serde_json::json;
 
@@ -41,6 +41,7 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         get_session_def(),
         store_memory_def(),
         store_memories_def(),
+        move_memories_def(),
         recall_memories_def(),
         get_memory_def(),
         reinforce_memory_def(),
@@ -70,10 +71,11 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
 /// which advertises a tool that then answers "Unknown tool" — fails a
 /// test rather than a caller.
 #[cfg(test)]
-const DISPATCHED: [&str; 15] = [
+const DISPATCHED: [&str; 16] = [
     "get_session",
     "store_memory",
     "store_memories",
+    "move_memories",
     "recall_memories",
     "get_memory",
     "reinforce_memory",
@@ -128,6 +130,7 @@ pub async fn dispatch_tool(
         "get_session" => handle_get_session(bridge, &arguments).await,
         "store_memory" => handle_store_memory(bridge, arguments).await,
         "store_memories" => handle_store_memories(bridge, arguments).await,
+        "move_memories" => handle_move_memories(bridge, arguments, None).await,
         "recall_memories" => handle_recall_memories(bridge, arguments).await,
         "get_memory" => handle_get_memory(bridge, arguments).await,
         "reinforce_memory" => handle_reinforce_memory(bridge, arguments).await,
@@ -1062,6 +1065,56 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
 // ═══════════════════════════════════════════════════════════════════════
 // Tool 5b: forget_memories (batch)
 // ═══════════════════════════════════════════════════════════════════════
+
+fn move_memories_def() -> ToolInfo {
+    ToolInfo {
+        output_schema: None,
+        name: "move_memories".into(),
+        title: Some("Move Memories".into()),
+        description: "Atomically move 1–100 Full or Summary memories into an existing namespace, preserving their IDs, content, lifecycle/access history and graph edges. Ghost and Tombstone records are refused. Embeddings are regenerated from retained content using the exact destination provider/profile; dimension equality alone is insufficient. Cross-namespace edges remain stored, but scoped search stays scoped. Requires native storage, an explicit storeId and a stable idempotencyKey chosen before the first attempt. To reconcile an uncertain outcome, retain any operationId/receipt and repeat only the identical full ordered payload, both namespace names, embeddingMode, storeId and key. Never replace the key or retry a guessed subset. A replay reports the original move, not the records’ current location. Namespaces are not access controls.".into(),
+        input_schema: json!({
+            "type":"object", "additionalProperties":false,
+            "required":["storeId","idempotencyKey","sourceNamespace","destinationNamespace","ids","embeddingMode"],
+            "properties":{
+                "storeId":{"type":"string","format":"uuid","description":"Explicit store identity from get_session; preserve across retries."},
+                "idempotencyKey":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[ -~]+$","description":"Choose once before the first attempt; reuse only with the identical complete ordered payload."},
+                "sourceNamespace":{"type":"string","minLength":1,"maxLength":64,"description":"Explicit source namespace; session defaults are not used."},
+                "destinationNamespace":{"type":"string","minLength":1,"maxLength":64,"description":"Existing destination namespace with a known embedding profile."},
+                "ids":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","format":"uuid"}},
+                "embeddingMode":{"type":"string","enum":["regenerate"]}
+            }
+        }),
+        annotations: Some(ToolAnnotations {
+            read_only_hint: Some(false), destructive_hint: Some(true),
+            idempotent_hint: Some(true), open_world_hint: Some(true),
+        }),
+    }
+}
+
+pub(crate) async fn handle_move_memories(
+    bridge: &McpBridge,
+    arguments: serde_json::Value,
+    admission: Option<crate::serialization::move_memories::Admission>,
+) -> ToolCallResult {
+    use crate::serialization::move_memories::{self, Reply};
+    let input = match move_memories::parse(arguments) {
+        Ok(input) => input,
+        Err(error) => return Reply::error("INVALID_INPUT", "notCommitted", None, &error).tool(),
+    };
+    let Some(admission) = admission else {
+        return Reply::error(
+            "SERVICE_UNAVAILABLE",
+            "notCommitted",
+            None,
+            "move_memories requires caller response admission; use the MCP dispatcher.",
+        )
+        .tool();
+    };
+    if let Err(error) = admission.check() {
+        return Reply::from_result(Err(error)).tool();
+    }
+    bridge.storage.move_memories(input, admission).await.tool()
+}
 
 fn forget_memories_def() -> ToolInfo {
     ToolInfo {
@@ -2547,6 +2600,7 @@ mod tests {
         for def in [
             forget_memory_def(),
             forget_memories_def(),
+            move_memories_def(),
             delete_namespace_def(),
         ] {
             let annotations = def
@@ -2576,6 +2630,56 @@ mod tests {
     }
 
     // ── Registry shape ───────────────────────────────────────────────
+
+    #[test]
+    fn move_tool_schema_declares_explicit_scope_retry_identity_and_compact_output() {
+        let definition = tool_definitions()
+            .into_iter()
+            .find(|tool| tool.name == "move_memories")
+            .unwrap();
+        let required = definition.input_schema["required"].as_array().unwrap();
+        for field in [
+            "storeId",
+            "idempotencyKey",
+            "sourceNamespace",
+            "destinationNamespace",
+            "ids",
+            "embeddingMode",
+        ] {
+            assert!(required.contains(&json!(field)));
+        }
+        assert_eq!(definition.input_schema["additionalProperties"], false);
+        assert_eq!(
+            definition.input_schema["properties"]["embeddingMode"]["enum"],
+            json!(["regenerate"])
+        );
+        assert_eq!(
+            definition.input_schema["properties"]["ids"]["maxItems"],
+            100
+        );
+        assert_eq!(
+            definition.input_schema["properties"]["contractVersion"]["enum"],
+            json!([1])
+        );
+        let output = definition.output_schema.unwrap();
+        let receipt = &output["properties"]["receipt"]["anyOf"][1]["properties"];
+        for field in [
+            "sourceNamespaceId",
+            "destinationNamespaceId",
+            "destinationProfileId",
+            "operationId",
+            "replayed",
+        ] {
+            assert!(receipt.get(field).is_some(), "{field}");
+        }
+        assert!(receipt.get("transition").is_none());
+        assert!(
+            definition
+                .description
+                .contains("scoped search stays scoped")
+        );
+        assert!(definition.description.contains("original move"));
+    }
 
     #[test]
     fn t34_every_tool_definition_has_a_unique_name() {
@@ -2628,8 +2732,8 @@ mod tests {
     }
 
     #[test]
-    fn t35_declares_fifteen_tools() {
-        assert_eq!(tool_definitions().len(), 15);
+    fn t35_declares_sixteen_tools() {
+        assert_eq!(tool_definitions().len(), 16);
     }
 
     /// A bridge whose every method fails. The point is to reach

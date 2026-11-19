@@ -165,6 +165,28 @@ impl RemoteStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for RemoteStorageAdapter {
+    async fn move_memories(
+        &self,
+        input: crate::storage::native_move::NativeMoveInput,
+        admission: crate::serialization::move_memories::Admission,
+    ) -> crate::serialization::move_memories::Reply {
+        use crate::serialization::move_memories::Reply;
+        if let Err(error) = input.validate().and_then(|()| admission.check()) {
+            return Reply::from_result(Err(error));
+        }
+        // Deliberately no capability fallback or transparent mutation replay.
+        match self.client.call("move_memories_v1", serde_json::json!({
+            "input":input, "caller":admission.caller(),
+        })).await {
+            Ok(value) => serde_json::from_value::<Reply>(value).map_err(|e| e.to_string())
+                .and_then(|reply| { reply.validate()?; Ok(reply) }).unwrap_or_else(|_| Reply::error(
+                "SERVICE_UNAVAILABLE", "unknown", None,
+                "Daemon move response could not be decoded. Reconcile the original request with its original key.")),
+            Err(_) => Reply::error("SERVICE_UNAVAILABLE", "unknown", None,
+                "Daemon move call failed. Preserve the original request and key; reconcile before retrying. An older daemon must be updated and restarted."),
+        }
+    }
+
     async fn list_canonical_page(
         &self,
         request: crate::serialization::list::ListPageRequest,
