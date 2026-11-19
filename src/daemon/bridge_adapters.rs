@@ -558,6 +558,24 @@ impl bridge::NamespaceRegistry for RemoteNamespaceAdapter {
             .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
     }
 
+    async fn create_namespace_bounded(
+        &self,
+        input: CreateNamespaceInput,
+        admission: crate::serialization::catalog_api1::CatalogReplyAdmission,
+    ) -> Result<NamespaceInfo, crate::serialization::catalog_api1::CatalogApi1Error> {
+        let result = self
+            .client
+            .call(
+                "create_namespace_bounded_v1",
+                serde_json::json!({
+                    "input": input, "caller": admission.caller(),
+                }),
+            )
+            .await?;
+        serde_json::from_value(result)
+            .map_err(|e| BridgeError::Internal(format!("response decode: {e}")).into())
+    }
+
     async fn delete_namespace(
         &self,
         input: bridge::DeleteNamespaceInput,
