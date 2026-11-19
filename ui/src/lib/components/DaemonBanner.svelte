@@ -3,7 +3,15 @@
   import { session } from '$lib/session.svelte';
 </script>
 
-{#if session.status === 'unavailable' || session.status === 'unsupported'}
+{#if session.status === 'signedOut'}
+  <div class="banner" role="alert">
+    <span class="dot" aria-hidden="true"></span>
+    <div class="text">
+      <strong>This page isn’t signed in.</strong>
+      <span>Open the link <code class="mono">recalld ui</code> printed. Each launch prints a new one.</span>
+    </div>
+  </div>
+{:else if session.status === 'unavailable' || session.status === 'unsupported'}
   <div class="banner" role="alert">
     <span class="dot" aria-hidden="true"></span>
     <div class="text">

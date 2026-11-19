@@ -2,23 +2,25 @@
  * recalld UI — design tokens ("Field Notes").
  * Single source of truth for color, type, spacing, radius and motion.
  * Components reference these variables only; no raw hex values in components.
+ * Warm "eggshell" grounds (requested after review, 2026-11-19); contrast
+ * re-checked: every text color stays >= 4.5:1 on bg, surface, canvas and sunken.
  * Light theme only for v1. A dark theme is out of scope until the light one ships.
  */
 
 :root {
   /* ── Surfaces ─────────────────────────────────────────────── */
-  --color-bg: #F6F6F2;            /* page ground (neutral off-white) */
-  --color-surface: #FBFBF8;       /* cards, panels, tables, popovers */
-  --color-canvas: #F9F9F6;        /* Memory map canvas */
-  --color-canvas-dot: #E5E6DF;    /* 1px dot grid on the map canvas, 24px pitch */
-  --color-sunken: #F6F6F2;        /* stat tiles, palette footer */
+  --color-bg: #F1EDE2;            /* page ground (warm eggshell) */
+  --color-surface: #F7F3E9;       /* cards, panels, tables, popovers */
+  --color-canvas: #F4F0E6;        /* Memory map canvas */
+  --color-canvas-dot: #E2DDD0;    /* 1px dot grid on the map canvas, 24px pitch */
+  --color-sunken: #F1EDE2;        /* stat tiles, palette footer */
   --color-scrim: rgba(26, 28, 25, 0.22); /* behind the ⌘K palette */
 
   /* ── Lines ────────────────────────────────────────────────── */
-  --color-border: #E3E4DD;        /* card, panel and table outlines */
-  --color-border-strong: #D5D8CE; /* secondary buttons, kbd */
-  --color-divider: #EEEFEA;       /* row separators inside cards/tables */
-  --color-grid: #D9DBD2;          /* chart gridlines (dashed 2 3) */
+  --color-border: #E3DDCF;        /* card, panel and table outlines */
+  --color-border-strong: #D6D0C0; /* secondary buttons, kbd */
+  --color-divider: #ECE7DB;       /* row separators inside cards/tables */
+  --color-grid: #D9D3C4;          /* chart gridlines (dashed 2 3) */
 
   /* ── Text ─────────────────────────────────────────────────── */
   --color-text: #1A1C19;          /* 16.4:1 on surface */
@@ -30,9 +32,9 @@
   --color-accent: #4A6656;        /* primary button, recall light, curves, dots (6.1:1) */
   --color-accent-text: #3B5446;   /* small green text: status lines, links (7.1:1) */
   --color-accent-strong: #2C3F34; /* text on accent-soft, link hover */
-  --color-accent-soft: #ECEEE9;   /* selected chip / nav / row background */
-  --color-accent-soft-border: #D5DAD2;
-  --color-on-accent: #FBFBF8;     /* text on --color-accent */
+  --color-accent-soft: #E7E6DB;   /* selected chip / nav / row background */
+  --color-accent-soft-border: #D5D6C8;
+  --color-on-accent: #F7F3E9;     /* text on --color-accent */
 
   /* ── Graph ────────────────────────────────────────────────── */
   --color-node: #3C403A;          /* unlit memory node */
@@ -43,7 +45,7 @@
   --color-contradicts: #5A6B7D;   /* dashed 3 3 */
   --color-permastore: #9C8A4E;    /* 1px halo ring, r + 3.2 */
   --color-mark-glass: #F3EEDC;    /* cream glass of the bulb mark (DESIGN §9a) */
-  --color-label-halo: #F9F9F6;    /* 4px text stroke behind map labels */
+  --color-label-halo: #F4F0E6;    /* 4px text stroke behind map labels */
 
   /* ── Agents (pulse + activity dot colors, assigned in order) ─ */
   --color-agent-1: #4A6656;       /* e.g. claude-code */

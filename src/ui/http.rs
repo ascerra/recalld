@@ -115,6 +115,24 @@ impl DaemonPool {
         Ok(value)
     }
 
+    /// Keep one daemon connection alive while `recalld ui` runs: the daemon
+    /// closes connections idle for 60 s and shuts down once it has none.
+    /// `ping` is not activity, so this adds no work beyond the round trip.
+    pub fn keep_alive(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let pool = self.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                tick.tick().await;
+                if let Ok(client) = pool.client().await
+                    && client.ping().await.is_err()
+                {
+                    pool.reset().await;
+                }
+            }
+        })
+    }
+
     /// Drop connections so the next call reconnects (after a daemon restart).
     pub async fn reset(&self) {
         self.clients.lock().await.clear();

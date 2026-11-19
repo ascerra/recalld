@@ -25,7 +25,9 @@
         ? 'connecting…'
         : session.status === 'unsupported'
           ? 'daemon lacks UI support'
-          : 'daemon unavailable',
+          : session.status === 'signedOut'
+            ? 'signed out'
+            : 'daemon unavailable',
   );
 </script>
 

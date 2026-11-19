@@ -74,6 +74,7 @@ impl BoundUi {
     }
 
     pub async fn serve(self, shutdown: impl std::future::Future<Output = ()> + Send + 'static) {
+        let keep_alive = self.state.daemon.keep_alive();
         let app = http::router(self.state);
         if let Err(e) = axum::serve(self.listener, app)
             .with_graceful_shutdown(shutdown)
@@ -81,6 +82,7 @@ impl BoundUi {
         {
             tracing::error!(%e, "UI server error");
         }
+        keep_alive.abort();
     }
 }
 
