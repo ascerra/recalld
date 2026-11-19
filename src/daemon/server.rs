@@ -791,6 +791,37 @@ async fn dispatch_bounded(
             serde_json::to_value(result).map_err(|e| BridgeError::Internal(e.to_string()))
         }
 
+        "create_namespace_bounded_v1" => {
+            use crate::serialization::catalog_api1::{
+                self, CatalogApi1Error, CatalogReplyAdmission,
+            };
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Params {
+                input: CreateNamespaceInput,
+                caller: catalog_api1::CatalogCaller,
+            }
+            let p: Params = serde_json::from_value(params)
+                .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
+            let admission = CatalogReplyAdmission::from_caller(
+                p.caller,
+                frame_limit.unwrap_or(LEGACY_MAX_MESSAGE_SIZE),
+            )?;
+            let result = namespaces
+                .create_namespace_bounded(p.input, admission)
+                .await
+                .map_err(|error| match error {
+                    CatalogApi1Error::Legacy(error) => error,
+                    CatalogApi1Error::Native(error) => {
+                        // Keep full evidence through the daemon error string;
+                        // the remote MCP tool parses it back into structured JSON.
+                        let (_, value) = catalog_api1::failure(&error);
+                        BridgeError::PartiallyApplied(value.to_string())
+                    }
+                })?;
+            serde_json::to_value(result).map_err(|e| BridgeError::Internal(e.to_string()))
+        }
+
         "create_namespace" => {
             let input: CreateNamespaceInput = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
@@ -1836,3 +1867,7 @@ pub(crate) async fn catalog_test_remote(
         task,
     )
 }
+
+#[cfg(test)]
+#[path = "catalog_tests.rs"]
+mod catalog_tests;

@@ -1533,6 +1533,7 @@ mod tests {
         for method in [
             "store_memory",
             "create_namespace",
+            "create_namespace_bounded_v1",
             "reinforce_memory",
             "delete_memory",
             "delete_memories",
