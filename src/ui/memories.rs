@@ -69,6 +69,42 @@ fn decay_now(r: &DiskRecord, ns: Option<&NamespaceConfig>, now: i64) -> (f32, Op
     (current, Some(NextChange { at, to }))
 }
 
+/// Tag/entity filters (AND) and the Explore sort, shared by both paths.
+fn filter_sort(
+    rows: Vec<MemoryRow>,
+    tags: &[String],
+    entities: &[String],
+    sort: &str,
+    desc: bool,
+) -> Vec<MemoryRow> {
+    let mut rows: Vec<MemoryRow> = rows
+        .into_iter()
+        .filter(|m| tags.iter().all(|t| m.tags.iter().any(|x| x == t)))
+        .filter(|m| {
+            entities
+                .iter()
+                .all(|e| m.entities.iter().any(|x| x.to_lowercase() == *e))
+        })
+        .collect();
+    match sort {
+        "strength" => rows.sort_by(|a, b| a.strength.total_cmp(&b.strength)),
+        "created" => rows.sort_by_key(|m| m.created_at),
+        "nextChange" => rows.sort_by_key(|m| m.next_change.as_ref().map_or(i64::MAX, |n| n.at)),
+        "summary" => rows.sort_by(|a, b| {
+            a.summary
+                .as_deref()
+                .unwrap_or("\u{10FFFF}")
+                .to_lowercase()
+                .cmp(&b.summary.as_deref().unwrap_or("\u{10FFFF}").to_lowercase())
+        }),
+        _ => rows.sort_by_key(|m| m.last_accessed_at),
+    }
+    if desc {
+        rows.reverse();
+    }
+    rows
+}
+
 fn row(
     id: MemoryId,
     r: &DiskRecord,
@@ -150,6 +186,14 @@ impl UiService {
         };
         let degrees = self.degrees().await;
 
+        let mut tags = p.tags.clone();
+        tags.sort();
+        let mut entities: Vec<String> = p.entities.iter().map(|e| e.to_lowercase()).collect();
+        entities.sort();
+        let sort = p.sort.clone().unwrap_or_else(|| "lastAccess".into());
+        let desc = p
+            .desc
+            .unwrap_or(matches!(sort.as_str(), "lastAccess" | "created"));
         // Explicit ids: a handful of point reads, never cached.
         if !p.ids.is_empty() {
             let ids = p
@@ -171,23 +215,17 @@ impl UiService {
                 .into_iter()
                 .filter_map(|(id, r)| r.map(|r| (id, r)))
                 .filter(|(_, r)| ns_filter.is_none_or(|n| n == r.namespace_id))
+                .filter(|(_, r)| p.phases.is_empty() || phases.contains(&(r.phase as u8)))
                 .map(|(id, r)| row(id, &r, &ns, degrees.get(&id).copied().unwrap_or(0), now))
                 .collect();
+            let rows = filter_sort(rows, &tags, &entities, &sort, desc);
             return Ok(MemoryPage {
                 total: rows.len(),
-                offset: 0,
-                rows,
+                offset: p.offset,
+                rows: rows.into_iter().skip(p.offset).take(limit).collect(),
             });
         }
 
-        let mut tags = p.tags.clone();
-        tags.sort();
-        let mut entities: Vec<String> = p.entities.iter().map(|e| e.to_lowercase()).collect();
-        entities.sort();
-        let sort = p.sort.clone().unwrap_or_else(|| "lastAccess".into());
-        let desc = p
-            .desc
-            .unwrap_or(matches!(sort.as_str(), "lastAccess" | "created"));
         let mut phase_key: Vec<_> = phases.iter().copied().collect();
         phase_key.sort();
         let key = format!("{ns_filter:?}|{phase_key:?}|{tags:?}|{entities:?}|{sort}|{desc}");
@@ -218,37 +256,13 @@ impl UiService {
                 })
                 .await
                 .map_err(internal)??;
-                let mut rows: Vec<MemoryRow> = all
+                let rows: Vec<MemoryRow> = all
                     .iter()
                     .filter(|(_, r)| ns_filter.is_none_or(|n| n == r.namespace_id))
                     .filter(|(_, r)| phases.contains(&(r.phase as u8)))
                     .map(|(id, r)| row(*id, r, &ns, degrees.get(id).copied().unwrap_or(0), now))
-                    .filter(|m| tags.iter().all(|t| m.tags.iter().any(|x| x == t)))
-                    .filter(|m| {
-                        entities
-                            .iter()
-                            .all(|e| m.entities.iter().any(|x| x.to_lowercase() == *e))
-                    })
                     .collect();
-                let far = i64::MAX;
-                match sort.as_str() {
-                    "strength" => rows.sort_by(|a, b| a.strength.total_cmp(&b.strength)),
-                    "created" => rows.sort_by_key(|m| m.created_at),
-                    "nextChange" => {
-                        rows.sort_by_key(|m| m.next_change.as_ref().map_or(far, |n| n.at))
-                    }
-                    "summary" => rows.sort_by(|a, b| {
-                        a.summary
-                            .as_deref()
-                            .unwrap_or("\u{10FFFF}")
-                            .to_lowercase()
-                            .cmp(&b.summary.as_deref().unwrap_or("\u{10FFFF}").to_lowercase())
-                    }),
-                    _ => rows.sort_by_key(|m| m.last_accessed_at),
-                }
-                if desc {
-                    rows.reverse();
-                }
+                let rows = filter_sort(rows, &tags, &entities, &sort, desc);
                 let rows = Arc::new(rows);
                 let mut cache = self.rows.lock().unwrap_or_else(|e| e.into_inner());
                 cache.entries.retain(|(_, s, _)| *s == stamp);

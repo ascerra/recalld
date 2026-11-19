@@ -12,6 +12,7 @@
   import MemoryPanel from '$lib/components/MemoryPanel.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import { scope } from '$lib/scope.svelte';
+  import { live } from '$lib/live.svelte';
   import { selection } from '$lib/selection.svelte';
   import { memoryPage, tags as fetchTags, PAGE, type PageQuery, type SortKey } from '$lib/api/memories';
   import type { MemoryRow } from '$lib/api/types';
@@ -30,6 +31,23 @@
   const phases = $derived(params.has('phase') ? params.getAll('phase').map(Number) : [1, 2, 3]);
   const tagSel = $derived(params.getAll('tag'));
   const entitySel = $derived(params.getAll('entity'));
+  const agentSel = $derived(params.getAll('agent'));
+  $effect(() => {
+    live.start();
+    return () => live.release();
+  });
+  // recalld doesn't persist who touched a memory: the Agent filter covers
+  // what agents did while this UI was open.
+  const agentIds = $derived.by(() => {
+    if (!agentSel.length) return [];
+    const ids = new Set<string>();
+    for (const { event: e } of live.recent) {
+      if (!('agent' in e) || !e.agent || !agentSel.includes(e.agent)) continue;
+      if (e.kind === 'recall') e.returned.forEach((id) => ids.add(id));
+      else if ('id' in e) ids.add(e.id);
+    }
+    return [...ids].slice(0, 500);
+  });
   const sort = $derived((params.get('sort') as SortKey) ?? 'lastAccess');
   const desc = $derived(params.has('dir') ? params.get('dir') === 'desc' : SORTS.find((s) => s.key === sort)!.desc);
 
@@ -52,7 +70,7 @@
       values.forEach((v) => q.append(key, v));
     });
 
-  const query: PageQuery = $derived({ namespace: scope.current, phases, tags: tagSel, entities: entitySel, sort, desc });
+  const query: PageQuery = $derived({ namespace: scope.current, phases, tags: tagSel, entities: entitySel, sort, desc, ids: agentSel.length ? (agentIds.length ? agentIds : ['00000000-0000-0000-0000-000000000000']) : [] });
   const key = $derived(JSON.stringify(query));
 
   // ── Rows: fetched in pages as the virtual window moves ────────────────
@@ -159,7 +177,8 @@
       bind:selected={() => tagSel, (v) => setList('tag', v)} />
     <FilterMenu label="Entities" options={(tagList.data?.entities.items ?? []).map((t: { name: string; count: number }) => ({ value: t.name, count: t.count }))}
       bind:selected={() => entitySel, (v) => setList('entity', v)} />
-    <FilterMenu label="Agent" options={[]} empty="Agents appear here once they act while the UI is open" />
+    <FilterMenu label="Agent" options={live.agents.map((a) => ({ value: a }))} empty="Agents appear here once they act while the UI is open"
+      bind:selected={() => agentSel, (v) => setList('agent', v)} />
     <DropdownMenu.Root>
       <DropdownMenu.Trigger class="chip sort-chip"><span class="sort-label">Sort</span> {SORTS.find((s) => s.key === sort)?.label}<Icon name="chevron" stroke={1.8} size="var(--icon-sm)" /></DropdownMenu.Trigger>
       <DropdownMenu.Portal>

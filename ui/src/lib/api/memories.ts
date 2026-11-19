@@ -19,6 +19,8 @@ export interface PageQuery {
   entities: string[];
   sort: SortKey;
   desc: boolean;
+  /** Restrict to these memories (the Agent filter). */
+  ids?: string[];
 }
 
 export const PAGE = 200;
@@ -29,6 +31,7 @@ export const memoryPage = (q: PageQuery, offset: number, limit = PAGE) =>
     phase: q.phases.map(String),
     tag: q.tags,
     entity: q.entities,
+    id: q.ids ?? [],
     sort: q.sort,
     desc: q.desc,
     offset,

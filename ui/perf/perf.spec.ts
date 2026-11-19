@@ -2,7 +2,7 @@
 // `pnpm perf` with RECALLD_BIN (built --features ui,bench, release recommended).
 // Results go to perf/results/perf.json; CI runs a smaller smoke variant.
 import { expect, test, type Page } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
@@ -41,7 +41,18 @@ async function frameTimes(page: Page, during: () => Promise<void>): Promise<numb
 
 test.describe.configure({ mode: 'serial' });
 
+// PERF_EXTERNAL=1 drives an already running stack at RECALLD_UI_URL (e.g. an
+// isolated container, so the browser can be the host's GPU Chrome) and
+// triggers agent recalls with PERF_RECALL_CMD instead of the local socket.
+const external = !!process.env.PERF_EXTERNAL;
+
 test.beforeAll(async () => {
+  if (external) {
+    stack = { url: process.env.RECALLD_UI_URL!, dir: '', stop() {} };
+    results.storeMemories = Number(process.env.PERF_MEMORIES ?? 10000);
+    results.storeEdgesTarget = Number(process.env.PERF_EDGES ?? 100000);
+    return;
+  }
   const bin = process.env.RECALLD_BIN!;
   if (smoke) {
     process.env.PERF_MEMORIES ??= '1000';
@@ -74,6 +85,16 @@ test('initial-route JS bundle (gzip)', async () => {
 
 test('launch → first paint, map open, cached reopen', async ({ page }) => {
   const url = new URL(stack.url);
+  if (external) {
+    // Launch timing is measured inside the stack (see PERF_LAUNCH_MS).
+    results.launchToReadyMs = Number(process.env.PERF_LAUNCH_MS ?? NaN);
+    await page.goto(url.toString());
+    await page.goto(new URL('/map', url.origin).toString());
+    const fcp = await page.evaluate(() => performance.getEntriesByName('first-contentful-paint')[0]?.startTime ?? NaN);
+    results.firstPaintMs = Math.round(fcp);
+    results.launchToFirstPaintMs = Math.round(results.launchToReadyMs + fcp);
+    return mapTimings(page, url);
+  }
   // Warm daemon: launch a second `recalld ui` and time it to first paint.
   const env = { ...process.env, HOME: join(stack.dir, 'home'), RECALLD_CONFIG: join(stack.dir, 'config.toml'), RECALLD_DAEMON_SOCKET: join(stack.dir, 'recalld.sock') };
   const t0 = performance.now();
@@ -92,7 +113,12 @@ test('launch → first paint, map open, cached reopen', async ({ page }) => {
   results.launchToFirstPaintMs = Math.round(tLink - t0 + fcp);
   ui.kill();
 
+  await mapTimings(page, url);
+});
+
+async function mapTimings(page: Page, url: URL) {
   await page.goto(url.toString());
+  await page.evaluate(() => indexedDB.deleteDatabase('keyval-store'));
   await page.goto(new URL('/map', url.origin).toString());
   await page.waitForFunction(() => performance.getEntriesByName('recalld:map-ready').length > 0, null, { timeout: 300_000 });
   results.mapFirstOpenMs = Math.round(await page.evaluate(() => performance.getEntriesByName('recalld:map-ready')[0].startTime));
@@ -103,7 +129,7 @@ test('launch → first paint, map open, cached reopen', async ({ page }) => {
   results.mapCachedInteractiveMs = Math.round(await page.evaluate(() => performance.getEntriesByName('recalld:map-ready')[0].startTime));
   results.mapReopenedFromCache = await page.evaluate(() => (window as unknown as { __recalldCached?: boolean }).__recalldCached === true);
   expect(results.mapCachedInteractiveMs as number).toBeLessThan(smoke ? 5000 : 1500);
-});
+}
 
 test('pan, zoom and drag frame times', async ({ page }) => {
   await page.goto(stack.url);
@@ -177,14 +203,18 @@ test('recall event → light, and 50 recalls/s', async ({ page }) => {
   await page.waitForFunction(() => performance.getEntriesByName('recalld:map-ready').length > 0);
   await page.waitForTimeout(1000);
   // A real agent recall through the daemon, as `recalld mcp` would send it.
-  const sock = await DaemonSocket.open(join(stack.dir, 'recalld.sock'));
-  await sock.call('ping', { protocolVersion: 2, maxMessageSize: 8 * 1024 * 1024 });
-  await sock.call('hello', { agent: 'perf-agent', kind: 'mcp' });
+  const sock = external ? null : await DaemonSocket.open(join(stack.dir, 'recalld.sock'));
+  await sock?.call('ping', { protocolVersion: 2, maxMessageSize: 8 * 1024 * 1024 });
+  await sock?.call('hello', { agent: 'perf-agent', kind: 'mcp' });
   const lat: number[] = [];
   for (let i = 0; i < 10; i++) {
     const before = await page.evaluate(() => (window as unknown as { __recalldLit: number[] }).__recalldLit?.length ?? 0);
-    const r = await sock.call('search', { query: ['kalo mira', 'tuve sika', 'dori pa'][i % 3], namespace: 'default', limit: 5, tags: [], entities: [], topics: [], emotions: [], minStrength: null, depth: 1, timeRangeStart: null, timeRangeEnd: null });
-    expect(r.error).toBeUndefined();
+    if (sock) {
+      const r = await sock.call('search', { query: ['kalo mira', 'tuve sika', 'dori pa'][i % 3], namespace: 'default', limit: 5, tags: [], entities: [], topics: [], emotions: [], minStrength: null, depth: 1, timeRangeStart: null, timeRangeEnd: null });
+      expect(r.error).toBeUndefined();
+    } else {
+      execSync(process.env.PERF_RECALL_CMD!, { stdio: 'ignore' });
+    }
     const sent = Date.now();
     await page.waitForFunction((n) => ((window as unknown as { __recalldLit: number[] }).__recalldLit?.length ?? 0) > n, before);
     // __recalldLit holds wall-clock ms when each recall's first light frame was drawn;
@@ -193,7 +223,7 @@ test('recall event → light, and 50 recalls/s', async ({ page }) => {
     lat.push(litAt - eventAt);
     void sent;
   }
-  sock.close();
+  sock?.close();
   results.recallToLightP95Ms = Math.round(p95(lat));
 
   await page.goto(new URL('/map?simulate=50', stack.url).toString());
