@@ -1117,47 +1117,74 @@ impl MetadataStore {
         Ok(tags)
     }
 
-    /// Tag histogram over the live memories of one namespace.
-    ///
-    /// `TAG_INDEX` is keyed by tag alone with no namespace dimension, so
-    /// this walks `NAMESPACE_INDEX` and does one `META_TABLE` point
-    /// lookup per member — the same work as one unfiltered
-    /// [`list_memories_filtered`](Self::list_memories_filtered) call, not
-    /// a `scan_all`.
-    ///
-    /// Returns `(tag -> memory count, live memory count)`. Tombstoned
-    /// records are skipped; `Summary` and `Ghost` are included, because a
-    /// phase transition strips text, not tags.
-    pub fn tag_counts_in_namespace(
+    /// API1 vocabulary over live records, using canonical labels when present.
+    /// Scoped reads use NAMESPACE_INDEX; global reads stream META_TABLE.
+    /// Each memory contributes at most once per exact label. Synthetic prefixes
+    /// are response bucket keys only, never validated or persisted as Tags.
+    pub(crate) fn label_counts(
         &self,
-        namespace_id: NamespaceId,
+        namespace_id: Option<NamespaceId>,
     ) -> Result<(HashMap<String, u64>, u64), StorageError> {
         self.ensure_available()?;
         let read_txn = self.db.begin_read()?;
-        let ns_table = read_txn.open_multimap_table(NAMESPACE_INDEX)?;
         let meta_table = read_txn.open_table(META_TABLE)?;
-
-        let mut counts: HashMap<String, u64> = HashMap::new();
+        let mut counts = HashMap::new();
         let mut memories = 0u64;
-
-        for result in ns_table.get(namespace_id.get())? {
-            let value = result?;
-            let bytes: [u8; 16] = value.value().try_into().map_err(|_| {
-                StorageError::CorruptIndex("invalid UUID length in namespace index".into())
-            })?;
-            let Some(record_value) = meta_table.get(bytes.as_slice())? else {
-                continue;
-            };
-            let record = DiskRecord::from_bytes(record_value.value())?;
+        let mut count_record = |bytes: &[u8]| -> Result<(), StorageError> {
+            let record = DiskRecord::from_bytes(bytes)?;
             if record.phase == DecayPhase::Tombstone {
-                continue;
+                return Ok(());
             }
             memories += 1;
+            let prefixes = ["entity/", "topic/", "emotion/"];
+            let mut labels = std::collections::HashSet::new();
             for tag in &record.tags {
-                *counts.entry(tag.as_str().to_string()).or_insert(0) += 1;
+                let derived = prefixes.iter().any(|prefix| {
+                    tag.as_str()
+                        .strip_prefix(prefix)
+                        .is_some_and(|s| !s.is_empty())
+                });
+                // Both native and legacy-retained canonical labels are
+                // authoritative, including empty lists (as in catalog pages).
+                if record.schema.is_none() || !derived {
+                    labels.insert(tag.to_string());
+                }
+            }
+            if let Some(schema) = &record.schema {
+                for (prefix, values) in prefixes.into_iter().zip([
+                    &schema.labels.entities,
+                    &schema.labels.topics,
+                    &schema.labels.emotions,
+                ]) {
+                    for label in values {
+                        labels.insert(format!("{prefix}{label}"));
+                    }
+                }
+            }
+            for label in labels {
+                *counts.entry(label).or_insert(0) += 1;
+            }
+            Ok(())
+        };
+        if let Some(namespace_id) = namespace_id {
+            let ns_table = read_txn.open_multimap_table(NAMESPACE_INDEX)?;
+            for result in ns_table.get(namespace_id.get())? {
+                let value = result?;
+                let bytes: [u8; 16] = value.value().try_into().map_err(|_| {
+                    StorageError::CorruptIndex("invalid UUID length in namespace index".into())
+                })?;
+                if let Some(record) = meta_table.get(bytes.as_slice())? {
+                    count_record(record.value())?;
+                }
+            }
+        } else {
+            // ponytail: O(n) global vocabulary until a canonical label index
+            // exists; stream records rather than materializing a full scan.
+            for result in meta_table.iter()? {
+                let (_, record) = result?;
+                count_record(record.value())?;
             }
         }
-
         Ok((counts, memories))
     }
 }
