@@ -7,7 +7,14 @@ import { open } from './support/ui';
 test.use({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
 
 // Relative times drift between runs; mask them.
-const masks = (page: Page) => [page.locator('.mono.t'), page.locator('td.last'), page.locator('.status.mono'), page.locator('.tc'), page.locator('.tv')];
+const masks = (page: Page) => [
+  page.locator('.mono.t'), // stream times
+  page.locator('td.last'), // "accessed 3d ago"
+  page.locator('.status.mono'),
+  page.locator('.tv, .tc'), // system tiles (uptime, RSS, CPU)
+  page.locator('.meta, .caption'), // relative next-change phrases
+  page.locator('section[aria-label="Memories over time"] svg'), // weekly buckets move with the date
+];
 
 async function shot(page: Page, name: string) {
   await page.evaluate(() => document.fonts.ready);
@@ -29,7 +36,7 @@ test('Memory map with a memory selected', async ({ page }) => {
   await page.getByRole('button', { name: 'Connection bonus keeps well-linked memories in Full' }).click();
   await page.getByRole('button', { name: 'Show on map' }).click();
   await page.waitForFunction(() => (window as unknown as { __recalldSettled?: boolean }).__recalldSettled === true, null, { timeout: 60_000 });
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(1000); // the 300 ms centering animation
   await shot(page, 'map-selected');
 });
 

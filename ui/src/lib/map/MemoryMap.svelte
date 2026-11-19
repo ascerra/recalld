@@ -32,6 +32,7 @@
     highlighted = [],
     onselect,
     onready,
+    onsettled,
   }: {
     snapshot: Snapshot;
     scopeKey: string | null;
@@ -43,6 +44,8 @@
     highlighted?: string[];
     onselect: (id: string | null) => void;
     onready?: (info: { cached: boolean; ms: number }) => void;
+    /** The layout stopped moving (immediately for a cached layout). */
+    onsettled?: () => void;
   } = $props();
 
   let container: HTMLDivElement;
@@ -503,6 +506,7 @@
         if (e.data.type === 'settled') {
           savePositions(scopeKey, snapshot.ids, e.data.x, e.data.y);
           perf.__recalldSettled = true;
+          onsettled?.();
         }
         if (first) {
           first = false;

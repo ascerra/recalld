@@ -73,15 +73,24 @@
   let map: { zoomIn(): void; zoomOut(): void; fit(): void; focusNeighborhood(id: string): void; center(id: string): void } | undefined = $state();
   let panelOpen = $state(true);
 
-  // ?id=… (from Explore's "Show on map" or the palette's ⌘↵).
+  // ?id=… (from Explore's "Show on map" or the palette's ⌘↵): select it and
+  // center on it once the layout has settled.
+  let pendingCenter: string | null = null;
+  let settled = false;
   $effect(() => {
     const id = page.url.searchParams.get('id');
     if (id) {
       selection.select(id);
       panelOpen = true;
-      setTimeout(() => map?.center(id), 300);
+      if (settled) map?.center(id);
+      else pendingCenter = id;
     }
   });
+  function onsettled() {
+    settled = true;
+    if (pendingCenter) map?.center(pendingCenter);
+    pendingCenter = null;
+  }
 
   const selectedRow = createQuery(() => ({
     queryKey: ['memory-row', selection.id],
@@ -137,6 +146,7 @@
             projectionDays={days}
             {phases}
             {edgeTypes}
+            {onsettled}
             onselect={(id) => {
               selection.select(id);
               if (id) panelOpen = true;

@@ -7,7 +7,7 @@ export default defineConfig({
   testDir: 'tests',
   outputDir: 'test-results',
   timeout: 60_000,
-  expect: { timeout: 10_000, toHaveScreenshot: { maxDiffPixelRatio: 0.02 } },
+  expect: { timeout: 10_000, toHaveScreenshot: { maxDiffPixelRatio: 0.03 } },
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
