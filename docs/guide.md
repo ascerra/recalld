@@ -49,6 +49,33 @@ Budget for the original database plus a full backup, a full working copy, and a 
 
 Migration retains existing vectors as `UnknownLegacy`: their original embedding model is not inferred from dimensions or current configuration. Supported compatibility operations remain available without inventing model provenance. Keep the embedding configuration that produced those vectors. Startup does not run an optional model probe, re-embed old memories, or certify that the configured model matches old vectors. Fresh namespaces bind to the configured provider profile. Storage schema version and lifecycle policy are separate; schema conversion does not by itself select a new decay policy.
 
+### Repairing legacy vector ownership
+
+Starting with 2.0.1, startup identifies duplicate vector owners, freed slots still referenced by records, and missing vector slots. These errors stop migration; upgrading does not silently discard affected memories.
+
+An explicit offline repair tool is available as the source example `repair_legacy_vectors`; it is not included in the release binary archives. Build it from the matching release source with `cargo build --locked --release --example repair_legacy_vectors`. It supports legacy namespaces and the configured local Ollama provider, not already migrated native databases or remote embedding services.
+
+Stop every writer and work from a complete copy of the stopped database. Keep the original intact. With an explicit configuration matching your existing embedding model and document prefix, create a plan:
+
+```bash
+target/release/examples/repair_legacy_vectors --config /path/to/config.toml \
+  plan /path/to/stopped-copy --manifest /path/to/plan.json
+```
+
+The plan makes no embedding requests. Review `plan.drop_ids` and `plan.repair_ids` in its JSON output file. Create separate JSON arrays of the exact IDs you approve for each operation, such as `["memory-uuid"]` or `[]`. Records proposed for removal have invalid vector ownership and no retained summary or text reference. Removal is permanent in the candidate; the source and backup retain those records. Investigate older backups first if you need to recover their content.
+
+```bash
+target/release/examples/repair_legacy_vectors --config /path/to/config.toml \
+  apply /path/to/stopped-copy /path/to/new-repair-workspace \
+  --manifest /path/to/plan.json \
+  --approved-drop-ids /path/to/approved-drop-ids.json \
+  --approved-repair-ids /path/to/approved-repair-ids.json
+```
+
+The workspace must not already exist. Both ID sets, the source fingerprint, and the provider configuration must match the plan. Repair rebuilds affected vector files, copies unaffected vectors, regenerates approved embeddings from retained content, and removes edges incident to approved removals. It does not certify the historical embedding model. Invalid retained text or incompatible embedding dimensions stop repair.
+
+Successful repair leaves `backup/`, `candidate/`, and a final `validated.json` in the workspace. It does not replace your data directory or start a daemon. With all writers still stopped, preserve the original directory separately and put the validated candidate at your configured data path. Start the new runtime with the same embedding configuration to perform the ordinary automatic schema migration. Verify health and memories before reconnecting clients; retain both the repair backup and the automatic migration backup. Allow space for multiple copies on both the data and temporary filesystems; this bounded recovery tool rejects snapshots larger than 2 GiB.
+
 ### Build from source
 
 Requires Rust 1.94 or later. For local embeddings (no API key needed), you will also need [Ollama](https://ollama.com) -- see [Section 2](#2-embedding-setup).

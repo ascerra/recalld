@@ -1,6 +1,19 @@
 # Changelog
 
-## 2.0.0 — unreleased
+## 2.0.1 — unreleased
+
+### Legacy database recovery
+
+- Startup errors now distinguish duplicate vector owners, references to freed slots, and missing vector slots, including the affected record and namespace identifiers.
+- Added an opt-in, source-built offline repair example for legacy databases with invalid vector ownership. It requires an exact snapshot and explicit record-ID approval, regenerates recoverable embeddings through the configured local Ollama provider, and removes only approved records without retained text. It preserves the source, creates a backup and separate validated candidate, and clears derived full-text indexes for rebuilding. It never activates the candidate automatically.
+- Existing 2.0 databases require no additional schema migration. Automatic upgrades remain strict: startup does not silently repair or discard records. See the [legacy vector recovery instructions](docs/guide.md#repairing-legacy-vector-ownership).
+
+### Build and test fixes
+
+- Fixed macOS path-alias assumptions in container-layout tests and updated the SQLite compatibility assertion for the bundled SQLite version.
+- Pinned CI and release jobs to Rust 1.94.1 so a rolling `stable` update cannot give parallel jobs different compilers. Compiler provenance and test coverage checks remain enabled.
+
+## 2.0.0 — 2026-11-18
 
 ### Database upgrades
 
