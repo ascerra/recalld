@@ -324,7 +324,8 @@ async fn handle_connection_with(
                         } else {
                             #[cfg(feature = "ui")]
                             let ui_answer = match (&ui, &ui_conn) {
-                                (Some(svc), Some(conn)) => svc.dispatch(conn, &method, &request.params).await,
+                                // Boxed: keeps the per-connection future as small as without `ui`.
+                                (Some(svc), Some(conn)) => Box::pin(svc.dispatch(conn, &method, &request.params)).await,
                                 _ => None,
                             };
                             #[cfg(not(feature = "ui"))]
@@ -344,7 +345,7 @@ async fn handle_connection_with(
                                     #[cfg(feature = "ui")]
                                     let result = match (observed, &ui) {
                                         (Some(obs), Some(svc)) => {
-                                            let result = crate::ui::events::scope(obs.ctx.clone(), call).await;
+                                            let result = Box::pin(crate::ui::events::scope(obs.ctx.clone(), call)).await;
                                             svc.finish(obs, &result);
                                             result
                                         }
@@ -446,9 +447,9 @@ async fn handle_connection_with(
                 if !matches!(outcome, Ok(true)) { break; }
                 #[cfg(feature = "ui")]
                 if let Some(params) = ui_conn.as_ref().and_then(|c| c.take_subscription()) {
-                    crate::ui::daemon::serve_subscription(
+                    Box::pin(crate::ui::daemon::serve_subscription(
                         &mut reader, &mut writer, params, peer_limit, shutdown_rx.clone(),
-                    ).await;
+                    )).await;
                     break;
                 }
             }

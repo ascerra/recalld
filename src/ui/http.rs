@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     middleware,
     response::{
@@ -83,6 +83,38 @@ impl DaemonPool {
         self.client().await?.call(method, params).await
     }
 
+    /// Run an MCP tool exactly as `recalld mcp` would for an agent, over
+    /// one of this pool's connections. Used for the UI's two writes.
+    pub async fn tool(&self, name: &str, args: Value) -> Result<Value, BridgeError> {
+        use crate::daemon::bridge_adapters::*;
+        let client = self.client().await?;
+        let bridge = crate::mcp::bridge::McpBridge {
+            search: Arc::new(RemoteSearchAdapter::new(client.clone())),
+            storage: Arc::new(RemoteStorageAdapter::new(client.clone())),
+            namespaces: Arc::new(RemoteNamespaceAdapter::new(client.clone())),
+            health: Arc::new(RemoteHealthAdapter::new(client)),
+            default_namespace: "default".into(),
+            timezone: chrono_tz::UTC,
+        };
+        let result = crate::mcp::tools::dispatch_tool(&bridge, name, args).await;
+        let text = result
+            .content
+            .first()
+            .map(|crate::mcp::protocol::ContentBlock::Text { text }| text.clone())
+            .unwrap_or_default();
+        let value = serde_json::from_str(&text).unwrap_or(Value::String(text.clone()));
+        if result.is_error == Some(true) || value.get("error").is_some() {
+            return Err(BridgeError::InvalidInput(
+                value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&text)
+                    .to_owned(),
+            ));
+        }
+        Ok(value)
+    }
+
     /// Drop connections so the next call reconnects (after a daemon restart).
     pub async fn reset(&self) {
         self.clients.lock().await.clear();
@@ -96,6 +128,16 @@ pub fn router(state: UiState) -> Router {
         .route("/graph", get(graph))
         .route("/health", get(health))
         .route("/system", get(system))
+        .route("/memories", get(memories))
+        .route("/memories/{id}", get(memory))
+        .route("/memories/{id}/history", get(history))
+        .route("/memories/{id}/neighbors", get(neighbors))
+        .route("/memories/{id}/reinforce", post(reinforce))
+        .route("/memories/{id}/forget", post(forget))
+        .route("/tags", get(tags))
+        .route("/search", get(search))
+        .route("/activity", get(activity))
+        .route("/namespaces/{name}/stats", get(namespace_stats))
         .route("/daemon/start", post(start_daemon))
         .route("/events", get(events))
         .fallback(|| async { error(StatusCode::NOT_FOUND, "notFound", "no such endpoint") })
@@ -212,6 +254,203 @@ async fn health(State(state): State<UiState>, Query(q): Query<Scope>) -> Respons
 
 async fn system(State(state): State<UiState>) -> Response {
     relay(&state, "system_status", json!({})).await
+}
+
+/// Repeated query keys (`?phase=1&phase=2`) as lists.
+fn multi(pairs: Vec<(String, String)>) -> std::collections::HashMap<String, Vec<String>> {
+    let mut out: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for (k, v) in pairs {
+        out.entry(k).or_default().push(v);
+    }
+    out
+}
+
+async fn memories(
+    State(state): State<UiState>,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> Response {
+    let q = multi(pairs);
+    let one = |k: &str| q.get(k).and_then(|v| v.first()).cloned();
+    let list = |k: &str| q.get(k).cloned().unwrap_or_default();
+    let phases: Vec<u8> = list("phase")
+        .iter()
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    let params = json!({
+        "namespace": one("namespace"),
+        "ids": list("id"),
+        "phases": phases,
+        "tags": list("tag"),
+        "entities": list("entity"),
+        "sort": one("sort"),
+        "desc": one("desc").map(|d| d == "true"),
+        "offset": one("offset").and_then(|o| o.parse::<usize>().ok()).unwrap_or(0),
+        "limit": one("limit").and_then(|l| l.parse::<usize>().ok()),
+    });
+    relay(&state, "memory_page", params).await
+}
+
+/// One memory, read the way an agent's `get_memory` does but with
+/// `recordAccess:false` (native stores close the legacy read RPC).
+async fn memory(State(state): State<UiState>, Path(id): Path<String>) -> Response {
+    match state
+        .daemon
+        .tool("get_memory", json!({ "id": id, "recordAccess": false }))
+        .await
+    {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => bridge_error(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct Limit {
+    limit: Option<usize>,
+    depth: Option<u8>,
+}
+
+async fn history(
+    State(state): State<UiState>,
+    Path(id): Path<String>,
+    Query(q): Query<Limit>,
+) -> Response {
+    relay(
+        &state,
+        "access_history",
+        json!({ "id": id, "limit": q.limit }),
+    )
+    .await
+}
+
+async fn neighbors(
+    State(state): State<UiState>,
+    Path(id): Path<String>,
+    Query(q): Query<Limit>,
+) -> Response {
+    relay(
+        &state,
+        "memory_neighbors",
+        json!({ "id": id, "depth": q.depth }),
+    )
+    .await
+}
+
+async fn tags(State(state): State<UiState>, Query(q): Query<Scope>) -> Response {
+    relay(
+        &state,
+        "list_tags",
+        json!({ "namespace": q.namespace, "limit": 200 }),
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+struct ActivityQuery {
+    namespace: Option<String>,
+    since: Option<i64>,
+    limit: Option<usize>,
+}
+
+async fn activity(State(state): State<UiState>, Query(q): Query<ActivityQuery>) -> Response {
+    relay(
+        &state,
+        "activity",
+        json!({ "namespace": q.namespace, "since": q.since, "limit": q.limit }),
+    )
+    .await
+}
+
+async fn namespace_stats(State(state): State<UiState>, Path(name): Path<String>) -> Response {
+    relay(&state, "namespace_stats", json!({ "name": name })).await
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+    namespace: Option<String>,
+    limit: Option<usize>,
+}
+
+/// recalld's hybrid search, read-only. For All namespaces, one search per
+/// namespace in parallel, merged by score when their embedding profiles
+/// match and grouped by namespace otherwise (SPEC §2.5).
+async fn search(State(state): State<UiState>, Query(q): Query<SearchQuery>) -> Response {
+    let limit = q.limit.unwrap_or(10).clamp(1, 50);
+    let names: Vec<String> = match q.namespace {
+        Some(ns) => vec![ns],
+        None => match state.daemon.call("list_namespaces", Value::Null).await {
+            Ok(list) => serde_json::from_value::<Vec<crate::mcp::bridge::NamespaceInfo>>(list)
+                .map(|l| {
+                    l.into_iter()
+                        .filter(|n| n.memory_count > 0)
+                        .map(|n| n.name)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Err(e) => return bridge_error(e),
+        },
+    };
+    let tasks: Vec<_> = names
+        .into_iter()
+        .map(|ns| {
+            let (daemon, query) = (state.daemon.clone(), q.q.clone());
+            tokio::spawn(async move {
+                daemon
+                    .call(
+                        "search_explain_read_only",
+                        json!({ "query": query, "namespace": ns, "limit": limit }),
+                    )
+                    .await
+            })
+        })
+        .collect();
+    let mut per = Vec::new();
+    for task in tasks {
+        let result = task
+            .await
+            .map_err(|e| BridgeError::Internal(e.to_string()))
+            .and_then(|r| r)
+            .and_then(|v| {
+                serde_json::from_value::<super::wire::SearchExplain>(v)
+                    .map_err(|e| BridgeError::Internal(e.to_string()))
+            });
+        match result {
+            Ok(s) => per.push(s),
+            Err(e) => return bridge_error(e),
+        }
+    }
+    Json(super::memories::merge(per, q.q, limit)).into_response()
+}
+
+#[derive(Deserialize)]
+struct Write {
+    namespace: String,
+    rating: Option<u8>,
+}
+
+async fn reinforce(
+    State(state): State<UiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Write>,
+) -> Response {
+    let args =
+        json!({ "id": id, "namespace": body.namespace, "quality": body.rating.unwrap_or(3) });
+    match state.daemon.tool("reinforce_memory", args).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => bridge_error(e),
+    }
+}
+
+async fn forget(
+    State(state): State<UiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Write>,
+) -> Response {
+    let args = json!({ "id": id, "namespace": body.namespace });
+    match state.daemon.tool("forget_memory", args).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => bridge_error(e),
+    }
 }
 
 async fn start_daemon(State(state): State<UiState>) -> Response {

@@ -119,7 +119,7 @@ struct ClientState {
     /// Agent name announced with `hello` on the current connection.
     #[cfg(feature = "ui")]
     announced: Option<String>,
-    /// This client's own name, overriding the process-wide one.
+    /// This client's name for `hello`; unnamed clients never send it.
     #[cfg(feature = "ui")]
     agent: Option<(String, &'static str)>,
 }
@@ -814,7 +814,9 @@ impl ClientState {
     /// A daemon without the UI rejects `hello`; that is ignored.
     #[cfg(feature = "ui")]
     async fn announce(&mut self) {
-        let Some((agent, kind)) = self.agent.clone().or_else(crate::ui::agent::get) else {
+        // Only clients explicitly named (`set_agent`) announce themselves;
+        // an unnamed client's frames are exactly what they were without `ui`.
+        let Some((agent, kind)) = self.agent.clone() else {
             return;
         };
         if self.announced.as_deref() == Some(agent.as_str()) || self.conn.is_none() {

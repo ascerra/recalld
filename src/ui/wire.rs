@@ -177,6 +177,250 @@ pub struct Subscribed {
     pub subscribed: Vec<String>,
 }
 
+// ── memory_page / memory_neighbors / access_history ────────────────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryPageParams {
+    #[serde(default)]
+    pub namespace: Option<String>,
+    /// Fetch exactly these memories (other filters still apply).
+    #[serde(default)]
+    pub ids: Vec<String>,
+    /// Phase codes to include; default Full, Summary, Ghost.
+    #[serde(default)]
+    pub phases: Vec<u8>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub entities: Vec<String>,
+    /// `lastAccess` (default), `strength`, `created`, `nextChange`, `summary`.
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub desc: Option<bool>,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryPage {
+    pub total: usize,
+    pub offset: usize,
+    pub rows: Vec<MemoryRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryRow {
+    pub id: String,
+    pub namespace: String,
+    /// `null` once the memory is a Ghost (its summary was dropped).
+    pub summary: Option<String>,
+    /// `DecayPhase` code.
+    pub phase: u8,
+    /// R now, from recalld's FSRS (same computation as the health report).
+    pub strength: f32,
+    pub stability: f32,
+    pub created_at: i64,
+    pub last_accessed_at: i64,
+    pub permastore: bool,
+    pub degree: u32,
+    /// Next phase transition, as the health report's forecast computes it.
+    pub next_change: Option<NextChange>,
+    pub tags: Vec<String>,
+    pub entities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NextChange {
+    /// When R crosses the next threshold (millis); `<= now` means the next sweep.
+    pub at: i64,
+    /// Phase it moves to; 4 means deletion.
+    pub to: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NeighborsParams {
+    pub id: String,
+    #[serde(default)]
+    pub depth: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Neighborhood {
+    pub center: String,
+    pub nodes: Vec<NeighborNode>,
+    pub edges: Vec<NeighborEdge>,
+    /// The neighborhood was larger than the node cap.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NeighborNode {
+    pub id: String,
+    pub namespace_id: u32,
+    pub summary: Option<String>,
+    pub phase: u8,
+    pub hop: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NeighborEdge {
+    pub src: String,
+    pub dst: String,
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub kind: u8,
+    pub weight: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HistoryParams {
+    pub id: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessHistory {
+    pub id: String,
+    /// Most recent first.
+    pub events: Vec<AccessEventWire>,
+    /// Events recorded in total (the record keeps a bounded history).
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessEventWire {
+    pub at: i64,
+    /// `direct`, `associative`, `sweep` or `reinforce`.
+    pub kind: String,
+    /// recalld does not persist who accessed a memory; always `null` here.
+    pub agent: Option<String>,
+}
+
+// ── search_explain_read_only ───────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExplainParams {
+    pub query: String,
+    pub namespace: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub depth: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SearchExplain {
+    pub namespace: String,
+    /// Bound embedding profile id, or `legacy:<dim>`; equal profiles merge by score.
+    pub embedding_profile: String,
+    pub hits: Vec<UiSearchHit>,
+}
+
+/// One search result with the score breakdown recalld's pipeline computed.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiSearchHit {
+    pub id: String,
+    pub namespace: String,
+    pub summary: Option<String>,
+    pub phase: u8,
+    /// Final composite score used for ranking.
+    pub score: f32,
+    /// Cosine similarity to the query, for direct matches.
+    pub vector: Option<f32>,
+    /// FTS5 keyword relevance.
+    pub text: Option<f32>,
+    /// Spreading activation, for results found through links.
+    pub activation: Option<f32>,
+    /// The seed this result was reached from, for linked results.
+    pub via: Option<String>,
+    pub via_summary: Option<String>,
+    /// `EdgeType` code of the last link on the path.
+    pub via_edge_type: Option<u8>,
+    pub hops: Option<u8>,
+    /// Summary of another result this one contradicts.
+    pub contradicts: Option<String>,
+}
+
+/// `GET /api/ui/search`: one namespace, or a merge across all of them.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiSearch {
+    pub query: String,
+    /// `true`: one ranking by score. `false`: namespaces use different
+    /// embedding profiles, so results are grouped by namespace instead.
+    pub merged: bool,
+    pub results: Vec<UiSearchHit>,
+}
+
+// ── activity (Timeline) ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActivityParams {
+    #[serde(default)]
+    pub namespace: Option<String>,
+    /// Range start (millis); `null` means all time.
+    #[serde(default)]
+    pub since: Option<i64>,
+    /// Stream rows to return, newest first.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Activity {
+    /// Bucket width: 7 days, or 30 when the range exceeds two years.
+    pub bucket_ms: i64,
+    pub buckets: Vec<ActivityBucket>,
+    pub rows: Vec<ActivityRow>,
+}
+
+/// Memories created in the bucket, by their phase today, and recalls in it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActivityBucket {
+    pub start: i64,
+    pub full: u32,
+    pub summary: u32,
+    pub ghost: u32,
+    pub recalls: u32,
+}
+
+/// One line of the activity stream, from persisted access history and
+/// creation times. recalld does not persist the agent or query.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActivityRow {
+    pub at: i64,
+    /// `recall`, `store`, `reinforce` or `sweep`.
+    pub kind: String,
+    /// The memory the row is about (the first of a recall's results).
+    pub id: String,
+    pub summary: Option<String>,
+    pub namespace: String,
+    /// Results of a recall, memories checked by a sweep, or links of a store.
+    pub count: u32,
+}
+
 // ── HTTP-only shapes ───────────────────────────────────────────────────
 
 /// `GET /api/ui/session`: what the shell needs before anything else.
@@ -243,11 +487,31 @@ pub(crate) fn declarations() -> String {
         UiSession,
         DaemonState,
         UiError,
+        MemoryPageParams,
+        MemoryPage,
+        MemoryRow,
+        NextChange,
+        NeighborsParams,
+        Neighborhood,
+        NeighborNode,
+        NeighborEdge,
+        HistoryParams,
+        AccessHistory,
+        AccessEventWire,
+        ExplainParams,
+        SearchExplain,
+        ActivityParams,
+        Activity,
+        ActivityBucket,
+        ActivityRow,
+        UiSearchHit,
+        UiSearch,
         events::UiEvent,
         events::RecallEvent,
         events::Seed,
         events::TraceStep,
         events::StoreEvent,
+        events::EdgeRef,
         events::LinkEvent,
         events::ReinforceEvent,
         events::ForgetEvent,
@@ -271,19 +535,56 @@ pub(crate) fn declarations() -> String {
         crate::api::models::VectorFileSize,
         crate::api::models::MetadataStats,
         crate::api::models::TagCount,
+        crate::mcp::bridge::MemoryRecord,
+        crate::mcp::bridge::ListTagsResponse,
+        crate::mcp::bridge::TagBucket,
+        crate::mcp::bridge::TagCount,
     ));
     out
 }
 
+/// `ui/src/lib/fsrs.fixture.json`: values from recalld's own FSRS code that
+/// the frontend's `fsrs.ts` must reproduce.
+#[cfg(test)]
+pub(crate) fn fsrs_fixture() -> String {
+    use crate::decay::{DecayConfig, fsrs::FsrsEngine};
+    let config = DecayConfig::default();
+    let engine = FsrsEngine::new(&config);
+    let mut r = Vec::new();
+    for s in [0.5f32, 1.0, 3.7, 30.0, 400.0] {
+        for t in [0.0f32, 0.25, 1.0, 7.0, 45.0, 365.0, 2000.0] {
+            for m in [1.0f32, 0.5, 2.0] {
+                r.push(serde_json::json!([t, s, m, engine.retrievability(t, s, m)]));
+            }
+        }
+    }
+    let mut until = Vec::new();
+    for s in [1.0f32, 3.7, 30.0, 400.0] {
+        for target in [
+            config.phase_1_threshold,
+            config.phase_2_threshold,
+            config.phase_3_threshold,
+        ] {
+            until.push(serde_json::json!([
+                s,
+                target,
+                engine.days_until_threshold(s, target)
+            ]));
+        }
+    }
+    let fixture = serde_json::json!({
+        "thresholds": [config.phase_1_threshold, config.phase_2_threshold, config.phase_3_threshold],
+        "permastoreDays": config.permastore_threshold,
+        "retrievability": r,
+        "daysUntil": until,
+    });
+    serde_json::to_string_pretty(&fixture).unwrap() + "\n"
+}
+
 #[cfg(test)]
 mod tests {
-    /// CI fails here when a Rust response struct changed but the generated
-    /// TypeScript types were not regenerated.
-    #[test]
-    fn types_are_current() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/src/lib/api/types/index.ts");
-        let expected = super::declarations();
+    fn check_generated(rel: &str, expected: String) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
         if std::env::var_os("UPDATE_UI_TYPES").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, &expected).unwrap();
@@ -292,8 +593,19 @@ mod tests {
         let actual = std::fs::read_to_string(&path).unwrap_or_default();
         assert!(
             actual == expected,
-            "ui/src/lib/api/types/index.ts is stale; run \
-             `UPDATE_UI_TYPES=1 cargo test --features ui types_are_current`"
+            "{rel} is stale; run `UPDATE_UI_TYPES=1 cargo test --features ui ui::wire`"
         );
+    }
+
+    #[test]
+    fn fsrs_fixture_is_current() {
+        check_generated("ui/src/lib/fsrs.fixture.json", super::fsrs_fixture());
+    }
+
+    /// CI fails here when a Rust response struct changed but the generated
+    /// TypeScript types were not regenerated.
+    #[test]
+    fn types_are_current() {
+        check_generated("ui/src/lib/api/types/index.ts", super::declarations());
     }
 }

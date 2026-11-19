@@ -28,12 +28,14 @@ use crate::storage::{RedbStorageEngine, StorageEngine as _};
 pub const MAX_EDGE_PAGE: usize = 200_000;
 
 pub struct UiService {
-    storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
-    graph: SharedGraph,
+    pub(super) storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
+    pub(super) graph: SharedGraph,
     cache: Arc<CacheManager>,
     embedding: Arc<dyn EmbeddingProvider>,
     config: crate::RecalldConfig,
-    api_storage: Arc<dyn crate::api::StorageEngine>,
+    pub(super) query_engine: Arc<crate::search::QueryEngine>,
+    pub(super) rows: Mutex<super::memories::RowCache>,
+    pub(super) api_storage: Arc<dyn crate::api::StorageEngine>,
     api_namespaces: Arc<dyn crate::api::NamespaceRegistry>,
     health: Arc<dyn HealthChecker>,
     started_at: i64,
@@ -68,6 +70,8 @@ impl UiService {
             cache: system.cache().clone(),
             embedding: system.embedding().clone(),
             config: system.config().clone(),
+            query_engine: system.query_engine().clone(),
+            rows: Mutex::new(super::memories::RowCache::new()),
             api_storage,
             api_namespaces,
             health: Arc::new(crate::mcp::bridge_adapters::McpHealthAdapter::new(
@@ -148,6 +152,28 @@ impl UiService {
                 )
             }
             "system_status" => encode(Ok(self.system_status().await)),
+            "memory_page" => match decode::<MemoryPageParams>(params) {
+                Ok(p) => encode(self.memory_page(p).await),
+                Err(e) => Err(e),
+            },
+            "memory_neighbors" => match serde_json::from_value::<NeighborsParams>(params.clone()) {
+                Ok(p) => encode(self.memory_neighbors(p).await),
+                Err(e) => Err(BridgeError::InvalidInput(e.to_string())),
+            },
+            "access_history" => match serde_json::from_value::<HistoryParams>(params.clone()) {
+                Ok(p) => encode(self.access_history(p).await),
+                Err(e) => Err(BridgeError::InvalidInput(e.to_string())),
+            },
+            "activity" => match decode::<ActivityParams>(params) {
+                Ok(p) => encode(self.activity(p).await),
+                Err(e) => Err(e),
+            },
+            "search_explain_read_only" => {
+                match serde_json::from_value::<ExplainParams>(params.clone()) {
+                    Ok(p) => encode(self.search_explain(p).await),
+                    Err(e) => Err(BridgeError::InvalidInput(e.to_string())),
+                }
+            }
             "hello" => match serde_json::from_value::<HelloParams>(params.clone()) {
                 Ok(p) => {
                     let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
@@ -412,6 +438,16 @@ impl UiService {
             .get(&conn.id)
             .and_then(|c| c.agent.clone());
         let recall = matches!(method, "search" | "query_contract_v1");
+        let store = matches!(
+            method,
+            "store_memory"
+                | "store_api1_v1"
+                | "store_batch_api1_v1"
+                | "store_native_single_observed_v1"
+                | "mutate_batch"
+                | "mutate_native_batch_v1"
+                | "mutate_native_batch_observed_v1"
+        );
         if !recall && !method.contains("read_only") {
             events::note_writer(agent.as_deref());
         }
@@ -440,6 +476,8 @@ impl UiService {
                 )
             }),
             reinforce,
+            store,
+            started_at: events::now_millis(),
         })
     }
 
@@ -495,6 +533,63 @@ impl UiService {
                     suppressed: trace.suppressed.iter().map(ToString::to_string).collect(),
                 })
             });
+        }
+        if obs.store {
+            // Created memories, attributed to this connection's agent. The
+            // graph insert itself runs on a shared completion worker.
+            let mut ids = Vec::new();
+            uuids(value, 0, &mut ids);
+            ids.sort();
+            ids.dedup();
+            let created: Vec<(MemoryId, u32, u8)> = self
+                .storage
+                .read()
+                .ok()
+                .map(|s| {
+                    ids.iter()
+                        .filter_map(|id| {
+                            let r = s.get_record(*id).ok()??;
+                            (r.created_at >= obs.started_at - 2_000).then_some((
+                                *id,
+                                r.namespace_id,
+                                r.phase as u8,
+                            ))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let graph = self.graph.try_read().ok();
+            for (id, namespace_id, phase) in created {
+                let edges = graph
+                    .as_ref()
+                    .map(|g| {
+                        g.edges_for(&id)
+                            .iter()
+                            .filter_map(|e| {
+                                let (s, t) = (g.nodes.get(e.source)?, g.nodes.get(e.target)?);
+                                let other = if s.memory_id == id { t } else { s };
+                                Some(events::EdgeRef {
+                                    to: other.memory_id.to_string(),
+                                    edge_type: e.edge_type as u8,
+                                    weight: e.weight,
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let agent = obs.agent.clone();
+                events::publish(|seq, at| {
+                    UiEvent::Store(events::StoreEvent {
+                        seq,
+                        at,
+                        agent,
+                        id: id.to_string(),
+                        namespace_id,
+                        phase,
+                        edges,
+                    })
+                });
+            }
         }
         if let Some((id, rating, before)) = obs.reinforce {
             let after = self.stability(id);
@@ -559,6 +654,8 @@ pub struct Observation {
     agent: Option<String>,
     query: Option<(String, String)>,
     reinforce: Option<(MemoryId, Option<u8>, Option<f32>)>,
+    store: bool,
+    started_at: i64,
 }
 
 /// Stream events to a subscribed connection until it closes.
@@ -644,6 +741,28 @@ fn find_id(v: &Value) -> Option<MemoryId> {
     })
 }
 
+/// Every UUID-shaped `id` / `memoryId` string in a result (bounded depth).
+fn uuids(v: &Value, depth: u8, out: &mut Vec<MemoryId>) {
+    if depth > 6 {
+        return;
+    }
+    match v {
+        Value::Object(obj) => {
+            for (k, v) in obj {
+                if matches!(k.as_str(), "id" | "memoryId")
+                    && let Some(id) = v.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok())
+                {
+                    out.push(MemoryId::from_uuid(id));
+                } else {
+                    uuids(v, depth + 1, out);
+                }
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|i| uuids(i, depth + 1, out)),
+        _ => {}
+    }
+}
+
 /// Memory ids a recall returned, across result shapes.
 fn returned_ids(v: &Value) -> Vec<String> {
     fn walk(v: &Value, depth: u8, out: &mut Vec<String>) {
@@ -652,15 +771,15 @@ fn returned_ids(v: &Value) -> Vec<String> {
         }
         if let Some(obj) = v.as_object() {
             for (key, value) in obj {
-                if matches!(key.as_str(), "hits" | "results" | "memories") {
-                    if let Some(items) = value.as_array() {
-                        out.extend(
-                            items
-                                .iter()
-                                .filter_map(|i| i.get("id")?.as_str().map(str::to_owned)),
-                        );
-                        continue;
-                    }
+                if matches!(key.as_str(), "hits" | "results" | "memories")
+                    && let Some(items) = value.as_array()
+                {
+                    out.extend(
+                        items
+                            .iter()
+                            .filter_map(|i| i.get("id")?.as_str().map(str::to_owned)),
+                    );
+                    continue;
                 }
                 walk(value, depth + 1, out);
             }

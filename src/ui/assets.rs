@@ -7,7 +7,7 @@ use axum::{
 };
 
 #[derive(rust_embed::Embed)]
-#[folder = "$CARGO_MANIFEST_DIR/ui/dist"]
+#[folder = "ui/dist"]
 #[allow_missing = true]
 struct Assets;
 

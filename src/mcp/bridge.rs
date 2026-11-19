@@ -704,9 +704,11 @@ pub struct StoredMemory {
 /// A full memory record returned by get.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct MemoryRecord {
     /// Exact persisted structured labels and provenance; omitted for legacy records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ui", ts(type = "unknown"))]
     pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
@@ -784,6 +786,7 @@ pub struct ListTagsInput {
 /// One label and the number of live memories carrying it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct TagCount {
     /// The label. In the `entities`, `topics` and `emotions` buckets the
     /// derived prefix is **stripped**, so the value can be passed
@@ -798,6 +801,7 @@ pub struct TagCount {
 /// One bucket of a tag listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct TagBucket {
     /// Distinct labels in this bucket *before* truncation, so a truncated
     /// answer still states its own size.
@@ -815,6 +819,7 @@ pub struct TagBucket {
 /// and useless for discovering the plain tags a caller would filter on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct ListTagsResponse {
     /// The namespace counted, or `null` when every namespace was counted.
     pub namespace: Option<String>,

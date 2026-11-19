@@ -87,6 +87,161 @@ export type UiError = {
  */
 error: string, message: string, };
 
+export type MemoryPageParams = { namespace: string | null, 
+/**
+ * Fetch exactly these memories (other filters still apply).
+ */
+ids: Array<string>, 
+/**
+ * Phase codes to include; default Full, Summary, Ghost.
+ */
+phases: Array<number>, tags: Array<string>, entities: Array<string>, 
+/**
+ * `lastAccess` (default), `strength`, `created`, `nextChange`, `summary`.
+ */
+sort: string | null, desc: boolean | null, offset: number, limit: number | null, };
+
+export type MemoryPage = { total: number, offset: number, rows: Array<MemoryRow>, };
+
+export type MemoryRow = { id: string, namespace: string, 
+/**
+ * `null` once the memory is a Ghost (its summary was dropped).
+ */
+summary: string | null, 
+/**
+ * `DecayPhase` code.
+ */
+phase: number, 
+/**
+ * R now, from recalld's FSRS (same computation as the health report).
+ */
+strength: number, stability: number, createdAt: number, lastAccessedAt: number, permastore: boolean, degree: number, 
+/**
+ * Next phase transition, as the health report's forecast computes it.
+ */
+nextChange: NextChange | null, tags: Array<string>, entities: Array<string>, };
+
+export type NextChange = { 
+/**
+ * When R crosses the next threshold (millis); `<= now` means the next sweep.
+ */
+at: number, 
+/**
+ * Phase it moves to; 4 means deletion.
+ */
+to: number, };
+
+export type NeighborsParams = { id: string, depth: number | null, };
+
+export type Neighborhood = { center: string, nodes: Array<NeighborNode>, edges: Array<NeighborEdge>, 
+/**
+ * The neighborhood was larger than the node cap.
+ */
+truncated: boolean, };
+
+export type NeighborNode = { id: string, namespaceId: number, summary: string | null, phase: number, hop: number, };
+
+export type NeighborEdge = { src: string, dst: string, type: number, weight: number, };
+
+export type HistoryParams = { id: string, limit: number | null, };
+
+export type AccessHistory = { id: string, 
+/**
+ * Most recent first.
+ */
+events: Array<AccessEventWire>, 
+/**
+ * Events recorded in total (the record keeps a bounded history).
+ */
+total: number, };
+
+export type AccessEventWire = { at: number, 
+/**
+ * `direct`, `associative`, `sweep` or `reinforce`.
+ */
+kind: string, 
+/**
+ * recalld does not persist who accessed a memory; always `null` here.
+ */
+agent: string | null, };
+
+export type ExplainParams = { query: string, namespace: string, limit: number | null, depth: number | null, };
+
+export type SearchExplain = { namespace: string, 
+/**
+ * Bound embedding profile id, or `legacy:<dim>`; equal profiles merge by score.
+ */
+embeddingProfile: string, hits: Array<UiSearchHit>, };
+
+export type ActivityParams = { namespace: string | null, 
+/**
+ * Range start (millis); `null` means all time.
+ */
+since: number | null, 
+/**
+ * Stream rows to return, newest first.
+ */
+limit: number | null, };
+
+export type Activity = { 
+/**
+ * Bucket width: 7 days, or 30 when the range exceeds two years.
+ */
+bucketMs: number, buckets: Array<ActivityBucket>, rows: Array<ActivityRow>, };
+
+export type ActivityBucket = { start: number, full: number, summary: number, ghost: number, recalls: number, };
+
+export type ActivityRow = { at: number, 
+/**
+ * `recall`, `store`, `reinforce` or `sweep`.
+ */
+kind: string, 
+/**
+ * The memory the row is about (the first of a recall's results).
+ */
+id: string, summary: string | null, namespace: string, 
+/**
+ * Results of a recall, memories checked by a sweep, or links of a store.
+ */
+count: number, };
+
+export type UiSearchHit = { id: string, namespace: string, summary: string | null, phase: number, 
+/**
+ * Final composite score used for ranking.
+ */
+score: number, 
+/**
+ * Cosine similarity to the query, for direct matches.
+ */
+vector: number | null, 
+/**
+ * FTS5 keyword relevance.
+ */
+text: number | null, 
+/**
+ * Spreading activation, for results found through links.
+ */
+activation: number | null, 
+/**
+ * The seed this result was reached from, for linked results.
+ */
+via: string | null, viaSummary: string | null, 
+/**
+ * `EdgeType` code of the last link on the path.
+ */
+viaEdgeType: number | null, hops: number | null, 
+/**
+ * Summary of another result this one contradicts.
+ */
+contradicts: string | null, };
+
+export type UiSearch = { query: string, 
+/**
+ * `true`: one ranking by score. `false`: namespaces use different
+ * embedding profiles, so results are grouped by namespace instead.
+ */
+merged: boolean, results: Array<UiSearchHit>, };
+
 export type UiEvent = { "kind": "recall" } & RecallEvent | { "kind": "store" } & StoreEvent | { "kind": "link" } & LinkEvent | { "kind": "reinforce" } & ReinforceEvent | { "kind": "forget" } & ForgetEvent | { "kind": "phase_change" } & PhaseChangeEvent | { "kind": "sweep" } & SweepEvent | { "kind": "lagged" } & LaggedEvent;
 
 export type RecallEvent = { seq: number, at: number, agent: string | null, namespace: string, query: string, seeds: Array<Seed>, trace: Array<TraceStep>, returned: Array<string>, suppressed: Array<string>, };
@@ -107,7 +262,14 @@ export type StoreEvent = { seq: number, at: number, agent: string | null, id: st
 /**
  * `DecayPhase` discriminant.
  */
-phase: number, };
+phase: number, 
+/**
+ * Links that existed when the store returned; later auto-links arrive
+ * as `link` events.
+ */
+edges: Array<EdgeRef>, };
+
+export type EdgeRef = { to: string, edgeType: number, weight: number, };
 
 export type LinkEvent = { seq: number, at: number, agent: string | null, src: string, dst: string, edgeType: number, weight: number, };
 
@@ -410,6 +572,117 @@ export type ReportTagCount = {
 tag: string, 
 /**
  * Number of memories with this tag.
+ */
+count: number, };
+
+export type MemoryRecord = { 
+/**
+ * Exact persisted structured labels and provenance; omitted for legacy records.
+ */
+labels?: unknown, 
+/**
+ * Memory ID.
+ */
+id: string, 
+/**
+ * Namespace the memory belongs to.
+ */
+namespace: string, 
+/**
+ * Short summary of the memory.
+ */
+summary: string, 
+/**
+ * Full text content, if available.
+ */
+fullText: string | null, 
+/**
+ * Tags associated with this memory.
+ */
+tags: Array<string>, 
+/**
+ * Current decay phase.
+ */
+phase: string, 
+/**
+ * Current memory strength (0.0-1.0).
+ */
+strength: number, 
+/**
+ * Current stability in days.
+ */
+stability: number, 
+/**
+ * Creation timestamp as ISO 8601 string.
+ */
+createdAt: string, 
+/**
+ * Last access timestamp as ISO 8601 string.
+ */
+lastAccessedAt: string, 
+/**
+ * Whether this memory is in permastore.
+ */
+isPermastore: boolean, 
+/**
+ * Number of graph edges connected to this memory.
+ */
+edgeCount: number, };
+
+export type ListTagsResponse = { 
+/**
+ * The namespace counted, or `null` when every namespace was counted.
+ */
+namespace: string | null, 
+/**
+ * Live memories inspected. `null` in global scope, where the tag
+ * index is read directly and no memory records are touched.
+ */
+memoriesCounted: number | null, 
+/**
+ * Labels that are not derived from `entities`, `topics` or
+ * `emotions`.
+ */
+tags: TagBucket, 
+/**
+ * Labels derived from `entities`, prefix stripped.
+ */
+entities: TagBucket, 
+/**
+ * Labels derived from `topics`, prefix stripped.
+ */
+topics: TagBucket, 
+/**
+ * Labels derived from `emotions`, prefix stripped.
+ */
+emotions: TagBucket, };
+
+export type TagBucket = { 
+/**
+ * Distinct labels in this bucket *before* truncation, so a truncated
+ * answer still states its own size.
+ */
+total: number, 
+/**
+ * Whether `items` is shorter than `total`.
+ */
+truncated: boolean, 
+/**
+ * Count descending, ties broken on name ascending.
+ */
+items: Array<TagCount>, };
+
+export type TagCount = { 
+/**
+ * The label. In the `entities`, `topics` and `emotions` buckets the
+ * derived prefix is **stripped**, so the value can be passed
+ * straight back to `store_memory` or `list_memories` — which is not
+ * true of the prefixed form, since those tools add the prefix
+ * themselves.
+ */
+name: string, 
+/**
+ * Live memories carrying this label.
  */
 count: number, };
 

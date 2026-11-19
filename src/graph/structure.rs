@@ -311,8 +311,6 @@ impl RelationshipGraph {
 
         let key = self.nodes.insert(node);
         self.id_index.insert(memory_id, key);
-        #[cfg(feature = "ui")]
-        crate::ui::events::node_added(memory_id, namespace_id, decay_phase);
         Ok(key)
     }
 

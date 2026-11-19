@@ -15,7 +15,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 use ts_rs::TS;
 
-use crate::model::{DecayPhase, EdgeType, MemoryId, NamespaceId};
+use crate::model::{DecayPhase, EdgeType, MemoryId};
 
 /// Events buffered per subscriber before the oldest are dropped.
 pub const CAPACITY: usize = 1024;
@@ -122,6 +122,17 @@ pub struct StoreEvent {
     pub namespace_id: u32,
     /// `DecayPhase` discriminant.
     pub phase: u8,
+    /// Links that existed when the store returned; later auto-links arrive
+    /// as `link` events.
+    pub edges: Vec<EdgeRef>,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeRef {
+    pub to: String,
+    pub edge_type: u8,
+    pub weight: f32,
 }
 
 /// An edge added to the graph (a store's auto-links arrive as these).
@@ -274,19 +285,6 @@ pub fn with_recall(f: impl FnOnce(&mut RecallTrace)) {
 
 // ── Hooks called from core modules (only compiled with `ui`) ────────────
 
-pub fn node_added(id: MemoryId, namespace: NamespaceId, phase: DecayPhase) {
-    publish(|seq, at| {
-        UiEvent::Store(StoreEvent {
-            seq,
-            at,
-            agent: current_agent(),
-            id: id.to_string(),
-            namespace_id: namespace.get(),
-            phase: phase as u8,
-        })
-    });
-}
-
 pub fn edge_added(src: MemoryId, dst: MemoryId, edge_type: EdgeType, weight: f32) {
     publish(|seq, at| {
         UiEvent::Link(LinkEvent {
@@ -421,10 +419,10 @@ mod tests {
         node_removed(id);
         loop {
             let event = sub.rx.recv().await.unwrap();
-            if let UiEvent::Forget(f) = event.as_ref() {
-                if f.id == id.to_string() {
-                    break;
-                }
+            if let UiEvent::Forget(f) = event.as_ref()
+                && f.id == id.to_string()
+            {
+                break;
             }
         }
         drop(sub);

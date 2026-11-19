@@ -16,6 +16,7 @@ use crate::daemon::{DaemonClient, DaemonServer};
 pub(crate) const DIM: usize = 16;
 
 /// A daemon over an isolated store. Dropping it stops serving.
+#[allow(dead_code)] // `dir` and `server` keep the store and server alive.
 pub(crate) struct Daemon {
     pub dir: tempfile::TempDir,
     pub socket: PathBuf,
@@ -163,6 +164,29 @@ impl Daemon {
             .as_str()
             .unwrap_or_else(|| panic!("store failed: {result}"))
             .to_owned()
+    }
+
+    pub async fn create_namespace(&self, client: &Arc<DaemonClient>, name: &str) {
+        let bridge = self.bridge(client);
+        let result = crate::mcp::tools::handle_create_namespace_bounded(
+            &bridge,
+            json!({ "name": name }),
+            Some(crate::serialization::catalog_api1::CatalogReplyAdmission::http()),
+        )
+        .await;
+        assert_ne!(result.is_error, Some(true), "{:?}", result.content);
+    }
+
+    fn bridge(&self, client: &Arc<DaemonClient>) -> crate::mcp::bridge::McpBridge {
+        use crate::daemon::bridge_adapters::*;
+        crate::mcp::bridge::McpBridge {
+            search: Arc::new(RemoteSearchAdapter::new(client.clone())),
+            storage: Arc::new(RemoteStorageAdapter::new(client.clone())),
+            namespaces: Arc::new(RemoteNamespaceAdapter::new(client.clone())),
+            health: Arc::new(RemoteHealthAdapter::new(client.clone())),
+            default_namespace: "default".into(),
+            timezone: chrono_tz::UTC,
+        }
     }
 
     /// Call an MCP tool exactly as `recalld mcp` would, over `client`.
@@ -511,4 +535,245 @@ async fn security_binds_loopback_only() {
     assert!(bound.listener.local_addr().unwrap().ip().is_loopback());
     assert!(bound.url().starts_with("http://127.0.0.1:"));
     assert!(bound.url().contains(&format!("?t={}", bound.token())));
+}
+
+// ── Read-only guarantee and search parity ──────────────────────────────
+
+/// Everything browsing could conceivably change, per record: the full
+/// persisted record (last_accessed_at, stability, strength, access history,
+/// RIF-adjusted state…) plus the graph's size.
+async fn snapshot(d: &Daemon) -> (Vec<String>, usize) {
+    use crate::storage::StorageEngine as _;
+    let svc = d.server.ui_service();
+    let mut records: Vec<String> = svc
+        .storage
+        .read()
+        .unwrap()
+        .scan_all()
+        .unwrap()
+        .into_iter()
+        .map(|(id, r)| format!("{id} {r:?}"))
+        .collect();
+    records.sort();
+    let edges = svc.graph.read().await.edge_count();
+    (records, edges)
+}
+
+fn ui_state(d: &Daemon) -> super::UiState {
+    super::UiState {
+        token: "a".repeat(64).into(),
+        port: 7690,
+        daemon: Arc::new(super::DaemonPool::new(d.socket.clone(), 2)),
+        starter: None,
+    }
+}
+
+async fn browse(state: &super::UiState, path: &str) -> (StatusCode, Value) {
+    let res = super::http::router(state.clone())
+        .oneshot(request("GET", path, Some("127.0.0.1:7690"), true))
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = axum::body::to_bytes(res.into_body(), 64 << 20)
+        .await
+        .unwrap();
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn browsing_never_changes_any_memory() {
+    let d = Daemon::start().await;
+    let agent = d.agent("claude-code").await;
+    let mut ids = Vec::new();
+    for s in [
+        "decay sweep moves memories between phases",
+        "graph links carry spreading activation",
+        "decay and graph links interact through the connection bonus",
+        "release checklist for docker images",
+    ] {
+        ids.push(d.store(&agent, s).await);
+    }
+    d.create_namespace(&agent, "topic-rust").await;
+    d.store_in(&agent, "a rust toolchain note about decay", "topic-rust")
+        .await;
+    // An agent recall beforehand, so access history and RIF state exist.
+    d.tool(
+        &agent,
+        "recall_memories",
+        json!({"query": "decay graph links"}),
+    )
+    .await;
+
+    let before = snapshot(&d).await;
+    let state = ui_state(&d);
+    let id = &ids[2];
+    let paths = [
+        "/api/ui/session".to_string(),
+        "/api/ui/namespaces".into(),
+        "/api/ui/graph".into(),
+        "/api/ui/graph?namespace=default".into(),
+        "/api/ui/memories".into(),
+        "/api/ui/memories?sort=strength&desc=true&phase=1&phase=2&phase=3&phase=4".into(),
+        "/api/ui/memories?entity=recalld&sort=nextChange".into(),
+        format!("/api/ui/memories?id={id}"),
+        format!("/api/ui/memories/{id}"),
+        format!("/api/ui/memories/{id}/history"),
+        format!("/api/ui/memories/{id}/neighbors?depth=2"),
+        "/api/ui/search?q=decay%20graph%20links".into(),
+        "/api/ui/search?q=decay&namespace=default".into(),
+        "/api/ui/health".into(),
+        "/api/ui/health?namespace=default".into(),
+        "/api/ui/system".into(),
+        "/api/ui/tags".into(),
+    ];
+    for path in &paths {
+        let (status, body) = browse(&state, path).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    // Twice, so cached and uncached paths both run.
+    for path in &paths {
+        browse(&state, path).await;
+    }
+    let after = snapshot(&d).await;
+    assert_eq!(before.1, after.1, "graph changed");
+    assert_eq!(before.0.len(), after.0.len());
+    for (b, a) in before.0.iter().zip(&after.0) {
+        assert_eq!(b, a, "browsing changed a memory");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ui_search_matches_recallds_own_search() {
+    let d = Daemon::start().await;
+    let agent = d.agent("claude-code").await;
+    for s in [
+        "decay sweep moves memories between phases",
+        "graph links carry spreading activation",
+        "decay and graph links interact through the connection bonus",
+        "release checklist for docker images",
+        "stability grows after late reviews of decay",
+    ] {
+        d.store(&agent, s).await;
+    }
+    let c = d.client().await;
+    for query in ["decay graph links", "docker release", "stability"] {
+        let own = c
+            .call(
+                "search_read_only",
+                json!({"query": query, "namespace": "default", "limit": 10, "tags": [],
+                       "entities": [], "topics": [], "emotions": [], "minStrength": null,
+                       "depth": 1, "timeRangeStart": null, "timeRangeEnd": null}),
+            )
+            .await
+            .unwrap();
+        let own: Vec<&str> = own["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["id"].as_str().unwrap())
+            .collect();
+        let ui: SearchExplain = serde_json::from_value(
+            c.call(
+                "search_explain_read_only",
+                json!({"query": query, "namespace": "default", "limit": 10, "depth": 1}),
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+        let ui: Vec<&str> = ui.hits.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ui, own, "query {query:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn contract_memory_methods() {
+    let d = Daemon::start().await;
+    let agent = d.agent("claude-code").await;
+    let a = d.store(&agent, "decay sweep moves memories").await;
+    d.store(&agent, "decay sweep and graph links").await;
+    d.tool(&agent, "recall_memories", json!({"query": "decay sweep"}))
+        .await;
+    let c = d.client().await;
+
+    let page: MemoryPage =
+        serde_json::from_value(c.call("memory_page", json!({})).await.unwrap()).unwrap();
+    assert_eq!(page.total, 2);
+    let row = page.rows.iter().find(|r| r.id == a).unwrap();
+    assert_eq!(row.namespace, "default");
+    assert_eq!(row.phase, 1);
+    assert!(row.summary.is_some());
+    assert!(row.next_change.is_some());
+    assert!(row.strength > 0.9);
+    assert_eq!(row.entities, vec!["Recalld".to_string()]);
+
+    let by_id: MemoryPage =
+        serde_json::from_value(c.call("memory_page", json!({"ids": [a]})).await.unwrap()).unwrap();
+    assert_eq!(by_id.rows.len(), 1);
+
+    let _: Neighborhood = serde_json::from_value(
+        c.call("memory_neighbors", json!({"id": a, "depth": 2}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let history: AccessHistory =
+        serde_json::from_value(c.call("access_history", json!({"id": a})).await.unwrap()).unwrap();
+    assert!(history.events.iter().all(|e| e.agent.is_none()));
+
+    // The UI's detail read: the agent `get_memory` tool with recordAccess:false.
+    let detail = d
+        .tool(
+            &agent,
+            "get_memory",
+            json!({"id": a, "recordAccess": false}),
+        )
+        .await;
+    eprintln!("get_memory detail: {detail}");
+    assert_eq!(detail["id"], a.as_str(), "{detail}");
+    assert!(detail["fullText"].is_string(), "{detail}");
+    assert!(detail["summary"].is_string(), "{detail}");
+    let _: crate::mcp::bridge::ListTagsResponse = serde_json::from_value(
+        c.call("list_tags", json!({"namespace": null, "limit": 50}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ui_writes_go_through_the_agent_tool_path() {
+    let d = Daemon::start().await;
+    let agent = d.agent("claude-code").await;
+    let id = d.store(&agent, "a memory to reinforce").await;
+    let state = ui_state(&d);
+    let post = |path: String, body: Value| {
+        let mut r = request("POST", &path, Some("127.0.0.1:7690"), true);
+        r.headers_mut()
+            .insert(super::MUTATION_HEADER, "1".parse().unwrap());
+        r.headers_mut()
+            .insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+        *r.body_mut() = Body::from(body.to_string());
+        super::http::router(state.clone()).oneshot(r)
+    };
+    let before = snapshot(&d).await;
+    let res = post(
+        format!("/api/ui/memories/{id}/reinforce"),
+        json!({"namespace": "default", "rating": 4}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_ne!(snapshot(&d).await.0, before.0, "reinforce must write");
+    let res = post(
+        format!("/api/ui/memories/{id}/forget"),
+        json!({"namespace": "default"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let c = d.client().await;
+    let page: MemoryPage =
+        serde_json::from_value(c.call("memory_page", json!({})).await.unwrap()).unwrap();
+    assert_eq!(page.total, 0, "forgotten memories leave Explore");
 }

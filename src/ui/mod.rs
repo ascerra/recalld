@@ -9,6 +9,7 @@ mod assets;
 pub mod daemon;
 pub mod events;
 pub mod http;
+mod memories;
 mod security;
 mod sysinfo;
 pub mod wire;
