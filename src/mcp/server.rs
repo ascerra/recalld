@@ -308,6 +308,18 @@ impl McpDispatcher {
             .map_err(|e| DispatchError::InvalidParams(e.to_string()))?
             .ok_or_else(|| DispatchError::InvalidParams("Missing params".to_string()))?;
 
+        // Keep only routing hints: cloning a batch here would duplicate its memory payloads.
+        let has_retry_identity = ["idempotencyKey", "batchOperationId"].iter().any(|key| {
+            params
+                .arguments
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+        });
+        let recovery_context = serde_json::json!({
+            "recordAccess": params.arguments.get("recordAccess").and_then(serde_json::Value::as_bool),
+            "hasRetryIdentity": has_retry_identity
+        });
         // Keep the existing v1 object-boundary error before new selection.
         let version = crate::mcp::args::require_object(&params.arguments)
             .map_err(|error| error.to_string())
@@ -339,6 +351,11 @@ impl McpDispatcher {
             Ok(()) => self.handler.call_tool(&params.name, params.arguments).await,
             Err(error) => ToolCallResult::error(error),
         };
+        super::recovery_guidance::append_recovery_guidance(
+            &params.name,
+            &recovery_context,
+            &mut result,
+        );
         // Legacy sessions include pre-structured-content protocol versions.
         // Keep their response shape unchanged until version-aware adoption.
         if ctx.era == Era::Legacy {
@@ -601,6 +618,11 @@ pub(crate) mod tests {
         }
 
         async fn call_tool(&self, name: &str, _arguments: serde_json::Value) -> ToolCallResult {
+            if name == "get_session" {
+                return ToolCallResult::error(
+                    "storage recovery required: derived graph effects pending publication",
+                );
+            }
             if name == "structured_test" {
                 return ToolCallResult::json(&serde_json::json!({"count": 2})).unwrap();
             }
@@ -624,6 +646,43 @@ pub(crate) mod tests {
 
     pub(crate) fn server() -> McpServer {
         McpServer::new(stub_handler())
+    }
+
+    #[tokio::test]
+    async fn recovery_guidance_is_delivered_on_both_mcp_eras() {
+        for modern in [false, true] {
+            let mut server = server();
+            if !modern {
+                server
+                    .handle_message(initialize_request(1, LEGACY_PROTOCOL_VERSION))
+                    .await
+                    .unwrap();
+            }
+            let params = serde_json::json!({"name":"get_session","arguments":{}});
+            let request = if modern {
+                modern_request(2, "tools/call", params)
+            } else {
+                plain_request(2, "tools/call", Some(params))
+            };
+            let result = server
+                .handle_message(request)
+                .await
+                .unwrap()
+                .result
+                .unwrap();
+            assert_eq!(result["isError"], true);
+            assert_eq!(
+                result["content"][0]["text"],
+                "storage recovery required: derived graph effects pending publication"
+            );
+            assert!(
+                result["content"][1]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("at most three times")
+            );
+            assert!(result.get("cacheScope").is_none());
+        }
     }
 
     /// Build a request carrying a valid modern `_meta` block.
@@ -706,7 +765,7 @@ pub(crate) mod tests {
             result["instructions"]
                 .as_str()
                 .unwrap()
-                .contains("Recalld is an AI memory system")
+                .contains("get_session")
         );
     }
 

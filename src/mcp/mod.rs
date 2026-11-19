@@ -13,6 +13,7 @@ pub mod args;
 pub(crate) mod batches;
 pub mod bridge;
 pub mod bridge_adapters;
+pub(crate) mod recovery_guidance;
 pub mod resources;
 mod tool_schema;
 pub mod tools;

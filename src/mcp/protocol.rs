@@ -96,16 +96,21 @@ pub const CATALOG_TTL_MS: u64 = 3_600_000;
 pub const RESOURCE_READ_TTL_MS: u64 = 0;
 
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
-pub const SERVER_INSTRUCTIONS: &str = "Read recalld://session first. Recalld is an AI memory system. Namespaces organize data; they are not access controls. \
-     Store/search use the resolved session default when namespace is omitted; by-ID operations \
-     use the record namespace. Supply namespace explicitly for reproducible workflows. \
-     Use recordAccess:false for evaluation or inspection. Reinforce only deliberate usefulness \
-     feedback. Inspect every batch item: legacy batch flags do not guarantee every item succeeded. \
-     Current duplicate scans are bounded and non-exhaustive; similarity is not proof of equivalence, \
-     so do not automatically delete close matches. Forget is logical removal, not backup erasure. \
-     Application contract 1 is supported; explicit contract 2 fails before work. Public v2 retries, \
-     exact-pair cursors and readiness are not enabled. Do not infer embedding-profile identity from \
-     matching dimensions.";
+pub const SERVER_INSTRUCTIONS: &str = "Start with get_session (or recalld://session) to inspect the active default namespace. \
+    Keep shared preferences and cross-project facts in default; put project-specific context in a project namespace. \
+    Reuse topic namespaces for general subjects when useful; avoid one namespace per conversation or agent. \
+    List namespaces before creating one. Namespaces organize memories; they are not access controls. \
+    Recall shared context and the current project or relevant topic separately, not every unrelated project. \
+    Pass namespace explicitly when choosing scope; omitted store/search scope uses the session default. \
+    By-ID operations use the record namespace, not the session default. Retrieval records access by default; \
+    use recordAccess:false for inspection. Reinforce only memories that actually helped. \
+    Store durable knowledge, not every turn or facts already available in project files. \
+    Similarity is not proof of duplication: never automatically delete matches. Check every batch item. \
+    Application contract 1 is supported; contract 2 and single-call retry keys are not enabled. \
+    Durable batches can resume with the same complete ordered payload, namespace, storeId and original key or reservation ID. \
+    If a single write outcome is unknown, do not blindly replay it: inspect the same namespace and retain the error. \
+    After upgrading, restart the MCP server process, reconnect and refresh tools; successful reads do not prove old clients can write. \
+    Forget is logical removal, not backup erasure. Matching vector dimensions do not establish model identity.";
 
 // ── JSON-RPC error codes ────────────────────────────────────────────
 

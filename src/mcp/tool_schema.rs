@@ -62,6 +62,23 @@ pub(super) fn output(tool: &str) -> Option<Value> {
     let count = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
     let name = json!({"type":"string"});
     Some(match tool {
+        "get_session" => json!({
+            "type":"object",
+            "required":["supportedContractVersions","defaultNamespace","namespacesAreAccessControls","accessDefaults"],
+            "properties":{
+                "supportedContractVersions":{"type":"array","items":{"const":1}},
+                "defaultNamespace":{
+                    "type":"object","required":["requestedName","source","exists","byIdResolution","resolved"],
+                    "properties":{
+                        "requestedName":{"type":"string"},"source":{"type":"string"},
+                        "exists":{"type":"boolean"},"byIdResolution":{"const":"record"},
+                        "resolved":{"type":["object","null"]}
+                    }
+                },
+                "namespacesAreAccessControls":{"const":false},
+                "accessDefaults":{"type":"object"}
+            }
+        }),
         "delete_namespace" => catalog::delete_output(),
         "get_memory" | "store_memory" | "store_memories" | "forget_memories" => {
             record::output(tool)
