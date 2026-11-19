@@ -177,6 +177,41 @@ enum DaemonAction {
 #[cfg(feature = "bench")]
 #[derive(Subcommand, Debug)]
 enum BenchTarget {
+    /// Serve a deterministic Ollama-compatible embedding endpoint (UI tests)
+    EmbedStub {
+        #[arg(long, default_value = "127.0.0.1:11435")]
+        addr: std::net::SocketAddr,
+        #[arg(long, default_value = "64")]
+        dim: usize,
+    },
+
+    /// Time agent recalls (`search` RPCs) against a daemon over --data-dir
+    RecallLatency {
+        #[arg(long, default_value = "300")]
+        queries: usize,
+        /// Attach a UI event subscriber while measuring (needs --features ui)
+        #[arg(long)]
+        subscribe: bool,
+        #[arg(long, default_value = "64")]
+        embed_dim: usize,
+    },
+
+    /// Generate a synthetic store (into --data-dir) for the UI perf harness
+    Synthetic {
+        #[arg(long, default_value = "10000")]
+        memories: usize,
+        /// Approximate number of graph edges
+        #[arg(long, default_value = "100000")]
+        edges: usize,
+        /// The reference screens' sample content instead of generated topics
+        #[arg(long)]
+        sample: bool,
+        #[arg(long, default_value = "7")]
+        seed: u64,
+        #[arg(long, default_value = "64")]
+        embed_dim: usize,
+    },
+
     /// Run the LoCoMo benchmark (long-term conversational memory QA)
     Locomo {
         /// Path to the locomo10.json dataset file
@@ -437,7 +472,100 @@ async fn run_ui(config: RecalldConfig, port: Option<u16>, open_browser: bool) ->
 
 #[cfg(feature = "bench")]
 async fn run_bench(config: RecalldConfig, target: BenchTarget, format: &str) -> ExitCode {
+    use recalld::bench::synthetic;
     match target {
+        BenchTarget::EmbedStub { addr, dim } => {
+            match synthetic::serve_embed_stub(addr, dim).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("embedding stub failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        BenchTarget::RecallLatency {
+            queries,
+            subscribe,
+            embed_dim,
+        } => {
+            let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("cannot bind the embedding stub: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let addr = listener.local_addr().expect("bound");
+            drop(listener);
+            tokio::spawn(synthetic::serve_embed_stub(addr, embed_dim));
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let mut config = config;
+            config.embedding.provider = recalld::config::EmbeddingProvider::Ollama;
+            config.embedding.model_name = "hash-embed".into();
+            config.embedding.dimensions = embed_dim;
+            config.embedding.base_url = format!("http://{addr}");
+            config.decay.disable_sweep = true;
+            match synthetic::recall_latency(config, queries, subscribe, embed_dim).await {
+                Ok(v) => {
+                    println!("{v}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("recall latency failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        BenchTarget::Synthetic {
+            memories,
+            edges,
+            sample,
+            seed,
+            embed_dim,
+        } => {
+            let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("cannot bind the embedding stub: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let addr = listener.local_addr().expect("bound");
+            drop(listener);
+            tokio::spawn(synthetic::serve_embed_stub(addr, embed_dim));
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let mut config = config;
+            config.embedding.provider = recalld::config::EmbeddingProvider::Ollama;
+            config.embedding.model_name = "hash-embed".into();
+            config.embedding.dimensions = embed_dim;
+            config.embedding.base_url = format!("http://{addr}");
+            let started = std::time::Instant::now();
+            let opts = synthetic::SyntheticOptions {
+                memories,
+                edges,
+                sample,
+                seed,
+                embed_dim,
+            };
+            match synthetic::generate(config, &opts).await {
+                Ok(summary) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "memories": summary.memories,
+                            "edges": summary.edges,
+                            "namespaces": summary.namespaces,
+                            "seconds": started.elapsed().as_secs_f64(),
+                        })
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("synthetic store failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         BenchTarget::Locomo {
             data,
             top_k,
@@ -795,6 +923,16 @@ fn create_remote_mcp_bridge(
     tz: chrono_tz::Tz,
 ) -> recalld::mcp::bridge::McpBridge {
     use recalld::daemon::bridge_adapters::*;
+
+    // Name this MCP process's daemon connection once the client says who it is.
+    #[cfg(feature = "ui")]
+    {
+        let client = client.clone();
+        recalld::ui::agent::on_set(move |name, kind| {
+            let (client, name) = (client.clone(), name.to_owned());
+            tokio::spawn(async move { client.set_agent(&name, kind).await });
+        });
+    }
 
     recalld::mcp::bridge::McpBridge {
         search: Arc::new(RemoteSearchAdapter::new(client.clone())),
