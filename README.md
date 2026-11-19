@@ -207,6 +207,12 @@ recalld-cli status
 
 Available CLI commands: `store`, `recall`, `get`, `forget`, `reinforce`, `inspect`, `namespaces`, `sweep`, `status`, `export`, `import`, `list`, `health`.
 
+**Local web UI (optional)** -- `recalld ui` opens a browser UI over your memories: a Memory map that lights up as agents recall, an Explore table, a Timeline and a Health view, with Search on `⌘K`. It is read-only by default (browsing never reinforces or decays anything) and only listens on `127.0.0.1`. The UI ships in separate `recalld-ui-*` release archives (or `RECALLD_UI=1` with `install.sh`); the standard binary and Docker image do not include it. See [docs/ui.md](docs/ui.md).
+
+```sh
+recalld ui            # starts the daemon if needed and opens the browser
+```
+
 ## Configuration
 
 recalld reads configuration from `recalld.toml` in the working directory or `~/.recalld/config.toml`. Per-directory overrides use `.recalld.toml` (found by walking up from the current directory), which must include a `namespace` field and can override any config section.
@@ -301,6 +307,12 @@ make release        # optimized build
 make install        # install to ~/.cargo/bin
 make test           # run tests
 make lint           # fmt check + clippy
+```
+
+With the optional local web UI (needs Node 22.17+ and pnpm):
+
+```sh
+make release-ui     # builds ui/dist, then cargo build --release --features ui
 ```
 
 Or directly with Cargo:

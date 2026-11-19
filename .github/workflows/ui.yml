@@ -1,0 +1,89 @@
+name: UI
+
+# The optional local web UI (`--features ui`). Runs only when the UI or the
+# backend surfaces it depends on change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ui/**"
+      - "src/ui/**"
+      - "src/daemon/**"
+      - "src/api/**"
+      - "src/graph/**"
+      - "src/bench/synthetic.rs"
+      - "docs/ui/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ui.yml"
+  pull_request:
+    paths:
+      - "ui/**"
+      - "src/ui/**"
+      - "src/daemon/**"
+      - "src/api/**"
+      - "src/graph/**"
+      - "src/bench/synthetic.rs"
+      - "docs/ui/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ui.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: "1.94.1"
+
+jobs:
+  ui:
+    name: UI build, types, unit, e2e, perf smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm build
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ui
+      - name: UI contract, read-only, security and generated-type checks
+        working-directory: .
+        run: "cargo test --locked --features ui --lib ui::"
+      - name: Build the UI-enabled binary (embeds ui/dist)
+        working-directory: .
+        run: cargo build --locked --features ui,bench
+      - name: No committed UI asset carries C2PA metadata
+        working-directory: .
+        run: "! grep -rlia c2pa ui/static"
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: End-to-end, screenshots and perf smoke
+        env:
+          RECALLD_BIN: ${{ github.workspace }}/target/debug/recalld
+          # CI runs the perf suite as a smoke test on a smaller store; the
+          # budget numbers in the PR come from the full 10k / 100k run.
+          PERF_SMOKE: "1"
+        run: pnpm exec playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-test-results
+          path: |
+            ui/test-results/
+            ui/perf/results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -100,6 +100,30 @@ jobs:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
+      - name: Default binary has no UI command
+        run: |
+          ./target/release/recalld --help > help.txt
+          if grep -Eq '^\s+ui\s' help.txt; then echo "default build exposes 'ui'"; exit 1; fi
+
+  default-build-unchanged:
+    # The optional `ui` feature must not change the default dependency set.
+    name: Default build unchanged
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+      - name: Compare default-feature dependency trees with the merge base
+        run: |
+          tree() { cargo tree --locked -e normal,build --prefix none --format '{p} {f}' | sort -u; }
+          tree > head.txt
+          git worktree add ../base "$(git merge-base HEAD origin/${{ github.base_ref }})"
+          (cd ../base && tree) > base.txt
+          diff -u base.txt head.txt
 
   docker:
     name: Docker build

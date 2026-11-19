@@ -55,7 +55,11 @@ get_target_version() {
 }
 
 download_and_install() {
+    # RECALLD_UI=1 installs the build with the optional local web UI (`recalld ui`).
     local asset="recalld-${PLATFORM}.tar.gz"
+    if [ "${RECALLD_UI:-0}" = "1" ]; then
+        asset="recalld-ui-${PLATFORM}.tar.gz"
+    fi
     local url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
 
     TMP_DIR="$(mktemp -d)"

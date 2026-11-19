@@ -14,6 +14,27 @@ env:
   RUSTUP_TOOLCHAIN: "1.94.1"
 
 jobs:
+  ui-assets:
+    name: Build UI assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm -C ui install --frozen-lockfile
+      - run: pnpm -C ui build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist/
+          if-no-files-found: error
+
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
@@ -63,6 +84,51 @@ jobs:
         with:
           files: ${{ matrix.asset }}
 
+  build-ui:
+    # The same binaries with the optional local web UI embedded (`recalld ui`).
+    name: Build with UI (${{ matrix.target }})
+    needs: ui-assets
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            asset: recalld-ui-x86_64-linux.tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            asset: recalld-ui-aarch64-linux.tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            asset: recalld-ui-x86_64-darwin.tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            asset: recalld-ui-aarch64-darwin.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ui-${{ matrix.target }}
+      - name: Build
+        run: cargo build --locked --release --features ui --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.asset }} recalld recalld-cli
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
+
   docker:
     name: Docker image
     needs: build
@@ -101,7 +167,7 @@ jobs:
 
   checksums:
     name: Checksums
-    needs: build
+    needs: [build, build-ui]
     runs-on: ubuntu-latest
     steps:
       - name: Download release assets

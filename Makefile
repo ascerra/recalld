@@ -1,4 +1,4 @@
-.PHONY: build release test fmt fmt-check clippy lint clean install setup
+.PHONY: build release test fmt fmt-check clippy lint clean install setup ui ui-test release-ui
 
 build:
 	cargo build
@@ -29,3 +29,16 @@ install:
 setup:
 	git config core.hooksPath .githooks
 	@echo "Git hooks configured."
+
+# ── Optional local web UI (`recalld ui`) ─────────────────────────
+ui:
+	pnpm -C ui install --frozen-lockfile
+	pnpm -C ui build
+
+ui-test: ui
+	pnpm -C ui check
+	pnpm -C ui test
+	cargo test --features ui --lib ui::
+
+release-ui: ui
+	cargo build --release --features ui

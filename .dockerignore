@@ -8,3 +8,4 @@ docs/
 Dockerfile
 compose.yaml
 .dockerignore
+ui/
