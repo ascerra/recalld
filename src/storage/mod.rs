@@ -31,6 +31,7 @@ pub mod inherited_policy;
 #[cfg(test)]
 mod inherited_policy_tests;
 pub mod insertion;
+pub mod legacy_vector_repair;
 pub mod lifecycle_migration;
 pub(crate) mod lineage;
 pub mod logical_export;

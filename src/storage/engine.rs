@@ -28,7 +28,7 @@ mod format_open_tests;
 mod text_compaction;
 mod tombstone;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
@@ -632,7 +632,7 @@ impl RedbStorageEngine {
 
         // 3. Clean up orphaned edges.
         let all_records = self.meta_store.scan_all()?;
-        let mut owners = HashSet::new();
+        let mut owners = HashMap::new();
         for (id, record) in &all_records {
             if record.id != *id.as_bytes() {
                 return Err(StorageError::InvalidMutation(
@@ -643,14 +643,26 @@ impl RedbStorageEngine {
                 .vector_manager
                 .get(NamespaceId::new(record.namespace_id))
                 .ok_or(StorageError::NamespaceNotFound(record.namespace_id))?;
-            if record.phase != DecayPhase::Tombstone
-                && (!owners.insert((record.namespace_id, record.vector_slot))
-                    || vectors.is_free(record.vector_slot)
-                    || vectors.get_vector(record.vector_slot).is_none())
-            {
-                return Err(StorageError::OwnershipMismatch(format!(
-                    "invalid or duplicate vector owner {id}"
-                )));
+            if record.phase != DecayPhase::Tombstone {
+                let reason = if let Some(previous) =
+                    owners.insert((record.namespace_id, record.vector_slot), *id)
+                {
+                    Some(format!(
+                        "duplicate vector owner {id}; previous_owner={previous}"
+                    ))
+                } else if vectors.is_free(record.vector_slot) {
+                    Some(format!("free vector slot referenced by owner {id}"))
+                } else if vectors.get_vector(record.vector_slot).is_none() {
+                    Some(format!("missing vector slot for owner {id}"))
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    return Err(StorageError::OwnershipMismatch(format!(
+                        "{reason}; phase={:?}; namespace_id={}; vector_slot={}",
+                        record.phase, record.namespace_id, record.vector_slot
+                    )));
+                }
             }
             if record.text_offset != 0 || record.text_length != 0 {
                 self.text_store.read(TextRef {
@@ -669,7 +681,7 @@ impl RedbStorageEngine {
                 .expect("enumerated namespace");
             let mut changed = false;
             for slot in 0..store.slot_count() {
-                if !owners.contains(&(namespace.get(), slot)) && !store.is_free(slot) {
+                if !owners.contains_key(&(namespace.get(), slot)) && !store.is_free(slot) {
                     store.free_slot(slot)?;
                     changed = true;
                 }
@@ -2187,31 +2199,54 @@ mod tests {
     }
 
     #[test]
-    fn containment_reopen_rejects_duplicate_owners_and_owned_free_slots() {
-        for duplicate in [true, false] {
+    fn containment_reopen_distinguishes_duplicate_free_and_missing_vector_owners() {
+        for fault in ["duplicate", "free", "missing"] {
             let dir = tempfile::tempdir().unwrap();
             let mut engine = open_engine(dir.path());
             let ns = make_namespace(&mut engine, "default");
             let a = add_memory(&mut engine, ns);
             let mut record = engine.get_record(a).unwrap().unwrap();
-            if duplicate {
-                let b = MemoryId::new();
-                record.id = *b.as_bytes();
-                engine.meta_store.insert(b, &record).unwrap();
-            } else {
-                engine
-                    .vector_manager
-                    .get_mut(ns)
-                    .unwrap()
-                    .free_slot(record.vector_slot)
-                    .unwrap();
-            }
+            let reason = match fault {
+                "duplicate" => {
+                    let b = MemoryId::new();
+                    record.id = *b.as_bytes();
+                    engine.meta_store.insert(b, &record).unwrap();
+                    let mut ids = [a, b];
+                    ids.sort();
+                    format!(
+                        "duplicate vector owner {}; previous_owner={}",
+                        ids[1], ids[0]
+                    )
+                }
+                "free" => {
+                    engine
+                        .vector_manager
+                        .get_mut(ns)
+                        .unwrap()
+                        .free_slot(record.vector_slot)
+                        .unwrap();
+                    format!("free vector slot referenced by owner {a}")
+                }
+                "missing" => {
+                    let b = MemoryId::new();
+                    record.id = *b.as_bytes();
+                    record.vector_slot = engine.vector_manager.get(ns).unwrap().slot_count();
+                    engine.meta_store.insert(b, &record).unwrap();
+                    format!("missing vector slot for owner {b}")
+                }
+                _ => unreachable!(),
+            };
+            let expected = format!(
+                "{reason}; phase={:?}; namespace_id={}; vector_slot={}",
+                record.phase, record.namespace_id, record.vector_slot
+            );
             engine.sync().unwrap();
             drop(engine);
-            assert!(matches!(
-                RedbStorageEngine::open(dir.path()),
-                Err(StorageError::OwnershipMismatch(_))
-            ));
+            match RedbStorageEngine::open(dir.path()) {
+                Err(StorageError::OwnershipMismatch(detail)) => assert_eq!(detail, expected),
+                Err(other) => panic!("unexpected error for {fault}: {other}"),
+                Ok(_) => panic!("accepted {fault} vector owner"),
+            }
         }
     }
 

@@ -63,7 +63,12 @@ fn fresh_partial_collision_and_custom_path_are_distinguished() {
     assert!(prepare_container_layout(root.path()).is_err());
     fs::remove_dir(root.path().join(STORE)).unwrap();
     drop(configured_layout(root.path(), &root.path().join(STORE), true).unwrap());
-    assert!(read(root.path()).unwrap().unwrap().ready);
+    assert!(
+        read(&root.path().canonicalize().unwrap())
+            .unwrap()
+            .unwrap()
+            .ready
+    );
     assert!(root.path().join(STORE).is_dir());
 }
 
@@ -80,7 +85,7 @@ fn pending_recovery_rejects_changed_or_duplicate_source_without_overwrite() {
         .is_err()
     );
     assert!(resolve_container_layout(root.path()).is_err());
-    let j = read(root.path()).unwrap().unwrap();
+    let j = read(&root.path().canonicalize().unwrap()).unwrap().unwrap();
     // Explicit offline paths cannot bypass the pending layout fence, even
     // after the relocating process has released its OS locks.
     for path in [
@@ -329,7 +334,12 @@ async fn schema_init_failure_restores_original_at_committed_child_not_root() {
     for seal in &seals {
         matches(&lease.path.join(&seal.name), seal).unwrap();
     }
-    assert!(read(root.path()).unwrap().unwrap().ready);
+    assert!(
+        read(&root.path().canonicalize().unwrap())
+            .unwrap()
+            .unwrap()
+            .ready
+    );
 }
 
 #[cfg(unix)]
