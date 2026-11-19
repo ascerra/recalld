@@ -9,6 +9,7 @@ interface Node extends SimulationNodeDatum {
   r: number;
   /** 0..1, how connected this memory is relative to the graph. */
   hub: number;
+  deg: number;
 }
 
 let sim: ReturnType<typeof forceSimulation<Node>> | null = null;
@@ -88,7 +89,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     }
     nodes = Array.from({ length: m.n }, (_, i) => {
       if (!m.known[i]) unknown.push(i);
-      return { i, r: nodeSize(m.degree[i]), hub: hubness(m.degree[i]), x: m.x[i], y: m.y[i] };
+      return { i, r: nodeSize(m.degree[i]), hub: hubness(m.degree[i]), deg: Math.max(1, m.degree[i]), x: m.x[i], y: m.y[i] };
     });
     // New memories appear next to their neighbors (DESIGN §6).
     const anyKnown = unknown.length < m.n;
@@ -110,11 +111,13 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       // Room to read: strong repulsion, long weak links, generous spacing.
       // Hubs push harder for room and pull harder toward the center, so they
       // anchor their clusters and sparse memories drift outward.
-      .force('charge', forceManyBody<Node>().strength((d) => -40 - 90 * d.hub).theta(0.9).distanceMax(900))
-      .force('link', forceLink<Node, { source: number; target: number; w: number }>(links).id((d) => d.i).distance(48).strength((l) => 0.03 + 0.12 * l.w))
-      .force('collide', forceCollide<Node>((d) => d.r * 2 + 4).iterations(1))
-      .force('x', forceX<Node>(0).strength((d) => 0.008 + 0.04 * d.hub))
-      .force('y', forceY<Node>(0).strength((d) => 0.008 + 0.04 * d.hub))
+      .force('charge', forceManyBody<Node>().strength((d) => -90 - 160 * d.hub).theta(0.9).distanceMax(500))
+      .force('link', forceLink<Node, { source: number; target: number; w: number }>(links).id((d) => d.i).distance(70)
+        // d3's own normalization: a memory with many links isn't pulled in many times as hard.
+        .strength((l) => (0.3 + 0.7 * l.w) / Math.min((l.source as unknown as Node).deg, (l.target as unknown as Node).deg)))
+      .force('collide', forceCollide<Node>((d) => d.r * 2.5 + 10).iterations(2))
+      .force('x', forceX<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
+      .force('y', forceY<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
       .stop();
     // Cached layouts open settled: barely reheat; a fully new one starts hot.
     sim.alpha(unknown.length === 0 ? 0 : anyKnown ? Math.min(0.3, 0.05 + unknown.length / m.n) : 1);

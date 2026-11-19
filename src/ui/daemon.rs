@@ -503,6 +503,28 @@ impl UiService {
                 .unwrap_or_default();
             let returned = returned_ids(value);
             let agent = obs.agent.clone();
+            // The light shows what mattered: the strongest matches (not every
+            // candidate the pipeline scored) and a deduplicated, bounded set of
+            // suppressed competitors.
+            let mut best: std::collections::HashMap<MemoryId, f32> = Default::default();
+            for (id, score) in &trace.seeds {
+                let e = best.entry(*id).or_insert(*score);
+                *e = e.max(*score);
+            }
+            let mut seeds: Vec<(MemoryId, f32)> = best.into_iter().collect();
+            seeds.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let top = seeds.first().map_or(0.0, |s| s.1);
+            seeds.retain(|s| s.1 >= top * 0.6);
+            seeds.truncate(returned.len().max(8));
+            let mut seen = std::collections::HashSet::new();
+            let suppressed: Vec<String> = trace
+                .suppressed
+                .iter()
+                .map(ToString::to_string)
+                .filter(|id| !returned.contains(id) && seen.insert(id.clone()))
+                .take(24)
+                .collect();
+            let steps: Vec<_> = trace.steps.iter().take(500).collect();
             events::publish(|seq, at| {
                 UiEvent::Recall(events::RecallEvent {
                     seq,
@@ -510,16 +532,14 @@ impl UiService {
                     agent,
                     namespace,
                     query,
-                    seeds: trace
-                        .seeds
+                    seeds: seeds
                         .iter()
                         .map(|(id, score)| events::Seed {
                             id: id.to_string(),
                             score: *score,
                         })
                         .collect(),
-                    trace: trace
-                        .steps
+                    trace: steps
                         .iter()
                         .map(|s| events::TraceStep {
                             from: s.from.to_string(),
@@ -530,7 +550,7 @@ impl UiService {
                         })
                         .collect(),
                     returned,
-                    suppressed: trace.suppressed.iter().map(ToString::to_string).collect(),
+                    suppressed,
                 })
             });
         }

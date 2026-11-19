@@ -4,6 +4,10 @@
 import type { UiEvent } from '$lib/api/types';
 import type { Glow, Pulse } from './light';
 
+/** At most this many traced spreads are drawn per recall. */
+export const MAX_LIT_STEPS = 24;
+/** Time between successive hops (a pulse takes about HOP_MS to travel). */
+export const HOP_GAP_MS = 175;
 export const HOP_MS = 350;
 const BLOOM_ATTACK = 80;
 const BLOOM_DECAY = 1200;
@@ -51,15 +55,24 @@ export function choreograph(
     }
     // 2. Pulses along each traced edge, in firing order.
     let last = now;
-    const steps = [...event.trace].sort((a, b) => a.order - b.order);
+    // Only the strongest spreads carry light; replay them in firing order,
+    // compacted so a long trace still plays in about a second.
+    const top = Math.max(0, ...event.trace.map((s) => s.amount));
+    const steps = [...event.trace]
+      .filter((s) => s.edgeType !== 4 && s.amount >= top * 0.2)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, MAX_LIT_STEPS)
+      .sort((a, b) => a.order - b.order);
+    const rank = new Map([...new Set(steps.map((s) => s.order))].map((o, i) => [o, i]));
     for (const step of steps) {
       if (step.edgeType === 4) continue; // contradicts edges never carry light
       const a = pos(step.from), b = pos(step.to);
       if (!a || !b) continue;
       const len = Math.hypot(b.x - a.x, b.y - a.y) * (opts.scale ?? 1);
       const duration = HOP_MS * speed * Math.min(1.6, Math.max(0.6, len / 120));
-      const start = now + step.order * HOP_MS * speed;
-      const fade = Math.pow(0.85, step.order);
+      const hop = rank.get(step.order)!;
+      const start = now + hop * HOP_GAP_MS * speed;
+      const fade = Math.pow(0.9, hop);
       if (!opts.reducedMotion) {
         out.pulses.push({ x0: a.x, y0: a.y, x1: b.x, y1: b.y, start, duration, width: 2.5 + 5 * step.amount, brightness: Math.min(1, (0.65 + step.amount) * fade), color: colors.agent });
       }

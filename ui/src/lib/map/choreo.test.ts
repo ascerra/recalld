@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { choreograph, HOP_MS } from './choreo';
+import { choreograph, HOP_GAP_MS } from './choreo';
 import type { UiEvent } from '$lib/api/types';
 
 const pos = (id: string) => ({ a: { x: 0, y: 0 }, b: { x: 120, y: 0 }, c: { x: 240, y: 0 }, d: { x: 120, y: 120 } })[id] ?? null;
@@ -21,7 +21,7 @@ describe('recall light', () => {
   it('fires pulses in PQSA order, one hop at a time', () => {
     const c = choreograph(recall, pos, 1000, colors);
     expect(c.pulses.map((p) => [p.x0, p.x1])).toEqual([[0, 120], [120, 240]]);
-    expect(c.pulses[1].start - c.pulses[0].start).toBe(HOP_MS);
+    expect(c.pulses[1].start - c.pulses[0].start).toBe(HOP_GAP_MS);
     expect(c.pulses[0].brightness).toBeGreaterThan(c.pulses[1].brightness);
   });
   it('never sends light along contradicts edges', () => {
@@ -45,6 +45,6 @@ describe('recall light', () => {
   });
   it('replay slows everything down', () => {
     const slow = choreograph(recall, pos, 0, colors, { speed: 3 });
-    expect(slow.pulses[1].start).toBe(3 * HOP_MS);
+    expect(slow.pulses[1].start).toBe(3 * HOP_GAP_MS);
   });
 });
