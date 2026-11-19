@@ -312,9 +312,17 @@
       ensureSummaries(liveLabels);
       for (const s of c.suppressed) {
         if (!graph.hasNode(s.id)) continue;
-        const before = graph.getNodeAttribute(s.id, 'color');
         graph.setNodeAttribute(s.id, 'color', alpha(theme.suppressed, 0.9));
-        setTimeout(() => graph?.hasNode(s.id) && graph.setNodeAttribute(s.id, 'color', before), s.until - performance.now());
+        // Recover to the node's own encoding (never to a color captured while
+        // another recall had it suppressed).
+        setTimeout(() => {
+          if (!graph?.hasNode(s.id)) return;
+          const a = graph.getNodeAttributes(s.id);
+          const i = a.index as number;
+          const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(s.id), i >= 0 && snapshot.permastore[i] === 1);
+          graph.setNodeAttribute(s.id, 'color', enc.color);
+          sigma?.refresh({ skipIndexation: true });
+        }, s.until - performance.now());
       }
       const last = Math.max(0, ...c.rings.map((x) => x.until)) - performance.now();
       setTimeout(() => sigma?.refresh({ skipIndexation: true }), last + 50);
@@ -460,9 +468,10 @@
           minCameraRatio: 0.03,
           maxCameraRatio: 8,
           stagePadding: 40,
-          // Gentle zoom: trackpads send many wheel steps per gesture.
-          zoomingRatio: 1.12,
-          zoomDuration: 120,
+          // Between sigma's jumpy default (1.7× per step, 250 ms) and too slow:
+          // events closer than zoomDuration/5 are dropped, so both matter.
+          zoomingRatio: 1.25,
+          zoomDuration: 200,
           doubleClickZoomingRatio: 1.6,
           hideEdgesOnMove: false,
         },
