@@ -1,4 +1,4 @@
-//! Local API1 catalog evidence admission. This is not a daemon negotiation.
+//! API1 catalog evidence admission for local and daemon-backed callers.
 use crate::{
     mcp::protocol::{Era, JsonRpcId, JsonRpcResponse, ResultEnvelope, ToolCallResult},
     model::NamespaceConfig,
@@ -133,9 +133,7 @@ impl CatalogWorkerEvidence {
     }
 }
 
-/// Only the new local create entry uses this typed error. Global BridgeError
-/// and daemon protocol remain unchanged; invalid evidence stays typed until
-/// the actual local tool boundary.
+/// Bounded create retains typed errors until the local tool or daemon boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogApi1Error {
     #[error(transparent)]
@@ -149,6 +147,18 @@ pub enum CatalogApi1Error {
 #[derive(Clone)]
 pub struct CatalogReplyAdmission {
     surface: Surface,
+    limit: usize,
+    daemon_limit: Option<usize>,
+}
+
+/// Response-format inputs only; the daemon reconstructs and caps admission.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CatalogCaller {
+    id: JsonRpcId,
+    mcp: bool,
+    modern: bool,
+    timezone: String,
     limit: usize,
 }
 
@@ -171,6 +181,7 @@ impl CatalogReplyAdmission {
                 timezone: chrono_tz::UTC,
             },
             limit: LOCAL_LIMIT,
+            daemon_limit: None,
         }
     }
 
@@ -178,7 +189,49 @@ impl CatalogReplyAdmission {
         Self {
             surface: Surface::Http,
             limit: LOCAL_LIMIT,
+            daemon_limit: None,
         }
+    }
+
+    pub(crate) fn caller(&self) -> CatalogCaller {
+        let (id, modern, timezone) = match &self.surface {
+            Surface::Mcp { id, era, timezone } => {
+                (id.clone(), *era == Era::Modern, timezone.to_string())
+            }
+            Surface::Http => (JsonRpcId::Null, false, "UTC".into()),
+        };
+        CatalogCaller {
+            id,
+            mcp: matches!(self.surface, Surface::Mcp { .. }),
+            modern,
+            timezone,
+            limit: self.limit,
+        }
+    }
+
+    pub(crate) fn from_caller(
+        caller: CatalogCaller,
+        frame_limit: usize,
+    ) -> Result<Self, crate::mcp::bridge::BridgeError> {
+        let timezone = caller.timezone.parse().map_err(|_| {
+            crate::mcp::bridge::BridgeError::InvalidInput("invalid catalog timezone".into())
+        })?;
+        let mut admission = if caller.mcp {
+            Self::mcp(
+                caller.id,
+                if caller.modern {
+                    Era::Modern
+                } else {
+                    Era::Legacy
+                },
+            )
+        } else {
+            Self::http()
+        }
+        .with_timezone(timezone);
+        admission.limit = caller.limit.min(LOCAL_LIMIT);
+        admission.daemon_limit = Some(frame_limit.min(crate::daemon::protocol::MAX_MESSAGE_SIZE));
+        Ok(admission)
     }
 
     pub(crate) fn with_timezone(mut self, timezone: chrono_tz::Tz) -> Self {
@@ -204,6 +257,16 @@ impl CatalogReplyAdmission {
         let value = match &self.surface {
             Surface::Mcp { timezone, .. } => serde_json::to_value(info(ns, *timezone)),
             Surface::Http => {
+                if let Some(limit) = self.daemon_limit {
+                    check_encoded(
+                        &crate::daemon::protocol::DaemonResponse::success(
+                            u64::MAX,
+                            serde_json::to_value(info(ns.clone(), chrono_tz::UTC))
+                                .map_err(|_| StorageError::ReceiptBudgetExceeded)?,
+                        ),
+                        limit,
+                    )?;
+                }
                 return check_encoded(
                     &super::ApiResponse {
                         data: http_namespace(ns),
@@ -240,6 +303,23 @@ impl CatalogReplyAdmission {
     }
 
     fn check_value(&self, value: &Value, failure: bool) -> Result<(), StorageError> {
+        if let Some(limit) = self.daemon_limit {
+            use crate::daemon::protocol::{DaemonResponse, DaemonRpcError, ERR_PARTIALLY_APPLIED};
+            // The actual RPC ID is a u64. Reserve its longest encoding before
+            // mutation, including the escaping of the complete error JSON.
+            let response = if failure {
+                DaemonResponse::error(
+                    u64::MAX,
+                    DaemonRpcError {
+                        code: ERR_PARTIALLY_APPLIED,
+                        message: value.to_string(),
+                    },
+                )
+            } else {
+                DaemonResponse::success(u64::MAX, value.clone())
+            };
+            check_encoded(&response, limit)?;
+        }
         let (value, limit) = self.wire_value(value, failure)?;
         check_encoded(&value, limit)
     }
@@ -526,6 +606,81 @@ mod tests {
         NativeCatalogAdapter,
         tests::{FixedClock, fixture},
     };
+
+    #[test]
+    fn daemon_caller_roundtrip_caps_limits_and_preserves_mcp_null_id_and_eras() {
+        for era in [Era::Legacy, Era::Modern] {
+            for id in [
+                JsonRpcId::Null,
+                JsonRpcId::Number(i64::MIN),
+                JsonRpcId::String("id\n\"\\λ".into()),
+            ] {
+                let original = CatalogReplyAdmission::mcp(id, era)
+                    .with_timezone(chrono_tz::America::Los_Angeles);
+                let mut caller = serde_json::to_value(original.caller()).unwrap();
+                caller["limit"] = json!(usize::MAX);
+                let restored = CatalogReplyAdmission::from_caller(
+                    serde_json::from_value(caller).unwrap(),
+                    usize::MAX,
+                )
+                .unwrap();
+                assert_eq!(restored.limit, LOCAL_LIMIT);
+                assert_eq!(
+                    restored.daemon_limit,
+                    Some(crate::daemon::protocol::MAX_MESSAGE_SIZE)
+                );
+                assert_eq!(
+                    original.encoded_for_test(&json!({"name":"example"}), false),
+                    restored.encoded_for_test(&json!({"name":"example"}), false)
+                );
+            }
+        }
+        let mut caller = serde_json::to_value(CatalogReplyAdmission::http().caller()).unwrap();
+        caller["timezone"] = json!("invalid timezone");
+        assert!(
+            CatalogReplyAdmission::from_caller(
+                serde_json::from_value(caller).unwrap(),
+                LOCAL_LIMIT
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn daemon_and_caller_envelopes_each_enforce_exact_byte_boundary() {
+        use crate::daemon::protocol::{DaemonResponse, DaemonRpcError, ERR_PARTIALLY_APPLIED};
+        for era in [Era::Legacy, Era::Modern] {
+            for failure in [false, true] {
+                let original =
+                    CatalogReplyAdmission::mcp(JsonRpcId::String("\"\\\n".repeat(1000)), era);
+                let value = json!({"receipt":{"name":"\0\"\\λ".repeat(100)},"message":"failure"});
+                let mut admission =
+                    CatalogReplyAdmission::from_caller(original.caller(), LOCAL_LIMIT).unwrap();
+                let caller_len = original.encoded_for_test(&value, failure).len();
+                admission.limit = caller_len;
+                admission.check_value(&value, failure).unwrap();
+                admission.limit -= 1;
+                assert!(admission.check_value(&value, failure).is_err());
+                admission.limit = LOCAL_LIMIT;
+                let response = if failure {
+                    DaemonResponse::error(
+                        u64::MAX,
+                        DaemonRpcError {
+                            code: ERR_PARTIALLY_APPLIED,
+                            message: value.to_string(),
+                        },
+                    )
+                } else {
+                    DaemonResponse::success(u64::MAX, value.clone())
+                };
+                let frame_len = serde_json::to_vec(&response).unwrap().len();
+                admission.daemon_limit = Some(frame_len);
+                admission.check_value(&value, failure).unwrap();
+                admission.daemon_limit = Some(frame_len - 1);
+                assert!(admission.check_value(&value, failure).is_err());
+            }
+        }
+    }
 
     struct CountClock(std::sync::atomic::AtomicUsize);
     impl crate::time::Clock for CountClock {
