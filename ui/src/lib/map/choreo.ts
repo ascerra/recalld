@@ -4,8 +4,8 @@
 import type { UiEvent } from '$lib/api/types';
 import type { Glow, Pulse } from './light';
 
-/** At most this many traced spreads are drawn per recall. */
-export const MAX_LIT_STEPS = 24;
+/** Draw the strongest spreads that together carry this share of the activation. */
+export const LIT_SHARE = 0.7;
 /** Time between successive hops (a pulse takes about HOP_MS to travel). */
 export const HOP_GAP_MS = 175;
 export const HOP_MS = 350;
@@ -57,11 +57,15 @@ export function choreograph(
     let last = now;
     // Only the strongest spreads carry light; replay them in firing order,
     // compacted so a long trace still plays in about a second.
-    const top = Math.max(0, ...event.trace.map((s) => s.amount));
-    const steps = [...event.trace]
-      .filter((s) => s.edgeType !== 4 && s.amount >= top * 0.2)
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, MAX_LIT_STEPS)
+    const ranked = event.trace.filter((s) => s.edgeType !== 4).sort((a, b) => b.amount - a.amount);
+    const total = ranked.reduce((t, s) => t + s.amount, 0);
+    let carried = 0;
+    const steps = ranked
+      .filter((s) => {
+        const keep = carried < total * LIT_SHARE;
+        carried += s.amount;
+        return keep;
+      })
       .sort((a, b) => a.order - b.order);
     const rank = new Map([...new Set(steps.map((s) => s.order))].map((o, i) => [o, i]));
     for (const step of steps) {

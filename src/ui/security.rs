@@ -1,7 +1,8 @@
 //! Localhost-only access control for `recalld ui` (SPEC §1.1).
 //!
-//! - Every request must carry `Host: 127.0.0.1:<port>` or `localhost:<port>`
-//!   (blocks DNS rebinding).
+//! - Every request must carry `Host: 127.0.0.1:<port>`, `localhost:<port>` or
+//!   `recalld.localhost:<port>` (blocks DNS rebinding; `*.localhost` always
+//!   resolves to loopback in browsers, RFC 6761).
 //! - A per-launch token, passed once in the opened URL (`?t=…`), is traded
 //!   for an `HttpOnly; SameSite=Strict` cookie; every `/api/ui/*` call needs it.
 //! - Mutations additionally need `X-Recalld-UI: 1`.
@@ -42,7 +43,9 @@ fn host_allowed(headers: &HeaderMap, port: u16) -> bool {
     let Some(host) = headers.get(header::HOST).and_then(|h| h.to_str().ok()) else {
         return false;
     };
-    host == format!("127.0.0.1:{port}") || host == format!("localhost:{port}")
+    ["127.0.0.1", "localhost", "recalld.localhost"]
+        .iter()
+        .any(|name| host == format!("{name}:{port}"))
 }
 
 fn cookie_token<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -151,6 +154,8 @@ mod tests {
         for (host, ok) in [
             ("127.0.0.1:7690", true),
             ("localhost:7690", true),
+            ("recalld.localhost:7690", true),
+            ("evil.localhost:7690", false),
             ("127.0.0.1:7691", false),
             ("evil.example:7690", false),
             ("127.0.0.1", false),

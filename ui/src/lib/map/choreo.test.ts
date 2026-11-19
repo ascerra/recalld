@@ -47,4 +47,9 @@ describe('recall light', () => {
     const slow = choreograph(recall, pos, 0, colors, { speed: 3 });
     expect(slow.pulses[1].start).toBe(3 * HOP_GAP_MS);
   });
+  it('draws only the spreads that carry most of the activation', () => {
+    const trace = [{ from: 'a', to: 'b', edgeType: 2, amount: 0.9, order: 0 }, ...Array.from({ length: 20 }, (_, i) => ({ from: 'a', to: 'c', edgeType: 2, amount: 0.01, order: i + 1 }))];
+    const c = choreograph({ ...recall, trace }, pos, 0, colors);
+    expect(c.pulses.length).toBe(1);
+  });
 });
