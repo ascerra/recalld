@@ -1,6 +1,20 @@
 # Changelog
 
-## 2.0.1 — unreleased
+## 2.0.2 — unreleased
+
+### MCP usability and namespace guidance
+
+- Added the read-only `get_session` tool, exposing the same connection defaults and namespace context as `recalld://session` to clients that primarily discover tools.
+- Improved tool descriptions, agent prompts, and optional hooks: keep shared facts in `default`, reuse project namespaces for project-specific knowledge, and use topic namespaces when useful. Scope relevant recalls explicitly and avoid per-agent namespaces or unnecessary memory writes.
+- Clarified access recording and duplicate detection: use `recordAccess:false` for inspection, give reinforcement deliberately, and treat similarity warnings as advisory rather than instructions to delete memories.
+- Added recovery guidance for known transient read failures, uncertain writes, and old-client capability errors. Unsupported single-write retry keys are rejected before effects; durable batch resumption retains the original identity and unchanged full payload. Automatic retry policy is unchanged.
+
+### Upgrade notes
+
+- Existing 2.0 databases require no additional schema migration. Keep the existing database and embedding configuration.
+- Restart the actual MCP server process using the updated binary, then reconnect the client and refresh its tool list to discover `get_session` and the updated descriptions. Reconnecting to an old process is insufficient; successful reads do not prove that an old client can write.
+
+## 2.0.1 — 2026-11-18
 
 ### Legacy database recovery
 
