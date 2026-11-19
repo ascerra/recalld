@@ -96,21 +96,14 @@ pub const CATALOG_TTL_MS: u64 = 3_600_000;
 pub const RESOURCE_READ_TTL_MS: u64 = 0;
 
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
-pub const SERVER_INSTRUCTIONS: &str = "Start with get_session (or recalld://session) to inspect the active default namespace. \
-    Keep shared preferences and cross-project facts in default; put project-specific context in a project namespace. \
-    Reuse topic namespaces for general subjects when useful; avoid one namespace per conversation or agent. \
-    List namespaces before creating one. Namespaces organize memories; they are not access controls. \
-    Recall shared context and the current project or relevant topic separately, not every unrelated project. \
-    Pass namespace explicitly when choosing scope; omitted store/search scope uses the session default. \
-    By-ID operations use the record namespace, not the session default. Retrieval records access by default; \
-    use recordAccess:false for inspection. Reinforce only memories that actually helped. \
-    Store durable knowledge, not every turn or facts already available in project files. \
-    Similarity is not proof of duplication: never automatically delete matches. Check every batch item. \
-    Application contract 1 is supported; contract 2 and single-call retry keys are not enabled. \
-    Durable batches can resume with the same complete ordered payload, namespace, storeId and original key or reservation ID. \
-    If a single write outcome is unknown, do not blindly replay it: inspect the same namespace and retain the error. \
-    After upgrading, restart the MCP server process, reconnect and refresh tools; successful reads do not prove old clients can write. \
-    Forget is logical removal, not backup erasure. Matching vector dimensions do not establish model identity.";
+pub const SERVER_INSTRUCTIONS: &str = "Start with get_session (or recalld://session). Reuse namespaces: default for shared facts, project namespaces for project knowledge, optional topic namespaces. \
+    List before creating; avoid per-agent/session namespaces. Namespaces are not access controls. \
+    Recall relevant shared/project/topic context separately. Choose namespace explicitly; omitted store/search scope uses the session default, by-ID operations use record scope. \
+    Store durable knowledge, not source-derived facts or every turn. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
+    Similarity is advisory: never automatically delete matches. Check every batch item. \
+    Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, namespace, storeId and original key/reservation. \
+    After upgrades, restart the MCP process and refresh tools; working reads do not prove write compatibility. \
+    Forget is not backup erasure; dimensions do not prove model identity.";
 
 // ── JSON-RPC error codes ────────────────────────────────────────────
 
