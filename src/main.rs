@@ -833,21 +833,26 @@ async fn run_mcp(loaded: LoadedConfig) -> ExitCode {
     let default_ns = loaded.default_namespace.clone();
     let tz = recalld::time::resolve_timezone(&loaded.config.timezone);
 
-    let bridge = match try_daemon_connection(&socket, &default_ns, tz).await {
-        Ok(bridge) => {
+    let connection = match try_daemon_connection(&socket, &default_ns, tz).await {
+        Ok(Some(bridge)) => {
             tracing::info!(socket = %socket.display(), "connected to daemon");
-            bridge
+            Ok(bridge)
         }
-        Err(_) => match auto_start_daemon(&loaded.config, &socket, &default_ns, tz).await {
-            Ok(bridge) => {
-                tracing::info!("auto-started daemon, connected");
-                bridge
-            }
-            Err(e) => {
-                tracing::warn!(%e, "daemon unavailable, falling back to direct mode");
-                return run_mcp_direct(loaded).await;
-            }
-        },
+        Ok(None) => auto_start_daemon(&loaded.config, &socket, &default_ns, tz).await,
+        Err(error) => Err(error),
+    };
+    let bridge = match connection {
+        Ok(bridge) => bridge,
+        Err(DaemonStartupError::Start(error))
+            if matches!(recalld::daemon::is_daemon_alive(&socket), Ok(false)) =>
+        {
+            tracing::warn!(%error, "could not start daemon, falling back to direct mode");
+            return run_mcp_direct(loaded).await;
+        }
+        Err(error) => {
+            tracing::error!(socket = %socket.display(), %error, "daemon unavailable");
+            return ExitCode::FAILURE;
+        }
     };
 
     let handler: Arc<dyn recalld::mcp::McpHandler> = Arc::new(bridge);
@@ -944,15 +949,51 @@ fn create_remote_mcp_bridge(
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum DaemonStartupError {
+    #[error("could not start daemon: {0}")]
+    Start(#[from] std::io::Error),
+    #[error("{0}")]
+    Unavailable(String),
+}
+
+/// Only a missing or stale listener permits starting another daemon.
 async fn try_daemon_connection(
     socket: &Path,
     default_namespace: &str,
     tz: chrono_tz::Tz,
-) -> Result<recalld::mcp::bridge::McpBridge, Box<dyn std::error::Error>> {
-    let client = Arc::new(recalld::daemon::DaemonClient::connect(socket).await?);
-    client.ping().await?;
+) -> Result<Option<recalld::mcp::bridge::McpBridge>, DaemonStartupError> {
+    Ok(try_daemon_client(socket)
+        .await?
+        .map(|client| create_remote_mcp_bridge(client, default_namespace, tz)))
+}
 
-    Ok(create_remote_mcp_bridge(client, default_namespace, tz))
+/// A connected, handshaken daemon client, or `None` when nothing listens.
+async fn try_daemon_client(
+    socket: &Path,
+) -> Result<Option<Arc<recalld::daemon::DaemonClient>>, DaemonStartupError> {
+    use std::io::ErrorKind;
+
+    let client = match recalld::daemon::DaemonClient::connect(socket).await {
+        Ok(client) => Arc::new(client),
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
+            return Ok(None);
+        }
+        Err(e) => {
+            return Err(DaemonStartupError::Unavailable(format!(
+                "daemon connection failed: {e}"
+            )));
+        }
+    };
+    match tokio::time::timeout(Duration::from_secs(2), client.ping()).await {
+        Ok(Ok(())) => Ok(Some(client)),
+        Ok(Err(e)) => Err(DaemonStartupError::Unavailable(format!(
+            "daemon accepted the socket but the handshake failed (it may be at its connection limit): {e}"
+        ))),
+        Err(_) => Err(DaemonStartupError::Unavailable(
+            "daemon accepted the socket but its handshake timed out".into(),
+        )),
+    }
 }
 
 async fn auto_start_daemon(
@@ -960,10 +1001,8 @@ async fn auto_start_daemon(
     socket: &Path,
     default_namespace: &str,
     tz: chrono_tz::Tz,
-) -> Result<recalld::mcp::bridge::McpBridge, Box<dyn std::error::Error>> {
-    let client = spawn_daemon(config, socket)
-        .await
-        .map_err(|e| e as Box<dyn std::error::Error>)?;
+) -> Result<recalld::mcp::bridge::McpBridge, DaemonStartupError> {
+    let client = spawn_daemon(config, socket).await?;
     Ok(create_remote_mcp_bridge(client, default_namespace, tz))
 }
 
@@ -971,7 +1010,7 @@ async fn auto_start_daemon(
 async fn spawn_daemon(
     config: &RecalldConfig,
     socket: &Path,
-) -> Result<Arc<recalld::daemon::DaemonClient>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Arc<recalld::daemon::DaemonClient>, DaemonStartupError> {
     use std::process::Command as StdCommand;
 
     let exe = std::env::current_exe()?;
@@ -1015,13 +1054,15 @@ async fn spawn_daemon(
     loop {
         tokio::time::sleep(Duration::from_millis(100)).await;
         if tokio::time::Instant::now() > deadline {
-            return Err("daemon did not start within 10 seconds".into());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "daemon did not start within 10 seconds",
+            )
+            .into());
         }
-        if let Ok(client) = recalld::daemon::DaemonClient::connect(socket).await {
-            let client = Arc::new(client);
-            if client.ping().await.is_ok() {
-                return Ok(client);
-            }
+        if let Some(client) = try_daemon_client(socket).await? {
+            tracing::info!(socket = %socket.display(), "connected after daemon startup");
+            return Ok(client);
         }
     }
 }

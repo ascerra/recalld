@@ -165,33 +165,7 @@ impl DaemonServer {
             tokio::select! {
                 result = listener.accept() => {
                     match result {
-                        Ok((stream, _addr)) => {
-                            let current = self.connection_count.load(Ordering::Relaxed);
-                            if current >= MAX_CONNECTIONS {
-                                tracing::warn!(
-                                    current,
-                                    max = MAX_CONNECTIONS,
-                                    "connection limit reached, dropping new connection"
-                                );
-                                drop(stream);
-                                continue;
-                            }
-
-                            self.connection_count.fetch_add(1, Ordering::Relaxed);
-
-                            tokio::spawn(handle_connection_with(
-                                self.search.clone(),
-                                self.storage.clone(),
-                                self.namespaces.clone(),
-                                self.health.clone(),
-                                stream,
-                                self.connection_count.clone(),
-                                self.last_activity.clone(),
-                                self.shutdown_tx.subscribe(),
-                                self.shutdown_tx.clone(),
-                                self.ui.clone(),
-                            ));
-                        }
+                        Ok((stream, _addr)) => self.accept_connection(stream).await,
                         Err(e) => {
                             tracing::warn!(%e, "accept error");
                         }
@@ -221,6 +195,49 @@ impl DaemonServer {
         let _ = std::fs::remove_file(lifecycle::pid_path());
 
         Ok(())
+    }
+
+    async fn accept_connection(&self, mut stream: tokio::net::UnixStream) {
+        let current = self.connection_count.load(Ordering::Relaxed);
+        if current >= MAX_CONNECTIONS {
+            tracing::warn!(
+                current,
+                max = MAX_CONNECTIONS,
+                "connection limit reached, dropping new connection"
+            );
+            // A tiny, bounded write on the freshly accepted socket;
+            // a refused client consumes no handler or request buffer.
+            let response = DaemonResponse::error(
+                UNATTRIBUTED_ID,
+                DaemonRpcError {
+                    code: ERR_UNAVAILABLE,
+                    message: format!(
+                        "daemon is at its connection limit ({MAX_CONNECTIONS}); retry after an idle connection closes"
+                    ),
+                },
+            );
+            let _ = tokio::time::timeout(
+                Duration::from_millis(10),
+                write_framed_message(&mut stream, &response, LEGACY_MAX_MESSAGE_SIZE),
+            )
+            .await;
+            return;
+        }
+
+        self.connection_count.fetch_add(1, Ordering::Relaxed);
+
+        tokio::spawn(handle_connection_with(
+            self.search.clone(),
+            self.storage.clone(),
+            self.namespaces.clone(),
+            self.health.clone(),
+            stream,
+            self.connection_count.clone(),
+            self.last_activity.clone(),
+            self.shutdown_tx.subscribe(),
+            self.shutdown_tx.clone(),
+            self.ui.clone(),
+        ));
     }
 }
 
@@ -282,7 +299,11 @@ async fn handle_connection_with(
 
     loop {
         tokio::select! {
-            msg = read_frame(&mut reader, MAX_MESSAGE_SIZE) => {
+            msg = read_request_frame(&mut reader) => {
+                if matches!(msg, Err(FrameError::IdleTimeout)) {
+                    tracing::debug!("closing idle daemon connection");
+                    break;
+                }
                 // EOF is connection termination, not another sampled request.
                 if let Err(e @ FrameError::Closed) = &msg {
                     tracing::warn!(%e, "client read error, closing connection");
@@ -506,6 +527,7 @@ fn action_for_frame_error(e: &FrameError) -> ConnectionAction {
         // `TooLarge` is a write-side error and never reaches this path, but
         // closing is the safe default if it ever does.
         FrameError::Closed
+        | FrameError::IdleTimeout
         | FrameError::Desync { .. }
         | FrameError::DrainTimeout { .. }
         | FrameError::PayloadTimeout { .. }
@@ -1413,6 +1435,106 @@ mod tests {
             method: "ping".into(),
             params: serde_json::json!({}),
         }
+    }
+
+    #[tokio::test]
+    async fn full_daemon_reclaims_idle_peers_and_finishes_in_flight_request() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::UnixStream;
+        use tokio::sync::Notify;
+
+        #[derive(Default)]
+        struct SlowHealth {
+            started: Notify,
+            finish: Notify,
+        }
+        #[async_trait::async_trait]
+        impl HealthChecker for SlowHealth {
+            async fn check_health(&self) -> HealthStatus {
+                self.started.notify_one();
+                self.finish.notified().await;
+                HealthStatus {
+                    status: "ok".into(),
+                    uptime_secs: 0,
+                    subsystems: vec![],
+                }
+            }
+        }
+
+        let dir = crate::test_support::Fixture::new().close();
+        let mut config = crate::config::RecalldConfig::default();
+        config.storage.data_dir = dir.path().to_str().unwrap().into();
+        config.embedding.provider = crate::config::EmbeddingProvider::Passthrough;
+        config.embedding.dimensions = crate::test_support::DIM;
+        config.decay.disable_sweep = true;
+        let mut server = DaemonServer::new(Recalld::new(config).await.unwrap());
+        let slow = Arc::new(SlowHealth::default());
+        server.health = slow.clone();
+
+        let mut peers = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            let (mut client, stream) = UnixStream::pair().unwrap();
+            server.accept_connection(stream).await;
+            write_framed_request(&mut client, &ping_request(1), MAX_MESSAGE_SIZE)
+                .await
+                .unwrap();
+            assert_eq!(
+                read_framed_response(&mut client, MAX_MESSAGE_SIZE)
+                    .await
+                    .unwrap()
+                    .id,
+                1
+            );
+            peers.push(client);
+        }
+        // One partial prefix, one dispatched RPC, and the rest entirely idle.
+        peers[1].write_all(&[0, 0]).await.unwrap();
+        let mut health = ping_request(11);
+        health.method = "check_health".into();
+        write_framed_request(&mut peers[0], &health, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        slow.started.notified().await;
+
+        let (mut refused, stream) = UnixStream::pair().unwrap();
+        server.accept_connection(stream).await;
+        let error = read_framed_response(&mut refused, MAX_MESSAGE_SIZE)
+            .await
+            .unwrap()
+            .error
+            .unwrap();
+        assert_eq!(error.code, ERR_UNAVAILABLE);
+        assert!(error.message.contains("connection limit"));
+
+        tokio::time::pause();
+        tokio::time::advance(CONNECTION_IDLE_TIMEOUT + Duration::from_secs(1)).await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while server.connection_count.load(Ordering::Relaxed) != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("all idle slots released, active RPC retained");
+
+        let (mut next, stream) = UnixStream::pair().unwrap();
+        server.accept_connection(stream).await;
+        write_framed_request(&mut next, &ping_request(12), MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_framed_response(&mut next, MAX_MESSAGE_SIZE)
+                .await
+                .unwrap()
+                .id,
+            12
+        );
+        slow.finish.notify_one();
+        let response = read_framed_response(&mut peers[0], MAX_MESSAGE_SIZE)
+            .await
+            .unwrap();
+        assert_eq!(response.id, 11);
+        assert_eq!(response.result.unwrap()["status"], "ok");
     }
 
     #[tokio::test]

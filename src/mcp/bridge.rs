@@ -823,8 +823,8 @@ pub struct TagBucket {
 pub struct ListTagsResponse {
     /// The namespace counted, or `null` when every namespace was counted.
     pub namespace: Option<String>,
-    /// Live memories inspected. `null` in global scope, where the tag
-    /// index is read directly and no memory records are touched.
+    /// Live memories inspected in the namespace. `null` in global scope
+    /// for API1 compatibility.
     pub memories_counted: Option<u64>,
     /// Labels that are not derived from `entities`, `topics` or
     /// `emotions`.

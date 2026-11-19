@@ -635,8 +635,8 @@ export type ListTagsResponse = {
  */
 namespace: string | null, 
 /**
- * Live memories inspected. `null` in global scope, where the tag
- * index is read directly and no memory records are touched.
+ * Live memories inspected in the namespace. `null` in global scope
+ * for API1 compatibility.
  */
 memoriesCounted: number | null, 
 /**

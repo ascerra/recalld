@@ -309,10 +309,14 @@ pub const DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// then send nothing, pinning a connection task forever.
 ///
 /// This bounds only the *body* of a frame whose length prefix has already
-/// arrived. The wait for the next length prefix stays unbounded on purpose:
-/// that is the client waiting for the daemon to finish work, and the idle
-/// monitor is what reclaims genuinely idle connections.
+/// arrived. A client waiting for a response leaves the prefix wait unbounded
+/// because the daemon may still be executing the request.
 pub const PAYLOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Time the daemon waits for the complete four-byte prefix of the next
+/// request, including the first one. Dispatch and response delivery happen
+/// outside this deadline.
+pub(crate) const CONNECTION_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How much of a declared payload is allocated at a time.
 ///
@@ -324,7 +328,7 @@ pub const PAYLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 const PAYLOAD_CHUNK: usize = 64 * 1024;
 
 /// Maximum number of concurrent client connections the daemon will accept.
-/// Additional connections are dropped immediately until an existing one closes.
+/// Additional peers receive a best-effort unavailable response and are closed.
 pub const MAX_CONNECTIONS: u32 = 32;
 
 /// An error encountered while reading or writing a protocol frame.
@@ -333,6 +337,10 @@ pub enum FrameError {
     /// The peer closed the connection cleanly between frames.
     #[error("connection closed by peer")]
     Closed,
+
+    /// The daemon received no complete request prefix within its idle timeout.
+    #[error("idle connection timed out")]
+    IdleTimeout,
 
     /// The outgoing message does not fit in a frame. Nothing was written.
     #[error("frame too large: {size} bytes exceeds the {limit} byte protocol limit")]
@@ -470,7 +478,27 @@ pub(crate) async fn read_frame<R: AsyncRead + Unpin>(
     reader: &mut R,
     limit: usize,
 ) -> Result<Vec<u8>, FrameError> {
-    let len = match reader.read_u32().await {
+    let prefix = reader.read_u32().await;
+    read_frame_body(prefix, reader, limit).await
+}
+
+/// Server-side request read. Expiring between requests (including a partial
+/// prefix) closes the stream; the body retains its own full delivery budget.
+pub(crate) async fn read_request_frame<R: AsyncRead + Unpin>(
+    reader: &mut R,
+) -> Result<Vec<u8>, FrameError> {
+    let prefix = tokio::time::timeout(CONNECTION_IDLE_TIMEOUT, reader.read_u32())
+        .await
+        .map_err(|_| FrameError::IdleTimeout)?;
+    read_frame_body(prefix, reader, MAX_MESSAGE_SIZE).await
+}
+
+async fn read_frame_body<R: AsyncRead + Unpin>(
+    prefix: std::io::Result<u32>,
+    reader: &mut R,
+    limit: usize,
+) -> Result<Vec<u8>, FrameError> {
+    let len = match prefix {
         Ok(n) => n as usize,
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Err(FrameError::Closed),
         Err(e) => return Err(FrameError::Io(e)),
