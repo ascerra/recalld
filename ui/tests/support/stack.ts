@@ -2,7 +2,7 @@
 // `recalld ui`. Never touches ~/.recalld: HOME, the socket, the config and
 // the data directory all live in a fresh temp dir.
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,6 +41,11 @@ export async function startStack(bin: string, kind: 'sample' | 'perf'): Promise<
       }
     });
   });
+  // `recalld ui` starts the daemon but stops waiting after 10 s; a debug
+  // daemon can take longer to open its store. Wait for its socket.
+  const socket = join(dir, 'recalld.sock');
+  for (let i = 0; i < 240 && !existsSync(socket); i++) await new Promise((r) => setTimeout(r, 500));
+  if (!existsSync(socket)) throw new Error('the daemon never opened its socket');
   const stop = () => {
     children.forEach((c) => c.kill());
     spawnSync(bin, ['daemon', 'stop'], { env });
