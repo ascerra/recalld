@@ -2393,7 +2393,10 @@ impl bridge::StorageEngine for McpStorageAdapter {
                 .control_schema_version
                 == 2
         {
-            return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreBatchV1/store_batch_api1_v1 before inserting a batch".into()));
+            return Err(bridge::BridgeError::InvalidInput(format!(
+                "native storage requires negotiated api1StoreBatchV1/store_batch_api1_v1 before inserting a batch. {}",
+                super::recovery_guidance::REFRESH
+            )));
         }
         if input.mutation_version == 3
             || input.expected_generation.is_some() && input.mutation_version != 4
@@ -2420,7 +2423,10 @@ impl bridge::StorageEngine for McpStorageAdapter {
             .control_schema_version
             == 2
         {
-            return Err(bridge::BridgeError::InvalidInput("native storage requires negotiated api1StoreV1/store_api1_v1; upgrade the client capability before storing".into()));
+            return Err(bridge::BridgeError::InvalidInput(format!(
+                "native storage requires negotiated api1StoreV1/store_api1_v1; upgrade the client capability before storing. {}",
+                super::recovery_guidance::REFRESH
+            )));
         }
         self.store_memory_reserved(input, None)
             .await
@@ -2485,9 +2491,10 @@ impl bridge::StorageEngine for McpStorageAdapter {
             .control_schema_version
             == 2
         {
-            return Err(bridge::BridgeError::Unavailable(
-                "native storage requires negotiated api1GetV1/get_api1_v1".into(),
-            ));
+            return Err(bridge::BridgeError::Unavailable(format!(
+                "native storage requires negotiated api1GetV1/get_api1_v1. {}",
+                super::recovery_guidance::REFRESH
+            )));
         }
         self.legacy_point(
             crate::serialization::get_api1::Request {

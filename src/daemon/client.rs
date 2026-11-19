@@ -76,9 +76,8 @@ fn is_retry_safe(method: &str) -> bool {
 /// Whether a method is barred from the automatic replay *only* because it
 /// records accesses.
 ///
-/// These write no memory content, so the honest report to the caller is
-/// "ask again", not the "may or may not have been applied" warning that a
-/// half-applied mutation deserves.
+/// These do not change content, but an unattributed response can still have
+/// recorded access. Reissuing may repeat that observation.
 fn records_accesses_only(method: &str) -> bool {
     matches!(method, "search" | "find_similar")
 }
@@ -645,12 +644,11 @@ impl DaemonClient {
                 "daemon connection lost while awaiting the response to `{method}` ({}); ",
                 failure.error
             );
-            // A read that is withheld from the automatic replay only because
-            // it records accesses must not be described as a write that may
-            // have half-happened: the caller can simply ask again.
+            // Content was not mutated, but access bookkeeping may have been.
+            // Do not call another observation safe or silently replay it.
             if records_accesses_only(method) {
                 message.push_str(
-                    "no memory was created, changed, or deleted, and reissuing the call is safe.",
+                    "no memory content was created or deleted, but access bookkeeping may have been recorded. Reissuing can record access again; inspect with recordAccess:false before deciding whether to repeat the observation.",
                 );
                 if reconnected.is_ok() {
                     message.push_str(" The connection has been re-established.");
@@ -661,16 +659,18 @@ impl DaemonClient {
                 message.push_str("the operation may or may not have been applied.");
                 if reconnected.is_ok() {
                     message.push_str(
-                        " The connection has been re-established - verify with recall_memories \
-                         before retrying.",
+                        " The connection has been re-established. Reconcile the affected IDs with recordAccess:false in the same explicitly selected namespace before retrying; do not blindly replay the mutation or invent a fresh retry key. Preserve the original request and any returned operation ID or receipt.",
                     );
                 } else {
                     message.push_str(
-                        " The daemon is currently unreachable - verify with recall_memories \
-                         once it is back before retrying.",
+                        " The daemon is currently unreachable. Once it is back, reconcile the affected IDs with recordAccess:false in the same explicitly selected namespace before retrying; do not blindly replay the mutation or invent a fresh retry key. Preserve the original request and any returned operation ID or receipt.",
                     );
                 }
             }
+            if method == "store_batch_api1_v1" {
+                message.push_str(" If the original batch has an idempotencyKey or batchOperationId, use its existing receipt-aware retry with the exact full ordered payload, default namespace and storeId, retaining that same identity.");
+            }
+            message.push_str(" After a daemon upgrade, reconnect the MCP client and refresh its tool list to renegotiate API1 capabilities.");
             return Err(BridgeError::Internal(message));
         }
 
@@ -776,7 +776,7 @@ impl DaemonClient {
         }
 
         Err(BridgeError::Internal(format!(
-            "daemon unavailable at {} after {RECONNECT_ATTEMPTS} attempts: {}",
+            "daemon unavailable at {} after {RECONNECT_ATTEMPTS} attempts: {}. Check daemon health; after an upgrade, reconnect the MCP client and refresh its tool list to renegotiate API1 capabilities.",
             self.socket_path.display(),
             last.unwrap_or_else(|| "unknown error".into())
         )))
@@ -1294,10 +1294,15 @@ mod tests {
                 "{method} must reach the daemon exactly once"
             );
 
-            // ...and the report must not describe a read as a half-applied
-            // write, which is the other way to get this wrong.
+            // Distinguish content mutation from an uncertain access observation;
+            // do not advertise repeating that observation as safe.
             let text = err.to_string();
-            assert!(text.contains("safe"), "{text}");
+            assert!(
+                text.contains("access bookkeeping may have been recorded"),
+                "{text}"
+            );
+            assert!(text.contains("recordAccess:false"), "{text}");
+            assert!(!text.contains("reissuing the call is safe"), "{text}");
             assert!(!text.contains("may or may not have been applied"), "{text}");
             assert!(client.is_connected());
         }
@@ -1316,6 +1321,12 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("may or may not have been applied"), "{text}");
         assert!(text.contains("re-established"), "{text}");
+        assert!(
+            text.contains("same explicitly selected namespace"),
+            "{text}"
+        );
+        assert!(text.contains("do not blindly replay"), "{text}");
+        assert!(text.contains("refresh its tool list"), "{text}");
 
         assert_eq!(
             stub.count("store_memory"),
@@ -1557,10 +1568,9 @@ mod tests {
     }
 
     /// The destructive methods must be on neither list.
-    /// `records_accesses_only` downgrades the caller's warning from "may
-    /// or may not have been applied" to "just ask again", which is the
-    /// wrong thing to tell someone whose namespace may have been
-    /// destroyed.
+    /// `records_accesses_only` distinguishes possible access bookkeeping
+    /// from content changes. Destructive calls must retain the full unknown-
+    /// mutation warning instead of claiming only access metadata could change.
     #[test]
     fn w42_the_destructive_methods_are_neither_retry_safe_nor_access_only() {
         for method in ["delete_memories", "delete_namespace"] {

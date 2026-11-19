@@ -1,6 +1,6 @@
 //! MCP tool definitions and handlers for Recalld memory operations.
 //!
-//! Defines 14 tools: store_memory, store_memories, recall_memories, get_memory,
+//! Defines 15 tools: get_session, store_memory, store_memories, recall_memories, get_memory,
 //! reinforce_memory, forget_memory, forget_memories, find_similar_memories,
 //! create_namespace, delete_namespace, namespace_stats, list_memories,
 //! list_namespaces, list_tags.
@@ -38,6 +38,7 @@ const FULL_TEXT_DESC: &str = "Detailed content. Removed as memory decays to ghos
 /// Return all tool definitions for `tools/list`.
 pub fn tool_definitions() -> Vec<ToolInfo> {
     let mut tools = vec![
+        get_session_def(),
         store_memory_def(),
         store_memories_def(),
         recall_memories_def(),
@@ -69,7 +70,8 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
 /// which advertises a tool that then answers "Unknown tool" — fails a
 /// test rather than a caller.
 #[cfg(test)]
-const DISPATCHED: [&str; 14] = [
+const DISPATCHED: [&str; 15] = [
+    "get_session",
     "store_memory",
     "store_memories",
     "recall_memories",
@@ -100,6 +102,21 @@ pub async fn dispatch_tool(
     {
         return ToolCallResult::error(error.to_string());
     }
+    // A silently ignored retry key can turn an uncertain single store into a duplicate.
+    if name == "store_memory"
+        && [
+            "idempotencyKey",
+            "batchOperationId",
+            "storeId",
+            "batchResultVersion",
+        ]
+        .iter()
+        .any(|key| arguments.get(key).is_some())
+    {
+        return ToolCallResult::error(
+            "store_memory does not support public retry keys. Use store_memories with a durable batch identity for resumable writes, or inspect the same namespace before retrying an uncertain single store.",
+        );
+    }
     // This branch is deliberately behind the shared unconditional v2 gate.
     // Activation requires the native owner/serving and complete wire proof.
     if crate::serialization::contract::ContractVersion::from_mcp(&arguments)
@@ -108,6 +125,7 @@ pub async fn dispatch_tool(
         return dispatch_v2(bridge, name, arguments).await;
     }
     match name {
+        "get_session" => handle_get_session(bridge, &arguments).await,
         "store_memory" => handle_store_memory(bridge, arguments).await,
         "store_memories" => handle_store_memories(bridge, arguments).await,
         "recall_memories" => handle_recall_memories(bridge, arguments).await,
@@ -126,6 +144,43 @@ pub async fn dispatch_tool(
     }
 }
 
+/// Read-only session discovery for clients that expose tools but not resources.
+fn get_session_def() -> ToolInfo {
+    ToolInfo {
+        output_schema: None,
+        name: "get_session".into(),
+        title: Some("Get Memory Session".into()),
+        description: "Start here: inspect the resolved default namespace, whether it exists, \
+            supported application contract, and access-recording defaults. Read-only; creates \
+            nothing. Same context as recalld://session. An omitted namespace uses this session \
+            default; pass namespace explicitly to choose shared, project, or topic context. \
+            Backend context is configuration information, not a readiness or model-provenance guarantee."
+            .into(),
+        input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
+        annotations: Some(ToolAnnotations {
+            read_only_hint: Some(true), destructive_hint: Some(false),
+            idempotent_hint: Some(true), open_world_hint: Some(false),
+        }),
+    }
+}
+
+async fn handle_get_session(bridge: &McpBridge, arguments: &serde_json::Value) -> ToolCallResult {
+    if arguments
+        .as_object()
+        .is_some_and(|fields| fields.keys().any(|key| key != "contractVersion"))
+    {
+        return ToolCallResult::error(
+            "get_session accepts only contractVersion. It reports the active session; pass namespace to store or recall tools to select another scope.",
+        );
+    }
+    match super::resources::session_document(bridge).await {
+        Ok(context) => ToolCallResult::json(&context).unwrap_or_else(|e| {
+            ToolCallResult::error(format!("Session serialization failed: {e}"))
+        }),
+        Err(error) => ToolCallResult::error(error),
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Tool 1: store_memory
 // ═══════════════════════════════════════════════════════════════════════
@@ -135,24 +190,13 @@ fn store_memory_def() -> ToolInfo {
         output_schema: None,
         name: "store_memory".to_string(),
         title: Some("Store Memory".to_string()),
-        // The near-duplicate half of this description teaches the
-        // RECOVERY, not just the warning. The check is post-hoc by
-        // construction — the memory is already stored when the report
-        // arrives — so an agent told only "these look similar" has no
-        // action available and will ignore it.
-        description: "Store a new observation, fact, or piece of context as a memory. \
-            The system automatically generates an embedding for semantic search. \
-            Use tags to categorize (e.g., \"topic/rust\", \"project/recalld\"). \
-            Memories decay naturally over time unless reinforced. \
-            The memory is always stored, but the result may carry a `nearDuplicates` \
-            object listing existing memories at cosine similarity 0.85 or higher. \
-            Act on it rather than ignoring it: if the new memory restates one of them, \
-            call `forget_memory` on the id you just created, then either \
-            `reinforce_memory` on the existing memory (nothing new to say) or \
-            `store_memory` again with `supersedes` set to the existing id (the fact \
-            changed). Leave both only when they are genuinely distinct facts that \
-            happen to read alike. Pass `checkDuplicates: false` to skip the check \
-            during bulk ingestion."
+        description: "Save a durable fact, preference, or decision with a generated embedding. \
+            Choose namespace explicitly: shared context in default, project-only context in a project namespace, \
+            and reusable topic context in an existing topic namespace when useful. Omission uses the session \
+            default shown by get_session. On success the memory is stored; nearDuplicates is advisory, \
+            not proof of equivalence. Compare meaning before deciding whether a correction needs supersedes. \
+            Never automatically delete similar memories. If a write outcome is unknown, inspect the named \
+            namespace before retrying; a new call can create another memory."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -271,16 +315,12 @@ fn store_memories_def() -> ToolInfo {
         output_schema: None,
         name: "store_memories".to_string(),
         title: Some("Store Memories (Batch)".to_string()),
-        description: "Store multiple memories in a single call. Each item has the \
-            store_memory fields, plus optional embedding and initialStability \
-            in the batch schema. Returns an array of results, one per \
-            input memory. Saves round trips for bulk ingestion. \
-            Items are stored in order and each is indexed before the next is \
-            checked, so a result entry may carry a `nearDuplicates` object naming \
-            an earlier item of the same batch as well as pre-existing memories. \
-            The recovery is the same as for store_memory: forget the new id and \
-            either reinforce the existing memory or re-store it with `supersedes`. \
-            Set `checkDuplicates: false` on an item to skip its check."
+        description: "Store up to 100 memories in order. Each item uses store_memory fields and its own \
+            namespace (omitted: session default). Inspect every result: batches can partially succeed. \
+            For a durable retry, resend the same full ordered payload and namespace with storeId plus the original \
+            idempotencyKey or returned batchOperationId; do not generate a new identity or resend only failed items. \
+            Without that identity, inspect outcomes before retrying. nearDuplicates is advisory and may \
+            include earlier items; compare meaning, never automatically delete matches."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -349,9 +389,9 @@ fn store_memories_def() -> ToolInfo {
                         "required": ["summary"]
                     }
                 },
-                "storeId": {"type":"string","format":"uuid","description":"Store lineage for a durable retry."},
-                "batchOperationId": {"type":"string","format":"uuid","description":"Resume an existing reservation with storeId and the same full ordered payload, instead of idempotencyKey."},
-                "idempotencyKey": {"type":"string","description":"Resume with the same full ordered payload and session namespace; finalized failures require a new key."},
+                "storeId": {"type":"string","format":"uuid","description":"Store identity for a durable batch retry; retain the storeId from the session backend context or original result."},
+                "batchOperationId": {"type":"string","format":"uuid","description":"Resume the original returned reservation with its storeId and identical ordered payload/namespace. Use instead of idempotencyKey, never both; do not invent this ID."},
+                "idempotencyKey": {"type":"string","description":"Choose once before the initial batch and retain with storeId. Retry the identical ordered payload and session namespace with the same key. Finalized errors replay unchanged; do not replace the key to resolve an unknown outcome."},
                 "batchResultVersion": {"type":"integer","enum":[1],"description":"Additive batch envelope version, not lifecycle/API v2 or whole-store CAS."}
             },
             "required": ["memories"]
@@ -629,20 +669,18 @@ fn recall_memories_def() -> ToolInfo {
         output_schema: None,
         name: "recall_memories".to_string(),
         title: Some("Recall Memories".to_string()),
-        description: "Search for relevant memories using a natural language query. \
-            Returns memories ranked by semantic similarity combined with memory \
-            strength (well-reinforced memories rank higher). This is the primary \
-            way to retrieve context from the memory system. Use compact=true \
-            (the default) for token-efficient results containing only id, \
-            summary, fullText, entities, and topics. Set compact=false to \
-            include full metadata, graph edges, and neighbor context."
+        description: "Find relevant memories in one namespace using a natural-language query. \
+            Omitted namespace uses the session default shown by get_session; shared and project context \
+            require separate scoped calls. compact=true (default) returns concise records. \
+            recordAccess defaults to true and records retrieval activity; set false for inspection \
+            without access writes. Reinforce separately only when a memory actually helped."
             .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "recordAccess": {
                     "type": "boolean", "default": true,
-                    "description": "False disables retrieval access writes and behavioral record caches. Omitted/true synchronously records legacy exposure before success."
+                    "description": "Default true records retrieval activity. False disables access recording and behavioral record caches; use for inspection or evaluation."
                 },
                 "query": {
                     "type": "string",
@@ -820,7 +858,7 @@ fn get_memory_def() -> ToolInfo {
             "properties": {
                 "recordAccess": {
                     "type": "boolean", "default": true,
-                    "description": "False disables retrieval access writes and behavioral record caches. Omitted/true synchronously records legacy exposure before success."
+                    "description": "Default true records retrieval activity. False disables access recording and behavioral record caches; use for inspection or evaluation."
                 },
                 "namespace": {"type": "string", "description": "Optional assertion of the record's namespace. Mismatch fails before effects; omitted uses the record scope, regardless of session default. Null is invalid."},
                 "id": {
@@ -1048,8 +1086,8 @@ fn forget_memories_def() -> ToolInfo {
                     "description": "Memory UUIDs to forget. Each moves to the Tombstone \
                         phase; its graph edges are kept and its UUID is never reused."
                 },
-                "storeId": {"type":"string","format":"uuid","description":"Store lineage for a durable retry."},
-                "batchOperationId": {"type":"string","format":"uuid","description":"Resume an existing reservation with storeId and the same full ordered payload, instead of idempotencyKey."},
+                "storeId": {"type":"string","format":"uuid","description":"Store identity for a durable batch retry; retain the storeId from the session backend context or original result."},
+                "batchOperationId": {"type":"string","format":"uuid","description":"Resume the original returned reservation with its storeId and identical ordered payload/namespace. Use instead of idempotencyKey, never both; do not invent this ID."},
                 "idempotencyKey": {"type":"string","description":"Resume the same full ordered ID array. A new key is required to retry finalized failures."},
                 "batchResultVersion": {"type":"integer","enum":[1]}
             },
@@ -1222,7 +1260,7 @@ fn find_similar_memories_def() -> ToolInfo {
             "properties": {
                 "recordAccess": {
                     "type": "boolean", "default": true,
-                    "description": "False disables retrieval access writes and behavioral record caches. Omitted/true synchronously records legacy exposure before success."
+                    "description": "Default true records retrieval activity. False disables access recording and behavioral record caches; use for inspection or evaluation."
                 },
                 "mode": {
                     "type": "string",
@@ -1433,11 +1471,12 @@ fn create_namespace_def() -> ToolInfo {
         output_schema: None,
         name: "create_namespace".to_string(),
         title: Some("Create Namespace".to_string()),
-        description: "Create a new memory namespace for organizing memories by \
-            domain or project; namespaces are not access controls. Each namespace has its own embedding space and \
-            decay configuration. You can set a custom decay rate multiplier to \
-            make memories in this namespace decay faster, slower, or not at all. \
-            Embedding dimensions are fixed after creation."
+        description: "Create a namespace for project-specific context or a reusable general topic. \
+            Use list_namespaces first and reuse an existing scope; avoid a namespace per agent or session. \
+            Keep broadly useful preferences in default. Creation does not change this session's default: \
+            pass the new name explicitly on store/recall calls, or configure .recalld.toml and reconnect. \
+            Namespaces are not access controls. Embedding dimensions default to the active provider \
+            and are fixed after creation; decay settings are optional."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -1846,8 +1885,8 @@ fn list_namespaces_def() -> ToolInfo {
         title: Some("List Namespaces".to_string()),
         description: "List every memory namespace with its ID, embedding dimensions, live \
             memory count, and creation date. Call this first when you do not know which \
-            namespaces exist, before targeting one with list_memories, list_tags, or \
-            namespace_stats. Counts exclude deleted (tombstoned) memories."
+            namespaces exist. Reuse a matching project or topic scope instead of creating duplicates. \
+            get_session reports the active default. Counts exclude deleted (tombstoned) memories."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -2300,25 +2339,23 @@ mod tests {
         }
     }
 
-    /// The warning is post-hoc, so the description has to name both the
-    /// field the caller will see and the recovery that acts on it. A
-    /// description that mentions neither leaves the agent with a report it
-    /// has no instruction to use.
+    /// Similarity advice must not instruct agents to delete semantically distinct memories.
     #[test]
-    fn d22_store_memory_description_names_the_report_and_the_recovery() {
+    fn d22_store_memory_description_keeps_duplicate_advice_non_destructive() {
         let description = store_memory_def().description;
         for needle in [
             "nearDuplicates",
             "supersedes",
-            "forget_memory",
-            "reinforce_memory",
-            "checkDuplicates",
+            "not proof of equivalence",
+            "Never automatically delete",
+            "unknown",
         ] {
             assert!(
                 description.contains(needle),
-                "store_memory description does not mention {needle}: {description}"
+                "missing {needle}: {description}"
             );
         }
+        assert!(!description.contains("call `forget_memory`"));
     }
 
     /// `json!` widens an `f32` to `f64` on the way into a `Value`, so a
@@ -2555,9 +2592,44 @@ mod tests {
 
     /// The count the module doc, the README and the guide all repeat. If
     /// it moves, they have to move with it.
+    #[tokio::test]
+    async fn single_store_rejects_ignored_retry_keys_before_effects() {
+        let bridge = unroutable_bridge();
+        for key in [
+            "idempotencyKey",
+            "batchOperationId",
+            "storeId",
+            "batchResultVersion",
+        ] {
+            let mut arguments = json!({"summary":"must not write"});
+            arguments[key] = json!("retry");
+            let result = dispatch_tool(&bridge, "store_memory", arguments).await;
+            assert_eq!(result.is_error, Some(true));
+            assert!(
+                serde_json::to_string(&result)
+                    .unwrap()
+                    .contains("does not support public retry keys")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_session_rejects_scope_override_before_reading_backend() {
+        let bridge = unroutable_bridge();
+        let result = dispatch_tool(&bridge, "get_session", json!({"namespace":"other"})).await;
+        assert_eq!(result.is_error, Some(true));
+        assert!(
+            serde_json::to_string(&result)
+                .unwrap()
+                .contains("reports the active session")
+        );
+        let definition = get_session_def();
+        assert_eq!(definition.annotations.unwrap().read_only_hint, Some(true));
+    }
+
     #[test]
-    fn t35_declares_fourteen_tools() {
-        assert_eq!(tool_definitions().len(), 14);
+    fn t35_declares_fifteen_tools() {
+        assert_eq!(tool_definitions().len(), 15);
     }
 
     /// A bridge whose every method fails. The point is to reach
@@ -2779,7 +2851,8 @@ mod tests {
     fn t38_read_only_tools_declare_the_read_only_hint() {
         // Hints describe the omitted/default mode. Recall/similarity observe
         // synchronously by default; only explicit false opts out.
-        const READ_ONLY: [&str; 4] = [
+        const READ_ONLY: [&str; 5] = [
+            "get_session",
             "namespace_stats",
             "list_memories",
             "list_namespaces",

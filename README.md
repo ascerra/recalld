@@ -77,6 +77,7 @@ prompt each time. Add it only if you want that prompt gone.
 {
   "permissions": {
     "allow": [
+      "mcp__recalld__get_session",
       "mcp__recalld__store_memory",
       "mcp__recalld__store_memories",
       "mcp__recalld__recall_memories",
@@ -102,30 +103,33 @@ Add the following to your `CLAUDE.md` (or equivalent prompt file) so your AI ass
 ````markdown
 # Memory
 
-Use recalld MCP tools for persistent memory across sessions. Recall at
-conversation start and store as things happen — don't wait to be asked.
+Start with `get_session` (fallback: `recalld://session`) to check the connection's
+namespace and access defaults. Reuse existing namespaces: `default` for shared
+preferences and cross-project facts, `project-<name>` for project-specific
+knowledge, and optionally `topic-<name>` for useful general topics. A project
+default does not make every fact project-local. Namespaces are not access controls.
 
-**Recall** when: starting a conversation, making recommendations, or the
-user references a prior session. **Store** when: a decision is made, a
-preference is expressed, feedback is given, or project context is learned.
-When unsure, store it — memories decay naturally if unused.
+Recall relevant context from `default` and the current project or relevant topic
+explicitly; don't search every unrelated namespace. Store durable decisions,
+preferences, feedback, and context when useful, not every turn. Avoid ephemeral
+task details, facts derivable from source, duplicate copies across stores, and
+namespaces per agent or session.
 
-Do NOT store: ephemeral task details, code snippets, or anything derivable
-from the codebase.
+Write specific, searchable summaries with canonical `entities`, a few `topics`,
+and meaningful `tags`. Use same-namespace `supersedes` for a real correction.
+Reinforce only after deliberately judging usefulness; don't delete a memory
+just because a similarity warning calls it a possible duplicate.
 
-**Writing good memories:** `summary` should be specific and searchable
-(include names, dates, key terms). Always include `entities` (canonical
-names), `topics` (1-5 keywords), and `tags` (hierarchical:
-`type/feedback`, `project/<name>`, `tech/<name>`). Use `supersedes` when
-correcting an existing memory.
-
-**Reinforce** useful memories (quality 3-4). Weaken wrong ones (quality 1)
-and store a corrected version.
+Single-record by-ID tools address the record, not the session default; an explicit namespace
+asserts its scope. Retrieval records access by default; use `recordAccess:false`
+for inspection. After an unclear write, preserve the response and IDs and inspect
+before acting: no blind replay or automatic duplicate deletion. Only resume a
+durable batch with its documented receipt/key and unchanged full payload.
 ````
 
 ### 5. Improve memory usage with hooks (optional)
 
-Prompt instructions alone may not be enough to get consistent memory usage. Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) can inject gentle reminders on every turn so your assistant doesn't forget that memory tools are available.
+Prompt instructions alone may not be enough to get consistent memory usage. Claude Code [hooks](https://code.claude.com/docs/en/hooks) can inject gentle reminders on every turn so your assistant doesn't forget that memory tools are available.
 
 Add to your `~/.claude/settings.json`:
 
@@ -137,7 +141,7 @@ Add to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Could any stored memories be useful here? recalld tools: recall_memories, store_memory, reinforce_memory.'"
+            "command": "echo 'Would shared or current-project memory help this task? Recall only relevant context; store durable learning and give feedback only when warranted.'"
           }
         ]
       }
@@ -146,7 +150,7 @@ Add to your `~/.claude/settings.json`:
 }
 ```
 
-This hook is suggestive, not mandatory -- the model decides whether memories are relevant on each turn. It nudges recall before responding without adding another model pass after the task is finished.
+This hook is suggestive, not mandatory -- the model decides whether memories are relevant on each turn. It nudges recall before responding without adding another model pass after the task is finished. Keep its output static and trusted: never interpolate user or recalled content into shell commands or injected instructions, and do not execute memory writes from the hook.
 
 ## Upgrading to 2.0
 
@@ -175,7 +179,7 @@ See [docs/benchmark.md](docs/benchmark.md) for full methodology, per-category br
 
 ## Usage modes
 
-**MCP server (stdio)** -- Runs as a Model Context Protocol server for AI tools like Claude Code. Exposes 14 tools: `store_memory`, `store_memories`, `recall_memories`, `get_memory`, `reinforce_memory`, `forget_memory`, `forget_memories`, `find_similar_memories`, `create_namespace`, `delete_namespace`, `namespace_stats`, `list_memories`, `list_namespaces`, `list_tags`.
+**MCP server (stdio)** -- Runs as a Model Context Protocol server for AI tools like Claude Code. Exposes 15 tools: `get_session`, `store_memory`, `store_memories`, `recall_memories`, `get_memory`, `reinforce_memory`, `forget_memory`, `forget_memories`, `find_similar_memories`, `create_namespace`, `delete_namespace`, `namespace_stats`, `list_memories`, `list_namespaces`, `list_tags`.
 
 ```sh
 recalld mcp

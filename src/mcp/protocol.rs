@@ -96,16 +96,14 @@ pub const CATALOG_TTL_MS: u64 = 3_600_000;
 pub const RESOURCE_READ_TTL_MS: u64 = 0;
 
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
-pub const SERVER_INSTRUCTIONS: &str = "Read recalld://session first. Recalld is an AI memory system. Namespaces organize data; they are not access controls. \
-     Store/search use the resolved session default when namespace is omitted; by-ID operations \
-     use the record namespace. Supply namespace explicitly for reproducible workflows. \
-     Use recordAccess:false for evaluation or inspection. Reinforce only deliberate usefulness \
-     feedback. Inspect every batch item: legacy batch flags do not guarantee every item succeeded. \
-     Current duplicate scans are bounded and non-exhaustive; similarity is not proof of equivalence, \
-     so do not automatically delete close matches. Forget is logical removal, not backup erasure. \
-     Application contract 1 is supported; explicit contract 2 fails before work. Public v2 retries, \
-     exact-pair cursors and readiness are not enabled. Do not infer embedding-profile identity from \
-     matching dimensions.";
+pub const SERVER_INSTRUCTIONS: &str = "Start with get_session (or recalld://session). Reuse namespaces: default for shared facts, project namespaces for project knowledge, optional topic namespaces. \
+    List before creating; avoid per-agent/session namespaces. Namespaces are not access controls. \
+    Recall relevant shared/project/topic context separately. Choose namespace explicitly; omitted store/search scope uses the session default, by-ID operations use record scope. \
+    Store durable knowledge, not source-derived facts or every turn. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
+    Similarity is advisory: never automatically delete matches. Check every batch item. \
+    Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, namespace, storeId and original key/reservation. \
+    After upgrades, restart the MCP process and refresh tools; working reads do not prove write compatibility. \
+    Forget is not backup erasure; dimensions do not prove model identity.";
 
 // ── JSON-RPC error codes ────────────────────────────────────────────
 

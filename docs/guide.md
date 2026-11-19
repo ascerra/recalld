@@ -375,7 +375,7 @@ Env var: `RECALLD_TIMEZONE`
 Place a `.recalld.toml` in your project root to set a default namespace and override any config section for that project. recalld walks up from the current directory to find the nearest one.
 
 ```toml
-namespace = "my-project"
+namespace = "project-my-project"
 
 [embedding]
 provider = "ollama"
@@ -809,9 +809,19 @@ Shows decay forecast, at-risk memories, and storage breakdown.
 
 ## 6. MCP Tools Reference
 
-recalld exposes 14 MCP tools. These are available to any MCP client (Claude Code, Cursor, etc.) when recalld is configured as an MCP server.
+recalld exposes 15 MCP tools. These are available to any MCP client (Claude Code, Cursor, etc.) when recalld is configured as an MCP server.
 
 Deletion is worth reading before you use it. `forget_memory` and `forget_memories` do not free anything: a forgotten memory keeps its record and its graph edges for the life of the database, because the decay sweep never reclaims a tombstone. `delete_namespace` is the only operation that does — and it destroys everything else in the namespace along with them, with no undo and no backup.
+
+### `get_session`
+
+Call with `{}` to inspect the connection before choosing scope; `recalld://session` is the resource fallback with the same JSON. `defaultNamespace` reports the requested name, bridge source, existence, resolved name/ID/dimension (or null), and record-based by-ID resolution. Missing namespaces are not created by inspection. `supportedContractVersions` is `[1]`; `backendContext` or `backendContextUnavailable` describes available backend context, not runtime readiness or verified model provenance.
+
+`accessDefaults` is true for recall, get, and single similarity: these retrievals record activity unless you pass `recordAccess: false`. Single-record by-ID tools resolve the record independently of the session default; their optional namespace asserts the record's scope and a mismatch fails before effects. Namespace-scoped tools use the connection default when omitted, falling back to `default`.
+
+Single writes have no general idempotency key. Preserve IDs/responses after an unclear outcome; do not blindly replay or delete apparent duplicates. Durable batch resume requires the same store ID, namespace, and full ordered payload with the original `idempotencyKey` or returned `batchOperationId`; finalized failures remain finalized. See [MCP write retries](mcp.md#write-retries).
+
+After replacing the binary, restart the actual MCP server subprocess or daemon and reconnect. An old process may still read successfully while writes fail; rediscover the session and tools before relying on new behavior.
 
 ### `store_memory`
 
@@ -825,7 +835,7 @@ Store a new memory.
 | `entities` | string[] | No | Named entities (people, places, orgs). Used for search indexing and graph linking. Max 32 items, 121 bytes of UTF-8 each (the derived `entity/<label>` tag must fit the 128-byte tag limit). |
 | `topics` | string[] | No | Topic keywords, e.g. `["rust", "cooking"]`. Max 32 items, 122 bytes of UTF-8 each. |
 | `emotions` | string[] | No | Emotional tone, e.g. `["happy", "anxious"]`. Max 32 items, 120 bytes of UTF-8 each. |
-| `namespace` | string | No | Target namespace (default: `"default"`). |
+| `namespace` | string | No | Target namespace (default: connection namespace, then `"default"`). |
 | `parentId` | string | No | UUID of an existing memory in the same namespace, linked as this memory's parent. The store fails if the target does not exist or is in a different namespace. |
 | `supersedes` | string | No | UUID of an existing memory in the same namespace that this one replaces. Recall REMOVES the old memory from results and returns this one in its place. The store fails if the target does not exist or is in a different namespace. |
 | `checkDuplicates` | boolean | No | Report existing memories that closely resemble this one (default: `true`). Never blocks the store; it only adds a `nearDuplicates` object to the result. |
@@ -841,8 +851,7 @@ always says what actually happened to the link.
   no memory is created. Checking up front is what keeps a rejected link
   from leaving an orphaned memory behind. A *tombstoned* (deleted) target is
   fine: correcting a memory you just deleted is a legitimate thing to do.
-- **Idempotent.** Storing the same correction twice is not an error; the
-  second call reports `alreadyApplied`.
+- **Link-level idempotence only.** Applying the same link between the same record IDs can report `alreadyApplied`. Repeating `store_memory` creates a new write and is not a safe retry strategy.
 - **Reported, never silent.** When the request names a target, the store
   result carries a `supersedes` object:
 
@@ -871,21 +880,13 @@ each with its id, score, and summary (truncated to 240 bytes).
   absent — not `null` — when nothing crossed the threshold, when
   `checkDuplicates: false` was passed, or when the namespace's vectors are
   not L2-normalized.
-- **0.85 is the same number `find_similar_memories` scan mode uses**, so the
-  two surfaces cannot disagree about whether a pair of memories is a
-  duplicate. It is not configurable: the right value is a property of the
-  embedding model, not of the deployment.
+- **0.85 is also the default scan threshold.** Both paths are bounded and may examine different pairs. A high score is an advisory, not proof of equivalent meaning.
 - **Scope.** Full- and summary-phase memories in the same namespace only —
   the same set auto-linking considers. The phase is re-checked against the
   stored record when the report is built, so a memory that has decayed or been
   deleted since it was indexed is dropped rather than reported with an empty
   summary.
-- **The recovery.** The warning arrives after the write, so acting on it
-  means undoing: `forget_memory` on the id you just created, then either
-  `reinforce_memory` on the existing memory (nothing new to say) or
-  `store_memory` again with `supersedes` set to the existing id (the fact
-  changed). Leave both only when they are genuinely distinct facts that
-  happen to read alike.
+- **Review, not automatic cleanup.** This advisory arrives after the write. Inspect the records and their meaning; do not automatically delete the new memory or replay the store. Use same-namespace `supersedes` for a real correction, and delete only when intended and authorized.
 - **Cost.** The scan is a linear pass over every vector in the index — all
   namespaces, since the index is one flat array with a per-entry namespace
   filter — so it scales with the total number of memories, not with the size
@@ -917,7 +918,7 @@ Search memories by semantic similarity.
 |---|---|---|---|
 | `query` | string | Yes | Natural language search query. |
 | `limit` | integer | No | Maximum results (default: 10, max: 100). |
-| `namespace` | string | No | Namespace to search (default: `"default"`). |
+| `namespace` | string | No | Namespace to search (default: connection namespace, then `"default"`). |
 | `tags` | string[] | No | Only return memories with ALL of these tags. |
 | `entities` | string[] | No | Filter to memories mentioning these entities. |
 | `topics` | string[] | No | Filter to memories about these topics. |
@@ -969,11 +970,11 @@ Find memories semantically similar to a given memory, or scan a namespace for du
 |---|---|---|---|
 | `mode` | string | No | `"single"` (default) or `"scan"`. |
 | `id` | string | Single mode | Source memory UUID. Required for single mode. |
-| `namespace` | string | Scan mode | Namespace to scan. Required for scan mode; defaults to session default for single mode. |
+| `namespace` | string | No | Scan: omitted/null uses the session default. Single: optional assertion against the source record namespace; omission uses record scope, null is invalid. |
 | `limit` | integer | No | Maximum results per source memory in single mode (default: 10, max: 100). |
 | `minScore` | number | No | Minimum similarity threshold for single mode (0.0-1.0). |
 | `threshold` | number | No | Similarity threshold for scan mode duplicate detection (0.0-1.0, default: 0.85). |
-| `sameNamespace` | boolean | No | Restrict to same namespace in single mode (default: true). Ignored in scan mode. |
+| `sameNamespace` | boolean | No | Restrict to source namespace in single mode (default: true). False searches only namespaces with matching known embedding profile and dimension. Ignored in scan mode. |
 
 ### `create_namespace`
 
@@ -982,7 +983,7 @@ Create a new memory namespace.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Namespace name (alphanumeric, hyphens, underscores; 1-64 chars). |
-| `embeddingDim` | integer | No | Embedding dimensions, fixed after creation. Defaults to the default namespace's dimensions. |
+| `embeddingDim` | integer | No | Embedding dimensions, fixed after creation. Omission selects the active provider dimension; an explicit value must match it. |
 | `initialStability` | number | No | Starting stability in days for new memories (default: 3.7145). |
 | `desiredRetention` | number | No | Target retention rate 0.0-1.0 (default: 0.9). |
 | `decayRateMultiplier` | number | No | Per-namespace decay rate multiplier. 1.0 = normal, 2.0 = 2x slower, 0.0 = disabled. Omit to inherit global setting. |
@@ -1008,7 +1009,7 @@ Get statistics for a memory namespace including the live memory count, tombstone
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `namespace` | string | No | Namespace name to get stats for (default: `"default"`). |
+| `namespace` | string | No | Namespace name to get stats for (default: connection namespace, then `"default"`). |
 
 ### `list_memories`
 
@@ -1016,7 +1017,7 @@ List memories in a namespace with pagination and optional filters. Unlike `recal
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `namespace` | string | No | Namespace to list from (default: `"default"`). |
+| `namespace` | string | No | Namespace to list from (default: connection namespace, then `"default"`). |
 | `limit` | integer | No | Maximum results per page (default: 50, max: 200). |
 | `offset` | integer | No | Number of results to skip for pagination (default: 0). |
 | `tags` | string[] | No | Only return memories with ALL of these tags. |
@@ -1038,7 +1039,7 @@ List the tag vocabulary with per-label memory counts, most common first. Use it 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `namespace` | string | No | Namespace to count within (default: `"default"`). |
+| `namespace` | string | No | Namespace to count within (default: connection namespace, then `"default"`). |
 | `allNamespaces` | boolean | No | Count across every namespace (default: `false`). Cannot be combined with an explicit `namespace`. |
 | `limit` | integer | No | Maximum labels per bucket (default: 50, max: 500). Each bucket also reports its untruncated total. |
 
@@ -1048,12 +1049,11 @@ List the tag vocabulary with per-label memory counts, most common first. Use it 
 
 Namespaces partition memories into separate spaces, each with its own embedding index and optional decay configuration.
 
-### Why namespaces
+### Choosing namespaces
 
-- **Project isolation**: Keep work-project memories separate from personal ones.
-- **Different embedding models**: Use different dimensions per namespace.
-- **Different decay rates**: Critical knowledge can have slower decay; ephemeral notes faster.
-- **Per-directory defaults**: A `.recalld.toml` in a project root auto-selects a namespace.
+Use `default` for shared preferences and cross-project facts, `project-<name>` for project-specific knowledge, and optional `topic-<name>` spaces for general topics when useful. Check `list_namespaces` and reuse names; avoid a namespace per agent or session and duplicate copies across stores. Namespaces organize memories, not access permissions.
+
+Explicitly recall from `default` and the current project or relevant topic, rather than every unrelated namespace. A per-directory default does not make all facts project-local. Namespaces may have different decay settings; new namespaces use the active embedding provider's profile and dimension, not an arbitrary model selected by name.
 
 ### Creating namespaces
 
@@ -1061,8 +1061,7 @@ Via MCP (from AI tool):
 
 ```json
 {
-  "name": "work-project",
-  "embeddingDim": 1536,
+  "name": "project-work",
   "initialStability": 3.7145,
   "desiredRetention": 0.9,
   "decayRateMultiplier": 2.0
@@ -1072,7 +1071,7 @@ Via MCP (from AI tool):
 Via CLI:
 
 ```bash
-recalld-cli namespaces create work-project --dim 1536 --initial-stability 3.7145
+recalld-cli namespaces create project-work --initial-stability 3.7145
 ```
 
 ### Per-directory namespace binding
@@ -1080,10 +1079,10 @@ recalld-cli namespaces create work-project --dim 1536 --initial-stability 3.7145
 Create `.recalld.toml` in your project root:
 
 ```toml
-namespace = "work-project"
+namespace = "project-work"
 ```
 
-When recalld starts in MCP mode from that directory (or any subdirectory), it uses `work-project` as the default namespace. Memories stored without an explicit namespace go there.
+When recalld starts in MCP mode from that directory (or any subdirectory), it uses `project-work` as the default namespace. Memories stored without an explicit namespace go there; explicitly select `default` for shared facts.
 
 ### Namespace constraints
 

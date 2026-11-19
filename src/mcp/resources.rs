@@ -87,7 +87,7 @@ pub async fn dispatch_resource(
 
 /// Resolve the frozen bridge default without creating a missing namespace.
 /// Resource reads are private and immediately stale at the server boundary.
-async fn read_session(bridge: &McpBridge) -> Result<ResourceReadResult, String> {
+pub(super) async fn session_document(bridge: &McpBridge) -> Result<serde_json::Value, String> {
     let requested = bridge.default_namespace();
     let namespaces = bridge
         .namespaces
@@ -110,6 +110,11 @@ async fn read_session(bridge: &McpBridge) -> Result<ResourceReadResult, String> 
         namespace.map(|ns| (ns.name.clone(), ns.id, u32::from(ns.embedding_dim))),
         backend,
     );
+    Ok(context)
+}
+
+async fn read_session(bridge: &McpBridge) -> Result<ResourceReadResult, String> {
+    let context = session_document(bridge).await?;
     Ok(ResourceReadResult {
         contents: vec![ResourceContent {
             uri: "recalld://session".into(),
@@ -222,6 +227,30 @@ mod tests {
                 assert_eq!(result["ttlMs"], 0);
                 let text = result["contents"][0]["text"].as_str().unwrap();
                 let context: Value = serde_json::from_str(text).unwrap();
+                // Tool-only clients see the same private, live session context.
+                let params = json!({"name":"get_session","arguments":{}});
+                let request = if modern {
+                    modern_request(3, "tools/call", params)
+                } else {
+                    plain_request(3, "tools/call", Some(params))
+                };
+                let tool = server
+                    .handle_message(request)
+                    .await
+                    .unwrap()
+                    .result
+                    .unwrap();
+                assert_ne!(tool["isError"], true, "{tool}");
+                assert!(tool.get("cacheScope").is_none());
+                assert!(tool.get("ttlMs").is_none());
+                let tool_context: Value =
+                    serde_json::from_str(tool["content"][0]["text"].as_str().unwrap()).unwrap();
+                assert_eq!(tool_context, context);
+                if modern {
+                    assert_eq!(tool["structuredContent"], context);
+                } else {
+                    assert!(tool.get("structuredContent").is_none());
+                }
                 assert_eq!(context["supportedContractVersions"], json!([1]));
                 assert_eq!(context["defaultNamespace"]["byIdResolution"], "record");
                 assert_eq!(
