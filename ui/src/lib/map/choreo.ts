@@ -18,6 +18,8 @@ export interface Choreo {
   /** Ids to label while lit (seeds first, then results). */
   labels: string[];
   suppressed: { id: string; until: number }[];
+  /** Nodes to flash, with when the light reaches them (performance.now clock). */
+  flashes: { id: string; at: number }[];
 }
 
 export interface Colors {
@@ -35,15 +37,18 @@ export function choreograph(
   opts: { speed?: number; reducedMotion?: boolean; scale?: number } = {},
 ): Choreo {
   const speed = opts.speed ?? 1;
-  const out: Choreo = { pulses: [], glows: [], rings: [], labels: [], suppressed: [] };
-  const glowAt = (id: string, start: number, intensity: number, color = colors.lit, kind: 0 | 1 | 2 = 0, radius = 14, decay = BLOOM_DECAY) => {
+  const out: Choreo = { pulses: [], glows: [], rings: [], labels: [], suppressed: [], flashes: [] };
+  const glowAt = (id: string, start: number, intensity: number, color = colors.lit, kind: 0 | 1 | 2 = 0, radius = 22, decay = BLOOM_DECAY) => {
     const p = pos(id);
     if (p) out.glows.push({ x: p.x, y: p.y, start, attack: BLOOM_ATTACK * speed, decay: decay * speed, intensity: Math.min(1, intensity), radius, color, kind });
   };
 
   if (event.kind === 'recall') {
     // 1. Seed bloom: intensity = seed score.
-    for (const s of event.seeds) glowAt(s.id, now, 0.35 + 0.65 * s.score);
+    for (const s of event.seeds) {
+      glowAt(s.id, now, 0.5 + 0.5 * s.score);
+      out.flashes.push({ id: s.id, at: now });
+    }
     // 2. Pulses along each traced edge, in firing order.
     let last = now;
     const steps = [...event.trace].sort((a, b) => a.order - b.order);
@@ -56,10 +61,12 @@ export function choreograph(
       const start = now + step.order * HOP_MS * speed;
       const fade = Math.pow(0.85, step.order);
       if (!opts.reducedMotion) {
-        out.pulses.push({ x0: a.x, y0: a.y, x1: b.x, y1: b.y, start, duration, width: 1.2 + 3 * step.amount, brightness: Math.min(1, (0.4 + step.amount) * fade), color: colors.agent });
+        out.pulses.push({ x0: a.x, y0: a.y, x1: b.x, y1: b.y, start, duration, width: 2.5 + 5 * step.amount, brightness: Math.min(1, (0.65 + step.amount) * fade), color: colors.agent });
       }
       // 3. Convergence: every arrival adds glow at the target (clamped in the shader).
-      glowAt(step.to, start + (opts.reducedMotion ? 0 : duration), 0.25 + 0.6 * step.amount * fade);
+      const arrive = start + (opts.reducedMotion ? 0 : duration);
+      glowAt(step.to, arrive, 0.35 + 0.6 * step.amount * fade);
+      out.flashes.push({ id: step.to, at: arrive });
       last = Math.max(last, start + duration);
     }
     // 4. Results keep a ring; linked ones get the moss tint.
@@ -67,8 +74,8 @@ export function choreograph(
     for (const id of event.returned) out.rings.push({ id, until: last + RESULT_RING_MS, linked: !seeds.has(id) });
     out.labels = [...event.seeds.map((s) => s.id), ...event.returned.filter((id) => !seeds.has(id))];
     // 5. Suppressed competitors cool for 600 ms, then recover.
-    for (const id of event.suppressed) {
-      glowAt(id, last, 0.8, colors.cool, 2, 12, SUPPRESS_MS);
+    for (const id of event.suppressed.slice(0, 12)) {
+      glowAt(id, last, 0.5, colors.cool, 2, 14, SUPPRESS_MS);
       out.suppressed.push({ id, until: last + SUPPRESS_MS * speed });
     }
   } else if (event.kind === 'store') {

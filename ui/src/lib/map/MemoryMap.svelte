@@ -310,19 +310,12 @@
       rings = [...rings.filter((x) => !c.rings.some((y) => y.id === x.id)), ...c.rings];
       liveLabels = c.labels.slice(0, 12);
       ensureSummaries(liveLabels);
-      for (const s of c.suppressed) {
-        if (!graph.hasNode(s.id)) continue;
-        graph.setNodeAttribute(s.id, 'color', alpha(theme.suppressed, 0.9));
-        // Recover to the node's own encoding (never to a color captured while
-        // another recall had it suppressed).
-        setTimeout(() => {
-          if (!graph?.hasNode(s.id)) return;
-          const a = graph.getNodeAttributes(s.id);
-          const i = a.index as number;
-          const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(s.id), i >= 0 && snapshot.permastore[i] === 1);
-          graph.setNodeAttribute(s.id, 'color', enc.color);
-          sigma?.refresh({ skipIndexation: true });
-        }, s.until - performance.now());
+      // Flash each recalled memory when the light reaches it, then return it
+      // to its own phase shading. Suppression shows only as a brief cool glow.
+      const t0 = performance.now();
+      for (const f of c.flashes) {
+        if (!graph.hasNode(f.id)) continue;
+        setTimeout(() => flash(f.id), Math.max(0, f.at - t0));
       }
       const last = Math.max(0, ...c.rings.map((x) => x.until)) - performance.now();
       setTimeout(() => sigma?.refresh({ skipIndexation: true }), last + 50);
@@ -335,6 +328,24 @@
         (perf.__recalldLit ??= []).push(Date.now());
       });
     }
+  }
+
+  const flashUntil = new Map<string, number>();
+  const FLASH_MS = 1500;
+  function flash(id: string) {
+    if (!graph?.hasNode(id)) return;
+    flashUntil.set(id, performance.now() + FLASH_MS);
+    graph.setNodeAttribute(id, 'color', alpha(theme.nodeLit, 0.95));
+    sigma?.refresh({ skipIndexation: true });
+    setTimeout(() => {
+      if (!graph?.hasNode(id) || (flashUntil.get(id) ?? 0) > performance.now()) return;
+      flashUntil.delete(id);
+      const a = graph.getNodeAttributes(id);
+      const i = a.index as number;
+      const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(id), i >= 0 && snapshot.permastore[i] === 1);
+      graph.setNodeAttribute(id, 'color', enc.color);
+      sigma?.refresh({ skipIndexation: true });
+    }, FLASH_MS + 20);
   }
 
   function applyToGraph(e: Received['event']) {
