@@ -2,7 +2,8 @@
 // stores: no memory content). One entry per scope: ids → x, y.
 import { get, set } from 'idb-keyval';
 
-const key = (scope: string | null) => `positions:${scope ?? '*'}`;
+// Bump the version when the layout forces change, so old layouts are redone.
+const key = (scope: string | null) => `positions:v3:${scope ?? '*'}`;
 
 export async function loadPositions(scope: string | null): Promise<Map<string, [number, number]>> {
   try {

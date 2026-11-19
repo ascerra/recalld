@@ -116,7 +116,7 @@
 
     <section class="activity" aria-label="Recent activity">
       <span class="micro-label">Activity</span>
-      {#each history.data?.events ?? [] as e (e.at + e.kind)}
+      {#each history.data?.events ?? [] as e, i (i)}
         <div class="act"><span class="mono t">{ago(e.at)}</span><span>{e.agent ?? 'unknown agent'} <span class="muted">{KINDS[e.kind] ?? e.kind}</span></span></div>
       {:else}
         <span class="muted small">No access recorded yet.</span>

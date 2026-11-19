@@ -149,7 +149,7 @@
     {:else if !lines.length}
       <p class="muted">No activity in this range yet. It appears as agents store and recall memories.</p>
     {/if}
-    {#each days as d (d.title)}
+    {#each days as d, i (i)}
       <div class="day">
         <h2 class="card-title">{d.title}</h2>
         {#each d.lines as l, i (l.at + l.kind + i)}

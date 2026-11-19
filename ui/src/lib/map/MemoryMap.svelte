@@ -15,7 +15,7 @@
   import { readTheme, type MapTheme } from './theme';
   import { edgeAttributes, nodeAttributes, EDGE } from './encoding';
   import { loadPositions, savePositions } from './cache';
-  import type { FromWorker, ToWorker } from './protocol';
+  import { setDegreeScale, type FromWorker, type ToWorker } from './protocol';
   import LayoutWorker from './layout.worker.ts?worker';
   import { LightLayer, affine } from './light';
   import { choreograph } from './choreo';
@@ -76,6 +76,14 @@
     __recalldNodeAt?: () => { x: number; y: number } | null;
   };
   perf.__recalldSettled = false;
+  // Test hook: viewport positions of every visible node.
+  (perf as { __recalldPositions?: () => { id: string; x: number; y: number }[] }).__recalldPositions = () => {
+    const out: { id: string; x: number; y: number }[] = [];
+    graph?.forEachNode((id, a) => {
+      if (a.visibility === 'visible') out.push({ id, ...sigma!.graphToViewport(a as { x: number; y: number }) });
+    });
+    return out;
+  };
   perf.__recalldNodeAt = () => {
     if (!graph || !sigma) return null;
     let best: { x: number; y: number } | null = null;
@@ -97,6 +105,9 @@
   function build(s: Snapshot, cached: Map<string, [number, number]>) {
     const g = new Graph({ type: 'directed', multi: true, allowSelfLoops: false });
     const n = s.ids.length;
+    let maxDegree = 1;
+    for (let i = 0; i < n; i++) maxDegree = Math.max(maxDegree, s.degree[i]);
+    setDegreeScale(maxDegree);
     const x = new Float32Array(n), y = new Float32Array(n), known = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       const c = cached.get(s.ids[i]);
@@ -241,8 +252,8 @@
 
     // Labels: seeds/results, selection, hover; more as you zoom in.
     const order = [...new Set([...liveLabels, ...highlighted])];
-    if (selectedId) order.push(selectedId);
-    if (hovered) order.push(hovered);
+    if (selectedId && !order.includes(selectedId)) order.push(selectedId);
+    if (hovered && !order.includes(hovered)) order.push(hovered);
     if (ratio < 0.6) {
       const extra = inView
         .filter((id) => !order.includes(id))
@@ -275,7 +286,8 @@
       ctx.fillStyle = theme.text;
       ctx.fillText(label, pl.x + 2, pl.y + 1);
     }
-    visibleIds = order.filter((id) => summaries.has(id)).slice(0, 100);
+    // Hovered and selected are often the same node: keep each id once.
+    visibleIds = [...new Set(order)].filter((id) => summaries.has(id)).slice(0, 100);
   }
 
   // ── Live activity → light and incremental graph updates ───────────────
@@ -448,6 +460,10 @@
           minCameraRatio: 0.03,
           maxCameraRatio: 8,
           stagePadding: 40,
+          // Gentle zoom: trackpads send many wheel steps per gesture.
+          zoomingRatio: 1.12,
+          zoomDuration: 120,
+          doubleClickZoomingRatio: 1.6,
           hideEdgesOnMove: false,
         },
       } as never);
@@ -499,11 +515,18 @@
         }, { attributes: ['x', 'y'] });
       };
       let first = true;
+      let frozen = false;
       // Read before `known` is transferred (and detached) to the worker.
       const cachedAll = built.known.every((k) => k === 1);
       worker.onmessage = (e: MessageEvent<FromWorker>) => {
         apply(e.data.x, e.data.y);
         if (e.data.type === 'settled') {
+          // Freeze the view's scale once the layout has settled, so dragging a
+          // node outward no longer rescales the whole map.
+          if (!frozen) {
+            frozen = true;
+            sigma!.setSetting('autoRescale', 'once');
+          }
           savePositions(scopeKey, snapshot.ids, e.data.x, e.data.y);
           perf.__recalldSettled = true;
           onsettled?.();
@@ -531,7 +554,7 @@
       });
       const src = snapshot.src.slice(), dst = snapshot.dst.slice(), weight = snapshot.weight.slice(), degree = snapshot.degree.slice();
       worker.postMessage(
-        { type: 'init', n: snapshot.ids.length, src, dst, weight, degree, x: built.x, y: built.y, known: built.known } satisfies ToWorker,
+        { type: 'init', n: snapshot.ids.length, src, dst, weight, degree, x: built.x, y: built.y, known: built.known, maxDegree: Math.max(1, ...degree) } satisfies ToWorker,
         [src.buffer, dst.buffer, weight.buffer, degree.buffer, built.x.buffer, built.y.buffer, built.known.buffer],
       );
     });
