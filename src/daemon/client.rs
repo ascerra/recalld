@@ -84,6 +84,7 @@ fn records_accesses_only(method: &str) -> bool {
 
 /// An established socket connection to the daemon.
 struct Connection {
+    last_request_start: tokio::time::Instant,
     reader: BufReader<OwnedReadHalf>,
     writer: OwnedWriteHalf,
 }
@@ -92,6 +93,7 @@ impl Connection {
     fn new(stream: UnixStream) -> Self {
         let (reader, writer) = stream.into_split();
         Self {
+            last_request_start: tokio::time::Instant::now(),
             reader: BufReader::new(reader),
             writer,
         }
@@ -237,6 +239,22 @@ pub struct DaemonClient {
 }
 
 impl DaemonClient {
+    /// Retire a quiet connection before selecting any connection-specific
+    /// capabilities or sending an effectful request. The safety margin is
+    /// 30 seconds (half the server prefix timeout), measured from the start
+    /// of the last successful send. Processing a slow reply cannot extend
+    /// the socket's perceived lifetime.
+    async fn state_for_call(&self) -> tokio::sync::MutexGuard<'_, ClientState> {
+        let mut state = self.state.lock().await;
+        if state.conn.as_ref().is_some_and(|conn| {
+            conn.last_request_start.elapsed() >= super::protocol::CONNECTION_IDLE_TIMEOUT / 2
+        }) {
+            state.conn = None;
+            self.connected.store(false, AtomicOrdering::Relaxed);
+        }
+        state
+    }
+
     /// Prepared-only single exchange, without reconnect/replay after send. The
     /// shared mutex covers negotiation and the entire attributed response.
     pub(crate) async fn call_api1_get(
@@ -244,7 +262,7 @@ impl DaemonClient {
         params: serde_json::Value,
         request: &crate::serialization::get_api1::Request,
     ) -> Api1GetExchange {
-        let mut state = self.state.lock().await;
+        let mut state = self.state_for_call().await;
         let ready = async {
             if state.conn.is_none() {
                 self.reconnect(&mut state).await?;
@@ -305,7 +323,7 @@ impl DaemonClient {
         method: &str,
         params: serde_json::Value,
     ) -> PreparedExchange {
-        let mut state = self.state.lock().await;
+        let mut state = self.state_for_call().await;
         let api1 = method == super::api1_get::GET;
         let point = method == super::prepared_get::GET;
         let limit = if api1 {
@@ -511,7 +529,7 @@ impl DaemonClient {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, BridgeError> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state_for_call().await;
         let outcome = self.call_locked(&mut state, method, params).await;
         self.connected
             .store(state.conn.is_some(), AtomicOrdering::Relaxed);
@@ -571,7 +589,7 @@ impl DaemonClient {
         new_params: serde_json::Value,
         legacy: Option<(&str, serde_json::Value)>,
     ) -> Result<(bool, serde_json::Value), BridgeError> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state_for_call().await;
         let result = async {
             if state.conn.is_none() {
                 self.reconnect(&mut state).await?;
@@ -690,7 +708,7 @@ impl DaemonClient {
     /// desynchronizing the stream — the precise failure the negotiation
     /// exists to prevent.
     pub async fn ping(&self) -> Result<(), BridgeError> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state_for_call().await;
         let outcome = self
             .call_locked(&mut state, "ping", handshake_params())
             .await;
@@ -854,7 +872,14 @@ impl ClientState {
         let id = request.id;
 
         let written = match self.conn.as_mut() {
-            Some(conn) => write_framed_request(&mut conn.writer, request, limit).await,
+            Some(conn) => {
+                let started = tokio::time::Instant::now();
+                let result = write_framed_request(&mut conn.writer, request, limit).await;
+                if result.is_ok() {
+                    conn.last_request_start = started;
+                }
+                result
+            }
             None => {
                 return Err(ExchangeError {
                     phase: TransmissionPhase::BeforeSend,
@@ -1263,6 +1288,24 @@ mod tests {
     }
 
     // 16
+    #[tokio::test]
+    async fn first_mutation_after_idle_renegotiates_before_sending_once() {
+        let stub = Stub::start(Behavior::Healthy);
+        let client = DaemonClient::connect(&stub.path).await.unwrap();
+        client.ping().await.unwrap();
+        tokio::time::pause();
+        tokio::time::advance(super::super::protocol::CONNECTION_IDLE_TIMEOUT).await;
+        tokio::time::resume();
+
+        // This peer uses the compatibility route for API1 store.
+        let (capable, _) = client
+            .call_api1_store(json!({}), Some(json!({})))
+            .await
+            .unwrap();
+        assert!(!capable);
+        assert_eq!(stub.methods(), ["ping", "ping", "store_memory"]);
+    }
+
     #[tokio::test]
     async fn read_only_method_retries_transparently_after_mid_call_close() {
         let stub = Stub::start(Behavior::CloseAfterFirstCall);
