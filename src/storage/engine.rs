@@ -18,6 +18,7 @@ mod maintenance;
 mod native_catalog;
 mod native_graph;
 mod native_maintenance;
+mod native_move;
 mod native_policy;
 mod native_records;
 mod purge;

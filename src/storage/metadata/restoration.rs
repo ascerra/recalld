@@ -350,6 +350,12 @@ pub(crate) fn reconcile(
         })
         .collect::<Result<_, _>>()?;
     drop(read);
+    let mut moves = ledger::MoveNamespaces::default();
+    for source in std::iter::once(snapshot).chain(target) {
+        for (_, bytes) in &source.receipts {
+            moves.include(&control::validate_receipt(bytes)?.receipt)?;
+        }
+    }
     let mut by_memory = std::collections::HashMap::<Uuid, Vec<&ledger::RemovalEntry>>::new();
     for entry in merged.values() {
         by_memory.entry(entry.memory_uuid).or_default().push(entry);
@@ -361,7 +367,7 @@ pub(crate) fn reconcile(
         let mut mask = 0;
         let mut terminal = None;
         for entry in by_memory.get(&id.into_inner()).into_iter().flatten() {
-            if entry.namespace_id != record.namespace_id {
+            if !moves.connects(id.into_inner(), entry.namespace_id, record.namespace_id) {
                 return Err(StorageError::MutationNamespaceMismatch);
             }
             mask |= entry.removed_fields_mask;

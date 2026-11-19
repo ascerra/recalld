@@ -77,7 +77,8 @@ impl VectorLayout {
                 let receipt = crate::storage::control::validate_receipt(value)?.receipt;
                 use crate::storage::control::MutationOutcome;
                 let certified = match receipt.outcome {
-                    MutationOutcome::VectorsReembedded { .. } => true,
+                    MutationOutcome::VectorsReembedded { .. }
+                    | MutationOutcome::NativeMemoriesMoved { .. } => true,
                     MutationOutcome::NativeNamespaceCreated { transition } => {
                         transition.vector_certification.is_some()
                     }

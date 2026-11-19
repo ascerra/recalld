@@ -809,7 +809,7 @@ Shows decay forecast, at-risk memories, and storage breakdown.
 
 ## 6. MCP Tools Reference
 
-recalld exposes 15 MCP tools. These are available to any MCP client (Claude Code, Cursor, etc.) when recalld is configured as an MCP server.
+recalld exposes 16 MCP tools. These are available to any MCP client (Claude Code, Cursor, etc.) when recalld is configured as an MCP server.
 
 Deletion is worth reading before you use it. `forget_memory` and `forget_memories` do not free anything: a forgotten memory keeps its record and its graph edges for the life of the database, because the decay sweep never reclaims a tombstone. `delete_namespace` is the only operation that does — and it destroys everything else in the namespace along with them, with no undo and no backup.
 
@@ -975,6 +975,31 @@ Find memories semantically similar to a given memory, or scan a namespace for du
 | `minScore` | number | No | Minimum similarity threshold for single mode (0.0-1.0). |
 | `threshold` | number | No | Similarity threshold for scan mode duplicate detection (0.0-1.0, default: 0.85). |
 | `sameNamespace` | boolean | No | Restrict to source namespace in single mode (default: true). False searches only namespaces with matching known embedding profile and dimension. Ignored in scan mode. |
+
+### `move_memories`
+
+Move 1–100 distinct Full or Summary memories atomically between two explicitly named namespaces. The destination must already exist. IDs, retained content, lifecycle/access history, and graph edges are preserved; embeddings are regenerated from retained content using the exact destination provider and profile. Ghost and Tombstone records cannot be moved. An UnknownLegacy source is supported through regeneration; the destination must have an explicit Bound embedding profile matching the active provider exactly, and source/destination lifecycle revisions must be compatible. Physical cross-namespace edges remain, while namespace-scoped retrieval remains scoped. Namespaces are not access controls.
+
+A batch may contain at most 16 MiB of retained full text. Larger requests are rejected before embedding or mutation; submit smaller batches with their own stable keys.
+
+```json
+{
+  "storeId": "<store UUID from get_session>",
+  "idempotencyKey": "<stable key chosen before the first attempt>",
+  "sourceNamespace": "default",
+  "destinationNamespace": "project-example",
+  "ids": ["<memory UUID>"],
+  "embeddingMode": "regenerate"
+}
+```
+
+This tool requires native storage and a daemon that supports moves. After updating, restart the daemon and MCP process and refresh the client's tools. An older daemon fails closed; the client never substitutes copy/delete or automatically replays a move.
+
+A successful native move also changes on-disk compatibility: older binaries cannot decode the new durable move receipt and must refuse to open that store. Continue with a move-capable binary, or restore a compatible backup before downgrading. Restarting an old daemon does not make it compatible.
+
+Success returns a compact `receipt` containing `storeId`, `operationId`, ordered `ids`, both namespace names and resolved IDs, `destinationProfileId`, `committedGeneration`, and `replayed`. Internal history proofs are retained by storage and are not sent to the client. Errors report `commitState` (`notCommitted`, `committed`, or `unknown`) and retain a known operation ID and compact receipt when available. A committed result does not by itself promise derived-index readiness.
+
+For an uncertain response, preserve the original request and any operation ID/receipt. Reconcile using only the **same store ID, key, full ordered IDs, source, destination, and embedding mode**. Never choose a fresh key or retry a guessed subset. A replay describes the original move; it does not assert that the records are still in that destination after later operations. The session's default namespace is not changed.
 
 ### `create_namespace`
 

@@ -66,6 +66,43 @@ pub(crate) struct VectorRelease {
     pub memory_id: MemoryId,
 }
 
+pub(crate) fn validate_native_move_effect(effect: &PendingEffects) -> Result<(), StorageError> {
+    let MutationOutcome::NativeMemoriesMoved { transition } = &effect.receipt.outcome else {
+        return Err(StorageError::InvalidControl(
+            "move effect outcome absent".into(),
+        ));
+    };
+    transition.validate(&effect.receipt)?;
+    if effect.scope != MutationScope::Catalog
+        || !effect.puts.is_empty()
+        || !effect.deletes.is_empty()
+        || !effect.removed_ids.is_empty()
+        || !effect.peer_counts.is_empty()
+        || effect.invalidated_ids != transition.ids
+        || effect.releases.len() != transition.records.len()
+    {
+        return Err(StorageError::InvalidControl(
+            "move effect plan mismatch".into(),
+        ));
+    }
+    for (release, row) in effect.releases.iter().zip(&transition.records) {
+        let before = row
+            .change
+            .before
+            .as_ref()
+            .ok_or_else(|| StorageError::InvalidControl("move before missing".into()))?;
+        if release.memory_id != row.change.memory_id
+            || release.namespace_id != transition.source_namespace_id
+            || Some(release.slot) != before.content.vector.as_ref().map(|v| v.slot)
+        {
+            return Err(StorageError::InvalidControl(
+                "move vector release differs from proof".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PendingEffects {
@@ -121,7 +158,8 @@ pub(crate) fn validate_existing(
                 let (_, value) = entry?;
                 if matches!(
                     control::validate_receipt(value.value())?.receipt.outcome,
-                    MutationOutcome::GraphChanged { .. }
+                    MutationOutcome::NativeMemoriesMoved { .. }
+                        | MutationOutcome::GraphChanged { .. }
                         | MutationOutcome::MemoryInserted { .. }
                         | MutationOutcome::MemoryTombstoned { .. }
                         | MutationOutcome::LifecycleMaterialized { .. }
@@ -194,6 +232,7 @@ pub(crate) fn validate_existing(
             ));
         }
         match &effect.receipt.outcome {
+            MutationOutcome::NativeMemoriesMoved { .. } => validate_native_move_effect(&effect)?,
             MutationOutcome::NativeNamespacePurgeAdvanced { .. } => {
                 crate::storage::native_purge::validate_effect(&effect)?
             }
@@ -217,6 +256,7 @@ pub(crate) fn validate_existing(
             _ => {}
         }
         match effect.receipt.outcome {
+            MutationOutcome::NativeMemoriesMoved { .. } => {}
             MutationOutcome::LifecycleMaterialized { memory_id, .. }
                 if matches!(effect.scope, MutationScope::Namespace(_))
                     && effect.puts.is_empty()
@@ -291,6 +331,13 @@ pub(crate) fn validate_existing(
         }
         if effect.releases.iter().any(|r| {
             !effect.removed_ids.contains(&r.memory_id) && !terminal_effect(&effect, r.memory_id)
+                && !matches!(&effect.receipt.outcome,
+                    MutationOutcome::NativeMemoriesMoved { transition }
+                    if transition.source_namespace_id == r.namespace_id
+                        && transition.records.iter().any(|row|
+                            row.change.memory_id == r.memory_id
+                                && row.change.before.as_ref().and_then(|before|
+                                    before.content.vector.as_ref()).is_some_and(|v| v.slot == r.slot)))
         }) {
             return Err(StorageError::InvalidControl(
                 "release without removed owner".into(),
@@ -1493,9 +1540,27 @@ pub(crate) fn validate_plan(
             ));
         }
     }
+    if let MutationOutcome::NativeMemoriesMoved { transition } = &effect.receipt.outcome {
+        validate_native_move_effect(effect)?;
+        for row in &transition.records {
+            let record = records
+                .iter()
+                .find(|(id, _)| *id == row.change.memory_id)
+                .ok_or_else(|| StorageError::InvalidControl("moved record absent".into()))?;
+            if record.1.namespace_id != transition.destination_namespace_id.get()
+                || !row.change.after.matches_record(&record.1)?
+            {
+                return Err(StorageError::InvalidControl(
+                    "move effect differs from canonical record".into(),
+                ));
+            }
+        }
+    }
     for release in &effect.releases {
         if records.iter().any(|(id, r)| {
-            (*id == release.memory_id && !terminal_effect(effect, *id))
+            (*id == release.memory_id && !terminal_effect(effect, *id)
+                && !matches!(&effect.receipt.outcome, MutationOutcome::NativeMemoriesMoved { transition }
+                    if transition.ids.contains(id) && r.namespace_id == transition.destination_namespace_id.get()))
                 || (r.phase != DecayPhase::Tombstone
                     && r.namespace_id == release.namespace_id.get()
                     && r.vector_slot == release.slot)

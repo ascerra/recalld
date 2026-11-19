@@ -43,6 +43,7 @@ pub mod native_catalog;
 pub mod native_graph;
 pub mod native_lifecycle;
 pub mod native_maintenance;
+pub mod native_move;
 pub mod native_policy;
 pub mod native_purge;
 #[cfg(test)]

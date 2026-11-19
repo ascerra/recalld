@@ -50,6 +50,14 @@ pub trait McpHandler: Send + Sync {
         self.call_tool("create_namespace", arguments).await
     }
 
+    async fn call_move_tool(
+        &self,
+        _arguments: serde_json::Value,
+        _admission: crate::serialization::move_memories::Admission,
+    ) -> ToolCallResult {
+        crate::serialization::move_memories::Reply::unavailable().tool()
+    }
+
     /// Read a resource by URI and return its content.
     async fn read_resource(&self, uri: &str) -> Result<ResourceReadResult, String>;
 }
@@ -345,6 +353,14 @@ impl McpDispatcher {
                             id.clone(),
                             ctx.era,
                         ),
+                    )
+                    .await
+            }
+            Ok(()) if params.name == "move_memories" => {
+                self.handler
+                    .call_move_tool(
+                        params.arguments,
+                        crate::serialization::move_memories::Admission::mcp(id.clone(), ctx.era),
                     )
                     .await
             }

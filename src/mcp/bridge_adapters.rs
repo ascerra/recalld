@@ -2140,6 +2140,22 @@ impl McpStorageAdapter {
 
 #[async_trait]
 impl bridge::StorageEngine for McpStorageAdapter {
+    async fn move_memories(
+        &self,
+        input: crate::storage::native_move::NativeMoveInput,
+        admission: crate::serialization::move_memories::Admission,
+    ) -> crate::serialization::move_memories::Reply {
+        use crate::serialization::move_memories::Reply;
+        if let Err(error) = input.validate().and_then(|()| admission.check()) {
+            return Reply::from_result(Err(error));
+        }
+        Reply::from_result(
+            self.completion()
+                .move_native(input, self.embedding.clone())
+                .await,
+        )
+    }
+
     fn supports_canonical_pages(&self) -> bool {
         true
     }

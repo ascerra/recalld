@@ -179,7 +179,7 @@ See [docs/benchmark.md](docs/benchmark.md) for full methodology, per-category br
 
 ## Usage modes
 
-**MCP server (stdio)** -- Runs as a Model Context Protocol server for AI tools like Claude Code. Exposes 15 tools: `get_session`, `store_memory`, `store_memories`, `recall_memories`, `get_memory`, `reinforce_memory`, `forget_memory`, `forget_memories`, `find_similar_memories`, `create_namespace`, `delete_namespace`, `namespace_stats`, `list_memories`, `list_namespaces`, `list_tags`.
+**MCP server (stdio)** -- Runs as a Model Context Protocol server for AI tools like Claude Code. Exposes 16 tools: `get_session`, `store_memory`, `store_memories`, `recall_memories`, `get_memory`, `reinforce_memory`, `forget_memory`, `forget_memories`, `find_similar_memories`, `create_namespace`, `delete_namespace`, `namespace_stats`, `list_memories`, `list_namespaces`, `list_tags`, `move_memories`.
 
 ```sh
 recalld mcp

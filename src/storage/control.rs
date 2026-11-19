@@ -247,6 +247,9 @@ pub struct ExposureOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum MutationOutcome {
+    NativeMemoriesMoved {
+        transition: super::native_move::NativeMoveWrite,
+    },
     VectorsReembedded {
         transition: super::vector_certification::VectorsReembedded,
     },
@@ -508,7 +511,8 @@ pub(crate) fn validate_existing(
             MutationOutcome::NativeNamespacePurgeAdvanced { transition: t } => {
                 scope == MutationScope::Namespace(t.namespace_id)
             }
-            MutationOutcome::NamespaceCreated { .. }
+            MutationOutcome::NativeMemoriesMoved { .. }
+            | MutationOutcome::NamespaceCreated { .. }
             | MutationOutcome::BatchReserved { .. }
             | MutationOutcome::BatchItemRejected { .. }
             | MutationOutcome::NativeNamespaceCreated { .. }
@@ -556,7 +560,8 @@ pub(crate) fn validate_existing(
         // schema table is entirely absent. Legacy decode alone is not proof.
         if matches!(
             stored.receipt.outcome,
-            MutationOutcome::NativeNamespacePurgeStarted { .. }
+            MutationOutcome::NativeMemoriesMoved { .. }
+                | MutationOutcome::NativeNamespacePurgeStarted { .. }
                 | MutationOutcome::VectorsReembedded { .. }
                 | MutationOutcome::NativeTextGenerationSelected { .. }
                 | MutationOutcome::NativeNamespacePurgeAdvanced { .. }
@@ -819,6 +824,9 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
+        MutationOutcome::NativeMemoriesMoved { transition } => {
+            transition.validate(&stored.receipt)?
+        }
         MutationOutcome::NativeNamespacePurgeStarted { transition } => {
             transition.validate(&stored.receipt)?
         }
@@ -985,7 +993,8 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
                 ));
             }
         }
-        MutationOutcome::AccessRecorded { .. }
+        MutationOutcome::NativeMemoriesMoved { .. }
+        | MutationOutcome::AccessRecorded { .. }
         | MutationOutcome::VectorsReembedded { .. }
         | MutationOutcome::NativeNamespacePurgeStarted { .. }
         | MutationOutcome::NativeNamespacePurgeAdvanced { .. }

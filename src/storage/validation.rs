@@ -284,7 +284,8 @@ fn validate_snapshot(
             && (!native_recovery
                 || !matches!(
                     e.receipt.outcome,
-                    super::control::MutationOutcome::NativeNamespacePurgeAdvanced { .. }
+                    super::control::MutationOutcome::NativeMemoriesMoved { .. }
+                        | super::control::MutationOutcome::NativeNamespacePurgeAdvanced { .. }
                         | super::control::MutationOutcome::NativePhaseMaterialized { .. }
                         | super::control::MutationOutcome::NativeMemoryHardDeleted { .. }
                         | super::control::MutationOutcome::NativeMemoryInsertedWithLinks { .. }

@@ -199,7 +199,11 @@ Migrated namespaces retain `UnknownLegacy` embedding provenance. Compatibility o
 
 ## Available tools
 
-The server exposes 15 tools.
+The server exposes 16 tools.
+
+### `move_memories`
+
+Atomically move 1–100 Full or Summary memories to an existing namespace while preserving IDs, retained content, history, and edges. Supply explicit `storeId`, `idempotencyKey`, `sourceNamespace`, `destinationNamespace`, ordered `ids`, and `embeddingMode: "regenerate"`. Reconcile an uncertain result only with the identical full request and key. See the [move tool reference](guide.md#move_memories) for embedding compatibility, receipts, and downgrade requirements.
 
 ### `get_session`
 
