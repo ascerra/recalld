@@ -2750,37 +2750,31 @@ impl bridge::StorageEngine for McpStorageAdapter {
                     bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
                 })?;
 
-                let (counts, memories_counted) = match namespace.as_deref() {
-                    Some(name) => {
-                        let ns = storage_r
+                let namespace_id = namespace
+                    .as_deref()
+                    .map(|name| {
+                        storage_r
                             .get_namespace_by_name(name)
                             .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+                            .map(|ns| ns.id)
                             .ok_or_else(|| {
                                 bridge::BridgeError::NotFound(format!(
                                     "namespace '{name}' not found"
                                 ))
-                            })?;
-                        let (counts, memories) = storage_r
-                            .meta_store()
-                            .tag_counts_in_namespace(ns.id)
-                            .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
-                        (counts.into_iter().collect::<Vec<_>>(), Some(memories))
-                    }
-                    // Global scope reads TAG_INDEX directly, which is keyed by
-                    // tag alone: no memory records are touched, so there is no
-                    // honest number to report for `memoriesCounted`.
-                    None => (
-                        storage_r
-                            .list_tags()
-                            .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?,
-                        None,
-                    ),
-                };
+                            })
+                    })
+                    .transpose()?;
+                let (counts, memories) = storage_r
+                    .meta_store()
+                    .label_counts(namespace_id)
+                    .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
+                // Preserve the API1 global scope's null memoriesCounted.
+                let memories_counted = namespace_id.map(|_| memories);
 
                 Ok(build_list_tags_response(
                     namespace,
                     memories_counted,
-                    counts,
+                    counts.into_iter().collect(),
                     limit,
                 ))
             })
@@ -3935,6 +3929,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_tags_legacy_prefixes_count_distinct_labels_per_memory() {
+        let fx = Fixture::new();
+        fx.insert_memory_with(tagged(
+            default_ns(),
+            &[
+                "plain",
+                "plain",
+                "entity/alice",
+                "entity/alice",
+                "topic/rust",
+                "emotion/calm",
+            ],
+        ))
+        .await;
+        for namespace in [Some("default".to_owned()), None] {
+            let response = fx
+                .storage_adapter()
+                .list_tags(bridge::ListTagsInput {
+                    namespace,
+                    limit: 50,
+                })
+                .await
+                .unwrap();
+            assert_eq!(names(&response.tags), [("plain", 1)]);
+            assert_eq!(names(&response.entities), [("alice", 1)]);
+            assert_eq!(names(&response.topics), [("rust", 1)]);
+            assert_eq!(names(&response.emotions), [("calm", 1)]);
+        }
+    }
+
+    #[tokio::test]
     async fn a54_list_tags_rejects_an_unknown_namespace() {
         let fx = Fixture::new();
         let err = fx
@@ -3972,8 +3997,7 @@ mod tests {
         assert_eq!(names(&response.tags), [("type/decision", 3)]);
     }
 
-    /// Global scope reads the tag index directly and touches no memory
-    /// records, so there is no honest number to report.
+    /// API1 retains a null memory count for global scope.
     #[tokio::test]
     async fn a56_list_tags_reports_no_memory_count_in_global_scope() {
         let fx = Fixture::new();

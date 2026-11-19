@@ -369,6 +369,174 @@ async fn native_creation_access_metadata_and_structured_labels_survive_round_tri
 }
 
 #[tokio::test]
+async fn list_tags_native_labels_follow_moves_and_exclude_tombstones() {
+    use crate::mcp::bridge::{ListTagsInput, StorageEngine as _};
+    use crate::storage::native_lifecycle::LifecycleScope;
+    use crate::storage::native_records::NativeInsert;
+    let root = tempfile::tempdir().unwrap();
+    let (_, mut session, provider, _) = fixture(root.path());
+    let ns = session
+        .engine
+        .get_namespace_by_name("default")
+        .unwrap()
+        .unwrap()
+        .id;
+    let input = NativeInsert {
+        memory: crate::storage::insertion::InsertMemory {
+            id: None,
+            summary: "vocabulary fixture".into(),
+            full_text: None,
+            tags: vec![
+                crate::model::Tag::new("plain").unwrap(),
+                crate::model::Tag::new("entity/Alice").unwrap(),
+                crate::model::Tag::new("topic/Rust").unwrap(),
+            ],
+            initial_stability: None,
+            created_at: None,
+            embedding: None,
+            parent_id: None,
+            supersedes: None,
+        },
+        observed_at: None,
+        entities: vec!["alice".into(), "alice".into(), "josé 🙂".into()],
+        topics: vec!["Storage / exact".into(), "Storage / exact".into()],
+        emotions: vec!["🙂".into(), "🙂".into()],
+        embedding_profile: None,
+    };
+    let mut live = None;
+    for mode in ["live", "empty", "doomed"] {
+        let mut input = input.clone();
+        if mode == "empty" {
+            input.entities.clear();
+            input.topics.clear();
+            input.emotions.clear();
+        }
+        let receipt = session
+            .insert_generated(
+                &MutationContext::unkeyed(ns),
+                LifecycleScope {
+                    namespace_id: ns,
+                    namespace_name: "default".into(),
+                    source: None,
+                },
+                &input,
+                provider.as_ref(),
+            )
+            .await
+            .unwrap();
+        let id = match receipt.outcome {
+            MutationOutcome::NativeMemoryInserted { transition } => transition.memory_id,
+            _ => panic!("expected native insertion"),
+        };
+        if mode == "doomed" {
+            let intent = session.capture_tombstone(id, None).unwrap();
+            session
+                .tombstone(&MutationContext::unkeyed(ns), &intent)
+                .unwrap();
+        } else if mode == "live" {
+            live = Some(id);
+        }
+    }
+    let request = request(
+        &session.engine,
+        vec![live.unwrap()],
+        "vocabulary-move",
+        "default",
+        "project-mtx",
+    );
+    move_records(&mut session.engine, request, provider.as_ref())
+        .await
+        .unwrap();
+    let f = crate::test_support::Fixture::from_open_engine(root, session.engine);
+    crate::derived_completion::DerivedCompletion {
+        storage: f.storage.clone(),
+        cache: f.cache.clone(),
+        graph: f.graph.clone(),
+        vectors: f.vector_index.clone(),
+        fts: f.fts_index.clone(),
+        entities: f.entity_index.clone(),
+    }
+    .complete()
+    .await
+    .unwrap();
+    let adapter = f.storage_adapter();
+    let names = |bucket: &crate::mcp::bridge::TagBucket| {
+        bucket
+            .items
+            .iter()
+            .map(|v| (v.name.clone(), v.count))
+            .collect::<Vec<_>>()
+    };
+    for (namespace, memories, alice, unicode) in [
+        (Some("default"), Some(3), 2, false),
+        (Some("project-mtx"), Some(1), 1, true),
+        (Some("project-next"), Some(0), 0, false),
+        (None, None, 3, true),
+    ] {
+        let result = adapter
+            .list_tags(ListTagsInput {
+                namespace: namespace.map(str::to_owned),
+                limit: 50,
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.memories_counted, memories);
+        let mut entities = vec![];
+        if alice > 0 {
+            entities.push(("alice".to_owned(), alice));
+        }
+        if unicode {
+            entities.push(("josé 🙂".to_owned(), 1));
+        }
+        assert_eq!(names(&result.entities), entities);
+        assert_eq!(
+            names(&result.topics),
+            if unicode {
+                vec![("Storage / exact".into(), 1)]
+            } else {
+                vec![]
+            }
+        );
+        assert_eq!(
+            names(&result.emotions),
+            if unicode {
+                vec![("🙂".into(), 1)]
+            } else {
+                vec![]
+            }
+        );
+        let plain = match namespace {
+            None => 2,
+            Some("project-next") => 0,
+            _ => 1,
+        };
+        assert_eq!(
+            names(&result.tags),
+            if plain > 0 {
+                vec![("plain".into(), plain)]
+            } else {
+                vec![]
+            }
+        );
+    }
+    for limit in [0, 1] {
+        let result = adapter
+            .list_tags(ListTagsInput {
+                namespace: None,
+                limit,
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.entities.total, 2);
+        assert!(result.entities.truncated);
+        assert_eq!(result.entities.items.len(), limit);
+        if limit == 1 {
+            assert_eq!(names(&result.entities), vec![("alice".into(), 3)]);
+        }
+    }
+}
+
+#[tokio::test]
 async fn invalid_batch_member_and_provider_failure_leave_every_record_in_source() {
     let root = tempfile::tempdir().unwrap();
     let (_, mut session, provider, ids) = fixture(root.path());
