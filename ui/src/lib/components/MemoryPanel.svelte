@@ -70,7 +70,7 @@
   let error = $state<string | null>(null);
   let confirming = $state(false);
 
-  const r = $derived(row.data ? strengthAt(row.data.lastAccessedAt, row.data.stability) : 0);
+  const r = $derived(row.data ? strengthAt(row.data.lastAccessedAt, row.data.stability, row.data.decayMultiplier) : 0);
   const elapsed = $derived(row.data ? Math.max(0, Date.now() - row.data.lastAccessedAt) / DAY_MS : 0);
   const labels = $derived(
     [...(row.data?.entities ?? []), ...(row.data?.tags ?? [])].slice(0, 3).join(' · '),
@@ -130,7 +130,7 @@
       <span class="card-title">Retrievability</span>
       <span class="mono values">R {r.toFixed(2)} · S {duration(m.stability)}{m.permastore ? ' · permastore' : ''}</span>
     </div>
-    <DecayCurve stability={m.stability} elapsedDays={elapsed} previousStability={previous} />
+    <DecayCurve stability={m.stability} elapsedDays={elapsed} previousStability={previous} multiplier={m.decayMultiplier} />
     <figcaption>
       {m.nextChange ? `${phaseName(m.nextChange.to)} ${m.nextChange.at <= Date.now() ? 'at the next sweep' : `in ${duration((m.nextChange.at - Date.now()) / DAY_MS)}`}` : m.permastore ? 'In permastore' : 'No change expected'}
       · created {fmtDate(m.createdAt)}

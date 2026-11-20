@@ -1,6 +1,7 @@
 // Decodes graph_snapshot's base64 little-endian columns into typed arrays.
 import type { GraphSnapshot, NamespaceRef } from './types';
 import { get } from './client';
+import { DAY_MS, phaseFor, retrievability } from '$lib/fsrs';
 
 function bytes(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64);
@@ -122,4 +123,24 @@ export function activeSince(g: Graph, since: number): Graph {
     type: pick(g.type, edges),
     weight: pick(g.weight, edges),
   };
+}
+
+/** The decay multiplier the sweep applies to memory `i`'s namespace. */
+export function decayMultiplier(g: Graph, i: number): number {
+  return g.namespaces.find((n) => n.id === g.ns[i])?.decayMultiplier ?? 1;
+}
+
+/** Retrievability of memory `i` at `at` (the Explore "strength"). */
+export function strengthAt(g: Graph, i: number, at = Date.now()): number {
+  if (i < 0 || g.permastore[i]) return 1;
+  if (g.stability[i] <= 0) return g.strength[i];
+  return retrievability(Math.max(0, at - g.lastAccess[i]) / DAY_MS, g.stability[i], decayMultiplier(g, i));
+}
+
+/** The phase memory `i` would be in at `at` (the map's Decay scrubber). */
+export function projectedPhase(g: Graph, i: number, at: number): number {
+  if (g.permastore[i] || g.phase[i] === 4 || g.stability[i] <= 0) return g.phase[i];
+  const ns = g.namespaces.find((n) => n.id === g.ns[i]);
+  // The projection never makes a memory stronger than recalld says it is now.
+  return Math.max(g.phase[i], phaseFor(strengthAt(g, i, at), (ns?.thresholds as [number, number, number]) ?? undefined));
 }

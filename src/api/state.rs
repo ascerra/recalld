@@ -727,6 +727,9 @@ pub trait FsrsEngine: Send + Sync {
         namespace: Option<&str>,
     ) -> Result<ReinforceResult, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// The global decay rate multiplier namespaces without their own inherit.
+    fn decay_rate_multiplier(&self) -> f64;
+
     /// Whether the decay sweep thread is still alive.
     fn sweep_thread_alive(&self) -> bool;
 

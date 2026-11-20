@@ -1576,3 +1576,183 @@ async fn prepared_get_rpc_actual_final_capture_races_preserve_generation_and_con
         daemon.finish().await;
     }
 }
+
+/// #231: an upgraded (control schema 2) store keeps records older releases
+/// left as a Summary that still has its text and a Ghost that still has tags.
+/// Both get eras, over the daemon socket, return them as stored.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_returns_carried_over_summary_text_and_ghost_tags() {
+    use crate::mcp::bridge::SearchPipeline as _;
+    use crate::serialization::get_api1::{Content, Request};
+    use crate::storage::schema_migration::{MigrationOptions, inspect_schema, migrate_schema};
+    let legacy = Fixture::new();
+    let mut ids = Vec::new();
+    for (phase, tags, text) in [
+        (DecayPhase::Summary, vec![], Some("retained full text")),
+        (DecayPhase::Ghost, vec!["topic/kept"], None),
+    ] {
+        let id = MemoryId::new();
+        let mut record = crate::model::DiskRecord {
+            schema: None,
+            version: crate::model::DiskRecord::CURRENT_VERSION,
+            id: *id.as_bytes(),
+            namespace_id: 1,
+            created_at: 0,
+            last_accessed_at: 0,
+            phase,
+            strength: 0.5,
+            decay_strength: 0.5,
+            stability: 1.0,
+            difficulty: 5.0,
+            is_permastore: 0,
+            vector_slot: 0,
+            edge_count: 0,
+            summary: "carried over".into(),
+            tags: tags
+                .into_iter()
+                .map(|t| crate::model::Tag::new(t).unwrap())
+                .collect(),
+            access_history: Vec::new(),
+            text_offset: 0,
+            text_length: 0,
+        };
+        legacy
+            .storage
+            .write()
+            .unwrap()
+            .insert_memory(id, NamespaceId::new(1), &mut record, &[1., 0., 0., 0.], text)
+            .unwrap();
+        ids.push(id);
+    }
+    legacy.storage.write().unwrap().sync().unwrap();
+    let source = legacy.close();
+    let native = tempfile::tempdir().unwrap();
+    std::fs::remove_dir(native.path()).unwrap();
+    migrate_schema(
+        source.path(),
+        native.path(),
+        &MigrationOptions {
+            migration_now: 2000,
+            expected_source: inspect_schema(source.path())
+                .unwrap()
+                .control
+                .generation_ref(),
+            attestations: vec![],
+        },
+    )
+    .unwrap();
+    let storage = crate::storage::RedbStorageEngine::open_native(native.path()).unwrap();
+    let f = Fixture::from_open_engine(native, storage);
+    let [summary, ghost] = [ids[0], ids[1]];
+    let record = f.record(summary).unwrap();
+    assert_eq!(record.phase, DecayPhase::Summary);
+    assert_ne!(record.text_length, 0, "upgrade keeps the Summary text");
+    assert_eq!(f.record(ghost).unwrap().tags.len(), 1);
+    assert_eq!(
+        f.storage
+            .read()
+            .unwrap()
+            .control_state()
+            .unwrap()
+            .control_schema_version,
+        2
+    );
+    let owner = owner(&f);
+    owner.rebuild_all().await.unwrap();
+    let engine = Arc::new(payload_engine(&f, &owner));
+
+    // Contract 2 (`get_memory` with contractVersion 2).
+    let local: Arc<dyn crate::mcp::bridge::SearchPipeline> =
+        Arc::new(crate::mcp::bridge_adapters::McpSearchAdapter::new(
+            engine.clone(),
+            Arc::new(crate::embedding::PassthroughProvider::new(4)),
+            f.storage.clone(),
+            f.graph.clone(),
+            chrono_tz::UTC,
+        ));
+    let daemon = crate::daemon::server::prepared_query_tests::PreparedDaemon::start(local.clone()).await;
+    let remote = crate::daemon::bridge_adapters::RemoteSearchAdapter::new(daemon.client.clone());
+    for id in [summary, ghost] {
+        let reply = remote
+            .get_contract(
+                point_request(id, false),
+                crate::daemon::protocol::MAX_MESSAGE_SIZE,
+            )
+            .await;
+        assert_eq!(reply.http_status, 200, "{reply:?}");
+        let owned = local
+            .get_contract(
+                point_request(id, false),
+                crate::daemon::protocol::MAX_MESSAGE_SIZE,
+            )
+            .await;
+        assert_eq!(
+            serde_json::to_value(&reply).unwrap(),
+            serde_json::to_value(owned).unwrap()
+        );
+        let memory = reply.envelope.data.unwrap().memory;
+        if id == summary {
+            assert_eq!(memory.full_text.as_deref(), Some("retained full text"));
+        } else {
+            assert_eq!(memory.phase, DecayPhase::Ghost);
+            assert_eq!(memory.tags.len(), 1);
+        }
+    }
+    daemon.finish().await;
+
+    // API1 (`get_memory`, and the web UI's GET /api/ui/memories/{id}, which
+    // runs this same tool over Remote adapters).
+    let adapter = ordinary_adapter(
+        &f,
+        engine,
+        Arc::new(crate::time::ManualClock::new(3000)),
+        chrono_tz::UTC,
+    );
+    let root = tempfile::tempdir().unwrap();
+    let (target, task) = crate::daemon::server::native_lifecycle_test_remote(
+        adapter.clone(),
+        &root.path().join("carried.sock"),
+    )
+    .await;
+    let target: Arc<dyn crate::mcp::bridge::StorageEngine> = Arc::new(target);
+    for id in [summary, ghost] {
+        let reply = target
+            .get_api1(
+                Request {
+                    id,
+                    namespace: None,
+                    record_access: false,
+                },
+                crate::daemon::api1_get::response_limit(),
+            )
+            .await;
+        let Content::Point { reply, native, .. } = reply.inner else {
+            panic!("carried-over record rejected: {reply:?}")
+        };
+        assert!(native);
+        assert_eq!(reply.http_status, 200, "{reply:?}");
+    }
+    let mut bridge = crate::test_support::StubBridge::default().into_bridge();
+    bridge.storage = target;
+    for id in [summary, ghost] {
+        let result = crate::mcp::tools::dispatch_tool(
+            &bridge,
+            "get_memory",
+            serde_json::json!({"id":id.to_string(),"recordAccess":false}),
+        )
+        .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let value = result.structured_content.unwrap();
+        if id == summary {
+            assert_eq!(value["fullText"], "retained full text");
+        } else {
+            assert_eq!(value["tags"], serde_json::json!(["topic/kept"]));
+        }
+    }
+    drop(bridge);
+    drop(adapter);
+    tokio::time::timeout(std::time::Duration::from_secs(3), task)
+        .await
+        .unwrap()
+        .unwrap();
+}
