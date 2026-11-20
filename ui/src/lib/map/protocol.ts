@@ -20,6 +20,9 @@ export type ToWorker =
   | { type: 'add'; x: number; y: number; degree: number; links: { to: number; w: number }[] }
   /** A memory forgotten while the map is open: its neighbors close the gap. */
   | { type: 'remove'; index: number }
+  /** The tab is hidden / visible again: hold the simulation meanwhile. */
+  | { type: 'pause' }
+  | { type: 'resume' }
   | { type: 'stop' };
 
 export type FromWorker =

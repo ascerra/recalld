@@ -102,10 +102,10 @@ jobs:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
-      - name: Default binary has no UI command
+      - name: Default binary has the UI command
         run: |
           ./target/release/recalld --help > help.txt
-          if grep -Eq '^\s+ui\s' help.txt; then echo "default build exposes 'ui'"; exit 1; fi
+          grep -Eq '^\s+ui\s' help.txt || { echo "default build is missing 'ui'"; exit 1; }
 
   default-build-unchanged:
     # The web UI is a default feature; a headless build (--no-default-features,

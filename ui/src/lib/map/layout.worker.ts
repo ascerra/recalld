@@ -25,6 +25,8 @@ let dragAt: { x: number; y: number } | null = null;
  *  layout moves slowly, as if through thick fluid. The first layout of a
  *  view runs flat out instead, so a large map is ready quickly. */
 let paced = false;
+/** The page is hidden: hold the simulation where it is until it's back. */
+let paused = false;
 function fluid() {
   paced = true;
   sim?.velocityDecay(0.72).alphaDecay(0.015);
@@ -61,7 +63,7 @@ async function run() {
   if (running || !sim) return;
   running = true;
   let frames = 0;
-  while (sim && sim.alpha() > sim.alphaMin()) {
+  while (sim && !paused && sim.alpha() > sim.alphaMin()) {
     sim.tick(paced ? 1 : 2);
     separate(2);
     if (paced || ++frames % 2 === 0) {
@@ -72,6 +74,7 @@ async function run() {
     await new Promise((r) => setTimeout(r, paced ? 16 : 0));
   }
   running = false;
+  if (paused) return; // picks up where it left off on resume
   if (!paced) fluid();
   if (sim) {
     // A local reheat is done: let the rest of the map move again.
@@ -275,6 +278,11 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     (sim.force('link') as ReturnType<typeof forceLink<Node, (typeof links)[number]>>).links(links);
     sim.nodes(nodes);
     reheatAround(node, 0.12);
+  } else if (m.type === 'pause') {
+    paused = true;
+  } else if (m.type === 'resume') {
+    paused = false;
+    run();
   } else if (m.type === 'stop') {
     sim?.stop();
     sim = null;

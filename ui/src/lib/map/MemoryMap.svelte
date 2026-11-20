@@ -60,6 +60,9 @@
   let rings: { id: string; until: number; linked: boolean }[] = [];
   let liveLabels: string[] = [];
   const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** No animation now: the user asked for less motion, or the tab is hidden
+   *  (nothing would be seen, and queued motion would all fire on return). */
+  const calm = () => reducedMotion || (typeof document !== 'undefined' && document.hidden);
   let tooltip = $state<{ id: string; x: number; y: number; flip: boolean } | null>(null);
   let summaries = $state<Map<string, string | null>>(new Map());
   let sigma: Sigma | null = null;
@@ -334,6 +337,9 @@
     if (!graph || !sigma || !light) return;
     const e = r.event;
     if (!replay) applyToGraph(e);
+    // A hidden tab keeps the graph current but plays no light: it would queue
+    // up unseen and all fire when the tab comes back.
+    if (document.hidden) return;
     const slot = 'agent' in e ? live.agentSlot(e.agent) : 0;
     const colors = { agent: rgb(theme.agents[slot]), lit: rgb(theme.nodeLit), moss: rgb(theme.moss), cool: rgb(theme.suppressed) };
     const scale = sigma.scaleSize(DRAW);
@@ -467,15 +473,15 @@
     const side = Math.random() * Math.PI * 2;
     const cx = anchor.x + 26 * px * Math.cos(side);
     const cy = anchor.y + 26 * px * Math.sin(side);
-    g.addNode(e.id, { ...enc, phase: e.phase, wob: Math.random() * Math.PI * 2, x: cx, y: cy, index: -1, size: reducedMotion ? enc.size : 0 });
+    g.addNode(e.id, { ...enc, phase: e.phase, wob: Math.random() * Math.PI * 2, x: cx, y: cy, index: -1, size: calm() ? enc.size : 0 });
     e.edges.forEach((x, i) => {
       if (!g.hasNode(x.to)) return;
       // A memory can link to the same neighbor more than once (one per type).
       const key = `live-${e.seq}-${x.to}-${x.edgeType}`;
       if (g.hasEdge(key)) return;
       const visible = edgeTypes.has(x.edgeType);
-      g.addEdgeWithKey(key, e.id, x.to, { ...edgeAttributes(theme, x.edgeType, x.weight), type: x.edgeType, visibility: reducedMotion && visible ? 'visible' : 'hidden' });
-      if (!reducedMotion && visible) growing.push({ from: e.id, to: x.to, start: now + 300 + i * 110, dur: 650, key, visible });
+      g.addEdgeWithKey(key, e.id, x.to, { ...edgeAttributes(theme, x.edgeType, x.weight), type: x.edgeType, visibility: calm() && visible ? 'visible' : 'hidden' });
+      if (!calm() && visible) growing.push({ from: e.id, to: x.to, start: now + 300 + i * 110, dur: 650, key, visible });
     });
     // The worker settles it among its neighbors: real repulsion nudges the
     // memories around it aside. Temporal links stay out of the physics here,
@@ -485,7 +491,7 @@
       liveIndex.set(e.id, snapshot.ids.length + liveIndex.size);
       worker.postMessage({ type: 'add', x: cx, y: cy, degree: e.edges.length, links: to } satisfies ToWorker);
     }
-    if (reducedMotion) return;
+    if (calm()) return;
     motions.set(e.id, { x0: cx, y0: cy, x1: cx, y1: cy, start: now, dur: 1100, ripple: false, size: enc.size, still: true });
     play();
   }
@@ -496,7 +502,7 @@
     const g = graph!;
     if (motions.get(id)?.shrink) return; // already leaving
     const a = g.getNodeAttributes(id) as { x: number; y: number; size: number; visibility: string };
-    if (reducedMotion || a.visibility !== 'visible') {
+    if (calm() || a.visibility !== 'visible') {
       g.setNodeAttribute(id, 'visibility', 'hidden');
       return;
     }
@@ -528,7 +534,7 @@
       // A new memory's first links grow out of it; others just appear.
       const now = performance.now();
       const young = [e.src, e.dst].find((id) => now - (bornAt.get(id) ?? -Infinity) < 4000);
-      const grow = visible && young !== undefined && !reducedMotion;
+      const grow = visible && young !== undefined && !calm();
       if (!graph.hasEdge(key)) {
         graph.addEdgeWithKey(key, e.src, e.dst, { ...edgeAttributes(theme, e.edgeType, e.weight), type: e.edgeType, visibility: visible && !grow ? 'visible' : 'hidden' });
         if (grow) {
@@ -870,6 +876,14 @@
         light = null; // no WebGL2: the map still works, without light
       }
       unsubscribe = live.subscribe(onLive);
+      // Hidden tab: pause the layout so it doesn't run (and post positions)
+      // unseen; resume and redraw on return.
+      onVisibility = () => {
+        worker?.postMessage({ type: document.hidden ? 'pause' : 'resume' } satisfies ToWorker);
+        if (!document.hidden) sigma?.refresh();
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+      if (document.hidden) onVisibility();
       if (selectedId && graph.hasNode(selectedId)) emphasize(selectedId);
       sigma.on('enterNode', ({ node }) => {
         hovered = node;
@@ -957,8 +971,10 @@
   });
 
   let unsubscribe: (() => void) | null = null;
+  let onVisibility: (() => void) | null = null;
   onDestroy(() => {
     unsubscribe?.();
+    if (onVisibility) document.removeEventListener('visibilitychange', onVisibility);
     light?.dispose();
     worker?.postMessage({ type: 'stop' } satisfies ToWorker);
     worker?.terminate();
