@@ -52,4 +52,10 @@ describe('recall light', () => {
     const c = choreograph({ ...recall, trace }, pos, 0, colors);
     expect(c.pulses.length).toBe(1);
   });
+  it('marks what the light touches so the rest of the map can dim', () => {
+    const c = choreograph(recall, pos, 0, colors);
+    expect(new Set(c.lit.nodes)).toEqual(new Set(['a', 'b', 'c']));
+    expect(c.lit.edges).toEqual([['a', 'b'], ['b', 'c']]);
+    expect(c.lit.until).toBeGreaterThan(Math.max(...c.pulses.map((p) => p.start + p.duration)));
+  });
 });

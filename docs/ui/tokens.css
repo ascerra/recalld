@@ -37,7 +37,11 @@
   --color-on-accent: #F7F3E9;     /* text on --color-accent */
 
   /* ── Graph ────────────────────────────────────────────────── */
-  --color-node: #3C403A;          /* unlit memory node */
+  --color-node: #3C403A;          /* unlit memory node (namespace tone 1) */
+  --color-node-2: #4A4D53;        /* namespace tone 2: ink slate */
+  --color-node-3: #524C44;        /* namespace tone 3: umber */
+  --color-node-4: #3F4943;        /* namespace tone 4: deep moss */
+  --color-node-5: #504B52;        /* namespace tone 5: dusk mauve */
   --color-node-lit: #579270;      /* node reached by a recall (3.2:1 on canvas) */
   --color-edge: #9EA39A;          /* base edge, opacity 0.32 × (0.3 + 0.7 × weight), solid */
   --color-suppressed: #AAB5BF;    /* RIF-suppressed competitor */

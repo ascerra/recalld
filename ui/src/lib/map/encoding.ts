@@ -8,19 +8,21 @@ export const EDGE_LABELS: Record<number, string> = {
   1: 'Parent', 2: 'Associative', 3: 'Causal', 4: 'Contradicts', 5: 'Entity', 6: 'Temporal', 7: 'Supersedes',
 };
 
-/** `strength`: retrievability now (0..1); a memory just stored is 1. */
-export function nodeAttributes(theme: MapTheme, phase: number, degree: number, permastore: boolean, strength = 1) {
+/** `strength`: retrievability now (0..1); a memory just stored is 1.
+ *  `ns`: namespace id, which picks the node's tone. */
+export function nodeAttributes(theme: MapTheme, phase: number, degree: number, permastore: boolean, strength = 1, ns = 0) {
   const size = displaySize(degree, strength);
+  const node = theme.tones?.[ns % theme.tones.length] || theme.node;
   switch (phase) {
     case 1:
-      return { size, color: alpha(theme.node, 0.82), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
+      return { size, color: alpha(node, 0.82), ring: alpha(node, 0), visibility: 'visible' as const, permastore };
     case 2:
-      return { size, color: alpha(theme.node, 0.38), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
+      return { size, color: alpha(node, 0.38), ring: alpha(node, 0), visibility: 'visible' as const, permastore };
     case 3:
-      return { size, color: alpha(theme.node, 0), ring: alpha(theme.node, 0.5), visibility: 'visible' as const, permastore };
+      return { size, color: alpha(node, 0), ring: alpha(node, 0.5), visibility: 'visible' as const, permastore };
     default:
       // Tombstones and memories the decay projection deletes.
-      return { size: 1.6, color: alpha(theme.node, 0.35), ring: alpha(theme.node, 0), visibility: 'hidden' as const, permastore: false };
+      return { size: 1.6, color: alpha(node, 0.35), ring: alpha(node, 0), visibility: 'hidden' as const, permastore: false };
   }
 }
 

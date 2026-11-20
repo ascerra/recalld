@@ -10,6 +10,8 @@ interface Node extends SimulationNodeDatum {
   /** 0..1, how connected this memory is relative to the graph. */
   hub: number;
   deg: number;
+  /** Forgotten while the map is open: exerts no force, pinned in place. */
+  gone?: boolean;
 }
 
 let sim: ReturnType<typeof forceSimulation<Node>> | null = null;
@@ -18,6 +20,14 @@ let adjacency: number[][] = [];
 let links: { source: number | Node; target: number | Node; w: number }[] = [];
 let running = false;
 let dragging = false;
+/** One tick per frame and high friction, so every change after the first
+ *  layout moves slowly, as if through thick fluid. The first layout of a
+ *  view runs flat out instead, so a large map is ready quickly. */
+let paced = false;
+function fluid() {
+  paced = true;
+  sim?.velocityDecay(0.72).alphaDecay(0.015);
+}
 let pinned: number[] = [];
 // The offset that keeps the layout centered. Recomputed only until the first
 // settle; afterwards fixed, so dragging one node never shifts the rest.
@@ -51,15 +61,16 @@ async function run() {
   running = true;
   let frames = 0;
   while (sim && sim.alpha() > sim.alphaMin()) {
-    sim.tick(2);
-    if (++frames % 2 === 0) {
+    sim.tick(paced ? 1 : 2);
+    if (paced || ++frames % 2 === 0) {
       const { x, y } = positions();
       post({ type: 'tick', x, y, alpha: sim.alpha() }, [x.buffer, y.buffer]);
     }
     // Yield so drag messages arrive between ticks.
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, paced ? 16 : 0));
   }
   running = false;
+  if (!paced) fluid();
   if (sim) {
     // A local reheat is done: let the rest of the map move again.
     if (!dragging) release();
@@ -90,8 +101,21 @@ function pinAllBut(near: Set<number>) {
     }
 }
 
+/** Only `node`'s surroundings move; the rest of the map stays put. */
+function reheatAround(node: Node, alpha: number) {
+  if (!sim) return;
+  if (!dragging) {
+    const near = new Set([node.i]);
+    for (const o of nodes) if (!o.gone && Math.hypot(o.x! - node.x!, o.y! - node.y!) < 160) near.add(o.i);
+    if (node.gone) near.delete(node.i);
+    pinAllBut(near);
+  }
+  sim.alpha(Math.max(sim.alpha(), alpha));
+  run();
+}
+
 function release() {
-  for (const i of pinned) nodes[i].fx = nodes[i].fy = null;
+  for (const i of pinned) if (!nodes[i].gone) nodes[i].fx = nodes[i].fy = null;
   pinned = [];
 }
 
@@ -140,17 +164,23 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       // Room to read: strong repulsion, long weak links, generous spacing.
       // Hubs push harder for room and pull harder toward the center, so they
       // anchor their clusters and sparse memories drift outward.
-      .force('charge', forceManyBody<Node>().strength((d) => -90 - 160 * d.hub).theta(0.9).distanceMax(500))
+      .force('charge', forceManyBody<Node>().strength((d) => (d.gone ? 0 : -90 - 160 * d.hub)).theta(0.9).distanceMax(500))
       .force('link', forceLink<Node, (typeof links)[number]>(links).id((d) => d.i).distance(70)
         // d3's own normalization: a memory with many links isn't pulled in many times as hard.
         .strength((l) => (0.3 + 0.7 * l.w) / Math.min((l.source as unknown as Node).deg, (l.target as unknown as Node).deg)))
-      .force('collide', forceCollide<Node>((d) => d.r * 2.5 + 10).iterations(2))
+      .force('collide', forceCollide<Node>((d) => (d.gone ? 0 : d.r * 2.5 + 10)).iterations(2))
       .force('x', forceX<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
       .force('y', forceY<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
       .stop();
     // Cached layouts open settled: barely reheat; a fully new one starts hot.
     sim.alpha(unknown.length === 0 ? 0 : anyKnown ? Math.min(0.3, 0.05 + unknown.length / m.n) : 1);
-    if (unknown.length === 0) {
+    paced = false;
+    if (anyKnown) fluid();
+    if (m.reflow) {
+      // Borrowed from the full map: drift into this view's own layout.
+      sim.alphaDecay(0.012).alpha(0.5);
+      run();
+    } else if (unknown.length === 0) {
       offset = [0, 0]; // cached layouts are already centered
       const { x, y } = positions();
       post({ type: 'settled', x, y }, [x.buffer, y.buffer]);
@@ -168,7 +198,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       dragging = true;
       // A gentle, well-damped reheat of the neighborhood only.
       freezeOffset();
-      sim.velocityDecay(0.6).alphaTarget(0.04).alpha(Math.max(sim.alpha(), 0.06));
+      sim.alphaTarget(0.04).alpha(Math.max(sim.alpha(), 0.06));
     }
     // The main thread works in centered coordinates; the worker in raw ones.
     n.fx = m.x + offset![0];
@@ -176,7 +206,6 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     if (m.phase === 'end') {
       n.fx = n.fy = null;
       sim.alphaTarget(0);
-      sim.velocityDecay(0.4);
       dragging = false; // the pinned nodes are released once it settles
     }
     run();
@@ -194,14 +223,16 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       links.push({ source: i, target: l.to, w: l.w });
     }
     sim.nodes(nodes); // re-initializes every force, links included
-    // Only its surroundings make room; the rest of the map stays put.
-    if (!dragging) {
-      const near = new Set([i]);
-      for (const o of nodes) if (Math.hypot(o.x! - node.x!, o.y! - node.y!) < 160) near.add(o.i);
-      pinAllBut(near);
-    }
-    sim.alpha(Math.max(sim.alpha(), 0.15));
-    run();
+    reheatAround(node, 0.15);
+  } else if (m.type === 'remove' && sim && nodes[m.index]) {
+    const node = nodes[m.index];
+    node.gone = true;
+    node.fx = node.x;
+    node.fy = node.y;
+    links = links.filter((l) => (l.source as Node).i !== m.index && (l.target as Node).i !== m.index);
+    (sim.force('link') as ReturnType<typeof forceLink<Node, (typeof links)[number]>>).links(links);
+    sim.nodes(nodes);
+    reheatAround(node, 0.12);
   } else if (m.type === 'stop') {
     sim?.stop();
     sim = null;

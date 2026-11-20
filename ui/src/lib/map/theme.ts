@@ -2,6 +2,8 @@
 // only source of values (WebGL needs concrete colors).
 export interface MapTheme {
   node: string;
+  /** Per-namespace node tones; a namespace keeps its tone in every view. */
+  tones: string[];
   nodeLit: string;
   edge: string;
   contradicts: string;
@@ -21,6 +23,7 @@ const css = (name: string) => getComputedStyle(document.documentElement).getProp
 export function readTheme(): MapTheme {
   return {
     node: css('--color-node'),
+    tones: [css('--color-node'), ...[2, 3, 4, 5].map((i) => css(`--color-node-${i}`))],
     nodeLit: css('--color-node-lit'),
     edge: css('--color-edge'),
     contradicts: css('--color-contradicts'),

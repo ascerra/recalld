@@ -24,6 +24,8 @@ export interface Choreo {
   suppressed: { id: string; until: number }[];
   /** Nodes to flash, with when the light reaches them (performance.now clock). */
   flashes: { id: string; at: number }[];
+  /** What the light touches, so the map can dim everything else until `until`. */
+  lit: { nodes: string[]; edges: [string, string][]; until: number };
 }
 
 export interface Colors {
@@ -41,7 +43,7 @@ export function choreograph(
   opts: { speed?: number; reducedMotion?: boolean; scale?: number } = {},
 ): Choreo {
   const speed = opts.speed ?? 1;
-  const out: Choreo = { pulses: [], glows: [], rings: [], labels: [], suppressed: [], flashes: [] };
+  const out: Choreo = { pulses: [], glows: [], rings: [], labels: [], suppressed: [], flashes: [], lit: { nodes: [], edges: [], until: now } };
   const glowAt = (id: string, start: number, intensity: number, color = colors.lit, kind: 0 | 1 | 2 = 0, radius = 22, decay = BLOOM_DECAY) => {
     const p = pos(id);
     if (p) out.glows.push({ x: p.x, y: p.y, start, attack: BLOOM_ATTACK * speed, decay: decay * speed, intensity: Math.min(1, intensity), radius, color, kind });
@@ -84,12 +86,18 @@ export function choreograph(
       const arrive = start + (opts.reducedMotion ? 0 : duration);
       glowAt(step.to, arrive, 0.35 + 0.6 * step.amount * fade);
       out.flashes.push({ id: step.to, at: arrive });
+      out.lit.edges.push([step.from, step.to]);
       last = Math.max(last, start + duration);
     }
     // 4. Results keep a ring; linked ones get the moss tint.
     const seeds = new Set(event.seeds.map((s) => s.id));
     for (const id of event.returned) out.rings.push({ id, until: last + RESULT_RING_MS, linked: !seeds.has(id) });
     out.labels = [...event.seeds.map((s) => s.id), ...event.returned.filter((id) => !seeds.has(id))];
+    out.lit = {
+      nodes: [...new Set([...seeds, ...event.returned, ...out.lit.edges.flat()])],
+      edges: out.lit.edges,
+      until: last + 400,
+    };
     // 5. Suppressed competitors cool for 600 ms, then recover.
     for (const id of event.suppressed.slice(0, 12)) {
       glowAt(id, last, 0.5, colors.cool, 2, 14, SUPPRESS_MS);
