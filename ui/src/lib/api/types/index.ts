@@ -109,7 +109,12 @@ phase: number,
 /**
  * R now, from recalld's FSRS (same computation as the health report).
  */
-strength: number, stability: number, createdAt: number, lastAccessedAt: number, permastore: boolean, degree: number, 
+strength: number, 
+/**
+ * Effective decay rate multiplier the sweep applies (namespace override
+ * or global); pass it to `fsrs.ts` to project R client-side.
+ */
+decayMultiplier: number, stability: number, createdAt: number, lastAccessedAt: number, permastore: boolean, degree: number, 
 /**
  * Next phase transition, as the health report's forecast computes it.
  */

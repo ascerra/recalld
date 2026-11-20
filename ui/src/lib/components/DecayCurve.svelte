@@ -9,14 +9,14 @@
     elapsedDays = 0,
     previousStability = null,
     thresholds = THRESHOLDS,
-    multiplier = 1,
+    multiplier,
     height = 96,
   }: {
     stability: number;
     elapsedDays?: number;
     previousStability?: number | null;
     thresholds?: [number, number, number];
-    multiplier?: number;
+    multiplier: number;
     height?: number;
   } = $props();
 

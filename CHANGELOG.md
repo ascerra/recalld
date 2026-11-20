@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Local web UI
+
+- Decay forecasts use the namespace's effective decay multiplier (its own, else the global one), as the decay sweep does: Explore's strength and **Next change**, the memory panel's decay curve, the Health forecast and at-risk list, and the map's Decay scrubber previously assumed a multiplier of 1. (#235)
+
 ## 2.1.2 — 2026-11-20
 
 ### Local web UI

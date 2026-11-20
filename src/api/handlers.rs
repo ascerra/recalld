@@ -1890,6 +1890,7 @@ pub async fn health_report(
     let report = compute_health_report(
         state.storage.as_ref(),
         state.namespaces.as_ref(),
+        state.decay.decay_rate_multiplier(),
         params.namespace,
     )
     .await?;
@@ -1905,6 +1906,7 @@ pub async fn health_report(
 pub async fn compute_health_report(
     storage: &dyn StorageEngine,
     namespaces: &dyn NamespaceRegistry,
+    global_decay_multiplier: f64,
     namespace: Option<String>,
 ) -> Result<HealthReport, AppError> {
     let stamp = storage.effects_stamp().await?;
@@ -1954,8 +1956,13 @@ pub async fn compute_health_report(
             .collect();
 
         let overview = health_report_compute::compute_overview(&filtered);
-        let decay_forecast = health_report_compute::compute_decay_forecast(&filtered, namespaces);
-        let at_risk = health_report_compute::compute_at_risk(&filtered, namespaces);
+        let decay_forecast = health_report_compute::compute_decay_forecast(
+            &filtered,
+            namespaces,
+            global_decay_multiplier,
+        );
+        let at_risk =
+            health_report_compute::compute_at_risk(&filtered, namespaces, global_decay_multiplier);
         let age_distribution = health_report_compute::compute_age_distribution(&filtered);
         let storage_breakdown =
             health_report_compute::compute_storage_breakdown(storage, namespaces, namespace_filter)

@@ -245,7 +245,7 @@
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
             <tr class="row" class:selected={open} onclick={() => m && toggle(m.id)}>
               {#if m}
-                {@const r = strengthAt(m.lastAccessedAt, m.stability)}
+                {@const r = strengthAt(m.lastAccessedAt, m.stability, m.decayMultiplier)}
                 <td class="first cell-btn">
                   <button type="button" data-id={m.id} aria-expanded={open} class:ghost={m.summary === null} onclick={(e) => { e.stopPropagation(); toggle(m.id); }}>{m.summary ?? 'Summary dropped'}</button>
                 </td>
