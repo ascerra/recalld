@@ -9,10 +9,10 @@ export const EDGE_LABELS: Record<number, string> = {
 };
 
 /** `strength`: retrievability now (0..1); a memory just stored is 1.
- *  `ns`: namespace id, which picks the node's tone. */
-export function nodeAttributes(theme: MapTheme, phase: number, degree: number, permastore: boolean, strength = 1, ns = 0) {
+ *  `tone`: the memory's own color (its namespace's tone, varied slightly). */
+export function nodeAttributes(theme: MapTheme, phase: number, degree: number, permastore: boolean, strength = 1, tone = theme.node) {
   const size = displaySize(degree, strength);
-  const node = theme.tones?.[ns % theme.tones.length] || theme.node;
+  const node = tone;
   switch (phase) {
     case 1:
       return { size, color: alpha(node, 0.82), ring: alpha(node, 0), visibility: 'visible' as const, permastore };
