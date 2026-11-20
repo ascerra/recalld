@@ -781,6 +781,49 @@ async fn read_only_graph_expansion_and_supersedes_hydrate_canonical_records() {
     );
 }
 
+/// A supersedes chain collapses to its newest returnable member: recall
+/// never shows two versions of one fact, and a newest version that cannot be
+/// returned (here a ghost) hands its place to the one before it rather than
+/// letting every older version through.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn supersedes_chain_collapses_to_newest_returnable_member() {
+    let h = Harness::new().await;
+    let (oldest, middle, newest) = (h.ids[0], h.ids[1], h.ids[2]);
+    let supersede = |new: MemoryId, old: MemoryId| {
+        let graph = h.f.graph.clone();
+        async move {
+            graph
+                .write()
+                .await
+                .add_edge(new, old, crate::model::EdgeType::Supersedes, 1.0, false)
+                .unwrap();
+        }
+    };
+    supersede(middle, oldest).await;
+    supersede(newest, middle).await;
+    let returned = |h: &Harness| {
+        let engine = h.engine.clone();
+        async move {
+            let response = engine.search(query(false)).await.unwrap();
+            response
+                .results
+                .iter()
+                .map(|r| r.memory_id)
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(returned(&h).await, vec![newest]);
+
+    let ghost =
+        h.f.insert_memory_with(MemorySpec {
+            phase: crate::model::DecayPhase::Ghost,
+            ..MemorySpec::new(NamespaceId::new(1))
+        })
+        .await;
+    supersede(ghost, newest).await;
+    assert_eq!(returned(&h).await, vec![newest]);
+}
+
 fn event_counts(h: &Harness, ids: &[MemoryId]) -> Vec<usize> {
     ids.iter()
         .map(|id| h.f.record(*id).unwrap().access_history.len())

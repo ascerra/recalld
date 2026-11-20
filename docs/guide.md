@@ -888,6 +888,11 @@ always says what actually happened to the link.
   still stored.
 - **Counted.** The new memory's `edgeCount` includes the supersedes edge.
   Memories stored before this behaviour existed are not backfilled.
+- **Chains collapse at recall.** If A is superseded by B and B by C, recall
+  returns only the newest version that passes the query's filters: C, or B
+  when C is deleted, a ghost, or filtered out. Older versions stay readable
+  with `get_memory`. Only a stored link counts; supersedes text inside a
+  summary does nothing.
 
 #### Near-duplicate warnings
 
