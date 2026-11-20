@@ -31,6 +31,36 @@ pub(super) fn pending(path: &Path) -> PathBuf {
     name.push(".recalld-upgrade-pending");
     path.with_file_name(name)
 }
+fn failed_marker(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap().to_os_string();
+    name.push(".recalld-upgrade-failed");
+    path.with_file_name(name)
+}
+/// Remembers a deterministic pre-commit failure on an unchanged source so a
+/// restart loop does not leave a new full copy of the store on every attempt.
+#[derive(Serialize, Deserialize)]
+struct FailedUpgrade {
+    version: String,
+    source: Vec<Seal>,
+    error: String,
+}
+/// Returns the refusal message when this binary already failed on this source.
+fn known_failure(target: &Path, source: &[Seal]) -> Option<String> {
+    let marker = failed_marker(target);
+    let record = fs::read(&marker)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<FailedUpgrade>(&b).ok())?;
+    if record.version == env!("CARGO_PKG_VERSION") && record.source == source {
+        return Some(format!(
+            "{}; this unchanged database already failed this upgrade, so no new copy was made; repair or replace the database, or remove {}, to retry",
+            record.error,
+            marker.display()
+        ));
+    }
+    // The source or binary changed: retry, and drop the stale record.
+    let _ = fs::remove_file(&marker);
+    None
+}
 /// Advisory classification; open rechecks while holding exclusive ownership.
 /// Unknown/future/mixed formats are errors, never treated as empty or legacy.
 pub(crate) fn classify(path: &Path) -> Result<StoreFormat, StorageError> {
@@ -309,14 +339,16 @@ fn recover(owner: &StoreOwnership) -> Result<(), StorageError> {
         .display()
     )))
 }
-fn rollback(j: &Journal) -> Result<(), StorageError> {
+/// Returns true when the original was verified unchanged, false when restored.
+fn rollback(j: &Journal) -> Result<bool, StorageError> {
     j.validate_paths(&j.target)?;
     // Before cutover the untouched original is itself the recovery source, even
     // when ENOSPC interrupted the backup. Do not require a complete partial copy.
     if j.target.try_exists()? && inventory(&j.target)? == j.original {
         let mut done = j.clone();
         done.phase = Phase::Aborted;
-        return done.clear();
+        done.clear()?;
+        return Ok(true);
     }
     if j.phase == Phase::Preparing {
         return Err(invalid("original changed during incomplete backup"));
@@ -358,7 +390,8 @@ fn rollback(j: &Journal) -> Result<(), StorageError> {
     fsync_dir(&j.root())?;
     let mut done = j.clone();
     done.phase = Phase::Aborted;
-    done.clear()
+    done.clear()?;
+    Ok(false)
 }
 
 /// Owns the startup transaction independently of runtime engine handles.
@@ -426,7 +459,7 @@ impl UpgradeTransaction {
         if saved.id != j.id || saved.phase == Phase::Committed {
             return Err(invalid("cannot abort changed or committed upgrade"));
         }
-        rollback(&saved)
+        rollback(&saved).map(|_| ())
     }
 }
 
@@ -466,12 +499,16 @@ fn prepare_at(
         StoreFormat::PendingUpgrade => unreachable!("owned classification excludes journals"),
     }
     let _old_lock = lock_directory(&owner.path)?;
+    let original = inventory(&owner.path)?;
+    if let Some(message) = known_failure(&owner.path, &original) {
+        return Err(invalid(message));
+    }
     let mut j = Journal {
         version: 1,
         id: Uuid::new_v4(),
         target: owner.path.clone(),
         phase: Phase::Preparing,
-        original: inventory(&owner.path)?,
+        original,
         candidate: vec![],
     };
     fs::create_dir(j.root())?;
@@ -552,11 +589,37 @@ fn prepare_at(
         Ok(())
     })();
     if let Err(error) = prepared {
-        rollback(&j)?;
-        return Err(invalid(format!(
+        let unchanged = rollback(&j)?;
+        let message = format!(
             "{error}; original unchanged/restored; upgrade artifacts retained at {}",
             j.root().display()
-        )));
+        );
+        // I/O and redb errors may be transient (e.g. disk full): keep retrying those.
+        let transient = matches!(
+            error,
+            StorageError::Io(_)
+                | StorageError::DatabaseLocked
+                | StorageError::Redb(_)
+                | StorageError::RedbDatabase(_)
+                | StorageError::RedbTable(_)
+                | StorageError::RedbTransaction(_)
+                | StorageError::RedbStorage(_)
+                | StorageError::RedbCommit(_)
+        );
+        if unchanged && !transient {
+            let record = FailedUpgrade {
+                version: env!("CARGO_PKG_VERSION").into(),
+                source: j.original.clone(),
+                error: message.clone(),
+            };
+            let written = serde_json::to_vec(&record)
+                .map_err(std::io::Error::other)
+                .and_then(|bytes| fs::write(failed_marker(&j.target), bytes));
+            if let Err(e) = written {
+                tracing::warn!(error = %e, "could not record failed upgrade");
+            }
+        }
+        return Err(invalid(message));
     }
     match RedbStorageEngine::open_shared_owned_with_ids(owner.clone(), true, ids) {
         Ok(engine) => Ok((

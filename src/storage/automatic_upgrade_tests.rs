@@ -508,3 +508,36 @@ fn upgrade_only_acquisition_cannot_bypass_lock_or_journal_identity() {
     assert_eq!(inventory(&path).unwrap(), original);
     assert!(!path.parent().unwrap().join("unrelated").exists());
 }
+#[test]
+fn repeated_failure_on_unchanged_source_makes_no_new_copy() {
+    let (_root, path) = fixture();
+    let attempt = |path: &Path| {
+        prepare_at(
+            path,
+            1795025815000,
+            Box::new(SystemIds),
+            |_| Err(invalid("vector ownership mismatch")),
+            |_| Ok(()),
+        )
+        .err()
+        .unwrap()
+        .to_string()
+    };
+    let artifacts = |path: &Path| {
+        fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().is_dir())
+            .count()
+            - 1
+    };
+    let first = attempt(&path);
+    assert_eq!(artifacts(&path), 1);
+    let second = attempt(&path);
+    assert!(second.starts_with(&first), "{second}");
+    assert!(second.contains("no new copy"), "{second}");
+    assert_eq!(artifacts(&path), 1);
+    // A changed (e.g. repaired) source retries the upgrade.
+    fs::write(path.join("repaired"), b"changed").unwrap();
+    assert!(!attempt(&path).contains("no new copy"));
+    assert_eq!(artifacts(&path), 2);
+}
