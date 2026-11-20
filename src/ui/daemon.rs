@@ -30,7 +30,7 @@ pub struct UiService {
     pub(super) storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     pub(super) graph: SharedGraph,
     embedding: Arc<dyn EmbeddingProvider>,
-    config: crate::RecalldConfig,
+    pub(super) config: crate::RecalldConfig,
     pub(super) query_engine: Arc<crate::search::QueryEngine>,
     pub(super) rows: Mutex<super::memories::RowCache>,
     pub(super) api_storage: Arc<dyn crate::api::StorageEngine>,
@@ -140,6 +140,7 @@ impl UiService {
                     crate::api::compute_health_report(
                         self.api_storage.as_ref(),
                         self.api_namespaces.as_ref(),
+                        self.config.decay.decay_rate_multiplier,
                         namespace,
                     )
                     .await

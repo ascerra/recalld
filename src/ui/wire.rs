@@ -211,6 +211,9 @@ pub struct MemoryRow {
     pub phase: u8,
     /// R now, from recalld's FSRS (same computation as the health report).
     pub strength: f32,
+    /// Effective decay rate multiplier the sweep applies (namespace override
+    /// or global); pass it to `fsrs.ts` to project R client-side.
+    pub decay_multiplier: f32,
     pub stability: f32,
     pub created_at: i64,
     pub last_accessed_at: i64,

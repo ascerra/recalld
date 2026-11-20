@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use crate::config::types::{
     CacheConfig, DecayConfig, EmbeddingConfig, EmbeddingProvider, GraphConfig, LogConfig,
-    LogFormat, RifConfig, ServerConfig, StorageConfig,
+    LogFormat, NamespacesMode, RifConfig, ServerConfig, StorageConfig,
 };
 use crate::config::{ConfigError, RecalldConfig};
 
@@ -178,6 +178,7 @@ fn apply_per_dir_overrides(base: RecalldConfig, per_dir: &PerDirConfig) -> Recal
         rif: per_dir.rif.clone().unwrap_or(base.rif),
         log: per_dir.log.clone().unwrap_or(base.log),
         ui: base.ui,
+        namespaces: base.namespaces,
         timezone: base.timezone,
     }
 }
@@ -519,6 +520,13 @@ fn apply_env_overrides(config: &mut RecalldConfig) -> std::result::Result<(), Ve
     }
     env_override_opt_string!("RECALLD_LOG_FILE", config.log.file);
 
+    // --- Namespaces ---
+    env_override!(
+        "RECALLD_NAMESPACES_MODE",
+        config.namespaces.mode,
+        NamespacesMode
+    );
+
     // --- Timezone ---
     env_override_string!("RECALLD_TIMEZONE", config.timezone);
 
@@ -614,6 +622,9 @@ pub fn generate_default_config() -> String {
 
 [ui]
 # enabled = true                     # `recalld ui`, the local browser UI
+
+[namespaces]
+# mode = "multi"                     # "single": MCP agents use only `default`
 "#
     .to_string()
 }

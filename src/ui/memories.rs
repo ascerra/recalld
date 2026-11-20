@@ -7,8 +7,7 @@ use std::sync::{Arc, Mutex};
 use super::daemon::UiService;
 use super::events::{self, EventContext, RecallTrace};
 use super::wire::*;
-use crate::decay::fsrs::FsrsEngine;
-use crate::health::report::decay_config_for_namespace;
+use crate::health::report::decay_outlook;
 use crate::mcp::bridge::BridgeError;
 use crate::model::record::DiskRecord;
 use crate::model::{AccessKind, DecayPhase, EdgeType, MemoryId, NamespaceConfig};
@@ -39,34 +38,6 @@ fn parse_id(s: &str) -> Result<MemoryId, BridgeError> {
     uuid::Uuid::parse_str(s)
         .map(MemoryId::from_uuid)
         .map_err(|e| BridgeError::InvalidInput(format!("invalid memory ID: {e}")))
-}
-
-/// R now and the next transition, exactly as the health report forecasts it.
-fn decay_now(r: &DiskRecord, ns: Option<&NamespaceConfig>, now: i64) -> (f32, Option<NextChange>) {
-    let dc = ns.map(decay_config_for_namespace).unwrap_or_default();
-    let engine = FsrsEngine::new(&dc);
-    let elapsed_days = ((now - r.last_accessed_at).max(0) as f64 / DAY) as f32;
-    let current = if r.stability > 0.0 {
-        engine.retrievability(elapsed_days, r.stability, 1.0)
-    } else {
-        r.strength
-    };
-    if r.is_permastore != 0 || r.stability <= 0.0 {
-        return (current, None);
-    }
-    let (threshold, to) = match r.phase {
-        DecayPhase::Full => (dc.phase_1_threshold, 2),
-        DecayPhase::Summary => (dc.phase_2_threshold, 3),
-        DecayPhase::Ghost => (dc.phase_3_threshold, 4),
-        DecayPhase::Tombstone => return (current, None),
-    };
-    let at = if current <= threshold {
-        now
-    } else {
-        let days = engine.days_until_threshold(r.stability, threshold) as f64;
-        r.last_accessed_at + (days * DAY) as i64
-    };
-    (current, Some(NextChange { at, to }))
 }
 
 /// Tag/entity filters (AND) and the Explore sort, shared by both paths.
@@ -110,10 +81,12 @@ fn row(
     r: &DiskRecord,
     ns: &HashMap<u32, NamespaceConfig>,
     degree: u32,
+    global_multiplier: f64,
     now: i64,
 ) -> MemoryRow {
     let config = ns.get(&r.namespace_id);
-    let (strength, next_change) = decay_now(r, config, now);
+    // R now and the next transition, exactly as the health report forecasts it.
+    let outlook = config.and_then(|ns| decay_outlook(r, ns, global_multiplier, now));
     let labels = r.schema.as_ref().map(|s| s.labels.clone());
     let meta = crate::model::structured_metadata(&r.tags, labels.as_ref());
     let derived = |t: &str| {
@@ -128,13 +101,18 @@ fn row(
             && !r.summary.is_empty())
         .then(|| r.summary.clone()),
         phase: r.phase as u8,
-        strength,
+        strength: outlook.as_ref().map_or(r.strength, |o| o.strength),
+        decay_multiplier: outlook.as_ref().map_or(1.0, |o| o.multiplier),
         stability: r.stability,
         created_at: r.created_at,
         last_accessed_at: r.last_accessed_at,
         permastore: r.is_permastore != 0,
         degree,
-        next_change,
+        next_change: outlook.and_then(|o| o.days).map(|d| NextChange {
+            at: now.saturating_add((d as f64 * DAY) as i64),
+            // Full → Summary → Ghost → 4 (deletion).
+            to: r.phase as u8 + 1,
+        }),
         tags: r
             .tags
             .iter()
@@ -170,6 +148,7 @@ impl UiService {
         let limit = p.limit.unwrap_or(200).clamp(1, MAX_PAGE);
         let now = events::now_millis();
         let ns = self.namespace_map()?;
+        let global = self.config.decay.decay_rate_multiplier;
         let ns_filter = match &p.namespace {
             Some(name) => Some(
                 ns.values()
@@ -216,7 +195,16 @@ impl UiService {
                 .filter_map(|(id, r)| r.map(|r| (id, r)))
                 .filter(|(_, r)| ns_filter.is_none_or(|n| n == r.namespace_id))
                 .filter(|(_, r)| p.phases.is_empty() || phases.contains(&(r.phase as u8)))
-                .map(|(id, r)| row(id, &r, &ns, degrees.get(&id).copied().unwrap_or(0), now))
+                .map(|(id, r)| {
+                    row(
+                        id,
+                        &r,
+                        &ns,
+                        degrees.get(&id).copied().unwrap_or(0),
+                        global,
+                        now,
+                    )
+                })
                 .collect();
             let rows = filter_sort(rows, &tags, &entities, &sort, desc);
             return Ok(MemoryPage {
@@ -260,7 +248,16 @@ impl UiService {
                     .iter()
                     .filter(|(_, r)| ns_filter.is_none_or(|n| n == r.namespace_id))
                     .filter(|(_, r)| phases.contains(&(r.phase as u8)))
-                    .map(|(id, r)| row(*id, r, &ns, degrees.get(id).copied().unwrap_or(0), now))
+                    .map(|(id, r)| {
+                        row(
+                            *id,
+                            r,
+                            &ns,
+                            degrees.get(id).copied().unwrap_or(0),
+                            global,
+                            now,
+                        )
+                    })
                     .collect();
                 let rows = filter_sort(rows, &tags, &entities, &sort, desc);
                 let rows = Arc::new(rows);
@@ -788,5 +785,78 @@ mod tests {
         assert!(!out.merged);
         let ids: Vec<_> = out.results.iter().map(|h| h.id.as_str()).collect();
         assert_eq!(ids, ["a1", "b1"]);
+    }
+
+    /// Forecasts use the multiplier the sweep uses (#235): a namespace that
+    /// decays at half speed changes phase later, inherits the global value
+    /// when it sets none, and never changes phase with decay disabled.
+    #[test]
+    fn forecasts_use_the_namespace_decay_multiplier() {
+        let day = DAY as i64;
+        let now = 2 * day;
+        let record = |phase| DiskRecord {
+            schema: None,
+            version: DiskRecord::CURRENT_VERSION,
+            id: [0; 16],
+            namespace_id: 1,
+            created_at: 0,
+            last_accessed_at: 0,
+            phase,
+            strength: 1.0,
+            decay_strength: 1.0,
+            stability: 3.7,
+            difficulty: 5.0,
+            is_permastore: 0,
+            vector_slot: 0,
+            edge_count: 0,
+            summary: "s".into(),
+            tags: vec![],
+            access_history: vec![],
+            text_offset: 0,
+            text_length: 0,
+        };
+        let full = record(DecayPhase::Full);
+        let at = |own: Option<f32>, global: f64| {
+            let mut ns = NamespaceConfig::default_namespace(0);
+            ns.decay_rate_multiplier = own;
+            let row = row(
+                MemoryId::new(),
+                &full,
+                &HashMap::from([(1, ns)]),
+                0,
+                global,
+                now,
+            );
+            (
+                row.next_change.map(|n| n.at),
+                row.strength,
+                row.decay_multiplier,
+            )
+        };
+
+        let (one, r1, m1) = at(Some(1.0), 1.0);
+        let (two, r2, m2) = at(Some(2.0), 1.0);
+        let (one, two) = (one.unwrap(), two.unwrap());
+        assert_eq!((m1, m2), (1.0, 2.0));
+        assert!(r2 > r1, "slower decay keeps more strength: {r2} vs {r1}");
+        // Full → Summary at R 0.7 is ~16.4 days after access at multiplier 1,
+        // twice that at 2.
+        assert_eq!((one - now) / day, 14);
+        assert_eq!((two - now) / day, 30);
+        // No namespace override: the global multiplier applies, like the sweep.
+        assert_eq!(at(None, 2.0), (Some(two), r2, 2.0));
+        assert_eq!(at(Some(0.0), 1.0).0, None);
+
+        // The health forecast and at-risk list share the computation.
+        let ghost = record(DecayPhase::Ghost);
+        let days = |m| {
+            let mut ns = NamespaceConfig::default_namespace(0);
+            ns.decay_rate_multiplier = Some(m);
+            crate::health::report::decay_outlook(&ghost, &ns, 1.0, now)
+                .unwrap()
+                .days
+                .unwrap()
+        };
+        assert!(days(2.0) > 2.0 * days(1.0));
     }
 }

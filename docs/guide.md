@@ -372,6 +372,16 @@ The local web UI (`recalld ui`; see [docs/ui.md](ui.md)).
 
 Env var: `RECALLD_UI_ENABLED`
 
+### `[namespaces]`
+
+How MCP agents see namespaces. The HTTP API and `recalld-cli` are unaffected.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"multi"` | `"multi"`: agents choose and create namespaces. `"single"`: every MCP store and recall uses `default`; see [Single-namespace mode](#single-namespace-mode). |
+
+Env var: `RECALLD_NAMESPACES_MODE`
+
 ### Top-level fields
 
 | Field | Type | Default | Description |
@@ -1107,6 +1117,17 @@ Namespaces partition memories into separate spaces, each with its own embedding 
 Use `default` for shared preferences and cross-project facts, `project-<name>` for project-specific knowledge, and optional `topic-<name>` spaces for general topics when useful. Check `list_namespaces` and reuse names; avoid a namespace per agent or session and duplicate copies across stores. Namespaces organize memories, not access permissions.
 
 Explicitly recall from `default` and the current project or relevant topic, rather than every unrelated namespace. A per-directory default does not make all facts project-local. Namespaces may have different decay settings; new namespaces use the active embedding provider's profile and dimension, not an arbitrary model selected by name.
+
+### Single-namespace mode
+
+To keep every memory in one shared store, for example when several agents should see the same memories, set:
+
+```toml
+[namespaces]
+mode = "single"
+```
+
+In this mode MCP agents are told that everything lives in `default`. `create_namespace`, `delete_namespace` and `move_memories` are hidden and refused, a `namespace` other than `default` is rejected (as are `allNamespaces: true` and `sameNamespace: false`), and the namespace in `.recalld.toml` is ignored with a warning. Existing namespaces are kept: if any still hold live memories, MCP startup logs a warning that they are not reachable through MCP. To consolidate them, switch back to `"multi"` and use `move_memories` into `default`. The HTTP API and CLI still reach every namespace.
 
 ### Creating namespaces
 
