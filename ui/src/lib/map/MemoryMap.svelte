@@ -425,13 +425,33 @@
 
   function birth(e: Extract<Received['event'], { kind: 'store' }>) {
     const g = graph!;
-    const near = e.edges.filter((x) => g.hasNode(x.to)).map((x) => g.getNodeAttributes(x.to) as { x: number; y: number });
-    const cx = near.length ? near.reduce((a, p) => a + p.x, 0) / near.length + 4 : 0;
-    const cy = near.length ? near.reduce((a, p) => a + p.y, 0) / near.length + 4 : 0;
+    // Settle beside its strongest content link (temporal links only say
+    // "stored around the same time"), or beside a random memory of its
+    // namespace, at a random angle, so new memories land all over the map.
+    const linked = e.edges.filter((x) => g.hasNode(x.to));
+    const content = linked.filter((x) => x.edgeType !== EDGE.temporal);
+    const pool = content.length ? content : linked;
+    let anchorId = pool.length ? pool.reduce((a, b) => (b.weight > a.weight ? b : a)).to : null;
+    if (!anchorId) {
+      const same: string[] = [];
+      const any: string[] = [];
+      g.forEachNode((id, a) => {
+        if (a.visibility !== 'visible') return;
+        any.push(id);
+        const i = a.index as number;
+        if (i >= 0 && snapshot.ns[i] === e.namespaceId) same.push(id);
+      });
+      const from = same.length ? same : any;
+      anchorId = from.length ? from[Math.floor(Math.random() * from.length)] : null;
+    }
+    const anchor = anchorId ? (g.getNodeAttributes(anchorId) as { x: number; y: number }) : { x: 0, y: 0 };
     const enc = nodeAttributes(theme, e.phase, e.edges.length, false);
     const now = performance.now();
     bornAt.set(e.id, now);
     const px = unitsPerPx();
+    const side = Math.random() * Math.PI * 2;
+    const cx = anchor.x + 26 * px * Math.cos(side);
+    const cy = anchor.y + 26 * px * Math.sin(side);
     const angle = Math.random() * Math.PI * 2;
     const from = reducedMotion ? { x: cx, y: cy } : { x: cx + 40 * px * Math.cos(angle), y: cy + 40 * px * Math.sin(angle) };
     g.addNode(e.id, { ...enc, x: from.x, y: from.y, index: -1, size: reducedMotion ? enc.size : 0 });
@@ -525,12 +545,15 @@
       }
       for (const id of [e.src, e.dst]) {
         if ((graph.getNodeAttribute(id, 'index') as number) !== -1) continue;
-        const near = graph.neighbors(id).map((n) => graph!.getNodeAttributes(n) as { x: number; y: number });
-        if (near.length) {
-          // Glide to the new neighbors' centroid instead of jumping there.
-          graph.setNodeAttribute(id, 'size', nodeAttributes(theme, 1, graph.degree(id), false).size);
-          moveTo(id, near.reduce((a, p) => a + p.x, 0) / near.length + 4, near.reduce((a, p) => a + p.y, 0) / near.length + 4);
-        }
+        graph.setNodeAttribute(id, 'size', nodeAttributes(theme, 1, graph.degree(id), false).size);
+        // A young memory leans a little toward each new content link; it never
+        // jumps to the middle of everything it links to.
+        if (e.edgeType === EDGE.temporal || !young || id !== young) continue;
+        const a = graph.getNodeAttributes(id) as { x: number; y: number };
+        const b = graph.getNodeAttributes(id === e.src ? e.dst : e.src) as { x: number; y: number };
+        const target = motions.get(id);
+        const x = target && !target.ripple ? target.x1 : a.x, y = target && !target.ripple ? target.y1 : a.y;
+        moveTo(id, x + (b.x - x) * 0.2, y + (b.y - y) * 0.2);
       }
     } else if (e.kind === 'phase_change' && graph.hasNode(e.id)) {
       const i = graph.getNodeAttribute(e.id, 'index') as number;
