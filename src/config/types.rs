@@ -357,6 +357,37 @@ impl Default for UiConfig {
     }
 }
 
+/// How MCP clients see namespaces (`[namespaces]`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NamespacesConfig {
+    /// `multi` (default): agents choose and create namespaces. `single`:
+    /// MCP exposes only `default`. The HTTP API and CLI are unaffected.
+    pub mode: NamespacesMode,
+}
+
+/// Namespace mode for MCP clients.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NamespacesMode {
+    /// Today's behavior: agents may use and create any namespace.
+    #[default]
+    Multi,
+    /// One shared store: every MCP memory lives in `default`.
+    Single,
+}
+
+impl std::str::FromStr for NamespacesMode {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s.to_lowercase().as_str() {
+            "multi" => Ok(Self::Multi),
+            "single" => Ok(Self::Single),
+            _ => Err(()),
+        }
+    }
+}
+
 /// Logging output configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -406,5 +437,21 @@ mod tests {
         decay.phase_thresholds = PhaseThresholds::default();
         decay.permastore_threshold_days = 99.0;
         assert!(decay.sets_deprecated_thresholds());
+    }
+
+    #[test]
+    fn namespaces_mode_defaults_to_multi_and_parses_toml_and_env_text() {
+        let config: crate::RecalldConfig = toml::from_str("").unwrap();
+        assert_eq!(config.namespaces.mode, NamespacesMode::Multi);
+        let config: crate::RecalldConfig =
+            toml::from_str("[namespaces]\nmode = \"single\"").unwrap();
+        assert_eq!(config.namespaces.mode, NamespacesMode::Single);
+        assert!(toml::from_str::<crate::RecalldConfig>("[namespaces]\nmode = \"one\"").is_err());
+        assert_eq!("Single".parse(), Ok(NamespacesMode::Single));
+        assert_eq!("multi".parse(), Ok(NamespacesMode::Multi));
+        assert!("one".parse::<NamespacesMode>().is_err());
+        let template: crate::RecalldConfig =
+            toml::from_str(&crate::config::generate_default_config()).unwrap();
+        assert_eq!(template.namespaces.mode, NamespacesMode::Multi);
     }
 }
