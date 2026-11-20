@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Single-namespace mode for MCP: `[namespaces] mode = "single"` (or `RECALLD_NAMESPACES_MODE=single`) keeps every agent's memories in `default`. Agents are not told to choose or create namespaces, `create_namespace`, `delete_namespace` and `move_memories` are hidden, and a namespace other than `default` is rejected. The default, `"multi"`, is unchanged; the HTTP API and CLI are unaffected.
+
 ### Local web UI
 
 - Decay forecasts use the namespace's effective decay multiplier (its own, else the global one), as the decay sweep does: Explore's strength and **Next change**, the memory panel's decay curve, the Health forecast and at-risk list, and the map's Decay scrubber previously assumed a multiplier of 1. (#235)
