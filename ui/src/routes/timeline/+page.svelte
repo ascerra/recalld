@@ -232,11 +232,11 @@
     background: var(--color-node);
   }
   .sq.summary {
-    background: var(--color-node);
-    opacity: 0.38;
+    background: var(--color-node-summary);
+    opacity: 0.6;
   }
   .sq.ghost {
-    border: var(--hairline) solid var(--color-node);
+    border: var(--hairline) solid var(--color-node-ghost);
   }
   .sq.recalls {
     background: var(--color-agent-2);
@@ -245,12 +245,12 @@
     fill: var(--color-node);
   }
   svg rect.summary {
-    fill: var(--color-node);
-    fill-opacity: 0.38;
+    fill: var(--color-node-summary);
+    fill-opacity: 0.6;
   }
   svg rect.ghost {
     fill: none;
-    stroke: var(--color-node);
+    stroke: var(--color-node-ghost);
     vector-effect: non-scaling-stroke;
   }
   svg rect.recalls {

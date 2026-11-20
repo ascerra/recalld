@@ -2,8 +2,10 @@
 // only source of values (WebGL needs concrete colors).
 export interface MapTheme {
   node: string;
-  /** Per-namespace node tones; a namespace keeps its tone in every view. */
-  tones: string[];
+  /** Stage greens: Full fades from `node` toward `nodeFading`, then Summary, Ghost. */
+  nodeFading: string;
+  nodeSummary: string;
+  nodeGhost: string;
   nodeLit: string;
   edge: string;
   contradicts: string;
@@ -23,7 +25,9 @@ const css = (name: string) => getComputedStyle(document.documentElement).getProp
 export function readTheme(): MapTheme {
   return {
     node: css('--color-node'),
-    tones: [css('--color-node'), ...[2, 3, 4, 5].map((i) => css(`--color-node-${i}`))],
+    nodeFading: css('--color-node-fading'),
+    nodeSummary: css('--color-node-summary'),
+    nodeGhost: css('--color-node-ghost'),
     nodeLit: css('--color-node-lit'),
     edge: css('--color-edge'),
     contradicts: css('--color-contradicts'),
@@ -37,6 +41,13 @@ export function readTheme(): MapTheme {
     agents: [1, 2, 3, 4].map((i) => css(`--color-agent-${i}`)),
     fontSans: css('--font-sans'),
   };
+}
+
+/** Blend two `#RRGGBB` colors: t = 0 gives `a`, t = 1 gives `b`. */
+export function mix(a: string, b: string, t: number): string {
+  const p = parseInt(a.slice(1), 16), q = parseInt(b.slice(1), 16), k = Math.min(1, Math.max(0, t));
+  const ch = (s: number) => Math.round(((p >> s) & 255) + (((q >> s) & 255) - ((p >> s) & 255)) * k);
+  return '#' + [16, 8, 0].map((s) => ch(s).toString(16).padStart(2, '0')).join('');
 }
 
 /** `#RRGGBB` + alpha → `rgba(r, g, b, a)`. */

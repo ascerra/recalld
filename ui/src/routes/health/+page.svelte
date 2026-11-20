@@ -246,11 +246,11 @@
     background: var(--color-node);
   }
   .phasebar .summary {
-    background: var(--color-node);
-    opacity: 0.38;
+    background: var(--color-node-summary);
+    opacity: 0.6;
   }
   .phasebar .ghost {
-    border: var(--hairline) solid var(--color-node);
+    border: var(--hairline) solid var(--color-node-ghost);
   }
   .phasebar .tomb,
   .s-text {

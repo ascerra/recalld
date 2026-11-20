@@ -37,12 +37,11 @@
   --color-on-accent: #F7F3E9;     /* text on --color-accent */
 
   /* ── Graph ────────────────────────────────────────────────── */
-  --color-node: #3C403A;          /* unlit memory node (namespace tone 1) */
-  --color-node-2: #4A4D53;        /* namespace tone 2: ink slate */
-  --color-node-3: #524C44;        /* namespace tone 3: umber */
-  --color-node-4: #3F4943;        /* namespace tone 4: deep moss */
-  --color-node-5: #504B52;        /* namespace tone 5: dusk mauve */
-  --color-node-lit: #579270;      /* node reached by a recall (3.2:1 on canvas) */
+  --color-node: #233F2E;          /* Full memory at full strength: deep forest */
+  --color-node-fading: #6A8B74;   /* Full memory nearing Summary: moss */
+  --color-node-summary: #9AB0A0;  /* Summary memory nearing Ghost: pale sage */
+  --color-node-ghost: #8EA596;    /* Ghost memory outline */
+  --color-node-lit: #3FA566;      /* node reached by a recall: fresh green, brighter than any stage */
   --color-edge: #9EA39A;          /* base edge, opacity 0.32 × (0.3 + 0.7 × weight), solid */
   --color-suppressed: #AAB5BF;    /* RIF-suppressed competitor */
   --color-suppressed-text: #4C5A68;
@@ -52,7 +51,7 @@
   --color-label-halo: #F4F0E6;    /* 4px text stroke behind map labels */
 
   /* ── Agents (pulse + activity dot colors, assigned in order) ─ */
-  --color-agent-1: #579270;       /* e.g. claude-code */
+  --color-agent-1: #3FA566;       /* e.g. claude-code */
   --color-agent-2: #A3AA8A;       /* e.g. claude-desktop (moss) */
   --color-agent-3: #6F7F95;       /* slate */
   --color-agent-4: #9C8A4E;       /* brass */

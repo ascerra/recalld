@@ -83,7 +83,7 @@
   (perf as { __recalldPositions?: () => { id: string; x: number; y: number; size: number; r: number }[] }).__recalldPositions = () => {
     const out: { id: string; x: number; y: number; size: number; r: number }[] = [];
     graph?.forEachNode((id, a) => {
-      if (a.visibility === 'visible') out.push({ id, size: a.size as number, r: sigma!.scaleSize(a.size as number), ...sigma!.graphToViewport(a as { x: number; y: number }) });
+      if (a.visibility === 'visible') out.push({ id, size: a.size as number, r: sigma!.scaleSize(a.size as number), ...sigma!.graphToViewport(drawn(id)) });
     });
     return out;
   };
@@ -128,7 +128,8 @@
         x: x[i],
         y: y[i],
         index: i,
-        ...nodeAttributes(theme, s.phase[i], s.degree[i], s.permastore[i] === 1, strengthAt(i), s.ns[i]),
+        wob: Math.random() * Math.PI * 2,
+        ...nodeAttributes(theme, s.phase[i], s.degree[i], s.permastore[i] === 1, strengthAt(i)),
       });
     }
     for (let k = 0; k < s.src.length; k++) {
@@ -145,12 +146,6 @@
   // ── Encoding updates (phase filter, decay projection, links menu) ─────
   /** Retrievability of snapshot memory `i` at `at` (the Explore "strength").
    *  ponytail: ignores per-namespace decay multipliers, like projectedPhase. */
-  /** Namespace id of a memory, for its tone. */
-  const nsOf = (id: string, a: Record<string, unknown>) => {
-    const i = a.index as number;
-    return i >= 0 ? snapshot.ns[i] : ((a.ns as number) ?? 0);
-  };
-
   function strengthAt(i: number, at = Date.now()): number {
     const s = snapshot;
     if (i < 0 || s.permastore[i]) return 1;
@@ -174,7 +169,7 @@
       const i = attrs.index as number;
       // Memories stored since the snapshot have no row in it: keep their own phase.
       const phase = i < 0 ? ((attrs.phase as number) ?? 1) : projectionDays > 0 ? projectedPhase(i, at) : snapshot.phase[i];
-      const enc = nodeAttributes(theme, phase, i < 0 ? graph!.degree(id) : snapshot.degree[i], i >= 0 && snapshot.permastore[i] === 1, strengthAt(i, at), nsOf(id, attrs));
+      const enc = nodeAttributes(theme, phase, i < 0 ? graph!.degree(id) : snapshot.degree[i], i >= 0 && snapshot.permastore[i] === 1, strengthAt(i, at));
       const hidden = !phases.has(phase) || (focus !== null && !focus.has(id));
       graph!.mergeNodeAttributes(id, { ...enc, phase, visibility: hidden ? 'hidden' : enc.visibility });
     });
@@ -238,7 +233,7 @@
     ctx.clearRect(0, 0, w, h);
     const ratio = sigma.getCamera().getState().ratio;
     const scale = sigma.scaleSize(1);
-    const vp = (id: string) => sigma!.graphToViewport(graph!.getNodeAttributes(id) as { x: number; y: number });
+    const vp = (id: string) => sigma!.graphToViewport(drawn(id));
     const radius = (id: string) => (graph!.getNodeAttribute(id, 'size') as number) * scale;
     const ring = (id: string, extra: number, color: string, width: number) => {
       if (!graph!.hasNode(id) || graph!.getNodeAttribute(id, 'visibility') !== 'visible') return;
@@ -325,7 +320,7 @@
   // ── Live activity → light and incremental graph updates ───────────────
   function position(id: string) {
     if (!graph?.hasNode(id) || graph.getNodeAttribute(id, 'visibility') !== 'visible') return null;
-    return graph.getNodeAttributes(id) as { x: number; y: number };
+    return drawn(id);
   }
 
   function onLive(r: Received, replay?: { speed: number }) {
@@ -375,7 +370,7 @@
       flashUntil.delete(id);
       const a = graph.getNodeAttributes(id);
       const i = a.index as number;
-      const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i), nsOf(id, a));
+      const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i));
       graph.setNodeAttribute(id, 'color', enc.color);
       sigma?.refresh({ skipIndexation: true });
     }, FLASH_MS + 20);
@@ -458,14 +453,14 @@
       anchorId = from.length ? from[Math.floor(Math.random() * from.length)] : null;
     }
     const anchor = anchorId ? (g.getNodeAttributes(anchorId) as { x: number; y: number }) : { x: 0, y: 0 };
-    const enc = nodeAttributes(theme, e.phase, e.edges.length, false, 1, e.namespaceId);
+    const enc = nodeAttributes(theme, e.phase, e.edges.length, false);
     const now = performance.now();
     bornAt.set(e.id, now);
     const px = unitsPerPx();
     const side = Math.random() * Math.PI * 2;
     const cx = anchor.x + 26 * px * Math.cos(side);
     const cy = anchor.y + 26 * px * Math.sin(side);
-    g.addNode(e.id, { ...enc, phase: e.phase, ns: e.namespaceId, x: cx, y: cy, index: -1, size: reducedMotion ? enc.size : 0 });
+    g.addNode(e.id, { ...enc, phase: e.phase, wob: Math.random() * Math.PI * 2, x: cx, y: cy, index: -1, size: reducedMotion ? enc.size : 0 });
     e.edges.forEach((x, i) => {
       if (!g.hasNode(x.to)) return;
       // A memory can link to the same neighbor more than once (one per type).
@@ -538,7 +533,7 @@
       // collision circle from that, and a bigger drawn node could overlap.
     } else if (e.kind === 'phase_change' && graph.hasNode(e.id)) {
       const i = graph.getNodeAttribute(e.id, 'index') as number;
-      const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i), nsOf(e.id, graph.getNodeAttributes(e.id)));
+      const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i));
       graph.mergeNodeAttributes(e.id, { ...enc, phase: e.to, visibility: phases.has(e.to) ? enc.visibility : 'hidden' });
     } else if (e.kind === 'forget' && graph.hasNode(e.id)) {
       death(e.id);
@@ -672,6 +667,52 @@
     litEdges = new Set();
   }
 
+  // ── Suspended in liquid ───────────────────────────────────────────────
+  // Drawing-only motion: every memory floats very slowly; the cursor stirs
+  // the memories near it; memories a recall lights sway a little more. The
+  // layout's positions never change, and the total offset (≤ 4 layout units)
+  // stays inside the gap between a drawn node and its collision circle, so
+  // nodes still can't overlap.
+  type SwayNode = { x: number; y: number; wob?: number };
+  type SwayState = FadeState & { t?: number; mx?: number; my?: number; stir?: number; reach?: number };
+  // Worst-case squeeze of two neighbors: float 2·1.4 + recall 2·1.4·1.2 + stir 3.5
+  // ≈ 10 layout units, under the ≥ 11-unit gap two collision circles leave.
+  const FLOAT = 1.4, STIR = 3.5, LIT_SWAY = 1.2;
+  function swayOffset(a: SwayNode, st: Faded, gs: SwayState, axis: 0 | 1): number {
+    if (gs.t === undefined || a.wob === undefined) return 0;
+    const w = 0.35 + (a.wob % 0.5) * 0.4; // each memory its own slow rhythm
+    const amp = FLOAT * (st.isLit ? 1 + LIT_SWAY * (gs.dim ?? 0) : 1);
+    let d = axis === 0 ? amp * Math.sin(gs.t * w + a.wob) : amp * Math.cos(gs.t * w * 0.8 + a.wob * 1.3);
+    if (gs.stir && gs.reach) {
+      const dx = a.x - gs.mx!, dy = a.y - gs.my!, dist = Math.hypot(dx, dy) || 1;
+      const fall = Math.exp(-((dist / gs.reach) ** 2));
+      d += (STIR * gs.stir * fall * (axis === 0 ? dx : dy)) / dist;
+    }
+    return d;
+  }
+  let swayGs: SwayState = { hasHighlighted: false };
+  /** Where a memory is drawn right now (layout position plus its sway). */
+  function drawn(id: string): { x: number; y: number } {
+    const a = graph!.getNodeAttributes(id) as SwayNode;
+    const st = { isHighlighted: false, isLit: litNodes.has(id) };
+    const gs = { ...swayGs, dim };
+    return { x: a.x + swayOffset(a, st, gs, 0), y: a.y + swayOffset(a, st, gs, 1) };
+  }
+  let swayRaf = 0, swayLast = 0, stir = 0, mouse: { x: number; y: number } | null = null, mouseAt = 0;
+  // ponytail: restyles every item per frame; skipped on very large maps.
+  const SWAY_MAX_NODES = 5000;
+  function swayFrame(t: number) {
+    swayRaf = requestAnimationFrame(swayFrame);
+    if (!sigma || t - swayLast < 33) return; // ~30 fps is plenty for motion this slow
+    const dt = t - swayLast;
+    swayLast = t;
+    // The stir rises while the cursor moves and settles back slowly.
+    stir = t - mouseAt < 120 ? Math.min(1, stir + dt / 400) : Math.max(0, stir - dt / 1600);
+    const m = mouse ? sigma.viewportToGraph(mouse) : { x: 0, y: 0 };
+    swayGs = { hasHighlighted: false, t: t / 1000, mx: m.x, my: m.y, stir, reach: 90 * unitsPerPx() };
+    sigma.setGraphState(swayGs as never);
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────────
   onMount(() => {
     theme = readTheme();
@@ -726,8 +767,8 @@
         styles: {
           nodes: [
             {
-              x: { attribute: 'x' },
-              y: { attribute: 'y' },
+              x: (a: SwayNode, st: Faded, gs: SwayState) => a.x + swayOffset(a, st, gs, 0),
+              y: (a: SwayNode, st: Faded, gs: SwayState) => a.y + swayOffset(a, st, gs, 1),
               color: { attribute: 'color' },
               size: { attribute: 'size' },
               visibility: { attribute: 'visibility' },
@@ -749,6 +790,8 @@
           renderLabels: false,
           renderEdgeLabels: false,
           enableNodeDrag: true,
+          // x/y are styled through the sway, so tell sigma where a drag writes.
+          dragPositionToAttributes: (p: { x: number; y: number }) => ({ x: p.x, y: p.y }),
           autoRescale: true,
           // Sizes live in layout units, like positions, so a node scales exactly
           // with zoom and the layout's collision radius (always larger than the
@@ -767,6 +810,14 @@
       } as never);
 
       sigma.on('afterRender', drawOverlay);
+      if (!reducedMotion && graph.order <= SWAY_MAX_NODES) {
+        container.addEventListener('pointermove', (ev) => {
+          const r = container.getBoundingClientRect();
+          mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
+          mouseAt = performance.now();
+        });
+        swayRaf = requestAnimationFrame(swayFrame);
+      }
       // Continuous zoom: sigma steps a fixed ratio per wheel event and drops
       // events that come close together, which makes trackpad pinches lurch.
       // Scale by each event's own delta instead, anchored at the cursor.
@@ -799,7 +850,7 @@
         clearTimeout(hoverTimer);
         // Tooltip after --dur-fast (120 ms).
         hoverTimer = setTimeout(() => {
-          const p = sigma!.graphToViewport(graph!.getNodeAttributes(node) as { x: number; y: number });
+          const p = sigma!.graphToViewport(drawn(node));
           tooltip = { id: node, x: p.x, y: p.y, flip: p.x > container.clientWidth - 320 };
         }, 120);
         sigma!.refresh({ skipIndexation: true });
@@ -887,6 +938,7 @@
     worker?.terminate();
     cancelAnimationFrame(animRaf);
     cancelAnimationFrame(dimRaf);
+    cancelAnimationFrame(swayRaf);
     sigma?.kill();
     // Timers a recall scheduled (flashes, refreshes) may still fire; make them no-ops.
     sigma = null;
