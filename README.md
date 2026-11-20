@@ -130,7 +130,7 @@ durable batch with its documented receipt/key and unchanged full payload.
 
 ### 5. Improve memory usage with hooks (optional)
 
-Prompt instructions alone may not be enough to get consistent memory usage. Claude Code [hooks](https://code.claude.com/docs/en/hooks) can inject gentle reminders so your assistant checks which namespaces exist when a session starts and doesn't forget that memory tools are available on each turn.
+Prompt instructions alone may not be enough to get consistent memory usage. Claude Code [hooks](https://code.claude.com/docs/en/hooks) can inject gentle reminders so your assistant checks which namespaces exist when a session starts, doesn't forget that memory tools are available on each turn, and passes the same habits to the subagents it delegates to.
 
 Add to your `~/.claude/settings.json`:
 
@@ -144,6 +144,16 @@ Add to your `~/.claude/settings.json`:
           {
             "type": "command",
             "command": "echo 'Start with get_session, then list_namespaces. Use default for shared facts and the existing project namespace that matches this repository for project knowledge; create one only when none fits.'"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s\\n' '{\"hookSpecificOutput\": {\"hookEventName\": \"SubagentStart\", \"additionalContext\": \"recalld memory is available. Before starting, recall relevant context from default and the project namespace for this repository (find it with list_namespaces). Before finishing, store durable decisions, gotchas or user preferences you learned that are not already in the code, PRs or issues; skip routine task details. Always pass an explicit namespace.\"}}'"
           }
         ]
       }

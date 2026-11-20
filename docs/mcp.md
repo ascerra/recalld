@@ -1352,9 +1352,10 @@ on the new contract; old reads working does not establish write compatibility.
 
 Prompt instructions tell the model *how* to use memory, but models don't always follow instructions consistently -- especially long ones competing with other system prompt content. Hooks can offer a contextual reminder without requiring a memory operation on every turn.
 
-Claude Code [hooks](https://code.claude.com/docs/en/hooks) can run shell commands in response to lifecycle events. For the `UserPromptSubmit` hook below, successful plain-text stdout is added to the conversation context. `SessionStart` stdout is added the same way. Two hooks work well for memory:
+Claude Code [hooks](https://code.claude.com/docs/en/hooks) can run shell commands in response to lifecycle events. For the `UserPromptSubmit` hook below, successful plain-text stdout is added to the conversation context. `SessionStart` stdout is added the same way; `SubagentStart` takes JSON with `hookSpecificOutput.additionalContext`. Three hooks work well for memory:
 
 - **`SessionStart`** -- runs when a session starts or resumes. A good place to have the model look up the existing namespaces with `list_namespaces` instead of assuming them.
+- **`SubagentStart`** -- runs when the agent starts a subagent. Session and prompt hooks are not documented to fire inside subagents, and a delegation prompt rarely mentions memory, so this is where subagents learn to recall first and store what they learn before finishing.
 - **`UserPromptSubmit`** -- runs before the model responds to each user message. A good place to remind the model that memory tools are available.
 
 Add to your `~/.claude/settings.json` (or project `.claude/settings.json`):
@@ -1369,6 +1370,16 @@ Add to your `~/.claude/settings.json` (or project `.claude/settings.json`):
           {
             "type": "command",
             "command": "echo 'Start with get_session, then list_namespaces. Use default for shared facts and the existing project namespace that matches this repository for project knowledge; create one only when none fits.'"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s\\n' '{\"hookSpecificOutput\": {\"hookEventName\": \"SubagentStart\", \"additionalContext\": \"recalld memory is available. Before starting, recall relevant context from default and the project namespace for this repository (find it with list_namespaces). Before finishing, store durable decisions, gotchas or user preferences you learned that are not already in the code, PRs or issues; skip routine task details. Always pass an explicit namespace.\"}}'"
           }
         ]
       }
@@ -1391,7 +1402,7 @@ This hook is deliberately suggestive rather than commanding -- the model decides
 
 Keep hook output static and trusted: do not interpolate user messages or recalled text into shell commands or injected instructions. Hooks should nudge relevance checks, not execute stores, reinforcement, or destructive writes themselves. Omit a hook if it adds noise.
 
-Codex supports the same events in `~/.codex/hooks.json`. Its hooks print JSON instead of plain text, for example `printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Start with get_session, then list_namespaces. ..."}}'`. Codex asks you to trust a hook again whenever its command changes.
+Codex supports the same events in `~/.codex/hooks.json`, including `SubagentStart`, which accepts the same JSON. Its hooks print JSON instead of plain text, for example `printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Start with get_session, then list_namespaces. ..."}}'`. Codex asks you to trust a hook again whenever its command changes.
 
 ### Adapting the prompt
 
