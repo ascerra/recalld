@@ -1,4 +1,5 @@
 //! New ordinary API1 point exchange; the existing prepared O1 era is unchanged.
+use super::prepared_get::{Rejected, require};
 use crate::mcp::bridge::{BridgeError, StorageEngine};
 use crate::model::{AccessKind, DecayPhase};
 use crate::serialization::contract::{Scope, Status};
@@ -139,6 +140,7 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
         super::client::Api1GetExchange::Prepared(exchange) => exchange,
     };
     let mut evidence = vec![];
+    let mut rejected = None;
     if let Some(value) = exchange.result
         && let Some(raw) = value.get("replyJson").and_then(Value::as_str)
         // Full candidate admission precedes any owned typed reply acquisition.
@@ -164,10 +166,10 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
                 Some("legacy") => {
                     decode_legacy(raw, &fields, status, &point).map(|r| (r, Mode::Legacy))
                 }
-                _ => Err(()),
-            };
-            if let Ok((reply, mode)) = decoded
-                && reply.observation_receipts.iter().all(|receipt| {
+                _ => Err(Rejected::from(())),
+            }
+            .and_then(|(reply, mode)| {
+                require(reply.observation_receipts.iter().all(|receipt| {
                     matches!(
                         (mode, &receipt.outcome),
                         (
@@ -175,9 +177,12 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
                             MutationOutcome::LifecycleExposureRecorded { .. }
                         ) | (Mode::Legacy, MutationOutcome::ExposuresRecorded { .. })
                     )
-                })
-            {
-                return Reply::point(reply, timezone, mode);
+                }))?;
+                Ok((reply, mode))
+            });
+            match decoded {
+                Ok((reply, mode)) => return Reply::point(reply, timezone, mode),
+                Err(at) => rejected = Some(at),
             }
         }
         evidence = receipts;
@@ -187,6 +192,9 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
         exchange.phase != super::client::TransmissionPhase::BeforeSend,
         vec![],
     );
+    if let Some(at) = rejected {
+        super::prepared_get::note_rejection(&mut reply, at);
+    }
     if !evidence.is_empty() {
         reply
             .envelope
@@ -196,16 +204,12 @@ pub(crate) async fn remote(client: &super::DaemonClient, request: Request, limit
     Reply::unverified(reply, evidence)
 }
 
-fn require(value: bool) -> Result<(), ()> {
-    value.then_some(()).ok_or(())
-}
-
 fn decode_legacy(
     raw: &str,
     fields: &BTreeMap<String, &RawValue>,
     status: u16,
     request: &GetRequest,
-) -> Result<GetReply, ()> {
+) -> Result<GetReply, Rejected> {
     if status != 200 {
         return super::prepared_get::decode(raw, fields, status, request);
     }
@@ -224,7 +228,7 @@ fn decode_legacy(
         namespace,
     }) = &reply.envelope.scope
     else {
-        return Err(());
+        return Err(Rejected::from(()));
     };
     require(!namespace_id.is_unset())?;
     crate::model::validation::validate_namespace_name(namespace).map_err(|_| ())?;
@@ -294,7 +298,7 @@ fn decode_legacy(
                 && receipt.committed_generation > read.generation,
         )?;
         let MutationOutcome::ExposuresRecorded { accesses } = &receipt.outcome else {
-            return Err(());
+            return Err(Rejected::from(()));
         };
         require(
             accesses.len() == 1

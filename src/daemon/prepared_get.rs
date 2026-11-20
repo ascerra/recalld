@@ -79,6 +79,7 @@ pub(crate) async fn remote(
         )
         .await;
     let mut evidence = vec![];
+    let mut rejected = None;
     if let Some(result) = exchange.result
         && let Some(raw) = result.get("replyJson").and_then(Value::as_str)
         && super::prepared_query::shape::check_typed(raw.as_bytes(), response_limit()).is_ok()
@@ -92,9 +93,11 @@ pub(crate) async fn remote(
                 .get("httpStatus")
                 .and_then(Value::as_u64)
                 .and_then(|v| u16::try_from(v).ok())
-            && let Ok(reply) = decode(raw, &fields, status, &request)
         {
-            return reply;
+            match decode(raw, &fields, status, &request) {
+                Ok(reply) => return reply,
+                Err(at) => rejected = Some(at),
+            }
         }
         // Named admitted fragments only. Preserve original parsed evidence;
         // never manufacture replacement JSON from the typed receipt, recurse
@@ -112,11 +115,15 @@ pub(crate) async fn remote(
             }
         }
     }
-    GetReply::remote_failure(
+    let mut reply = GetReply::remote_failure(
         request.record_access,
         exchange.phase != TransmissionPhase::BeforeSend,
         evidence,
-    )
+    );
+    if let Some(at) = rejected {
+        note_rejection(&mut reply, at);
+    }
+    reply
 }
 
 pub(crate) async fn dispatch(
@@ -215,15 +222,46 @@ fn framed_reply(mut reply: GetReply) -> Value {
     encode(&reply)
 }
 
-fn require(value: bool) -> Result<(), ()> {
-    value.then_some(()).ok_or(())
+/// Source location of the decoder check a daemon reply failed. Carries no
+/// reply content, so it is safe to log and to show the caller.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Rejected(&'static std::panic::Location<'static>);
+impl From<()> for Rejected {
+    #[track_caller]
+    fn from((): ()) -> Self {
+        Self(std::panic::Location::caller())
+    }
+}
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.0.file(), self.0.line())
+    }
+}
+/// Name the failed check instead of a bare "unavailable" (#231).
+pub(crate) fn note_rejection(reply: &mut GetReply, rejected: Rejected) {
+    tracing::warn!(check = %rejected, "daemon get reply failed validation");
+    if let Some(error) = &mut reply.envelope.error {
+        error.message = format!(
+            "{} Daemon reply failed validation at {rejected}.",
+            error.message
+        );
+    }
+}
+
+#[track_caller]
+pub(super) fn require(value: bool) -> Result<(), Rejected> {
+    if value {
+        Ok(())
+    } else {
+        Err(Rejected::from(()))
+    }
 }
 pub(super) fn decode(
     raw: &str,
     fields: &BTreeMap<String, &RawValue>,
     status: u16,
     request: &GetRequest,
-) -> Result<GetReply, ()> {
+) -> Result<GetReply, Rejected> {
     require(
         fields
             .get("contractVersion")
@@ -260,7 +298,7 @@ pub(super) fn decode(
             Some((*namespace_id, namespace.as_str()))
         }
         None => None,
-        _ => return Err(()),
+        _ => return Err(Rejected::from(())),
     };
     if let Some(g) = reply.envelope.read_generation {
         require(!g.store_id.is_nil())?;
@@ -284,17 +322,12 @@ pub(super) fn decode(
         if let Some(labels) = &m.labels {
             labels.validate().map_err(|_| ())?;
         }
-        match m.phase {
-            DecayPhase::Full => {}
-            DecayPhase::Summary => require(m.full_text.is_none())?,
-            DecayPhase::Ghost | DecayPhase::Tombstone => require(
-                m.summary.is_none()
-                    && m.full_text.is_none()
-                    && m.tags.is_empty()
-                    && m.labels.as_ref().is_none_or(|v| {
-                        v.entities.is_empty() && v.topics.is_empty() && v.emotions.is_empty()
-                    }),
-            )?,
+        // The daemon projects summary and text only for Full/Summary, so a
+        // Ghost/Tombstone carrying either is not its reply. Text, tags and
+        // labels are otherwise returned as stored: records carried over from
+        // older releases keep Summary text or Ghost tags (#231).
+        if matches!(m.phase, DecayPhase::Ghost | DecayPhase::Tombstone) {
+            require(m.summary.is_none() && m.full_text.is_none())?;
         }
         observe =
             request.record_access && matches!(m.phase, DecayPhase::Full | DecayPhase::Summary);
@@ -359,7 +392,7 @@ pub(super) fn decode(
                     require(accesses[0].accessed_at >= data.evaluated_at)?;
                 }
             }
-            _ => return Err(()),
+            _ => return Err(Rejected::from(())),
         }
     }
     if let Some(error) = &reply.envelope.error {
