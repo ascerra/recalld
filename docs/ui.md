@@ -1,13 +1,20 @@
 # recalld local web UI
 
-`recalld ui` is an optional browser UI for looking at what your agents remember: which memories exist, how strong they are, how they link, and what each recall actually touched. It runs on your machine, talks only to your recalld daemon, and changes nothing unless you press **Reinforce** or **Forget**.
+`recalld ui` is a browser UI for looking at what your agents remember: which memories exist, how strong they are, how they link, and what each recall actually touched. It runs on your machine, talks only to your recalld daemon, and changes nothing unless you press **Reinforce** or **Forget**.
 
 ## Getting it
 
-The UI is a cargo feature, off by default, so the standard `recalld` binary and the Docker image don't include it.
+The UI comes with the standard install (`install.sh` and the release archives). It is on by default; turn it off with
 
-- **Release archives:** download `recalld-ui-<platform>.tar.gz` from the release page, or install with `RECALLD_UI=1 ./install.sh`. It is the full recalld binary plus the UI, so it can replace the standard one.
-- **From source:** `make release-ui` (Node 22.17+ and pnpm), or `pnpm -C ui install && pnpm -C ui build && cargo build --release --features ui`.
+```toml
+[ui]
+enabled = false
+```
+
+or `RECALLD_UI_ENABLED=false`. Agents and the MCP server are unaffected either way.
+
+- **From source:** `make release` or `make install` (Node 22.17+ and pnpm), or `pnpm -C ui install && pnpm -C ui build && cargo build --release`. A plain `cargo build` without building the UI first still works; `recalld ui` then shows a page saying the UI wasn't built.
+- **Without the UI:** `cargo build --release --no-default-features`. The Docker image is built this way, since a container can't usefully serve a `127.0.0.1` page.
 
 The UI is embedded in the binary, so its version always matches recalld's. Health → System shows it.
 
@@ -19,17 +26,17 @@ recalld ui --port 7690     # a fixed port
 recalld ui --no-open       # print the link instead of opening it
 ```
 
-`recalld ui` connects to the same daemon `recalld mcp` uses and starts it if it isn't running, so it works alongside Claude Code and other agents. If a daemon started by a recalld build *without* the UI is already running, the UI says so. Run `recalld daemon stop`, then `recalld ui` again, and the UI-enabled binary starts the daemon.
+`recalld ui` connects to the same daemon `recalld mcp` uses and starts it if it isn't running, so it works alongside Claude Code and other agents. The daemon keeps running until you stop it (`recalld daemon stop`); it no longer shuts itself down when idle, so the UI never loses it. `recalld daemon start --idle-timeout <minutes>` brings an idle shutdown back. If a daemon started by a recalld build *without* the UI is already running, the UI says so. Run `recalld daemon stop`, then `recalld ui` again, and the UI-enabled binary starts the daemon.
 
 Press Ctrl-C to stop the UI. The daemon keeps running for your agents.
 
 ## What you see
 
-- **Memory map:** every memory as a node, sized by its links and shaded by phase (Full, Summary, Ghost). When an agent recalls, the map shows recalld's real spreading-activation path: seeds bloom, light travels along the links that were followed, results keep a ring, and memories suppressed by retrieval-induced forgetting cool briefly. Drag nodes, double-click for a 2-hop neighborhood, and use the **Decay** scrubber to project every memory forward up to a year with recalld's FSRS formula. Temporal links are hidden by default; the **Links** menu shows them.
-- **Explore:** a fast table of every memory with phase, strength (R), next phase change, namespace and last access. Filter by phase, tag or entity; sort, and share the URL.
+- **Memory map:** every memory as a node, sized by its links and its current strength, and colored by stage: deep green while Full and strong, lighter as it fades, pale sage as a Summary, an outline as a Ghost. When an agent recalls, the map shows recalld's real spreading-activation path: seeds bloom, light travels along the links that were followed, results keep a ring, and memories suppressed by retrieval-induced forgetting cool briefly. Click a memory to bring its links forward, drag nodes, double-click for a 2-hop neighborhood, and use the **Decay** scrubber to project every memory forward up to a year with recalld's FSRS formula. Only associative links show by default; the **Links** menu adds the other types.
+- **Explore:** a fast table of every memory with phase, strength (R), next phase change, namespace and last access. Filter by phase, tag or entity; sort, and share the URL. Click a row to open it in place: full text, labels, the decay curve, activity and its links (click one to open it).
 - **Timeline:** memories stored per week (by their phase today) and recalls per week, plus a day-by-day activity stream.
-- **Health:** counts by phase, the decay forecast, memories fading soon, storage, and the daemon's system status (version, uptime, memory, CPU, cache, embedding latency, connected agents, next decay sweep).
-- **Search (⌘K or /):** recalld's own hybrid search (vector, text, entities and graph links), with the score breakdown for each result. **↵** opens a result in Explore and **⌘↵** shows it on the map.
+- **Health:** counts by phase, the decay forecast, memories fading soon, storage, and the daemon's system status (version, uptime, memory, embedding latency, subsystem health, connected agents, next decay sweep).
+- **Search (⌘K or /):** recalld's own hybrid search (vector, text, entities and graph links), with the score breakdown for each result. **↵** opens a result where you are (on the map it is selected there; in Explore its row opens) and **⌘↵** shows it on the map.
 
 The namespace scope (sidebar or the first toolbar chip) applies to every view and is remembered.
 

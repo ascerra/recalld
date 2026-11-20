@@ -468,7 +468,7 @@ pub async fn recall_latency(
     let run_socket = socket.clone();
     tokio::spawn(async move {
         let _ = server
-            .run(&run_socket, std::time::Duration::from_secs(3600))
+            .run(&run_socket, Some(std::time::Duration::from_secs(3600)))
             .await;
     });
     for _ in 0..100 {

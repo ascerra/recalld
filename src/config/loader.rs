@@ -177,6 +177,7 @@ fn apply_per_dir_overrides(base: RecalldConfig, per_dir: &PerDirConfig) -> Recal
         graph: per_dir.graph.clone().unwrap_or(base.graph),
         rif: per_dir.rif.clone().unwrap_or(base.rif),
         log: per_dir.log.clone().unwrap_or(base.log),
+        ui: base.ui,
         timezone: base.timezone,
     }
 }
@@ -482,6 +483,7 @@ fn apply_env_overrides(config: &mut RecalldConfig) -> std::result::Result<(), Ve
 
     // --- RIF ---
     env_override!("RECALLD_RIF_ENABLED", config.rif.enabled, bool);
+    env_override!("RECALLD_UI_ENABLED", config.ui.enabled, bool);
     env_override!(
         "RECALLD_RIF_MAX_SUPPRESSION",
         config.rif.max_suppression,
@@ -609,6 +611,9 @@ pub fn generate_default_config() -> String {
 # level = "info"
 # format = "pretty"                  # "pretty" or "json"
 # file = "/var/log/recalld.log"       # optional, stderr-only if omitted
+
+[ui]
+# enabled = true                     # `recalld ui`, the local browser UI
 "#
     .to_string()
 }

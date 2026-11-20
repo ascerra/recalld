@@ -189,6 +189,13 @@ pub fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Whether `elapsed_ms` of idleness has reached `timeout`. Compared in u128:
+/// casting a large timeout's milliseconds to i64 can wrap negative, which
+/// would shut the daemon down at the first check.
+fn idle_expired(elapsed_ms: i64, timeout: Duration) -> bool {
+    elapsed_ms >= 0 && elapsed_ms as u128 >= timeout.as_millis()
+}
+
 /// Background task that shuts down the daemon after it has been idle
 /// (zero connections and no recent activity) for `idle_timeout`.
 pub async fn idle_monitor(
@@ -209,7 +216,7 @@ pub async fn idle_monitor(
         let last = last_activity.load(Ordering::Relaxed);
         let elapsed_ms = now_millis() - last;
 
-        if elapsed_ms >= idle_timeout.as_millis() as i64 {
+        if idle_expired(elapsed_ms, idle_timeout) {
             tracing::info!(
                 idle_secs = elapsed_ms / 1000,
                 "idle timeout reached, initiating shutdown"
@@ -372,5 +379,20 @@ mod tests {
         assert_eq!(runtime_dir_from(Some("".into())), None);
         assert_eq!(runtime_dir_from(None), None);
         assert_eq!(runtime_dir_from(Some(RUNTIME_DIR.into())), dir(RUNTIME_DIR));
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+
+    #[test]
+    fn a_huge_timeout_never_expires() {
+        // u64::MAX / 2 seconds used to wrap to -1000 ms and expire at once.
+        let huge = Duration::from_secs(u64::MAX / 2);
+        assert!(!idle_expired(0, huge));
+        assert!(!idle_expired(i64::MAX, huge));
+        assert!(idle_expired(30 * 60_000, Duration::from_secs(30 * 60)));
+        assert!(!idle_expired(30 * 60_000 - 1, Duration::from_secs(30 * 60)));
     }
 }

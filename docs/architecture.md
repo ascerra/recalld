@@ -758,7 +758,7 @@ response would advertise a revision in which `initialize` does not exist.
 
 - Socket path: `$RECALLD_DAEMON_SOCKET` if set; otherwise `$XDG_RUNTIME_DIR/recalld/recalld.sock` (Linux) or `~/.recalld/recalld.sock`. A daemon already listening at either location, or under `/run/user/<uid>` on Linux, is used in preference to the default, so clients and daemon agree even when their environments differ.
 - JSON-RPC 2.0 protocol.
-- Auto-shutdown after idle timeout (default 30 minutes).
+- Optional auto-shutdown after an idle timeout (`--idle-timeout <minutes>`; default 0, never), so agents and the UI always find it running.
 - Stale socket cleanup on startup (checks if PID is alive).
 - MCP clients connect to the daemon via JSON-RPC 2.0.
 

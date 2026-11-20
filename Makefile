@@ -1,9 +1,10 @@
-.PHONY: build release test fmt fmt-check clippy lint clean install setup ui ui-test release-ui
+.PHONY: build release test fmt fmt-check clippy lint clean install setup ui ui-test
 
 build:
 	cargo build
 
-release:
+# Release builds embed the local web UI, so build it first (Node 22.17+, pnpm).
+release: ui
 	cargo build --release
 
 test:
@@ -23,14 +24,14 @@ lint: fmt-check clippy
 clean:
 	cargo clean
 
-install:
+install: ui
 	cargo install --path .
 
 setup:
 	git config core.hooksPath .githooks
 	@echo "Git hooks configured."
 
-# ── Optional local web UI (`recalld ui`) ─────────────────────────
+# ── Local web UI (`recalld ui`) ──────────────────────────────────
 ui:
 	pnpm -C ui install --frozen-lockfile
 	pnpm -C ui build
@@ -38,7 +39,4 @@ ui:
 ui-test: ui
 	pnpm -C ui check
 	pnpm -C ui test
-	cargo test --features ui --lib ui::
-
-release-ui: ui
-	cargo build --release --features ui
+	cargo test --lib ui::

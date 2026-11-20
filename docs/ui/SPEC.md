@@ -54,7 +54,7 @@ New module `src/ui/` holds the server, routes, asset embedding and SSE bridge.
 `rust-embed` on `ui/dist/`. Debug builds read from disk (enables `pnpm dev` + a proxy); release
 builds embed. SPA fallback: unknown non-`/api` paths serve `index.html`. Long-cache hashed assets;
 `no-store` for `index.html`. Add `make ui` (runs `pnpm -C ui install --frozen-lockfile && pnpm -C ui
-build`) and make `make release-ui` depend on it. CI: build the UI once, then `cargo build --features
+build`) and make `make release` and `make install` depend on it (the UI is a default feature). CI: build the UI once, then `cargo build --features
 ui`.
 
 ### 2.3 New read-only daemon methods

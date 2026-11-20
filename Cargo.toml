@@ -29,10 +29,12 @@ name = "recalld"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["ui"]
 bench = []
-# Optional local web UI (`recalld ui`). Off by default: a build without it is
-# unchanged in behavior and dependencies.
+# Local web UI (`recalld ui`), on by default and turned off at runtime with
+# `[ui] enabled = false`. Build without it (`--no-default-features`, as the
+# Docker image does) for a headless binary. The SPA is embedded from
+# `ui/dist` when built first (`make release`); without it the UI page says so.
 ui = ["dep:rust-embed", "dep:ts-rs", "dep:futures-core", "tower-http/compression-gzip"]
 
 [dependencies]

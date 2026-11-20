@@ -1,6 +1,6 @@
 name: UI
 
-# The optional local web UI (`--features ui`). Runs only when the UI or the
+# The local web UI (`recalld ui`, a default feature). Runs only when the UI or the
 # backend surfaces it depends on change.
 on:
   push:

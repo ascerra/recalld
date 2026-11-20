@@ -158,8 +158,9 @@ enum DaemonAction {
         #[arg(long)]
         foreground: bool,
 
-        /// Idle timeout in minutes before auto-shutdown (0 = no timeout)
-        #[arg(long, default_value = "30", env = "RECALLD_DAEMON_IDLE_TIMEOUT")]
+        /// Idle timeout in minutes before auto-shutdown (default 0: never;
+        /// the daemon keeps running for agents and the UI)
+        #[arg(long, default_value = "0", env = "RECALLD_DAEMON_IDLE_TIMEOUT")]
         idle_timeout: u64,
 
         /// Log level filter
@@ -432,6 +433,12 @@ async fn async_main(cli: Cli) -> ExitCode {
 
 #[cfg(feature = "ui")]
 async fn run_ui(config: RecalldConfig, port: Option<u16>, open_browser: bool) -> ExitCode {
+    if !config.ui.enabled {
+        eprintln!(
+            "The local web UI is turned off ([ui] enabled = false or RECALLD_UI_ENABLED=false)."
+        );
+        return ExitCode::FAILURE;
+    }
     let socket = recalld::daemon::socket_path();
     let reachable = async |socket: &Path| match recalld::daemon::DaemonClient::connect(socket).await
     {
@@ -1172,11 +1179,8 @@ async fn run_daemon(config: RecalldConfig, action: DaemonAction) -> ExitCode {
             idle_timeout,
             ..
         } => {
-            let timeout = if idle_timeout == 0 {
-                Duration::from_secs(u64::MAX / 2)
-            } else {
-                Duration::from_secs(idle_timeout * 60)
-            };
+            let timeout =
+                (idle_timeout > 0).then(|| Duration::from_secs(idle_timeout.saturating_mul(60)));
             if foreground {
                 run_daemon_foreground(config, timeout).await
             } else {
@@ -1188,7 +1192,10 @@ async fn run_daemon(config: RecalldConfig, action: DaemonAction) -> ExitCode {
     }
 }
 
-async fn run_daemon_foreground(mut config: RecalldConfig, idle_timeout: Duration) -> ExitCode {
+async fn run_daemon_foreground(
+    mut config: RecalldConfig,
+    idle_timeout: Option<Duration>,
+) -> ExitCode {
     let socket = recalld::daemon::socket_path();
 
     if recalld::daemon::is_daemon_alive(&socket).unwrap_or(false) {

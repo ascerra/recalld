@@ -2,7 +2,8 @@ FROM rust:1-bookworm AS builder
 
 WORKDIR /build
 COPY . .
-RUN cargo build --locked --release --bin recalld --bin recalld-cli
+# Headless: the local web UI binds 127.0.0.1, which a container can't usefully serve.
+RUN cargo build --locked --release --no-default-features --bin recalld --bin recalld-cli
 
 FROM debian:bookworm-slim
 

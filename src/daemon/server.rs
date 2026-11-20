@@ -133,7 +133,13 @@ impl DaemonServer {
     }
 
     /// Binds to `socket_path` and serves RPC requests until shutdown.
-    pub async fn run(self, socket_path: &Path, idle_timeout: Duration) -> std::io::Result<()> {
+    /// `idle_timeout`: shut down after this long with no clients; `None` runs
+    /// until stopped.
+    pub async fn run(
+        self,
+        socket_path: &Path,
+        idle_timeout: Option<Duration>,
+    ) -> std::io::Result<()> {
         lifecycle::cleanup_stale_socket(socket_path)?;
 
         if let Some(parent) = socket_path.parent() {
@@ -149,12 +155,14 @@ impl DaemonServer {
 
         tracing::info!(path = %socket_path.display(), "daemon listening");
 
-        tokio::spawn(lifecycle::idle_monitor(
-            self.last_activity.clone(),
-            self.connection_count.clone(),
-            idle_timeout,
-            self.shutdown_tx.clone(),
-        ));
+        if let Some(idle_timeout) = idle_timeout {
+            tokio::spawn(lifecycle::idle_monitor(
+                self.last_activity.clone(),
+                self.connection_count.clone(),
+                idle_timeout,
+                self.shutdown_tx.clone(),
+            ));
+        }
 
         let mut shutdown_rx = self.shutdown_tx.subscribe();
 
