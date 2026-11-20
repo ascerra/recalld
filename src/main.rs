@@ -72,7 +72,8 @@ enum Command {
         ///
         /// If a directory, generates timestamped filename automatically.
         /// If a file path ending in .zip, uses that exact name.
-        #[arg(short, long)]
+        /// Long form only: `-d` is the global `--data-dir`.
+        #[arg(long)]
         destination: std::path::PathBuf,
 
         /// Override the data directory to back up
@@ -120,6 +121,15 @@ enum Command {
         /// Read-only preview at this Unix timestamp in milliseconds
         #[arg(long, allow_hyphen_values = true)]
         preview_at: Option<i64>,
+    },
+
+    /// Offline repair of 1.0 vector ownership that stops the 2.0 upgrade
+    ///
+    /// Requires an explicit --config. See "Repairing legacy vector ownership"
+    /// in docs/guide.md.
+    RepairLegacyVectors {
+        #[command(subcommand)]
+        action: recalld::cli::legacy_vector_repair::RepairCommand,
     },
 
     /// Open the local web UI (starts the daemon if needed)
@@ -339,6 +349,8 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+        // Stdout carries the repair's JSON result; no tracing subscriber.
+        Command::RepairLegacyVectors { .. } => {}
         #[cfg(feature = "bench")]
         Command::Bench { .. } => {}
     }
@@ -356,6 +368,20 @@ fn main() -> ExitCode {
 }
 
 async fn async_main(cli: Cli) -> ExitCode {
+    // Before config discovery: repair never falls back to ./recalld.toml or ~/.recalld.
+    if let Some(Command::RepairLegacyVectors { action }) = cli.command {
+        let Some(config) = cli.config else {
+            eprintln!("repair-legacy-vectors requires an explicit --config");
+            return ExitCode::FAILURE;
+        };
+        return match recalld::cli::legacy_vector_repair::run(&config, action).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("Repair failed; source not activated or replaced: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let loaded = match load_config(&cli) {
         Ok(c) => c,
         Err(e) => {
@@ -424,6 +450,7 @@ async fn async_main(cli: Cli) -> ExitCode {
                 }
             }
         }
+        Command::RepairLegacyVectors { .. } => unreachable!("dispatched before config discovery"),
         #[cfg(feature = "ui")]
         Command::Ui { port, no_open, .. } => run_ui(loaded.config, port, !no_open).await,
         #[cfg(feature = "bench")]
@@ -1394,4 +1421,33 @@ fn init_tracing(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn backup_accepts_global_data_dir_short_flag() {
+        let cli = Cli::try_parse_from([
+            "recalld",
+            "backup",
+            "-d",
+            "/data",
+            "--destination",
+            "out.zip",
+        ])
+        .expect("`backup -d` is the global --data-dir");
+        assert_eq!(cli.data_dir.as_deref(), Some("/data"));
+        let Some(Command::Backup { destination, .. }) = cli.command else {
+            panic!("expected backup");
+        };
+        assert_eq!(destination, std::path::PathBuf::from("out.zip"));
+    }
 }

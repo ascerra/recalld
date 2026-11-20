@@ -8,6 +8,7 @@ mod client;
 mod commands;
 mod config;
 mod import;
+pub mod legacy_vector_repair;
 mod output;
 mod policy;
 mod vector_certification;

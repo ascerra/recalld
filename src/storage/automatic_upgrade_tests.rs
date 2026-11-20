@@ -159,6 +159,45 @@ fn runtime_rejection_keeps_original_and_durable_backup() {
     assert_eq!(inventory(&backups[0]).unwrap(), before);
 }
 #[test]
+fn ownership_mismatch_names_the_repair_command() {
+    use crate::model::DiskRecord;
+    use crate::storage::metadata::META_TABLE;
+    use redb::ReadableTable;
+    let (_root, path) = fixture();
+    let db = redb::Database::open(path.join("meta.db")).unwrap();
+    let tx = db.begin_write().unwrap();
+    {
+        let mut table = tx.open_table(META_TABLE).unwrap();
+        let rows: Vec<_> = table
+            .iter()
+            .unwrap()
+            .map(|r| DiskRecord::from_bytes(r.unwrap().1.value()).unwrap())
+            .collect();
+        let mut b = rows[1].clone();
+        b.namespace_id = rows[0].namespace_id;
+        b.vector_slot = rows[0].vector_slot;
+        table
+            .insert(b.id.as_slice(), b.encode().unwrap().as_slice())
+            .unwrap();
+    }
+    tx.commit().unwrap();
+    drop(db);
+    let before = inventory(&path).unwrap();
+    let message = open(&path).err().unwrap().to_string();
+    assert!(message.contains("duplicate vector owner"), "{message}");
+    assert!(
+        message.contains("original unchanged/restored; upgrade artifacts retained at "),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(
+            "; run `recalld repair-legacy-vectors plan` (see 'Repairing legacy vector ownership' in docs/guide.md)"
+        ),
+        "{message}"
+    );
+    assert_eq!(inventory(&path).unwrap(), before);
+}
+#[test]
 fn every_precommit_failure_restores_original() {
     for phase in [
         Phase::Preparing,
@@ -507,4 +546,37 @@ fn upgrade_only_acquisition_cannot_bypass_lock_or_journal_identity() {
     assert!(prepare_upgrade(&path, 1795025815000, Box::new(SystemIds)).is_err());
     assert_eq!(inventory(&path).unwrap(), original);
     assert!(!path.parent().unwrap().join("unrelated").exists());
+}
+#[test]
+fn repeated_failure_on_unchanged_source_makes_no_new_copy() {
+    let (_root, path) = fixture();
+    let attempt = |path: &Path| {
+        prepare_at(
+            path,
+            1795025815000,
+            Box::new(SystemIds),
+            |_| Err(invalid("vector ownership mismatch")),
+            |_| Ok(()),
+        )
+        .err()
+        .unwrap()
+        .to_string()
+    };
+    let artifacts = |path: &Path| {
+        fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().is_dir())
+            .count()
+            - 1
+    };
+    let first = attempt(&path);
+    assert_eq!(artifacts(&path), 1);
+    let second = attempt(&path);
+    assert!(second.starts_with(&first), "{second}");
+    assert!(second.contains("no new copy"), "{second}");
+    assert_eq!(artifacts(&path), 1);
+    // A changed (e.g. repaired) source retries the upgrade.
+    fs::write(path.join("repaired"), b"changed").unwrap();
+    assert!(!attempt(&path).contains("no new copy"));
+    assert_eq!(artifacts(&path), 2);
 }
