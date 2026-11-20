@@ -1,15 +1,16 @@
-//! Offline repair adapter; never activates a candidate or starts a daemon.
-//! `--config CONFIG plan SOURCE --manifest PLAN.json` makes no provider calls.
-//! `--config CONFIG apply SOURCE DEST --manifest PLAN.json --approved-drop-ids DROP.json --approved-repair-ids REPAIR.json`
+//! `recalld repair-legacy-vectors`: offline repair adapter; never activates a
+//! candidate or starts a daemon.
+//! `plan SOURCE --manifest PLAN.json` makes no provider calls.
+//! `apply SOURCE DEST --manifest PLAN.json --approved-drop-ids DROP.json --approved-repair-ids REPAIR.json`
 //! uses only the configured local Ollama document provider. Inspect DEST/candidate
 //! before running the published runtime's ordinary schema upgrade against it.
-use clap::{Parser, Subcommand};
-use recalld::{
+use crate::{
     config::{RecalldConfig, loader},
     embedding::{self, EmbeddingProvider},
     model::{MemoryId, schema::EmbeddingProfile},
     storage::legacy_vector_repair::{self as repair, RepairDocument, RepairPlan},
 };
+use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,23 +19,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Parser)]
-struct Args {
-    /// Explicit operator configuration; never discover a home config implicitly.
-    #[arg(long)]
-    config: PathBuf,
-    #[command(subcommand)]
-    command: Command,
-}
-#[derive(Subcommand)]
-enum Command {
+#[derive(Subcommand, Debug)]
+pub enum RepairCommand {
+    /// Write a repair manifest; makes no embedding requests
     Plan {
         source: PathBuf,
         #[arg(long)]
         manifest: PathBuf,
     },
+    /// Regenerate approved embeddings into a fresh workspace
     Apply {
         source: PathBuf,
         destination: PathBuf,
@@ -62,7 +57,7 @@ struct Manifest {
 fn local_endpoint(config: &RecalldConfig) -> Result<String> {
     if !matches!(
         config.embedding.provider,
-        recalld::config::EmbeddingProvider::Ollama
+        crate::config::EmbeddingProvider::Ollama
     ) {
         return Err(
             "repair requires the configured local Ollama provider; no provider fallback".into(),
@@ -187,12 +182,14 @@ fn write_manifest(path: &Path, manifest: &Manifest) -> Result<()> {
     Ok(())
 }
 
-async fn run(args: Args) -> Result<()> {
-    let loaded = loader::load_config(Some(&args.config), &loader::CliOverrides::default())
+/// Run the repair with an explicit operator configuration; never discovers a
+/// home config implicitly.
+pub async fn run(config: &Path, command: RepairCommand) -> Result<()> {
+    let loaded = loader::load_config(Some(config), &loader::CliOverrides::default())
         .map_err(|errors| format!("configuration rejected: {errors:?}"))?;
     let (endpoint, provider) = provider(&loaded.config).await?;
-    match args.command {
-        Command::Plan { source, manifest } => {
+    match command {
+        RepairCommand::Plan { source, manifest } => {
             let plan = repair::plan(&source)?;
             let provider = provider.profile().ok_or("provider has no profile")?;
             let manifest_value = Manifest {
@@ -207,7 +204,7 @@ async fn run(args: Args) -> Result<()> {
                 serde_json::json!({"manifest":manifest,"repair_count":manifest_value.plan.repair_ids.len(),"drop_count":manifest_value.plan.drop_ids.len(),"provider_calls":0})
             );
         }
-        Command::Apply {
+        RepairCommand::Apply {
             source,
             destination,
             manifest,
@@ -250,14 +247,6 @@ async fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(error) = run(Args::parse()).await {
-        eprintln!("Repair failed; source not activated or replaced: {error}");
-        std::process::exit(1);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,9 +255,9 @@ mod tests {
     #[test]
     fn remote_and_paid_providers_are_rejected_before_construction() {
         let mut config = RecalldConfig::default();
-        config.embedding.provider = recalld::config::EmbeddingProvider::OpenAI;
+        config.embedding.provider = crate::config::EmbeddingProvider::OpenAI;
         assert!(local_endpoint(&config).is_err());
-        config.embedding.provider = recalld::config::EmbeddingProvider::Ollama;
+        config.embedding.provider = crate::config::EmbeddingProvider::Ollama;
         for endpoint in [
             "https://example.com",
             "http://localhost@remote.invalid",
@@ -294,7 +283,7 @@ mod tests {
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mut config = RecalldConfig::default();
-        config.embedding.provider = recalld::config::EmbeddingProvider::Ollama;
+        config.embedding.provider = crate::config::EmbeddingProvider::Ollama;
         config.embedding.base_url = format!("http://{}", listener.local_addr().unwrap());
         config.embedding.dimensions = 4;
         config.embedding.model_name = "synthetic-local-repair".into();

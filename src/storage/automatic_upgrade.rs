@@ -553,8 +553,14 @@ fn prepare_at(
     })();
     if let Err(error) = prepared {
         rollback(&j)?;
+        let hint = match error {
+            StorageError::OwnershipMismatch(_) => {
+                "; run `recalld repair-legacy-vectors plan` (see 'Repairing legacy vector ownership' in docs/guide.md)"
+            }
+            _ => "",
+        };
         return Err(invalid(format!(
-            "{error}; original unchanged/restored; upgrade artifacts retained at {}",
+            "{error}; original unchanged/restored; upgrade artifacts retained at {}{hint}",
             j.root().display()
         )));
     }

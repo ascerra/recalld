@@ -53,19 +53,19 @@ Migration retains existing vectors as `UnknownLegacy`: their original embedding 
 
 Starting with 2.0.1, startup identifies duplicate vector owners, freed slots still referenced by records, and missing vector slots. These errors stop migration; upgrading does not silently discard affected memories.
 
-An explicit offline repair tool is available as the source example `repair_legacy_vectors`; it is not included in the release binary archives. Build it from the matching release source with `cargo build --locked --release --example repair_legacy_vectors`. It supports legacy namespaces and the configured local Ollama provider, not already migrated native databases or remote embedding services.
+If startup reports one of these errors, it names the offline repair command, `recalld repair-legacy-vectors`, which ships in the release `recalld` binary from 2.1.1; no Rust toolchain is needed. On 2.1.0 and earlier, build the `repair_legacy_vectors` example from that release's source instead. It requires an explicit `--config` and never reads `./recalld.toml` or `~/.recalld/config.toml` implicitly. It supports legacy namespaces and the configured local Ollama provider, not already migrated native databases or remote embedding services.
 
 Stop every writer and work from a complete copy of the stopped database. Keep the original intact. With an explicit configuration matching your existing embedding model and document prefix, create a plan:
 
 ```bash
-target/release/examples/repair_legacy_vectors --config /path/to/config.toml \
+recalld --config /path/to/config.toml repair-legacy-vectors \
   plan /path/to/stopped-copy --manifest /path/to/plan.json
 ```
 
 The plan makes no embedding requests. Review `plan.drop_ids` and `plan.repair_ids` in its JSON output file. Create separate JSON arrays of the exact IDs you approve for each operation, such as `["memory-uuid"]` or `[]`. Records proposed for removal have invalid vector ownership and no retained summary or text reference. Removal is permanent in the candidate; the source and backup retain those records. Investigate older backups first if you need to recover their content.
 
 ```bash
-target/release/examples/repair_legacy_vectors --config /path/to/config.toml \
+recalld --config /path/to/config.toml repair-legacy-vectors \
   apply /path/to/stopped-copy /path/to/new-repair-workspace \
   --manifest /path/to/plan.json \
   --approved-drop-ids /path/to/approved-drop-ids.json \
