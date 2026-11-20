@@ -25,13 +25,16 @@ export function nodeAttributes(theme: MapTheme, phase: number, degree: number, p
 }
 
 export function edgeAttributes(theme: MapTheme, type: number, weight: number) {
-  const a = 0.4 * (0.55 + 0.6 * weight);
+  // Soft solid lines whose opacity carries the weight, so weak links recede
+  // and dense clusters read as a haze rather than a scratchy mesh. Only
+  // contradictions are dashed: fine dashes in a dense cluster look like noise.
+  const a = 0.32 * (0.3 + 0.7 * weight);
   const base = type === EDGE.contradicts ? theme.contradicts : theme.edge;
   const stronger = type === EDGE.supersedes ? 1.25 : 1;
-  const dashed = type === EDGE.entity ? [1.5, 2.5] : type === EDGE.contradicts ? [3, 3] : null;
+  const dashed = type === EDGE.contradicts ? [3, 3] : null;
   const color = alpha(base, Math.min(1, a * stronger));
   return {
-    size: type === EDGE.supersedes ? 1 : 0.8,
+    size: type === EDGE.supersedes ? 1.2 : 1,
     color: dashed ? alpha(base, 0) : color,
     dashColor: dashed ? color : alpha(base, 0),
     dashSize: dashed ? dashed[0] : 0,

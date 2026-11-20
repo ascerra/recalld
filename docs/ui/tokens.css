@@ -39,7 +39,7 @@
   /* ── Graph ────────────────────────────────────────────────── */
   --color-node: #3C403A;          /* unlit memory node */
   --color-node-lit: #579270;      /* node reached by a recall (3.2:1 on canvas) */
-  --color-edge: #9EA39A;          /* base edge, opacity 0.4 × (0.55 + 0.6 × weight) */
+  --color-edge: #9EA39A;          /* base edge, opacity 0.32 × (0.3 + 0.7 × weight), solid */
   --color-suppressed: #AAB5BF;    /* RIF-suppressed competitor */
   --color-suppressed-text: #4C5A68;
   --color-contradicts: #5A6B7D;   /* dashed 3 3 */

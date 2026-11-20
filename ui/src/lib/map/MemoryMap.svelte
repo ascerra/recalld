@@ -166,8 +166,9 @@
     const at = Date.now() + projectionDays * DAY_MS;
     graph.forEachNode((id, attrs) => {
       const i = attrs.index as number;
-      const phase = projectionDays > 0 ? projectedPhase(i, at) : snapshot.phase[i];
-      const enc = nodeAttributes(theme, phase, snapshot.degree[i], snapshot.permastore[i] === 1, strengthAt(i, at));
+      // Memories stored since the snapshot have no row in it: keep their own phase.
+      const phase = i < 0 ? ((attrs.phase as number) ?? 1) : projectionDays > 0 ? projectedPhase(i, at) : snapshot.phase[i];
+      const enc = nodeAttributes(theme, phase, i < 0 ? graph!.degree(id) : snapshot.degree[i], i >= 0 && snapshot.permastore[i] === 1, strengthAt(i, at));
       const hidden = !phases.has(phase) || (focus !== null && !focus.has(id));
       graph!.mergeNodeAttributes(id, { ...enc, phase, visibility: hidden ? 'hidden' : enc.visibility });
     });
@@ -268,7 +269,7 @@
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k);
-      ctx.strokeStyle = alpha(theme.edge, 0.7);
+      ctx.strokeStyle = alpha(theme.edge, 0.5);
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -458,7 +459,7 @@
     const side = Math.random() * Math.PI * 2;
     const cx = anchor.x + 26 * px * Math.cos(side);
     const cy = anchor.y + 26 * px * Math.sin(side);
-    g.addNode(e.id, { ...enc, x: cx, y: cy, index: -1, size: reducedMotion ? enc.size : 0 });
+    g.addNode(e.id, { ...enc, phase: e.phase, x: cx, y: cy, index: -1, size: reducedMotion ? enc.size : 0 });
     e.edges.forEach((x, i) => {
       if (!g.hasNode(x.to)) return;
       // A memory can link to the same neighbor more than once (one per type).
@@ -606,6 +607,25 @@
     return light;
   }
 
+  /** Hovering a memory highlights it, its neighbors and their links; sigma's
+   *  styles fade everything else (see `styles` below). */
+  let emphasized: { nodes: string[]; edges: string[] } = { nodes: [], edges: [] };
+  function emphasize(id: string | null) {
+    const g = graph!, s = sigma!;
+    for (const n of emphasized.nodes) if (g.hasNode(n)) s.setNodeState(n, { isHighlighted: false });
+    for (const e of emphasized.edges) if (g.hasEdge(e)) s.setEdgeState(e, { isHighlighted: false });
+    emphasized = { nodes: [], edges: [] };
+    if (!id) return;
+    emphasized.nodes.push(id);
+    g.forEachEdge(id, (key, a, src, dst) => {
+      if (a.visibility !== 'visible') return;
+      emphasized.edges.push(key);
+      emphasized.nodes.push(src === id ? dst : src);
+    });
+    for (const n of emphasized.nodes) s.setNodeState(n, { isHighlighted: true });
+    for (const e of emphasized.edges) s.setEdgeState(e, { isHighlighted: true });
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────────
   onMount(() => {
     theme = readTheme();
@@ -650,9 +670,18 @@
               size: { attribute: 'size' },
               visibility: { attribute: 'visibility' },
               labelVisibility: 'hidden',
+              // While a memory is hovered, everything outside its neighborhood fades.
+              opacity: { when: (_a: unknown, st: { isHighlighted: boolean }, gs: { hasHighlighted: boolean }) => gs.hasHighlighted && !st.isHighlighted, then: 0.3, else: 1 },
             },
           ],
-          edges: [{ color: { attribute: 'color' }, size: { attribute: 'size' }, visibility: { attribute: 'visibility' } }],
+          edges: [
+            {
+              color: { whenState: 'isHighlighted', then: () => alpha(theme.node, 0.55), else: { attribute: 'color' } },
+              size: { whenState: 'isHighlighted', then: 1.3, else: { attribute: 'size' } },
+              opacity: { when: (_a: unknown, st: { isHighlighted: boolean }, gs: { hasHighlighted: boolean }) => gs.hasHighlighted && !st.isHighlighted, then: 0.25, else: 1 },
+              visibility: { attribute: 'visibility' },
+            },
+          ],
         },
         settings: {
           renderLabels: false,
@@ -697,6 +726,7 @@
       unsubscribe = live.subscribe(onLive);
       sigma.on('enterNode', ({ node }) => {
         hovered = node;
+        emphasize(node);
         ensureSummaries([node]);
         clearTimeout(hoverTimer);
         // Tooltip after --dur-fast (120 ms).
@@ -708,6 +738,7 @@
       });
       sigma.on('leaveNode', () => {
         hovered = null;
+        emphasize(null);
         tooltip = null;
         clearTimeout(hoverTimer);
         sigma!.refresh({ skipIndexation: true });
