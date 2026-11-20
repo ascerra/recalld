@@ -82,7 +82,23 @@ impl DecaySweepRunner {
                 return result;
             }
         };
+        // Startup and timer passes publish after every `write_batch_size`
+        // commits and after their last one, rather than after every commit:
+        // each publication rebuilds every record and edge. The batch also
+        // bounds the effects awaiting publication, which every commit reads.
+        // The first commit is published on its own, so a pass whose derived
+        // views cannot be published still stops after one write. Bounded
+        // passes report a receipt per commit and keep publishing each one
+        // before recording it.
+        let defer_publication = admission.is_none();
+        let mut deferred = Deferred::default();
         for (index, intent) in intents.into_iter().enumerate() {
+            if deferred.count > 0
+                && (!deferred.published || deferred.count >= config.write_batch_size)
+                && !deferred.publish(completion, work, &mut result).await
+            {
+                break;
+            }
             if admission.is_some_and(ReceiptAdmission::stopped) {
                 break;
             }
@@ -99,11 +115,28 @@ impl DecaySweepRunner {
                 expected_generation: None,
                 contract_version: original_contract_version,
             };
-            match completion
-                .apply_native_decay_accepted_bounded(ctx, intent, policy.clone(), work, admission)
-                .await
-            {
-                Ok(NativeDecayResult::Committed(receipt)) => result.native_commit(&receipt),
+            let applied = if defer_publication {
+                completion
+                    .apply_native_decay_in_pass(ctx, intent, policy.clone(), work)
+                    .await
+            } else {
+                completion
+                    .apply_native_decay_accepted_bounded(
+                        ctx,
+                        intent,
+                        policy.clone(),
+                        work,
+                        admission,
+                    )
+                    .await
+            };
+            match applied {
+                Ok(NativeDecayResult::Committed(receipt)) => {
+                    if defer_publication {
+                        deferred.add(id, phase, &receipt);
+                    }
+                    result.native_commit(&receipt)
+                }
                 Ok(NativeDecayResult::Skipped(reason)) => match reason {
                     NativeDecaySkip::Unchanged => result.unchanged_skipped += 1,
                     NativeDecaySkip::Stale => result.stale_skipped += 1,
@@ -131,6 +164,10 @@ impl DecaySweepRunner {
             if (index + 1) % config.yield_every_n == 0 {
                 tokio::task::yield_now().await;
             }
+        }
+        // Publish the remaining commits before reporting or compacting.
+        if deferred.count > 0 {
+            deferred.publish(completion, work, &mut result).await;
         }
         // Physical relocation is a separate internal-contract1 commit after
         // successful lifecycle work. Never consume a fresh ID/generation after
@@ -160,6 +197,57 @@ impl DecaySweepRunner {
         // there is no independent native phase-index persistence transaction.
         result.duration = start.elapsed();
         result
+    }
+}
+
+/// Commits of a native startup or timer pass that await derived publication.
+#[derive(Default)]
+struct Deferred {
+    /// The first of them. A failed publication is reported against it, as a
+    /// per-commit publication failure would have been.
+    first: Option<(MemoryId, DecayPhase, WriteReceipt)>,
+    count: usize,
+    published: bool,
+}
+
+impl Deferred {
+    fn add(&mut self, id: MemoryId, phase: DecayPhase, receipt: &WriteReceipt) {
+        self.first
+            .get_or_insert_with(|| (id, phase, receipt.clone()));
+        self.count += 1;
+    }
+
+    /// Publish every deferred commit. On failure, records it against the
+    /// first of them and returns false: the pass makes no further writes.
+    async fn publish(
+        &mut self,
+        completion: &crate::derived_completion::DerivedCompletion,
+        work: &WorkTicket,
+        result: &mut SweepResult,
+    ) -> bool {
+        self.published = true;
+        self.count = 0;
+        let first = self.first.take();
+        let Err(source) = completion.complete_with_admission(Some(work), None).await else {
+            return true;
+        };
+        let error = match first {
+            Some((memory_id, phase, receipt)) => {
+                let error = StorageError::CommittedMutation {
+                    receipt: Box::new(receipt),
+                    source: Box::new(source),
+                };
+                result.errors.push(SweepRecordError {
+                    memory_id,
+                    phase,
+                    error: error.to_string(),
+                });
+                error
+            }
+            None => source,
+        };
+        result.retain_publication_failure(&error);
+        false
     }
 }
 

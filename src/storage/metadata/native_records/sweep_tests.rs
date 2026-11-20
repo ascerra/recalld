@@ -631,5 +631,161 @@ async fn native_sweep_actual_interval_registers_only_at_tick_and_publishes_fresh
     assert_eq!(tracker.status().unresolved, 0);
 }
 
+fn setup_memories(count: usize) -> (Fixture, Vec<MemoryId>) {
+    let root = tempfile::tempdir().unwrap();
+    let d = certified_fixture(root.path());
+    let c = Arc::new(CountingClock::new(3000));
+    let mut session =
+        NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c).unwrap();
+    let mut ids = Vec::new();
+    for n in 0..count {
+        let mut memory = input(&d);
+        memory.memory.initial_stability = Some(1.);
+        let intent = session.capture_insert(scope(&d), &memory).unwrap();
+        let key = ctx(&session, &d, &format!("pass-batch-{n}"));
+        ids.push(inserted(
+            &session
+                .insert_prepared(&key, &intent, &generated())
+                .unwrap(),
+        ));
+    }
+    (Fixture::from_open_engine(root, session.engine), ids)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_timer_pass_publishes_per_batch_and_checks_each_write_against_its_own_record() {
+    let (f, ids) = setup_memories(5);
+    completion(&f).rebuild_all().await.unwrap();
+    ready(&f).await;
+    let scans = || {
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .recovery_scans
+            .load(Ordering::SeqCst)
+    };
+    let before = scans();
+    // One hour on, every strength moves and no phase changes, so the pass
+    // commits every memory: the five here plus the fixture's parent.
+    let result = DecaySweepRunner::execute_sweep_with_work(
+        &SweepConfig {
+            write_batch_size: 2,
+            ..Default::default()
+        },
+        &crate::decay::DecayConfig::default(),
+        &Default::default(),
+        &f.storage,
+        &f.graph,
+        &f.cache,
+        1.,
+        Some(3000 + DAY / 24),
+        None,
+        Some(&completion(&f)),
+    )
+    .await;
+    let scanned = scans() - before;
+    assert!(
+        result.errors.is_empty() && result.publication_error.is_none(),
+        "{result:?}"
+    );
+    assert_eq!(result.memories_scanned, ids.len() as u64 + 1);
+    assert_eq!(result.unchanged_skipped, 0);
+    assert_eq!(result.full_to_summary, 0);
+    // A publication reads every record once. Six commits in batches of two
+    // publish after the first (on its own), the third, the fifth and the
+    // last. Applying each write reads only that write's record.
+    assert_eq!(scanned, 4);
+    ready(&f).await;
+    assert!(
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .is_empty()
+    );
+    for id in &ids {
+        let record = row(&f, *id);
+        assert_eq!(record.phase, DecayPhase::Full);
+        assert!(record.strength < 1., "strength was not materialized");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_phase_effect_checked_against_its_own_record_matches_a_full_scan() {
+    use crate::storage::metadata::effects::{validate_plan, validation_record_ids};
+    let (f, ids) = setup_memories(2);
+    completion(&f).rebuild_all().await.unwrap();
+    let id = ids[0];
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    let work = tracker.begin().unwrap();
+    let policy = NativePolicyInputs::default();
+    let capture = f
+        .storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .capture_native_decay(id, scope_id(&f, id), &policy, 3000 + DAY / 24)
+        .unwrap();
+    let context = MutationContext {
+        store_id: Some(f.storage.read().unwrap().control_state().unwrap().store_id),
+        scope: MutationScope::Namespace(scope_id(&f, id)),
+        idempotency_key: None,
+        expected_generation: None,
+        contract_version: 2,
+    };
+    let committed = completion(&f)
+        .apply_native_decay_in_pass(context, capture, policy, &work)
+        .await
+        .unwrap();
+    assert!(matches!(
+        committed,
+        crate::storage::native_maintenance::NativeDecayResult::Committed(_)
+    ));
+    let (effect, all, own) = {
+        let storage = f.storage.read().unwrap();
+        let effect = storage
+            .meta_store()
+            .pending_effects()
+            .unwrap()
+            .pop()
+            .unwrap();
+        let ids = validation_record_ids(&effect).unwrap();
+        assert_eq!(ids, vec![id]);
+        let own = storage.meta_store().records_for_recovery(&ids).unwrap();
+        (
+            effect,
+            storage.meta_store().scan_all_for_recovery().unwrap(),
+            own,
+        )
+    };
+    validate_plan(&effect, &all).unwrap();
+    validate_plan(&effect, &own).unwrap();
+    let mut wrong = own.clone();
+    wrong[0].1.strength = 1.;
+    assert!(validate_plan(&effect, &wrong).is_err());
+    assert!(validate_plan(&effect, &[]).is_err());
+    let mut released = effect.clone();
+    released
+        .releases
+        .push(crate::storage::metadata::effects::VectorRelease {
+            namespace_id: scope_id(&f, id),
+            slot: own[0].1.vector_slot,
+            memory_id: id,
+        });
+    assert!(
+        validation_record_ids(&released).is_none(),
+        "a release is checked against every record"
+    );
+    completion(&f).complete().await.unwrap();
+    f.storage.read().unwrap().meta_store().finish_work(work);
+}
+
+fn scope_id(f: &Fixture, id: MemoryId) -> crate::model::NamespaceId {
+    crate::model::NamespaceId::new(row(f, id).namespace_id)
+}
+
 #[path = "sweep_origin_tests.rs"]
 mod origin;

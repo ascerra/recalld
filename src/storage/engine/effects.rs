@@ -171,7 +171,10 @@ pub(super) fn apply_pending(
         }
         let pending = meta.pending_effects()?;
         for effect in pending.iter().filter(|e| !e.canonical_applied) {
-            let records = meta.scan_all_for_recovery()?;
+            let records = match crate::storage::metadata::effects::validation_record_ids(effect) {
+                Some(ids) => meta.records_for_recovery(&ids)?,
+                None => meta.scan_all_for_recovery()?,
+            };
             // Refuse corrupt recovery instructions before changing any files.
             crate::storage::metadata::effects::validate_plan(effect, &records)?;
             // A validated no-change receipt has no physical edge transaction.

@@ -136,6 +136,9 @@ pub struct MetadataStore {
     pub(crate) derived_publication: std::sync::Arc<tokio::sync::RwLock<()>>,
     #[cfg(test)]
     pub(crate) fail_effect_application: std::sync::atomic::AtomicBool,
+    /// How many times [`Self::scan_all_for_recovery`] has read every record.
+    #[cfg(test)]
+    pub(crate) recovery_scans: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(crate) catalog_test_fault: std::sync::atomic::AtomicU8,
     #[cfg(test)]
@@ -364,6 +367,8 @@ impl MetadataStore {
             derived_publication: std::sync::Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(test)]
             fail_effect_application: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            recovery_scans: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             catalog_test_fault: std::sync::atomic::AtomicU8::new(0),
             #[cfg(test)]
@@ -2073,6 +2078,9 @@ impl MetadataStore {
     pub(crate) fn scan_all_for_recovery(
         &self,
     ) -> Result<Vec<(MemoryId, DiskRecord)>, StorageError> {
+        #[cfg(test)]
+        self.recovery_scans
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(META_TABLE)?;
         let mut records = Vec::new();
@@ -2085,6 +2093,23 @@ impl MetadataStore {
             records.push((MemoryId::from_uuid(uuid), record));
         }
 
+        Ok(records)
+    }
+
+    /// The records with these IDs that exist, read like
+    /// [`Self::scan_all_for_recovery`]. Absent IDs are left out.
+    pub(crate) fn records_for_recovery(
+        &self,
+        ids: &[MemoryId],
+    ) -> Result<Vec<(MemoryId, DiskRecord)>, StorageError> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(META_TABLE)?;
+        let mut records = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(value) = table.get(id.as_bytes().as_slice())? {
+                records.push((*id, DiskRecord::from_bytes(value.value())?));
+            }
+        }
         Ok(records)
     }
 

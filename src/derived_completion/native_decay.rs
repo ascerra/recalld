@@ -26,9 +26,39 @@ impl DerivedCompletion {
         parent: &WorkTicket,
         admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
     ) -> Result<NativeDecayResult, StorageError> {
+        self.apply_native_decay(ctx, intent, policy, parent, admission, true)
+            .await
+    }
+
+    /// One decay of an unbounded sweep pass: commit it without awaiting
+    /// derived publication. Each publication is a full rebuild of every record
+    /// and edge, so awaiting one per memory made a pass cost records x
+    /// (records + edges). The pass publishes in batches and after its last
+    /// commit, before it reports or compacts. A bounded pass records a receipt
+    /// per commit and uses [`Self::apply_native_decay_accepted_bounded`].
+    pub(crate) async fn apply_native_decay_in_pass(
+        &self,
+        ctx: MutationContext,
+        intent: NativeDecayIntent,
+        policy: NativePolicyInputs,
+        parent: &WorkTicket,
+    ) -> Result<NativeDecayResult, StorageError> {
+        self.apply_native_decay(ctx, intent, policy, parent, None, false)
+            .await
+    }
+
+    async fn apply_native_decay(
+        &self,
+        ctx: MutationContext,
+        intent: NativeDecayIntent,
+        policy: NativePolicyInputs,
+        parent: &WorkTicket,
+        admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+        publish: bool,
+    ) -> Result<NativeDecayResult, StorageError> {
         let work = self.accept_work(Some(parent))?;
         let result = self
-            .native_decay_work(ctx, intent, policy, &work, admission)
+            .native_decay_work(ctx, intent, policy, &work, admission, publish)
             .await;
         if let (Some(admission), Err(error)) = (admission, &result) {
             admission.fail(error);
@@ -46,6 +76,7 @@ impl DerivedCompletion {
         policy: NativePolicyInputs,
         work: &WorkTicket,
         admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
+        publish: bool,
     ) -> Result<NativeDecayResult, StorageError> {
         let gate = publication_gate(&self.storage).await?;
         let lease = gate.read_owned().await;
@@ -88,12 +119,14 @@ impl DerivedCompletion {
                         source: Box::new(source),
                     })?;
             }
-            self.complete_with_admission(Some(work), admission)
-                .await
-                .map_err(|source| StorageError::CommittedMutation {
-                    receipt: Box::new(receipt.clone()),
-                    source: Box::new(source),
-                })?;
+            if publish {
+                self.complete_with_admission(Some(work), admission)
+                    .await
+                    .map_err(|source| StorageError::CommittedMutation {
+                        receipt: Box::new(receipt.clone()),
+                        source: Box::new(source),
+                    })?;
+            }
         }
         Ok(result)
     }
