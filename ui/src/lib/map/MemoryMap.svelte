@@ -19,7 +19,7 @@
   import LayoutWorker from './layout.worker.ts?worker';
   import { LightLayer, affine } from './light';
   import { choreograph, type Choreo } from './choreo';
-  import { rgb, alpha, shade } from './theme';
+  import { rgb, alpha } from './theme';
   import { live, type Received } from '$lib/live.svelte';
 
   let {
@@ -128,7 +128,7 @@
         x: x[i],
         y: y[i],
         index: i,
-        ...nodeAttributes(theme, s.phase[i], s.degree[i], s.permastore[i] === 1, strengthAt(i), toneOf(s.ids[i], s.ns[i])),
+        ...nodeAttributes(theme, s.phase[i], s.degree[i], s.permastore[i] === 1, strengthAt(i), s.ns[i]),
       });
     }
     for (let k = 0; k < s.src.length; k++) {
@@ -145,21 +145,6 @@
   // ── Encoding updates (phase filter, decay projection, links menu) ─────
   /** Retrievability of snapshot memory `i` at `at` (the Explore "strength").
    *  ponytail: ignores per-namespace decay multipliers, like projectedPhase. */
-  /** A memory's color: its namespace's tone, lightened or darkened a little
-   *  by a stable hash of its id, so a big namespace isn't one flat block. */
-  const toneCache = new Map<string, string>();
-  function toneOf(id: string, ns: number): string {
-    let t = toneCache.get(id);
-    if (!t) {
-      let h = 2166136261;
-      for (let k = 0; k < id.length; k++) h = Math.imul(h ^ id.charCodeAt(k), 16777619);
-      const base = theme.tones[ns % theme.tones.length] || theme.node;
-      t = shade(base, ((h >>> 0) / 0xffffffff) * 0.24 - 0.12);
-      toneCache.set(id, t);
-    }
-    return t;
-  }
-
   /** Namespace id of a memory, for its tone. */
   const nsOf = (id: string, a: Record<string, unknown>) => {
     const i = a.index as number;
@@ -189,7 +174,7 @@
       const i = attrs.index as number;
       // Memories stored since the snapshot have no row in it: keep their own phase.
       const phase = i < 0 ? ((attrs.phase as number) ?? 1) : projectionDays > 0 ? projectedPhase(i, at) : snapshot.phase[i];
-      const enc = nodeAttributes(theme, phase, i < 0 ? graph!.degree(id) : snapshot.degree[i], i >= 0 && snapshot.permastore[i] === 1, strengthAt(i, at), toneOf(id, nsOf(id, attrs)));
+      const enc = nodeAttributes(theme, phase, i < 0 ? graph!.degree(id) : snapshot.degree[i], i >= 0 && snapshot.permastore[i] === 1, strengthAt(i, at), nsOf(id, attrs));
       const hidden = !phases.has(phase) || (focus !== null && !focus.has(id));
       graph!.mergeNodeAttributes(id, { ...enc, phase, visibility: hidden ? 'hidden' : enc.visibility });
     });
@@ -390,7 +375,7 @@
       flashUntil.delete(id);
       const a = graph.getNodeAttributes(id);
       const i = a.index as number;
-      const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i), toneOf(id, nsOf(id, a)));
+      const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i), nsOf(id, a));
       graph.setNodeAttribute(id, 'color', enc.color);
       sigma?.refresh({ skipIndexation: true });
     }, FLASH_MS + 20);
@@ -473,7 +458,7 @@
       anchorId = from.length ? from[Math.floor(Math.random() * from.length)] : null;
     }
     const anchor = anchorId ? (g.getNodeAttributes(anchorId) as { x: number; y: number }) : { x: 0, y: 0 };
-    const enc = nodeAttributes(theme, e.phase, e.edges.length, false, 1, toneOf(e.id, e.namespaceId));
+    const enc = nodeAttributes(theme, e.phase, e.edges.length, false, 1, e.namespaceId);
     const now = performance.now();
     bornAt.set(e.id, now);
     const px = unitsPerPx();
@@ -553,7 +538,7 @@
       // collision circle from that, and a bigger drawn node could overlap.
     } else if (e.kind === 'phase_change' && graph.hasNode(e.id)) {
       const i = graph.getNodeAttribute(e.id, 'index') as number;
-      const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i), toneOf(e.id, nsOf(e.id, graph.getNodeAttributes(e.id))));
+      const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i), nsOf(e.id, graph.getNodeAttributes(e.id)));
       graph.mergeNodeAttributes(e.id, { ...enc, phase: e.to, visibility: phases.has(e.to) ? enc.visibility : 'hidden' });
     } else if (e.kind === 'forget' && graph.hasNode(e.id)) {
       death(e.id);

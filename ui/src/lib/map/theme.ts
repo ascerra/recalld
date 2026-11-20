@@ -23,7 +23,7 @@ const css = (name: string) => getComputedStyle(document.documentElement).getProp
 export function readTheme(): MapTheme {
   return {
     node: css('--color-node'),
-    tones: [css('--color-node'), ...[2, 3, 4, 5, 6].map((i) => css(`--color-node-${i}`))],
+    tones: [css('--color-node'), ...[2, 3, 4, 5].map((i) => css(`--color-node-${i}`))],
     nodeLit: css('--color-node-lit'),
     edge: css('--color-edge'),
     contradicts: css('--color-contradicts'),
@@ -37,17 +37,6 @@ export function readTheme(): MapTheme {
     agents: [1, 2, 3, 4].map((i) => css(`--color-agent-${i}`)),
     fontSans: css('--font-sans'),
   };
-}
-
-/** CSS variable holding namespace `id`'s node tone (matches `MapTheme.tones`). */
-export const toneVar = (id: number) => (id % 6 === 0 ? '--color-node' : `--color-node-${(id % 6) + 1}`);
-
-/** Lighten (k > 0) or darken (k < 0) `#RRGGBB` by mixing toward white or black. */
-export function shade(hex: string, k: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const t = k > 0 ? 255 : 0, a = Math.abs(k);
-  const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(v + (t - v) * a));
-  return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
 /** `#RRGGBB` + alpha → `rgba(r, g, b, a)`. */

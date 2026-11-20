@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { toneVar } from '$lib/map/theme';
   import { page } from '$app/state';
   import Icon, { type IconName } from './Icon.svelte';
   import Mark from './Mark.svelte';
@@ -70,7 +69,7 @@
       {/if}
       {#each namespaces.data ?? [] as ns (ns.id)}
         <button type="button" aria-pressed={scope.current === ns.name} onclick={() => scope.set(ns.name)}>
-          <span class="ns-name"><span class="tone" style="background: var({toneVar(ns.id)})" aria-hidden="true"></span>{ns.name}</span><span class="mono n">{count(ns.memoryCount)}</span>
+          <span class="ns-name">{ns.name}</span><span class="mono n">{count(ns.memoryCount)}</span>
         </button>
       {/each}
     </div>
@@ -151,16 +150,6 @@
     text-align: left;
     cursor: pointer;
     color: var(--color-text-2);
-  }
-  /* The namespace's node color on the map, as a key. */
-  .tone {
-    display: inline-block;
-    width: var(--space-2);
-    height: var(--space-2);
-    border-radius: 50%;
-    margin-right: var(--space-2);
-    vertical-align: middle;
-    opacity: 0.82;
   }
   .namespaces button[aria-pressed='true'] {
     color: var(--color-accent-strong);
