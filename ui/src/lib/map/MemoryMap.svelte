@@ -498,16 +498,26 @@
           minCameraRatio: 0.03,
           maxCameraRatio: 8,
           stagePadding: 40,
-          // Between sigma's jumpy default (1.7× per step, 250 ms) and too slow:
-          // events closer than zoomDuration/5 are dropped, so both matter.
-          zoomingRatio: 1.25,
-          zoomDuration: 200,
           doubleClickZoomingRatio: 1.6,
           hideEdgesOnMove: false,
         },
       } as never);
 
       sigma.on('afterRender', drawOverlay);
+      // Continuous zoom: sigma steps a fixed ratio per wheel event and drops
+      // events that come close together, which makes trackpad pinches lurch.
+      // Scale by each event's own delta instead, anchored at the cursor.
+      sigma.getMouseCaptor().on('wheel', (e) => {
+        e.preventSigmaDefault();
+        const ev = e.original as WheelEvent;
+        ev.preventDefault();
+        const dy = ev.deltaY * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1);
+        // Pinch arrives as ctrl+wheel with small deltas; mouse wheels send ~100 per notch.
+        const factor = Math.exp(dy * (ev.ctrlKey ? 0.01 : 0.002));
+        const cam = sigma!.getCamera();
+        const ratio = cam.getBoundedRatio(cam.getState().ratio * factor);
+        if (ratio !== cam.getState().ratio) cam.setState(sigma!.getViewportZoomedState({ x: e.x, y: e.y }, ratio));
+      });
       try {
         light = new LightLayer(lightCanvas, () => ({
           m: affine((p) => sigma!.graphToViewport(p)),
