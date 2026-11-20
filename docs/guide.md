@@ -516,7 +516,7 @@ This is the recommended transport when running recalld in a Docker container, on
 
 ### As daemon
 
-The daemon runs in the background, listening on a Unix socket. MCP clients connect to it via JSON-RPC 2.0. The daemon auto-shuts down after 30 minutes of inactivity by default.
+The daemon runs in the background, listening on a Unix socket. MCP clients connect to it via JSON-RPC 2.0. The daemon keeps running until you stop it. Pass `--idle-timeout <minutes>` to shut it down after that many idle minutes.
 
 The socket is at `$XDG_RUNTIME_DIR/recalld/recalld.sock` on Linux, and at `~/.recalld/recalld.sock` where `XDG_RUNTIME_DIR` is not set (macOS). Set `RECALLD_DAEMON_SOCKET` to put it somewhere else. A client that does not have the same environment as the daemon still finds it: before settling on a path, recalld checks each of these locations, and `/run/user/<uid>` on Linux, for a daemon that is already listening. `recalld daemon status` prints the path in use.
 

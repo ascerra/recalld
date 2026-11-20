@@ -1,6 +1,13 @@
 # Changelog
 
-## 2.1.0 — unreleased
+## Unreleased
+
+### Fixed
+
+- `recalld backup` no longer claims `-d` for `--destination`, so the global `-d/--data-dir` works with it. Spell out `--destination`. (#219)
+- The guide no longer says the daemon shuts down after 30 idle minutes; since 2.1.0 it keeps running by default. (#218)
+
+## 2.1.0 — 2026-11-20
 
 ### Local web UI
 
