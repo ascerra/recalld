@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from 'n
 import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { startStack, type Stack } from '../tests/support/stack';
+import { allNamespaces } from '../tests/support/ui';
 import { DaemonSocket } from './daemon';
 
 const smoke = !!process.env.PERF_SMOKE;
@@ -74,6 +75,9 @@ test.afterAll(async () => {
   writeFileSync(join(import.meta.dirname, 'results', smoke ? 'perf-smoke.json' : 'perf.json'), JSON.stringify(results, null, 2));
   console.log(JSON.stringify(results, null, 2));
 });
+
+// Budgets are for the whole store, across every namespace.
+test.beforeEach(({ page }) => allNamespaces(page));
 
 test('initial-route JS bundle (gzip)', async () => {
   const dir = join(import.meta.dirname, '../dist/_app/immutable');

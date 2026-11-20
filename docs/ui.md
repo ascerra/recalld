@@ -38,7 +38,7 @@ Press Ctrl-C to stop the UI. The daemon keeps running for your agents.
 - **Health:** counts by phase, the decay forecast, memories fading soon, storage, and the daemon's system status (version, uptime, memory, embedding latency, subsystem health, connected agents, next decay sweep).
 - **Search (⌘K or /):** recalld's own hybrid search (vector, text, entities and graph links), with the score breakdown for each result. **↵** opens a result where you are (on the map it is selected there; in Explore its row opens) and **⌘↵** shows it on the map.
 
-The namespace scope (sidebar or the first toolbar chip) applies to every view and is remembered.
+The namespace scope (sidebar or the first toolbar chip) applies to every view and is remembered. It starts on `default`, which is lighter than the whole store once your memories are split into project namespaces; choose **All namespaces** to see everything.
 
 ## Looking never changes memory
 

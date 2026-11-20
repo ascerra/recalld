@@ -1,12 +1,16 @@
 // The global namespace scope (DESIGN §2): one setting, shown in the sidebar
-// and the first chip of every toolbar. Persisted across sessions.
+// and the first chip of every toolbar. Persisted across sessions. Starts on
+// `default`, the lighter view on a store split into project namespaces;
+// All namespaces is stored as `*`.
 const KEY = 'recalld.scope';
+const ALL = '*';
 
 function load(): string | null {
   try {
-    return localStorage.getItem(KEY) || null;
+    const stored = localStorage.getItem(KEY);
+    return stored === ALL ? null : stored || 'default';
   } catch {
-    return null;
+    return 'default';
   }
 }
 
@@ -17,8 +21,7 @@ class Scope {
   set(namespace: string | null) {
     this.current = namespace;
     try {
-      if (namespace) localStorage.setItem(KEY, namespace);
-      else localStorage.removeItem(KEY);
+      localStorage.setItem(KEY, namespace ?? ALL);
     } catch {
       /* storage unavailable: keep the in-memory choice */
     }

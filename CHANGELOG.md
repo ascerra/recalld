@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Local web UI
+
+- The UI starts on the `default` namespace instead of All namespaces, which is lighter once memories live in project namespaces. **All namespaces** stays in the sidebar and scope menu, and a chosen scope is still remembered.
+- Long summaries in the map's detail panel show at a smaller size and clamp to four lines, with **Show whole summary** to expand.
+- Opening a row in Explore shows its whole summary instead of one truncated line.
+
 ### Fixed
 
 - `delete_namespace` no longer refuses a small namespace as "operation too large" because another namespace is large. The admission check counted every memory and edge in the store against its 100,000-row bound; it now counts only the namespace being deleted and the edges that touch it, so an empty or tombstone-only namespace deletes without `force` and reports `tombstonesPurged`. A namespace that is itself too large is still refused.

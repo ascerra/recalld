@@ -39,8 +39,8 @@ new one.
   collapses to a 56px rail (green dot plus the vertical short title). Explore: it closes entirely.
   Esc closes it.
 - **Namespace scope is global.** One setting, shown in two places: the sidebar list and the first
-  chip of every view's toolbar (stacked-layers icon + current scope + chevron). Default is **All
-  namespaces**. Changing either updates every view and persists across sessions.
+  chip of every view's toolbar (stacked-layers icon + current scope + chevron). Default is **`default`**
+  (lighter once memories live in project namespaces); **All namespaces** is one click away. Changing either updates every view and persists across sessions.
 - **Search** sits at the right of every page header: a 44px-tall field with a 1.5px bottom rule, the
   label "Search" in sans 14, and a `⌘K` kbd. ⌘K / Ctrl+K and `/` open the palette from anywhere.
 - **Responsive:** below ~900px the sidebar and panel collapse to rails. Below ~600px they stack

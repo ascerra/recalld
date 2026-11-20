@@ -384,6 +384,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* An opened row shows its whole summary. */
+  .row.selected .cell-btn button {
+    white-space: normal;
+  }
   .cell-btn button.ghost {
     font-style: italic;
     color: var(--color-text-muted);

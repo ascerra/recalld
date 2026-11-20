@@ -58,6 +58,13 @@
   const fmtDate = (t: number) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   let showFull = $state(false);
+  // Summaries longer than this show smaller and clamp to four lines.
+  const LONG_TITLE = 90;
+  let showTitle = $state(false);
+  $effect(() => {
+    id;
+    showTitle = false;
+  });
   let previous = $state<number | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -261,12 +268,18 @@
     <p class="muted">This memory no longer exists.</p>
   {:else}
     {@const m = row.data}
+    {@const long = (m.summary?.length ?? 0) > LONG_TITLE}
     <div class="head">
       <div class="top">
         <span class="status mono"><span class="dot"></span>{phaseName(m.phase)} · accessed {ago(m.lastAccessedAt)}</span>
         <button type="button" class="icon-btn close" aria-label="Close details" onclick={onclose}><Icon name="close" stroke={1.8} /></button>
       </div>
-      <h2 class:ghost={m.summary === null}>{m.summary ?? 'Summary dropped'}</h2>
+      <h2 class:ghost={m.summary === null} class:long class:clamped={long && !showTitle}>{m.summary ?? 'Summary dropped'}</h2>
+      {#if long}
+        <button type="button" class="link" aria-expanded={showTitle} onclick={() => (showTitle = !showTitle)}>
+          {showTitle ? 'Show less' : 'Show whole summary'}
+        </button>
+      {/if}
       <span class="meta">{m.namespace}{labels ? ` · ${labels}` : ''} · {m.degree} links</span>
       {#if m.phase === 1 && record.data?.fullText}
         <button type="button" class="link" aria-expanded={showFull} onclick={() => (showFull = !showFull)}>
@@ -328,6 +341,18 @@
     font: var(--weight-regular) var(--text-memory) / 1.2 var(--font-serif);
     letter-spacing: -0.01em;
     text-wrap: pretty;
+  }
+  /* Long summaries drop to the section size and clamp until expanded. */
+  h2.long {
+    font-size: var(--text-section);
+    line-height: 1.35;
+  }
+  h2.clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
   }
   h2.ghost {
     font-style: italic;
